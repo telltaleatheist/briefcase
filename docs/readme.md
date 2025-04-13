@@ -31,6 +31,7 @@ Clippy is a modern web application for downloading videos from various platforms
 
 ### Prerequisites
 - Node.js 16+ and npm
+- FFmpeg and ytdlp are expected in a bin folder in the root directory, but if they aren't there, the system uses system versions
 - FFmpeg installed on your system
 - yt-dlp installed on your system
 
