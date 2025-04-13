@@ -56,6 +56,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   batchQueueStatus: BatchQueueStatus | null = null;
   multiUrlText: string = '';
   private disableUrlChangesListener = false;
+  private textareaIntentionallyCleared = false;
+  private urlChangeSubscription: Subscription | null = null;
 
   qualityOptions = QUALITY_OPTIONS;
   browserOptions = BROWSER_OPTIONS;
@@ -104,6 +106,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     if (this.settingsSubscription) {
       this.settingsSubscription.unsubscribe();
+    }
+    
+    if (this.urlChangeSubscription) {
+      this.urlChangeSubscription.unsubscribe();
     }
   }
   
@@ -163,14 +169,15 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       browser: ['auto'],
       outputDir: ['']
     });
-
-    this.subscribeToUrlChanges(form.get('urls') as FormArray); // <-- sync text
-
+  
+    // Store the subscription so we can unsubscribe later
+    this.urlChangeSubscription = this.subscribeToUrlChanges(form.get('urls') as FormArray);
+  
     return form;
   }
 
-  subscribeToUrlChanges(urlArray: FormArray): void {
-    urlArray.valueChanges.subscribe(values => {
+  subscribeToUrlChanges(urlArray: FormArray): Subscription {
+    return urlArray.valueChanges.subscribe(values => {
       // Skip if the listener is disabled
       if (this.disableUrlChangesListener) return;
       
@@ -184,6 +191,69 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     });
   }
 
+  addUrlsFromTextarea(): void {
+    console.log('Textarea content:', this.multiUrlText);
+    
+    if (!this.multiUrlText || this.multiUrlText.trim() === '') {
+      this.snackBar.open('Please enter URLs in the textarea', 'Dismiss', { duration: 3000 });
+      return;
+    }
+    
+    // Process the URLs
+    const urls = this.multiUrlText
+      .split('\n')
+      .map(url => url.trim())
+      .filter(url => url.length > 0);
+      
+    // Get the current FormArray
+    const urlsFormArray = this.batchForm.get('urls') as FormArray;
+    
+    // Temporarily turn off valueChanges emission to prevent feedback loop
+    this.disableUrlChangesListener = true;
+    
+    // Clear and rebuild the form array entirely
+    while (urlsFormArray.length) {
+      urlsFormArray.removeAt(0);
+    }
+    
+    // Add new form controls for each URL
+    urls.forEach(url => {
+      urlsFormArray.push(this.fb.group({ url: [url] }));
+    });
+    
+    // If no URLs, ensure at least one empty field
+    if (urlsFormArray.length === 0) {
+      urlsFormArray.push(this.createUrlField());
+    }
+    
+    // Clear the textarea
+    this.multiUrlText = '';
+    
+    // IMPORTANT: Unsubscribe and set up a new subscription that doesn't update the textarea
+    this.setupOneWayUrlBinding();
+    
+    // Re-enable the listener
+    setTimeout(() => {
+      this.disableUrlChangesListener = false;
+    }, 0);
+    
+    this.snackBar.open('URLs added to the list', 'Dismiss', { duration: 3000 });
+  }
+
+  setupOneWayUrlBinding(): void {
+    // First, unsubscribe from the existing subscription if it exists
+    if (this.urlChangeSubscription) {
+      this.urlChangeSubscription.unsubscribe();
+      this.urlChangeSubscription = null;
+    }
+    
+    // Set up a new subscription that doesn't update the textarea
+    const urlArray = this.batchForm.get('urls') as FormArray;
+    this.urlChangeSubscription = urlArray.valueChanges.subscribe(() => {
+      // Do nothing - we want to keep the textarea empty
+    });
+  }
+  
   createConfigForm(): FormGroup {
     return this.fb.group({
       maxConcurrentDownloads: [2, [Validators.required, Validators.min(1), Validators.max(10)]],
@@ -218,13 +288,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     if (urls.length === 0) {
       urls.push(this.createUrlField());
     }
-    
-    // Directly update the multiUrlText to reflect the current state of form controls
-    this.updateMultiUrlTextarea();
   }
 
   updateMultiUrlTextarea(): void {
-    if (this.disableUrlChangesListener) return;
+    if (this.disableUrlChangesListener || this.textareaIntentionallyCleared) return;
     
     const urls = (this.batchForm.get('urls') as FormArray).controls
       .map(control => {

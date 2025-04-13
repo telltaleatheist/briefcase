@@ -124,14 +124,23 @@
           <mat-form-field appearance="outline" class="multiline-url-input full-width">
             <mat-label>Paste multiple URLs (one per line)</mat-label>
             <textarea
-            matInput
-            [(ngModel)]="multiUrlText"
-            (input)="onMultiUrlTextareaInput($event)"
-            rows="4"
-            style="width: 100%; margin-bottom: 12px;"
-            placeholder="Paste multiple URLs, one per line"></textarea>
+              matInput
+              [(ngModel)]="multiUrlText"
+              [ngModelOptions]="{standalone: true}"
+              rows="4"
+              style="width: 100%; margin-bottom: 12px;"
+              placeholder="Paste multiple URLs, one per line"></textarea>
+            <button 
+              type="button" 
+              mat-icon-button 
+              matSuffix 
+              (click)="addUrlsFromTextarea()" 
+              matTooltip="Add URLs to list"
+            >
+              <mat-icon>add_circle</mat-icon>
+            </button>
           </mat-form-field>
-
+          
           <div formArrayName="urls" class="url-fields">
             <div *ngFor="let urlControl of urls.controls; let i = index" class="url-field-row">
               <div [formGroupName]="i" class="url-input-container">

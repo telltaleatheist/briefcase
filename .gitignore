@@ -43,3 +43,4 @@ docs/full_structure.md
 tsconfig.tsbuildinfo
 scripts/*
 docs/clippy_structure.md
+docs/testUrls.md
