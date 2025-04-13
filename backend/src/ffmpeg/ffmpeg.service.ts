@@ -56,7 +56,6 @@ export class FfmpegService {
     ffmpeg.setFfmpegPath(ffmpegPath);
     this.logger.log(`FFmpeg path set to: ${ffmpegPath}`);
     
-    // Also set FFprobe path - follow similar logic for ffprobe binary
     let ffprobePath = '';
     
     // Try user's Documents/clippy/bin directory
@@ -91,9 +90,6 @@ export class FfmpegService {
     this.logger.log(`FFprobe path set to: ${ffprobePath}`);
   }
 
-  /**
-   * Get video metadata using FFprobe
-   */
   async getVideoMetadata(videoPath: string): Promise<VideoMetadata> {
     return new Promise<VideoMetadata>((resolve, reject) => {
       ffmpeg.ffprobe(videoPath, (err, metadata) => {
@@ -138,9 +134,6 @@ export class FfmpegService {
     });
   }
 
-  /**
-   * Fix video aspect ratio by adding blurred background
-   */
   async fixAspectRatio(videoFile: string): Promise<string | null> {
     if (!fs.existsSync(videoFile)) {
       this.logger.error(`Video file doesn't exist: ${videoFile}`);
@@ -261,9 +254,6 @@ export class FfmpegService {
     }
   }
 
-  /**
-   * Create a thumbnail from a video
-   */
   async createThumbnail(videoPath: string, outputPath?: string): Promise<string | null> {
     if (!fs.existsSync(videoPath)) {
       this.logger.error(`Video file doesn't exist: ${videoPath}`);
@@ -301,9 +291,6 @@ export class FfmpegService {
     }
   }
 
-  /**
-   * Calculate greatest common divisor (for aspect ratio)
-   */
   private calculateGCD(a: number, b: number): number {
     return b === 0 ? a : this.calculateGCD(b, a % b);
   }

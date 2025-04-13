@@ -32,24 +32,15 @@ export class BatchDownloaderService {
     private readonly ffmpegService: FfmpegService,
   ) {}
 
-  /**
-   * Set the maximum number of concurrent downloads
-   */
   setMaxConcurrentDownloads(max: number): void {
     this.maxConcurrentDownloads = max;
     this.logger.log(`Max concurrent downloads set to: ${max}`);
   }
 
-  /**
-   * Get the current maximum number of concurrent downloads
-   */
   getMaxConcurrentDownloads(): number {
     return this.maxConcurrentDownloads;
   }
 
-  /**
-   * Add a new download to the batch queue
-   */
   addToBatchQueue(options: DownloadOptions): string {
     const jobId = `batch-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
@@ -71,9 +62,6 @@ export class BatchDownloaderService {
     return jobId;
   }
 
-  /**
-   * Process the download queue, respecting the concurrent download limit
-   */
   private async processDownloadQueue(): Promise<void> {
     if (this.downloadQueue.length === 0) {
       this.logger.log('Download queue is empty, nothing to process');
@@ -135,9 +123,6 @@ export class BatchDownloaderService {
     }
   }
 
-  /**
-   * Process all downloaded videos sequentially
-   */
   private async processVideos(): Promise<void> {
     if (this.processingQueue.length === 0 || this.isProcessing) {
       return;
@@ -213,9 +198,6 @@ export class BatchDownloaderService {
     });
   }
 
-  /**
-   * Get the current status of batch jobs
-   */
   getBatchStatus(): any {
     return {
       downloadQueue: this.downloadQueue.length,
@@ -226,9 +208,6 @@ export class BatchDownloaderService {
     };
   }
 
-  /**
-   * Clear all queues
-   */
   clearQueues(): void {
     this.downloadQueue = [];
     this.processingQueue = [];
@@ -236,9 +215,6 @@ export class BatchDownloaderService {
     this.emitQueueUpdate();
   }
 
-  /**
-   * Helper method to safely emit WebSocket events
-   */
   private emitEvent(event: string, data: any): void {
     if (this.server) {
       this.server.emit(event, data);
@@ -247,9 +223,6 @@ export class BatchDownloaderService {
     }
   }
 
-  /**
-   * Emit queue update event
-   */
   private emitQueueUpdate(): void {
     const queueStatus = {
       downloadQueue: this.downloadQueue.map(job => ({

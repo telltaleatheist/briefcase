@@ -479,11 +479,6 @@ if (!gotTheLock) {
           log.info(`Attempting to access frontend path: ${frontendPath}`);
           log.info(`Frontend exists: ${fs.existsSync(frontendPath)}`);
 
-          /*
-          const fs = require('fs');
-          const frontendPath = '/Users/telltale/Documents/clippy/dist-electron/mac-arm64/Clippy.app/Contents/Resources/frontend/dist/clippy-frontend/browser';
-          const files = fs.readdirSync(frontendPath);
-          console.log(`Frontend directory contents: ${files}`);*/
           const backend = spawn(nodePath, [backendPath], {
             env: {
               ...env,

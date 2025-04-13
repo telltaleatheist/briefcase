@@ -26,8 +26,8 @@ export class EnvironmentUtil {
   
     // Standard fallback paths
     pathsToTry.push(
-      path.join(__dirname, '../../../bin', binaryName),                          // Project bin
-      path.join(process.env.HOME || '.', 'Documents', 'clippy', 'bin', binaryName) // User-specific bin
+      path.join(__dirname, '../../../bin', binaryName),                             // Project bin
+      path.join(process.env.HOME || '.', 'Documents', 'clippy', 'bin', binaryName)  // User-specific bin
     );
   
     // Append .exe for Windows
