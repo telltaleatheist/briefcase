@@ -80,18 +80,27 @@ clippy/
 ```
 
 ## Build for Production
+```
+npm run electron (builds and runs)
+```
+
+##Build for development
+```
+npm run electron:dev (builds and runs)
+```
 
 ### Backend
 ```
 cd backend
 npm run build
-npm run start:prod
+backend is run within the electron environment - no need to run manually, so i didnt add a script to package.json for it
 ```
 
 ### Frontend
 ```
 cd frontend
 npm run build
+frontend is run within the electron environment - no need to run manually, so i didnt add a script to package.json for it
 ```
 
 This will generate production-ready files in the `frontend/dist` directory that can be served by any web server.
