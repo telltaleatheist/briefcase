@@ -422,4 +422,56 @@ export class DownloaderService implements OnModuleInit {
       });
     });
   }
+
+  async getVideoInfo(url: string): Promise<any> {
+    this.logger.log(`Fetching video info for URL: ${url}`);
+    
+    return new Promise((resolve, reject) => {
+      const ytDlpPath = this.ytDlpPath;
+      const args = ['--dump-json', '--no-playlist', '--flat-playlist', url];
+      
+      this.logger.log(`Executing: ${ytDlpPath} ${args.join(' ')}`);
+      
+      execFile(ytDlpPath, args, (error, stdout, stderr) => {
+        if (error) {
+          this.logger.error(`Error fetching video info: ${error.message}`);
+          this.logger.error(`stderr: ${stderr}`);
+          reject(error);
+          return;
+        }
+        
+        try {
+          const videoInfo = JSON.parse(stdout.trim());
+          
+          // Format the upload date if available
+          let formattedDate = '';
+          if (videoInfo.upload_date) {
+            // Convert YYYYMMDD to YYYY-MM-DD
+            const dateStr = videoInfo.upload_date;
+            if (dateStr.length === 8) {
+              const year = dateStr.substring(0, 4);
+              const month = dateStr.substring(4, 6);
+              const day = dateStr.substring(6, 8);
+              formattedDate = `${year}-${month}-${day}`;
+            }
+          }
+          
+          // Extract relevant information
+          const result = {
+            title: videoInfo.title || 'Unknown Title',
+            uploader: videoInfo.uploader || videoInfo.channel || 'Unknown Uploader',
+            duration: videoInfo.duration || 0,
+            thumbnail: videoInfo.thumbnail || '',
+            uploadDate: formattedDate
+          };
+          
+          this.logger.log(`Successfully fetched info for video: ${result.title}`);
+          resolve(result);
+        } catch (parseError) {
+          this.logger.error(`Error parsing video info: ${parseError}`);
+          reject(parseError);
+        }
+      });
+    });
+  }
 }

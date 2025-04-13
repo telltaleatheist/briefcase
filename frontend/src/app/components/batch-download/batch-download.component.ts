@@ -22,9 +22,9 @@ import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
 import { SettingsService } from '../../services/settings.service';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
-import { BatchQueueStatus, DownloadOptions } from '../../models/download.model';
+import { BatchQueueStatus, DownloadOptions, VideoInfo } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
-import { Subscription } from 'rxjs';
+import { Subscription, catchError, of } from 'rxjs';
 
 @Component({
   selector: 'app-batch-download',
@@ -135,7 +135,13 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     // Add new form controls for each URL
     urls.forEach(url => {
-      urlsFormArray.push(this.fb.group({ url: [url] }));
+      urlsFormArray.push(this.createUrlFieldWithUrl(url));
+      
+      // Get the index of the just-added URL
+      const index = urlsFormArray.length - 1;
+      
+      // Load the filename for this URL
+      this.loadFileNameForUrl(index);
     });
     
     // If no URLs, ensure at least one empty field
@@ -218,7 +224,13 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     // Add new form controls for each URL
     urls.forEach(url => {
-      urlsFormArray.push(this.fb.group({ url: [url] }));
+      urlsFormArray.push(this.createUrlFieldWithUrl(url));
+      
+      // Get the index of the just-added URL
+      const index = urlsFormArray.length - 1;
+      
+      // Load the filename for this URL
+      this.loadFileNameForUrl(index);
     });
     
     // If no URLs, ensure at least one empty field
@@ -263,7 +275,21 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
   createUrlField(): FormGroup {
     return this.fb.group({
-      url: ['', [Validators.required, Validators.pattern(/^https?:\/\/.+/)]]
+      url: ['', [Validators.required, Validators.pattern(/^https?:\/\/.+/)]],
+      title: [''],
+      uploadDate: [''],
+      fullFileName: [''],
+      loading: [false]
+    });
+  }
+  
+  createUrlFieldWithUrl(url: string): FormGroup {
+    return this.fb.group({
+      url: [url, [Validators.required, Validators.pattern(/^https?:\/\/.+/)]],
+      title: [''],
+      uploadDate: [''],
+      fullFileName: [''],
+      loading: [false]
     });
   }
 
@@ -290,6 +316,64 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     }
   }
 
+  loadFileNameForUrl(index: number): void {
+    const urlsFormArray = this.batchForm.get('urls') as FormArray;
+    const urlGroup = urlsFormArray.at(index) as FormGroup;
+    const url = urlGroup.get('url')?.value;
+    
+    if (!url || url.trim() === '') {
+      return;
+    }
+    
+    // Set loading state
+    urlGroup.get('loading')?.setValue(true);
+    
+    // Call the API to get video info
+    this.batchApiService.getVideoInfo(url)
+      .pipe(
+        catchError(err => {
+          console.error('Error fetching video info:', err);
+          // Reset loading state
+          urlGroup.get('loading')?.setValue(false);
+          
+          // Set default values
+          urlGroup.get('title')?.setValue('URL ' + (index + 1));
+          urlGroup.get('uploadDate')?.setValue('');
+          urlGroup.get('fullFileName')?.setValue('URL ' + (index + 1));
+          
+          return of(null);
+        })
+      )
+      .subscribe((info: VideoInfo | null) => {
+        // Reset loading state
+        urlGroup.get('loading')?.setValue(false);
+        
+        if (info && info.title) {
+          // Get formatted date
+          let dateStr = '';
+          if (info.uploadDate) {
+            dateStr = info.uploadDate;
+          } else {
+            // If no upload date, use today's date
+            dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+          }
+          
+          // Set the full filename for tooltip (which matches what the backend will create)
+          const fullFileName = `${dateStr} ${info.title}`;
+          
+          // Update form values
+          urlGroup.get('title')?.setValue(info.title);
+          urlGroup.get('uploadDate')?.setValue(dateStr);
+          urlGroup.get('fullFileName')?.setValue(fullFileName);
+        } else {
+          // Set fallback values
+          urlGroup.get('title')?.setValue('URL ' + (index + 1));
+          urlGroup.get('uploadDate')?.setValue('');
+          urlGroup.get('fullFileName')?.setValue('URL ' + (index + 1));
+        }
+      });
+  }
+
   updateMultiUrlTextarea(): void {
     if (this.disableUrlChangesListener || this.textareaIntentionallyCleared) return;
     
@@ -307,6 +391,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     navigator.clipboard.readText().then(text => {
         const urlGroup = this.urls.controls[index] as FormGroup;
         urlGroup.get('url')?.setValue(text);
+        
+        // Load filename for the pasted URL
+        this.loadFileNameForUrl(index);
     });
   }
 
@@ -332,7 +419,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
     
-    const urlValues = this.urls.controls.map(control => control.value.url);
+    const urlControls = this.urls.controls;
+    const urlValues = urlControls.map(control => (control as FormGroup).get('url')?.value);
     const formValues = this.batchForm.value;
     
     // Create download options for each URL
@@ -445,13 +533,17 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       const urlsArray = this.fb.array([]);
       
       urls.forEach(url => {
-        const group = this.createUrlField();
-        group.get('url')?.setValue(url);
+        const group = this.createUrlFieldWithUrl(url);
         // Use "as any" to bypass the type checking for the push operation
         urlsArray.push(group as any);
       });
 
       this.batchForm.setControl('urls', urlsArray);
+      
+      // Load filenames for each URL
+      for (let i = 0; i < urls.length; i++) {
+        this.loadFileNameForUrl(i);
+      }
       
       this.snackBar.open(`Added ${urls.length} URLs from clipboard`, 'Dismiss', { duration: 3000 });
     });

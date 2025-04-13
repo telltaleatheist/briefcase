@@ -1,8 +1,9 @@
+
 // clippy/frontend/src/app/services/batch-api.service.ts
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { BatchConfig, BatchDownloadOptions, BatchQueueStatus, DownloadOptions } from '../models/download.model';
+import { BatchConfig, BatchDownloadOptions, BatchQueueStatus, DownloadOptions, VideoInfo } from '../models/download.model';
 import { environment } from '../../environment/environment';
 
 @Injectable({
@@ -31,5 +32,10 @@ export class BatchApiService {
 
   clearBatchQueues(): Observable<{success: boolean, message: string}> {
     return this.http.delete<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch`);
+  }
+  
+  // New method to get video info (for displaying filenames)
+  getVideoInfo(url: string): Observable<VideoInfo> {
+    return this.http.get<VideoInfo>(`${this.apiUrl}/downloader/info?url=${encodeURIComponent(url)}`);
   }
 }

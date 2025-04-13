@@ -32,6 +32,23 @@ export class DownloaderController {
     return { success: true, jobIds };
   }
 
+  @Get('info')
+  async getVideoInfo(@Query('url') url: string) {
+    if (!url) {
+      return { error: 'URL is required' };
+    }
+    
+    try {
+      const result = await this.downloaderService.getVideoInfo(url);
+      return result;
+    } catch (error) {
+      return { 
+        error: error instanceof Error ? error.message : 'Failed to get video info',
+        title: 'Unknown Title'
+      };
+    }
+  }
+
   @Get('batch/status')
   async getBatchStatus() {
     return this.batchDownloaderService.getBatchStatus();

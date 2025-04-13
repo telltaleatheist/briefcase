@@ -13,6 +13,14 @@ export interface DownloadOptions {
   fixAspectRatio?: boolean;
 }
 
+export interface VideoInfo {
+  title: string;
+  uploader?: string;
+  duration?: number;
+  thumbnail?: string;
+  uploadDate?: string; // Added upload date field
+}
+
 export interface DownloadProgress {
   progress: number;
   task?: string;
