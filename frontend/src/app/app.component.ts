@@ -9,10 +9,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
-import { DownloadFormComponent } from './components/download-form/download-form.component';
-import { DownloadProgressComponent } from './components/download-progress/download-progress.component';
-import { DownloadHistoryComponent } from './components/download-history/download-history.component';
-
 import { SocketService } from './services/socket.service';
 import { SettingsService } from './services/settings.service';
 
@@ -28,10 +24,7 @@ import { SettingsService } from './services/settings.service';
     MatToolbarModule,
     MatIconModule,
     MatButtonModule,
-    MatTooltipModule,
-    DownloadFormComponent,
-    DownloadProgressComponent,
-    DownloadHistoryComponent
+    MatTooltipModule
   ]
 })
 export class AppComponent implements OnInit {

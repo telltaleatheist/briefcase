@@ -4,6 +4,14 @@
     <span class="spacer"></span>
     <button 
       mat-icon-button 
+      [routerLink]="['/single']" 
+      matTooltip="Single Download"
+      class="header-button"
+    >
+      <mat-icon>cloud_download</mat-icon>
+    </button>
+    <button 
+      mat-icon-button 
       [routerLink]="['/batch']" 
       matTooltip="Batch Download"
       class="header-button"
@@ -19,21 +27,9 @@
     </button>
   </mat-toolbar>
 
-  <div *ngIf="router.url === '/'" class="main-content">
-    <div class="content-container">
-      <!-- Download Form Component -->
-      <app-download-form *ngIf="!isDownloading"></app-download-form>
-      
-      <!-- Download Progress Component (visible only during downloads) -->
-      <app-download-progress *ngIf="isDownloading"></app-download-progress>
-      
-      <!-- Download History Component -->
-      <app-download-history></app-download-history>
-    </div>
-  </div>
-
-  <!-- For other routes, use router-outlet -->
-  <router-outlet *ngIf="router.url !== '/'"></router-outlet>
+  <main class="main-content">
+    <router-outlet></router-outlet>
+  </main>
 
   <footer class="app-footer">
     <div class="footer-content">

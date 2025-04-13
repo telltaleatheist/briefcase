@@ -5,19 +5,24 @@ import { RouterModule, Routes } from '@angular/router';
 const routes: Routes = [
   {
     path: '',
-    loadComponent: () => import('./app.component').then(m => m.AppComponent)
+    redirectTo: 'batch',
+    pathMatch: 'full'
   },
   {
-    path: 'settings',
-    loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
+    path: 'single',
+    loadComponent: () => import('./components/download-form/download-form.component').then(m => m.DownloadFormComponent)
   },
   {
     path: 'batch',
     loadComponent: () => import('./components/batch-download/batch-download.component').then(m => m.BatchDownloadComponent)
   },
   {
+    path: 'settings',
+    loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
+  },
+  {
     path: '**',
-    redirectTo: ''
+    redirectTo: 'batch'
   }
 ];
 
