@@ -14,14 +14,10 @@ export class PathService {
     this.logger.log(`Default download path set to: ${this.defaultDownloadPath}`);
   }
 
-  /**
-   * Gets the default download path based on the user's operating system
-   */
   getDefaultDownloadPath(): string {
     const platform = os.platform();
     const homeDir = os.homedir();
     
-    // Different defaults based on operating system
     if (platform === 'darwin') {
       // macOS
       return path.join(homeDir, 'Downloads');
@@ -69,9 +65,6 @@ export class PathService {
     }
   }
 
-  /**
-   * Ensures the given path exists, creates it if it doesn't
-   */
   ensurePathExists(downloadPath: string): boolean {
     try {
       if (!fs.existsSync(downloadPath)) {
@@ -89,9 +82,6 @@ export class PathService {
     }
   }
 
-  /**
-   * Validates if a path is writable
-   */
   isPathWritable(downloadPath: string): boolean {
     try {
       // Ensure the directory exists first
@@ -114,9 +104,6 @@ export class PathService {
     }
   }
 
-  /**
-   * Returns the default download path if the requested path is invalid or null
-   */
   getSafePath(requestedPath: string | null | undefined): string {
     if (!requestedPath) {
       return this.defaultDownloadPath;
