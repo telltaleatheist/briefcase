@@ -1,8 +1,9 @@
 // clippy/frontend/src/app/app.component.ts
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
+import { RouterModule, Router, RouterOutlet } from '@angular/router';
 
+import { ThemeService } from './services/theme.service';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
@@ -11,20 +12,24 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { SocketService } from './services/socket.service';
 import { SettingsService } from './services/settings.service';
+import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
 
 @Component({
   selector: 'app-root',
-  standalone: true,
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss'],
+  encapsulation: ViewEncapsulation.None, // Add this to ensure styles apply globally
+  standalone: true,
   imports: [
     CommonModule,
     RouterModule,
+    RouterOutlet,  // Add this for router-outlet
     MatSnackBarModule,
     MatToolbarModule,
     MatIconModule,
     MatButtonModule,
-    MatTooltipModule
+    MatTooltipModule,
+    ThemeToggleComponent  // Import the ThemeToggleComponent
   ]
 })
 export class AppComponent implements OnInit {
@@ -35,9 +40,13 @@ export class AppComponent implements OnInit {
   private socketService = inject(SocketService);
   private settingsService = inject(SettingsService);
   private snackBar = inject(MatSnackBar);
+  private themeService = inject(ThemeService);  // Inject the ThemeService
   public router = inject(Router);
 
   ngOnInit(): void {
+    // Force dark mode on startup
+    this.themeService.setTheme(true);
+    
     this.socketService.onConnect().subscribe(() => {
       this.snackBar.open('Connected to server', 'Dismiss', { duration: 3000 });
     });

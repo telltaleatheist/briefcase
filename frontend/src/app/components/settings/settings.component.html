@@ -1,121 +1,120 @@
-<div class="settings-container">
-  <mat-card class="settings-card">
+<form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="settings-form">
+  <mat-card>
     <mat-card-header>
-      <button mat-icon-button (click)="goBack()" aria-label="Back">
-        <mat-icon>arrow_back</mat-icon>
-      </button>
-      <mat-card-title>Settings</mat-card-title>
+      <mat-card-title>Application Settings</mat-card-title>
     </mat-card-header>
     
     <mat-card-content>
-      <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()">
-        <!-- Download Settings -->
-        <h3 class="settings-section-title">Download Settings</h3>
+      <!-- Download Settings -->
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Download Settings</mat-panel-title>
+        </mat-expansion-panel-header>
         
-        <div class="settings-section">
-          <mat-form-field appearance="outline">
-            <mat-label>Default Quality</mat-label>
+        <div class="settings-group">
+          <!-- Output Directory -->
+          <div class="output-dir-section">
+            <mat-form-field appearance="fill" class="full-width">
+              <mat-label>Output Directory</mat-label>
+              <input matInput formControlName="outputDir" placeholder="Select download location">
+              <button mat-icon-button matSuffix (click)="browseOutputDir()" 
+                      *ngIf="isElectron"
+                      matTooltip="Browse directories">
+                <mat-icon>folder_open</mat-icon>
+              </button>
+            </mat-form-field>
+            
+            <div *ngIf="isValidatingPath" class="path-validation-spinner">
+              <mat-spinner diameter="20"></mat-spinner>
+            </div>
+          </div>
+
+          <!-- Video Quality -->
+          <mat-form-field appearance="fill">
+            <mat-label>Video Quality</mat-label>
             <mat-select formControlName="quality">
               <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
-                {{ option.label }}
+                {{option.label}}
               </mat-option>
             </mat-select>
           </mat-form-field>
-          
-          <div class="checkbox-setting">
-            <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
-          </div>
-          
-          <div class="checkbox-setting">
-            <mat-checkbox formControlName="fixAspectRatio">Fix aspect ratio with blurred background</mat-checkbox>
-          </div>
-          
-          <div class="checkbox-setting">
-            <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
-          </div>
-          
-          <div *ngIf="settingsForm.get('useCookies')?.value">
-            <mat-form-field appearance="outline">
-              <mat-label>Browser</mat-label>
-              <mat-select formControlName="browser">
-                <mat-option *ngFor="let option of browserOptions" [value]="option.value">
-                  {{ option.label }}
-                </mat-option>
-              </mat-select>
-            </mat-form-field>
-          </div>
-          
-          <mat-form-field appearance="outline">
-            <mat-label>Default Output Directory</mat-label>
-            <input matInput formControlName="outputDir" readonly>
-            <button 
-              type="button" 
-              mat-icon-button 
-              matSuffix 
-              (click)="browseOutputDir()" 
-              matTooltip="Browse for folder"
-            >
-              <mat-icon>folder</mat-icon>
-            </button>
-          </mat-form-field>
-        </div>
-        <h3 class="settings-section-title">Batch Processing</h3>
 
-        <div class="settings-section">
-          <div class="checkbox-setting">
-            <mat-checkbox formControlName="batchProcessingEnabled">Enable batch processing</mat-checkbox>
-          </div>
-          
-          <mat-form-field appearance="outline">
+          <!-- Conversion Options -->
+          <section class="checkbox-section">
+            <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
+            <mat-checkbox formControlName="fixAspectRatio">Fix Aspect Ratio</mat-checkbox>
+          </section>
+        </div>
+      </mat-expansion-panel>
+
+      <!-- Batch Processing Settings -->
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Batch Processing</mat-panel-title>
+        </mat-expansion-panel-header>
+        
+        <div class="settings-group">
+          <mat-checkbox formControlName="batchProcessingEnabled">
+            Enable Batch Processing
+          </mat-checkbox>
+
+          <mat-form-field appearance="fill">
             <mat-label>Max Concurrent Downloads</mat-label>
-            <input matInput type="number" formControlName="maxConcurrentDownloads" min="1" max="10">
-            <mat-hint>Set between 1-10 downloads</mat-hint>
-            <mat-error *ngIf="settingsForm.get('maxConcurrentDownloads')?.hasError('required')">
-              This field is required
-            </mat-error>
-            <mat-error *ngIf="settingsForm.get('maxConcurrentDownloads')?.hasError('min')">
-              Minimum value is 1
-            </mat-error>
-            <mat-error *ngIf="settingsForm.get('maxConcurrentDownloads')?.hasError('max')">
-              Maximum value is 10
-            </mat-error>
+            <input matInput type="number" formControlName="maxConcurrentDownloads" 
+                   min="1" max="10">
           </mat-form-field>
         </div>
+      </mat-expansion-panel>
+
+      <!-- Advanced Settings -->
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Advanced Settings</mat-panel-title>
+        </mat-expansion-panel-header>
         
-        <!-- Appearance Settings -->
-        <h3 class="settings-section-title">Appearance</h3>
-        
-        <div class="settings-section">
-          <mat-form-field appearance="outline">
-            <mat-label>Theme</mat-label>
-            <mat-select formControlName="theme">
-              <mat-option *ngFor="let option of themeOptions" [value]="option.value">
-                {{ option.label }}
+        <div class="settings-group">
+          <!-- Browser Selection -->
+          <mat-form-field appearance="fill">
+            <mat-label>Browser</mat-label>
+            <mat-select formControlName="browser">
+              <mat-option *ngFor="let browser of browserOptions" [value]="browser.value">
+                {{browser.label}}
               </mat-option>
             </mat-select>
           </mat-form-field>
+
+          <!-- Theme Toggle -->
+          <div class="theme-toggle">
+            <span>Dark Mode</span>
+            <mat-slide-toggle 
+              [checked]="isDarkTheme$ | async"
+              (change)="toggleTheme()">
+            </mat-slide-toggle>
+          </div>
+
+          <!-- Cookies Option -->
+          <mat-checkbox formControlName="useCookies">
+            Use Cookies
+          </mat-checkbox>
         </div>
-        
-        <!-- Action Buttons -->
-        <div class="settings-actions">
-          <button 
-            type="button" 
-            mat-stroked-button 
-            color="warn" 
-            (click)="resetToDefaults()"
-          >
-            Reset to Defaults
-          </button>
-          
-          <button 
-            type="submit" 
-            mat-raised-button 
-            color="primary"
-          >
-            Save Settings
-          </button>
-        </div>
-      </form>
+      </mat-expansion-panel>
     </mat-card-content>
+
+    <mat-card-actions>
+      <div class="action-buttons">
+        <button mat-raised-button color="primary" type="submit" 
+                [disabled]="settingsForm.invalid">
+          Save Settings
+        </button>
+        <button mat-raised-button color="warn" type="button" 
+                (click)="resetToDefaults()">
+          Reset to Defaults
+        </button>
+        <button mat-raised-button type="button" 
+                (click)="goBack()">
+          Cancel
+        </button>
+      </div>
+    </mat-card-actions>
   </mat-card>
-</div>
+</form>

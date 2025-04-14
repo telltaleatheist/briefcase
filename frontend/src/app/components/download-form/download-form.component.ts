@@ -1,6 +1,6 @@
 // clippy/frontend/src/app/components/download-form/download-form.component.ts
 import { Component, OnInit } from '@angular/core';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormGroup, FormsModule, Validators } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
 import { QUALITY_OPTIONS, BROWSER_OPTIONS } from './download-form.constants';
 import { of } from 'rxjs';
@@ -21,24 +21,23 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 
 @Component({
   selector: 'app-download-form',
+  templateUrl: './download-form.component.html',
+  styleUrls: ['./download-form.component.scss'],
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     ReactiveFormsModule,
     MatCardModule,
     MatFormFieldModule,
     MatInputModule,
-    MatIconModule,
     MatButtonModule,
-    MatProgressSpinnerModule,
-    MatCheckboxModule,
+    MatIconModule,
     MatSelectModule,
-    MatOptionModule,
-    MatExpansionModule
-  ],
-  templateUrl: './download-form.component.html',
-  styleUrls: ['./download-form.component.scss'],
-  providers: [DatePipe]
+    MatCheckboxModule,
+    MatExpansionModule,  // Add this for mat-expansion-panel
+    // Add any other modules you need
+  ]
 })
 export class DownloadFormComponent implements OnInit {
   downloadForm!: FormGroup;

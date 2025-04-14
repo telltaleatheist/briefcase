@@ -14,9 +14,9 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 
 @Component({
   selector: 'app-download-history',
-  standalone: true,
   templateUrl: './download-history.component.html',
   styleUrls: ['./download-history.component.scss'],
+  standalone: true,  // Add this line
   imports: [
     CommonModule,
     MatSnackBarModule,

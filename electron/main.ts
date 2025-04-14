@@ -141,8 +141,8 @@ if (!gotTheLock) {
 
     // Always open DevTools in development mode
     if (isDevelopment) {
-//      mainWindow.webContents.openDevTools();
- //     mainWindow.setMenuBarVisibility(isDevelopment);
+      mainWindow.webContents.openDevTools();
+      mainWindow.setMenuBarVisibility(isDevelopment);
 
       // Add debug listeners only in development mode
       mainWindow.webContents.on('did-start-loading', () => log.info('Started loading'));

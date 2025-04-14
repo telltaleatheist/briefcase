@@ -12,8 +12,8 @@
   font-size: 1.2rem;
   margin-top: 1.5rem;
   margin-bottom: 1rem;
-  color: #333;
-  border-bottom: 1px solid #eee;
+  color: var(--text-color, #333);
+  border-bottom: 1px solid var(--border-color, #eee);
   padding-bottom: 0.5rem;
 }
 
@@ -22,6 +22,13 @@
   flex-direction: column;
   gap: 1rem;
   margin-bottom: 1.5rem;
+}
+
+.theme-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 1rem 0;
 }
 
 .settings-actions {
@@ -51,17 +58,28 @@ mat-form-field {
   width: 100%;
 }
 
-.settings-actions {
+.output-dir-section {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.advanced-settings {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
-  margin-top: 2rem;
-  
-  @media (max-width: 600px) {
-    flex-direction: column-reverse;
-    
-    button {
-      width: 100%;
-    }
+}
+
+.batch-processing-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+// Dark theme adjustments
+.theme-dark {
+  .settings-section-title {
+    color: var(--text-color, #fff);
+    border-bottom-color: var(--border-color, #444);
   }
 }

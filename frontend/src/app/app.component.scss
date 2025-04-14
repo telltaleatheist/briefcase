@@ -78,3 +78,45 @@
   ::-webkit-scrollbar-thumb:hover {
     background: #555;
   }
+  
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: inherit; /* Inherit from body */
+  color: inherit; /* Inherit from body */
+}
+
+.app-title {
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.header-button {
+  margin-left: 8px;
+}
+
+.main-content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background-color: inherit; /* Inherit from body */
+}
+
+.app-footer {
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  text-align: center;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+body.theme-dark .app-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footer-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}

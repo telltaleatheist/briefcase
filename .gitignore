@@ -44,3 +44,12 @@ tsconfig.tsbuildinfo
 scripts/*
 docs/clippy_structure.md
 docs/testUrls.md
+# Ignore Angular/Vite cache
+frontend/.angular/cache/
+
+# Or ignore all Angular cache
+frontend/.angular/
+# Ignore all frontend build artifacts and cache
+/frontend/dist/
+/frontend/.angular/
+docs/full_structure 2.md

@@ -3,6 +3,9 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { RouterModule, Router } from '@angular/router';
+import { ThemeService } from '../../services/theme.service';
+import { Observable } from 'rxjs';
+import { MatExpansionModule } from '@angular/material/expansion';
 
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatCardModule } from '@angular/material/card';
@@ -21,10 +24,11 @@ import { PathService } from '../../services/path.service';
 import { Settings } from '../../models/settings.model';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { finalize } from 'rxjs';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 
 @Component({
   selector: 'app-settings',
-  standalone: true,
+  standalone: true,  // Change this to true to match the imports array
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss'],
   imports: [
@@ -41,7 +45,9 @@ import { finalize } from 'rxjs';
     MatButtonModule,
     MatOptionModule,
     MatTooltipModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatSlideToggleModule,
+    MatExpansionModule
   ]
 })
 export class SettingsComponent implements OnInit {
@@ -50,22 +56,23 @@ export class SettingsComponent implements OnInit {
   private pathService = inject(PathService);
   private snackBar = inject(MatSnackBar);
   private router = inject(Router);
+  private themeService = inject(ThemeService);
 
   settingsForm: FormGroup;
   browserOptions = BROWSER_OPTIONS;
   qualityOptions = QUALITY_OPTIONS;
-  themeOptions = [
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' }
-  ];
   
   isValidatingPath = false;
   isElectron = false;
+  isDarkTheme$: Observable<boolean>;
 
   constructor() {
     this.settingsForm = this.createForm();
     // Check if we're running in Electron
     this.isElectron = !!(window as any).electron;
+    
+    // Get theme observable
+    this.isDarkTheme$ = this.themeService.isDarkTheme$;
   }
 
   ngOnInit(): void {
@@ -200,5 +207,9 @@ export class SettingsComponent implements OnInit {
 
   goBack(): void {
     this.router.navigate(['/']);
+  }
+
+  toggleTheme(): void {
+    this.themeService.toggleTheme();
   }
 }

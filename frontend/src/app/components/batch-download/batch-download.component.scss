@@ -63,30 +63,11 @@
   }
 }
 
-.url-expansion-panel {
-  width: 100%;
-  border-radius: 4px;
-  
-  ::ng-deep .mat-expansion-panel-header {
-    padding: 0 16px;
-    height: 48px;
-  }
-  
-  ::ng-deep .mat-expansion-panel-header-title {
-    margin-right: 48px !important; /* Force more space for the arrow */
-  }
-  
-  ::ng-deep .mat-expansion-panel-body {
-    padding: 0 16px 16px;
-  }
-}
-
 .filename-container {
   display: flex;
   align-items: center;
   width: 100%;
   overflow: hidden;
-  max-width: calc(100% - 48px); /* Ensure text doesn't expand too far */
 }
 
 .video-title {
@@ -95,7 +76,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   order: 2; /* Explicitly set order */
-  padding-right: 10px; /* Extra padding on the title itself */
 }
 
 .upload-date-badge {

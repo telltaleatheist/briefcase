@@ -11,9 +11,9 @@ import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-download-progress',
-  standalone: true,
   templateUrl: './download-progress.component.html',
   styleUrls: ['./download-progress.component.scss'],
+  standalone: true,  // Add this line
   imports: [
     CommonModule,
     MatCardModule,

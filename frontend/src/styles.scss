@@ -11,12 +11,114 @@ html, body {
 body {
   background-color: #f5f5f5;
   color: #333;
+  transition: 
+    background-color 0.3s ease,
+    color 0.3s ease;
 }
 
-/* Dark theme body overrides */
-.theme-dark body {
-  background-color: #303030;
-  color: #fff;
+/* Cyberpunk Dark Theme Styling */
+body.theme-dark {
+  background-color: #121212;
+  color: #e0e0e0;
+  
+  // Neon-inspired color variables
+  --primary-neon: #1de9b6;
+  --accent-neon: #9c27b0;
+  --background-dark: #121212;
+  --background-medium: #1e1e1e;
+  --text-primary: #e0e0e0;
+  --text-secondary: #64ffda; // Brighter mint for better readability
+  
+  // Global text color override
+  color: var(--text-primary);
+
+  // Ensure input and form elements have light text
+  input, 
+  textarea, 
+  select, 
+  .mat-input-element,
+  .mat-form-field-label,
+  .mat-select-value {
+    color: var(--text-primary) !important;
+  }
+
+  // Placeholder text styling
+  ::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.7;
+  }
+
+  // Section and heading styles
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--primary-neon);
+    font-weight: 600;
+    text-shadow: 0 0 10px rgba(64, 255, 208, 0.3);
+  }
+
+  // App header styling
+  .mat-toolbar {
+    background-color: #1e1e1e !important;
+    color: var(--primary-neon) !important;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(64, 255, 208, 0.2);
+  }
+
+  // Batch download and URL input styles
+  .batch-download-container,
+  .url-input-container {
+    background-color: var(--background-medium) !important;
+    border: 1px solid rgba(64, 255, 208, 0.2);
+    color: var(--text-primary) !important;
+  }
+
+  .batch-download-title,
+  .url-input-label {
+    color: var(--primary-neon);
+    font-weight: 600;
+    font-size: 1.1rem;
+    text-shadow: 0 0 10px rgba(64, 255, 208, 0.3);
+  }
+
+  // Ensure default black text is overridden
+  .mat-mdc-text-field-wrapper {
+    color: var(--text-primary) !important;
+  }
+
+  // Specific overrides for commonly black-texted elements
+  .mat-mdc-input-element,
+  .mat-mdc-form-field-input-control {
+    color: var(--text-primary) !important;
+  }
+
+  // Cards and expansion panels
+  .mat-mdc-card,
+  .mat-expansion-panel {
+    background-color: var(--background-medium) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid rgba(64, 255, 208, 0.2);
+  }
+
+  // Input and form field styling
+  .mat-mdc-form-field {
+    --mdc-filled-text-field-container-color: var(--background-medium);
+    --mdc-filled-text-field-label-text-color: var(--primary-neon);
+    --mdc-filled-text-field-input-text-color: var(--text-primary);
+  }
+
+  .mdc-text-field--filled:not(.mdc-text-field--disabled) {
+    background-color: var(--background-medium) !important;
+  }
+
+  // Additional specificity for text color
+  * {
+    color: var(--text-primary);
+  }
+}
+
+/* Light Theme Styles */
+body {
+  background-color: #f5f5f5;
+  color: #333;
 }
 
 /* Common utility classes */
@@ -24,42 +126,15 @@ body {
   flex: 1 1 auto;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
-
-.theme-dark ::-webkit-scrollbar-track {
-  background: #424242;
-}
-
-.theme-dark ::-webkit-scrollbar-thumb {
-  background: #686868;
-}
-
-.theme-dark ::-webkit-scrollbar-thumb:hover {
-  background: #7a7a7a;
-}
-
 /* Form controls */
 .mdc-text-field--filled:not(.mdc-text-field--disabled) {
   background-color: rgba(0, 0, 0, 0.04);
 }
 
-.theme-dark .mdc-text-field--filled:not(.mdc-text-field--disabled) {
-  background-color: rgba(255, 255, 255, 0.08);
+/* Transition effects */
+* {
+  transition: 
+    background-color 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease;
 }

@@ -69,11 +69,32 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "frontend/dist/clippy-frontend", "to": "frontend/dist/clippy-frontend" },
-      { "from": "backend/dist", "to": "backend/dist" },
-      { "from": "backend/node_modules", "to": "backend/node_modules" },
-      { "from": "bin", "to": "bin", "filter": ["**/*"] },
-      { "from": "node_modules/@nestjs", "to": "node_modules/@nestjs", "filter": ["**/*"] }
+      {
+        "from": "frontend/dist/clippy-frontend",
+        "to": "frontend/dist/clippy-frontend"
+      },
+      {
+        "from": "backend/dist",
+        "to": "backend/dist"
+      },
+      {
+        "from": "backend/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@nestjs",
+        "to": "node_modules/@nestjs",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "mac": {
       "category": "public.app-category.utilities",

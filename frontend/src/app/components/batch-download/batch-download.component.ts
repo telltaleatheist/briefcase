@@ -28,7 +28,7 @@ import { Subscription, catchError, of } from 'rxjs';
 
 @Component({
   selector: 'app-batch-download',
-  standalone: true,
+  standalone: true,  // Change this to true
   imports: [
     CommonModule,
     ReactiveFormsModule,

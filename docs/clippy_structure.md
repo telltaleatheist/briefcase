@@ -64,8 +64,6 @@
 │   │       ├── path.service.d.ts
 │   │       ├── path.service.js
 │   │       └── path.service.js.map
-│   ├── downloads
-│   │   └── history.json
 │   ├── package-lock 2.json
 │   ├── package-lock.json
 │   ├── package.json
@@ -109,27 +107,6 @@
 │   ├── tsconfig.json
 │   ├── tsconfig.tsbuildinfo
 │   └── uploads
-├── bin
-│   ├── ffmpeg
-│   ├── ffmpeg-apple-arm
-│   ├── ffmpeg-mac-intel
-│   ├── ffprobe
-│   ├── ffprobe-apple-arm
-│   ├── ffprobe-mac-intel
-│   └── yt-dlp
-├── dist
-│   ├── download.js
-│   ├── download.js.map
-│   ├── main.js
-│   ├── main.js.map
-│   └── preload
-│       ├── main.js
-│       ├── main.js.map
-│       ├── preload.js
-│       ├── preload.js.map
-│       └── utilities
-│           ├── download.js
-│           └── download.js.map
 ├── docs
 │   ├── clippy_structure.md
 │   ├── development.md
@@ -138,16 +115,10 @@
 │   ├── license.md
 │   ├── readme.md
 │   ├── test-list.md
+│   ├── testUrls.md
 │   └── user_guide.md
 ├── downloads
-│   └── history.json
 ├── electron
-│   ├── dist
-│   │   ├── main.js
-│   │   ├── main.js.map
-│   │   └── utilities
-│   │       ├── download.js
-│   │       └── download.js.map
 │   ├── environment.util.ts
 │   ├── main.ts
 │   ├── preload.ts
@@ -161,22 +132,84 @@
 │   │   ├── clippy-frontend
 │   │   │   ├── 3rdpartylicenses.txt
 │   │   │   ├── browser
-│   │   │   │   ├── chunk-5GOJZ5B7.js
-│   │   │   │   ├── chunk-5PRGKA3C.js
-│   │   │   │   ├── chunk-AQ7TTHD2.js
-│   │   │   │   ├── chunk-BQMFFVUH.js
-│   │   │   │   ├── chunk-JR2KB6PQ.js
-│   │   │   │   ├── chunk-KVX4MJJ6.js
-│   │   │   │   ├── chunk-PBRK5LMI.js
-│   │   │   │   ├── chunk-R7EWYWWU.js
-│   │   │   │   ├── chunk-V77PILUH.js
+│   │   │   │   ├── chunk-2WN4UNMH.js
+│   │   │   │   ├── chunk-3XKWZYQB.js
+│   │   │   │   ├── chunk-BDKZ5BSO.js
+│   │   │   │   ├── chunk-D27TPXN2.js
+│   │   │   │   ├── chunk-LYPAVHQI.js
+│   │   │   │   ├── chunk-NBGCHEN4.js
+│   │   │   │   ├── chunk-SOQM6ORW.js
+│   │   │   │   ├── chunk-WJAXLGJI.js
 │   │   │   │   ├── favicon.ico
 │   │   │   │   ├── index.html
-│   │   │   │   ├── main-5OGDYHOJ.js
+│   │   │   │   ├── main-IXBKC6XB.js
 │   │   │   │   ├── polyfills-FFHMD2TL.js
-│   │   │   │   └── styles-NSHBMMF5.css
+│   │   │   │   └── styles-AOO3CJZW.css
 │   │   │   └── prerendered-routes.json
-│   │   └── out-tsc
+│   │   ├── out-tsc
+│   │   │   ├── app
+│   │   │   │   ├── app-routing.module.js
+│   │   │   │   ├── app-routing.module.js.map
+│   │   │   │   ├── app.component.js
+│   │   │   │   ├── app.component.js.map
+│   │   │   │   ├── app.config.js
+│   │   │   │   ├── app.config.js.map
+│   │   │   │   ├── app.config.server.js
+│   │   │   │   ├── app.config.server.js.map
+│   │   │   │   ├── app.module.js
+│   │   │   │   ├── app.module.js.map
+│   │   │   │   ├── app.routes.js
+│   │   │   │   ├── app.routes.js.map
+│   │   │   │   ├── components
+│   │   │   │   │   ├── batch-download
+│   │   │   │   │   │   ├── batch-download.component.js
+│   │   │   │   │   │   └── batch-download.component.js.map
+│   │   │   │   │   ├── download-form
+│   │   │   │   │   │   ├── download-form.component.js
+│   │   │   │   │   │   ├── download-form.component.js.map
+│   │   │   │   │   │   ├── download-form.constants.js
+│   │   │   │   │   │   └── download-form.constants.js.map
+│   │   │   │   │   ├── download-history
+│   │   │   │   │   │   ├── download-history.component.js
+│   │   │   │   │   │   └── download-history.component.js.map
+│   │   │   │   │   ├── download-progress
+│   │   │   │   │   │   ├── download-progress.component.js
+│   │   │   │   │   │   └── download-progress.component.js.map
+│   │   │   │   │   ├── settings
+│   │   │   │   │   │   ├── settings.component.js
+│   │   │   │   │   │   └── settings.component.js.map
+│   │   │   │   │   └── theme-toggle
+│   │   │   │   │       ├── theme-toggle.component.js
+│   │   │   │   │       └── theme-toggle.component.js.map
+│   │   │   │   ├── core
+│   │   │   │   │   ├── logger.service.js
+│   │   │   │   │   └── logger.service.js.map
+│   │   │   │   ├── material.module.js
+│   │   │   │   ├── material.module.js.map
+│   │   │   │   ├── models
+│   │   │   │   │   ├── download.model.js
+│   │   │   │   │   ├── download.model.js.map
+│   │   │   │   │   ├── settings.model.js
+│   │   │   │   │   └── settings.model.js.map
+│   │   │   │   └── services
+│   │   │   │       ├── api.service.js
+│   │   │   │       ├── api.service.js.map
+│   │   │   │       ├── batch-api.service.js
+│   │   │   │       ├── batch-api.service.js.map
+│   │   │   │       ├── path.service.js
+│   │   │   │       ├── path.service.js.map
+│   │   │   │       ├── settings.service.js
+│   │   │   │       ├── settings.service.js.map
+│   │   │   │       ├── socket.service.js
+│   │   │   │       ├── socket.service.js.map
+│   │   │   │       ├── theme.service.js
+│   │   │   │       └── theme.service.js.map
+│   │   │   ├── environment
+│   │   │   │   ├── environment.js
+│   │   │   │   └── environment.js.map
+│   │   │   ├── main.js
+│   │   │   └── main.js.map
+│   │   └── out-tsc 2
 │   │       ├── app
 │   │       │   ├── app-routing.module.js
 │   │       │   ├── app-routing.module.js.map
@@ -271,10 +304,12 @@
 │   │   │   │   │   ├── download-progress.component.html
 │   │   │   │   │   ├── download-progress.component.scss
 │   │   │   │   │   └── download-progress.component.ts
-│   │   │   │   └── settings
-│   │   │   │       ├── settings.component.html
-│   │   │   │       ├── settings.component.scss
-│   │   │   │       └── settings.component.ts
+│   │   │   │   ├── settings
+│   │   │   │   │   ├── settings.component.html
+│   │   │   │   │   ├── settings.component.scss
+│   │   │   │   │   └── settings.component.ts
+│   │   │   │   └── theme-toggle
+│   │   │   │       └── theme-toggle.component.ts
 │   │   │   ├── core
 │   │   │   │   └── logger.service.ts
 │   │   │   ├── material.module.ts
@@ -286,11 +321,13 @@
 │   │   │       ├── batch-api.service.ts
 │   │   │       ├── path.service.ts
 │   │   │       ├── settings.service.ts
-│   │   │       └── socket.service.ts
+│   │   │       ├── socket.service.ts
+│   │   │       └── theme.service.ts
 │   │   ├── environment
 │   │   │   └── environment.ts
 │   │   ├── index.html
 │   │   ├── main.ts
+│   │   ├── material-theme.scss
 │   │   └── styles.scss
 │   ├── tsconfig.app.json
 │   ├── tsconfig.json
@@ -298,11 +335,11 @@
 ├── index.html
 ├── package-lock.json
 ├── package.json
-├── scripts
-│   ├── copy-dev-bin.js
-│   ├── refresh-full-tree.sh
-│   └── refresh-tree.sh
-└── tsconfig.tsbuildinfo
+└── scripts
+    ├── copy-dev-bin.js
+    ├── download-binaries.js
+    ├── refresh-full-tree.sh
+    └── refresh-tree.sh
 
-62 directories, 242 files
+69 directories, 272 files
 ```
