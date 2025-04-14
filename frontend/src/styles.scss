@@ -1,4 +1,3 @@
-
 /* You can add global styles to this file, and also import other style files */
 @import '@angular/material/prebuilt-themes/indigo-pink.css';
 
@@ -17,76 +16,37 @@ body {
     color 0.3s ease;
 }
 
+/* Cyberpunk Dark Theme Styling */
 body.theme-dark {
-  // Color palette
+  background-color: #121212;
+  color: #e0e0e0;
+  
+  // Neon-inspired color variables
   --primary-neon: #1de9b6;
   --accent-neon: #9c27b0;
   --background-dark: #121212;
   --background-medium: #1e1e1e;
   --text-primary: #e0e0e0;
-  --text-secondary: #64ffda;
+  --text-secondary: #64ffda; // Brighter mint for better readability
   
-  // Placeholder and input styling
-  ::placeholder {
-    color: rgba(64, 255, 208, 0.3) !important; // Very dim mint
-    font-style: italic;
-  }
+  // Global text color override
+  color: var(--text-primary);
 
-  // Input text styling
+  // Ensure input and form elements have light text
   input, 
   textarea, 
-  .mat-input-element {
+  select, 
+  .mat-input-element,
+  .mat-form-field-label,
+  .mat-select-value {
     color: var(--text-primary) !important;
   }
 
-  // Checkbox styling
-  .mat-mdc-checkbox {
-    --mdc-checkbox-selected-container-color: #1de9b6 !important;
-    --mdc-checkbox-selected-checkmark-color: #121212 !important;
-    --mdc-checkbox-unselected-outline-color: rgba(64, 255, 208, 0.5) !important;
+  // Placeholder text styling
+  ::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.7;
   }
-
-  // Checkbox label styling
-  .mat-mdc-checkbox-label {
-    color: var(--text-primary) !important;
-  }
-
-  // URL item styling to indicate clickability
-  .url-item {
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    padding: 4px 8px;
-    border-radius: 4px;
-  }
-
-  .url-item:hover {
-    background-color: rgba(64, 255, 208, 0.1);
-    box-shadow: 0 0 8px rgba(64, 255, 208, 0.2);
-  }
-}
-
-// Remove duplicate text for batch download
-.batch-download-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.batch-download-header h2 {
-  margin: 0;
-}
-
-// Ensure placeholder behavior
-textarea::placeholder {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  transition: opacity 0.3s ease;
-}
-
-textarea:focus::placeholder {
-  opacity: 0;
-}
 
   // Section and heading styles
   h1, h2, h3, h4, h5, h6 {
@@ -153,6 +113,7 @@ textarea:focus::placeholder {
   * {
     color: var(--text-primary);
   }
+}
 
 /* Light Theme Styles */
 body {
