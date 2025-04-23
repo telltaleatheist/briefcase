@@ -17,79 +17,109 @@ export class FfmpegService {
   private readonly logger = new Logger(FfmpegService.name);
 
   constructor() {
-    // First try to set path from node-ffmpeg-installer
-    let ffmpegPath = ffmpegInstaller.path;
+    // First try system paths which don't require permission changes
+    const systemPaths = [
+      '/usr/local/bin/ffmpeg',
+      '/usr/bin/ffmpeg',
+      '/opt/homebrew/bin/ffmpeg'
+    ];
     
-    // If that file doesn't exist, check alternate locations
-    if (!fs.existsSync(ffmpegPath)) {
-      this.logger.warn(`FFmpeg not found at installer path: ${ffmpegPath}`);
-      
-      // Try user's Documents/clippy/bin directory
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-      const userBinPath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'ffmpeg');
-      
-      if (fs.existsSync(userBinPath)) {
-        ffmpegPath = userBinPath;
-        this.logger.log(`Using FFmpeg from user bin directory: ${ffmpegPath}`);
+    let ffmpegPath = '';
+    for (const path of systemPaths) {
+      if (fs.existsSync(path)) {
+        ffmpegPath = path;
+        this.logger.log(`Using FFmpeg from system path: ${ffmpegPath}`);
+        break;
+      }
+    }
+    
+    // If not found in system, try installed path
+    if (!ffmpegPath) {
+      ffmpegPath = ffmpegInstaller.path;
+      if (fs.existsSync(ffmpegPath)) {
+        this.logger.log(`Using FFmpeg from installer: ${ffmpegPath}`);
       } else {
-        // Try project root bin directory
-        const projectBinPath = path.join(__dirname, '../../../bin');
+        // Try user's Documents/clippy/bin directory
+        const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+        const userBinPath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'ffmpeg');
         
-        if (fs.existsSync(projectBinPath)) {
-          ffmpegPath = projectBinPath;
-          this.logger.log(`Using FFmpeg from project bin directory: ${ffmpegPath}`);
+        if (fs.existsSync(userBinPath)) {
+          ffmpegPath = userBinPath;
+          this.logger.log(`Using FFmpeg from user bin directory: ${ffmpegPath}`);
         } else {
-          // Try backend/bin directory
-          const backendBinPath = path.join(__dirname, '../../../bin/ffmpeg');
+          // Try project root bin directory
+          const projectBinPath = path.join(__dirname, '../../../bin/ffmpeg');
           
-          if (fs.existsSync(backendBinPath)) {
-            ffmpegPath = backendBinPath;
-            this.logger.log(`Using FFmpeg from backend bin directory: ${ffmpegPath}`);
-          } else {
-            this.logger.error(`Could not find FFmpeg binary in any location`);
+          if (fs.existsSync(projectBinPath)) {
+            ffmpegPath = projectBinPath;
+            this.logger.log(`Using FFmpeg from project bin directory: ${ffmpegPath}`);
           }
         }
       }
     }
     
-    // Set FFmpeg path
-    ffmpeg.setFfmpegPath(ffmpegPath);
-    this.logger.log(`FFmpeg path set to: ${ffmpegPath}`);
+    // Set FFmpeg path if found
+    if (ffmpegPath && fs.existsSync(ffmpegPath)) {
+      ffmpeg.setFfmpegPath(ffmpegPath);
+      this.logger.log(`FFmpeg path set to: ${ffmpegPath}`);
+    } else {
+      this.logger.error('Could not find FFmpeg binary in any location');
+    }
+    
+    // Same approach for FFprobe - check system paths first
+    const systemProbePaths = [
+      '/usr/local/bin/ffprobe',
+      '/usr/bin/ffprobe',
+      '/opt/homebrew/bin/ffprobe'
+    ];
     
     let ffprobePath = '';
+    for (const path of systemProbePaths) {
+      if (fs.existsSync(path)) {
+        ffprobePath = path;
+        this.logger.log(`Using FFprobe from system path: ${ffprobePath}`);
+        break;
+      }
+    }
     
-    // Try user's Documents/clippy/bin directory
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    const userProbePath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'ffprobe');
-    
-    if (fs.existsSync(userProbePath)) {
-      ffprobePath = userProbePath;
-      this.logger.log(`Using FFprobe from user bin directory: ${ffprobePath}`);
-    } else {
-      // Try project root bin directory
-      const projectProbePath = path.join(__dirname, '../../../bin/ffprobe');
+    // If not found in system, try other locations
+    if (!ffprobePath) {
+      // Try user's Documents/clippy/bin directory
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      const userProbePath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'ffprobe');
       
-      if (fs.existsSync(projectProbePath)) {
-        ffprobePath = projectProbePath;
-        this.logger.log(`Using FFprobe from project bin directory: ${ffprobePath}`);
+      if (fs.existsSync(userProbePath)) {
+        ffprobePath = userProbePath;
+        this.logger.log(`Using FFprobe from user bin directory: ${ffprobePath}`);
       } else {
-        // Try backend/bin directory
-        const backendProbePath = path.join(__dirname, '../../../bin/ffprobe');
+        // Try project root bin directory
+        const projectProbePath = path.join(__dirname, '../../../bin/ffprobe');
         
-        if (fs.existsSync(backendProbePath)) {
-          ffprobePath = backendProbePath;
-          this.logger.log(`Using FFprobe from backend bin directory: ${ffprobePath}`);
-        } else {
-          this.logger.error(`Could not find FFprobe binary in any location`);
+        if (fs.existsSync(projectProbePath)) {
+          ffprobePath = projectProbePath;
+          this.logger.log(`Using FFprobe from project bin directory: ${ffprobePath}`);
         }
       }
     }
     
-    // Set FFprobe path
-    ffmpeg.setFfprobePath(ffprobePath);
-    this.logger.log(`FFprobe path set to: ${ffprobePath}`);
+    // Set FFprobe path if found
+    if (ffprobePath && fs.existsSync(ffprobePath)) {
+      ffmpeg.setFfprobePath(ffprobePath);
+      this.logger.log(`FFprobe path set to: ${ffprobePath}`);
+    } else {
+      this.logger.error('Could not find FFprobe binary in any location');
+    }
   }
-
+  
+  // Helper method for safe WebSocket emission
+  private safeEmit(event: string, data: any): void {
+    if (this.server) {
+      this.server.emit(event, data);
+    } else {
+      this.logger.warn(`Cannot emit '${event}' - WebSocket server not initialized`);
+    }
+  }
+  
   async getVideoMetadata(videoPath: string): Promise<VideoMetadata> {
     return new Promise<VideoMetadata>((resolve, reject) => {
       ffmpeg.ffprobe(videoPath, (err, metadata) => {
@@ -178,7 +208,7 @@ export class FfmpegService {
           this.logger.log(`Video dimensions: ${width}x${height}, Aspect ratio: ${aspectRatio.toFixed(4)}`);
           
           // Is it a vertical video?
-          const isVertical = aspectRatio < 1.0;
+          const isVertical = aspectRatio <= 1.0;
           
           // Check if it's close to 16:9 (1.78)
           const is16_9 = aspectRatio >= 1.75 && aspectRatio <= 1.8;
@@ -197,32 +227,30 @@ export class FfmpegService {
           const outputFile = path.join(fileDir, `${fileBase}_16x9${fileExt}`);
           
           // Create FFmpeg command
-          let command;
-          if (isVertical) {
-            // For vertical videos, create horizontal 16:9 with blurred pillarboxing
-            command = ffmpeg(videoFile)
-              .outputOptions([
-                '-filter_complex', '[0:v]scale=1920:1080:force_original_aspect_ratio=increase,gblur=sigma=30,crop=1920:1080[bg];[0:v]scale=iw*min(1920/iw\\,1080/ih):ih*min(1920/iw\\,1080/ih)[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p',
-                '-pix_fmt', 'yuv420p',
-                '-c:v', 'libx264',
-                '-b:v', '3M',
-                '-c:a', 'aac',
-                '-b:a', '128k'
-              ])
-              .save(outputFile);
-          } else {
-            // For horizontal videos not in 16:9, create with letterboxing
-            command = ffmpeg(videoFile)
-              .outputOptions([
-                '-filter_complex', '[0:v]scale=1920:1080,gblur=sigma=60[bg]; [0:v]scale=1920:-1[fg]; [bg][fg]overlay=(W-w)/2:(H-h)/2',
-                '-c:a', 'copy'
-              ])
-              .save(outputFile);
-          }
+          let command = ffmpeg(videoFile)
+          .outputOptions([
+            '-filter_complex', "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p",
+            '-pix_fmt', 'yuv420p',
+            '-c:v', 'libx264',
+            '-b:v', '3M',
+            '-c:a', 'aac',
+            '-b:a', '128k'
+          ])
+          .save(outputFile);
+
+          // Add more event handlers for better debugging
+          command.on('start', (cmdline) => {
+            this.logger.log(`FFmpeg command started: ${cmdline}`);
+          });
+          
+          command.on('stderr', (stderrLine) => {
+            this.logger.debug(`FFmpeg stderr: ${stderrLine}`);
+          });
 
           command.on('progress', (progress) => {
             const percent = Math.round((progress.percent || 0) * 100) / 100;
-            this.server.emit('processing-progress', { 
+            // Use safe emit to handle case where server isn't initialized
+            this.safeEmit('processing-progress', { 
               progress: percent,
               task: 'Adjusting aspect ratio'
             });
@@ -231,21 +259,23 @@ export class FfmpegService {
           command.on('end', () => {
             this.logger.log(`Successfully created 16:9 version with blurred background: ${outputFile}`);
             
-            // Delete the original video
-            try {
-              fs.unlinkSync(videoFile);
+            // Delete the original video safely
+            if (this.safeDeleteFile(videoFile)) {
               this.logger.log(`Deleted original video: ${videoFile}`);
-            } catch (e) {
-              this.logger.error('Error deleting original video:', e);
+            } else {
+              this.logger.debug(`Original file couldn't be deleted (may not exist): ${videoFile}`);
             }
             
             resolve(outputFile);
-          });
-
+          });          
+          
           command.on('error', (err) => {
             this.logger.error(`Error creating blurred background version: ${err.message}`);
             resolve(null);
           });
+          
+          // Make sure the command is explicitly run
+          command.run();
         });
       });
     } catch (error) {
@@ -254,6 +284,24 @@ export class FfmpegService {
     }
   }
 
+  private safeDeleteFile(filePath: string): boolean {
+    if (!filePath) return false;
+    
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        this.logger.log(`Deleted file: ${filePath}`);
+        return true;
+      } else {
+        this.logger.debug(`File doesn't exist, no need to delete: ${filePath}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Error deleting file ${filePath}:`, error);
+      return false;
+    }
+  }
+  
   async createThumbnail(videoPath: string, outputPath?: string): Promise<string | null> {
     if (!fs.existsSync(videoPath)) {
       this.logger.error(`Video file doesn't exist: ${videoPath}`);
@@ -269,12 +317,15 @@ export class FfmpegService {
       }
 
       return new Promise<string | null>((resolve, reject) => {
-        ffmpeg(videoPath)
+        const command = ffmpeg(videoPath)
           .screenshots({
             timestamps: ['10%'], // Take screenshot at 10% of the video duration
             filename: path.basename(outputPath || ''),
             folder: path.dirname(outputPath || ''),
             size: '640x360', // Thumbnail size
+          })
+          .on('start', (cmdline) => {
+            this.logger.log(`FFmpeg thumbnail command started: ${cmdline}`);
           })
           .on('end', () => {
             this.logger.log(`Thumbnail created at: ${outputPath}`);
@@ -284,6 +335,9 @@ export class FfmpegService {
             this.logger.error(`Error creating thumbnail: ${err.message}`);
             resolve(null);
           });
+          
+        // Make sure the command is explicitly run
+        command.run();
       });
     } catch (error) {
       this.logger.error('Error creating thumbnail:', error);

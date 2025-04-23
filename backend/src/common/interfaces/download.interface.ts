@@ -15,6 +15,7 @@ export interface DownloadResult {
   outputFile?: string;
   error?: string;
   jobId?: string;
+  isImage?: boolean; // Add this new property
 }
 
 export interface DownloadProgress {

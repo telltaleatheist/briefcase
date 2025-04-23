@@ -140,6 +140,17 @@ export class BatchDownloaderService {
       }
       
       try {
+        // Check if the result is an image
+        const isImage = job.downloadResult.isImage === true;
+        
+        if (isImage) {
+          // Skip processing for images
+          this.logger.log(`Skipping processing for image: ${job.downloadResult.outputFile}`);
+          job.status = 'completed';
+          this.emitQueueUpdate();
+          continue;
+        }
+        
         this.logger.log(`Processing video for job ${job.id}: ${job.downloadResult.outputFile}`);
         this.emitEvent('processing-progress', { 
           progress: 0, 
@@ -172,7 +183,6 @@ export class BatchDownloaderService {
         
         job.status = 'completed';
         
-        // Add to download history (this is handled by the downloader service already)
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(`Error processing video for job ${job.id}: ${errorMessage}`);
@@ -197,7 +207,7 @@ export class BatchDownloaderService {
       timestamp: new Date().toISOString()
     });
   }
-
+  
   getBatchStatus(): any {
     return {
       downloadQueue: this.downloadQueue.length,

@@ -144,6 +144,24 @@ export class DownloaderService implements OnModuleInit {
         throw new Error(`Cannot create or access download directory: ${downloadFolder}`);
       }
   
+      // Check if this is a Reddit URL
+      if (options.url.includes('reddit.com')) {
+        try {
+          const info = await this.getRedditInfo(options.url);
+          if (info && info.imageUrl) {
+            // It's an image post, handle differently
+            const result = await this.downloadRedditImage(info.imageUrl, info.title, downloadFolder, jobId);
+            
+            // Add a flag to indicate this is an image
+            return { ...result, isImage: true };
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          this.logger.warn(`Failed to get Reddit info, trying regular download: ${errorMessage}`);
+        }
+      }
+
+      // Continue with normal video download process
       const dateFormat = '%(upload_date>%Y-%m-%d)s ';
       const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title)s.%(ext)s`);
   
@@ -154,7 +172,10 @@ export class DownloaderService implements OnModuleInit {
         ytDlpOptions.push('--merge-output-format', 'mp4');
       }
   
-      if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
+      // Special handling for Reddit URLs
+      if (options.url.includes('reddit.com')) {
+        // For Reddit, don't specify any format - let yt-dlp choose the best available format
+      } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
         ytDlpOptions.push('--format', `bestvideo[height<=${options.quality}]+bestaudio/best[height<=${options.quality}]`);
       } else {
         ytDlpOptions.push('--format', `best[height<=${options.quality}]/best`);
@@ -165,7 +186,7 @@ export class DownloaderService implements OnModuleInit {
       }
   
       ytDlpOptions.push(options.url);
-  
+
       let outputFile: string | null = null;
       let progressPercent = 0;
   
@@ -224,23 +245,36 @@ export class DownloaderService implements OnModuleInit {
           if (code === 0 && outputFile && fs.existsSync(outputFile)) {
             this.logger.log(`Download successful: ${outputFile}`);
             outputFile = await this.processOutputFilename(outputFile);
-  
-            if (jobId) {
+        
+            // Determine if this is an image based on file extension
+            const fileExt = path.extname(outputFile).toLowerCase();
+            const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
+            
+            if (isImage) {
+              this.logger.log(`File is an image, skipping aspect ratio correction: ${outputFile}`);
+              this.addToHistory(outputFile, options.url);
               this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
-              resolve({ success: true, outputFile });
+              resolve({ success: true, outputFile, isImage: true });
               return;
             }
-  
+        
+            if (jobId) {
+              this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
+              resolve({ success: true, outputFile, isImage: false });
+              return;
+            }
+        
+            // Only process videos
             if (options.fixAspectRatio) {
               this.emitEvent('processing-progress', { task: 'Fixing aspect ratio' });
               const fixedFile = await this.ffmpegService.fixAspectRatio(outputFile);
               if (fixedFile) outputFile = fixedFile;
             }
-  
+        
             this.addToHistory(outputFile, options.url);
             this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
-  
-            resolve({ success: true, outputFile });
+        
+            resolve({ success: true, outputFile, isImage: false });
           } else {
             const errorMsg = `Download failed with code ${code}`;
             this.logger.error(errorMsg);
@@ -248,13 +282,7 @@ export class DownloaderService implements OnModuleInit {
             resolve({ success: false, error: errorMsg });
           }
         });
-  
-        downloadProcess.on('error', (err: Error) => {
-          this.logger.error(`Download process error: ${err.message}`);
-          this.emitEvent('download-failed', { error: err.message, url: options.url, jobId });
-          reject({ success: false, error: err.message });
-        });
-      });
+    });
   
       return downloadPromise;
     } catch (error) {
@@ -269,6 +297,205 @@ export class DownloaderService implements OnModuleInit {
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
+  }
+
+  // Modified getRedditInfo method to better extract post titles
+  private async getRedditInfo(url: string): Promise<{ imageUrl?: string, title: string }> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Try to get JSON information about the Reddit post
+        const args = ['--dump-json', '--simulate', '--no-playlist', '--flat-playlist', url];
+        this.logger.log(`Fetching video info for URL: ${url}`);
+        this.logger.log(`Executing: ${this.ytDlpPath} ${args.join(' ')}`);
+        
+        execFile(this.ytDlpPath, args, (error, stdout, stderr) => {
+          // Initialize with default title
+          let title = 'Reddit Post';
+          
+          // Try to extract title from stdout even if there's an error
+          try {
+            if (stdout && stdout.trim()) {
+              const info = JSON.parse(stdout.trim());
+              if (info && info.title) {
+                title = info.title;
+                this.logger.log(`Successfully fetched info for video: ${title}`);
+              }
+            }
+          } catch (e) {
+            this.logger.warn(`Could not parse JSON from stdout: ${e instanceof Error ? e.message : 'Unknown error'}`);
+          }
+          
+          // Check stderr for image URL patterns
+          if (error && stderr) {
+            // Match the specific Reddit media URL format we're seeing in the error
+            const redditMediaMatch = stderr.match(/Unsupported URL: (https:\/\/www\.reddit\.com\/media\?url=([^&]+))/);
+            
+            if (redditMediaMatch) {
+              // Found the Reddit media URL, now decode it to get the actual image URL
+              const encodedImgUrl = redditMediaMatch[2];
+              try {
+                const imageUrl = decodeURIComponent(encodedImgUrl);
+                this.logger.log(`Extracted image URL from Reddit post: ${imageUrl}`);
+                
+                // Extract post title from the original URL if possible
+                const titleFromUrl = this.extractTitleFromRedditUrl(url);
+                if (titleFromUrl) {
+                  title = titleFromUrl;
+                }
+                
+                // Return the image URL and title
+                resolve({ imageUrl, title });
+                return;
+              } catch (e) {
+                this.logger.error(`Failed to decode image URL: ${e instanceof Error ? e.message : 'Unknown error'}`);
+              }
+            }
+            
+            // No image URL found in the error message
+            reject(new Error(`Could not extract image URL from Reddit post. stderr: ${stderr}`));
+          } else if (!error) {
+            // No error means it's probably a video, not an image
+            resolve({ title });
+          } else {
+            // Error but no stderr or no matching URL
+            reject(new Error(`Error fetching video info: ${error.message}`));
+          }
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  // Add this helper method to extract a title from a Reddit URL
+  private extractTitleFromRedditUrl(url: string): string | null {
+    try {
+      // Reddit URLs often contain the title after the post ID
+      // Format: /comments/POST_ID/POST_TITLE/
+      const titleMatch = url.match(/\/comments\/[^\/]+\/([^\/\?]+)/);
+      
+      if (titleMatch && titleMatch[1]) {
+        // Clean up the title (replace underscores, hyphens with spaces)
+        let urlTitle = titleMatch[1]
+          .replace(/_/g, ' ')
+          .replace(/-/g, ' ');
+        
+        // Decode URI components in case the title is URL-encoded
+        try {
+          urlTitle = decodeURIComponent(urlTitle);
+        } catch (e) {
+          // Ignore decoding errors
+        }
+        
+        return urlTitle;
+      }
+      
+      return null;
+    } catch (e) {
+      this.logger.warn(`Error extracting title from URL: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      return null;
+    }
+  }
+
+  private async downloadRedditImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string): Promise<DownloadResult> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Create a safe filename from the title
+        const safeTitle = title.replace(/[^a-z0-9\s]/gi, '_').replace(/\s+/g, ' ').trim();
+        
+        // Prepare a filename with current date like the video naming convention
+        const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        const ext = path.extname(imageUrl).toLowerCase() || '.jpeg'; // Ensure we have an extension
+        const filename = `${date} ${safeTitle}${ext}`;
+        const outputPath = path.join(downloadFolder, filename);
+        
+        this.logger.log(`Downloading Reddit image: ${imageUrl} to ${outputPath}`);
+        this.emitEvent('download-started', { url: imageUrl, jobId });
+        this.emitEvent('download-progress', { progress: 0, task: 'Downloading Image', jobId });
+        
+        // Create the output directory if it doesn't exist
+        if (!fs.existsSync(downloadFolder)) {
+          fs.mkdirSync(downloadFolder, { recursive: true });
+        }
+        
+        // Use https or http module to download the image
+        const httpModule = imageUrl.startsWith('https') ? require('https') : require('http');
+        const file = fs.createWriteStream(outputPath);
+        
+        const request = httpModule.get(imageUrl, (response: any) => {
+          // Handle redirects
+          if (response.statusCode === 301 || response.statusCode === 302) {
+            const redirectUrl = response.headers.location;
+            this.logger.log(`Following redirect to: ${redirectUrl}`);
+            file.close();
+            
+            // Try again with the new URL
+            this.downloadRedditImage(redirectUrl, title, downloadFolder, jobId)
+              .then(resolve)
+              .catch(reject);
+            return;
+          }
+          
+          // Check if we got a successful response
+          if (response.statusCode !== 200) {
+            file.close();
+            fs.unlinkSync(outputPath); // Clean up the empty file
+            
+            const errorMsg = `HTTP error: ${response.statusCode} ${response.statusMessage}`;
+            this.logger.error(errorMsg);
+            this.emitEvent('download-failed', { error: errorMsg, url: imageUrl, jobId });
+            reject({ success: false, error: errorMsg });
+            return;
+          }
+          
+          response.pipe(file);
+          
+          // Handle progress (approximate since we don't know total size)
+          let receivedBytes = 0;
+          response.on('data', (chunk: any) => {
+            receivedBytes += chunk.length;
+            this.emitEvent('download-progress', { 
+              progress: 50, // Approximate progress
+              task: 'Downloading Image', 
+              jobId 
+            });
+          });
+          
+          file.on('finish', () => {
+            file.close();
+            this.logger.log(`Image download completed: ${outputPath}`);
+            this.emitEvent('download-progress', { progress: 100, task: 'Completed', jobId });
+            
+            // Add to history
+            this.addToHistory(outputPath, imageUrl);
+            this.emitEvent('download-completed', { outputFile: outputPath, url: imageUrl, jobId });
+            
+            resolve({ success: true, outputFile: outputPath });
+          });
+        });
+        
+        request.on('error', (err: any) => {
+          file.close();
+          fs.unlink(outputPath, () => {}); // Delete the file async
+          this.logger.error(`Image download failed: ${err.message}`);
+          this.emitEvent('download-failed', { error: err.message, url: imageUrl, jobId });
+          reject({ success: false, error: err.message });
+        });
+        
+        request.end();
+      } catch (error) {
+        this.logger.error('Error downloading Reddit image:', error);
+        this.emitEvent('download-failed', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          url: imageUrl,
+          jobId
+        });
+        reject({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    });
   }
 
   async processOutputFilename(filePath: string): Promise<string> {

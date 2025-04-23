@@ -63,49 +63,43 @@ if (!gotTheLock) {
 
   function setupBinaries(): void {
     if (process.platform === 'win32') return; // No need for chmod on Windows
-  
+    
     const binaries = ['yt-dlp', 'ffmpeg', 'ffprobe'];
-  
+    
+    // Get binary paths
     const binaryPaths: Record<string, string> = binaries.reduce((acc, binary) => {
       acc[binary] = EnvironmentUtil.getBinaryPath(binary);
       return acc;
     }, {} as Record<string, string>);
-  
-    // Attempt to read directory of the first binary to debug bin location
+    
+    // Log before trying to set permissions
     const firstBinaryPath = binaryPaths[binaries[0]];
     const binDir = path.dirname(firstBinaryPath);
-  
-    log.info(`Setting up binaries in: ${binDir} (exists: ${fs.existsSync(binDir)})`);
-  
-    if (fs.existsSync(binDir)) {
-      try {
-        const files = fs.readdirSync(binDir);
-        log.info(`Files in bin directory: ${files.join(', ')}`);
-      } catch (err) {
-        log.error(`Error listing bin directory: ${err}`);
-      }
-    } else {
-      log.warn(`Bin directory not found: ${binDir}`);
-      return;
-    }
-  
-    // Ensure each binary is executable
+    log.info(`Setting up binaries in: ${binDir}`);
+    
+    // Only try to chmod if it's in a directory we control
     binaries.forEach(binary => {
       const fullPath = binaryPaths[binary];
-  
+      
       if (fs.existsSync(fullPath)) {
-        log.info(`Setting executable permissions for: ${fullPath}`);
-        try {
-          fs.chmodSync(fullPath, 0o755);
-        } catch (error) {
-          log.error(`Failed to set permissions for ${fullPath}:`, error);
+        // Only apply chmod if the binary is NOT in a system directory
+        if (!fullPath.startsWith('/usr/') && !fullPath.startsWith('/opt/')) {
+          log.info(`Setting executable permissions for: ${fullPath}`);
+          try {
+            fs.chmodSync(fullPath, 0o755);
+          } catch (error) {
+            log.error(`Failed to set permissions for ${fullPath}:`, error);
+            // Continue even if permissions fail - the binary might already be executable
+          }
+        } else {
+          log.info(`Skipping chmod for system binary: ${fullPath}`);
         }
       } else {
         log.warn(`Binary not found: ${fullPath}`);
       }
     });
   }
-  
+    
   // Create main application window
   function createWindow(): void {
     log.info('Creating main application window...');
@@ -717,24 +711,37 @@ if (!gotTheLock) {
    * Gets the appropriate path for a binary based on environment and platform
    */
   function getBinaryPath(binaryName: string): string {
-    const executable = process.platform === 'win32' ? `${binaryName}.exe` : binaryName;
+    // First try using the EnvironmentUtil version which already has good fallbacks
+    const utilPath = EnvironmentUtil.getBinaryPath(binaryName);
     
-    let binPath: string;
-    
-    if (isDevelopment) {
-      // Development environment - check project root
-      binPath = path.join(process.cwd(), 'bin', executable);
-    } else {
-      // Production environment - check in resources
-      binPath = path.join(process.resourcesPath, 'bin', executable);
+    // If it's just returning the binary name itself, it means no binary was found
+    // Let's do an additional check using the system PATH directly
+    if (utilPath === binaryName || utilPath === (binaryName + (process.platform === 'win32' ? '.exe' : ''))) {
+      log.info(`No binary found in standard locations, checking system PATH for: ${binaryName}`);
+      
+      try {
+        const { execSync } = require('child_process');
+        let command;
+        
+        if (process.platform === 'win32') {
+          command = `where ${binaryName}`;
+        } else {
+          command = `which ${binaryName}`;
+        }
+        
+        // Try to get the path from the system
+        const systemPath = execSync(command, { encoding: 'utf8' }).trim();
+        
+        if (systemPath && fs.existsSync(systemPath)) {
+          log.info(`Found ${binaryName} in system PATH: ${systemPath}`);
+          return systemPath;
+        }
+      } catch (error) {
+        log.warn(`Could not find ${binaryName} in system PATH: ${error}`);
+      }
     }
-    
-    // Verify the binary exists
-    if (!fs.existsSync(binPath)) {
-      log.warn(`Binary not found at ${binPath}`);
-    }
-    
-    return binPath;
+      
+    return utilPath;
   }
 
   // Quit when all windows are closed, except on macOS

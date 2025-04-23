@@ -16,7 +16,8 @@ export class ThemeService {
     } else {
       // Use system preference as default if available
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      this.setTheme(prefersDark);
+      const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+      this.setTheme(prefersLight);
     }
   }
 
