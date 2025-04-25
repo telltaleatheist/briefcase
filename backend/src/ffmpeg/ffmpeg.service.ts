@@ -219,15 +219,16 @@ export class FfmpegService {
             return;
           }
 
-          // Create output filename
-          const fileDir = path.dirname(videoFile);
-          const fileName = path.basename(videoFile);
-          const fileBase = path.parse(fileName).name;
-          const fileExt = path.parse(fileName).ext;
-          const outputFile = path.join(fileDir, `${fileBase}_16x9${fileExt}`);
-          
-          // Create FFmpeg command
-          let command = ffmpeg(videoFile)
+        // Create output filename
+        const fileDir = path.dirname(videoFile);
+        const fileName = path.basename(videoFile);
+        const fileBase = path.parse(fileName).name;
+
+        // Force .mov extension for Final Cut Pro compatibility
+        const outputFile = path.join(fileDir, `${fileBase}_16x9.mov`);
+
+        // Create FFmpeg command
+        let command = ffmpeg(videoFile)
           .outputOptions([
             '-filter_complex', "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p",
             '-pix_fmt', 'yuv420p',
@@ -237,7 +238,7 @@ export class FfmpegService {
             '-b:a', '128k'
           ])
           .save(outputFile);
-
+  
           // Add more event handlers for better debugging
           command.on('start', (cmdline) => {
             this.logger.log(`FFmpeg command started: ${cmdline}`);
