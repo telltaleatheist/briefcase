@@ -34,19 +34,23 @@ export class EnvironmentUtil {
         throw new Error('Frontend distribution directory not found');
       }
   
-      // NEW: Aggressive verification
-      const requiredFiles = ['index.html', 'main-RBANONJM.js', 'styles-FBVOPZU6.css'];
-      const missingFiles = requiredFiles.filter(file => 
-        !fs.existsSync(path.join(frontendPath!, file))
-      );
+      // NEW: Dynamic file verification
+      const requiredFiles = ['index.html', 'main-*.js', 'styles-*.css'];
+      const missingRequired = requiredFiles.some(pattern => {
+        const matchingFiles = fs.readdirSync(frontendPath!)
+          .filter(file => file.match(new RegExp(pattern.replace('*', '.*'))));
+        return matchingFiles.length === 0;
+      });
   
-      if (missingFiles.length > 0) {
-        log.warn(`Missing frontend files: ${missingFiles.join(', ')}`);
-        throw new Error(`Missing essential frontend files: ${missingFiles.join(', ')}`);
+      if (missingRequired) {
+        log.warn('Missing essential frontend files');
+        const dirContents = fs.readdirSync(frontendPath!);
+        log.info(`Directory contents: ${dirContents.join(', ')}`);
+        throw new Error('Missing essential frontend files');
       }
   
       log.info(`Frontend path resolved: ${frontendPath}`);
-      log.info(`Frontend directory contents: ${fs.readdirSync(frontendPath).join(', ')}`);
+      log.info(`Frontend directory contents: ${fs.readdirSync(frontendPath!).join(', ')}`);
       
       return frontendPath;
   
@@ -71,7 +75,7 @@ export class EnvironmentUtil {
       throw error;
     }
   }
-  
+    
   static isDevelopment(): boolean {
     return process.env.NODE_ENV === 'development';
   }

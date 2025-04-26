@@ -9,24 +9,22 @@ export class ThemeService {
   isDarkTheme$ = this.isDarkTheme.asObservable();
 
   constructor() {
-    // Check local storage for saved theme preference or use system preference
     const savedTheme = localStorage.getItem('clippy-theme');
     if (savedTheme) {
-      this.setTheme(savedTheme === 'dark');
+      // If there's a saved theme, use it
+      this.setDarkMode(savedTheme === 'dark');
     } else {
-      // Use system preference as default if available
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-      this.setTheme(prefersLight);
+      // Default to light mode
+      this.setDarkMode(false);
     }
   }
-
+  
   toggleTheme() {
     const newIsDark = !this.isDarkTheme.value;
-    this.setTheme(newIsDark);
+    this.setDarkMode(newIsDark);
   }
 
-  setTheme(isDark: boolean) {
+  setDarkMode(isDark: boolean) {
     this.isDarkTheme.next(isDark);
     this.applyTheme(isDark);
     

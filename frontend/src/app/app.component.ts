@@ -45,7 +45,7 @@ export class AppComponent implements OnInit {
 
   ngOnInit(): void {
     // Force dark mode on startup
-    this.themeService.setTheme(true);
+    this.themeService.setDarkMode(false);
     
     this.socketService.onConnect().subscribe(() => {
       this.snackBar.open('Connected to server', 'Dismiss', { duration: 3000 });

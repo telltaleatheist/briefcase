@@ -70,24 +70,20 @@ $cyberpunk-dark-theme: mat.define-dark-theme((
   )
 ));
 
-// Include light theme styles (optional, for non-dark mode)
-@include mat.core-theme($my-light-theme);
+
+// 🌞 GLOBAL — Load Light Theme by default
 @include mat.all-component-themes($my-light-theme);
 
-// Include dark theme styles when body has the theme-dark class
+// 🌑 DARK — Only when .theme-dark class exists
 .theme-dark {
-  @include mat.all-component-colors($cyberpunk-dark-theme);
-  
-  // Additional custom dark theme properties
+  @include mat.all-component-themes($cyberpunk-dark-theme);
+
+  // Custom Dark Theme CSS variables
   --primary-color: #{mat.get-color-from-palette($cyberpunk-primary, 500)};
   --accent-color: #{mat.get-color-from-palette($cyberpunk-accent, A200)};
   --warn-color: #{mat.get-color-from-palette($cyberpunk-warn, 500)};
-  
-  // Background colors with a cyberpunk twist
   background-color: #121212;
   color: #e0e0e0;
-  
-  // Accent elements
   --highlight-color: #{mat.get-color-from-palette($cyberpunk-accent, A400)};
   --border-color: #{mat.get-color-from-palette($cyberpunk-primary, 700)};
 }
