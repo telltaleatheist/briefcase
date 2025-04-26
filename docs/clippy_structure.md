@@ -1,7 +1,6 @@
 ```
-/Users/telltale/Documents/clippy/scripts/..
+/Users/telltale/Documents/software/clippy/scripts/..
 ├── backend
-│   ├── README.md
 │   ├── dist
 │   │   ├── app.controller.d.ts
 │   │   ├── app.controller.js
@@ -67,6 +66,7 @@
 │   ├── package-lock 2.json
 │   ├── package-lock.json
 │   ├── package.json
+│   ├── README.md
 │   ├── src
 │   │   ├── app.controller.spec.ts
 │   │   ├── app.controller.ts
@@ -118,6 +118,7 @@
 │   ├── testUrls.md
 │   └── user_guide.md
 ├── downloads
+│   └── history.json
 ├── electron
 │   ├── environment.util.ts
 │   ├── main.ts
@@ -135,14 +136,14 @@
 │   │   │   │   ├── chunk-4KO2CRE6.js
 │   │   │   │   ├── chunk-DMIJB3UR.js
 │   │   │   │   ├── chunk-DSYFJ5HI.js
+│   │   │   │   ├── chunk-FWWLWYLG.js
 │   │   │   │   ├── chunk-IW327RHQ.js
-│   │   │   │   ├── chunk-JPGC3EP7.js
-│   │   │   │   ├── chunk-NOF2WNJA.js
+│   │   │   │   ├── chunk-JMHVIC7K.js
 │   │   │   │   ├── chunk-O3PZBOJV.js
 │   │   │   │   ├── chunk-XFC4FSBT.js
 │   │   │   │   ├── favicon.ico
 │   │   │   │   ├── index.html
-│   │   │   │   ├── main-OV5FN4AS.js
+│   │   │   │   ├── main-RBANONJM.js
 │   │   │   │   ├── polyfills-FFHMD2TL.js
 │   │   │   │   └── styles-FBVOPZU6.css
 │   │   │   └── prerendered-routes.json
@@ -341,5 +342,5 @@
     ├── refresh-full-tree.sh
     └── refresh-tree.sh
 
-69 directories, 272 files
+69 directories, 273 files
 ```

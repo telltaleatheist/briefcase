@@ -472,7 +472,7 @@ if (!gotTheLock) {
           log.info(`Attempting to launch backend from: ${backendPath}`);
           log.info(`Attempting to access frontend path: ${frontendPath}`);
           log.info(`Frontend exists: ${fs.existsSync(frontendPath)}`);
-
+        
           const backend = spawn(nodePath, [backendPath], {
             env: {
               ...env,
@@ -490,56 +490,37 @@ if (!gotTheLock) {
             },
             stdio: 'pipe',
           });
-          
-          // Add these handlers with proper types
-          if (backend.stdout) {
-            backend.stdout.on('data', (data: Buffer) => {
-              log.info(`Backend stdout: ${data.toString().trim()}`);
-            });
-          }
-          
-          if (backend.stderr) {
-            backend.stderr.on('data', (data: Buffer) => {
-              log.error(`Backend stderr: ${data.toString().trim()}`);
-            });
-          }
-          
-          backend.on('error', (err: Error) => {
-            log.error(`Failed to start backend process: ${err.message}`);
-          });
-          
+        
           log.info(`Process spawned successfully with PID: ${backend.pid}`);
-          
+        
           if (backend.stdout) {
             backend.stdout.on('data', (data: Buffer) => {
-              log.info(`[Backend] ${data.toString().trim()}`);
+              log.info(`[Backend stdout]: ${data.toString().trim()}`);
             });
           } else {
             log.warn(`Backend stdout stream is not available`);
           }
-
+        
           if (backend.stderr) {
             backend.stderr.on('data', (data: Buffer) => {
-              log.error(`[Backend Error] ${data.toString().trim()}`);
+              log.error(`[Backend stderr]: ${data.toString().trim()}`);
             });
           } else {
             log.warn(`Backend stderr stream is not available`);
           }
-
+        
           backend.on('error', (err: Error) => {
-            log.error(`Error starting backend process: ${err.message}`);
-            resolve(false); // Changed from resolve(startFallbackServer())
+            log.error(`[Backend process error]: ${err.message}`);
           });
-      
+        
+          backend.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+            log.error(`[Backend process exited] code: ${code}, signal: ${signal}`);
+          });
+        
           backend.on('close', (code: number | null) => {
-            log.info(`Backend process closed with code ${code}`);
-            if (code !== 0) resolve(false);
+            log.error(`[Backend process closed] code: ${code}`);
           });
-
-          backend.on('exit', (code: number | null) => {
-            log.info(`Backend process exited with code ${code}`);
-          });
-
+        
           // Clean up when app quits
           app.on('before-quit', () => {
             log.info('Shutting down backend server...');
