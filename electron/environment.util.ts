@@ -7,87 +7,79 @@ import log from 'electron-log';
 export class EnvironmentUtil {
 
   static getFrontEndPath(isDevelopment: boolean): string {
-    let frontendPath;
+    let frontendPath: string | undefined;
     
-    if (isDevelopment) {
-      // Development paths
-      frontendPath = path.join(process.cwd(), 'frontend/dist/clippy-frontend/browser');
-      
-      // If that doesn't exist, try a few alternatives
-      if (!fs.existsSync(frontendPath)) {
-        const devAlternatives = [
-          path.join(app.getAppPath(), 'frontend/dist/clippy-frontend/browser'),
+    try {
+      if (isDevelopment) {
+        const devPaths = [
+          path.join(process.cwd(), 'frontend/dist/clippy-frontend/browser'),
+          path.join(process.cwd(), 'frontend/dist/clippy-frontend'),
           path.join(__dirname, '../../frontend/dist/clippy-frontend/browser'),
-          path.join(__dirname, '../../../frontend/dist/clippy-frontend/browser')
+          path.join(__dirname, '../../frontend/dist/clippy-frontend')
         ];
-        
-        for (const altPath of devAlternatives) {
-          if (fs.existsSync(altPath)) {
-            frontendPath = altPath;
-            break;
-          }
-        }
-      }
-    } else {
-      // Production (packaged) paths - follow Electron conventions
-      frontendPath = path.join(process.resourcesPath, 'app.asar', 'frontend/dist/clippy-frontend/browser');
-      
-      // If that doesn't exist, try unpackaged location
-      if (!fs.existsSync(frontendPath)) {
-        frontendPath = path.join(process.resourcesPath, 'frontend/dist/clippy-frontend/browser');
-      }
-      
-      // If still not found, try some other common locations in packaged apps
-      if (!fs.existsSync(frontendPath)) {
-        const prodAlternatives = [
-          path.join(process.resourcesPath, 'app', 'frontend/dist/clippy-frontend/browser'),
-          path.join(app.getAppPath(), '../frontend/dist/clippy-frontend/browser'),
-          path.join(app.getAppPath(), 'frontend/dist/clippy-frontend/browser')
+  
+        frontendPath = devPaths.find(fs.existsSync);
+      } else {
+        const prodPaths = [
+          path.join(process.resourcesPath, 'frontend/dist/clippy-frontend/browser'),
+          path.join(process.resourcesPath, 'frontend/dist/clippy-frontend'),
+          path.join(process.resourcesPath, 'app.asar', 'frontend/dist/clippy-frontend/browser'),
+          path.join(process.resourcesPath, 'app.asar', 'frontend/dist/clippy-frontend')
         ];
-        
-        for (const altPath of prodAlternatives) {
-          if (fs.existsSync(altPath)) {
-            frontendPath = altPath;
-            break;
-          }
-        }
+  
+        frontendPath = prodPaths.find(fs.existsSync);
       }
-    }
-    
-    log.info(`Frontend path resolved to: ${frontendPath} (exists: ${fs.existsSync(frontendPath)})`);
-    
-    // If we still haven't found a valid path, log alternatives for debugging
-    if (!fs.existsSync(frontendPath)) {
-      log.warn(`Frontend path not found at: ${frontendPath}`);
+  
+      if (!frontendPath) {
+        throw new Error('Frontend distribution directory not found');
+      }
+  
+      // NEW: Aggressive verification
+      const requiredFiles = ['index.html', 'main-RBANONJM.js', 'styles-FBVOPZU6.css'];
+      const missingFiles = requiredFiles.filter(file => 
+        !fs.existsSync(path.join(frontendPath!, file))
+      );
+  
+      if (missingFiles.length > 0) {
+        log.warn(`Missing frontend files: ${missingFiles.join(', ')}`);
+        throw new Error(`Missing essential frontend files: ${missingFiles.join(', ')}`);
+      }
+  
+      log.info(`Frontend path resolved: ${frontendPath}`);
+      log.info(`Frontend directory contents: ${fs.readdirSync(frontendPath).join(', ')}`);
       
-      // Log the contents of parent directories to help debug
+      return frontendPath;
+  
+    } catch (error) {
+      log.error('Error resolving frontend path:', error);
+      
+      // Log additional context for debugging
+      log.info('Development mode:', isDevelopment);
+      log.info('Current working directory:', process.cwd());
+      log.info('Resources path:', process.resourcesPath);
+      log.info('__dirname:', __dirname);
+  
+      // List contents of the Resources directory
       try {
-        const parentDir = path.dirname(frontendPath);
-        if (fs.existsSync(parentDir)) {
-          log.info(`Contents of parent directory ${parentDir}:`);
-          const files = fs.readdirSync(parentDir);
-          for (const file of files) {
-            log.info(`- ${file}`);
-          }
-        }
-        
-        // Also check one level up
-        const grandParentDir = path.dirname(parentDir);
-        if (fs.existsSync(grandParentDir)) {
-          log.info(`Contents of grandparent directory ${grandParentDir}:`);
-          const files = fs.readdirSync(grandParentDir);
-          for (const file of files) {
-            log.info(`- ${file}`);
-          }
-        }
-      } catch (error) {
-        log.error(`Error inspecting directories: ${error}`);
+        log.info('Resources directory contents:', 
+          fs.readdirSync(process.resourcesPath).join(', ')
+        );
+      } catch (listError) {
+        log.error('Could not list Resources directory:', listError);
       }
+  
+      throw error;
     }
-    
-    return frontendPath;
+  }
+  
+  static isDevelopment(): boolean {
+    return process.env.NODE_ENV === 'development';
   }
 
+  static isProduction(): boolean {
+    return process.env.NODE_ENV === 'production' || process.env.NODE_ENV === undefined;
+  }
+    
   static getBackEndPath(isDevelopment: boolean): string {
     let backendPath;
     
@@ -124,14 +116,6 @@ export class EnvironmentUtil {
     return backendPath;
   }
   
-  static isDevelopment(): boolean {
-    return process.env.NODE_ENV === 'development';
-  }
-
-  static isProduction(): boolean {
-    return process.env.NODE_ENV === 'production' || process.env.NODE_ENV === undefined;
-  }
-
   // Returns the path to a binary based on the current environment
   static getBinaryPath(binaryName: string): string {
     const envVar = process.env[`${binaryName.toUpperCase().replace('-', '_')}_PATH`];

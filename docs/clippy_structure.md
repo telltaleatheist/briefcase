@@ -63,6 +63,7 @@
 │   │       ├── path.service.d.ts
 │   │       ├── path.service.js
 │   │       └── path.service.js.map
+│   ├── downloads
 │   ├── package-lock 2.json
 │   ├── package-lock.json
 │   ├── package.json
@@ -106,13 +107,15 @@
 │   ├── tsconfig.build.tsbuildinfo
 │   ├── tsconfig.json
 │   ├── tsconfig.tsbuildinfo
-│   └── uploads
+│   ├── uploads
+│   └── yarn.lock
 ├── docs
 │   ├── clippy_structure.md
 │   ├── development.md
 │   ├── full_structure.md
 │   ├── installation.md
 │   ├── license.md
+│   ├── packaged_structure.md
 │   ├── readme.md
 │   ├── test-list.md
 │   ├── testUrls.md
@@ -147,77 +150,13 @@
 │   │   │   │   ├── polyfills-FFHMD2TL.js
 │   │   │   │   └── styles-FBVOPZU6.css
 │   │   │   └── prerendered-routes.json
-│   │   ├── out-tsc
-│   │   │   ├── app
-│   │   │   │   ├── app-routing.module.js
-│   │   │   │   ├── app-routing.module.js.map
-│   │   │   │   ├── app.component.js
-│   │   │   │   ├── app.component.js.map
-│   │   │   │   ├── app.config.js
-│   │   │   │   ├── app.config.js.map
-│   │   │   │   ├── app.config.server.js
-│   │   │   │   ├── app.config.server.js.map
-│   │   │   │   ├── app.module.js
-│   │   │   │   ├── app.module.js.map
-│   │   │   │   ├── app.routes.js
-│   │   │   │   ├── app.routes.js.map
-│   │   │   │   ├── components
-│   │   │   │   │   ├── batch-download
-│   │   │   │   │   │   ├── batch-download.component.js
-│   │   │   │   │   │   └── batch-download.component.js.map
-│   │   │   │   │   ├── download-form
-│   │   │   │   │   │   ├── download-form.component.js
-│   │   │   │   │   │   ├── download-form.component.js.map
-│   │   │   │   │   │   ├── download-form.constants.js
-│   │   │   │   │   │   └── download-form.constants.js.map
-│   │   │   │   │   ├── download-history
-│   │   │   │   │   │   ├── download-history.component.js
-│   │   │   │   │   │   └── download-history.component.js.map
-│   │   │   │   │   ├── download-progress
-│   │   │   │   │   │   ├── download-progress.component.js
-│   │   │   │   │   │   └── download-progress.component.js.map
-│   │   │   │   │   ├── settings
-│   │   │   │   │   │   ├── settings.component.js
-│   │   │   │   │   │   └── settings.component.js.map
-│   │   │   │   │   └── theme-toggle
-│   │   │   │   │       ├── theme-toggle.component.js
-│   │   │   │   │       └── theme-toggle.component.js.map
-│   │   │   │   ├── core
-│   │   │   │   │   ├── logger.service.js
-│   │   │   │   │   └── logger.service.js.map
-│   │   │   │   ├── material.module.js
-│   │   │   │   ├── material.module.js.map
-│   │   │   │   ├── models
-│   │   │   │   │   ├── download.model.js
-│   │   │   │   │   ├── download.model.js.map
-│   │   │   │   │   ├── settings.model.js
-│   │   │   │   │   └── settings.model.js.map
-│   │   │   │   └── services
-│   │   │   │       ├── api.service.js
-│   │   │   │       ├── api.service.js.map
-│   │   │   │       ├── batch-api.service.js
-│   │   │   │       ├── batch-api.service.js.map
-│   │   │   │       ├── path.service.js
-│   │   │   │       ├── path.service.js.map
-│   │   │   │       ├── settings.service.js
-│   │   │   │       ├── settings.service.js.map
-│   │   │   │       ├── socket.service.js
-│   │   │   │       ├── socket.service.js.map
-│   │   │   │       ├── theme.service.js
-│   │   │   │       └── theme.service.js.map
-│   │   │   ├── environment
-│   │   │   │   ├── environment.js
-│   │   │   │   └── environment.js.map
-│   │   │   ├── main.js
-│   │   │   └── main.js.map
-│   │   └── out-tsc 2
+│   │   ├── clippy-frontend 2
+│   │   └── out-tsc
 │   │       ├── app
 │   │       │   ├── app-routing.module.js
 │   │       │   ├── app-routing.module.js.map
 │   │       │   ├── app.component.js
 │   │       │   ├── app.component.js.map
-│   │       │   ├── app.component.spec.js
-│   │       │   ├── app.component.spec.js.map
 │   │       │   ├── app.config.js
 │   │       │   ├── app.config.js.map
 │   │       │   ├── app.config.server.js
@@ -241,9 +180,12 @@
 │   │       │   │   ├── download-progress
 │   │       │   │   │   ├── download-progress.component.js
 │   │       │   │   │   └── download-progress.component.js.map
-│   │       │   │   └── settings
-│   │       │   │       ├── settings.component.js
-│   │       │   │       └── settings.component.js.map
+│   │       │   │   ├── settings
+│   │       │   │   │   ├── settings.component.js
+│   │       │   │   │   └── settings.component.js.map
+│   │       │   │   └── theme-toggle
+│   │       │   │       ├── theme-toggle.component.js
+│   │       │   │       └── theme-toggle.component.js.map
 │   │       │   ├── core
 │   │       │   │   ├── logger.service.js
 │   │       │   │   └── logger.service.js.map
@@ -264,7 +206,9 @@
 │   │       │       ├── settings.service.js
 │   │       │       ├── settings.service.js.map
 │   │       │       ├── socket.service.js
-│   │       │       └── socket.service.js.map
+│   │       │       ├── socket.service.js.map
+│   │       │       ├── theme.service.js
+│   │       │       └── theme.service.js.map
 │   │       ├── environment
 │   │       │   ├── environment.js
 │   │       │   └── environment.js.map
@@ -340,7 +284,8 @@
     ├── copy-dev-bin.js
     ├── download-binaries.js
     ├── refresh-full-tree.sh
+    ├── refresh-packaged-app-tree.sh
     └── refresh-tree.sh
 
-69 directories, 273 files
+59 directories, 228 files
 ```

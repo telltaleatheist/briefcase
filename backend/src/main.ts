@@ -58,26 +58,38 @@ async function bootstrap() {
     const frontendPathFromEnv = process.env.FRONTEND_PATH;
     let frontendDistPath: string | null = null;
 
-    if (frontendPathFromEnv && fs.existsSync(frontendPathFromEnv)) {
-      console.log(`Using frontend path from environment: ${frontendPathFromEnv}`);
-      frontendDistPath = frontendPathFromEnv;
-    } else {
-      // Fall back to checking multiple paths
-      const possiblePaths = [
-        path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(process.cwd(), '..', 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend', 'browser'), // <-- NEW PRODUCTION PATH
-      ];
-
-      for (const potentialPath of possiblePaths) {
-        console.log(`Checking frontend path: ${potentialPath} (exists: ${fs.existsSync(potentialPath)})`);
-        if (fs.existsSync(potentialPath)) {
-          frontendDistPath = potentialPath;
-          break;
-        }
-      }
+    console.log('Environment FRONTEND_PATH:', frontendPathFromEnv);
+    
+    if (!frontendPathFromEnv) {
+      console.error('❌ No FRONTEND_PATH provided in environment. Exiting.');
+      process.exit(1);
     }
     
+    // Strictly validate the frontend path
+    if (!fs.existsSync(frontendPathFromEnv)) {
+      console.error(`❌ Frontend path does not exist: ${frontendPathFromEnv}`);
+      console.error('Detailed directory check:');
+      
+      try {
+        console.log('Contents of Resources:', 
+          fs.readdirSync((process as any).resourcesPath).join(', ')
+        );
+        
+        const frontendDir = path.join((process as any).resourcesPath, 'frontend');
+        if (fs.existsSync(frontendDir)) {
+          console.log('Frontend directory contents:', 
+            fs.readdirSync(frontendDir).join(', ')
+          );
+        }
+      } catch (err) {
+        console.error('Error listing directories:', err);
+      }
+      
+      process.exit(1);
+    }
+    
+    frontendDistPath = frontendPathFromEnv;
+
     if (!frontendDistPath) {
       console.error('❌ Could not find frontend dist directory. Exiting.');
       process.exit(1);

@@ -53,3 +53,10 @@ frontend/.angular/
 /frontend/dist/
 /frontend/.angular/
 docs/full_structure 2.md
+scripts/refresh-full-tree.sh
+docs/packaged_structure.md
+scripts/refresh-full-tree.sh
+
+yarn.lock
+yarn-error.log
+package-lock 2.json
