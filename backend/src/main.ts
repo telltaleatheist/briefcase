@@ -66,8 +66,9 @@ async function bootstrap() {
       const possiblePaths = [
         path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
         path.join(process.cwd(), '..', 'frontend', 'dist', 'clippy-frontend', 'browser'),
+        path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend', 'browser'), // <-- NEW PRODUCTION PATH
       ];
-    
+
       for (const potentialPath of possiblePaths) {
         console.log(`Checking frontend path: ${potentialPath} (exists: ${fs.existsSync(potentialPath)})`);
         if (fs.existsSync(potentialPath)) {
@@ -143,6 +144,12 @@ async function bootstrap() {
   }
 }
 
+bootstrap().catch((err) => {
+  console.error('💥 Fatal error during backend startup:');
+  console.error(err);
+  process.exit(1);
+});
+
 // Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -151,5 +158,3 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
 });
-
-bootstrap();

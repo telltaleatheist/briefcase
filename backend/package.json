@@ -32,6 +32,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "fluent-ffmpeg": "^2.1.2",
+    "fs-extra": "^11.3.0",
     "node-ffmpeg-installer": "^1.0.22",
     "path-to-regexp": "^8.2.0",
     "reflect-metadata": "^0.1.13",
