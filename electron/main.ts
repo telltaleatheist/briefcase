@@ -106,8 +106,8 @@ if (!gotTheLock) {
     setupBinaries();
 
     mainWindow = new BrowserWindow({
-      width: 900,
-      height: 700,
+      width: 800,
+      height: 1000,
       minWidth: 800,  // Reasonable minimum width
       minHeight: 600, // Reasonable minimum height
       autoHideMenuBar: true,
@@ -135,8 +135,8 @@ if (!gotTheLock) {
 
     // Always open DevTools in development mode
     if (isDevelopment) {
-      mainWindow.webContents.openDevTools();
-      mainWindow.setMenuBarVisibility(isDevelopment);
+//      mainWindow.webContents.openDevTools();
+//      mainWindow.setMenuBarVisibility(isDevelopment);
 
       // Add debug listeners only in development mode
       mainWindow.webContents.on('did-start-loading', () => log.info('Started loading'));
