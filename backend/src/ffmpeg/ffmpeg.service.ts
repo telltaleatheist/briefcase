@@ -13,6 +13,7 @@ import { VideoMetadata } from '../common/interfaces/download.interface';
 export class FfmpegService {
   @WebSocketServer()
   server: Server;
+  private lastReportedProgress: Map<string, number> = new Map();
 
   private readonly logger = new Logger(FfmpegService.name);
 
@@ -164,13 +165,16 @@ export class FfmpegService {
     });
   }
 
-  async fixAspectRatio(videoFile: string): Promise<string | null> {
+async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(videoFile)) {
       this.logger.error(`Video file doesn't exist: ${videoFile}`);
       return null;
     }
-
+  
     try {
+      // Add this at the class level if not already there
+      // private lastReportedProgress: Map<string, number> = new Map();
+  
       return new Promise<string | null>((resolve, reject) => {
         ffmpeg.ffprobe(videoFile, (err, metadata) => {
           if (err) {
@@ -179,9 +183,9 @@ export class FfmpegService {
             resolve(null);
             return;
           }
-
-          this.logger.log(`Full Metadata: ${JSON.stringify(metadata, null, 2)}`);
-
+  
+          this.logger.debug(`FFmpeg Metadata: ${JSON.stringify(metadata, null, 2)}`);
+  
           const stream = metadata.streams.find(s => s.codec_type === 'video');
           if (!stream) {
             this.logger.error('CRITICAL: No video stream found');
@@ -206,13 +210,13 @@ export class FfmpegService {
           if (rotation === '90' || rotation === '270' || rotation === 90 || rotation === 270) {
             [width, height] = [height, width];
           }
-
+  
           const aspectRatio = width / height;
           this.logger.log(`ASPECT RATIO ANALYSIS:
             Original Dimensions: ${width}x${height}
             Calculated Aspect Ratio: ${aspectRatio.toFixed(4)}
             Is Vertical Video: ${aspectRatio <= 1.0}
-            Raw Stream Info: ${JSON.stringify(stream, null, 2)}`);
+            Video Duration: ${totalDuration}s`);
                     
           // Is it a vertical video?
           const isVertical = aspectRatio <= 1.0;
@@ -225,15 +229,21 @@ export class FfmpegService {
             resolve(null);
             return;
           }
-
+  
           // Create output filename
           const fileDir = path.dirname(videoFile);
           const fileName = path.basename(videoFile);
           const fileBase = path.parse(fileName).name;
-
+  
           // Force .mov extension for Final Cut Pro compatibility
           const outputFile = path.join(fileDir, `${fileBase}_16x9.mov`);
-
+          
+          // Set the progress key
+          const progressKey = outputFile;
+          
+          // Reset the progress counter for this file
+          this.lastReportedProgress.set(progressKey, 0);
+  
           // Create FFmpeg command
           let command = ffmpeg(videoFile)
             .outputOptions([
@@ -246,9 +256,21 @@ export class FfmpegService {
             ])
             .save(outputFile);
     
-          // Add more event handlers for better debugging
+          // Start progress at 0%
+          this.safeEmit('processing-progress', { 
+            progress: 0,
+            task: 'Preparing aspect ratio adjustment',
+            jobId // Add jobId here
+          });
+  
           command.on('start', (cmdline) => {
             this.logger.log(`FFmpeg command started: ${cmdline}`);
+            // Emit a 5% progress for starting
+            this.safeEmit('processing-progress', { 
+              progress: 0, 
+              task: 'Starting aspect ratio adjustment',
+              jobId // Add jobId here
+            });
           });
           
           command.on('stderr', (stderrLine) => {
@@ -267,39 +289,69 @@ export class FfmpegService {
                 const millis = timeParts.length > 3 ? parseInt(timeParts[3]) : 0;
                 
                 const currentTimeInSeconds = hours * 3600 + minutes * 60 + seconds + (millis / 100);
-                let progressPercent = 0;
                 
-                if (totalDuration > 0) {
-                  progressPercent = Math.min(Math.round((currentTimeInSeconds / totalDuration) * 100), 100);
+                // Make sure totalDuration is valid (fallback to default if not)
+                let effectiveDuration = totalDuration;
+                if (effectiveDuration <= 0 || isNaN(effectiveDuration)) {
+                  this.logger.warn(`Invalid duration: ${totalDuration}, using default`);
+                  effectiveDuration = 100; // Use a default if duration is invalid
                 }
+                
+                let progressPercent = Math.min(Math.round((currentTimeInSeconds / effectiveDuration) * 100), 100);
+                
+                // Always force progress to be between 5-95% (leaving room for start and end operations)
+                progressPercent = Math.max(5, Math.min(progressPercent, 95));
+                
+                // Skip if progress is too small or moving backwards
+                const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
+                if (progressPercent <= lastProgress) {
+                  return;
+                }
+                this.lastReportedProgress.set(progressKey, progressPercent);
                 
                 let speedInfo = '';
                 if (speedMatch) {
                   speedInfo = `(Speed: ${speedMatch[1]}x)`;
                 }
                 
-                // Emit progress to all clients
+                // Emit progress to all clients WITH jobId
                 this.safeEmit('processing-progress', { 
                   progress: progressPercent,
-                  task: `Adjusting aspect ratio ${speedInfo}`
+                  task: `Adjusting aspect ratio ${speedInfo}`,
+                  jobId // Add jobId to the event data
                 });
+                
+                // Log the progress for debugging
+                this.logger.debug(`Progress: ${progressPercent}% (${currentTimeInSeconds}s / ${effectiveDuration}s)`);
               }
             }
-            
-            // Log debug info
-            this.logger.debug(`FFmpeg stderr: ${stderrLine}`);
           });
-
-          command.on('progress', (progress) => {
-            const percent = Math.round((progress.percent || 0) * 100) / 100;
             
-            // Emit progress event with jobId if available
-              this.safeEmit('processing-progress', { 
-                progress: percent,
-                task: 'Adjusting aspect ratio'
-              });
-            });
-
+          command.on('progress', (progress) => {
+            // Fallback progress mechanism (may not always work reliably)
+            if (progress && typeof progress.percent === 'number') {
+              const percent = Math.round(progress.percent * 100) / 100;
+              
+              // Scale to 5-95% range
+              const scaledPercent = Math.max(5, Math.min(Math.round(5 + (percent * 0.9)), 95));
+              
+              // Only update if greater than last reported
+              const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
+              if (scaledPercent > lastProgress) {
+                this.lastReportedProgress.set(progressKey, scaledPercent);
+                
+                // Emit progress event
+                this.safeEmit('processing-progress', { 
+                  progress: scaledPercent,
+                  task: `Adjusting aspect ratio (${percent}%)`,
+                  jobId // Add jobId here
+                });
+                
+                this.logger.debug(`Native progress: ${percent}%, Scaled: ${scaledPercent}%`);
+              }
+            }
+          });
+  
           command.on('end', () => {
             this.logger.log(`Successfully created 16:9 version with blurred background: ${outputFile}`);
             
@@ -307,13 +359,15 @@ export class FfmpegService {
             if (this.safeDeleteFile(videoFile)) {
               this.logger.log(`Deleted original video: ${videoFile}`);
             } else {
-              this.logger.debug(`Original file couldn't be deleted (may not exist): ${videoFile}`);
+              this.logger.debug(`Original file couldn't be deleted: ${videoFile}`);
             }
             
             // Emit 100% completion
+            this.lastReportedProgress.set(progressKey, 100);
             this.safeEmit('processing-progress', { 
               progress: 100,
-              task: 'Processing completed'
+              task: 'Processing completed',
+              jobId // Add jobId here
             });
             
             resolve(outputFile);
@@ -322,7 +376,7 @@ export class FfmpegService {
           command.on('error', (err) => {
             this.logger.error(`Error creating blurred background version: ${err.message}`);
             
-            // Emit error event with jobId if available
+            // Emit error event
             this.safeEmit('processing-failed', {
               error: err.message,
             });

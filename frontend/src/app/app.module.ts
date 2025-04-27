@@ -23,8 +23,9 @@ import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.com
 
 // Socket.io configuration
 const socketIoConfig: SocketIoConfig = {
-  url: environment.apiBaseUrl,
+  url: environment.socketIoConfig.url,
   options: {
+    ...environment.socketIoConfig.options,
     transports: ['websocket']
   }
 };

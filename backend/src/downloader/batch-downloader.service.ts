@@ -221,7 +221,7 @@ export class BatchDownloaderService {
           job.progress = 10;
           this.emitQueueUpdate();
           
-          const fixedFile = await this.ffmpegService.fixAspectRatio(processedFile);
+          const fixedFile = await this.ffmpegService.fixAspectRatio(processedFile, job.id);
           if (fixedFile) {
             processedFile = fixedFile;
           }

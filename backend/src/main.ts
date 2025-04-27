@@ -9,8 +9,24 @@ import * as fs from 'fs';
 import { environment } from './config/environment';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import * as log from 'electron-log';
+import { ServerOptions } from 'socket.io';
 
 log.info('✅ Backend is starting...');
+
+class ExtendedIoAdapter extends IoAdapter {
+  createIOServer(port: number, options?: ServerOptions): any {
+    const server = super.createIOServer(port, {
+      ...options,
+      path: environment.socket.path,
+      cors: {
+        origin: environment.cors.origins,
+        methods: environment.cors.methods,
+        credentials: environment.socket.credentials
+      }
+    });
+    return server;
+  }
+}
 
 async function bootstrap() {
   try {
@@ -29,17 +45,7 @@ async function bootstrap() {
       abortOnError: false
     });
 
-    app.useWebSocketAdapter(new IoAdapter(app));
-
-    app.enableCors({
-      origin: [
-        'http://localhost:8080',
-        'http://localhost:4200',
-        'http://localhost:3000'
-      ],
-      methods: ['GET', 'POST'],
-      credentials: true
-    });
+    app.useWebSocketAdapter(new ExtendedIoAdapter(app));
     
     app.setGlobalPrefix(environment.apiPrefix);
 

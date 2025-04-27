@@ -1,5 +1,6 @@
 // clippy/backend/src/ffmpeg/ffmpeg.controller.ts
 import { 
+  Body,
   Controller, 
   Get, 
   Param, 
@@ -88,7 +89,10 @@ export class FfmpegController {
 
   @Post('fix-aspect-ratio')
   @UseInterceptors(FileInterceptor('video'))
-  async fixAspectRatio(@UploadedFile() video: Express.Multer.File) {
+  async fixAspectRatio(
+    @UploadedFile() video: Express.Multer.File,
+    @Body('jobId') jobId?: string // Add this parameter to accept jobId from request body
+  ) {
     try {
       if (!video) {
         return { 
@@ -96,9 +100,9 @@ export class FfmpegController {
           message: 'No video file uploaded' 
         };
       }
-
-      // Fix aspect ratio
-      const processedVideoPath = await this.ffmpegService.fixAspectRatio(video.path);
+  
+      // Pass the jobId to the ffmpeg service
+      const processedVideoPath = await this.ffmpegService.fixAspectRatio(video.path, jobId);
       
       if (!processedVideoPath) {
         return {
@@ -106,7 +110,7 @@ export class FfmpegController {
           message: 'Failed to process video aspect ratio'
         };
       }
-
+  
       return {
         success: true,
         outputFile: path.basename(processedVideoPath)

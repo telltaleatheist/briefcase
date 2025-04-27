@@ -105,6 +105,7 @@ export class DownloaderService implements OnModuleInit {
    * Helper method to safely emit WebSocket events
    */
   private emitEvent(event: string, data: any): void {
+    this.logger.log(`Emitting event: ${event}`, data);
     if (this.server) {
       this.server.emit(event, data);
     } else {
@@ -266,7 +267,7 @@ export class DownloaderService implements OnModuleInit {
             // Only process videos
             if (options.fixAspectRatio) {
               this.emitEvent('processing-progress', { task: 'Fixing aspect ratio' });
-              const fixedFile = await this.ffmpegService.fixAspectRatio(outputFile);
+              const fixedFile = await this.ffmpegService.fixAspectRatio(outputFile, jobId);
               if (fixedFile) outputFile = fixedFile;
             }
         
