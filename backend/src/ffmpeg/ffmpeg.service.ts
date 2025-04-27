@@ -172,23 +172,26 @@ export class FfmpegService {
 
     try {
       return new Promise<string | null>((resolve, reject) => {
-        // Get video dimensions
         ffmpeg.ffprobe(videoFile, (err, metadata) => {
           if (err) {
-            this.logger.error(`Error probing video file: ${err.message}`);
+            this.logger.error(`CRITICAL: Error probing video file: ${err.message}`);
+            this.logger.error(`Full error details: ${JSON.stringify(err, null, 2)}`);
             resolve(null);
             return;
           }
+
+          this.logger.log(`Full Metadata: ${JSON.stringify(metadata, null, 2)}`);
 
           const stream = metadata.streams.find(s => s.codec_type === 'video');
           if (!stream) {
-            this.logger.error('No video stream found');
+            this.logger.error('CRITICAL: No video stream found');
             resolve(null);
             return;
           }
-
+  
           let width = stream.width;
           let height = stream.height;
+          let totalDuration = parseFloat(stream.duration || '0');
           
           if (!width || !height) {
             this.logger.error('Could not determine video dimensions');
@@ -205,8 +208,12 @@ export class FfmpegService {
           }
 
           const aspectRatio = width / height;
-          this.logger.log(`Video dimensions: ${width}x${height}, Aspect ratio: ${aspectRatio.toFixed(4)}`);
-          
+          this.logger.log(`ASPECT RATIO ANALYSIS:
+            Original Dimensions: ${width}x${height}
+            Calculated Aspect Ratio: ${aspectRatio.toFixed(4)}
+            Is Vertical Video: ${aspectRatio <= 1.0}
+            Raw Stream Info: ${JSON.stringify(stream, null, 2)}`);
+                    
           // Is it a vertical video?
           const isVertical = aspectRatio <= 1.0;
           
@@ -219,43 +226,79 @@ export class FfmpegService {
             return;
           }
 
-        // Create output filename
-        const fileDir = path.dirname(videoFile);
-        const fileName = path.basename(videoFile);
-        const fileBase = path.parse(fileName).name;
+          // Create output filename
+          const fileDir = path.dirname(videoFile);
+          const fileName = path.basename(videoFile);
+          const fileBase = path.parse(fileName).name;
 
-        // Force .mov extension for Final Cut Pro compatibility
-        const outputFile = path.join(fileDir, `${fileBase}_16x9.mov`);
+          // Force .mov extension for Final Cut Pro compatibility
+          const outputFile = path.join(fileDir, `${fileBase}_16x9.mov`);
 
-        // Create FFmpeg command
-        let command = ffmpeg(videoFile)
-          .outputOptions([
-            '-filter_complex', "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p",
-            '-pix_fmt', 'yuv420p',
-            '-c:v', 'libx264',
-            '-b:v', '3M',
-            '-c:a', 'aac',
-            '-b:a', '128k'
-          ])
-          .save(outputFile);
-  
+          // Create FFmpeg command
+          let command = ffmpeg(videoFile)
+            .outputOptions([
+              '-filter_complex', "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p",
+              '-pix_fmt', 'yuv420p',
+              '-c:v', 'libx264',
+              '-b:v', '3M',
+              '-c:a', 'aac',
+              '-b:a', '128k'
+            ])
+            .save(outputFile);
+    
           // Add more event handlers for better debugging
           command.on('start', (cmdline) => {
             this.logger.log(`FFmpeg command started: ${cmdline}`);
           });
           
           command.on('stderr', (stderrLine) => {
+            // Parse ffmpeg output to get current time and calculate progress
+            const timeMatch = stderrLine.match(/time=(\d+:\d+:\d+\.\d+)/);
+            const speedMatch = stderrLine.match(/speed=(\d+\.\d+)x/);
+            
+            if (timeMatch) {
+              const timeStr = timeMatch[1];
+              const timeParts = timeStr.split(/[:\.]/);
+              
+              if (timeParts.length >= 3) {
+                const hours = parseInt(timeParts[0]);
+                const minutes = parseInt(timeParts[1]);
+                const seconds = parseInt(timeParts[2]);
+                const millis = timeParts.length > 3 ? parseInt(timeParts[3]) : 0;
+                
+                const currentTimeInSeconds = hours * 3600 + minutes * 60 + seconds + (millis / 100);
+                let progressPercent = 0;
+                
+                if (totalDuration > 0) {
+                  progressPercent = Math.min(Math.round((currentTimeInSeconds / totalDuration) * 100), 100);
+                }
+                
+                let speedInfo = '';
+                if (speedMatch) {
+                  speedInfo = `(Speed: ${speedMatch[1]}x)`;
+                }
+                
+                // Emit progress to all clients
+                this.safeEmit('processing-progress', { 
+                  progress: progressPercent,
+                  task: `Adjusting aspect ratio ${speedInfo}`
+                });
+              }
+            }
+            
+            // Log debug info
             this.logger.debug(`FFmpeg stderr: ${stderrLine}`);
           });
 
           command.on('progress', (progress) => {
             const percent = Math.round((progress.percent || 0) * 100) / 100;
-            // Use safe emit to handle case where server isn't initialized
-            this.safeEmit('processing-progress', { 
-              progress: percent,
-              task: 'Adjusting aspect ratio'
+            
+            // Emit progress event with jobId if available
+              this.safeEmit('processing-progress', { 
+                progress: percent,
+                task: 'Adjusting aspect ratio'
+              });
             });
-          });
 
           command.on('end', () => {
             this.logger.log(`Successfully created 16:9 version with blurred background: ${outputFile}`);
@@ -267,11 +310,23 @@ export class FfmpegService {
               this.logger.debug(`Original file couldn't be deleted (may not exist): ${videoFile}`);
             }
             
+            // Emit 100% completion
+            this.safeEmit('processing-progress', { 
+              progress: 100,
+              task: 'Processing completed'
+            });
+            
             resolve(outputFile);
           });          
           
           command.on('error', (err) => {
             this.logger.error(`Error creating blurred background version: ${err.message}`);
+            
+            // Emit error event with jobId if available
+            this.safeEmit('processing-failed', {
+              error: err.message,
+            });
+            
             resolve(null);
           });
           
@@ -280,7 +335,7 @@ export class FfmpegService {
         });
       });
     } catch (error) {
-      this.logger.error('Error checking aspect ratio:', error);
+      this.logger.error('CRITICAL: Unexpected error in aspect ratio processing:', error);
       return null;
     }
   }

@@ -1,31 +1,45 @@
 // clippy/frontend/src/app/models/download.model.ts
-export type QualityOption = '360' | '480' | '720' | '1080' | '1440' | '2160';
+
+// Add these missing type definitions
 export type BrowserType = 'auto' | 'chrome' | 'firefox' | 'edge' | 'safari' | 'brave' | 'opera';
 
-export interface DownloadOptions {
-  url: string;
-  outputDir?: string;
-  quality?: QualityOption;
-  convertToMp4?: boolean;
-  fps?: number;
-  useCookies?: boolean;
-  browser?: BrowserType;
-  fixAspectRatio?: boolean;
+export interface QualityOption {
+  value: string;
+  label: string;
 }
 
-export interface VideoInfo {
-  title: string;
-  uploader?: string;
-  duration?: number;
-  thumbnail?: string;
-  uploadDate?: string; // Added upload date field
+// Keep all other existing interfaces
+export interface DownloadOptions {
+  url: string;
+  quality: string;
+  convertToMp4: boolean;
+  fixAspectRatio: boolean;
+  useCookies: boolean;
+  browser: string;
+  outputDir: string;
+}
+
+export interface BatchDownloadOptions {
+  urls: string[];
+  quality: string;
+  convertToMp4: boolean;
+  fixAspectRatio: boolean;
+  useCookies: boolean;
+  browser: string;
+  outputDir: string;
+}
+
+export interface DownloadResult {
+  success: boolean;
+  outputFile?: string;
+  error?: string;
+  isImage?: boolean;
 }
 
 export interface DownloadProgress {
   progress: number;
   task?: string;
-  outputFile?: string;
-  jobId?: string;
+  jobId?: string; // Added jobId to track individual downloads
 }
 
 export interface HistoryItem {
@@ -33,35 +47,26 @@ export interface HistoryItem {
   filename: string;
   filePath: string;
   sourceUrl: string;
-  fileSize?: number;
-  duration?: number;
+  fileSize: number;
   date: string;
 }
 
 export interface VideoInfo {
   title: string;
-  uploader?: string;
-  duration?: number;
-  thumbnail?: string;
+  uploader: string;
+  duration: number;
+  thumbnail: string;
+  uploadDate: string;
 }
 
-export interface BatchJobInfo {
-  id: string;
-  url: string;
-  status: 'queued' | 'downloading' | 'processing' | 'completed' | 'failed';
-  error?: string;
-}
-
-export interface BatchQueueStatus {
-  downloadQueue: BatchJobInfo[];
-  processingQueue: BatchJobInfo[];
-  activeDownloads: string[];
-  maxConcurrentDownloads: number;
-  isProcessing: boolean;
-}
-
-export interface BatchDownloadOptions {
-  downloads: DownloadOptions[];
+export interface VideoMetadata {
+  width: number;
+  height: number;
+  duration: number;
+  codecName?: string;
+  bitrate?: number;
+  fps?: number;
+  aspectRatio?: string;
 }
 
 export interface BatchConfig {
@@ -69,9 +74,26 @@ export interface BatchConfig {
   enabled: boolean;
 }
 
-export interface DownloadResult {
-  success: boolean;
-  outputFile?: string;
+// Updated interfaces to include job progress information with string dates
+export interface BatchJob {
+  id: string;
+  url: string;
+  status: 'queued' | 'downloading' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  currentTask: string;
   error?: string;
-  jobId?: string;
+  downloadStartTime?: string; // Use string for ISO date format
+  downloadEndTime?: string;   // Use string for ISO date format
+  processingStartTime?: string; // Use string for ISO date format
+  processingEndTime?: string;  // Use string for ISO date format
+}
+
+export interface BatchQueueStatus {
+  downloadQueue: BatchJob[];
+  processingQueue: BatchJob[];
+  completedJobs: BatchJob[];  // New
+  failedJobs: BatchJob[];     // New
+  activeDownloads: string[];
+  maxConcurrentDownloads: number;
+  isProcessing: boolean;
 }

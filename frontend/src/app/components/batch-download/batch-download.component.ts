@@ -17,18 +17,17 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
-
 import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
 import { SettingsService } from '../../services/settings.service';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
-import { BatchQueueStatus, DownloadOptions, VideoInfo } from '../../models/download.model';
+import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
 import { Subscription, catchError, of } from 'rxjs';
 
 @Component({
   selector: 'app-batch-download',
-  standalone: true,  // Change this to true
+  standalone: true,
   imports: [
     CommonModule,
     ReactiveFormsModule,
@@ -64,6 +63,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   
   private socketSubscription: Subscription | null = null;
   private settingsSubscription: Subscription | null = null;
+  private downloadProgressSubscription: Subscription | null = null;
+  private processingProgressSubscription: Subscription | null = null;
   
   constructor(
     private fb: FormBuilder,
@@ -89,6 +90,24 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       }
     );
     
+    // Listen for download progress updates
+    this.downloadProgressSubscription = this.socketService.onDownloadProgress().subscribe(
+      (progress: DownloadProgress) => {
+        if (progress.jobId) {
+          this.updateJobProgress(progress.jobId, progress.progress, progress.task);
+        }
+      }
+    );
+    
+    // Listen for processing progress updates
+    this.processingProgressSubscription = this.socketService.onProcessingProgress().subscribe(
+      (progress: DownloadProgress) => {
+        if (progress.jobId) {
+          this.updateJobProgress(progress.jobId, progress.progress, progress.task);
+        }
+      }
+    );
+    
     // Get initial batch status
     this.refreshBatchStatus();
     
@@ -111,6 +130,135 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     if (this.urlChangeSubscription) {
       this.urlChangeSubscription.unsubscribe();
     }
+    
+    if (this.downloadProgressSubscription) {
+      this.downloadProgressSubscription.unsubscribe();
+    }
+    
+    if (this.processingProgressSubscription) {
+      this.processingProgressSubscription.unsubscribe();
+    }
+  }
+  
+  // Update progress for a specific job
+  updateJobProgress(jobId: string, progress: number, task: string | undefined): void {
+    if (!this.batchQueueStatus) return;
+    
+    // Check all queues for the job
+    const queues = [
+      this.batchQueueStatus.downloadQueue,
+      this.batchQueueStatus.processingQueue,
+      this.batchQueueStatus.completedJobs || [],
+      this.batchQueueStatus.failedJobs || []
+    ];
+    
+    for (const queue of queues) {
+      const job = queue.find(j => j.id === jobId);
+      if (job) {
+        job.progress = progress;
+        // Only update task if it's defined
+        if (task !== undefined) {
+          job.currentTask = task;
+        }
+        // Don't break, as a job might appear in multiple queues during transitions
+      }
+    }
+  }
+  
+  // Get all jobs as a single array for display
+  getAllJobsForDisplay(): BatchJob[] {
+    if (!this.batchQueueStatus) return [];
+    
+    const allJobs = [
+      ...(this.batchQueueStatus.downloadQueue || []),
+      ...(this.batchQueueStatus.processingQueue || []),
+      ...(this.batchQueueStatus.completedJobs || []),
+      ...(this.batchQueueStatus.failedJobs || [])
+    ];
+    
+    // Put completed and failed jobs at the end
+    return allJobs.sort((a, b) => {
+      // Helper function to get sort priority
+      const getPriority = (status: string): number => {
+        switch (status) {
+          case 'downloading': return 1;
+          case 'processing': return 2;
+          case 'queued': return 3;
+          case 'completed': return 4;
+          case 'failed': return 5;
+          default: return 6;
+        }
+      };
+      
+      return getPriority(a.status) - getPriority(b.status);
+    });
+  }
+  
+  // Get CSS class for job status with null check
+  getJobStatusClass(status: string | undefined): string {
+    if (!status) return '';
+    
+    switch (status) {
+      case 'queued': return 'status-queued';
+      case 'downloading': return 'status-downloading';
+      case 'processing': return 'status-processing';
+      case 'completed': return 'status-completed';
+      case 'failed': return 'status-failed';
+      default: return '';
+    }
+  }
+  
+  // Get icon for job status with null check
+  getJobStatusIcon(status: string | undefined): string {
+    if (!status) return 'help';
+    
+    switch (status) {
+      case 'queued': return 'queue';
+      case 'downloading': return 'downloading';
+      case 'processing': return 'settings';
+      case 'completed': return 'check_circle';
+      case 'failed': return 'error';
+      default: return 'help';
+    }
+  }
+  
+  // Get color for status chip with null check
+  getStatusChipColor(status: string | undefined): string {
+    if (!status) return 'default';
+    
+    switch (status) {
+      case 'queued': return 'primary';
+      case 'downloading': return 'accent';
+      case 'processing': return 'warn';
+      case 'completed': return 'success';
+      case 'failed': return 'warn';
+      default: return 'default';
+    }
+  }
+  
+  // Get color for progress bar with null check
+  getProgressBarColor(status: string | undefined): string {
+    if (!status) return 'primary';
+    
+    switch (status) {
+      case 'downloading': return 'primary';
+      case 'processing': return 'accent';
+      case 'completed': return 'primary';
+      case 'failed': return 'warn';
+      default: return 'primary';
+    }
+  }
+  
+  // Check if there are any active jobs
+  hasActiveJobs(): boolean {
+    if (!this.batchQueueStatus) return false;
+    
+    return (
+      this.batchQueueStatus.downloadQueue.length > 0 ||
+      this.batchQueueStatus.processingQueue.length > 0 ||
+      (this.batchQueueStatus.completedJobs?.length || 0) > 0 ||
+      (this.batchQueueStatus.failedJobs?.length || 0) > 0
+    );
   }
   
   onMultiUrlInput(text: string): void {
@@ -159,7 +307,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       (activeElement as HTMLTextAreaElement).focus();
     }
   }
-
+  
   onMultiUrlTextareaInput(event: Event): void {
     const value = (event.target as HTMLTextAreaElement)?.value || '';
     this.onMultiUrlInput(value);
@@ -504,17 +652,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         console.error('Error getting batch status:', error);
       }
     });
-  }
-
-  getStatusChipColor(status: string): string {
-    switch (status) {
-      case 'queued': return 'primary';
-      case 'downloading': return 'accent';
-      case 'processing': return 'warn';
-      case 'completed': return 'success';
-      case 'failed': return 'danger';
-      default: return 'default';
-    }
   }
 
   pasteMultipleUrls(): void {

@@ -1,99 +1,48 @@
-/* clippy/frontend/src/app/components/batch-download/batch-download.component.scss */
+// clippy/frontend/src/app/components/batch-download/batch-download.component.scss
 
 .batch-download-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 16px;
+  margin-bottom: 20px;
 }
 
-.status-card, .batch-form-card {
+.batch-form-card,
+.status-card {
+  width: 100%;
   margin-bottom: 16px;
 }
 
-.status-info {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.status-item {
-  padding: 8px;
-  border-radius: 4px;
-  background-color: rgba(0, 0, 0, 0.04);
+.multiline-url-input {
+  width: 100%;
 }
 
 .url-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   margin-bottom: 16px;
 }
 
 .url-field-row {
-  display: flex;
-  align-items: flex-start;
   margin-bottom: 8px;
 }
 
 .url-input-container {
   display: flex;
   align-items: center;
-  width: 100%;
+  gap: 8px;
+}
+
+.url-expansion-panel {
+  flex: 1;
 }
 
 .url-field {
   width: 100%;
 }
 
-.url-expansion-panel {
-  width: 100%;
-  border-radius: 4px;
-  
-  ::ng-deep .mat-expansion-panel-header {
-    padding: 0 16px;
-    height: 48px;
-  }
-  
-  ::ng-deep .mat-expansion-panel-body {
-    padding: 0 16px 16px;
-  }
-}
-
-.filename-container {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  overflow: hidden;
-}
-
-.video-title {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  order: 2; /* Explicitly set order */
-}
-
-.upload-date-badge {
-  background-color: rgba(0, 0, 0, 0.08);
-  color: rgba(0, 0, 0, 0.7);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
-  white-space: nowrap;
-  margin-right: 8px;
-  order: 1; /* Explicitly set order to be first */
-}
-
-.url-actions, .status-actions, .form-actions, .config-actions {
-  display: flex;
-  gap: 8px;
+.url-actions {
   margin-top: 16px;
-  justify-content: flex-end;
+  display: flex;
+  justify-content: flex-start;
 }
 
 .batch-options {
@@ -102,13 +51,47 @@
   gap: 16px;
 }
 
-.checkbox-setting {
-  margin: 8px 0;
+.form-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.status-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 8px;
+  background-color: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+}
+
+.status-item {
+  padding: 8px;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.status-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+  justify-content: flex-end;
 }
 
 .queue-section {
-  margin-top: 24px;
-  margin-bottom: 24px;
+  margin: 24px 0;
 }
 
 .queue-section h3 {
@@ -116,16 +99,235 @@
   font-weight: 500;
 }
 
-.config-form {
+.loading-icon {
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.filename-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.video-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-date-badge {
+  font-size: 12px;
+  background-color: rgba(0, 0, 0, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+// New styles for enhanced job display
+.all-jobs-section {
+  margin: 24px 0;
+}
+
+.all-jobs-section h3 {
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+
+.job-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 0;
 }
 
-.full-width {
-  width: 100%;
+.job-item {
+  padding: 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  border-left: 5px solid transparent;
 }
 
-.url-textarea textarea {
-  resize: vertical;
+.job-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.job-title {
+  flex-grow: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+}
+
+.task-label {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.progress-value {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: right;
+}
+
+mat-progress-bar {
+  grid-column: 1 / 3;
+  grid-row: 2;
+}
+
+.job-details {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+.error-message {
+  color: #f44336;
+}
+
+.no-jobs-message {
+  text-align: center;
+  padding: 24px;
+  color: rgba(0, 0, 0, 0.5);
+  font-style: italic;
+}
+
+// Status-specific styles
+.status-queued {
+  border-left-color: #2196f3;
+  background-color: rgba(33, 150, 243, 0.05);
+  
+  .mat-icon {
+    color: #2196f3;
+  }
+}
+
+.status-downloading {
+  border-left-color: #673ab7;
+  background-color: rgba(103, 58, 183, 0.05);
+  
+  .mat-icon {
+    color: #673ab7;
+  }
+}
+
+.status-processing {
+  border-left-color: #ff9800;
+  background-color: rgba(255, 152, 0, 0.05);
+  
+  .mat-icon {
+    color: #ff9800;
+    animation: spin 2s linear infinite;
+  }
+}
+
+.status-completed {
+  border-left-color: #4caf50;
+  background-color: rgba(76, 175, 80, 0.05);
+  
+  .mat-icon {
+    color: #4caf50;
+  }
+}
+
+.status-failed {
+  border-left-color: #f44336;
+  background-color: rgba(244, 67, 54, 0.05);
+  
+  .mat-icon {
+    color: #f44336;
+  }
+}
+
+// Dark mode adjustments - these will apply when the app is in dark mode
+:host-context(.dark-theme) {
+  .job-item {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+  
+  .status-info {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  
+  .task-label {
+    color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .no-jobs-message {
+    color: rgba(255, 255, 255, 0.5);
+  }
+  
+  .status-queued {
+    background-color: rgba(33, 150, 243, 0.1);
+  }
+  
+  .status-downloading {
+    background-color: rgba(103, 58, 183, 0.1);
+  }
+  
+  .status-processing {
+    background-color: rgba(255, 152, 0, 0.1);
+  }
+  
+  .status-completed {
+    background-color: rgba(76, 175, 80, 0.1);
+  }
+  
+  .status-failed {
+    background-color: rgba(244, 67, 54, 0.1);
+  }
+}
+
+// For smaller screens
+@media (max-width: 600px) {
+  .status-info {
+    grid-template-columns: 1fr;
+  }
+  
+  .job-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .job-progress {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  
+  .task-label, .progress-value {
+    grid-column: 1;
+  }
+  
+  .progress-value {
+    grid-row: 2;
+    text-align: left;
+  }
+  
+  mat-progress-bar {
+    grid-column: 1;
+    grid-row: 3;
+  }
 }

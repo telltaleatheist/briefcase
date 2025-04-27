@@ -12,7 +12,7 @@ export class SettingsService {
   
   private readonly STORAGE_KEY = 'clippy_settings';
   private defaultSettings: Settings = {
-    quality: "720",
+    quality: { value: "720", label: "720p HD" },
     convertToMp4: true,
     fixAspectRatio: true,
     useCookies: false,
@@ -24,7 +24,7 @@ export class SettingsService {
   };
 
   private settingsSubject = new BehaviorSubject<Settings>(this.defaultSettings);
-  
+
   constructor(private logger: LoggerService) {
     this.logger.debug('Logger initialized in settings');
     this.loadSettings();
@@ -33,23 +33,28 @@ export class SettingsService {
   /**
    * Load settings from local storage
    */
-  private loadSettings(): void {
+  private loadSettings(): Settings {
     const storedSettings = localStorage.getItem(this.STORAGE_KEY);
     
     if (storedSettings) {
       try {
         const parsedSettings = JSON.parse(storedSettings);
-        this.settingsSubject.next({
+        const mergedSettings = {
           ...this.defaultSettings,
           ...parsedSettings
-        });
+        };
+        
+        this.settingsSubject.next(mergedSettings);
+        return mergedSettings;
       } catch (error) {
         console.error('Error parsing stored settings:', error);
         this.settingsSubject.next(this.defaultSettings);
+        return this.defaultSettings;
       }
     } else {
       // If no settings found, initialize with default settings and get default path
       this.initializeDefaultPath();
+      return this.defaultSettings;
     }
   }
   

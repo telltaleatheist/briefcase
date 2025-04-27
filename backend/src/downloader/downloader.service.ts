@@ -143,7 +143,7 @@ export class DownloaderService implements OnModuleInit {
       if (!this.pathService.ensurePathExists(downloadFolder)) {
         throw new Error(`Cannot create or access download directory: ${downloadFolder}`);
       }
-  
+      
       // Check if this is a Reddit URL
       if (options.url.includes('reddit.com')) {
         try {
@@ -160,11 +160,11 @@ export class DownloaderService implements OnModuleInit {
           this.logger.warn(`Failed to get Reddit info, trying regular download: ${errorMessage}`);
         }
       }
-
+      
       // Continue with normal video download process
       const dateFormat = '%(upload_date>%Y-%m-%d)s ';
       const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title)s.%(ext)s`);
-  
+      
       const ytDlpOptions: string[] = ['--verbose', '--output', outputTemplate];
       ytDlpOptions.push('--no-check-certificates', '--no-playlist', '--force-overwrites');
   
@@ -186,7 +186,7 @@ export class DownloaderService implements OnModuleInit {
       }
   
       ytDlpOptions.push(options.url);
-
+      
       let outputFile: string | null = null;
       let progressPercent = 0;
   
@@ -197,9 +197,8 @@ export class DownloaderService implements OnModuleInit {
           stdio: ['ignore', 'pipe', 'pipe']
         } as ExecFileOptions;
   
-        // ✅ Get yt-dlp binary path dynamically
         const ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
-        this.logger.log(`Executing: ${ytDlpPath} ${ytDlpOptions.join(' ')}`); // ✅ Log resolved path
+        this.logger.log(`Executing: ${ytDlpPath} ${ytDlpOptions.join(' ')}`);
   
         const downloadProcess = execFile(ytDlpPath, ytDlpOptions, commandOptions);
   
@@ -245,7 +244,7 @@ export class DownloaderService implements OnModuleInit {
           if (code === 0 && outputFile && fs.existsSync(outputFile)) {
             this.logger.log(`Download successful: ${outputFile}`);
             outputFile = await this.processOutputFilename(outputFile);
-        
+            
             // Determine if this is an image based on file extension
             const fileExt = path.extname(outputFile).toLowerCase();
             const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
@@ -257,11 +256,11 @@ export class DownloaderService implements OnModuleInit {
               resolve({ success: true, outputFile, isImage: true });
               return;
             }
-        
+              
             if (jobId) {
               this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
               resolve({ success: true, outputFile, isImage: false });
-              return;
+            return;
             }
         
             // Only process videos
@@ -272,17 +271,17 @@ export class DownloaderService implements OnModuleInit {
             }
         
             this.addToHistory(outputFile, options.url);
-            this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
-        
-            resolve({ success: true, outputFile, isImage: false });
-          } else {
+              this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
+
+              resolve({ success: true, outputFile, isImage: false });
+                      } else {
             const errorMsg = `Download failed with code ${code}`;
             this.logger.error(errorMsg);
             this.emitEvent('download-failed', { error: errorMsg, url: options.url, jobId });
             resolve({ success: false, error: errorMsg });
           }
-        });
-    });
+        });        
+      });
   
       return downloadPromise;
     } catch (error) {
@@ -298,7 +297,7 @@ export class DownloaderService implements OnModuleInit {
       };
     }
   }
-
+  
   // Modified getRedditInfo method to better extract post titles
   private async getRedditInfo(url: string): Promise<{ imageUrl?: string, title: string }> {
     return new Promise((resolve, reject) => {

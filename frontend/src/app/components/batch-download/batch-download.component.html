@@ -211,43 +211,40 @@
         </form>
       </mat-expansion-panel>
       
-      <!-- Active Downloads -->
-      <div *ngIf="batchQueueStatus.activeDownloads.length > 0" class="queue-section">
-        <h3>Active Downloads</h3>
-        <mat-list>
-          <mat-list-item *ngFor="let jobId of batchQueueStatus.activeDownloads">
-            <mat-icon matListItemIcon>downloading</mat-icon>
-            <div matListItemTitle>Job ID: {{ jobId }}</div>
-            <mat-progress-bar matListItemLine mode="indeterminate"></mat-progress-bar>
-          </mat-list-item>
-        </mat-list>
-      </div>
-      
-      <!-- Download Queue -->
-      <div *ngIf="batchQueueStatus.downloadQueue.length > 0" class="queue-section">
-        <h3>Download Queue</h3>
-        <mat-list>
-          <mat-list-item *ngFor="let job of batchQueueStatus.downloadQueue">
-            <mat-icon matListItemIcon>queue</mat-icon>
-            <div matListItemTitle>{{ job.url }}</div>
-            <div matListItemLine>
-              <mat-chip [color]="getStatusChipColor(job.status)">{{ job.status }}</mat-chip>
+      <!-- Jobs Display Section -->
+      <!-- This new section shows all jobs in a unified list with detailed progress info -->
+      <div class="all-jobs-section">
+        <h3>All Jobs</h3>
+        
+        <!-- Combine all job types into a single array for display -->
+        <mat-list class="job-list">
+          <!-- Active Downloads -->
+          <div *ngFor="let job of getAllJobsForDisplay()" class="job-item" [ngClass]="getJobStatusClass(job.status)">
+            <div class="job-header">
+              <mat-icon [ngClass]="getJobStatusClass(job.status)">{{ getJobStatusIcon(job.status) }}</mat-icon>
+              <span class="job-title">{{ job.url }}</span>
+              <mat-chip [color]="getStatusChipColor(job.status || '')" selected>{{ job.status || 'unknown' }}</mat-chip>
             </div>
-          </mat-list-item>
-        </mat-list>
-      </div>
-      
-      <!-- Processing Queue -->
-      <div *ngIf="batchQueueStatus.processingQueue.length > 0" class="queue-section">
-        <h3>Processing Queue</h3>
-        <mat-list>
-          <mat-list-item *ngFor="let job of batchQueueStatus.processingQueue">
-            <mat-icon matListItemIcon>settings</mat-icon>
-            <div matListItemTitle>{{ job.url }}</div>
-            <div matListItemLine>
-              <mat-chip [color]="getStatusChipColor(job.status)">{{ job.status }}</mat-chip>
+            
+            <div class="job-progress">
+              <div class="task-label">{{ job.currentTask || 'Waiting...' }}</div>
+              <mat-progress-bar 
+                [mode]="job.status === 'queued' ? 'buffer' : 'determinate'" 
+                [value]="job.progress || 0"
+                [color]="getProgressBarColor(job.status || '')">
+              </mat-progress-bar>
+              <div class="progress-value">{{ job.progress || 0 }}%</div>
             </div>
-          </mat-list-item>
+            
+            <div class="job-details" *ngIf="job.error">
+              <div class="error-message">{{ job.error }}</div>
+            </div>
+          </div>
+          
+          <!-- Show message if no jobs -->
+          <div class="no-jobs-message" *ngIf="getAllJobsForDisplay().length === 0">
+            No active jobs. Add URLs above to start downloading.
+          </div>
         </mat-list>
       </div>
       
@@ -257,7 +254,7 @@
         </button>
         
         <button mat-stroked-button color="warn" (click)="clearQueue()" 
-            [disabled]="batchQueueStatus.downloadQueue.length === 0 && batchQueueStatus.processingQueue.length === 0">
+            [disabled]="!hasActiveJobs()">
           <mat-icon>clear_all</mat-icon> Clear Queue
         </button>
       </div>

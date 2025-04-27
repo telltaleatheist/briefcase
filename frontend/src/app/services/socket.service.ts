@@ -86,4 +86,22 @@ export class SocketService {
   onProcessingFailed(): Observable<{error: string, jobId: string}> {
     return this.socket.fromEvent<{error: string, jobId: string}, any>('processing-failed');
   }
+  
+  /**
+   * Listen for job progress updates
+   * This is a consolidated event for tracking a job through all phases
+   */
+  onJobProgressUpdated(): Observable<{
+    jobId: string,
+    progress: number,
+    status: string,
+    task: string
+  }> {
+    return this.socket.fromEvent<{
+      jobId: string,
+      progress: number,
+      status: string,
+      task: string
+    }, any>('job-progress-updated');
+  }
 }
