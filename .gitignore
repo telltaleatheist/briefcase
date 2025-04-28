@@ -25,6 +25,7 @@ package-lock.json
 history.json
 pnpm-lock.yaml
 yarn.lock
+yarn-error.log
 
 # IDE/editor settings
 .vscode/
@@ -33,16 +34,12 @@ yarn.lock
 # macOS files
 .DS_Store
 
-docs/test-list.md
 scripts/refresh-tree.sh
 scripts/refresh-full-tree.sh
 scripts/copy-dev-bin.js
 
 backend/tsconfig.tsbuildinfo
-docs/full_structure.md
 tsconfig.tsbuildinfo
-scripts/*
-docs/clippy_structure.md
 docs/testUrls.md
 # Ignore Angular/Vite cache
 frontend/.angular/cache/
@@ -53,10 +50,6 @@ frontend/.angular/
 /frontend/dist/
 /frontend/.angular/
 docs/full_structure 2.md
-scripts/refresh-full-tree.sh
 docs/packaged_structure.md
-scripts/refresh-full-tree.sh
 
-yarn.lock
-yarn-error.log
 package-lock 2.json

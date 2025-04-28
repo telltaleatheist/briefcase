@@ -43,8 +43,11 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@types/fluent-ffmpeg": "^2.1.27",
     "electron-log": "^5.3.3",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "fluent-ffmpeg": "^2.1.3",
+    "node-ffmpeg-installer": "^1.1.2"
   },
   "build": {
     "appId": "com.owenmorgan.clippy",
@@ -57,36 +60,20 @@
       "main": "./dist-electron/main/main.js"
     },
     "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "package.json"
+      "dist-electron/main/**/*",
+      "backend/dist/**/*",
+      "backend/package.json",
+      "frontend/dist/clippy-frontend/**/*"
     ],
     "extraResources": [
       {
-        "from": "frontend/dist/clippy-frontend",
-        "to": "frontend/dist/clippy-frontend"
-      },
-      {
-        "from": "backend/dist",
-        "to": "backend/dist"
-      },
-      {
         "from": "backend/node_modules",
         "to": "backend/node_modules"
-      },
-      {
-        "from": "node_modules/@nestjs",
-        "to": "node_modules/@nestjs",
-        "filter": [
-          "**/*"
-        ]
       }
     ],
     "mac": {
       "category": "public.app-category.utilities",
-      "target": [
-        "dmg"
-      ],
+      "target": ["dmg"],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "extendInfo": {
@@ -95,28 +82,15 @@
     },
     "dmg": {
       "contents": [
-        {
-          "x": 130,
-          "y": 220
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
       ]
     },
     "win": {
-      "target": [
-        "nsis"
-      ]
+      "target": ["nsis"]
     },
     "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
+      "target": ["AppImage", "deb"],
       "category": "Utility"
     },
     "publish": {
