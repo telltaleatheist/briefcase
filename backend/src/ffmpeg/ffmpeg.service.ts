@@ -9,7 +9,6 @@ import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 import { EnvironmentUtil } from '../config/environment.util';
 
-
 @WebSocketGateway({ cors: true })
 @Injectable()
 export class FfmpegService {
