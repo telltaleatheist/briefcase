@@ -5,6 +5,7 @@ import { DownloaderService } from './downloader.service';
 import { BatchDownloaderService } from './batch-downloader.service';
 import { DownloadVideoDto } from '../common/dto/download.dto';
 import * as fs from 'fs';
+import * as log from 'electron-log';
 
 @Controller('downloader')
 export class DownloaderController {
@@ -71,7 +72,7 @@ export class DownloaderController {
   // Existing endpoints remain unchanged...
   @Get('history')
   async getDownloadHistory() {
-    console.log('Accessing download history route');
+    log.info('Accessing download history route');
     return this.downloaderService.getDownloadHistory();
   }
 
@@ -141,7 +142,7 @@ export class DownloaderController {
 
   @Get('check')
   async checkUrl(@Query('url') url: string) {
-    console.log('✅ [DownloaderController] checkUrl() called with:', url);
+    log.info('✅ [DownloaderController] checkUrl() called with:', url);
     if (!url) {
       return { valid: false, message: 'URL is required' };
     }

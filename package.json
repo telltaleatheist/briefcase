@@ -21,7 +21,8 @@
     "package": "npm run build:all && electron-builder build",
     "package:win": "npm run build:all && electron-builder build --win --publish never",
     "package:linux": "npm run build:all && electron-builder build --linux --publish never",
-    "package:mac": "npm run build:all && electron-builder --mac"
+    "package:mac": "npm run build:all && electron-builder --mac",
+    "package:mac-intel": "npm run build:all && electron-builder --mac --x64"
   },
   "keywords": [
     "video",
@@ -35,23 +36,15 @@
   "author": "Your Name",
   "license": "MIT",
   "devDependencies": {
-    "@types/jest": "^29.5.14",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "^22.14.0",
-    "concurrently": "^8.2.2",
+    "@types/node": "^22.15.2",
     "cross-env": "^7.0.3",
     "electron": "^35.1.4",
     "electron-builder": "^24.13.3",
-    "fs-extra": "^11.3.0",
-    "typescript": "^5.8.3",
-    "wait-on": "^8.0.3"
+    "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@angular/forms": "^19.2.6",
     "electron-log": "^5.3.3",
-    "electron-updater": "^6.6.2",
-    "ngx-socket-io": "^4.3.1",
-    "p-queue": "^8.1.0"
+    "electron-updater": "^6.6.2"
   },
   "build": {
     "appId": "com.owenmorgan.clippy",
@@ -80,13 +73,6 @@
       {
         "from": "backend/node_modules",
         "to": "backend/node_modules"
-      },
-      {
-        "from": "bin",
-        "to": "bin",
-        "filter": [
-          "**/*"
-        ]
       },
       {
         "from": "node_modules/@nestjs",

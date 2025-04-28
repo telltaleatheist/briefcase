@@ -1,3 +1,8 @@
+// At the top of your file
+process.stderr.write('====== BACKEND PROCESS STARTING - EARLY DEBUG ======\n');
+process.stderr.write(`Process environment keys: ${Object.keys(process.env).join(', ')}\n`);
+process.stderr.write(`FRONTEND_PATH value: ${process.env.FRONTEND_PATH}\n`);
+
 // clippy/backend/src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -11,7 +16,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import * as log from 'electron-log';
 import { ServerOptions } from 'socket.io';
 
-log.info('✅ Backend is starting...');
+process.stderr.write('✅ After imports');
 
 class ExtendedIoAdapter extends IoAdapter {
   createIOServer(port: number, options?: ServerOptions): any {
@@ -28,17 +33,19 @@ class ExtendedIoAdapter extends IoAdapter {
   }
 }
 
-async function bootstrap() {
-  try {
-    // Log startup with clear separation for debugging
-    console.log('====================================');
-    console.log('BACKEND SERVICE STARTING');
-    console.log('Process ID:', process.pid);
-    console.log('Environment:', process.env.NODE_ENV || 'development');
-    console.log('FRONTEND_PATH:', process.env.FRONTEND_PATH);
-    console.log('Current directory:', process.cwd());
-    console.log('====================================');
+process.stderr.write('✅ Before bootstrap...');
 
+async function bootstrap() {
+  // Log startup with clear separation for debugging
+  log.info('====================================');
+  log.info('BACKEND SERVICE STARTING');
+  log.info('Process ID:', process.pid);
+  log.info('Environment:', process.env.NODE_ENV || 'development');
+  process.stderr.write(`FRONTEND_PATH value after bootstrap called: ${process.env.FRONTEND_PATH}\n`);
+  log.info('Current directory:', process.cwd());
+  log.info('====================================');
+    
+  try {
     // Create the NestJS app
     const app = await NestFactory.create<NestExpressApplication>(AppModule, {
       logger: ['error', 'warn', 'log', 'debug', 'verbose'],
@@ -60,50 +67,16 @@ async function bootstrap() {
 
     // Get the express adapter
     const expressApp = app.getHttpAdapter().getInstance();
-
     const frontendPathFromEnv = process.env.FRONTEND_PATH;
-    let frontendDistPath: string | null = null;
 
-    console.log('Environment FRONTEND_PATH:', frontendPathFromEnv);
-    
     if (!frontendPathFromEnv) {
-      console.error('❌ No FRONTEND_PATH provided in environment. Exiting.');
-      process.exit(1);
-    }
-    
-    // Strictly validate the frontend path
-    if (!fs.existsSync(frontendPathFromEnv)) {
-      console.error(`❌ Frontend path does not exist: ${frontendPathFromEnv}`);
-      console.error('Detailed directory check:');
-      
-      try {
-        console.log('Contents of Resources:', 
-          fs.readdirSync((process as any).resourcesPath).join(', ')
-        );
-        
-        const frontendDir = path.join((process as any).resourcesPath, 'frontend');
-        if (fs.existsSync(frontendDir)) {
-          console.log('Frontend directory contents:', 
-            fs.readdirSync(frontendDir).join(', ')
-          );
-        }
-      } catch (err) {
-        console.error('Error listing directories:', err);
-      }
-      
-      process.exit(1);
-    }
-    
-    frontendDistPath = frontendPathFromEnv;
-
-    if (!frontendDistPath) {
-      console.error('❌ Could not find frontend dist directory. Exiting.');
+      log.error('❌ process environment variables empty. exiting from main.ts bootstrap function.');
       process.exit(1);
     } else {
-      console.log(`✅ Frontend dist path: ${frontendDistPath}`);
+      log.info(`✅ Frontend dist path: ${frontendPathFromEnv}`);
 
       // Serve static files
-      expressApp.use(express.static(frontendDistPath, {
+      expressApp.use(express.static(frontendPathFromEnv, {
         index: 'index.html',
         extensions: ['html']
       }));
@@ -120,14 +93,14 @@ async function bootstrap() {
         // If the request has a file extension (like .js, .css, etc), skip it
         if (path.extname(req.url)) return next();
       
-        const indexPath = path.join(frontendDistPath!, 'index.html');
+        const indexPath = path.join(frontendPathFromEnv!, 'index.html');
       
         if (!fs.existsSync(indexPath)) {
-          console.error(`[ERROR] index.html not found at: ${indexPath}`);
+          log.error(`[ERROR] index.html not found at: ${indexPath}`);
           return res.status(500).send('Frontend application not found');
         }
       
-        console.log(`[Fallback] Serving index.html for route: ${req.url}`);
+        log.info(`[Fallback] Serving index.html for route: ${req.url}`);
         res.sendFile(indexPath);
       });
     }
@@ -136,26 +109,26 @@ async function bootstrap() {
     
     try {
       await app.listen(port);
-      console.log(`=== APPLICATION STARTED ===`);
-      console.log(`Server running on port ${port}`);
-      console.log(`API endpoint: http://localhost:${port}/${environment.apiPrefix}`);
+      log.info(`=== APPLICATION STARTED ===`);
+      log.info(`Server running on port ${port}`);
+      log.info(`API endpoint: http://localhost:${port}/${environment.apiPrefix}`);
     } catch (error) {
       if ((error as any).code === 'EADDRINUSE') {
-        console.error(`Port ${port} is already in use. Please make sure no other instance of the application is running.`);
-        console.error(`You can kill the process using port ${port} with: lsof -i :${port} -t | xargs kill -9`);
+        log.error(`Port ${port} is already in use. Please make sure no other instance of the application is running.`);
+        log.error(`You can kill the process using port ${port} with: lsof -i :${port} -t | xargs kill -9`);
       }
       throw error; // Re-throw the error to be caught by the outer try/catch
     }
   } catch (error) {
-    console.error('=== BOOTSTRAP ERROR ===');
-    console.error('Error during application startup:');
+    log.error('=== BOOTSTRAP ERROR ===');
+    log.error('Error during application startup:');
     
     if (error instanceof Error) {
-      console.error('Error Name:', error.name);
-      console.error('Error Message:', error.message);
-      console.error('Error Stack:', error.stack);
+      log.error('Error Name:', error.name);
+      log.error('Error Message:', error.message);
+      log.error('Error Stack:', error.stack);
     } else {
-      console.error(error);
+      log.error(error);
     }
     
     process.exit(1);
@@ -163,16 +136,16 @@ async function bootstrap() {
 }
 
 bootstrap().catch((err) => {
-  console.error('💥 Fatal error during backend startup:');
-  console.error(err);
+  log.error('💥 Fatal error during backend startup:');
+  log.error(err);
   process.exit(1);
 });
 
 // Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  log.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  log.error('Uncaught Exception:', error);
 });

@@ -4,6 +4,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { BrowserWindow } from 'electron';
+import * as log from 'electron-log';
 
 const exec = promisify(execFile);
 
@@ -32,7 +33,7 @@ export async function checkAndFixAspectRatio(
     await exec('ffmpeg', ['-i', filePath, '-vf', 'scale=1280:720', outputPath]);
     return outputPath;
   } catch (err) {
-    console.error('FFmpeg error:', err);
+    log.error('FFmpeg error:', err);
     return null;
   }
 }

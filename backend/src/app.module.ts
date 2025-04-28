@@ -9,8 +9,16 @@ import { ConfigModule } from '@nestjs/config';
 import { join } from 'path';
 import * as fs from 'fs';
 import { PathModule } from './path/path.module';
+import * as log from 'electron-log';
 
 function findFrontendDistPath(): string {
+  // First check if path is provided via environment variable
+  if (process.env.FRONTEND_PATH && fs.existsSync(process.env.FRONTEND_PATH)) {
+    log.info(`Using frontend path from environment: ${process.env.FRONTEND_PATH}`);
+    return process.env.FRONTEND_PATH;
+  }
+  
+  // Fallback to checking common locations
   const possiblePaths = [
     join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
     join(process.cwd(), '..', 'frontend', 'dist', 'clippy-frontend', 'browser')
@@ -18,13 +26,14 @@ function findFrontendDistPath(): string {
 
   for (const potentialPath of possiblePaths) {
     if (fs.existsSync(potentialPath)) {
-      console.log(`Found frontend dist path: ${potentialPath}`);
+      log.info(`Found frontend dist path: ${potentialPath}`);
       return potentialPath;
     }
   }
 
-  console.error('❌ Could not find frontend dist directory. Exiting.');
-  process.exit(1); // ⬅ exits cleanly instead of returning ''
+  log.error('❌ Could not find frontend dist directory. Will serve API only - app.module.ts.');
+  // Instead of exiting, return a default path for API-only mode
+  return join(process.cwd(), 'public');
 }
 
 @Module({
@@ -34,12 +43,20 @@ function findFrontendDistPath(): string {
       isGlobal: true,
       envFilePath: ['.env.local', '.env']
     }),
-    // Serve static files from frontend
-    ServeStaticModule.forRoot({
-      rootPath: findFrontendDistPath(),
-      exclude: ['/api*'],
-      serveRoot: '/'
-    }),
+    
+    // Conditionally serve static files from frontend
+    ...((() => {
+      const frontendPath = findFrontendDistPath();
+      // Only include ServeStaticModule if the path exists
+      return fs.existsSync(frontendPath) ? 
+        [ServeStaticModule.forRoot({
+          rootPath: frontendPath,
+          exclude: ['/api*'],
+          serveRoot: '/'
+        })] : 
+        [];
+    })()),
+    
     // Import custom modules
     DownloaderModule,
     FfmpegModule,

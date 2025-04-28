@@ -7,6 +7,8 @@ import * as fs from 'fs';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
+import { EnvironmentUtil } from '../config/environment.util';
+
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -18,100 +20,23 @@ export class FfmpegService {
   private readonly logger = new Logger(FfmpegService.name);
 
   constructor() {
-    // First try system paths which don't require permission changes
-    const systemPaths = [
-      '/usr/local/bin/ffmpeg',
-      '/usr/bin/ffmpeg',
-      '/opt/homebrew/bin/ffmpeg'
-    ];
-    
-    let ffmpegPath = '';
-    for (const path of systemPaths) {
-      if (fs.existsSync(path)) {
-        ffmpegPath = path;
-        this.logger.log(`Using FFmpeg from system path: ${ffmpegPath}`);
-        break;
-      }
-    }
-    
-    // If not found in system, try installed path
-    if (!ffmpegPath) {
-      ffmpegPath = ffmpegInstaller.path;
-      if (fs.existsSync(ffmpegPath)) {
-        this.logger.log(`Using FFmpeg from installer: ${ffmpegPath}`);
-      } else {
-        // Try user's Documents/clippy/bin directory
-        const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-        const userBinPath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'ffmpeg');
-        
-        if (fs.existsSync(userBinPath)) {
-          ffmpegPath = userBinPath;
-          this.logger.log(`Using FFmpeg from user bin directory: ${ffmpegPath}`);
-        } else {
-          // Try project root bin directory
-          const projectBinPath = path.join(__dirname, '../../../bin/ffmpeg');
-          
-          if (fs.existsSync(projectBinPath)) {
-            ffmpegPath = projectBinPath;
-            this.logger.log(`Using FFmpeg from project bin directory: ${ffmpegPath}`);
-          }
-        }
-      }
-    }
-    
-    // Set FFmpeg path if found
-    if (ffmpegPath && fs.existsSync(ffmpegPath)) {
-      ffmpeg.setFfmpegPath(ffmpegPath);
-      this.logger.log(`FFmpeg path set to: ${ffmpegPath}`);
-    } else {
-      this.logger.error('Could not find FFmpeg binary in any location');
-    }
-    
-    // Same approach for FFprobe - check system paths first
-    const systemProbePaths = [
-      '/usr/local/bin/ffprobe',
-      '/usr/bin/ffprobe',
-      '/opt/homebrew/bin/ffprobe'
-    ];
-    
-    let ffprobePath = '';
-    for (const path of systemProbePaths) {
-      if (fs.existsSync(path)) {
-        ffprobePath = path;
-        this.logger.log(`Using FFprobe from system path: ${ffprobePath}`);
-        break;
-      }
-    }
-    
-    // If not found in system, try other locations
-    if (!ffprobePath) {
-      // Try user's Documents/clippy/bin directory
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-      const userProbePath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'ffprobe');
+    try {
+      // Directly use EnvironmentUtil to get binary paths
+      const ffmpegPath = EnvironmentUtil.getBinaryPath('ffmpeg');
+      const ffprobePath = EnvironmentUtil.getBinaryPath('ffprobe');
       
-      if (fs.existsSync(userProbePath)) {
-        ffprobePath = userProbePath;
-        this.logger.log(`Using FFprobe from user bin directory: ${ffprobePath}`);
-      } else {
-        // Try project root bin directory
-        const projectProbePath = path.join(__dirname, '../../../bin/ffprobe');
-        
-        if (fs.existsSync(projectProbePath)) {
-          ffprobePath = projectProbePath;
-          this.logger.log(`Using FFprobe from project bin directory: ${ffprobePath}`);
-        }
-      }
-    }
-    
-    // Set FFprobe path if found
-    if (ffprobePath && fs.existsSync(ffprobePath)) {
+      // Set paths for fluent-ffmpeg
+      ffmpeg.setFfmpegPath(ffmpegPath);
       ffmpeg.setFfprobePath(ffprobePath);
-      this.logger.log(`FFprobe path set to: ${ffprobePath}`);
-    } else {
-      this.logger.error('Could not find FFprobe binary in any location');
+      
+      this.logger.log(`FFmpeg path: ${ffmpegPath}`);
+      this.logger.log(`FFprobe path: ${ffprobePath}`);
+    } catch (error) {
+      this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
+      throw error; // Rethrow to prevent service initialization
     }
   }
-  
+    
   // Helper method for safe WebSocket emission
   private safeEmit(event: string, data: any): void {
     if (this.server) {

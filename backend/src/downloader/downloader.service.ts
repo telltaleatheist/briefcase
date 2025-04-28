@@ -32,54 +32,20 @@ export class DownloaderService implements OnModuleInit {
     private readonly ffmpegService: FfmpegService,
     private readonly pathService: PathService,
   ) {
-    
-    let resolvedPath = this.configService.get('YT_DLP_PATH') || EnvironmentUtil.getBinaryPath('yt-dlp');
-    this.logger.log(`yt-dlp path initially resolved to: ${resolvedPath}`);
-    
-    // Check if the path exists
-    if (!fs.existsSync(resolvedPath)) {
-      this.logger.warn(`WARNING: yt-dlp not found at ${resolvedPath}`);
+    try {
+      // Directly use EnvironmentUtil to get yt-dlp path
+      this.ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
+      this.logger.log(`yt-dlp path resolved to: ${this.ytDlpPath}`);
       
-      // Try standard production location at ~/Documents/clippy/bin/
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-      const prodPath = path.join(homeDir, 'Documents', 'clippy', 'bin', 'yt-dlp');
-      
-      if (fs.existsSync(prodPath)) {
-        resolvedPath = prodPath;
-        this.logger.log(`Using production path: ${resolvedPath}`);
-      } else {
-        this.logger.warn(`WARNING: yt-dlp not found at ${prodPath}`);
-        
-        // Try absolute project root bin directory
-        const projectRootBin = path.join(__dirname, '../../../bin');
-        
-        if (fs.existsSync(projectRootBin)) {
-          resolvedPath = projectRootBin;
-          this.logger.log(`Using project root bin path: ${resolvedPath}`);
-        } else if (EnvironmentUtil.isDevelopment()) {
-          // Last resort fallback: absolute path for local dev only
-          resolvedPath = path.join(__dirname, '../../../bin/yt-dlp');
-          this.logger.log(`Development fallback path used: ${resolvedPath}`);
-        }
-      }
+      this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
+      this.ensureDirectoriesExist();
+      this.loadDownloadHistory();
+    } catch (error) {
+      this.logger.error('Failed to initialize yt-dlp path', error);
+      throw error; // Rethrow to prevent service initialization
     }
-    
-    // Final check if binary exists
-    if (!fs.existsSync(resolvedPath)) {
-      this.logger.error(`CRITICAL ERROR: yt-dlp binary not found at any location. Last tried: ${resolvedPath}`);
-      // Don't throw here to allow graceful service startup, but app will fail when trying to use it
-    } else {
-      this.logger.log(`Final yt-dlp path: ${resolvedPath}`);
-    }
-
-    this.logger.log(`__dirname: ${__dirname}`);
-    this.ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
-    this.logger.log(`yt-dlp resolved path (raw): ${this.ytDlpPath}`);
-    this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
-    this.ensureDirectoriesExist();
-    this.loadDownloadHistory();
   }
-  
+    
   private ensureDirectoriesExist(): void {
     const downloadsDir = path.dirname(this.historyFilePath);
     

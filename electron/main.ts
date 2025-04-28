@@ -12,6 +12,15 @@ import { EnvironmentUtil } from './environment.util';
 // Check if the app is packaged
 const isPackaged = app.isPackaged;
 const isDevelopment = process.argv.includes('development') || (!isPackaged && process.env.NODE_ENV?.trim().toLowerCase() === 'development');
+
+if (isPackaged) {
+  process.env.ELECTRON_RESOURCES_PATH = process.resourcesPath || app.getAppPath();
+} else {
+  process.env.ELECTRON_RESOURCES_PATH = app.getAppPath();
+}
+
+process.env.APP_ROOT = app.getAppPath();
+
 const backendPath = EnvironmentUtil.getBackEndPath(isDevelopment);
 
 log.info(`Backend path: ${backendPath} (exists: ${fs.existsSync(backendPath)})`);
@@ -245,27 +254,6 @@ if (!gotTheLock) {
       // Check if the frontend path exists
       if (!fs.existsSync(frontendPath)) {
         log.warn(`Primary frontend path doesn't exist: ${frontendPath}`);
-        
-        // Try alternative paths
-        const alternativePaths = [
-          // Check in Resources directory directly (for packaged app)
-          path.join(process.resourcesPath, 'frontend/dist/clippy-frontend/browser'),
-          
-          // Check relative to app directory
-          path.join(app.getAppPath(), '../frontend/dist/clippy-frontend/browser'),
-          
-          // Check in the parent of Resources
-          path.join(process.resourcesPath, '../frontend/dist/clippy-frontend/browser')
-        ];
-
-        for (const altPath of alternativePaths) {
-          log.info(`Trying alternative frontend path: ${altPath}`);
-          if (fs.existsSync(altPath)) {
-            frontendPath = altPath;
-            log.info(`Found valid frontend path: ${frontendPath}`);
-            break;
-          }
-        }
       }
 
       log.info(`[HTTP Server] Frontend path: ${frontendPath} (exists: ${fs.existsSync(frontendPath)})`);
@@ -456,43 +444,51 @@ if (!gotTheLock) {
         const nodePath = process.execPath;
         log.info(`Using Node.js executable: ${nodePath} (exists: ${fs.existsSync(nodePath)})`);
 
-        // Environment variables for the backend
-        const env = {
-          ...process.env,
-          NODE_ENV: isDevelopment ? 'development' : 'production',
-          YT_DLP_PATH: ytDlpPath,
-          FFMPEG_PATH: ffmpegPath,
-          FFPROBE_PATH: ffprobePath,
-        };
-
-        log.info(`Attempting to spawn Node.js process...`);
-
         try {
+          // Get the frontend path first to ensure it exists
           frontendPath = EnvironmentUtil.getFrontEndPath(isDevelopment);
+          
+          // Explicitly log the frontend path to verify it's correct
+          log.info(`Frontend path for backend process: ${frontendPath}`);
+          log.info(`Frontend path exists: ${fs.existsSync(frontendPath)}`);
+          
+          // Log directory contents to verify files are there
+          if (fs.existsSync(frontendPath)) {
+            log.info(`Frontend directory contents: ${fs.readdirSync(frontendPath).join(', ')}`);
+          }
+          
           log.info(`Attempting to launch backend from: ${backendPath}`);
-          log.info(`Attempting to access frontend path: ${frontendPath}`);
-          log.info(`Frontend exists: ${fs.existsSync(frontendPath)}`);
-        
+          
+          // Create a complete environment object with all necessary variables
+          const backendEnv = {
+            ...process.env,  // Include the original process environment
+            ELECTRON_RUN_AS_NODE: '1',
+            CLIPPY_BACKEND: 'true',
+            FRONTEND_PATH: frontendPath,  // Set the frontend path explicitly
+            NODE_PATH: path.join(process.resourcesPath, 'backend/node_modules'),
+            YT_DLP_PATH: ytDlpPath,
+            FFMPEG_PATH: ffmpegPath,
+            FFPROBE_PATH: ffprobePath,
+            PORT: '3000',
+            NODE_ENV: isDevelopment ? 'development' : 'production',
+            APP_ROOT: process.resourcesPath,
+            VERBOSE: 'true'
+          };
+          
+          // Log the most critical environment variables to verify they're set correctly
+          log.info(`Environment variables for backend process:`);
+          log.info(`- FRONTEND_PATH: ${backendEnv.FRONTEND_PATH}`);
+          log.info(`- NODE_ENV: ${backendEnv.NODE_ENV}`);
+          log.info(`- NODE_PATH: ${backendEnv.NODE_PATH}`);
+          
+          // Spawn the backend process with the complete environment
           const backend = spawn(nodePath, [backendPath], {
-            env: {
-              ...env,
-              ELECTRON_RUN_AS_NODE: '1',
-              CLIPPY_BACKEND: 'true',
-              FRONTEND_PATH: frontendPath,
-              NODE_PATH: path.join(process.resourcesPath, 'backend/node_modules'),
-              YT_DLP_PATH: ytDlpPath,
-              FFMPEG_PATH: ffmpegPath,
-              FFPROBE_PATH: ffprobePath,
-              PORT: '3000',
-              NODE_ENV: 'production',
-              APP_ROOT: process.resourcesPath,
-              VERBOSE: 'true'
-            },
+            env: backendEnv,
             stdio: 'pipe',
           });
-        
+          
           log.info(`Process spawned successfully with PID: ${backend.pid}`);
-        
+          
           if (backend.stdout) {
             backend.stdout.on('data', (data: Buffer) => {
               log.info(`[Backend stdout]: ${data.toString().trim()}`);
