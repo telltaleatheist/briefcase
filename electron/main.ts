@@ -13,12 +13,20 @@ import { EnvironmentUtil } from './environment.util';
 const isPackaged = app.isPackaged;
 const isDevelopment = process.argv.includes('development') || (!isPackaged && process.env.NODE_ENV?.trim().toLowerCase() === 'development');
 
+// Set resources path based on environment
 if (isPackaged) {
   process.env.ELECTRON_RESOURCES_PATH = process.resourcesPath || app.getAppPath();
 } else {
   process.env.ELECTRON_RESOURCES_PATH = app.getAppPath();
 }
 
+// Determine the correct preload path based on environment
+const preloadPath = isPackaged
+  ? path.join(__dirname, 'preload.js')  // In production, it's in the same directory as main.js
+  : path.join(__dirname, '../electron', 'preload.js'); // In development, it's in the electron directory
+
+// Store this for use when creating the BrowserWindow
+process.env.ELECTRON_PRELOAD_PATH = preloadPath;
 process.env.APP_ROOT = app.getAppPath();
 
 const backendPath = EnvironmentUtil.getBackEndPath(isDevelopment);
@@ -85,7 +93,7 @@ if (!gotTheLock) {
         contextIsolation: true,
         webSecurity: true, // Enable web security
         allowRunningInsecureContent: false, // Disable insecure content
-        preload: path.join(__dirname, '..', 'preload', 'preload.js')
+        preload: process.env.ELECTRON_PRELOAD_PATH,
       },
     });
     
