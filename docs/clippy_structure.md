@@ -20,6 +20,7 @@
 │   │   │       ├── download.interface.d.ts
 │   │   │       ├── download.interface.js
 │   │   │       └── download.interface.js.map
+│   │   ├── common 3
 │   │   ├── config
 │   │   │   ├── environment.d.ts
 │   │   │   ├── environment.js
@@ -83,7 +84,8 @@
 │   │   │   ├── batch-downloader.service.ts
 │   │   │   ├── downloader.controller.ts
 │   │   │   ├── downloader.module.ts
-│   │   │   └── downloader.service.ts
+│   │   │   ├── downloader.service.ts
+│   │   │   └── yt-dlp-manager.ts
 │   │   ├── ffmpeg
 │   │   │   ├── ffmpeg.controller.ts
 │   │   │   ├── ffmpeg.module.ts
@@ -127,17 +129,17 @@
 │   │   ├── clippy-frontend
 │   │   │   ├── 3rdpartylicenses.txt
 │   │   │   ├── browser
-│   │   │   │   ├── chunk-746FPRH6.js
-│   │   │   │   ├── chunk-75CXD2I5.js
-│   │   │   │   ├── chunk-DUU3WWL3.js
-│   │   │   │   ├── chunk-JLVEUXKO.js
-│   │   │   │   ├── chunk-MDXS4XCI.js
-│   │   │   │   ├── chunk-QDSSMDX7.js
-│   │   │   │   ├── chunk-RH5B4HVH.js
-│   │   │   │   ├── chunk-SIPOXYVS.js
+│   │   │   │   ├── chunk-6KOQWOIZ.js
+│   │   │   │   ├── chunk-ENXQB46L.js
+│   │   │   │   ├── chunk-EXQFMX5D.js
+│   │   │   │   ├── chunk-LJFZY62H.js
+│   │   │   │   ├── chunk-NO6WRW6C.js
+│   │   │   │   ├── chunk-ON3PFF7T.js
+│   │   │   │   ├── chunk-TK2FGPT3.js
+│   │   │   │   ├── chunk-VUD6VB6S.js
 │   │   │   │   ├── favicon.ico
 │   │   │   │   ├── index.html
-│   │   │   │   ├── main-GUABTY6C.js
+│   │   │   │   ├── main-6MUDFVRO.js
 │   │   │   │   ├── polyfills-FFHMD2TL.js
 │   │   │   │   └── styles-FBVOPZU6.css
 │   │   │   └── prerendered-routes.json
@@ -275,5 +277,5 @@
     ├── refresh-packaged-app-tree.sh
     └── refresh-tree.sh
 
-59 directories, 216 files
+60 directories, 217 files
 ```

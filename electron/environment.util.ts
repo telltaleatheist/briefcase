@@ -1,10 +1,8 @@
-// Updated environment.util.ts optimized for both development and packaging
+// clippy/electron/environment.util.ts
 import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
 import log from 'electron-log';
-import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
-import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
 
 let getYtDlpPath: () => string;
 try {
@@ -216,47 +214,6 @@ export class EnvironmentUtil {
     return this.backendPath || '';
   }
   
-  // Returns the path to a binary based on the current environment
-  static getBinaryPath(binaryName: string): string {
-    const cacheKey = binaryName;
-  
-    // First, check if we have a cached path that exists
-    if (this.binaryPathCache[cacheKey]) {
-      return this.binaryPathCache[cacheKey];
-    }
-  
-    // Use packaged binaries by default
-    try {
-      let binaryPath: string;
-      
-      switch (binaryName) {
-        case 'ffmpeg':
-          binaryPath = ffmpegInstaller.path;
-          break;
-        case 'ffprobe':
-          binaryPath = ffprobeInstaller.path;
-          break;
-        case 'yt-dlp':
-          binaryPath = getYtDlpPath();
-          break;
-        default:
-          throw new Error(`Unsupported binary: ${binaryName}`);
-      }
-      
-      if (binaryPath && fs.existsSync(binaryPath)) {
-        log.info(`Using packaged ${binaryName}: ${binaryPath}`);
-        this.binaryPathCache[cacheKey] = binaryPath;
-        return binaryPath;
-      }
-      
-      throw new Error(`Packaged binary ${binaryName} not found!`);
-    } catch (error) {
-      log.error(`Error finding packaged binary ${binaryName}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    return binaryName;
-  }
-
   static setupEnvironmentConfig(mainWindow: Electron.BrowserWindow): void {
     // Collect environment variables to persist
     const envToPersist = { ...process.env };

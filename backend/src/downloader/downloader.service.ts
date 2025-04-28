@@ -15,8 +15,7 @@ import { PathService } from '../path/path.service';
 import { join } from 'node:path';
 import { execFile, ExecFileOptions } from 'node:child_process';
 import { EnvironmentUtil } from "../config/environment.util";
-const ytDlpModule = require('yt-dlp-wrap') as { getBinaryPath: () => string };
-const getYtDlpPath = ytDlpModule.getBinaryPath;
+import { YtDlpManager } from './yt-dlp-manager';
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -25,7 +24,6 @@ export class DownloaderService implements OnModuleInit {
   server: Server;
 
   private readonly logger = new Logger(DownloaderService.name);
-  private readonly ytDlpPath: string;
   private downloadHistory: HistoryItem[] = [];
   private historyFilePath: string;
   
@@ -35,23 +33,11 @@ export class DownloaderService implements OnModuleInit {
     private readonly pathService: PathService,
   ) {
     try {
-      // Use the packaged yt-dlp binary directly
-      try {
-        this.ytDlpPath = getYtDlpPath();
-      } catch (error) {
-        // Fallback to using environment util
-        this.ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
-        this.logger.log(`Using fallback path for yt-dlp: ${this.ytDlpPath}`);
-      }
-
-      this.logger.log(`yt-dlp path resolved to: ${this.ytDlpPath}`);
-      
       this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
       this.ensureDirectoriesExist();
       this.loadDownloadHistory();
     } catch (error) {
-      this.logger.error('Failed to initialize yt-dlp path', error);
-      throw error; // Rethrow to prevent service initialization
+      throw error;
     }
   }
     
@@ -137,129 +123,129 @@ export class DownloaderService implements OnModuleInit {
         }
       }
       
-      // Continue with normal video download process
       const dateFormat = '%(upload_date>%Y-%m-%d)s ';
       const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title)s.%(ext)s`);
       
-      const ytDlpOptions: string[] = ['--verbose', '--output', outputTemplate];
-      ytDlpOptions.push('--no-check-certificates', '--no-playlist', '--force-overwrites');
-  
+      const ytDlpManager = new YtDlpManager();
+      ytDlpManager.input(options.url).output(outputTemplate);
+      
+      // Add common options
+      ytDlpManager.addOption('--verbose')
+                  .addOption('--no-check-certificates')
+                  .addOption('--no-playlist')
+                  .addOption('--force-overwrites');
+      
       if (options.convertToMp4) {
-        ytDlpOptions.push('--merge-output-format', 'mp4');
+        ytDlpManager.addOption('--merge-output-format', 'mp4');
       }
-  
+      
       // Special handling for Reddit URLs
       if (options.url.includes('reddit.com')) {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
-        ytDlpOptions.push('--format', `bestvideo[height<=${options.quality}]+bestaudio/best[height<=${options.quality}]`);
+        ytDlpManager.addOption('--format', `bestvideo[height<=${options.quality}]+bestaudio/best[height<=${options.quality}]`);
       } else {
-        ytDlpOptions.push('--format', `best[height<=${options.quality}]/best`);
+        ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
       }
-  
+      
       if (options.useCookies && options.browser) {
-        ytDlpOptions.push('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
+        ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
       }
-  
-      ytDlpOptions.push(options.url);
       
       let outputFile: string | null = null;
       let progressPercent = 0;
-  
+      
       this.emitEvent('download-started', { url: options.url, jobId });
-  
-      const downloadPromise = new Promise<DownloadResult>((resolve, reject) => {
-        const commandOptions = {
-          stdio: ['ignore', 'pipe', 'pipe']
-        } as ExecFileOptions;
-  
-        const ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
-        this.logger.log(`Executing: ${ytDlpPath} ${ytDlpOptions.join(' ')}`);
-  
-        const downloadProcess = execFile(ytDlpPath, ytDlpOptions, commandOptions);
-  
-        if (downloadProcess.stdout) {
-          downloadProcess.stdout.on('data', (data: Buffer) => {
-            const output = data.toString();
-  
-            const progressMatch = output.match(/(\d+\.\d+)% of/);
-            if (progressMatch) {
-              progressPercent = parseFloat(progressMatch[1]);
-              this.emitEvent('download-progress', {
-                progress: progressPercent,
-                task: 'Downloading',
-                jobId
-              });
-            }
-  
-            if (output.includes('[download] Destination:')) {
-              outputFile = output.split('Destination: ')[1].trim();
-            }
-  
-            if (output.includes('[Merger] Merging formats into')) {
-              const match = output.match(/"([^"]+)"/);
-              if (match) {
-                outputFile = match[1];
-              }
-            }
+      
+      // Create a listener for stdout to parse progress information
+      const stdoutListener = (output: string) => {
+        const progressMatch = output.match(/(\d+\.\d+)% of/);
+        if (progressMatch) {
+          progressPercent = parseFloat(progressMatch[1]);
+          this.emitEvent('download-progress', {
+            progress: progressPercent,
+            task: 'Downloading',
+            jobId
           });
         }
-  
-        if (downloadProcess.stderr) {
-          downloadProcess.stderr.on('data', (data: Buffer) => {
-            const output = data.toString();
-            if (output.includes('[debug]')) {
-              this.logger.debug(`yt-dlp debug: ${output}`);
-            } else {
-              this.logger.error(`yt-dlp error: ${output}`);
-            }
-          });
+        
+        if (output.includes('[download] Destination:')) {
+          outputFile = output.split('Destination: ')[1].trim();
         }
-  
-        downloadProcess.on('close', async (code: number) => {
-          if (code === 0 && outputFile && fs.existsSync(outputFile)) {
-            this.logger.log(`Download successful: ${outputFile}`);
-            outputFile = await this.processOutputFilename(outputFile);
-            
-            // Determine if this is an image based on file extension
-            const fileExt = path.extname(outputFile).toLowerCase();
-            const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
-            
-            if (isImage) {
-              this.logger.log(`File is an image, skipping aspect ratio correction: ${outputFile}`);
-              this.addToHistory(outputFile, options.url);
-              this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
-              resolve({ success: true, outputFile, isImage: true });
-              return;
-            }
-              
-            if (jobId) {
-              this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
-              resolve({ success: true, outputFile, isImage: false });
-            return;
-            }
         
-            // Only process videos
-            if (options.fixAspectRatio) {
-              this.emitEvent('processing-progress', { task: 'Fixing aspect ratio' });
-              const fixedFile = await this.ffmpegService.fixAspectRatio(outputFile, jobId);
-              if (fixedFile) outputFile = fixedFile;
-            }
-        
-            this.addToHistory(outputFile, options.url);
-              this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
-
-              resolve({ success: true, outputFile, isImage: false });
-                      } else {
-            const errorMsg = `Download failed with code ${code}`;
-            this.logger.error(errorMsg);
-            this.emitEvent('download-failed', { error: errorMsg, url: options.url, jobId });
-            resolve({ success: false, error: errorMsg });
+        if (output.includes('[Merger] Merging formats into')) {
+          const match = output.match(/"([^"]+)"/);
+          if (match) {
+            outputFile = match[1];
           }
-        });        
-      });
-  
-      return downloadPromise;
+        }
+      };
+      
+      try {
+        // Run the download and capture output
+        const output = await ytDlpManager.run();
+        
+        // Process the output for progress and file information
+        output.split('\n').forEach(line => stdoutListener(line));
+        
+        // If we didn't capture the output file from the stdout
+        if (!outputFile) {
+          // Try to infer the outputFile from the filesystem based on the download directory
+          const files = fs.readdirSync(downloadFolder);
+          const mostRecentFile = files
+            .map(file => ({ file, mtime: fs.statSync(path.join(downloadFolder, file)).mtime }))
+            .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())[0];
+            
+          if (mostRecentFile) {
+            outputFile = path.join(downloadFolder, mostRecentFile.file);
+          } else {
+            throw new Error('Could not determine output file from download');
+          }
+        }
+        
+        if (outputFile && fs.existsSync(outputFile)) {
+          this.logger.log(`Download successful: ${outputFile}`);
+          outputFile = await this.processOutputFilename(outputFile);
+          
+          // Determine if this is an image based on file extension
+          const fileExt = path.extname(outputFile).toLowerCase();
+          const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
+          
+          if (isImage) {
+            this.logger.log(`File is an image, skipping aspect ratio correction: ${outputFile}`);
+            this.addToHistory(outputFile, options.url);
+            this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
+            return { success: true, outputFile, isImage: true };
+          }
+            
+          if (jobId) {
+            this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
+            return { success: true, outputFile, isImage: false };
+          }
+          
+          // Only process videos
+          if (options.fixAspectRatio) {
+            this.emitEvent('processing-progress', { task: 'Fixing aspect ratio' });
+            const fixedFile = await this.ffmpegService.fixAspectRatio(outputFile, jobId);
+            if (fixedFile) outputFile = fixedFile;
+          }
+          
+          this.addToHistory(outputFile, options.url);
+          this.emitEvent('download-completed', { outputFile, url: options.url, jobId });
+          
+          return { success: true, outputFile, isImage: false };
+        } else {
+          const errorMsg = `Download seemed to succeed but output file not found: ${outputFile}`;
+          this.logger.error(errorMsg);
+          this.emitEvent('download-failed', { error: errorMsg, url: options.url, jobId });
+          return { success: false, error: errorMsg };
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error during yt-dlp execution';
+        this.logger.error(`yt-dlp execution failed: ${errorMsg}`);
+        this.emitEvent('download-failed', { error: errorMsg, url: options.url, jobId });
+        return { success: false, error: errorMsg };
+      }
     } catch (error) {
       this.logger.error('Error in downloadVideo:', error);
       this.emitEvent('download-failed', {
@@ -273,73 +259,79 @@ export class DownloaderService implements OnModuleInit {
       };
     }
   }
-  
-  // Modified getRedditInfo method to better extract post titles
+    
   private async getRedditInfo(url: string): Promise<{ imageUrl?: string, title: string }> {
-    return new Promise((resolve, reject) => {
-      try {
-        // Try to get JSON information about the Reddit post
-        const args = ['--dump-json', '--simulate', '--no-playlist', '--flat-playlist', url];
-        this.logger.log(`Fetching video info for URL: ${url}`);
-        this.logger.log(`Executing: ${this.ytDlpPath} ${args.join(' ')}`);
+    try {
+      this.logger.log(`Fetching info for Reddit URL: ${url}`);
+      
+      // Create and configure YtDlpManager
+      const ytDlpManager = new YtDlpManager();
+      ytDlpManager
+        .input(url)
+        .addOption('--dump-json')
+        .addOption('--simulate')
+        .addOption('--no-playlist')
+        .addOption('--flat-playlist');
         
-        execFile(this.ytDlpPath, args, (error, stdout, stderr) => {
-          // Initialize with default title
-          let title = 'Reddit Post';
-          
-          // Try to extract title from stdout even if there's an error
-          try {
-            if (stdout && stdout.trim()) {
-              const info = JSON.parse(stdout.trim());
-              if (info && info.title) {
-                title = info.title;
-                this.logger.log(`Successfully fetched info for video: ${title}`);
-              }
-            }
-          } catch (e) {
-            this.logger.warn(`Could not parse JSON from stdout: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      // Initialize with default title
+      let title = 'Reddit Post';
+      
+      try {
+        // Execute the command and get output
+        const output = await ytDlpManager.run();
+        
+        // Try to extract title from the output
+        if (output && output.trim()) {
+          const info = JSON.parse(output.trim());
+          if (info && info.title) {
+            title = info.title;
+            this.logger.log(`Successfully fetched info for Reddit post: ${title}`);
           }
           
-          // Check stderr for image URL patterns
-          if (error && stderr) {
-            // Match the specific Reddit media URL format we're seeing in the error
-            const redditMediaMatch = stderr.match(/Unsupported URL: (https:\/\/www\.reddit\.com\/media\?url=([^&]+))/);
-            
-            if (redditMediaMatch) {
-              // Found the Reddit media URL, now decode it to get the actual image URL
-              const encodedImgUrl = redditMediaMatch[2];
-              try {
-                const imageUrl = decodeURIComponent(encodedImgUrl);
-                this.logger.log(`Extracted image URL from Reddit post: ${imageUrl}`);
-                
-                // Extract post title from the original URL if possible
-                const titleFromUrl = this.extractTitleFromRedditUrl(url);
-                if (titleFromUrl) {
-                  title = titleFromUrl;
-                }
-                
-                // Return the image URL and title
-                resolve({ imageUrl, title });
-                return;
-              } catch (e) {
-                this.logger.error(`Failed to decode image URL: ${e instanceof Error ? e.message : 'Unknown error'}`);
-              }
-            }
-            
-            // No image URL found in the error message
-            reject(new Error(`Could not extract image URL from Reddit post. stderr: ${stderr}`));
-          } else if (!error) {
-            // No error means it's probably a video, not an image
-            resolve({ title });
-          } else {
-            // Error but no stderr or no matching URL
-            reject(new Error(`Error fetching video info: ${error.message}`));
-          }
-        });
+          // If we got here with no error, it's probably a video, not an image
+          return { title };
+        }
+        
       } catch (error) {
-        reject(error);
+        // If we get an error, it might be because it's an image post
+        // Check the error message for image URL patterns
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`YtDlpManager execution failed, checking for image URL pattern: ${errorMessage}`);
+        
+        // Match the specific Reddit media URL format we're seeing in the error
+        const redditMediaMatch = errorMessage.match(/Unsupported URL: (https:\/\/www\.reddit\.com\/media\?url=([^&]+))/);
+        
+        if (redditMediaMatch) {
+          // Found the Reddit media URL, now decode it to get the actual image URL
+          const encodedImgUrl = redditMediaMatch[2];
+          try {
+            const imageUrl = decodeURIComponent(encodedImgUrl);
+            this.logger.log(`Extracted image URL from Reddit post: ${imageUrl}`);
+            
+            // Extract post title from the original URL if possible
+            const titleFromUrl = this.extractTitleFromRedditUrl(url);
+            if (titleFromUrl) {
+              title = titleFromUrl;
+            }
+            
+            // Return the image URL and title
+            return { imageUrl, title };
+          } catch (e) {
+            throw new Error(`Failed to decode image URL: ${e instanceof Error ? e.message : 'Unknown error'}`);
+          }
+        }
+        
+        // No image URL found in the error message
+        throw new Error(`Could not extract image URL from Reddit post. Error: ${errorMessage}`);
       }
-    });
+      
+      // Fallback case - should rarely hit this
+      return { title };
+      
+    } catch (error) {
+      this.logger.error(`Error in getRedditInfo: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error;
+    }
   }
 
   // Add this helper method to extract a title from a Reddit URL
@@ -600,80 +592,89 @@ export class DownloaderService implements OnModuleInit {
   }
 
   async checkUrl(url: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      execFile(this.ytDlpPath, ['--dump-json', '--simulate', '--no-playlist', url], (error: Error | null, stdout: string, stderr: string) => {
-        if (error) {
-          this.logger.error(`yt-dlp failed!`);
-          this.logger.error(`Command: ${this.ytDlpPath} --dump-json "${url}"`);
-          this.logger.error(`Error message: ${error.message}`);
-          this.logger.error(`stderr: ${stderr}`);
-          this.logger.error(`stdout: ${stdout}`);
-          reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
-          return;
-        }
+    try {
+      this.logger.log(`Checking URL validity: ${url}`);
       
-        try {
-          const info = JSON.parse(stdout);
-          resolve({ valid: true, info });
-        } catch (parseErr) {
-          this.logger.error('Failed to parse yt-dlp output!');
-          this.logger.error(`stdout: ${stdout}`);
-          this.logger.error(`Parse error: ${parseErr}`);
-          reject(new Error('Invalid yt-dlp response'));
-        }
-      });
-    });
+      // Create and configure YtDlpManager
+      const ytDlpManager = new YtDlpManager();
+      ytDlpManager
+        .input(url)
+        .addOption('--dump-json')
+        .addOption('--simulate')
+        .addOption('--no-playlist');
+      
+      try {
+        // Execute the command and get output
+        const output = await ytDlpManager.run();
+        
+        // Parse the JSON output
+        const info = JSON.parse(output);
+        return { valid: true, info };
+        
+      } catch (error) {
+        // Log detailed error information
+        this.logger.error(`yt-dlp check failed for URL: ${url}`);
+        this.logger.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        
+        throw new Error(`URL check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error in checkUrl: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error;
+    }
   }
 
   async getVideoInfo(url: string): Promise<any> {
-    this.logger.log(`Fetching video info for URL: ${url}`);
-    
-    return new Promise((resolve, reject) => {
-      const ytDlpPath = this.ytDlpPath;
-      const args = ['--dump-json', '--no-playlist', '--flat-playlist', url];
+    try {
+      this.logger.log(`Fetching video info for URL: ${url}`);
       
-      this.logger.log(`Executing: ${ytDlpPath} ${args.join(' ')}`);
+      // Create and configure YtDlpManager
+      const ytDlpManager = new YtDlpManager();
+      ytDlpManager
+        .input(url)
+        .addOption('--dump-json')
+        .addOption('--no-playlist')
+        .addOption('--flat-playlist');
       
-      execFile(ytDlpPath, args, (error, stdout, stderr) => {
-        if (error) {
-          this.logger.error(`Error fetching video info: ${error.message}`);
-          this.logger.error(`stderr: ${stderr}`);
-          reject(error);
-          return;
+      // Execute the command and get output
+      const output = await ytDlpManager.run();
+      
+      try {
+        // Parse the JSON output
+        const videoInfo = JSON.parse(output.trim());
+        
+        // Format the upload date if available
+        let formattedDate = '';
+        if (videoInfo.upload_date) {
+          // Convert YYYYMMDD to YYYY-MM-DD
+          const dateStr = videoInfo.upload_date;
+          if (dateStr.length === 8) {
+            const year = dateStr.substring(0, 4);
+            const month = dateStr.substring(4, 6);
+            const day = dateStr.substring(6, 8);
+            formattedDate = `${year}-${month}-${day}`;
+          }
         }
         
-        try {
-          const videoInfo = JSON.parse(stdout.trim());
-          
-          // Format the upload date if available
-          let formattedDate = '';
-          if (videoInfo.upload_date) {
-            // Convert YYYYMMDD to YYYY-MM-DD
-            const dateStr = videoInfo.upload_date;
-            if (dateStr.length === 8) {
-              const year = dateStr.substring(0, 4);
-              const month = dateStr.substring(4, 6);
-              const day = dateStr.substring(6, 8);
-              formattedDate = `${year}-${month}-${day}`;
-            }
-          }
-          
-          // Extract relevant information
-          const result = {
-            title: videoInfo.title || 'Unknown Title',
-            uploader: videoInfo.uploader || videoInfo.channel || 'Unknown Uploader',
-            duration: videoInfo.duration || 0,
-            thumbnail: videoInfo.thumbnail || '',
-            uploadDate: formattedDate
-          };
-          
-          this.logger.log(`Successfully fetched info for video: ${result.title}`);
-          resolve(result);
-        } catch (parseError) {
-          this.logger.error(`Error parsing video info: ${parseError}`);
-          reject(parseError);
-        }
-      });
-    });
+        // Extract relevant information
+        const result = {
+          title: videoInfo.title || 'Unknown Title',
+          uploader: videoInfo.uploader || videoInfo.channel || 'Unknown Uploader',
+          duration: videoInfo.duration || 0,
+          thumbnail: videoInfo.thumbnail || '',
+          uploadDate: formattedDate
+        };
+        
+        this.logger.log(`Successfully fetched info for video: ${result.title}`);
+        return result;
+        
+      } catch (parseError) {
+        this.logger.error(`Error parsing video info JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        throw new Error(`Failed to parse video info: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error in getVideoInfo: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error;
+    }
   }
 }
