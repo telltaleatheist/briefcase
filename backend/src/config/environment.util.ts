@@ -5,8 +5,8 @@ import * as log from 'electron-log';
 // Import the binary installers
 import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
-const ytDlpModule = require('yt-dlp-wrap') as { getBinaryPath: () => string };
-const getYtDlpPath = ytDlpModule.getBinaryPath;
+import YTDlpWrap from 'yt-dlp-wrap';
+import { execSync } from 'child_process';
 
 export class EnvironmentUtil {
   private static isDevMode: boolean | undefined;
@@ -65,62 +65,51 @@ export class EnvironmentUtil {
   }
 
   static getBinaryPath(binaryName: string): string {
-    const cacheKey = binaryName;
-  
-    // First, check if we have a cached path that exists
-    if (this.binaryPathCache[cacheKey]) {
-      return this.binaryPathCache[cacheKey];
-    }
-  
-    // Use packaged binaries by default
     try {
-      let binaryPath: string;
-      
       switch (binaryName) {
         case 'ffmpeg':
-          binaryPath = ffmpegInstaller.path;
-          break;
+          return ffmpegInstaller.path;
         case 'ffprobe':
-          binaryPath = ffprobeInstaller.path;
-          break;
+          return ffprobeInstaller.path;
         case 'yt-dlp':
-          binaryPath = getYtDlpPath();
-          break;
+          // Try to find yt-dlp in system PATH first
+          const systemPath = this.findBinaryInPath('yt-dlp');
+          if (systemPath) {
+            log.info(`Found yt-dlp at: ${systemPath}`);
+            return systemPath;
+          }
+
+          // If not found, fallback to just 'yt-dlp' (hope it's in minimal PATH)
+          log.warn('yt-dlp not found in system PATH. Falling back to default binary name.');
+          return 'yt-dlp';
+
         default:
           throw new Error(`Unsupported binary: ${binaryName}`);
       }
-      
+    } catch (error) {
+      log.error(`Error resolving binary path for ${binaryName}:`, error);
+      return binaryName; // Last resort: just return the binary name
+    }
+  }
+
+  private static findBinaryInPath(binaryName: string): string | null {
+    try {
+      const command = process.platform === 'win32' ? 'where' : 'which';
+      const binaryPath = execSync(`${command} ${binaryName}`, { encoding: 'utf8' })
+        .trim()
+        .split(/\r?\n/)[0]; // Always use first result
+          
       if (binaryPath && fs.existsSync(binaryPath)) {
-        log.info(`Using packaged ${binaryName}: ${binaryPath}`);
-        this.binaryPathCache[cacheKey] = binaryPath;
         return binaryPath;
       }
       
-      throw new Error(`Packaged binary ${binaryName} not found!`);
+      return null;
     } catch (error) {
-      log.error(`Error finding packaged binary ${binaryName}: ${error instanceof Error ? error.message : String(error)}`);
-      
-      // Try system path as fallback
-      try {
-        const which = process.platform === 'win32' ? 'where' : 'which';
-        const { execSync } = require('child_process');
-        const systemPath = execSync(`${which} ${binaryName}`, { encoding: 'utf8' }).trim().split('\n')[0];
-        
-        if (systemPath && fs.existsSync(systemPath)) {
-          log.warn(`Falling back to system PATH for ${binaryName}: ${systemPath}`);
-          this.binaryPathCache[cacheKey] = systemPath;
-          return systemPath;
-        }
-      } catch (fallbackError) {
-        log.error(`Could not find ${binaryName} in system PATH either!`);
-      }
-      
-      // Always return something even if it's just the binary name
-      log.warn(`Could not find ${binaryName} anywhere, returning binary name as fallback`);
-      return binaryName;
+      log.warn(`findBinaryInPath failed for ${binaryName}:`, error);
+      return null;
     }
   }
-  
+      
   static getDownloadsPath(): string {
     const baseDir = this.isDevelopment() 
       ? path.join(process.cwd()) // Current working directory in development

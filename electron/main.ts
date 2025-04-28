@@ -70,49 +70,9 @@ if (!gotTheLock) {
   let backendStarted = false;
   let server: Server | null = null;
 
-  function setupBinaries(): void {
-    if (process.platform === 'win32') return; // No need for chmod on Windows
-    
-    const binaries = ['yt-dlp', 'ffmpeg', 'ffprobe'];
-    
-    // Get binary paths
-    const binaryPaths: Record<string, string> = binaries.reduce((acc, binary) => {
-      acc[binary] = EnvironmentUtil.getBinaryPath(binary);
-      return acc;
-    }, {} as Record<string, string>);
-    
-    // Log before trying to set permissions
-    const firstBinaryPath = binaryPaths[binaries[0]];
-    const binDir = path.dirname(firstBinaryPath);
-    log.info(`Setting up binaries in: ${binDir}`);
-    
-    // Only try to chmod if it's in a directory we control
-    binaries.forEach(binary => {
-      const fullPath = binaryPaths[binary];
-      
-      if (fs.existsSync(fullPath)) {
-        // Only apply chmod if the binary is NOT in a system directory
-        if (!fullPath.startsWith('/usr/') && !fullPath.startsWith('/opt/')) {
-          log.info(`Setting executable permissions for: ${fullPath}`);
-          try {
-            fs.chmodSync(fullPath, 0o755);
-          } catch (error) {
-            log.error(`Failed to set permissions for ${fullPath}:`, error);
-            // Continue even if permissions fail - the binary might already be executable
-          }
-        } else {
-          log.info(`Skipping chmod for system binary: ${fullPath}`);
-        }
-      } else {
-        log.warn(`Binary not found: ${fullPath}`);
-      }
-    });
-  }
-    
   // Create main application window
   function createWindow(): void {
     log.info('Creating main application window...');
-    setupBinaries();
 
     mainWindow = new BrowserWindow({
       width: 800,
@@ -431,16 +391,6 @@ if (!gotTheLock) {
 
         log.info(`Backend entry point exists. Preparing to launch...`);
 
-        // Set up binary paths
-        const ytDlpPath = getBinaryPath('yt-dlp');
-        const ffmpegPath = getBinaryPath('ffmpeg');
-        const ffprobePath = getBinaryPath('ffprobe');
-
-        log.info(`Binary paths for backend process:`);
-        log.info(`- yt-dlp: ${ytDlpPath} (exists: ${fs.existsSync(ytDlpPath)})`);
-        log.info(`- ffmpeg: ${ffmpegPath} (exists: ${fs.existsSync(ffmpegPath)})`);
-        log.info(`- ffprobe: ${ffprobePath} (exists: ${fs.existsSync(ffprobePath)})`);
-
         const nodePath = process.execPath;
         log.info(`Using Node.js executable: ${nodePath} (exists: ${fs.existsSync(nodePath)})`);
 
@@ -466,9 +416,6 @@ if (!gotTheLock) {
             CLIPPY_BACKEND: 'true',
             FRONTEND_PATH: frontendPath,  // Set the frontend path explicitly
             NODE_PATH: path.join(process.resourcesPath, 'backend/node_modules'),
-            YT_DLP_PATH: ytDlpPath,
-            FFMPEG_PATH: ffmpegPath,
-            FFPROBE_PATH: ffprobePath,
             PORT: '3000',
             NODE_ENV: isDevelopment ? 'development' : 'production',
             APP_ROOT: process.resourcesPath,
@@ -563,11 +510,6 @@ if (!gotTheLock) {
     log.info('Electron app ready, initializing...');
     logActiveProcesses();
 
-    // Add environment variables for binary paths that NestJS can access
-    process.env.YT_DLP_PATH = getBinaryPath('yt-dlp');
-    process.env.FFMPEG_PATH = getBinaryPath('ffmpeg');
-    process.env.FFPROBE_PATH = getBinaryPath('ffprobe');
-    
     // Log the paths we're using
     log.info(`Using yt-dlp: ${process.env.YT_DLP_PATH}`);
     log.info(`Using ffmpeg: ${process.env.FFMPEG_PATH}`);
@@ -684,42 +626,6 @@ if (!gotTheLock) {
       app.quit();
     });
   }
-  /**
-   * Gets the appropriate path for a binary based on environment and platform
-   */
-  function getBinaryPath(binaryName: string): string {
-    // First try using the EnvironmentUtil version which already has good fallbacks
-    const utilPath = EnvironmentUtil.getBinaryPath(binaryName);
-    
-    // If it's just returning the binary name itself, it means no binary was found
-    // Let's do an additional check using the system PATH directly
-    if (utilPath === binaryName || utilPath === (binaryName + (process.platform === 'win32' ? '.exe' : ''))) {
-      log.info(`No binary found in standard locations, checking system PATH for: ${binaryName}`);
-      
-      try {
-        const { execSync } = require('child_process');
-        let command;
-        
-        if (process.platform === 'win32') {
-          command = `where ${binaryName}`;
-        } else {
-          command = `which ${binaryName}`;
-        }
-        
-        // Try to get the path from the system
-        const systemPath = execSync(command, { encoding: 'utf8' }).trim();
-        
-        if (systemPath && fs.existsSync(systemPath)) {
-          log.info(`Found ${binaryName} in system PATH: ${systemPath}`);
-          return systemPath;
-        }
-      } catch (error) {
-        log.warn(`Could not find ${binaryName} in system PATH: ${error}`);
-      }
-    }
-      
-    return utilPath;
-  }
 
   // Quit when all windows are closed, except on macOS
   app.on('window-all-closed', () => {
@@ -818,16 +724,6 @@ if (!gotTheLock) {
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
-  });
-  // Expose the binary paths in the preload API so they can be used in the renderer process
-  ipcMain.handle('get-binary-paths', () => {
-    return {
-      ytDlpPath: process.env.YT_DLP_PATH,
-      ffmpegPath: process.env.FFMPEG_PATH,
-      ffprobePath: process.env.FFPROBE_PATH,
-      resourcesPath: process.resourcesPath || app.getAppPath(),
-      isDevelopment: isDevelopment
-    };
   });
 
   ipcMain.handle('select-directory', async () => {
