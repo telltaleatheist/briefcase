@@ -1,5 +1,4 @@
 // clippy/frontend/src/app/components/batch-download/batch-download.component.scss
-
 .batch-download-container {
   display: flex;
   flex-direction: column;
@@ -114,12 +113,7 @@
   gap: 8px;
   max-width: 100%;
   overflow: hidden;
-}
-
-.video-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-direction: row-reverse;
 }
 
 .upload-date-badge {
@@ -128,9 +122,16 @@
   padding: 2px 6px;
   border-radius: 4px;
   white-space: nowrap;
+  margin-right: 8px;
 }
 
-// New styles for enhanced job display
+.video-title {
+  flex-grow: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .all-jobs-section {
   margin: 24px 0;
 }
