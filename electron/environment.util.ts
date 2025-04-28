@@ -3,6 +3,23 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
 import log from 'electron-log';
+import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
+
+let getYtDlpPath: () => string;
+try {
+  const ytDlpWrap = require('yt-dlp-wrap');
+  getYtDlpPath = typeof ytDlpWrap.getBinaryPath === 'function' 
+    ? ytDlpWrap.getBinaryPath 
+    : () => {
+        // Fallback if function doesn't exist
+        throw new Error('getBinaryPath not available in yt-dlp-wrap');
+      };
+} catch (error) {
+  getYtDlpPath = () => {
+    throw new Error(`Error loading yt-dlp-wrap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  };
+}
 
 interface ConfigFile {
   [key: string]: string | undefined;
@@ -202,98 +219,44 @@ export class EnvironmentUtil {
   // Returns the path to a binary based on the current environment
   static getBinaryPath(binaryName: string): string {
     const cacheKey = binaryName;
-
+  
     // First, check if we have a cached path that exists
     if (this.binaryPathCache[cacheKey]) {
       return this.binaryPathCache[cacheKey];
     }
   
-    const envVar = process.env[`${binaryName.toUpperCase().replace('-', '_')}_PATH`];
-    
-    // If the environment variable is set and the binary exists at the given path, return it
-    if (envVar && fs.existsSync(envVar)) {
-      this.binaryPathCache[cacheKey] = envVar;
-      return this.binaryPathCache[cacheKey];
-    }
-  
-    const pathsToTry: string[] = [];
-    
-    // Add paths based on whether we're in development or production
-    if (this.isDevelopment()) {
-      // Development paths
-      pathsToTry.push(
-        path.join(process.cwd(), 'bin', binaryName),
-        path.join(app.getAppPath(), 'bin', binaryName),
-        path.join(__dirname, '../../../bin', binaryName)
-      );
-    } else {
-      // Production (packaged) paths
-      pathsToTry.push(
-        path.join(process.resourcesPath, 'bin', binaryName),
-        path.join(process.resourcesPath, 'app.asar.unpacked', 'bin', binaryName),
-        path.join(process.resourcesPath, 'app', 'bin', binaryName)
-      );
-    }
-    
-    // User-specific location as a fallback
-    pathsToTry.push(
-      path.join(process.env.HOME || '.', 'Documents', 'clippy', 'bin', binaryName)
-    );
-  
-    // Append .exe for Windows
-    if (process.platform === 'win32') {
-      for (let i = 0; i < pathsToTry.length; i++) {
-        if (!pathsToTry[i].endsWith('.exe')) {
-          pathsToTry[i] += '.exe';
-        }
-      }
-    }
-  
-    // Return the first existing path
-    for (const candidate of pathsToTry) {
-      if (fs.existsSync(candidate)) {
-        log.info(`Found binary ${binaryName} at: ${candidate}`);
-        this.binaryPathCache[cacheKey] = candidate;
-        return this.binaryPathCache[cacheKey];
-      }
-    }
-    
-    // If we get here, try finding it in the system PATH as a last resort
+    // Use packaged binaries by default
     try {
-      const { execSync } = require('child_process');
-      let command;
+      let binaryPath: string;
       
-      if (process.platform === 'win32') {
-        command = `where ${binaryName}`;
-      } else {
-        command = `which ${binaryName}`;
+      switch (binaryName) {
+        case 'ffmpeg':
+          binaryPath = ffmpegInstaller.path;
+          break;
+        case 'ffprobe':
+          binaryPath = ffprobeInstaller.path;
+          break;
+        case 'yt-dlp':
+          binaryPath = getYtDlpPath();
+          break;
+        default:
+          throw new Error(`Unsupported binary: ${binaryName}`);
       }
       
-      const systemPath = execSync(command, { encoding: 'utf8' }).trim();
-      
-      if (systemPath && fs.existsSync(systemPath)) {
-        log.info(`Found ${binaryName} in system PATH: ${systemPath}`);
-        this.binaryPathCache[cacheKey] = systemPath;
-        return this.binaryPathCache[cacheKey];
+      if (binaryPath && fs.existsSync(binaryPath)) {
+        log.info(`Using packaged ${binaryName}: ${binaryPath}`);
+        this.binaryPathCache[cacheKey] = binaryPath;
+        return binaryPath;
       }
+      
+      throw new Error(`Packaged binary ${binaryName} not found!`);
     } catch (error) {
-      log.warn(`Could not find ${binaryName} in system PATH: ${error}`);
+      log.error(`Error finding packaged binary ${binaryName}: ${error instanceof Error ? error.message : String(error)}`);
     }
-  
-    // Final fallback — just return the binary name and hope the system can resolve it
-    log.warn(`Could not find ${binaryName} in any location, returning just the name`);
-    this.binaryPathCache[cacheKey] = binaryName;
-    return this.binaryPathCache[cacheKey];
+
+    return binaryName;
   }
-  
-  // Optional: Method to clear the binary path cache if needed
-  static clearBinaryPathCache(): void {
-    this.binaryPathCache = {};
-    this.backendPath = undefined;
-    this.frontendPath = undefined;
-    this.isDevMode = undefined;
-  }
-  
+
   static setupEnvironmentConfig(mainWindow: Electron.BrowserWindow): void {
     // Collect environment variables to persist
     const envToPersist = { ...process.env };

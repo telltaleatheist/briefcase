@@ -1,21 +1,18 @@
-// src/environment/environment.util.ts
 import * as path from 'path';
 import * as fs from 'fs';
-import * as childProcess from 'child_process';
 import * as log from 'electron-log';
+
+// Import the binary installers
+import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
+const ytDlpModule = require('yt-dlp-wrap') as { getBinaryPath: () => string };
+const getYtDlpPath = ytDlpModule.getBinaryPath;
 
 export class EnvironmentUtil {
   private static isDevMode: boolean | undefined;
   private static binaryPathCache: { [key: string]: string } = {};
-  // Store manually set binary paths
   private static manualBinaryPaths: { [key: string]: string } = {};
 
-  /**
-   * Set a manual path for a specific binary
-   * @param binaryName Name of the binary (e.g., 'yt-dlp', 'ffmpeg')
-   * @param binaryPath Full path to the binary
-   * @throws Error if the binary path is invalid
-   */
   static setManualBinaryPath(binaryName: string, binaryPath: string): void {
     if (!binaryName || typeof binaryName !== 'string') {
       throw new Error('Invalid binary name. Must be a non-empty string.');
@@ -33,23 +30,6 @@ export class EnvironmentUtil {
       fs.accessSync(binaryPath, fs.constants.X_OK);
     } catch (error) {
       throw new Error(`Binary is not executable: ${binaryPath}`);
-    }
-
-    try {
-      const versionCommands: { [key: string]: string } = {
-        'yt-dlp': '--version',
-        'ffmpeg': '-version',
-        'ffprobe': '-version'
-      };
-
-      const versionCommand = versionCommands[binaryName] || '--version';
-      
-      childProcess.execSync(`"${binaryPath}" ${versionCommand}`, { 
-        stdio: 'ignore',
-        timeout: 5000 // 5-second timeout
-      });
-    } catch (error) {
-      throw new Error(`Failed to run binary ${binaryName} from path: ${binaryPath}`);
     }
 
     this.manualBinaryPaths[binaryName] = binaryPath;
@@ -74,7 +54,6 @@ export class EnvironmentUtil {
   }
 
   static isDevelopment(): boolean {
-    // Cache the development mode status
     if (this.isDevMode === undefined) {
       this.isDevMode = process.env.NODE_ENV === 'development';
     }
@@ -87,32 +66,61 @@ export class EnvironmentUtil {
 
   static getBinaryPath(binaryName: string): string {
     const cacheKey = binaryName;
-    
+  
     // First, check if we have a cached path that exists
     if (this.binaryPathCache[cacheKey]) {
       return this.binaryPathCache[cacheKey];
     }
-    
-    // Determine the correct command to find binary in PATH
-    const which = process.platform === 'win32' ? 'where' : 'which';
-    
+  
+    // Use packaged binaries by default
     try {
-      // Use the system's PATH command to find the binary
-      const systemPath = childProcess.execSync(`${which} ${binaryName}`, { encoding: 'utf8' }).trim().split('\n')[0];
+      let binaryPath: string;
       
-      if (systemPath && fs.existsSync(systemPath)) {
-        log.info(`Using ${binaryName} from system PATH: ${systemPath}`);
-        this.binaryPathCache[cacheKey] = systemPath;
-        return systemPath;
+      switch (binaryName) {
+        case 'ffmpeg':
+          binaryPath = ffmpegInstaller.path;
+          break;
+        case 'ffprobe':
+          binaryPath = ffprobeInstaller.path;
+          break;
+        case 'yt-dlp':
+          binaryPath = getYtDlpPath();
+          break;
+        default:
+          throw new Error(`Unsupported binary: ${binaryName}`);
       }
+      
+      if (binaryPath && fs.existsSync(binaryPath)) {
+        log.info(`Using packaged ${binaryName}: ${binaryPath}`);
+        this.binaryPathCache[cacheKey] = binaryPath;
+        return binaryPath;
+      }
+      
+      throw new Error(`Packaged binary ${binaryName} not found!`);
     } catch (error) {
-      log.error(`Could not find ${binaryName} in system PATH: ${error instanceof Error ? error.message : String(error)}`);
+      log.error(`Error finding packaged binary ${binaryName}: ${error instanceof Error ? error.message : String(error)}`);
+      
+      // Try system path as fallback
+      try {
+        const which = process.platform === 'win32' ? 'where' : 'which';
+        const { execSync } = require('child_process');
+        const systemPath = execSync(`${which} ${binaryName}`, { encoding: 'utf8' }).trim().split('\n')[0];
+        
+        if (systemPath && fs.existsSync(systemPath)) {
+          log.warn(`Falling back to system PATH for ${binaryName}: ${systemPath}`);
+          this.binaryPathCache[cacheKey] = systemPath;
+          return systemPath;
+        }
+      } catch (fallbackError) {
+        log.error(`Could not find ${binaryName} in system PATH either!`);
+      }
+      
+      // Always return something even if it's just the binary name
+      log.warn(`Could not find ${binaryName} anywhere, returning binary name as fallback`);
+      return binaryName;
     }
-    
-    // If we get here, the binary wasn't found in PATH
-    throw new Error(`Binary ${binaryName} not found in system PATH!`);
-  }  
-
+  }
+  
   static getDownloadsPath(): string {
     const baseDir = this.isDevelopment() 
       ? path.join(process.cwd()) // Current working directory in development
@@ -142,11 +150,5 @@ export class EnvironmentUtil {
         throw new Error('Cannot create downloads directory!');
       }
     }
-  }
-
-  // Clear the cache if needed
-  static clearBinaryPathCache(): void {
-    this.binaryPathCache = {};
-    this.isDevMode = undefined;
   }
 }

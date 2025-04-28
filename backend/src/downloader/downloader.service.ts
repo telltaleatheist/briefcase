@@ -15,6 +15,8 @@ import { PathService } from '../path/path.service';
 import { join } from 'node:path';
 import { execFile, ExecFileOptions } from 'node:child_process';
 import { EnvironmentUtil } from "../config/environment.util";
+const ytDlpModule = require('yt-dlp-wrap') as { getBinaryPath: () => string };
+const getYtDlpPath = ytDlpModule.getBinaryPath;
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -33,8 +35,15 @@ export class DownloaderService implements OnModuleInit {
     private readonly pathService: PathService,
   ) {
     try {
-      // Directly use EnvironmentUtil to get yt-dlp path
-      this.ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
+      // Use the packaged yt-dlp binary directly
+      try {
+        this.ytDlpPath = getYtDlpPath();
+      } catch (error) {
+        // Fallback to using environment util
+        this.ytDlpPath = EnvironmentUtil.getBinaryPath('yt-dlp');
+        this.logger.log(`Using fallback path for yt-dlp: ${this.ytDlpPath}`);
+      }
+
       this.logger.log(`yt-dlp path resolved to: ${this.ytDlpPath}`);
       
       this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');

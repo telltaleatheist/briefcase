@@ -1,13 +1,16 @@
 // clippy/backend/src/ffmpeg/ffmpeg.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import * as ffmpeg from 'fluent-ffmpeg';
-import * as ffmpegInstaller from 'node-ffmpeg-installer';
 import * as path from 'path';
 import * as fs from 'fs';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 import { EnvironmentUtil } from '../config/environment.util';
+
+// Import the binary installers directly
+import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -20,9 +23,9 @@ export class FfmpegService {
 
   constructor() {
     try {
-      // Directly use EnvironmentUtil to get binary paths
-      const ffmpegPath = EnvironmentUtil.getBinaryPath('ffmpeg');
-      const ffprobePath = EnvironmentUtil.getBinaryPath('ffprobe');
+      // Use the packaged binaries directly
+      const ffmpegPath = ffmpegInstaller.path;
+      const ffprobePath = ffprobeInstaller.path;
       
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegPath);

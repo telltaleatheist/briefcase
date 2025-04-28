@@ -12,28 +12,24 @@ import { PathModule } from './path/path.module';
 import * as log from 'electron-log';
 
 function findFrontendDistPath(): string {
-  // First check if path is provided via environment variable
-  if (process.env.FRONTEND_PATH && fs.existsSync(process.env.FRONTEND_PATH)) {
-    log.info(`Using frontend path from environment: ${process.env.FRONTEND_PATH}`);
-    return process.env.FRONTEND_PATH;
-  }
-  
-  // Fallback to checking common locations
-  const possiblePaths = [
-    join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
-    join(process.cwd(), '..', 'frontend', 'dist', 'clippy-frontend', 'browser')
-  ];
-
-  for (const potentialPath of possiblePaths) {
-    if (fs.existsSync(potentialPath)) {
-      log.info(`Found frontend dist path: ${potentialPath}`);
-      return potentialPath;
-    }
+  if (!process.env.FRONTEND_PATH) {
+    log.error('No FRONTEND_PATH environment variable set');
+    const fallbackPath = join(process.cwd(), 'public');
+    fs.mkdirSync(fallbackPath, { recursive: true });
+    
+    return fallbackPath;
   }
 
-  log.error('❌ Could not find frontend dist directory. Will serve API only - app.module.ts.');
-  // Instead of exiting, return a default path for API-only mode
-  return join(process.cwd(), 'public');
+  if (!fs.existsSync(process.env.FRONTEND_PATH)) {
+    log.warn(`Provided FRONTEND_PATH does not exist: ${process.env.FRONTEND_PATH}`);
+    const fallbackPath = join(process.cwd(), 'public');
+    fs.mkdirSync(fallbackPath, { recursive: true });
+    
+    return fallbackPath;
+  }
+
+  log.info(`Using frontend path from environment: ${process.env.FRONTEND_PATH}`);
+  return process.env.FRONTEND_PATH;
 }
 
 @Module({
