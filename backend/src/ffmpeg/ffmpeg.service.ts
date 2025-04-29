@@ -6,11 +6,11 @@ import * as fs from 'fs';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
-import { EnvironmentUtil } from '../config/environment.util';
 
 // Import the binary installers directly
 import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
+import { execSync } from 'child_process';
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -24,8 +24,39 @@ export class FfmpegService {
   constructor() {
     try {
       // Use the packaged binaries directly
-      const ffmpegPath = ffmpegInstaller.path;
-      const ffprobePath = ffprobeInstaller.path;
+      let ffmpegPath = ffmpegInstaller.path;
+      let ffprobePath = ffprobeInstaller.path;
+      
+      // Check if we're in an asar package
+      if (ffmpegPath.includes('app.asar')) {
+        // For production: extract binaries from asar or use system binaries
+        const isWindows = process.platform === 'win32';
+        
+        // Try system binaries first
+        const systemFFmpeg = this.findBinaryInPath('ffmpeg');
+        const systemFFprobe = this.findBinaryInPath('ffprobe');
+        
+        if (systemFFmpeg && systemFFprobe) {
+          this.logger.log(`Using system FFmpeg: ${systemFFmpeg}`);
+          this.logger.log(`Using system FFprobe: ${systemFFprobe}`);
+          ffmpegPath = systemFFmpeg;
+          ffprobePath = systemFFprobe;
+        } else {
+          this.logger.warn('System FFmpeg/FFprobe not found, trying fallback locations');
+          
+          // Fallback to common installation locations
+          if (process.platform === 'darwin') {
+            const macPaths = ['/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg'];
+            for (const potentialPath of macPaths) {
+              if (fs.existsSync(potentialPath)) {
+                ffmpegPath = potentialPath;
+                ffprobePath = potentialPath.replace('ffmpeg', 'ffprobe');
+                break;
+              }
+            }
+          }
+        }
+      }
       
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegPath);
@@ -38,7 +69,21 @@ export class FfmpegService {
       throw error; // Rethrow to prevent service initialization
     }
   }
-    
+  
+  // Add this helper method to find binaries in PATH
+  private findBinaryInPath(binaryName: string): string | null {
+    try {
+      const command = process.platform === 'win32' ? 'where' : 'which';
+      const result = execSync(`${command} ${binaryName}`, { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
+      if (fs.existsSync(result)) {
+        return result;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+      
   // Helper method for safe WebSocket emission
   private safeEmit(event: string, data: any): void {
     if (this.server) {
@@ -99,9 +144,6 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
     }
   
     try {
-      // Add this at the class level if not already there
-      // private lastReportedProgress: Map<string, number> = new Map();
-  
       return new Promise<string | null>((resolve, reject) => {
         ffmpeg.ffprobe(videoFile, (err, metadata) => {
           if (err) {
@@ -110,8 +152,6 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
             resolve(null);
             return;
           }
-  
-          this.logger.debug(`FFmpeg Metadata: ${JSON.stringify(metadata, null, 2)}`);
   
           const stream = metadata.streams.find(s => s.codec_type === 'video');
           if (!stream) {
@@ -274,7 +314,6 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
                   jobId // Add jobId here
                 });
                 
-                this.logger.debug(`Native progress: ${percent}%, Scaled: ${scaledPercent}%`);
               }
             }
           });
