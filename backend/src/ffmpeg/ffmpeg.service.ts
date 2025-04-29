@@ -23,40 +23,9 @@ export class FfmpegService {
 
   constructor() {
     try {
-      // Use the packaged binaries directly
-      let ffmpegPath = ffmpegInstaller.path;
-      let ffprobePath = ffprobeInstaller.path;
-      
-      // Check if we're in an asar package
-      if (ffmpegPath.includes('app.asar')) {
-        // For production: extract binaries from asar or use system binaries
-        const isWindows = process.platform === 'win32';
-        
-        // Try system binaries first
-        const systemFFmpeg = this.findBinaryInPath('ffmpeg');
-        const systemFFprobe = this.findBinaryInPath('ffprobe');
-        
-        if (systemFFmpeg && systemFFprobe) {
-          this.logger.log(`Using system FFmpeg: ${systemFFmpeg}`);
-          this.logger.log(`Using system FFprobe: ${systemFFprobe}`);
-          ffmpegPath = systemFFmpeg;
-          ffprobePath = systemFFprobe;
-        } else {
-          this.logger.warn('System FFmpeg/FFprobe not found, trying fallback locations');
-          
-          // Fallback to common installation locations
-          if (process.platform === 'darwin') {
-            const macPaths = ['/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg'];
-            for (const potentialPath of macPaths) {
-              if (fs.existsSync(potentialPath)) {
-                ffmpegPath = potentialPath;
-                ffprobePath = potentialPath.replace('ffmpeg', 'ffprobe');
-                break;
-              }
-            }
-          }
-        }
-      }
+      // Find ffmpeg and ffprobe using the same logic as YtDlpManager
+      const ffmpegPath = this.findFFmpegPath();
+      const ffprobePath = this.findFFprobePath();
       
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegPath);
@@ -69,8 +38,75 @@ export class FfmpegService {
       throw error; // Rethrow to prevent service initialization
     }
   }
+
+  private findFFmpegPath(): string {
+    // 1. Try to find in system PATH
+    const pathFromSystem = this.findBinaryInPath('ffmpeg');
+    if (pathFromSystem) {
+      this.logger.log(`Found ffmpeg in system PATH: ${pathFromSystem}`);
+      return pathFromSystem;
+    }
+    
+    // 2. Check common installation locations based on platform
+    const fallbackPaths = this.getCommonFFmpegPaths();
+    for (const possiblePath of fallbackPaths) {
+      if (fs.existsSync(possiblePath)) {
+        this.logger.log(`Found fallback ffmpeg at: ${possiblePath}`);
+        return possiblePath;
+      }
+    }
+    
+    // 3. Fall back to the packaged binary
+    try {
+      const installerPath = ffmpegInstaller.path;
+      if (fs.existsSync(installerPath)) {
+        this.logger.log(`Using packaged ffmpeg: ${installerPath}`);
+        return installerPath;
+      }
+    } catch (error) {
+      this.logger.warn('Error accessing packaged ffmpeg:', error);
+    }
+    
+    // 4. Last resort: just return the binary name and hope it's in PATH
+    this.logger.warn('ffmpeg not found. Falling back to "ffmpeg" string.');
+    return 'ffmpeg';
+  }
   
-  // Add this helper method to find binaries in PATH
+  // Find ffprobe binary using enhanced logic from YtDlpManager
+  private findFFprobePath(): string {
+    // 1. Try to find in system PATH
+    const pathFromSystem = this.findBinaryInPath('ffprobe');
+    if (pathFromSystem) {
+      this.logger.log(`Found ffprobe in system PATH: ${pathFromSystem}`);
+      return pathFromSystem;
+    }
+    
+    // 2. Check common installation locations based on platform
+    const fallbackPaths = this.getCommonFFprobePaths();
+    for (const possiblePath of fallbackPaths) {
+      if (fs.existsSync(possiblePath)) {
+        this.logger.log(`Found fallback ffprobe at: ${possiblePath}`);
+        return possiblePath;
+      }
+    }
+    
+    // 3. Fall back to the packaged binary
+    try {
+      const installerPath = ffprobeInstaller.path;
+      if (fs.existsSync(installerPath)) {
+        this.logger.log(`Using packaged ffprobe: ${installerPath}`);
+        return installerPath;
+      }
+    } catch (error) {
+      this.logger.warn('Error accessing packaged ffprobe:', error);
+    }
+    
+    // 4. Last resort: just return the binary name and hope it's in PATH
+    this.logger.warn('ffprobe not found. Falling back to "ffprobe" string.');
+    return 'ffprobe';
+  }
+
+  // Helper method to find binaries in PATH (copied from YtDlpManager)
   private findBinaryInPath(binaryName: string): string | null {
     try {
       const command = process.platform === 'win32' ? 'where' : 'which';
@@ -83,7 +119,81 @@ export class FfmpegService {
       return null;
     }
   }
-      
+  
+  // Get common ffmpeg paths based on platform (similar to YtDlpManager approach)
+  private getCommonFFmpegPaths(): string[] {
+    const paths: string[] = [];
+    
+    if (process.platform === 'darwin') {
+      paths.push(
+        '/usr/local/bin/ffmpeg',
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+        '/opt/local/bin/ffmpeg',
+        '/Library/Frameworks/Python.framework/Versions/Current/bin/ffmpeg'
+      );
+    } else if (process.platform === 'win32') {
+      paths.push(
+        'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
+        'C:\\Program Files (x86)\\ffmpeg\\bin\\ffmpeg.exe',
+        'C:\\ffmpeg\\bin\\ffmpeg.exe'
+      );
+    } else if (process.platform === 'linux') {
+      paths.push(
+        '/usr/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/snap/bin/ffmpeg'
+      );
+    }
+
+    // Add a path relative to the current directory
+    paths.push(path.join(__dirname, '../bin/ffmpeg'));
+    
+    // Add platform-specific executable extension if needed
+    if (process.platform === 'win32') {
+      paths.push(path.join(__dirname, '../bin/ffmpeg.exe'));
+    }
+    
+    return paths;
+  }
+  
+  // Get common ffprobe paths based on platform
+  private getCommonFFprobePaths(): string[] {
+    const paths: string[] = [];
+    
+    if (process.platform === 'darwin') {
+      paths.push(
+        '/usr/local/bin/ffprobe',
+        '/opt/homebrew/bin/ffprobe',
+        '/usr/bin/ffprobe',
+        '/opt/local/bin/ffprobe',
+        '/Library/Frameworks/Python.framework/Versions/Current/bin/ffprobe'
+      );
+    } else if (process.platform === 'win32') {
+      paths.push(
+        'C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe',
+        'C:\\Program Files (x86)\\ffmpeg\\bin\\ffprobe.exe',
+        'C:\\ffmpeg\\bin\\ffprobe.exe'
+      );
+    } else if (process.platform === 'linux') {
+      paths.push(
+        '/usr/bin/ffprobe',
+        '/usr/local/bin/ffprobe',
+        '/snap/bin/ffprobe'
+      );
+    }
+
+    // Add a path relative to the current directory
+    paths.push(path.join(__dirname, '../bin/ffprobe'));
+    
+    // Add platform-specific executable extension if needed
+    if (process.platform === 'win32') {
+      paths.push(path.join(__dirname, '../bin/ffprobe.exe'));
+    }
+    
+    return paths;
+  }
+  
   // Helper method for safe WebSocket emission
   private safeEmit(event: string, data: any): void {
     if (this.server) {
