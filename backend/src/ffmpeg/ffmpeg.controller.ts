@@ -102,7 +102,7 @@ export class FfmpegController {
       }
   
       // Pass the jobId to the ffmpeg service
-      const processedVideoPath = await this.ffmpegService.fixAspectRatio(video.path, jobId);
+      const processedVideoPath = await this.ffmpegService.reencodeVideo(video.path, jobId);
       
       if (!processedVideoPath) {
         return {

@@ -173,7 +173,6 @@ export class BatchDownloaderService {
     this.isProcessing = true;
     this.logger.log(`Starting to process ${this.processingQueue.length} videos`);
     
-    // Process each video in the queue
     while (this.processingQueue.length > 0) {
       const job = this.processingQueue[0]; // Keep the job in the queue until processing is done
       
@@ -207,25 +206,31 @@ export class BatchDownloaderService {
           continue;
         }
         
-        this.logger.log(`Processing video for job ${job.id}: ${job.downloadResult.outputFile}`);
-        job.currentTask = 'Processing video...';
-        job.progress = 0;
-        this.emitQueueUpdate();
+        // Determine if video needs processing
+        const isYouTubeSource = 
+          job.options.url.includes('youtube.com') || 
+          job.options.url.includes('youtu.be');
         
-        // Apply aspect ratio correction only if needed
-        // The audio and video should already be combined from the downloader service
+        const shouldProcess = 
+          isYouTubeSource || 
+          job.options.fixAspectRatio;
+        
         let processedFile = job.downloadResult.outputFile;
         
-        if (job.options.fixAspectRatio) {
-          job.currentTask = 'Fixing aspect ratio...';
-          job.progress = 10;
+        if (shouldProcess) {
+          job.currentTask = 'Processing video...';
+          job.progress = 0;
           this.emitQueueUpdate();
           
-          const fixedFile = await this.ffmpegService.fixAspectRatio(processedFile, job.id);
-          if (fixedFile) {
-            processedFile = fixedFile;
+          const reprocessedFile = await this.ffmpegService.reencodeVideo(processedFile, job.id);
+          
+          if (reprocessedFile) {
+            processedFile = reprocessedFile;
           }
         }
+        
+        // Update job with processed file
+        job.downloadResult.outputFile = processedFile;
         
         // Processing completed
         job.status = 'completed';
@@ -238,7 +243,12 @@ export class BatchDownloaderService {
         this.processingQueue.shift();
         
       } catch (error) {
-        // Error handling...
+        // Error handling logic
+        this.logger.error(`Error processing video: ${error}`);
+        job.status = 'failed';
+        job.error = error instanceof Error ? error.message : 'Unknown error';
+        this.failedJobs.push(job);
+        this.processingQueue.shift();
       }
       
       // Emit queue update
@@ -253,7 +263,7 @@ export class BatchDownloaderService {
       timestamp: new Date().toISOString()
     });
   }
-    
+
   // Update job progress from events
   updateJobProgress(jobId: string, progress: number, task: string): void {
     // Search for the job in all queues

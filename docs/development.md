@@ -55,7 +55,7 @@ The `FfmpegService` handles video processing:
 
 ```typescript
 // Key method for fixing aspect ratio
-async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> {
+async reencodeVideo(videoFile: string, jobId?: string): Promise<string | null> {
   // Process video to 16:9 aspect ratio with blurred background
   // Track and emit progress events with jobId
   // Return path to processed file

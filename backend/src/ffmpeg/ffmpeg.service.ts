@@ -247,29 +247,45 @@ export class FfmpegService {
     });
   }
 
-async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> {
+  async reencodeVideo(videoFile: string, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(videoFile)) {
       this.logger.error(`Video file doesn't exist: ${videoFile}`);
       return null;
     }
-  
+    
     try {
+      // Determine the best encoder based on platform
+      let selectedEncoder: string;
+      try {
+        const availableEncoders = execSync('ffmpeg -hide_banner -encoders').toString();
+        const useVideoToolbox = 
+          process.platform === 'darwin' && 
+          process.arch === 'arm64' && 
+          availableEncoders.includes('h264_videotoolbox');
+        
+        selectedEncoder = useVideoToolbox ? 'h264_videotoolbox' : 'libx264';
+        
+        this.logger.log(`Selected encoder: ${selectedEncoder}`);
+      } catch (encoderDetectionError) {
+        this.logger.warn(`Failed to detect encoder, falling back to libx264: ${encoderDetectionError}`);
+        selectedEncoder = 'libx264';
+      }
+  
       return new Promise<string | null>((resolve, reject) => {
         ffmpeg.ffprobe(videoFile, (err, metadata) => {
           if (err) {
             this.logger.error(`CRITICAL: Error probing video file: ${err.message}`);
-            this.logger.error(`Full error details: ${JSON.stringify(err, null, 2)}`);
             resolve(null);
             return;
           }
-  
+    
           const stream = metadata.streams.find(s => s.codec_type === 'video');
           if (!stream) {
             this.logger.error('CRITICAL: No video stream found');
             resolve(null);
             return;
           }
-  
+    
           let width = stream.width;
           let height = stream.height;
           let totalDuration = parseFloat(stream.duration || '0');
@@ -287,66 +303,88 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
           if (rotation === '90' || rotation === '270' || rotation === 90 || rotation === 270) {
             [width, height] = [height, width];
           }
-  
+    
           const aspectRatio = width / height;
-          this.logger.log(`ASPECT RATIO ANALYSIS:
+          this.logger.log(`REENCODING ANALYSIS:
             Original Dimensions: ${width}x${height}
             Calculated Aspect Ratio: ${aspectRatio.toFixed(4)}
             Is Vertical Video: ${aspectRatio <= 1.0}
             Video Duration: ${totalDuration}s`);
-                    
+                      
           // Is it a vertical video?
           const isVertical = aspectRatio <= 1.0;
           
           // Check if it's close to 16:9 (1.78)
           const is16_9 = aspectRatio >= 1.75 && aspectRatio <= 1.8;
           
-          if (is16_9) {
-            this.logger.log('Video already has 16:9 aspect ratio');
-            resolve(null);
-            return;
-          }
-  
           // Create output filename
           const fileDir = path.dirname(videoFile);
           const fileName = path.basename(videoFile);
           const fileBase = path.parse(fileName).name;
-  
+    
           // Force .mov extension for Final Cut Pro compatibility
-          const outputFile = path.join(fileDir, `${fileBase}_16x9.mov`);
+          const outputFile = path.join(fileDir, `${fileBase}_reencoded.mov`);
           
           // Set the progress key
           const progressKey = outputFile;
           
           // Reset the progress counter for this file
           this.lastReportedProgress.set(progressKey, 0);
-  
-          // Create FFmpeg command
+    
+          // Prepare filter complex for aspect ratio correction and encoding
+          const filterOptions = [];
+          const baseFilter = "[0:v]format=yuv420p"; // Basic format conversion
+          if (isVertical) {
+            filterOptions.push(
+              '-filter_complex', 
+              "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p"
+            );
+          } else {
+            // For non-vertical videos, apply a simpler filter that still ensures proper format
+            filterOptions.push('-filter_complex', baseFilter);
+          }
+          
+          // Encoder-specific options - using the exact settings that worked in your logs
+          const encoderOptions = selectedEncoder === 'h264_videotoolbox' 
+          ? [
+              '-c:v', 'h264_videotoolbox', 
+              '-b:v', '3M', 
+              '-maxrate', '3M', 
+              '-bufsize', '6M',
+              '-allow_sw', '1',  // Allow software fallback if hardware encoding fails
+              '-profile:v', 'high'  // Use high profile for better compatibility
+            ]  
+          : ['-c:v', 'libx264', '-b:v', '3M']; // Simplified libx264 options to match working command
+          
+          // Create FFmpeg command - modified to match the successful command
           let command = ffmpeg(videoFile)
             .outputOptions([
-              '-filter_complex', "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p",
+              // Aspect ratio filter (if needed)
+              ...filterOptions,
+              
+              // Encoding options for compatibility
               '-pix_fmt', 'yuv420p',
-              '-c:v', 'libx264',
-              '-b:v', '3M',
+              ...encoderOptions,
               '-c:a', 'aac',
-              '-b:a', '128k'
+              '-b:a', '128k',
+              '-movflags', '+faststart'  // Optimize for web streaming
             ])
-            .save(outputFile);
-    
+            .output(outputFile); // Changed from .save() to .output() to match successful pattern
+          
           // Start progress at 0%
           this.safeEmit('processing-progress', { 
             progress: 0,
-            task: 'Preparing aspect ratio adjustment',
-            jobId // Add jobId here
+            task: 'Preparing video re-encoding',
+            jobId
           });
-  
+              
           command.on('start', (cmdline) => {
-            this.logger.log(`FFmpeg command started: ${cmdline}`);
-            // Emit a 5% progress for starting
+            this.logger.log(`FFmpeg re-encoding command started: ${cmdline}`);
+            // Emit a 0% progress for starting
             this.safeEmit('processing-progress', { 
               progress: 0, 
-              task: 'Starting aspect ratio adjustment',
-              jobId // Add jobId here
+              task: 'Starting video re-encoding',
+              jobId
             });
           });
           
@@ -394,8 +432,8 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
                 // Emit progress to all clients WITH jobId
                 this.safeEmit('processing-progress', { 
                   progress: progressPercent,
-                  task: `Adjusting aspect ratio ${speedInfo}`,
-                  jobId // Add jobId to the event data
+                  task: `Re-encoding video ${speedInfo}`,
+                  jobId
                 });
                 
                 // Log the progress for debugging
@@ -420,16 +458,15 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
                 // Emit progress event
                 this.safeEmit('processing-progress', { 
                   progress: scaledPercent,
-                  task: `Adjusting aspect ratio (${percent}%)`,
-                  jobId // Add jobId here
+                  task: `Re-encoding video (${percent}%)`,
+                  jobId
                 });
-                
               }
             }
           });
-  
+    
           command.on('end', () => {
-            this.logger.log(`Successfully created 16:9 version with blurred background: ${outputFile}`);
+            this.logger.log(`Successfully re-encoded video: ${outputFile}`);
             
             // Delete the original video safely
             if (this.safeDeleteFile(videoFile)) {
@@ -442,19 +479,20 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
             this.lastReportedProgress.set(progressKey, 100);
             this.safeEmit('processing-progress', { 
               progress: 100,
-              task: 'Processing completed',
-              jobId // Add jobId here
+              task: 'Video re-encoding completed',
+              jobId
             });
             
             resolve(outputFile);
           });          
           
           command.on('error', (err) => {
-            this.logger.error(`Error creating blurred background version: ${err.message}`);
+            this.logger.error(`Error re-encoding video: ${err.message}`);
             
             // Emit error event
             this.safeEmit('processing-failed', {
               error: err.message,
+              jobId
             });
             
             resolve(null);
@@ -470,6 +508,23 @@ async fixAspectRatio(videoFile: string, jobId?: string): Promise<string | null> 
     }
   }
 
+  // Helper methods for quality settings
+  private getPreset(quality?: 'high' | 'medium' | 'low'): string {
+    switch (quality) {
+      case 'high': return 'slow';     // Higher quality, slower encoding
+      case 'low': return 'ultrafast'; // Faster encoding, lower quality
+      default: return 'medium';       // Balanced
+    }
+  }
+
+  private getCRF(quality?: 'high' | 'medium' | 'low'): string {
+    switch (quality) {
+      case 'high': return '18';   // Very high quality
+      case 'low': return '28';    // Lower quality
+      default: return '23';       // Default balanced quality
+    }
+  }
+  
   private safeDeleteFile(filePath: string): boolean {
     if (!filePath) return false;
     
