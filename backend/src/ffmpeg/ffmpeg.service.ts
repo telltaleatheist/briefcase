@@ -7,10 +7,9 @@ import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 
-// Import the binary installers directly
+// Import only one set of installer packages
 import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
-import { execSync } from 'child_process';
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -23,9 +22,8 @@ export class FfmpegService {
 
   constructor() {
     try {
-      // Find ffmpeg and ffprobe using the same logic as YtDlpManager
-      const ffmpegPath = this.findFFmpegPath();
-      const ffprobePath = this.findFFprobePath();
+      const ffmpegPath = ffmpegInstaller.path;
+      const ffprobePath = ffprobeInstaller.path;
       
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegPath);
@@ -35,163 +33,8 @@ export class FfmpegService {
       this.logger.log(`FFprobe path: ${ffprobePath}`);
     } catch (error) {
       this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
-      throw error; // Rethrow to prevent service initialization
+      throw error;
     }
-  }
-
-  private findFFmpegPath(): string {
-    // 1. Try to find in system PATH
-    const pathFromSystem = this.findBinaryInPath('ffmpeg');
-    if (pathFromSystem) {
-      this.logger.log(`Found ffmpeg in system PATH: ${pathFromSystem}`);
-      return pathFromSystem;
-    }
-    
-    // 2. Check common installation locations based on platform
-    const fallbackPaths = this.getCommonFFmpegPaths();
-    for (const possiblePath of fallbackPaths) {
-      if (fs.existsSync(possiblePath)) {
-        this.logger.log(`Found fallback ffmpeg at: ${possiblePath}`);
-        return possiblePath;
-      }
-    }
-    
-    // 3. Fall back to the packaged binary
-    try {
-      const installerPath = ffmpegInstaller.path;
-      if (fs.existsSync(installerPath)) {
-        this.logger.log(`Using packaged ffmpeg: ${installerPath}`);
-        return installerPath;
-      }
-    } catch (error) {
-      this.logger.warn('Error accessing packaged ffmpeg:', error);
-    }
-    
-    // 4. Last resort: just return the binary name and hope it's in PATH
-    this.logger.warn('ffmpeg not found. Falling back to "ffmpeg" string.');
-    return 'ffmpeg';
-  }
-  
-  // Find ffprobe binary using enhanced logic from YtDlpManager
-  private findFFprobePath(): string {
-    // 1. Try to find in system PATH
-    const pathFromSystem = this.findBinaryInPath('ffprobe');
-    if (pathFromSystem) {
-      this.logger.log(`Found ffprobe in system PATH: ${pathFromSystem}`);
-      return pathFromSystem;
-    }
-    
-    // 2. Check common installation locations based on platform
-    const fallbackPaths = this.getCommonFFprobePaths();
-    for (const possiblePath of fallbackPaths) {
-      if (fs.existsSync(possiblePath)) {
-        this.logger.log(`Found fallback ffprobe at: ${possiblePath}`);
-        return possiblePath;
-      }
-    }
-    
-    // 3. Fall back to the packaged binary
-    try {
-      const installerPath = ffprobeInstaller.path;
-      if (fs.existsSync(installerPath)) {
-        this.logger.log(`Using packaged ffprobe: ${installerPath}`);
-        return installerPath;
-      }
-    } catch (error) {
-      this.logger.warn('Error accessing packaged ffprobe:', error);
-    }
-    
-    // 4. Last resort: just return the binary name and hope it's in PATH
-    this.logger.warn('ffprobe not found. Falling back to "ffprobe" string.');
-    return 'ffprobe';
-  }
-
-  // Helper method to find binaries in PATH (copied from YtDlpManager)
-  private findBinaryInPath(binaryName: string): string | null {
-    try {
-      const command = process.platform === 'win32' ? 'where' : 'which';
-      const result = execSync(`${command} ${binaryName}`, { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
-      if (fs.existsSync(result)) {
-        return result;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-  
-  // Get common ffmpeg paths based on platform (similar to YtDlpManager approach)
-  private getCommonFFmpegPaths(): string[] {
-    const paths: string[] = [];
-    
-    if (process.platform === 'darwin') {
-      paths.push(
-        '/usr/local/bin/ffmpeg',
-        '/opt/homebrew/bin/ffmpeg',
-        '/usr/bin/ffmpeg',
-        '/opt/local/bin/ffmpeg',
-        '/Library/Frameworks/Python.framework/Versions/Current/bin/ffmpeg'
-      );
-    } else if (process.platform === 'win32') {
-      paths.push(
-        'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
-        'C:\\Program Files (x86)\\ffmpeg\\bin\\ffmpeg.exe',
-        'C:\\ffmpeg\\bin\\ffmpeg.exe'
-      );
-    } else if (process.platform === 'linux') {
-      paths.push(
-        '/usr/bin/ffmpeg',
-        '/usr/local/bin/ffmpeg',
-        '/snap/bin/ffmpeg'
-      );
-    }
-
-    // Add a path relative to the current directory
-    paths.push(path.join(__dirname, '../bin/ffmpeg'));
-    
-    // Add platform-specific executable extension if needed
-    if (process.platform === 'win32') {
-      paths.push(path.join(__dirname, '../bin/ffmpeg.exe'));
-    }
-    
-    return paths;
-  }
-  
-  // Get common ffprobe paths based on platform
-  private getCommonFFprobePaths(): string[] {
-    const paths: string[] = [];
-    
-    if (process.platform === 'darwin') {
-      paths.push(
-        '/usr/local/bin/ffprobe',
-        '/opt/homebrew/bin/ffprobe',
-        '/usr/bin/ffprobe',
-        '/opt/local/bin/ffprobe',
-        '/Library/Frameworks/Python.framework/Versions/Current/bin/ffprobe'
-      );
-    } else if (process.platform === 'win32') {
-      paths.push(
-        'C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe',
-        'C:\\Program Files (x86)\\ffmpeg\\bin\\ffprobe.exe',
-        'C:\\ffmpeg\\bin\\ffprobe.exe'
-      );
-    } else if (process.platform === 'linux') {
-      paths.push(
-        '/usr/bin/ffprobe',
-        '/usr/local/bin/ffprobe',
-        '/snap/bin/ffprobe'
-      );
-    }
-
-    // Add a path relative to the current directory
-    paths.push(path.join(__dirname, '../bin/ffprobe'));
-    
-    // Add platform-specific executable extension if needed
-    if (process.platform === 'win32') {
-      paths.push(path.join(__dirname, '../bin/ffprobe.exe'));
-    }
-    
-    return paths;
   }
   
   // Helper method for safe WebSocket emission
@@ -254,22 +97,8 @@ export class FfmpegService {
     }
     
     try {
-      // Determine the best encoder based on platform
-      let selectedEncoder: string;
-      try {
-        const availableEncoders = execSync('ffmpeg -hide_banner -encoders').toString();
-        const useVideoToolbox = 
-          process.platform === 'darwin' && 
-          process.arch === 'arm64' && 
-          availableEncoders.includes('h264_videotoolbox');
-        
-        selectedEncoder = useVideoToolbox ? 'h264_videotoolbox' : 'libx264';
-        
-        this.logger.log(`Selected encoder: ${selectedEncoder}`);
-      } catch (encoderDetectionError) {
-        this.logger.warn(`Failed to detect encoder, falling back to libx264: ${encoderDetectionError}`);
-        selectedEncoder = 'libx264';
-      }
+      // Use a single default encoder without detection
+      const selectedEncoder = 'libx264';  
   
       return new Promise<string | null>((resolve, reject) => {
         ffmpeg.ffprobe(videoFile, (err, metadata) => {
@@ -314,9 +143,6 @@ export class FfmpegService {
           // Is it a vertical video?
           const isVertical = aspectRatio <= 1.0;
           
-          // Check if it's close to 16:9 (1.78)
-          const is16_9 = aspectRatio >= 1.75 && aspectRatio <= 1.8;
-          
           // Create output filename
           const fileDir = path.dirname(videoFile);
           const fileName = path.basename(videoFile);
@@ -344,32 +170,20 @@ export class FfmpegService {
             filterOptions.push('-filter_complex', baseFilter);
           }
           
-          // Encoder-specific options - using the exact settings that worked in your logs
-          const encoderOptions = selectedEncoder === 'h264_videotoolbox' 
-          ? [
-              '-c:v', 'h264_videotoolbox', 
-              '-b:v', '3M', 
-              '-maxrate', '3M', 
-              '-bufsize', '6M',
-              '-allow_sw', '1',  // Allow software fallback if hardware encoding fails
-              '-profile:v', 'high'  // Use high profile for better compatibility
-            ]  
-          : ['-c:v', 'libx264', '-b:v', '3M']; // Simplified libx264 options to match working command
+          // Simplified encoder options
+          const encoderOptions = ['-c:v', selectedEncoder, '-b:v', '3M'];
           
-          // Create FFmpeg command - modified to match the successful command
+          // Create FFmpeg command
           let command = ffmpeg(videoFile)
             .outputOptions([
-              // Aspect ratio filter (if needed)
               ...filterOptions,
-              
-              // Encoding options for compatibility
               '-pix_fmt', 'yuv420p',
               ...encoderOptions,
               '-c:a', 'aac',
               '-b:a', '128k',
-              '-movflags', '+faststart'  // Optimize for web streaming
+              '-movflags', '+faststart'
             ])
-            .output(outputFile); // Changed from .save() to .output() to match successful pattern
+            .output(outputFile);
           
           // Start progress at 0%
           this.safeEmit('processing-progress', { 
@@ -380,7 +194,6 @@ export class FfmpegService {
               
           command.on('start', (cmdline) => {
             this.logger.log(`FFmpeg re-encoding command started: ${cmdline}`);
-            // Emit a 0% progress for starting
             this.safeEmit('processing-progress', { 
               progress: 0, 
               task: 'Starting video re-encoding',
@@ -435,32 +248,6 @@ export class FfmpegService {
                   task: `Re-encoding video ${speedInfo}`,
                   jobId
                 });
-                
-                // Log the progress for debugging
-                this.logger.debug(`Progress: ${progressPercent}% (${currentTimeInSeconds}s / ${effectiveDuration}s)`);
-              }
-            }
-          });
-            
-          command.on('progress', (progress) => {
-            // Fallback progress mechanism (may not always work reliably)
-            if (progress && typeof progress.percent === 'number') {
-              const percent = Math.round(progress.percent * 100) / 100;
-              
-              // Scale to 5-95% range
-              const scaledPercent = Math.max(5, Math.min(Math.round(5 + (percent * 0.9)), 95));
-              
-              // Only update if greater than last reported
-              const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
-              if (scaledPercent > lastProgress) {
-                this.lastReportedProgress.set(progressKey, scaledPercent);
-                
-                // Emit progress event
-                this.safeEmit('processing-progress', { 
-                  progress: scaledPercent,
-                  task: `Re-encoding video (${percent}%)`,
-                  jobId
-                });
               }
             }
           });
@@ -471,8 +258,6 @@ export class FfmpegService {
             // Delete the original video safely
             if (this.safeDeleteFile(videoFile)) {
               this.logger.log(`Deleted original video: ${videoFile}`);
-            } else {
-              this.logger.debug(`Original file couldn't be deleted: ${videoFile}`);
             }
             
             // Emit 100% completion
@@ -505,23 +290,6 @@ export class FfmpegService {
     } catch (error) {
       this.logger.error('CRITICAL: Unexpected error in aspect ratio processing:', error);
       return null;
-    }
-  }
-
-  // Helper methods for quality settings
-  private getPreset(quality?: 'high' | 'medium' | 'low'): string {
-    switch (quality) {
-      case 'high': return 'slow';     // Higher quality, slower encoding
-      case 'low': return 'ultrafast'; // Faster encoding, lower quality
-      default: return 'medium';       // Balanced
-    }
-  }
-
-  private getCRF(quality?: 'high' | 'medium' | 'low'): string {
-    switch (quality) {
-      case 'high': return '18';   // Very high quality
-      case 'low': return '28';    // Lower quality
-      default: return '23';       // Default balanced quality
     }
   }
   
