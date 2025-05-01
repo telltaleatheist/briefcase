@@ -8,6 +8,9 @@ import * as http from 'http';
 import { Server } from 'http';
 import * as fs from 'fs';
 import { EnvironmentUtil } from './environment.util';
+import { ConfigManager } from '../config/ConfigManager';
+import { PathValidator } from '../utilities/PathValidator';
+import { ConfigDialog } from '../utilities/configDialog';
 
 // Check if the app is packaged
 const isPackaged = app.isPackaged;
@@ -73,6 +76,111 @@ if (!gotTheLock) {
     }
   });
 
+  // Configuration manager for executable paths
+  const configManager = ConfigManager.getInstance();
+
+  /**
+   * Check if required executables are configured and valid
+   */
+  async function checkRequiredExecutables(): Promise<boolean> {
+    log.info('Checking required executables configuration...');
+    
+    // If no configuration exists, return false immediately
+    if (!configManager.hasRequiredPaths()) {
+      log.info('Required paths are not configured');
+      return false;
+    }
+    
+    // Get configuration
+    const config = configManager.getConfig();
+    
+    // Set environment variables with the paths
+    process.env.FFMPEG_PATH = config.ffmpegPath;
+    process.env.FFPROBE_PATH = config.ffprobePath;
+    process.env.YT_DLP_PATH = config.ytDlpPath;
+    
+    log.info(`Using configured paths:
+      FFmpeg: ${config.ffmpegPath}
+      FFprobe: ${config.ffprobePath}
+      yt-dlp: ${config.ytDlpPath}`);
+    
+    // Validate all paths
+    const validation = await PathValidator.validateAllPaths(config);
+    
+    if (!validation.allValid) {
+      log.error('Some required executables are invalid:');
+      if (!validation.ffmpeg.isValid) {
+        log.error(`FFmpeg: ${validation.ffmpeg.error}`);
+      }
+      if (!validation.ffprobe.isValid) {
+        log.error(`FFprobe: ${validation.ffprobe.error}`);
+      }
+      if (!validation.ytDlp.isValid) {
+        log.error(`yt-dlp: ${validation.ytDlp.error}`);
+      }
+      return false;
+    }
+    
+    log.info('All required executables are valid');
+    return true;
+  }
+
+  /**
+   * Show configuration dialog for required executables
+   */
+  async function showExecutablesConfigDialog(): Promise<boolean> {
+    log.info('Showing executables configuration dialog...');
+    
+    // Create dialog with a callback to update environment variables
+    const configDialog = new ConfigDialog(() => {
+      const config = configManager.getConfig();
+      process.env.FFMPEG_PATH = config.ffmpegPath;
+      process.env.FFPROBE_PATH = config.ffprobePath;
+      process.env.YT_DLP_PATH = config.ytDlpPath;
+      
+      log.info(`Updated environment variables:
+        FFMPEG_PATH: ${process.env.FFMPEG_PATH}
+        FFPROBE_PATH: ${process.env.FFPROBE_PATH}
+        YT_DLP_PATH: ${process.env.YT_DLP_PATH}`);
+    });
+    
+    // Show dialog and return result
+    return configDialog.showDialog();
+  }
+
+  // Add the following IPC handlers
+
+  // Check path configuration
+  ipcMain.handle('check-path-config', async () => {
+    const result = await checkRequiredExecutables();
+    return { isValid: result };
+  });
+  
+  // Show path configuration dialog
+  ipcMain.handle('show-path-config-dialog', async () => {
+    return showExecutablesConfigDialog();
+  });
+  
+  // Get current path configuration
+  ipcMain.handle('get-path-config', () => {
+    return configManager.getConfig();
+  });
+  
+  // Update path configuration
+  ipcMain.handle('update-path-config', (_, config) => {
+    const success = configManager.updateConfig(config);
+    
+    if (success) {
+      // Update environment variables
+      const updatedConfig = configManager.getConfig();
+      process.env.FFMPEG_PATH = updatedConfig.ffmpegPath;
+      process.env.FFPROBE_PATH = updatedConfig.ffprobePath;
+      process.env.YT_DLP_PATH = updatedConfig.ytDlpPath;
+    }
+    
+    return { success };
+  });
+  
   // Keep a global reference of the window object
   let mainWindow: BrowserWindow | null = null;
   let backendStarted = false;
@@ -518,33 +626,57 @@ if (!gotTheLock) {
     log.info('Electron app ready, initializing...');
     logActiveProcesses();
 
-    // Log the paths we're using
-    log.info(`Using yt-dlp: ${process.env.YT_DLP_PATH}`);
-    log.info(`Using ffmpeg: ${process.env.FFMPEG_PATH}`);
-    log.info(`Using ffprobe: ${process.env.FFPROBE_PATH}`);
-
-  // Start the backend first 
-  const backendStarted = await startBackendServer();
+    let executablesConfigured = await checkRequiredExecutables();
   
-  if (!backendStarted) {
-    // Show error window instead of normal window
-    showBackendErrorWindow();
-  } else {
-    // Then create the main window
-    createWindow();
-  }
-
-  app.on('activate', () => {
-    // On macOS it's common to re-create a window when the dock icon is clicked
-    if (BrowserWindow.getAllWindows().length === 0) {
-      if (backendStarted) {
-        createWindow();
-      } else {
-        showBackendErrorWindow();
+    // If not configured or invalid, show configuration dialog
+    if (!executablesConfigured) {
+      log.info('Required executables not configured or invalid, showing dialog...');
+      const dialogResult = await showExecutablesConfigDialog();
+      
+      if (!dialogResult) {
+        log.info('User cancelled configuration dialog, exiting application');
+        app.quit();
+        return;
+      }
+      
+      // Check again after dialog
+      executablesConfigured = await checkRequiredExecutables();
+      
+      if (!executablesConfigured) {
+        log.error('Still unable to configure required executables, showing error and exiting');
+        dialog.showErrorBox(
+          'Configuration Error',
+          'Failed to configure required executables. Please make sure FFmpeg, FFprobe, and yt-dlp are installed correctly.'
+        );
+        app.quit();
+        return;
       }
     }
+    
+    log.info('Required executables are properly configured, continuing startup...');
+    
+    // Start the backend first 
+    const backendStarted = await startBackendServer();
+  
+    if (!backendStarted) {
+      // Show error window instead of normal window
+      showBackendErrorWindow();
+    } else {
+      // Then create the main window
+      createWindow();
+    }
+  
+    app.on('activate', () => {
+      // On macOS it's common to re-create a window when the dock icon is clicked
+      if (BrowserWindow.getAllWindows().length === 0) {
+        if (backendStarted) {
+          createWindow();
+        } else {
+          showBackendErrorWindow();
+        }
+      }
+    });
   });
-});
 
   function showBackendErrorWindow(): void {
     const errorWindow = new BrowserWindow({
@@ -625,7 +757,7 @@ if (!gotTheLock) {
         </body>
       </html>
     `;
-    
+
     // Load the HTML content
     errorWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`);
     

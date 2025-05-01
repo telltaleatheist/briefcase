@@ -17,12 +17,20 @@ export class YtDlpManager {
   }
 
   private createYtDlpWrap(): YTDlpWrap {
+    // First try to use the configured path from environment variable
+    if (process.env.YT_DLP_PATH && fs.existsSync(process.env.YT_DLP_PATH)) {
+      log.info(`Using configured yt-dlp path: ${process.env.YT_DLP_PATH}`);
+      return new YTDlpWrap(process.env.YT_DLP_PATH);
+    }
+
+    // Fall back to system PATH
     const pathFromSystem = this.findBinaryInPath('yt-dlp');
     if (pathFromSystem) {
       log.info(`Found yt-dlp in system PATH: ${pathFromSystem}`);
       return new YTDlpWrap(pathFromSystem);
     }
 
+    // Try common locations
     const fallbackPaths = this.getCommonYtDlpPaths();
     for (const possiblePath of fallbackPaths) {
       if (fs.existsSync(possiblePath)) {

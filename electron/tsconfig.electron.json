@@ -1,29 +1,30 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020", "DOM"],
+    "target": "ES2021",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "outDir": "../dist-electron/main",
-    "rootDir": "./",
-    "baseUrl": ".",
-    "strict": true,
-    "moduleResolution": "node",
+    "rootDir": "..",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "sourceMap": true,
     "declaration": false,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"],
-    "skipLibCheck": true
+    "strict": true,
+    "skipLibCheck": true,
+    "noImplicitAny": false
   },
-  "include": ["./**/*.ts"],
+  "include": [
+    "../electron/**/*.ts",
+    "../utilities/**/*.ts",
+    "../config/**/*.ts"
+  ],
   "exclude": [
-    "node_modules",
-    "backend/**/*",
-    "frontend/**/*",
-    "preload/**/*",
-    "dist",
+    "../node_modules",
+    "../backend/**/*",
+    "../frontend/**/*",
+    "../dist",
     "**/*.spec.ts"
   ]
 }

@@ -7,10 +7,6 @@ import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 
-// Import only one set of installer packages
-import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
-import * as ffprobeInstaller from '@ffprobe-installer/ffprobe';
-
 @WebSocketGateway({ cors: true })
 @Injectable()
 export class FfmpegService {
@@ -22,8 +18,19 @@ export class FfmpegService {
 
   constructor() {
     try {
-      const ffmpegPath = ffmpegInstaller.path;
-      const ffprobePath = ffprobeInstaller.path;
+      // Use configured paths from environment variables first
+      const ffmpegPath = process.env.FFMPEG_PATH || 
+                        (require('@ffmpeg-installer/ffmpeg') || {}).path;
+      const ffprobePath = process.env.FFPROBE_PATH || 
+                         (require('@ffprobe-installer/ffprobe') || {}).path;
+      
+      if (!ffmpegPath) {
+        throw new Error('FFmpeg path not found. Please configure it in the application settings.');
+      }
+      
+      if (!ffprobePath) {
+        throw new Error('FFprobe path not found. Please configure it in the application settings.');
+      }
       
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegPath);
@@ -31,12 +38,21 @@ export class FfmpegService {
       
       this.logger.log(`FFmpeg path: ${ffmpegPath}`);
       this.logger.log(`FFprobe path: ${ffprobePath}`);
+      
+      // Verify if the paths are valid by checking file existence
+      if (!fs.existsSync(ffmpegPath)) {
+        throw new Error(`FFmpeg executable not found at path: ${ffmpegPath}`);
+      }
+      
+      if (!fs.existsSync(ffprobePath)) {
+        throw new Error(`FFprobe executable not found at path: ${ffprobePath}`);
+      }
     } catch (error) {
       this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
       throw error;
     }
   }
-  
+    
   // Helper method for safe WebSocket emission
   private safeEmit(event: string, data: any): void {
     if (this.server) {

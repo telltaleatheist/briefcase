@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Configure Required Executables</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+      background-color: #f9f9f9;
+    }
+    .container {
+      max-width: 550px;
+      margin: 0 auto;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 24px;
+    }
+    h2 {
+      margin-top: 0;
+      color: #333;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+    p {
+      color: #666;
+      line-height: 1.5;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    .path-input-container {
+      display: flex;
+      gap: 8px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background-color: #2980b9;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #3498db;
+    }
+    button:active {
+      background-color: #1c6ea4;
+    }
+    button.secondary {
+      background-color: #7f8c8d;
+    }
+    button.secondary:hover {
+      background-color: #95a5a6;
+    }
+    button.success {
+      background-color: #27ae60;
+    }
+    button.success:hover {
+      background-color: #2ecc71;
+    }
+    button.danger {
+      background-color: #c0392b;
+    }
+    button.danger:hover {
+      background-color: #e74c3c;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 5px;
+      font-size: 14px;
+    }
+    .status.error {
+      background-color: #ffebee;
+      color: #c0392b;
+    }
+    .status.success {
+      background-color: #e8f5e9;
+      color: #27ae60;
+    }
+    .status.info {
+      background-color: #e3f2fd;
+      color: #2980b9;
+    }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 24px;
+      gap: 10px;
+    }
+    .version-info {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+    .autodetect-container {
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .loader {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(0,0,0,0.1);
+      border-radius: 50%;
+      border-top-color: #3498db;
+      animation: spin 1s ease-in-out infinite;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .hidden {
+      display: none;
+    }
+    .one-click-container {
+      text-align: center;
+      margin-bottom: 20px;
+      padding: 15px;
+      background-color: #f1f9fe;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Configure Required Executables</h2>
+    <p>
+      Clippy needs to know where to find the following executables on your system.
+      These are required for downloading and processing videos.
+    </p>
+    
+    <div class="one-click-container">
+      <p>Quick Setup: Select a folder where all three executables are located</p>
+      <button id="btnSelectDirectory">Select Directory</button>
+      <div id="directoryStatus" class="status hidden"></div>
+    </div>
+    
+    <div class="autodetect-container">
+      <button id="btnAutoDetect">Auto-Detect Executables</button>
+      <div id="autoDetectLoader" class="loader hidden"></div>
+      <div id="autoDetectStatus" class="status hidden"></div>
+    </div>
+    
+    <div class="form-group">
+      <label for="ffmpegPath">FFmpeg Executable:</label>
+      <div class="path-input-container">
+        <input type="text" id="ffmpegPath" readonly>
+        <button id="btnSelectFFmpeg">Browse</button>
+      </div>
+      <div id="ffmpegStatus" class="status hidden"></div>
+      <div id="ffmpegVersion" class="version-info"></div>
+    </div>
+    
+    <div class="form-group">
+      <label for="ffprobePath">FFprobe Executable:</label>
+      <div class="path-input-container">
+        <input type="text" id="ffprobePath" readonly>
+        <button id="btnSelectFFprobe">Browse</button>
+      </div>
+      <div id="ffprobeStatus" class="status hidden"></div>
+      <div id="ffprobeVersion" class="version-info"></div>
+    </div>
+    
+    <div class="form-group">
+      <label for="ytDlpPath">yt-dlp Executable:</label>
+      <div class="path-input-container">
+        <input type="text" id="ytDlpPath" readonly>
+        <button id="btnSelectYtDlp">Browse</button>
+      </div>
+      <div id="ytDlpStatus" class="status hidden"></div>
+      <div id="ytDlpVersion" class="version-info"></div>
+    </div>
+    
+    <div class="actions">
+      <button id="btnExit" class="danger">Exit Application</button>
+      <button id="btnSave" class="success" disabled>Save Configuration</button>
+    </div>
+  </div>
+  
+  <script>
+    // Get DOM elements
+    const ffmpegPathInput = document.getElementById('ffmpegPath');
+    const ffprobePathInput = document.getElementById('ffprobePath');
+    const ytDlpPathInput = document.getElementById('ytDlpPath');
+    
+    const btnSelectFFmpeg = document.getElementById('btnSelectFFmpeg');
+    const btnSelectFFprobe = document.getElementById('btnSelectFFprobe');
+    const btnSelectYtDlp = document.getElementById('btnSelectYtDlp');
+    const btnSave = document.getElementById('btnSave');
+    const btnExit = document.getElementById('btnExit');
+    const btnAutoDetect = document.getElementById('btnAutoDetect');
+    const btnSelectDirectory = document.getElementById('btnSelectDirectory');
+    
+    const ffmpegStatus = document.getElementById('ffmpegStatus');
+    const ffprobeStatus = document.getElementById('ffprobeStatus');
+    const ytDlpStatus = document.getElementById('ytDlpStatus');
+    
+    const ffmpegVersion = document.getElementById('ffmpegVersion');
+    const ffprobeVersion = document.getElementById('ffprobeVersion');
+    const ytDlpVersion = document.getElementById('ytDlpVersion');
+    
+    const autoDetectLoader = document.getElementById('autoDetectLoader');
+    const autoDetectStatus = document.getElementById('autoDetectStatus');
+    const directoryStatus = document.getElementById('directoryStatus');
+    
+    // State management
+    let configState = {
+      ffmpegPath: '',
+      ffprobePath: '',
+      ytDlpPath: ''
+    };
+    
+    // Check if all required paths are set
+    function checkAllPathsSet() {
+      const isComplete = configState.ffmpegPath && configState.ffprobePath && configState.ytDlpPath;
+      btnSave.disabled = !isComplete;
+      return isComplete;
+    }
+    
+    // Update the UI when a path is set
+    function updatePathUI(type, path, isValid, version, error) {
+      const input = type === 'ffmpeg' ? ffmpegPathInput : 
+                    type === 'ffprobe' ? ffprobePathInput : ytDlpPathInput;
+      const status = type === 'ffmpeg' ? ffmpegStatus : 
+                     type === 'ffprobe' ? ffprobeStatus : ytDlpStatus;
+      const versionElement = type === 'ffmpeg' ? ffmpegVersion : 
+                            type === 'ffprobe' ? ffprobeVersion : ytDlpVersion;
+      
+      input.value = path || '';
+      
+      if (path) {
+        if (isValid) {
+          status.textContent = 'Valid executable found';
+          status.className = 'status success';
+          versionElement.textContent = version ? `Version: ${version}` : '';
+        } else {
+          status.textContent = error || 'Invalid executable';
+          status.className = 'status error';
+          versionElement.textContent = '';
+        }
+        status.classList.remove('hidden');
+      } else {
+        status.classList.add('hidden');
+        versionElement.textContent = '';
+      }
+      
+      checkAllPathsSet();
+    }
+    
+    // Load any existing configuration
+    async function loadExistingConfig() {
+      try {
+        const result = await window.electronAPI.checkConfig();
+        
+        if (result.isValid) {
+          // Request saved paths
+          const config = await window.electronAPI.getConfig();
+          
+          if (config) {
+            configState = {
+              ffmpegPath: config.ffmpegPath || '',
+              ffprobePath: config.ffprobePath || '',
+              ytDlpPath: config.ytDlpPath || ''
+            };
+            
+            // Update UI
+            ffmpegPathInput.value = configState.ffmpegPath;
+            ffprobePathInput.value = configState.ffprobePath;
+            ytDlpPathInput.value = configState.ytDlpPath;
+            
+            if (result.versions) {
+              ffmpegVersion.textContent = result.versions.ffmpeg ? `Version: ${result.versions.ffmpeg}` : '';
+              ffprobeVersion.textContent = result.versions.ffprobe ? `Version: ${result.versions.ffprobe}` : '';
+              ytDlpVersion.textContent = result.versions.ytDlp ? `Version: ${result.versions.ytDlp}` : '';
+            }
+            
+            checkAllPathsSet();
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load configuration:', error);
+      }
+    }
+    
+    // Select FFmpeg executable
+    btnSelectFFmpeg.addEventListener('click', async () => {
+      const result = await window.electronAPI.selectExecutable('ffmpeg');
+      
+      if (result.success) {
+        configState.ffmpegPath = result.path;
+        updatePathUI('ffmpeg', result.path, true, result.version);
+      } else if (result.path) {
+        updatePathUI('ffmpeg', result.path, false, null, result.error);
+      }
+    });
+    
+    // Select FFprobe executable
+    btnSelectFFprobe.addEventListener('click', async () => {
+      const result = await window.electronAPI.selectExecutable('ffprobe');
+      
+      if (result.success) {
+        configState.ffprobePath = result.path;
+        updatePathUI('ffprobe', result.path, true, result.version);
+      } else if (result.path) {
+        updatePathUI('ffprobe', result.path, false, null, result.error);
+      }
+    });
+    
+    // Select yt-dlp executable
+    btnSelectYtDlp.addEventListener('click', async () => {
+      const result = await window.electronAPI.selectExecutable('ytdlp');
+      
+      if (result.success) {
+        configState.ytDlpPath = result.path;
+        updatePathUI('ytdlp', result.path, true, result.version);
+      } else if (result.path) {
+        updatePathUI('ytdlp', result.path, false, null, result.error);
+      }
+    });
+    
+    // Auto-detect executables
+    btnAutoDetect.addEventListener('click', async () => {
+      btnAutoDetect.disabled = true;
+      autoDetectLoader.classList.remove('hidden');
+      autoDetectStatus.classList.add('hidden');
+      
+      try {
+        const result = await window.electronAPI.autoDetectExecutables();
+        
+        let detected = false;
+        
+        if (result.ffmpeg) {
+          if (result.ffmpeg.isValid) {
+            configState.ffmpegPath = result.ffmpeg.path;
+            updatePathUI('ffmpeg', result.ffmpeg.path, true, result.ffmpeg.version);
+            detected = true;
+          }
+        }
+        
+        if (result.ffprobe) {
+          if (result.ffprobe.isValid) {
+            configState.ffprobePath = result.ffprobe.path;
+            updatePathUI('ffprobe', result.ffprobe.path, true, result.ffprobe.version);
+            detected = true;
+          }
+        }
+        
+        if (result.ytDlp) {
+          if (result.ytDlp.isValid) {
+            configState.ytDlpPath = result.ytDlp.path;
+            updatePathUI('ytdlp', result.ytDlp.path, true, result.ytDlp.version);
+            detected = true;
+          }
+        }
+        
+        if (detected) {
+          autoDetectStatus.textContent = 'Some executables were found in your PATH';
+          autoDetectStatus.className = 'status success';
+        } else {
+          autoDetectStatus.textContent = 'No executables found. Please select them manually.';
+          autoDetectStatus.className = 'status error';
+        }
+        
+        autoDetectStatus.classList.remove('hidden');
+      } catch (error) {
+        autoDetectStatus.textContent = 'Error detecting executables: ' + error.message;
+        autoDetectStatus.className = 'status error';
+        autoDetectStatus.classList.remove('hidden');
+      } finally {
+        btnAutoDetect.disabled = false;
+        autoDetectLoader.classList.add('hidden');
+      }
+    });
+    
+    // Select directory containing all executables
+    btnSelectDirectory.addEventListener('click', async () => {
+      btnSelectDirectory.disabled = true;
+      directoryStatus.classList.add('hidden');
+      
+      try {
+        const result = await window.electronAPI.selectExecutablesDirectory();
+        
+        if (result.success) {
+          let found = false;
+          
+          if (result.ffmpegPath) {
+            configState.ffmpegPath = result.ffmpegPath;
+            updatePathUI('ffmpeg', result.ffmpegPath, true);
+            found = true;
+          }
+          
+          if (result.ffprobePath) {
+            configState.ffprobePath = result.ffprobePath;
+            updatePathUI('ffprobe', result.ffprobePath, true);
+            found = true;
+          }
+          
+          if (result.ytDlpPath) {
+            configState.ytDlpPath = result.ytDlpPath;
+            updatePathUI('ytdlp', result.ytDlpPath, true);
+            found = true;
+          }
+          
+          if (found) {
+            directoryStatus.textContent = `Some executables found in ${result.directory}`;
+            directoryStatus.className = 'status success';
+          } else {
+            directoryStatus.textContent = `No executables found in ${result.directory}`;
+            directoryStatus.className = 'status error';
+          }
+          
+          directoryStatus.classList.remove('hidden');
+        }
+      } finally {
+        btnSelectDirectory.disabled = false;
+      }
+    });
+    
+    // Save configuration
+    btnSave.addEventListener('click', async () => {
+      btnSave.disabled = true;
+      
+      try {
+        const result = await window.electronAPI.saveConfig(configState);
+        
+        if (result.success) {
+          window.electronAPI.configSaved();
+        } else {
+          // Show error messages
+          let anyError = false;
+          
+          if (result.errors.ffmpeg) {
+            updatePathUI('ffmpeg', configState.ffmpegPath, false, null, result.errors.ffmpeg);
+            anyError = true;
+          }
+          
+          if (result.errors.ffprobe) {
+            updatePathUI('ffprobe', configState.ffprobePath, false, null, result.errors.ffprobe);
+            anyError = true;
+          }
+          
+          if (result.errors.ytDlp) {
+            updatePathUI('ytdlp', configState.ytDlpPath, false, null, result.errors.ytDlp);
+            anyError = true;
+          }
+          
+          if (!anyError) {
+            alert('Failed to save configuration. Please try again.');
+          }
+          
+          btnSave.disabled = false;
+        }
+      } catch (error) {
+        alert('Error saving configuration: ' + error.message);
+        btnSave.disabled = false;
+      }
+    });
+    
+    // Exit application
+    btnExit.addEventListener('click', () => {
+      window.electronAPI.exitApp();
+    });
+    
+    // Initialize
+    loadExistingConfig();
+        </script>
+      </body>
+      </html>

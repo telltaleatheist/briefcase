@@ -2,16 +2,16 @@
   "name": "clippy",
   "version": "1.0.0",
   "description": "Video downloader application using NestJS and Angular",
-  "main": "./dist-electron/main/main.js",
+  "main": "dist-electron/main/electron/main.js",
   "scripts": {
     "install:all": "npm install && npm run install:backend && npm run install:frontend && npm run install:electron",
     "install:backend": "cd backend && npm install",
     "install:frontend": "cd frontend && npm install",
     "install:electron": "cd electron && [ -f package.json ] && npm install || echo 'No electron/package.json found, skipping...'",
     "clean": "rm -rf dist-electron mac-arm64 mac-arm64* *.dmg *.dmg.blockmap",
-    "clean:all": "npm run clean && dist frontend/dist backend/dist",
+    "clean:all": "npm run clean && rm -rf frontend/dist backend/dist",
     "build:all": "npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
-    "build:backend": "tsc -p backend/tsconfig.json && cd backend && npm run build",
+    "build:backend": "tsc -p backend/tsconfig.json && tsc-alias -p backend/tsconfig.json && cd backend && npm run build",
     "build:frontend": "tsc -p frontend/tsconfig.json && cd frontend && npm run build",
     "build:electron": "tsc -p electron/tsconfig.electron.json",
     "build:preload": "tsc -p electron/tsconfig.preload.json",
@@ -38,16 +38,31 @@
   "author": "Your Name",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^22.15.2",
+    "@electron/typescript-definitions": "^9.1.2",
+    "@types/electron": "^1.6.12",
+    "@types/node": "^22.15.3",
     "cross-env": "^7.0.3",
-    "electron": "^35.1.4",
+    "electron": "^36.0.1",
     "electron-builder": "^24.13.3",
+    "karma": "^6.4.4",
     "rimraf": "^6.0.1",
+    "tsc-alias": "^1.8.15",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.8.3"
   },
+  "exports": {
+    "./config": "./config/index.ts",
+    "./utilities": "./utilities/index.ts",
+    "./electron": "./electron/index.ts",
+    "./download": "./electron/utilities/download.ts"
+  },
+  "imports": {
+    "#config/*": "./config/*",
+    "#utilities/*": "./utilities/*",
+    "#electron/*": "./electron/*"
+  },
   "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "@angular/core": "^19.2.9",
     "@types/fluent-ffmpeg": "^2.1.27",
     "electron-log": "^5.3.3",
     "electron-updater": "^6.6.2",
@@ -71,12 +86,6 @@
       "backend/dist/**/*",
       "backend/package.json",
       "frontend/dist/clippy-frontend/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "backend/node_modules",
-        "to": "backend/node_modules"
-      }
     ],
     "mac": {
       "category": "public.app-category.utilities",
@@ -119,5 +128,8 @@
       "provider": "github",
       "releaseType": "release"
     }
+  },
+  "optionalDependencies": {
+    "node-ffmpeg-darwin-x64": "^5.1.1"
   }
 }

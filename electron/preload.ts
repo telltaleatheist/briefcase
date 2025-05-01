@@ -55,7 +55,25 @@ contextBridge.exposeInMainWorld('electron', {
         // In production, binaries are in the resources/bin directory
         return path.join(resourcesPath, 'bin', executable);
       }
-    }
+    },
+    checkPathConfig: () => {
+      return ipcRenderer.invoke('check-path-config');
+    },
+    
+    // Notify about missing executables
+    showPathConfigDialog: () => {
+      return ipcRenderer.invoke('show-path-config-dialog');
+    },
+    
+    // Get current configuration
+    getPathConfig: () => {
+      return ipcRenderer.invoke('get-path-config');
+    },
+    
+    // Update configuration programmatically
+    updatePathConfig: (config: any) => {
+      return ipcRenderer.invoke('update-path-config', config);
+    },
   },
   // Add all your other IPC handlers here
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),

@@ -1,8 +1,12 @@
 {
   "compileOnSave": true,
   "exclude": [
-  "**/*.spec.ts",
-  "test.ts"
+    "**/*.spec.ts",
+    "test.ts"
+  ],
+  "include": [
+    "src/**/*.ts",
+    "src/types/**/*.d.ts"
   ],
   "compilerOptions": {
     "skipLibCheck": true,

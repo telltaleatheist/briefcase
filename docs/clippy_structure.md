@@ -20,7 +20,6 @@
 │   │   │       ├── download.interface.d.ts
 │   │   │       ├── download.interface.js
 │   │   │       └── download.interface.js.map
-│   │   ├── common 3
 │   │   ├── config
 │   │   │   ├── environment.d.ts
 │   │   │   ├── environment.js
@@ -40,7 +39,10 @@
 │   │   │   ├── downloader.module.js.map
 │   │   │   ├── downloader.service.d.ts
 │   │   │   ├── downloader.service.js
-│   │   │   └── downloader.service.js.map
+│   │   │   ├── downloader.service.js.map
+│   │   │   ├── yt-dlp-manager.d.ts
+│   │   │   ├── yt-dlp-manager.js
+│   │   │   └── yt-dlp-manager.js.map
 │   │   ├── ffmpeg
 │   │   │   ├── ffmpeg.controller.d.ts
 │   │   │   ├── ffmpeg.controller.js
@@ -64,7 +66,6 @@
 │   │       ├── path.service.d.ts
 │   │       ├── path.service.js
 │   │       └── path.service.js.map
-│   ├── downloads
 │   ├── package-lock.json
 │   ├── package.json
 │   ├── src
@@ -105,10 +106,14 @@
 │   ├── tsconfig.build.json
 │   ├── tsconfig.build.tsbuildinfo
 │   ├── tsconfig.json
-│   ├── tsconfig.tsbuildinfo
-│   └── uploads
+│   └── tsconfig.tsbuildinfo
+├── config
+│   ├── ConfigManager.ts
+│   └── index.ts
 ├── docs
 │   ├── clippy_structure.md
+│   ├── completed_app_structure.md
+│   ├── config-integration-guide.md
 │   ├── development.md
 │   ├── full_structure.md
 │   ├── packaged_structure.md
@@ -117,6 +122,7 @@
 │   └── history.json
 ├── electron
 │   ├── environment.util.ts
+│   ├── index.ts
 │   ├── main.ts
 │   ├── preload.ts
 │   ├── tsconfig.electron.json
@@ -173,6 +179,11 @@
 │   │       │   │   ├── download-progress
 │   │       │   │   │   ├── download-progress.component.js
 │   │       │   │   │   └── download-progress.component.js.map
+│   │       │   │   ├── executable-error-handler
+│   │       │   │   │   ├── executable-config-dialog.component.js
+│   │       │   │   │   ├── executable-config-dialog.component.js.map
+│   │       │   │   │   ├── executable-error-handler.component.js
+│   │       │   │   │   └── executable-error-handler.component.js.map
 │   │       │   │   ├── settings
 │   │       │   │   │   ├── settings.component.js
 │   │       │   │   │   └── settings.component.js.map
@@ -194,6 +205,8 @@
 │   │       │       ├── api.service.js.map
 │   │       │       ├── batch-api.service.js
 │   │       │       ├── batch-api.service.js.map
+│   │       │       ├── config.service.js
+│   │       │       ├── config.service.js.map
 │   │       │       ├── path.service.js
 │   │       │       ├── path.service.js.map
 │   │       │       ├── settings.service.js
@@ -241,6 +254,9 @@
 │   │   │   │   │   ├── download-progress.component.html
 │   │   │   │   │   ├── download-progress.component.scss
 │   │   │   │   │   └── download-progress.component.ts
+│   │   │   │   ├── executable-error-handler
+│   │   │   │   │   ├── executable-config-dialog.component.ts
+│   │   │   │   │   └── executable-error-handler.component.ts
 │   │   │   │   ├── settings
 │   │   │   │   │   ├── settings.component.html
 │   │   │   │   │   ├── settings.component.scss
@@ -256,6 +272,7 @@
 │   │   │   └── services
 │   │   │       ├── api.service.ts
 │   │   │       ├── batch-api.service.ts
+│   │   │       ├── config.service.ts
 │   │   │       ├── path.service.ts
 │   │   │       ├── settings.service.ts
 │   │   │       ├── socket.service.ts
@@ -265,17 +282,27 @@
 │   │   ├── index.html
 │   │   ├── main.ts
 │   │   ├── material-theme.scss
-│   │   └── styles.scss
+│   │   ├── styles.scss
+│   │   └── types
+│   │       └── electron-api.d.ts
 │   ├── tsconfig.app.json
 │   ├── tsconfig.json
 │   └── tsconfig.spec.json
 ├── index.html
 ├── package-lock.json
 ├── package.json
-└── scripts
-    ├── refresh-full-tree.sh
-    ├── refresh-packaged-app-tree.sh
-    └── refresh-tree.sh
+├── scripts
+│   ├── analyze-dependencies.js
+│   ├── refresh-app-tree.sh
+│   ├── refresh-full-tree.sh
+│   ├── refresh-packaged-app-tree.sh
+│   └── refresh-tree.sh
+└── utilities
+    ├── configDialog.html
+    ├── configDialog.ts
+    ├── configPreload.ts
+    ├── index.ts
+    └── PathValidator.ts
 
-60 directories, 217 files
+62 directories, 242 files
 ```
