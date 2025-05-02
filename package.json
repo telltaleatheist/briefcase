@@ -72,6 +72,11 @@
     "#electron/*": "./electron/*"
   },
   "dependencies": {
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/platform-socket.io": "^10.0.0",
+    "@nestjs/websockets": "^10.0.0",  
     "@angular/core": "^19.2.9",
     "@types/fluent-ffmpeg": "^2.1.27",
     "electron-log": "^5.3.3",
@@ -89,10 +94,8 @@
       "buildResources": "assets"
     },
     "extraResources": [
-      {
-        "from": "backend/node_modules/yt-dlp-wrap",
-        "to": "app.asar.unpacked/backend/node_modules/yt-dlp-wrap"
-      }
+      { "from": "node_modules", "to": "node_modules" },
+      { "from": "backend/node_modules", "to": "backend/node_modules" }
     ],
     "files": [
       "dist-electron/main/**/*",
@@ -100,7 +103,8 @@
       "backend/dist/**/*",
       "!backend/dist/**/*.map",
       "backend/package.json",
-      "frontend/dist/clippy-frontend/**/*"
+      "frontend/dist/clippy-frontend/**/*",
+      "backend/node_modules/**/*"
     ],
     "mac": {
       "category": "public.app-category.utilities",

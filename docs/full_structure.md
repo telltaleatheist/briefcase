@@ -1,5 +1,5 @@
 ```
-/Users/telltale/Documents/software/clippy/scripts/..
+/Users/telltale/Projects/clippy/scripts/..
 ├── backend
 │   ├── dist
 │   │   ├── app.controller.d.ts
@@ -317,8 +317,8 @@
 │   │               ├── app-update.yml
 │   │               ├── app.asar
 │   │               ├── app.asar.unpacked
-│   │               │   └── backend
 │   │               ├── ar.lproj
+│   │               ├── backend
 │   │               ├── bg.lproj
 │   │               ├── bn.lproj
 │   │               ├── ca.lproj
@@ -422,14 +422,10 @@
 │           └── PathValidator.js.map
 ├── docs
 │   ├── clippy_structure.md
-│   ├── completed_app_structure.md
 │   ├── config-integration-guide.md
 │   ├── development.md
-│   ├── full_structure.md
-│   ├── packaged_structure.md
-│   └── testUrls.md
+│   └── full_structure.md
 ├── downloads
-│   └── history.json
 ├── electron
 │   ├── environment.util.ts
 │   ├── index.ts
@@ -447,21 +443,20 @@
 │   │   ├── clippy-frontend
 │   │   │   ├── 3rdpartylicenses.txt
 │   │   │   ├── browser
-│   │   │   │   ├── chunk-6KOQWOIZ.js
-│   │   │   │   ├── chunk-ENXQB46L.js
-│   │   │   │   ├── chunk-EXQFMX5D.js
-│   │   │   │   ├── chunk-LJFZY62H.js
-│   │   │   │   ├── chunk-NO6WRW6C.js
-│   │   │   │   ├── chunk-ON3PFF7T.js
-│   │   │   │   ├── chunk-TK2FGPT3.js
-│   │   │   │   ├── chunk-VUD6VB6S.js
+│   │   │   │   ├── chunk-7SDZ26YN.js
+│   │   │   │   ├── chunk-HZDX6F6H.js
+│   │   │   │   ├── chunk-KQ4B2MVL.js
+│   │   │   │   ├── chunk-PGEVTJX2.js
+│   │   │   │   ├── chunk-TND4E4ON.js
+│   │   │   │   ├── chunk-WZEER3WZ.js
+│   │   │   │   ├── chunk-YUNWHYHS.js
+│   │   │   │   ├── chunk-ZTUJYC22.js
 │   │   │   │   ├── favicon.ico
 │   │   │   │   ├── index.html
-│   │   │   │   ├── main-6MUDFVRO.js
+│   │   │   │   ├── main-3FWJAZVZ.js
 │   │   │   │   ├── polyfills-FFHMD2TL.js
 │   │   │   │   └── styles-FBVOPZU6.css
 │   │   │   └── prerendered-routes.json
-│   │   ├── clippy-frontend 2
 │   │   └── out-tsc
 │   │       ├── app
 │   │       │   ├── app-routing.module.js
@@ -609,13 +604,12 @@
 │   ├── refresh-full-tree.sh
 │   ├── refresh-packaged-app-tree.sh
 │   └── refresh-tree.sh
-├── utilities
-│   ├── configDialog.html
-│   ├── configDialog.ts
-│   ├── configPreload.ts
-│   ├── index.ts
-│   └── PathValidator.ts
-└── yarn.lock
+└── utilities
+    ├── configDialog.html
+    ├── configDialog.ts
+    ├── configPreload.ts
+    ├── index.ts
+    └── PathValidator.ts
 
-232 directories, 385 files
+231 directories, 380 files
 ```
