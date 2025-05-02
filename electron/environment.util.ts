@@ -19,6 +19,29 @@ try {
   };
 }
 
+export const DEFAULT_SERVER_CONFIG = {
+  nestBackend: {
+    port: 3000,
+    host: 'localhost'
+  },
+  electronServer: {
+    port: 3001,
+    host: 'localhost'
+  }
+};
+
+// Interface for server configuration
+export interface ServerConfig {
+  nestBackend: {
+    port: number;
+    host: string;
+  };
+  electronServer: {
+    port: number;
+    host: string;
+  };
+}
+
 interface ConfigFile {
   [key: string]: string | undefined;
 }
@@ -67,6 +90,30 @@ export class EnvironmentUtil {
     }
   }
 
+  static getServerConfig(): ServerConfig {
+    // Start with default configuration
+    const config: ServerConfig = JSON.parse(JSON.stringify(DEFAULT_SERVER_CONFIG));
+    
+    // Override with environment variables if they exist
+    if (process.env.NEST_BACKEND_PORT) {
+      config.nestBackend.port = parseInt(process.env.NEST_BACKEND_PORT, 10);
+    }
+    
+    if (process.env.BACKEND_HOST) {
+      config.nestBackend.host = process.env.BACKEND_HOST;
+    }
+    
+    if (process.env.ELECTRON_SERVER_PORT) {
+      config.electronServer.port = parseInt(process.env.ELECTRON_SERVER_PORT, 10);
+    }
+    
+    if (process.env.ELECTRON_SERVER_HOST) {
+      config.electronServer.host = process.env.ELECTRON_SERVER_HOST;
+    }
+    
+    return config;
+  }
+  
   // Read environment variables from config file
   static readEnvironmentConfig(): NodeJS.ProcessEnv {
     try {
@@ -99,70 +146,87 @@ export class EnvironmentUtil {
     try {
       if (isDevelopment) {
         const devPaths = [
-          path.join(process.cwd(), 'frontend/dist/clippy-frontend/browser'),
-          path.join(process.cwd(), 'frontend/dist/clippy-frontend'),
-          path.join(__dirname, '../../frontend/dist/clippy-frontend/browser'),
-          path.join(__dirname, '../../frontend/dist/clippy-frontend')
+          path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
+          path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend'),
+          path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend', 'browser'),
+          path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend'),
+          // Add Angular 17 standalone output path
+          path.join(process.cwd(), 'frontend', 'dist', 'browser'),
+          path.join(__dirname, '..', '..', 'frontend', 'dist', 'browser')
         ];
   
-        this.frontendPath = devPaths.find(fs.existsSync);
+        this.frontendPath = devPaths.find(p => fs.existsSync(p));
       } else {
         const prodPaths = [
-          path.join(process.resourcesPath, 'frontend/dist/clippy-frontend/browser'),
-          path.join(process.resourcesPath, 'frontend/dist/clippy-frontend'),
-          path.join(process.resourcesPath, 'app.asar', 'frontend/dist/clippy-frontend/browser'),
-          path.join(process.resourcesPath, 'app.asar', 'frontend/dist/clippy-frontend')
+          path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend', 'browser'),
+          path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend'),
+          path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend', 'browser'),
+          path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend'),
+          // Add more paths
+          path.join(process.resourcesPath, 'frontend', 'dist', 'browser'),
+          path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend'),
+          path.join(process.resourcesPath, 'frontend')
         ];
   
-        this.frontendPath = prodPaths.find(fs.existsSync);
+        this.frontendPath = prodPaths.find(p => fs.existsSync(p));
       }
   
       if (!this.frontendPath) {
         throw new Error('Frontend distribution directory not found');
       }
   
-      // NEW: Dynamic file verification
-      const requiredFiles = ['index.html', 'main-*.js', 'styles-*.css'];
-      const missingRequired = requiredFiles.some(pattern => {
-        const matchingFiles = fs.readdirSync(this.frontendPath!)
-          .filter(file => file.match(new RegExp(pattern.replace('*', '.*'))));
-        return matchingFiles.length === 0;
-      });
+      // Verify essential files exist
+      const hasIndexHtml = fs.existsSync(path.join(this.frontendPath, 'index.html'));
+      
+      // Check for JS files (main bundle)
+      const dirContents = fs.readdirSync(this.frontendPath);
+      const hasMainJs = dirContents.some(file => file.match(/main-.*\.js$/));
+      const hasStyles = dirContents.some(file => file.match(/styles-.*\.css$/));
   
-      if (missingRequired) {
+      if (!hasIndexHtml || !hasMainJs || !hasStyles) {
         log.warn('Missing essential frontend files');
-        const dirContents = fs.readdirSync(this.frontendPath!);
         log.info(`Directory contents: ${dirContents.join(', ')}`);
         throw new Error('Missing essential frontend files');
       }
   
       log.info(`Frontend path resolved: ${this.frontendPath}`);
-      log.info(`Frontend directory contents: ${fs.readdirSync(this.frontendPath!).join(', ')}`);
+      log.info(`Frontend directory contents: ${dirContents.join(', ')}`);
       
       return this.frontendPath;
   
     } catch (error) {
+      // Error handling remains the same
       log.error('Error resolving frontend path:', error);
       
-      // Log additional context for debugging
       log.info('Development mode:', isDevelopment);
       log.info('Current working directory:', process.cwd());
       log.info('Resources path:', process.resourcesPath);
       log.info('__dirname:', __dirname);
   
-      // List contents of the Resources directory
+      // List contents of possible parent directories
       try {
-        log.info('Resources directory contents:', 
-          fs.readdirSync(process.resourcesPath).join(', ')
-        );
+        // List resources path if it exists
+        if (process.resourcesPath && fs.existsSync(process.resourcesPath)) {
+          log.info('Resources directory contents:', 
+            fs.readdirSync(process.resourcesPath).join(', ')
+          );
+        }
+        
+        // List frontend parent directory if possible
+        const frontendParent = path.join(process.cwd(), 'frontend');
+        if (fs.existsSync(frontendParent)) {
+          log.info('Frontend parent directory contents:', 
+            fs.readdirSync(frontendParent).join(', ')
+          );
+        }
       } catch (listError) {
-        log.error('Could not list Resources directory:', listError);
+        log.error('Could not list directories:', listError);
       }
   
       throw error;
     }
   }
-
+  
   static isDevelopment(): boolean {
     // Cache the development mode status
     if (this.isDevMode === undefined) {

@@ -44,6 +44,14 @@ async function bootstrap() {
       }
     );
 
+    // Add this block to enable CORS for HTTP requests
+    app.enableCors({
+      origin: ['http://localhost:3001', 'http://localhost:3000', '*'],
+      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+      credentials: true,
+      allowedHeaders: 'Content-Type, Accept, Authorization'
+    });
+
     app.useWebSocketAdapter(new ExtendedIoAdapter(app));
     
     app.setGlobalPrefix(environment.apiPrefix);
