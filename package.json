@@ -58,7 +58,9 @@
     }
   ],
   "asarUnpack": [
-    "backend/node_modules/**"
+    "backend/node_modules/**",
+    "utilities/**",
+    "dist-electron/utilities/**"
   ],
   "exports": {
     "./config": "./config/index.ts",
@@ -95,7 +97,9 @@
     },
     "extraResources": [
       { "from": "node_modules", "to": "node_modules" },
-      { "from": "backend/node_modules", "to": "backend/node_modules" }
+      { "from": "backend/node_modules", "to": "backend/node_modules" },
+      { "from": "utilities", "to": "utilities" },
+      { "from": "dist-electron/utilities", "to": "utilities" }
     ],
     "files": [
       "dist-electron/main/**/*",
@@ -104,7 +108,9 @@
       "!backend/dist/**/*.map",
       "backend/package.json",
       "frontend/dist/clippy-frontend/**/*",
-      "backend/node_modules/**/*"
+      "backend/node_modules/**/*",
+      "utilities/**/*",
+      "dist-electron/utilities/**/*"
     ],
     "mac": {
       "category": "public.app-category.utilities",

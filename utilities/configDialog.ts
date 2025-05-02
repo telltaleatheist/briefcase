@@ -239,9 +239,32 @@ export class ConfigDialog {
   private createWindow() {
     // First determine the preload path before creating the window
     let preloadPath;
+    
     if (app.isPackaged) {
-      preloadPath = path.join(process.resourcesPath, 'utilities', 'configPreload.js');
+      // In a packaged app, the code is inside the app.asar archive
+      const possiblePaths = [
+        path.join(process.resourcesPath, 'app.asar', 'utilities', 'configPreload.js'),
+        path.join(process.resourcesPath, 'app.asar', 'dist-electron', 'utilities', 'configPreload.js'),
+        path.join(process.resourcesPath, 'app.asar', 'dist-electron', 'preload', 'utilities', 'configPreload.js'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'utilities', 'configPreload.js')
+      ];
+      
+      // Try each path until we find one that exists
+      for (const potentialPath of possiblePaths) {
+        log.info(`Checking for preload at: ${potentialPath}`);
+        try {
+          // We can't directly check if files exist inside asar archives with fs.existsSync
+          // Instead, we need to try to access it and catch any errors
+          require.resolve(potentialPath);
+          preloadPath = potentialPath;
+          log.info(`Found preload at: ${preloadPath}`);
+          break;
+        } catch (error) {
+          log.info(`Not found at: ${potentialPath}`);
+        }
+      }
     } else {
+      // In development mode
       preloadPath = path.join(app.getAppPath(), 'utilities', 'configPreload.js');
       
       // Try alternate location if the first one doesn't exist
@@ -253,9 +276,8 @@ export class ConfigDialog {
       }
     }
     
-    log.info(`Preload path: ${preloadPath}`);
-    log.info(`Preload exists: ${fs.existsSync(preloadPath)}`);
-  
+    log.info(`Final preload path: ${preloadPath}`);
+    
     // Now create the window with the correct preload path
     this.window = new BrowserWindow({
       width: 600,
@@ -269,70 +291,64 @@ export class ConfigDialog {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: fs.existsSync(preloadPath) ? preloadPath : undefined
+        preload: preloadPath
       }
     });
     
     // Determine HTML path based on environment
     let htmlPath;
     if (app.isPackaged) {
-      // In production/packaged mode
-      htmlPath = path.join(process.resourcesPath, 'utilities', 'configDialog.html');
+      // In production/packaged mode, check both the asar and the extracted/unpacked locations
+      const possibleHtmlPaths = [
+        path.join(process.resourcesPath, 'utilities', 'configDialog.html'),
+        path.join(process.resourcesPath, 'app.asar', 'utilities', 'configDialog.html'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'utilities', 'configDialog.html')
+      ];
+      
+      for (const potentialPath of possibleHtmlPaths) {
+        log.info(`Checking for HTML at: ${potentialPath}`);
+        try {
+          // For HTML files inside asar, we need to be careful with how we check
+          if (potentialPath.includes('app.asar') && !potentialPath.includes('unpacked')) {
+            try {
+              require.resolve(potentialPath);
+              htmlPath = potentialPath;
+              log.info(`Found HTML at: ${htmlPath}`);
+              break;
+            } catch (error) {
+              log.info(`Not found at: ${potentialPath}`);
+            }
+          } else {
+            // For regular files, we can use existsSync
+            if (fs.existsSync(potentialPath)) {
+              htmlPath = potentialPath;
+              log.info(`Found HTML at: ${htmlPath}`);
+              break;
+            }
+          }
+        } catch (error) {
+          log.info(`Error checking path ${potentialPath}: ${(error as Error).message || String(error)}`);
+        }
+      }
     } else {
       // In development mode
       htmlPath = path.join(app.getAppPath(), 'utilities', 'configDialog.html');
     }
     
-    // Add logging to help debug path issues
-    log.info(`Config dialog HTML path: ${htmlPath}`);
-    log.info(`HTML file exists: ${fs.existsSync(htmlPath)}`);
+    log.info(`Final HTML path: ${htmlPath}`);
     
-    // Try to list contents of the parent directory if the file isn't found
-    if (!fs.existsSync(htmlPath)) {
-      const parentDir = path.dirname(htmlPath);
-      log.info(`Parent directory exists: ${fs.existsSync(parentDir)}`);
-      if (fs.existsSync(parentDir)) {
-        log.info(`Parent directory contents: ${fs.readdirSync(parentDir).join(', ')}`);
+    // Load the HTML file
+    if (htmlPath) {
+      try {
+        this.window.loadFile(htmlPath);
+      } catch (error) {
+        log.error(`Error loading HTML file: ${(error as Error).message || String(error)}`);
+        this.window.loadURL(`data:text/html;charset=utf-8,<html><body><h2>Error</h2><p>Failed to load configuration dialog: ${(error as Error).message || String(error)}</p></body></html>`);
       }
-      
-      // Also try a different path as fallback
-      const altPath = path.join(app.getAppPath(), 'dist-electron', 'utilities', 'configDialog.html');
-      log.info(`Trying alternative path: ${altPath}`);
-      log.info(`Alternative path exists: ${fs.existsSync(altPath)}`);
-      
-      if (fs.existsSync(altPath)) {
-        htmlPath = altPath;
-      }
-    }
-    
-    // Check if the HTML file exists
-    if (fs.existsSync(htmlPath)) {
-      this.window.loadFile(htmlPath);
     } else {
-      // Fallback to a data URL with a simple HTML error message
-      this.window.loadURL(`data:text/html;charset=utf-8,
-        <html>
-          <head><title>Configuration Error</title>
-            <style>
-              body { font-family: sans-serif; padding: 20px; color: #333; }
-              h2 { color: #c0392b; }
-              button { padding: 10px 20px; background: #3498db; color: white; 
-                     border: none; border-radius: 4px; cursor: pointer; }
-              button:hover { background: #2980b9; }
-            </style>
-          </head>
-          <body>
-            <h2>Configuration Dialog Error</h2>
-            <p>Unable to load the configuration dialog HTML file.</p>
-            <p>Path tried: ${htmlPath}</p>
-            <button onclick="window.electronAPI && window.electronAPI.exitApp()">
-              Exit Application
-            </button>
-          </body>
-        </html>`);
-      log.error('Configuration dialog HTML file not found:', htmlPath);
+      this.window.loadURL(`data:text/html;charset=utf-8,<html><body><h2>Error</h2><p>Could not find configuration dialog HTML file</p></body></html>`);
     }
-    
+
     // Handle window closed
     this.window.on('closed', () => {
       this.window = null;
