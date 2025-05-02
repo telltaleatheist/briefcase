@@ -3,12 +3,14 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import log from 'electron-log';
+import { SharedConfigService } from '../config/shared-config.service';
 
 export class YtDlpManager {
   private static instance: YTDlpWrap;
   private inputUrl: string | null = null;
   private outputTemplate: string | null = null;
   private options: string[] = [];
+  private readonly sharedConfigService: SharedConfigService;
 
   constructor() {
     if (!YtDlpManager.instance) {
@@ -23,63 +25,12 @@ export class YtDlpManager {
       return new YTDlpWrap(process.env.YT_DLP_PATH);
     }
 
-    // Fall back to system PATH
-    const pathFromSystem = this.findBinaryInPath('yt-dlp');
-    if (pathFromSystem) {
-      log.info(`Found yt-dlp in system PATH: ${pathFromSystem}`);
-      return new YTDlpWrap(pathFromSystem);
-    }
-
-    // Try common locations
-    const fallbackPaths = this.getCommonYtDlpPaths();
-    for (const possiblePath of fallbackPaths) {
-      if (fs.existsSync(possiblePath)) {
-        log.info(`Found fallback yt-dlp at: ${possiblePath}`);
-        return new YTDlpWrap(possiblePath);
-      }
-    }
-
     log.warn('yt-dlp not found. Falling back to "yt-dlp" string.');
-    return new YTDlpWrap('yt-dlp');
-  }
-
-  private findBinaryInPath(binaryName: string): string | null {
-    try {
-      const command = process.platform === 'win32' ? 'where' : 'which';
-      const result = execSync(`${command} ${binaryName}`, { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
-      if (fs.existsSync(result)) {
-        return result;
-      }
-      return null;
-    } catch {
-      return null;
+    const ytDlpPath = this.sharedConfigService.getYtDlpPath();
+    if (!ytDlpPath) {
+      throw new Error('yt-dlp path is not defined in the shared configuration.');
     }
-  }
-
-  private getCommonYtDlpPaths(): string[] {
-    const paths: string[] = [];
-
-    if (process.platform === 'darwin') {
-      paths.push(
-        '/usr/local/bin/yt-dlp',
-        '/opt/homebrew/bin/yt-dlp',
-        '/Library/Frameworks/Python.framework/Versions/3.14/bin/yt-dlp'
-      );
-    } else if (process.platform === 'win32') {
-      paths.push(
-        'C:\\Program Files\\yt-dlp\\yt-dlp.exe',
-        'C:\\ProgramData\\yt-dlp\\yt-dlp.exe'
-      );
-    } else if (process.platform === 'linux') {
-      paths.push(
-        '/usr/bin/yt-dlp',
-        '/usr/local/bin/yt-dlp',
-        '/snap/bin/yt-dlp'
-      );
-    }
-
-    paths.push(path.join(__dirname, '../bin/yt-dlp'));
-    return paths;
+    return new YTDlpWrap(ytDlpPath);
   }
 
   input(url: string): YtDlpManager {

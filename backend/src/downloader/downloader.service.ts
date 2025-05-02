@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { execFile, ExecFileOptions } from 'node:child_process';
 import { EnvironmentUtil } from "../config/environment.util";
 import { YtDlpManager } from './yt-dlp-manager';
+import { SharedConfigService } from '../config/shared-config.service';
 
 @WebSocketGateway({ cors: true })
 @Injectable()
@@ -31,6 +32,7 @@ export class DownloaderService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly ffmpegService: FfmpegService,
     private readonly pathService: PathService,
+    private readonly sharedConfigService: SharedConfigService,
   ) {
     try {
       this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
@@ -128,7 +130,12 @@ export class DownloaderService implements OnModuleInit {
       
       const ytDlpManager = new YtDlpManager();
       ytDlpManager.input(options.url).output(outputTemplate);
-      
+      const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+      if (ffmpegPath) {
+        ytDlpManager.addOption('--ffmpeg-location', ffmpegPath);
+        this.logger.log(`Set FFmpeg location for yt-dlp: ${ffmpegPath}`);
+      }
+
       // Add common options
       ytDlpManager.addOption('--verbose')
                   .addOption('--no-check-certificates')
@@ -147,7 +154,7 @@ export class DownloaderService implements OnModuleInit {
       } else {
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
       }
-      
+
       if (options.useCookies && options.browser) {
         ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
       }

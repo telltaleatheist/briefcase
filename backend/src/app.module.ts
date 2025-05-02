@@ -10,6 +10,7 @@ import { join } from 'path';
 import * as fs from 'fs';
 import { PathModule } from './path/path.module';
 import * as log from 'electron-log';
+import { SharedConfigModule } from './config/shared-config.module';
 
 function findFrontendDistPath(): string {
   if (!process.env.FRONTEND_PATH) {
@@ -34,6 +35,7 @@ function findFrontendDistPath(): string {
 
 @Module({
   imports: [
+    SharedConfigModule,
     // Load environment variables
     ConfigModule.forRoot({
       isGlobal: true,
