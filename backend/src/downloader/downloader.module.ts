@@ -5,9 +5,10 @@ import { DownloaderService } from './downloader.service';
 import { BatchDownloaderService } from './batch-downloader.service';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { PathModule } from '../path/path.module';
+import { MediaModule } from '../media/media.module';
 
 @Module({
-  imports: [FfmpegModule, PathModule],
+  imports: [FfmpegModule, PathModule, MediaModule],
   controllers: [DownloaderController],
   providers: [DownloaderService, BatchDownloaderService],
   exports: [DownloaderService, BatchDownloaderService],

@@ -6,8 +6,8 @@ import { DownloaderModule } from './downloader/downloader.module';
 import { FfmpegModule } from './ffmpeg/ffmpeg.module';
 import { ConfigModule } from '@nestjs/config';
 import { PathModule } from './path/path.module';
-import * as log from 'electron-log';
 import { SharedConfigModule } from './config/shared-config.module';
+import { MediaModule } from './media/media.module';
 
 @Module({
   imports: [
@@ -20,6 +20,7 @@ import { SharedConfigModule } from './config/shared-config.module';
     
     // Import custom modules
     DownloaderModule,
+    MediaModule, 
     FfmpegModule,
     PathModule,
   ],
