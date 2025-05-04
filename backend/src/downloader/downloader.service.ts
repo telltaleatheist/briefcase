@@ -150,7 +150,12 @@ export class DownloaderService implements OnModuleInit {
       if (options.url.includes('reddit.com')) {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
-        ytDlpManager.addOption('--format', `bestvideo[height<=${options.quality}]+bestaudio/best[height<=${options.quality}]`);
+        // Convert quality to a number with a fallback value (e.g., 1080)
+        const qualityValue = typeof options.quality === 'object' 
+          ? 1080 // Default value if quality is an object
+          : parseInt(options.quality?.toString() || '1080');
+
+        ytDlpManager.addOption('--format', `bestvideo[height<=${qualityValue}]+bestaudio/best[height<=${qualityValue}]`);
       } else {
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
       }
