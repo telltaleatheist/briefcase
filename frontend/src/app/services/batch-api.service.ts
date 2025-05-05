@@ -38,4 +38,12 @@ export class BatchApiService {
   getVideoInfo(url: string): Observable<VideoInfo> {
     return this.http.get<VideoInfo>(`${this.apiUrl}/downloader/info?url=${encodeURIComponent(url)}`);
   }
+
+  cancelJob(jobId: string): Observable<{success: boolean, message: string}> {
+    return this.http.delete<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/job/${jobId}`);
+  }
+  
+  retryJob(jobId: string): Observable<{success: boolean, message: string}> {
+    return this.http.post<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/job/${jobId}/retry`, {});
+  }  
 }

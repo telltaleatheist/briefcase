@@ -78,22 +78,29 @@ export interface BatchConfig {
 export interface BatchJob {
   id: string;
   url: string;
-  status: 'queued' | 'downloading' | 'processing' | 'completed' | 'failed';
+  status: 'queued' | 'downloading' | 'processing' | 'completed' | 'failed' | 'paused';
   progress: number;
-  currentTask: string;
+  currentTask?: string;
   error?: string;
-  downloadStartTime?: string; // Use string for ISO date format
-  downloadEndTime?: string;   // Use string for ISO date format
-  processingStartTime?: string; // Use string for ISO date format
-  processingEndTime?: string;  // Use string for ISO date format
+  priority?: 'low' | 'normal' | 'high';
+  retryCount?: number;
+  createdAt?: string;
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  processingStartTime?: string;
+  processingEndTime?: string;
+  outputFile?: string;
+  queueType?: string; // Added to track which queue a job belongs to
 }
 
 export interface BatchQueueStatus {
   downloadQueue: BatchJob[];
   processingQueue: BatchJob[];
-  completedJobs: BatchJob[];  // New
-  failedJobs: BatchJob[];     // New
+  completedJobs?: BatchJob[];
+  failedJobs?: BatchJob[];
   activeDownloads: string[];
   maxConcurrentDownloads: number;
   isProcessing: boolean;
+  processingPaused?: boolean;
+  downloadsPaused?: boolean;
 }

@@ -3,20 +3,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as ffmpeg from 'fluent-ffmpeg';
 import * as path from 'path';
 import * as fs from 'fs';
-import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { Server } from 'socket.io';
 import { VideoMetadata } from '../common/interfaces/download.interface';
+import { MediaEventService } from '../media/media-event.service';
 
-@WebSocketGateway({ cors: true })
 @Injectable()
 export class FfmpegService {
-  @WebSocketServer()
-  server: Server;
   private lastReportedProgress: Map<string, number> = new Map();
-
   private readonly logger = new Logger(FfmpegService.name);
 
-  constructor() {
+  constructor(
+    private readonly eventService: MediaEventService
+  ) {
     try {
       // Use configured paths from environment variables first
       const ffmpegPath = process.env.FFMPEG_PATH || 
@@ -50,15 +47,6 @@ export class FfmpegService {
     } catch (error) {
       this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
       throw error;
-    }
-  }
-    
-  // Helper method for safe WebSocket emission
-  private safeEmit(event: string, data: any): void {
-    if (this.server) {
-      this.server.emit(event, data);
-    } else {
-      this.logger.warn(`Cannot emit '${event}' - WebSocket server not initialized`);
     }
   }
   
@@ -202,19 +190,11 @@ export class FfmpegService {
             .output(outputFile);
           
           // Start progress at 0%
-          this.safeEmit('processing-progress', { 
-            progress: 0,
-            task: 'Preparing video re-encoding',
-            jobId
-          });
+          this.eventService.emitProcessingProgress(0, 'Preparing video re-encoding', jobId);
               
           command.on('start', (cmdline) => {
             this.logger.log(`FFmpeg re-encoding command started: ${cmdline}`);
-            this.safeEmit('processing-progress', { 
-              progress: 0, 
-              task: 'Starting video re-encoding',
-              jobId
-            });
+            this.eventService.emitProcessingProgress(0, 'Starting video re-encoding', jobId);
           });
           
           command.on('stderr', (stderrLine) => {
@@ -258,12 +238,12 @@ export class FfmpegService {
                   speedInfo = `(Speed: ${speedMatch[1]}x)`;
                 }
                 
-                // Emit progress to all clients WITH jobId
-                this.safeEmit('processing-progress', { 
-                  progress: progressPercent,
-                  task: `Re-encoding video ${speedInfo}`,
+                // Emit progress with jobId
+                this.eventService.emitProcessingProgress(
+                  progressPercent,
+                  `Re-encoding video ${speedInfo}`,
                   jobId
-                });
+                );
               }
             }
           });
@@ -278,11 +258,7 @@ export class FfmpegService {
             
             // Emit 100% completion
             this.lastReportedProgress.set(progressKey, 100);
-            this.safeEmit('processing-progress', { 
-              progress: 100,
-              task: 'Video re-encoding completed',
-              jobId
-            });
+            this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
             
             resolve(outputFile);
           });          
@@ -291,10 +267,7 @@ export class FfmpegService {
             this.logger.error(`Error re-encoding video: ${err.message}`);
             
             // Emit error event
-            this.safeEmit('processing-failed', {
-              error: err.message,
-              jobId
-            });
+            this.eventService.emitProcessingFailed(videoFile, err.message, jobId);
             
             resolve(null);
           });

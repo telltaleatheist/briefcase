@@ -51,8 +51,9 @@ const socketIoConfig: SocketIoConfig = {
     SettingsComponent,
     DownloadHistoryComponent,
     DownloadProgressComponent,
-    ThemeToggleComponent  // Add the ThemeToggleComponent here
+    ThemeToggleComponent  
   ],
   bootstrap: [AppComponent]
 })
 export class AppModule {}
+

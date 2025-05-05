@@ -62,6 +62,16 @@
 │   │   ├── main.d.ts
 │   │   ├── main.js
 │   │   ├── main.js.map
+│   │   ├── media
+│   │   │   ├── media-event.service.d.ts
+│   │   │   ├── media-event.service.js
+│   │   │   ├── media-event.service.js.map
+│   │   │   ├── media-processing.service.d.ts
+│   │   │   ├── media-processing.service.js
+│   │   │   ├── media-processing.service.js.map
+│   │   │   ├── media.module.d.ts
+│   │   │   ├── media.module.js
+│   │   │   └── media.module.js.map
 │   │   └── path
 │   │       ├── path.controller.d.ts
 │   │       ├── path.controller.js
@@ -100,6 +110,10 @@
 │   │   │   ├── ffmpeg.module.ts
 │   │   │   └── ffmpeg.service.ts
 │   │   ├── main.ts
+│   │   ├── media
+│   │   │   ├── media-event.service.ts
+│   │   │   ├── media-processing.service.ts
+│   │   │   └── media.module.ts
 │   │   ├── path
 │   │   │   ├── path.controller.ts
 │   │   │   ├── path.module.ts
@@ -477,6 +491,7 @@
 │           ├── PathValidator.js
 │           └── PathValidator.js.map
 ├── docs
+│   ├── backend-refactoring.md
 │   ├── clippy_structure.md
 │   ├── config-integration-guide.md
 │   ├── development.md
@@ -681,5 +696,5 @@
     ├── index.ts
     └── PathValidator.ts
 
-241 directories, 440 files
+243 directories, 453 files
 ```

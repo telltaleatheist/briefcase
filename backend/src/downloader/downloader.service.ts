@@ -3,8 +3,6 @@ import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/com
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
 import * as fs from 'fs';
-import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { Server } from 'socket.io';
 import { 
   DownloadOptions, 
   DownloadResult, 
@@ -13,13 +11,10 @@ import {
 import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
 import { SharedConfigService } from '../config/shared-config.service';
+import { MediaEventService } from '../media/media-event.service';
 
-@WebSocketGateway({ cors: true })
 @Injectable()
 export class DownloaderService implements OnModuleInit {
-  @WebSocketServer()
-  server: Server;
-
   private readonly logger = new Logger(DownloaderService.name);
   private downloadHistory: HistoryItem[] = [];
   private historyFilePath: string;
@@ -29,6 +24,7 @@ export class DownloaderService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly pathService: PathService,
     private readonly sharedConfigService: SharedConfigService,
+    private readonly eventService: MediaEventService,
   ) {
     try {
       this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
@@ -53,52 +49,9 @@ export class DownloaderService implements OnModuleInit {
   }
 
   onModuleInit() {
-    if (!this.server) {
-      this.logger.warn('WebSocket server not initialized during module initialization');
-    } else {
-      this.logger.log('WebSocket server initialized successfully');
-    }
+    this.logger.log('Downloader service initialized');
   }
-
-  /**
-   * Helper method to safely emit WebSocket events
-   */
-  private emitEvent(event: string, data: any): void {
-    this.logger.debug(`Emitting event: ${event}`, data);
-    if (this.server) {
-      this.server.emit(event, data);
-    } else {
-      this.logger.warn(`Cannot emit ${event} - WebSocket server not initialized`);
-    }
-  }
-
-  /**
-   * Load download history from file
-   */
-  private loadDownloadHistory(): void {
-    try {
-      if (fs.existsSync(this.historyFilePath)) {
-        const historyData = fs.readFileSync(this.historyFilePath, 'utf8');
-        this.downloadHistory = JSON.parse(historyData);
-        this.logger.log(`Loaded ${this.downloadHistory.length} items from download history`);
-      }
-    } catch (error) {
-      this.logger.error('Failed to load download history', error);
-      this.downloadHistory = [];
-    }
-  }
-
-  /**
-   * Save download history to file
-   */
-  private saveDownloadHistory(): void {
-    try {
-      fs.writeFileSync(this.historyFilePath, JSON.stringify(this.downloadHistory, null, 2));
-    } catch (error) {
-      this.logger.error('Failed to save download history', error);
-    }
-  }
-
+  
   /**
    * Main method to download a video from a URL
    */
@@ -106,11 +59,16 @@ export class DownloaderService implements OnModuleInit {
     try {
       this.logger.log(`Starting download for URL: ${options.url}`);
       
+      // Emit download-started event
+      this.eventService.emitDownloadStarted(options.url, jobId);
+      
       const downloadFolder = this.pathService.getSafePath(options.outputDir);
       this.logger.log(`Using download directory: ${downloadFolder}`);
       
       if (!this.pathService.ensurePathExists(downloadFolder)) {
-        throw new Error(`Cannot create or access download directory: ${downloadFolder}`);
+        const error = `Cannot create or access download directory: ${downloadFolder}`;
+        this.eventService.emitDownloadFailed(options.url, error, jobId);
+        throw new Error(error);
       }
       
       // Check if this is a Reddit URL - handle differently
@@ -135,16 +93,17 @@ export class DownloaderService implements OnModuleInit {
       const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title)s.%(ext)s`);
       
       // Create ytDlpManager instance
-      const ytDlpManager = this.createYtDlpManager();
+      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
       
       // Configure download
       ytDlpManager.input(options.url).output(outputTemplate);
+      
       const ffmpegPath = this.sharedConfigService.getFfmpegPath();
       if (ffmpegPath) {
         ytDlpManager.addOption('--ffmpeg-location', ffmpegPath);
         this.logger.log(`Set FFmpeg location for yt-dlp: ${ffmpegPath}`);
       }
-
+  
       // Add common options
       ytDlpManager.addOption('--verbose')
                   .addOption('--no-check-certificates')
@@ -156,9 +115,14 @@ export class DownloaderService implements OnModuleInit {
       }
       
       // Configure format options based on source
-      this.configureFormatOptions(ytDlpManager, options);
+      if (options.url.includes('reddit.com')) {
+        // For Reddit, don't specify any format - let yt-dlp choose the best available format
+      } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
+        ytDlpManager.addOption('--format', `bestvideo[height<=${options.quality}]+bestaudio/best[height<=${options.quality}]`);
+      } else {
+        ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
+      }
       
-      // Configure browser cookies if needed
       if (options.useCookies && options.browser) {
         ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
       }
@@ -170,28 +134,19 @@ export class DownloaderService implements OnModuleInit {
         this.activeDownloads.set(jobId, ytDlpManager);
       }
       
-      this.emitEvent('download-started', { url: options.url, jobId });
-      
       // Set up progress tracking
       ytDlpManager.on('progress', (progress) => {
-        this.emitEvent('download-progress', {
-          progress: progress.percent,
-          task: 'Downloading',
-          speed: progress.downloadSpeed,
-          eta: progress.eta,
-          totalSize: progress.totalSize,
-          downloadedBytes: progress.downloadedBytes,
-          jobId
-        });
-      });
-      
-      ytDlpManager.on('retry', (retryInfo) => {
-        this.emitEvent('download-retry', {
-          attempt: retryInfo.attempt,
-          maxRetries: retryInfo.maxRetries,
-          error: retryInfo.error,
-          jobId
-        });
+        this.eventService.emitDownloadProgress(
+          progress.percent,
+          'Downloading',
+          jobId,
+          {
+            speed: progress.downloadSpeed,
+            eta: progress.eta,
+            totalSize: progress.totalSize,
+            downloadedBytes: progress.downloadedBytes
+          }
+        );
       });
       
       try {
@@ -199,7 +154,7 @@ export class DownloaderService implements OnModuleInit {
         const output = await ytDlpManager.runWithRetry(3, 2000);
         
         // Try to determine the output file
-        outputFile = this.determineOutputFile(output, downloadFolder);
+        outputFile = await this.determineOutputFile(output, downloadFolder);
         
         if (outputFile && fs.existsSync(outputFile)) {
           this.logger.log(`Download successful: ${outputFile}`);
@@ -213,12 +168,7 @@ export class DownloaderService implements OnModuleInit {
           this.addToHistory(outputFile, options.url);
           
           // Emit completion event
-          this.emitEvent('download-completed', { 
-            outputFile, 
-            url: options.url, 
-            jobId,
-            isImage
-          });
+          this.eventService.emitDownloadCompleted(outputFile, options.url, jobId, isImage);
           
           // Clean up active downloads
           if (jobId) {
@@ -227,13 +177,13 @@ export class DownloaderService implements OnModuleInit {
           
           return { 
             success: true, 
-            outputFile, 
+            outputFile,
             isImage
           };
         } else {
           const errorMsg = `Download seemed to succeed but output file not found: ${outputFile}`;
           this.logger.error(errorMsg);
-          this.emitEvent('download-failed', { error: errorMsg, url: options.url, jobId });
+          this.eventService.emitDownloadFailed(options.url, errorMsg, jobId);
           
           // Clean up active downloads
           if (jobId) {
@@ -245,7 +195,7 @@ export class DownloaderService implements OnModuleInit {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error during yt-dlp execution';
         this.logger.error(`yt-dlp execution failed: ${errorMsg}`);
-        this.emitEvent('download-failed', { error: errorMsg, url: options.url, jobId });
+        this.eventService.emitDownloadFailed(options.url, errorMsg, jobId);
         
         // Clean up active downloads
         if (jobId) {
@@ -256,11 +206,9 @@ export class DownloaderService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error('Error in downloadVideo:', error);
-      this.emitEvent('download-failed', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        url: options.url,
-        jobId
-      });
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      
+      this.eventService.emitDownloadFailed(options.url, errorMsg, jobId);
       
       // Clean up active downloads
       if (jobId) {
@@ -269,41 +217,32 @@ export class DownloaderService implements OnModuleInit {
       
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: errorMsg
       };
     }
   }
-  
-  /**
-   * Create and configure a YtDlpManager instance
-   */
-  private createYtDlpManager(): YtDlpManager {
-    return new YtDlpManager(this.sharedConfigService);
-  }
-  
-  /**
-   * Configure format options based on source URL
-   */
-  private configureFormatOptions(ytDlpManager: YtDlpManager, options: DownloadOptions): void {
-    // Special handling for Reddit URLs
-    if (options.url.includes('reddit.com')) {
-      // For Reddit, don't specify any format - let yt-dlp choose the best available format
-    } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
-      // Convert quality to a number with a fallback value (e.g., 1080)
-      const qualityValue = typeof options.quality === 'object' 
-        ? 1080 // Default value if quality is an object
-        : parseInt(options.quality?.toString() || '1080');
 
-      ytDlpManager.addOption('--format', `bestvideo[height<=${qualityValue}]+bestaudio/best[height<=${qualityValue}]`);
-    } else {
-      ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
+  /**
+   * Cancel an active download
+   */
+  cancelDownload(jobId: string): boolean {
+    const manager = this.activeDownloads.get(jobId);
+    
+    if (manager) {
+      this.logger.log(`Cancelling download for job ${jobId}`);
+      manager.cancel();
+      this.activeDownloads.delete(jobId);
+      
+      return true;
     }
+    
+    return false;
   }
   
   /**
    * Determine the output file from yt-dlp output or file system
    */
-  private determineOutputFile(output: string, downloadFolder: string): string | null {
+  private async determineOutputFile(output: string, downloadFolder: string): Promise<string | null> {
     // Try to extract from output first
     let outputFile: string | null = null;
     
@@ -312,7 +251,11 @@ export class DownloaderService implements OnModuleInit {
     if (destinationMatch) {
       outputFile = destinationMatch[1];
       this.logger.log(`Found output file from destination line: ${outputFile}`);
-      return outputFile;
+      
+      // Verify file exists
+      if (fs.existsSync(outputFile)) {
+        return outputFile;
+      }
     }
     
     // Check for '[Merger] Merging formats into' line
@@ -320,11 +263,18 @@ export class DownloaderService implements OnModuleInit {
     if (mergerMatch) {
       outputFile = mergerMatch[1];
       this.logger.log(`Found output file from merger line: ${outputFile}`);
-      return outputFile;
+      
+      // Verify file exists
+      if (fs.existsSync(outputFile)) {
+        return outputFile;
+      }
     }
     
     // If we didn't find it in the output, try to infer from the file system
     try {
+      // Add delay to give the file system time to update
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const files = fs.readdirSync(downloadFolder);
       if (files.length === 0) {
         this.logger.warn(`No files found in download directory: ${downloadFolder}`);
@@ -350,22 +300,6 @@ export class DownloaderService implements OnModuleInit {
     
     return null;
   }
-    
-  /**
-   * Cancel an active download
-   */
-  cancelDownload(jobId: string): boolean {
-    const manager = this.activeDownloads.get(jobId);
-    
-    if (manager) {
-      manager.cancel();
-      this.activeDownloads.delete(jobId);
-      this.logger.log(`Cancelled download for job ${jobId}`);
-      return true;
-    }
-    
-    return false;
-  }
   
   /**
    * Get information about a Reddit post/URL
@@ -375,7 +309,7 @@ export class DownloaderService implements OnModuleInit {
       this.logger.log(`Fetching info for Reddit URL: ${url}`);
       
       // Create and configure YtDlpManager
-      const ytDlpManager = this.createYtDlpManager();
+      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
       ytDlpManager
         .input(url)
         .addOption('--dump-json')
@@ -492,8 +426,7 @@ export class DownloaderService implements OnModuleInit {
         const outputPath = path.join(downloadFolder, filename);
         
         this.logger.log(`Downloading Reddit image: ${imageUrl} to ${outputPath}`);
-        this.emitEvent('download-started', { url: imageUrl, jobId });
-        this.emitEvent('download-progress', { progress: 0, task: 'Downloading Image', jobId });
+        this.eventService.emitDownloadProgress(0, 'Downloading Image', jobId);
         
         // Create the output directory if it doesn't exist
         if (!fs.existsSync(downloadFolder)) {
@@ -525,7 +458,7 @@ export class DownloaderService implements OnModuleInit {
             
             const errorMsg = `HTTP error: ${response.statusCode} ${response.statusMessage}`;
             this.logger.error(errorMsg);
-            this.emitEvent('download-failed', { error: errorMsg, url: imageUrl, jobId });
+            this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
             reject({ success: false, error: errorMsg });
             return;
           }
@@ -536,21 +469,17 @@ export class DownloaderService implements OnModuleInit {
           let receivedBytes = 0;
           response.on('data', (chunk: any) => {
             receivedBytes += chunk.length;
-            this.emitEvent('download-progress', { 
-              progress: 50, // Approximate progress
-              task: 'Downloading Image', 
-              jobId 
-            });
+            this.eventService.emitDownloadProgress(50, 'Downloading Image', jobId);
           });
           
           file.on('finish', () => {
             file.close();
             this.logger.log(`Image download completed: ${outputPath}`);
-            this.emitEvent('download-progress', { progress: 100, task: 'Completed', jobId });
+            this.eventService.emitDownloadProgress(100, 'Completed', jobId);
             
             // Add to history
             this.addToHistory(outputPath, imageUrl);
-            this.emitEvent('download-completed', { outputFile: outputPath, url: imageUrl, jobId });
+            this.eventService.emitDownloadCompleted(outputPath, imageUrl, jobId, true);
             
             resolve({ success: true, outputFile: outputPath, isImage: true });
           });
@@ -560,21 +489,18 @@ export class DownloaderService implements OnModuleInit {
           file.close();
           fs.unlink(outputPath, () => {}); // Delete the file async
           this.logger.error(`Image download failed: ${err.message}`);
-          this.emitEvent('download-failed', { error: err.message, url: imageUrl, jobId });
+          this.eventService.emitDownloadFailed(imageUrl, err.message, jobId);
           reject({ success: false, error: err.message });
         });
         
         request.end();
       } catch (error) {
         this.logger.error('Error downloading Reddit image:', error);
-        this.emitEvent('download-failed', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          url: imageUrl,
-          jobId
-        });
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
         reject({
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: errorMsg
         });
       }
     });
@@ -670,69 +596,22 @@ export class DownloaderService implements OnModuleInit {
       // Save history to file
       this.saveDownloadHistory();
       
-      // Notify clients
-      this.emitEvent('download-history-updated', this.downloadHistory);
+      // Notify clients of history update
+      this.eventService.emitEvent('download-history-updated', this.downloadHistory);
     } catch (error) {
       this.logger.error('Error adding to history:', error);
     }
   }
 
   /**
-   * Get download history
-   */
-  getDownloadHistory(): HistoryItem[] {
-    return this.downloadHistory;
-  }
-
-  /**
-   * Get a file by its ID
-   */
-  getFileById(id: string): HistoryItem | undefined {
-    const file = this.downloadHistory.find(item => item.id === id);
-    
-    if (!file) {
-      throw new NotFoundException('File not found in download history');
-    }
-    
-    return file;
-  }
-
-  /**
-   * Remove a file from the download history
-   */
-  removeFromHistory(id: string): { success: boolean, message: string } {
-    const initialLength = this.downloadHistory.length;
-    this.downloadHistory = this.downloadHistory.filter(item => item.id !== id);
-    
-    if (this.downloadHistory.length < initialLength) {
-      this.saveDownloadHistory();
-      this.emitEvent('download-history-updated', this.downloadHistory);
-      return { success: true, message: 'Item removed from history' };
-    }
-    
-    return { success: false, message: 'Item not found in history' };
-  }
-
-  /**
-   * Clear the download history
-   */
-  clearHistory(): { success: boolean, message: string } {
-    this.downloadHistory = [];
-    this.saveDownloadHistory();
-    this.emitEvent('download-history-updated', this.downloadHistory);
-    
-    return { success: true, message: 'Download history cleared' };
-  }
-
-  /**
-   * Check if a URL is valid/downloadable
-   */
+     * Check if a URL is valid/downloadable
+     */
   async checkUrl(url: string): Promise<any> {
     try {
       this.logger.log(`Checking URL validity: ${url}`);
       
       // Create and configure YtDlpManager
-      const ytDlpManager = this.createYtDlpManager();
+      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
       ytDlpManager
         .input(url)
         .addOption('--dump-json')
@@ -768,7 +647,7 @@ export class DownloaderService implements OnModuleInit {
       this.logger.log(`Fetching video info for URL: ${url}`);
       
       // Create and configure YtDlpManager
-      const ytDlpManager = this.createYtDlpManager();
+      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
       ytDlpManager
         .input(url)
         .addOption('--dump-json')
@@ -822,43 +701,81 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
-   * Update the yt-dlp executable
+   * Load download history from file
    */
-  async updateYtDlp(): Promise<{ success: boolean, message: string }> {
+  private loadDownloadHistory(): void {
     try {
-      const ytDlpManager = this.createYtDlpManager();
-      const result = await ytDlpManager.updateYtDlp();
-      
-      if (result) {
-        return { 
-          success: true, 
-          message: 'yt-dlp has been updated successfully' 
-        };
-      } else {
-        return { 
-          success: false, 
-          message: 'Failed to update yt-dlp' 
-        };
+      if (fs.existsSync(this.historyFilePath)) {
+        const historyData = fs.readFileSync(this.historyFilePath, 'utf8');
+        this.downloadHistory = JSON.parse(historyData);
+        this.logger.log(`Loaded ${this.downloadHistory.length} items from download history`);
       }
     } catch (error) {
-      return { 
-        success: false, 
-        message: `Error updating yt-dlp: ${error instanceof Error ? error.message : 'Unknown error'}` 
-      };
+      this.logger.error('Failed to load download history', error);
+      this.downloadHistory = [];
     }
   }
 
   /**
-   * Get yt-dlp version
+   * Save download history to file
    */
-  async getYtDlpVersion(): Promise<{ version: string }> {
+  private saveDownloadHistory(): void {
     try {
-      const ytDlpManager = this.createYtDlpManager();
-      const version = await ytDlpManager.getYtDlpVersion();
-      return { version };
+      fs.writeFileSync(this.historyFilePath, JSON.stringify(this.downloadHistory, null, 2));
     } catch (error) {
-      this.logger.error(`Failed to get yt-dlp version: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return { version: 'unknown' };
+      this.logger.error('Failed to save download history', error);
     }
+  }
+
+  /**
+   * Get download history
+   */
+  getDownloadHistory(): HistoryItem[] {
+    return this.downloadHistory;
+  }
+
+  /**
+   * Get a file by its ID
+   */
+  getFileById(id: string): HistoryItem | undefined {
+    const file = this.downloadHistory.find(item => item.id === id);
+    
+    if (!file) {
+      throw new NotFoundException('File not found in download history');
+    }
+    
+    return file;
+  }
+
+  /**
+   * Remove a file from the download history
+   */
+  removeFromHistory(id: string): { success: boolean, message: string } {
+    const initialLength = this.downloadHistory.length;
+    this.downloadHistory = this.downloadHistory.filter(item => item.id !== id);
+    
+    if (this.downloadHistory.length < initialLength) {
+      this.saveDownloadHistory();
+      
+      // Notify clients
+      this.eventService.emitEvent('download-history-updated', this.downloadHistory);
+      
+      return { success: true, message: 'Item removed from history' };
+    }
+    
+    return { success: false, message: 'Item not found in history' };
+  }
+
+  /**
+   * Clear the download history
+   */
+  clearHistory(): { success: boolean, message: string } {
+    this.downloadHistory = [];
+    this.saveDownloadHistory();
+    
+    // Notify clients
+    this.eventService.emitEvent('download-history-updated', this.downloadHistory);
+    
+    return { success: true, message: 'Download history cleared' };
   }
 }

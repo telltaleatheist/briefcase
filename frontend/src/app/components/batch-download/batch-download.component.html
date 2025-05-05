@@ -156,7 +156,7 @@
   <!-- Batch Queue Status -->
   <mat-card class="status-card" *ngIf="batchQueueStatus">
     <mat-card-header>
-      <mat-card-title>Batch Queue Status</mat-card-title>
+      <mat-card-title>Processing Status: {{ batchQueueStatus.isProcessing ? 'Running' : 'Idle' }}</mat-card-title>
     </mat-card-header>
 
     <mat-card-content>
@@ -169,9 +169,6 @@
         </div>
         <div class="status-item">
           <strong>Processing Queue:</strong> {{ batchQueueStatus.processingQueue.length }}
-        </div>
-        <div class="status-item">
-          <strong>Processing Status:</strong> {{ batchQueueStatus.isProcessing ? 'Running' : 'Idle' }}
         </div>
       </div>
       
@@ -212,35 +209,50 @@
       </mat-expansion-panel>
       
       <!-- Jobs Display Section -->
-      <!-- This new section shows all jobs in a unified list with detailed progress info -->
       <div class="all-jobs-section">
         <h3>All Jobs</h3>
         
         <!-- Combine all job types into a single array for display -->
         <mat-list class="job-list">
-          <!-- Active Downloads -->
-          <div *ngFor="let job of getAllJobsForDisplay()" class="job-item" [ngClass]="getJobStatusClass(job.status)">
-            <div class="job-header">
-              <mat-icon [ngClass]="getJobStatusClass(job.status)">{{ getJobStatusIcon(job.status) }}</mat-icon>
-              <span class="job-title">{{ job.url }}</span>
-              <mat-chip [color]="getStatusChipColor(job.status || '')" selected>{{ job.status || 'unknown' }}</mat-chip>
-            </div>
-            
-            <div class="job-progress">
-              <div class="task-label">{{ job.currentTask || 'Waiting...' }}</div>
-              <mat-progress-bar 
-                [mode]="job.status === 'queued' ? 'buffer' : 'determinate'" 
-                [value]="job.progress || 0"
-                [color]="getProgressBarColor(job.status || '')">
-              </mat-progress-bar>
-              <div class="progress-value">{{ job.progress || 0 }}%</div>
-            </div>
-            
-            <div class="job-details" *ngIf="job.error">
-              <div class="error-message">{{ job.error }}</div>
-            </div>
-          </div>
-          
+          <!-- Jobs -->
+          <div *ngFor="let job of getAllJobsForDisplay()" 
+          class="job-item" 
+          [ngClass]="getJobStatusClassWithQueueType(job)">
+       <div class="job-header">
+         <span class="job-title">{{ getDisplayName(job) }}</span>
+         <mat-chip [color]="getStatusChipColor(job.status || '')" selected>
+           {{ isProcessingJob(job) ? 'Processing' : job.status }}
+         </mat-chip>
+       </div>
+       
+       <div class="job-progress">
+         <div class="task-label">{{ job.currentTask || getDefaultTaskForStatus(job.status) }}</div>
+         <mat-progress-bar 
+           [mode]="job.status === 'queued' ? 'buffer' : 'determinate'" 
+           [value]="job.progress || 0"
+           [color]="isProcessingJob(job) ? 'accent' : getProgressBarColor(job.status || '')">
+         </mat-progress-bar>
+         <div class="progress-value">{{ job.progress || 0 }}%</div>
+       </div>
+       
+       <div class="job-actions">
+         <button *ngIf="job.status !== 'completed'" 
+                 mat-icon-button 
+                 class="action-button"
+                 (click)="cancelJob(job.id)" 
+                 matTooltip="Cancel">
+           <mat-icon>cancel</mat-icon>
+         </button>
+         <button *ngIf="job.status === 'failed'" 
+                 mat-icon-button 
+                 class="action-button"
+                 (click)="retryJob(job.id)" 
+                 matTooltip="Retry">
+           <mat-icon>refresh</mat-icon>
+         </button>
+       </div>
+     </div>
+                          
           <!-- Show message if no jobs -->
           <div class="no-jobs-message" *ngIf="getAllJobsForDisplay().length === 0">
             No active jobs. Add URLs above to start downloading.
@@ -254,7 +266,7 @@
         </button>
         
         <button mat-stroked-button color="warn" (click)="clearQueue()" 
-            [disabled]="!hasActiveJobs()">
+              [disabled]="!hasActiveJobs()">
           <mat-icon>clear_all</mat-icon> Clear Queue
         </button>
       </div>

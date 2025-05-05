@@ -1,107 +1,176 @@
 // clippy/frontend/src/app/services/socket.service.ts
 import { Injectable } from '@angular/core';
 import { Socket } from 'ngx-socket-io';
-import { Observable } from 'rxjs';
+import { Observable, BehaviorSubject } from 'rxjs';
 import { DownloadProgress, HistoryItem, BatchQueueStatus } from '../models/download.model';
 
 @Injectable({
   providedIn: 'root'
 })
 export class SocketService {
-  constructor(private socket: Socket) {}
+  private connectionStatus = new BehaviorSubject<boolean>(false);
+  
+  // Cache for last known progress to restore state if needed
+  private progressCache = new Map<string, DownloadProgress>();
+  
+  constructor(private socket: Socket) {
+    // Set up connection monitoring
+    this.setupConnectionListeners();
+  }
+  
+  private setupConnectionListeners(): void {
+    this.socket.on('connect', () => {
+      console.log('Socket connected');
+      this.connectionStatus.next(true);
+    });
+    
+    this.socket.on('disconnect', () => {
+      console.log('Socket disconnected');
+      this.connectionStatus.next(false);
+    });
+    
+    this.socket.on('error', (error) => {
+      console.error('Socket error:', error);
+    });
+  }
+  
+  /**
+   * Get connection status as observable
+   */
+  getConnectionStatus(): Observable<boolean> {
+    return this.connectionStatus.asObservable();
+  }
+  
+  /**
+   * Manual reconnection method
+   */
+  reconnect(): void {
+    if (!this.connectionStatus.value) {
+      this.socket.connect();
+    }
+  }
+
+  /**
+   * Generic event listener
+   */
+  listenTo<T>(eventName: string): Observable<T> {
+    return this.socket.fromEvent<T, any>(eventName);
+  }
 
   /**
    * Listen for socket connection
    */
   onConnect(): Observable<void> {
-    return this.socket.fromEvent<void, any>('connect');
+    return this.listenTo<void>('connect');
   }
 
   /**
    * Listen for socket disconnection
    */
   onDisconnect(): Observable<void> {
-    return this.socket.fromEvent<void, any>('disconnect');
+    return this.listenTo<void>('disconnect');
   }
 
   /**
    * Listen for download progress updates
    */
   onDownloadProgress(): Observable<DownloadProgress> {
-    return this.socket.fromEvent<DownloadProgress, any>('download-progress');
+    return new Observable<DownloadProgress>(observer => {
+      this.socket.on('download-progress', (data: DownloadProgress) => {
+        // Store in cache
+        if (data.jobId) {
+          this.progressCache.set(data.jobId, data);
+        }
+        
+        observer.next(data);
+      });
+      
+      return () => {
+        this.socket.off('download-progress');
+      };
+    });
   }
 
   /**
    * Listen for processing progress updates
    */
   onProcessingProgress(): Observable<DownloadProgress> {
-    return this.socket.fromEvent<DownloadProgress, any>('processing-progress');
+    return new Observable<DownloadProgress>(observer => {
+      this.socket.on('processing-progress', (data: DownloadProgress) => {
+        // Store in cache
+        if (data.jobId) {
+          this.progressCache.set(data.jobId, data);
+        }
+        
+        observer.next(data);
+      });
+      
+      return () => {
+        this.socket.off('processing-progress');
+      };
+    });
+  }
+
+  /**
+   * Get the last known progress for a job
+   */
+  getLastKnownProgress(jobId: string): DownloadProgress | undefined {
+    return this.progressCache.get(jobId);
   }
 
   /**
    * Listen for download history updates
    */
   onDownloadHistoryUpdated(): Observable<HistoryItem[]> {
-    return this.socket.fromEvent<HistoryItem[], any>('download-history-updated');
+    return this.listenTo<HistoryItem[]>('download-history-updated');
   }
 
   /**
    * Listen for download started event
    */
   onDownloadStarted(): Observable<{url: string, jobId?: string}> {
-    return this.socket.fromEvent<{url: string, jobId?: string}, any>('download-started');
+    return this.listenTo<{url: string, jobId?: string}>('download-started');
   }
 
   /**
    * Listen for download completed event
    */
-  onDownloadCompleted(): Observable<{outputFile: string, url: string, jobId?: string}> {
-    return this.socket.fromEvent<{outputFile: string, url: string, jobId?: string}, any>('download-completed');
+  onDownloadCompleted(): Observable<{outputFile: string, url: string, jobId?: string, isImage?: boolean}> {
+    return this.listenTo<{outputFile: string, url: string, jobId?: string, isImage?: boolean}>('download-completed');
   }
 
   /**
    * Listen for download failed event
    */
   onDownloadFailed(): Observable<{error: string, url: string, jobId?: string}> {
-    return this.socket.fromEvent<{error: string, url: string, jobId?: string}, any>('download-failed');
+    return this.listenTo<{error: string, url: string, jobId?: string}>('download-failed');
   }
 
   /**
    * Listen for batch queue updates
    */
   onBatchQueueUpdated(): Observable<BatchQueueStatus> {
-    return this.socket.fromEvent<BatchQueueStatus, any>('batch-queue-updated');
+    return this.listenTo<BatchQueueStatus>('batch-queue-updated');
   }
 
   /**
    * Listen for batch completion
    */
-  onBatchCompleted(): Observable<{timestamp: string}> {
-    return this.socket.fromEvent<{timestamp: string}, any>('batch-completed');
+  onBatchCompleted(): Observable<{completedJobsCount: number, failedJobsCount: number, timestamp: string}> {
+    return this.listenTo<{completedJobsCount: number, failedJobsCount: number, timestamp: string}>('batch-completed');
   }
 
   /**
    * Listen for processing failures
    */
-  onProcessingFailed(): Observable<{error: string, jobId: string}> {
-    return this.socket.fromEvent<{error: string, jobId: string}, any>('processing-failed');
+  onProcessingFailed(): Observable<{error: string, jobId?: string, inputFile?: string}> {
+    return this.listenTo<{error: string, jobId?: string, inputFile?: string}>('processing-failed');
   }
   
   /**
-   * Listen for job progress updates
-   * This is a consolidated event for tracking a job through all phases
+   * Send an event to the server
    */
-  onJobProgressUpdated(): Observable<{
-    jobId: string,
-    progress: number,
-    status: string,
-    task: string
-  }> {
-    return this.socket.fromEvent<{
-      jobId: string,
-      progress: number,
-      status: string,
-      task: string
-    }, any>('job-progress-updated');
+  emitEvent(eventName: string, data: any): void {
+    this.socket.emit(eventName, data);
   }
 }

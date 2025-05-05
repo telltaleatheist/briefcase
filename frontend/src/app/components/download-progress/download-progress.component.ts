@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+// clippy/frontend/src/app/components/download-progress/download-progress.component.ts
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
@@ -21,10 +22,15 @@ import { Subscription } from 'rxjs';
   ]
 })
 export class DownloadProgressComponent implements OnInit, OnDestroy {
+  @Input() jobId?: string;
+  
   progress = 0;
   task = 'Preparing download...';
+  isConnected = true;
+  
   private downloadSubscription: Subscription | null = null;
   private processingSubscription: Subscription | null = null;
+  private connectionSubscription: Subscription | null = null;
 
   constructor(
     private cdr: ChangeDetectorRef,
@@ -32,21 +38,57 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-    console.log('DownloadProgressComponent initialized');
+    console.log('DownloadProgressComponent initialized', this.jobId ? `with jobId: ${this.jobId}` : 'without jobId');
     
+    // Monitor connection status
+    this.connectionSubscription = this.socketService.getConnectionStatus().subscribe(isConnected => {
+      this.isConnected = isConnected;
+      if (!isConnected) {
+        this.task = 'Connection lost. Trying to reconnect...';
+      }
+      this.cdr.detectChanges();
+    });
+    
+    // Download progress events
     this.downloadSubscription = this.socketService.onDownloadProgress().subscribe((data: DownloadProgress) => {
       console.log('Received download progress:', data);
-      this.progress = Math.max(0, Math.min(100, Number(data.progress)));
-      this.task = data.task || 'Downloading...';
-      this.cdr.detectChanges();
+      
+      // Only update if no jobId is set or if the jobId matches
+      if (!this.jobId || (data.jobId && data.jobId === this.jobId)) {
+        this.updateProgress(data.progress, data.task || 'Downloading...');
+      }
     });
 
+    // Processing progress events  
     this.processingSubscription = this.socketService.onProcessingProgress().subscribe((data: DownloadProgress) => {
       console.log('Received processing progress:', data);
-      this.progress = Math.max(0, Math.min(100, Number(data.progress)));
-      this.task = data.task || 'Processing video...';
-      this.cdr.detectChanges();
+      
+      // Only update if no jobId is set or if the jobId matches
+      if (!this.jobId || (data.jobId && data.jobId === this.jobId)) {
+        this.updateProgress(data.progress, data.task || 'Processing video...');
+      }
     });
+    
+    // Initialize with last known progress if we have a jobId
+    if (this.jobId) {
+      const lastProgress = this.socketService.getLastKnownProgress(this.jobId);
+      if (lastProgress) {
+        console.log('Using cached progress data:', lastProgress);
+        this.updateProgress(lastProgress.progress, lastProgress.task || 'Processing...');
+      }
+    }
+  }
+  
+  /**
+   * Update progress and trigger change detection
+   */
+  private updateProgress(progress: number, task: string): void {
+    // Ensure progress is a valid number and within range
+    this.progress = Math.max(0, Math.min(100, Number(progress) || 0));
+    this.task = task || 'Processing...';
+    
+    // Force change detection
+    this.cdr.detectChanges();
   }
 
   ngOnDestroy(): void {
@@ -55,6 +97,9 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
     }
     if (this.processingSubscription) {
       this.processingSubscription.unsubscribe();
+    }
+    if (this.connectionSubscription) {
+      this.connectionSubscription.unsubscribe();
     }
   }
 }

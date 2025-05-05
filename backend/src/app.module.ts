@@ -4,25 +4,23 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DownloaderModule } from './downloader/downloader.module';
 import { FfmpegModule } from './ffmpeg/ffmpeg.module';
-import { ConfigModule } from '@nestjs/config';
 import { PathModule } from './path/path.module';
-import { SharedConfigModule } from './config/shared-config.module';
 import { MediaModule } from './media/media.module';
+import { ConfigModule } from '@nestjs/config';
+import { SharedConfigModule } from './config/shared-config.module';
+import { environment } from './config/environment';
 
 @Module({
   imports: [
-    SharedConfigModule,
-    // Load environment variables
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env.local', '.env']
+      load: [() => environment],
     }),
-    
-    // Import custom modules
+    SharedConfigModule,
     DownloaderModule,
-    MediaModule, 
     FfmpegModule,
     PathModule,
+    MediaModule
   ],
   controllers: [AppController],
   providers: [AppService],

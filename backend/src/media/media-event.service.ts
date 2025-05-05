@@ -2,210 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
-import { Subject, Observable } from 'rxjs';
 
-/**
- * Event types for the media event system
- */
-export type MediaEventType = 
-  // Download events
-  | 'download-started'
-  | 'download-progress'
-  | 'download-completed'
-  | 'download-failed'
-  | 'download-retry'
-  | 'download-cancelled'
-  // Processing events
-  | 'processing-started'
-  | 'processing-progress'
-  | 'processing-completed'
-  | 'processing-failed'
-  // Batch events
-  | 'batch-queue-updated'
-  | 'batch-completed'
-  | 'batch-paused'
-  | 'batch-resumed'
-  // History events
-  | 'download-history-updated'
-  // System events
-  | 'system-error'
-  | 'config-updated';
-
-/**
- * Base interface for all media events
- */
-export interface BaseMediaEvent {
-  type: MediaEventType;
-  timestamp: string;
-  jobId?: string;
-  data: any;
-}
-
-/**
- * Download started event
- */
-export interface DownloadStartedEvent extends BaseMediaEvent {
-  type: 'download-started';
-  data: {
-    url: string;
-  };
-}
-
-/**
- * Download progress event
- */
-export interface DownloadProgressEvent extends BaseMediaEvent {
-  type: 'download-progress';
-  data: {
-    progress: number;
-    task: string;
-    speed?: number;
-    eta?: number;
-    totalSize?: number;
-    downloadedBytes?: number;
-  };
-}
-
-/**
- * Download completed event
- */
-export interface DownloadCompletedEvent extends BaseMediaEvent {
-  type: 'download-completed';
-  data: {
-    outputFile: string;
-    url: string;
-    isImage?: boolean;
-  };
-}
-
-/**
- * Download failed event
- */
-export interface DownloadFailedEvent extends BaseMediaEvent {
-  type: 'download-failed';
-  data: {
-    url: string;
-    error: string;
-  };
-}
-
-/**
- * Download retry event
- */
-export interface DownloadRetryEvent extends BaseMediaEvent {
-  type: 'download-retry';
-  data: {
-    url: string;
-    attempt: number;
-    maxRetries: number;
-    error: string;
-  };
-}
-
-/**
- * Download cancelled event
- */
-export interface DownloadCancelledEvent extends BaseMediaEvent {
-  type: 'download-cancelled';
-  data: {
-    url: string;
-  };
-}
-
-/**
- * Processing started event
- */
-export interface ProcessingStartedEvent extends BaseMediaEvent {
-  type: 'processing-started';
-  data: {
-    inputFile: string;
-    options: any;
-  };
-}
-
-/**
- * Processing progress event
- */
-export interface ProcessingProgressEvent extends BaseMediaEvent {
-  type: 'processing-progress';
-  data: {
-    progress: number;
-    task: string;
-  };
-}
-
-/**
- * Processing completed event
- */
-export interface ProcessingCompletedEvent extends BaseMediaEvent {
-  type: 'processing-completed';
-  data: {
-    outputFile: string;
-    thumbnailFile?: string;
-    audioFile?: string;
-  };
-}
-
-/**
- * Processing failed event
- */
-export interface ProcessingFailedEvent extends BaseMediaEvent {
-  type: 'processing-failed';
-  data: {
-    inputFile: string;
-    error: string;
-  };
-}
-
-/**
- * Batch queue updated event
- */
-export interface BatchQueueUpdatedEvent extends BaseMediaEvent {
-  type: 'batch-queue-updated';
-  data: {
-    downloadQueue: any[];
-    processingQueue: any[];
-    completedJobs: any[];
-    failedJobs: any[];
-    activeDownloads: string[];
-    maxConcurrentDownloads: number;
-    isProcessing: boolean;
-    isPaused: boolean;
-  };
-}
-
-/**
- * Batch completed event
- */
-export interface BatchCompletedEvent extends BaseMediaEvent {
-  type: 'batch-completed';
-  data: {
-    completedJobsCount: number;
-    failedJobsCount: number;
-  };
-}
-
-/**
- * Union type of all media events
- */
-export type MediaEvent =
-  | DownloadStartedEvent
-  | DownloadProgressEvent
-  | DownloadCompletedEvent
-  | DownloadFailedEvent
-  | DownloadRetryEvent
-  | DownloadCancelledEvent
-  | ProcessingStartedEvent
-  | ProcessingProgressEvent
-  | ProcessingCompletedEvent
-  | ProcessingFailedEvent
-  | BatchQueueUpdatedEvent
-  | BatchCompletedEvent
-  | BaseMediaEvent;
-
-/**
- * Service for handling media events across the application
- */
 @WebSocketGateway({ cors: true })
 @Injectable()
 export class MediaEventService {
@@ -213,215 +10,138 @@ export class MediaEventService {
   server: Server;
 
   private readonly logger = new Logger(MediaEventService.name);
-  private eventSubject = new Subject<MediaEvent>();
-  
-  // Observable for subscribing to all events
-  events$ = this.eventSubject.asObservable();
   
   /**
-   * Emit a media event
+   * Base method to emit any event with data
    */
-  emitEvent(event: MediaEvent): void {
-    // Add timestamp if not present
-    if (!event.timestamp) {
-      event.timestamp = new Date().toISOString();
+  public emitEvent(eventType: string, data: any): void {
+    if (!this.server) {
+      this.logger.warn(`Cannot emit event: ${eventType} - WebSocket server not initialized`);
+      return;
     }
     
-    // Log the event
-    this.logger.debug(`Emitting event: ${event.type}`, { 
-      jobId: event.jobId, 
-      data: event.data 
-    });
-    
-    // Push to the subject
-    this.eventSubject.next(event);
-    
-    // Emit via WebSocket
-    this.emitWebSocketEvent(event);
+    this.logger.debug(`Emitting event: ${eventType}`);
+    this.server.emit(eventType, data);
   }
   
   /**
-   * Emit an event via WebSocket
+   * Helper to ensure progress is within valid range (0-100)
    */
-  private emitWebSocketEvent(event: MediaEvent): void {
-    if (this.server) {
-      this.server.emit(event.type, {
-        ...event.data,
-        jobId: event.jobId,
-        timestamp: event.timestamp
-      });
-    } else {
-      this.logger.warn(`Cannot emit WebSocket event: ${event.type} - server not initialized`);
-    }
+  private normalizeProgress(progress: number): number {
+    return Math.max(0, Math.min(100, progress));
   }
   
   /**
-   * Helper methods for common events
+   * Helper to create a timestamp
    */
+  private getTimestamp(): string {
+    return new Date().toISOString();
+  }
   
-  // Download events
-  
+  /**
+   * Download events
+   */
   emitDownloadStarted(url: string, jobId?: string): void {
-    this.emitEvent({
-      type: 'download-started',
-      timestamp: new Date().toISOString(),
+    this.emitEvent('download-started', { 
+      url, 
       jobId,
-      data: { url }
+      timestamp: this.getTimestamp()
     });
   }
   
-  emitDownloadProgress(progress: number, task: string, jobId?: string, additionalData?: object): void {
-    this.emitEvent({
-      type: 'download-progress',
-      timestamp: new Date().toISOString(),
+  emitDownloadProgress(progress: number, task: string, jobId?: string, additionalInfo?: any): void {
+    this.emitEvent('download-progress', {
+      progress: this.normalizeProgress(progress),
+      task,
       jobId,
-      data: { 
-        progress, 
-        task,
-        ...additionalData
-      }
+      ...additionalInfo
     });
   }
   
   emitDownloadCompleted(outputFile: string, url: string, jobId?: string, isImage: boolean = false): void {
-    this.emitEvent({
-      type: 'download-completed',
-      timestamp: new Date().toISOString(),
+    this.emitEvent('download-completed', { 
+      outputFile, 
+      url,
       jobId,
-      data: { 
-        outputFile, 
-        url,
-        isImage 
-      }
+      isImage,
+      timestamp: this.getTimestamp()
     });
   }
   
   emitDownloadFailed(url: string, error: string, jobId?: string): void {
-    this.emitEvent({
-      type: 'download-failed',
-      timestamp: new Date().toISOString(),
+    this.emitEvent('download-failed', { 
+      url, 
+      error,
       jobId,
-      data: { url, error }
+      timestamp: this.getTimestamp()
     });
   }
   
-  emitDownloadRetry(url: string, attempt: number, maxRetries: number, error: string, jobId?: string): void {
-    this.emitEvent({
-      type: 'download-retry',
-      timestamp: new Date().toISOString(),
-      jobId,
-      data: { 
-        url, 
-        attempt, 
-        maxRetries, 
-        error 
-      }
-    });
-  }
-  
-  emitDownloadCancelled(url: string, jobId?: string): void {
-    this.emitEvent({
-      type: 'download-cancelled',
-      timestamp: new Date().toISOString(),
-      jobId,
-      data: { url }
-    });
-  }
-  
-  // Processing events
-  
+  /**
+   * Processing events
+   */
   emitProcessingStarted(inputFile: string, options: any, jobId?: string): void {
-    this.emitEvent({
-      type: 'processing-started',
-      timestamp: new Date().toISOString(),
+    this.emitEvent('processing-started', { 
+      inputFile, 
+      options,
       jobId,
-      data: { inputFile, options }
+      timestamp: this.getTimestamp()
     });
   }
   
-  emitProcessingProgress(progress: number, task: string, jobId?: string): void {
-    this.emitEvent({
-      type: 'processing-progress',
-      timestamp: new Date().toISOString(),
+  emitProcessingProgress(progress: number, task: string, jobId?: string, additionalInfo?: any): void {
+    this.emitEvent('processing-progress', {
+      progress: this.normalizeProgress(progress),
+      task,
       jobId,
-      data: { progress, task }
+      ...additionalInfo
     });
   }
   
   emitProcessingCompleted(outputFile: string, jobId?: string, thumbnailFile?: string, audioFile?: string): void {
-    this.emitEvent({
-      type: 'processing-completed',
-      timestamp: new Date().toISOString(),
+    this.emitEvent('processing-completed', { 
+      outputFile,
       jobId,
-      data: { 
-        outputFile,
-        thumbnailFile,
-        audioFile
-      }
+      thumbnailFile,
+      audioFile,
+      timestamp: this.getTimestamp()
     });
   }
   
   emitProcessingFailed(inputFile: string, error: string, jobId?: string): void {
-    this.emitEvent({
-      type: 'processing-failed',
-      timestamp: new Date().toISOString(),
+    this.emitEvent('processing-failed', { 
+      inputFile, 
+      error,
       jobId,
-      data: { inputFile, error }
+      timestamp: this.getTimestamp()
     });
   }
   
-  // Batch events
-  
+  /**
+   * Batch events
+   */
   emitBatchQueueUpdated(queueState: any): void {
-    this.emitEvent({
-      type: 'batch-queue-updated',
-      timestamp: new Date().toISOString(),
-      data: queueState
-    });
+    this.emitEvent('batch-queue-updated', queueState);
   }
   
   emitBatchCompleted(completedJobsCount: number, failedJobsCount: number): void {
-    this.emitEvent({
-      type: 'batch-completed',
-      timestamp: new Date().toISOString(),
-      data: { 
-        completedJobsCount, 
-        failedJobsCount
-      }
+    this.emitEvent('batch-completed', {
+      completedJobsCount,
+      failedJobsCount,
+      timestamp: this.getTimestamp()
     });
   }
   
   /**
-   * Filter events by type
+   * Combined job progress event
    */
-  filterByType<T extends MediaEvent>(type: MediaEventType): Observable<T> {
-    return new Observable<T>(observer => {
-      const subscription = this.events$.subscribe(event => {
-        if (event.type === type) {
-          observer.next(event as T);
-        }
-      });
-      
-      return () => {
-        subscription.unsubscribe();
-      };
-    });
-  }
-  
-  /**
-   * Filter events by job ID
-   */
-  filterByJobId(jobId: string): Observable<MediaEvent> {
-    return new Observable<MediaEvent>(observer => {
-      const subscription = this.events$.subscribe(event => {
-        if (event.jobId === jobId) {
-          observer.next(event);
-        }
-      });
-      
-      return () => {
-        subscription.unsubscribe();
-      };
+  emitJobProgress(jobId: string, progress: number, status: string, task: string): void {
+    this.emitEvent('job-progress-updated', {
+      jobId,
+      progress: this.normalizeProgress(progress),
+      status,
+      task,
+      timestamp: this.getTimestamp()
     });
   }
 }
