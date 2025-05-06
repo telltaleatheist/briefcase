@@ -251,13 +251,11 @@ export class ConfigDialog {
       
       // Try each path until we find one that exists
       for (const potentialPath of possiblePaths) {
-        log.info(`Checking for preload at: ${potentialPath}`);
         try {
           // We can't directly check if files exist inside asar archives with fs.existsSync
           // Instead, we need to try to access it and catch any errors
           require.resolve(potentialPath);
           preloadPath = potentialPath;
-          log.info(`Found preload at: ${preloadPath}`);
           break;
         } catch (error) {
           log.info(`Not found at: ${potentialPath}`);
@@ -275,8 +273,6 @@ export class ConfigDialog {
         }
       }
     }
-    
-    log.info(`Final preload path: ${preloadPath}`);
     
     // Now create the window with the correct preload path
     this.window = new BrowserWindow({
@@ -306,23 +302,19 @@ export class ConfigDialog {
       ];
       
       for (const potentialPath of possibleHtmlPaths) {
-        log.info(`Checking for HTML at: ${potentialPath}`);
         try {
           // For HTML files inside asar, we need to be careful with how we check
           if (potentialPath.includes('app.asar') && !potentialPath.includes('unpacked')) {
             try {
               require.resolve(potentialPath);
               htmlPath = potentialPath;
-              log.info(`Found HTML at: ${htmlPath}`);
               break;
             } catch (error) {
-              log.info(`Not found at: ${potentialPath}`);
             }
           } else {
             // For regular files, we can use existsSync
             if (fs.existsSync(potentialPath)) {
               htmlPath = potentialPath;
-              log.info(`Found HTML at: ${htmlPath}`);
               break;
             }
           }
@@ -335,9 +327,6 @@ export class ConfigDialog {
       htmlPath = path.join(app.getAppPath(), 'utilities', 'configDialog.html');
     }
     
-    log.info(`Final HTML path: ${htmlPath}`);
-    
-    // Load the HTML file
     if (htmlPath) {
       try {
         this.window.loadFile(htmlPath);

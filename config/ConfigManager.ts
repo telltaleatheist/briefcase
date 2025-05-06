@@ -34,7 +34,6 @@ export class ConfigManager {
       if (fs.existsSync(this.configPath)) {
         const configData = fs.readFileSync(this.configPath, 'utf8');
         this.config = JSON.parse(configData);
-        log.info(`Config loaded from ${this.configPath}`);
       } else {
         log.info(`No config file found at ${this.configPath}, using defaults`);
         this.config = {};

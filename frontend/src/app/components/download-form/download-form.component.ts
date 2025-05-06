@@ -78,15 +78,13 @@ export class DownloadFormComponent implements OnInit {
 
   private checkUrlAndDownload(): void {
     const urlControl = this.downloadForm.get('url');
-    const rawUrl = urlControl?.value;
-    const url = rawUrl?.replace(/^https:\/\/x\.com/, 'https://twitter.com');
+    const rawUrl = urlControl?.value || '';  // Provide a default empty string
+    const url = rawUrl.replace(/^https:\/\/x\.com/, 'https://twitter.com');
       
     this.isLoading = true;
   
-    console.log('Checking URL:', url);
-  
     this.apiService.checkUrl(url).subscribe({
-      next: (result) => {
+        next: (result) => {
         this.isLoading = false;
   
         if (!result || !result.valid) {
@@ -99,8 +97,7 @@ export class DownloadFormComponent implements OnInit {
         this.urlInfo = result.info || null;
         urlControl?.setErrors(null);
   
-        console.log('URL is valid, ready to download:', this.urlInfo);
-        this.startDownload(); // Only runs after button click
+        this.startDownload();
       },
       error: (err) => {
         this.isLoading = false;
@@ -114,11 +111,8 @@ export class DownloadFormComponent implements OnInit {
   
   startDownload(): void {
     const settings = this.downloadForm.value;
-    console.log('🚀 Starting download with settings:', settings);
-  
     this.apiService.downloadVideo(settings).subscribe({
       next: (res) => {
-        console.log('✅ Download started successfully:', res);
         // Optionally update UI state here
       },
       error: (err) => {
@@ -148,7 +142,6 @@ export class DownloadFormComponent implements OnInit {
         }
       });
     } else {
-      console.log('🗂️ Directory selection is not available in the web version');
       this.snackBar.open('Directory selection is not available in the web version', 'Dismiss', { duration: 3000 });
     }
   }

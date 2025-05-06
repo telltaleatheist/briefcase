@@ -72,7 +72,6 @@ export class DownloaderController {
   // Existing endpoints remain unchanged...
   @Get('history')
   async getDownloadHistory() {
-    log.info('Accessing download history route');
     return this.downloaderService.getDownloadHistory();
   }
 
@@ -142,7 +141,6 @@ export class DownloaderController {
 
   @Get('check')
   async checkUrl(@Query('url') url: string) {
-    log.info('✅ [DownloaderController] checkUrl() called with:', url);
     if (!url) {
       return { valid: false, message: 'URL is required' };
     }

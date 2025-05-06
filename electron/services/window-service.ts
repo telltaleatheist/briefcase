@@ -15,8 +15,6 @@ export class WindowService {
    * Create the main application window
    */
   createMainWindow(): BrowserWindow {
-    log.info('Creating main application window...');
-
     this.mainWindow = new BrowserWindow({
       width: 800,
       height: 1000,
@@ -45,7 +43,6 @@ export class WindowService {
 
     // Window close handler
     this.mainWindow.on('closed', () => {
-      log.info('Main window closed');
       this.mainWindow = null;
     });
     
@@ -56,7 +53,6 @@ export class WindowService {
    * Show error window when backend fails to start
    */
   showBackendErrorWindow(): BrowserWindow {
-    log.info('Showing backend error window');
     
     const errorWindow = new BrowserWindow({
       width: 500,
@@ -142,7 +138,6 @@ export class WindowService {
     
     // Handle window closed
     errorWindow.on('closed', () => {
-      log.info('Error window closed, quitting application');
       process.exit(0);
     });
     

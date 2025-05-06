@@ -72,14 +72,6 @@ export class AppConfig {
     process.env.ELECTRON_RESOURCES_PATH = this.resourcesPath;
     process.env.ELECTRON_PRELOAD_PATH = this.preloadPath;
     process.env.APP_ROOT = this.appPath;
-    
-    // Log paths for debugging
-    log.info(`Environment configuration:`);
-    log.info(`- App path: ${this.appPath}`);
-    log.info(`- Resources path: ${this.resourcesPath}`);
-    log.info(`- Preload path: ${this.preloadPath}`);
-    log.info(`- Frontend path: ${this.frontendPath} (exists: ${fs.existsSync(this.frontendPath)})`);
-    log.info(`- Backend path: ${this.backendPath} (exists: ${fs.existsSync(this.backendPath)})`);
   }
 }
 

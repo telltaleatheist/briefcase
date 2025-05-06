@@ -19,8 +19,6 @@ export class ExecutablesUtil {
    * Check if required executables are configured and valid
    */
   async checkRequiredExecutables(): Promise<boolean> {
-    log.info('Checking required executables configuration...');
-    
     // If no configuration exists, return false immediately
     if (!this.configManager.hasRequiredPaths()) {
       log.info('Required paths are not configured');
@@ -57,7 +55,6 @@ export class ExecutablesUtil {
       return false;
     }
     
-    log.info('All required executables are valid');
     return true;
   }
 
@@ -65,19 +62,12 @@ export class ExecutablesUtil {
    * Show configuration dialog for required executables
    */
   async showExecutablesConfigDialog(): Promise<boolean> {
-    log.info('Showing executables configuration dialog...');
-    
     // Create dialog with a callback to update environment variables
     const configDialog = new ConfigDialog(() => {
       const config = this.configManager.getConfig();
       process.env.FFMPEG_PATH = config.ffmpegPath;
       process.env.FFPROBE_PATH = config.ffprobePath;
       process.env.YT_DLP_PATH = config.ytDlpPath;
-      
-      log.info(`Updated environment variables:
-        FFMPEG_PATH: ${process.env.FFMPEG_PATH}
-        FFPROBE_PATH: ${process.env.FFPROBE_PATH}
-        YT_DLP_PATH: ${process.env.YT_DLP_PATH}`);
     });
     
     // Show dialog and return result
@@ -114,7 +104,6 @@ export class ExecutablesUtil {
       }
     }
     
-    log.info('Required executables are properly configured');
     return true;
   }
 }

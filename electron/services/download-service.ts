@@ -67,7 +67,6 @@ export class DownloadService {
    */
   checkFileExists(filePath: string): boolean {
     const exists = fs.existsSync(filePath);
-    log.info(`Checking if file exists: ${filePath} - ${exists ? 'YES' : 'NO'}`);
     return exists;
   }
   

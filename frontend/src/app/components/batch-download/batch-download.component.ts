@@ -84,9 +84,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
   
   ngOnInit(): void {
-    console.log('BatchDownloadComponent initialized');
-    
-    // Load user settings
     this.settingsSubscription = this.settingsService.getSettings().subscribe((settings: Settings) => {
       this.updateDefaultValues(settings);
     });
@@ -94,7 +91,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Listen for batch queue updates
     this.socketSubscription = this.socketService.onBatchQueueUpdated().subscribe(
       (status: BatchQueueStatus) => {
-        console.log('Batch queue updated:', status);
         this.batchQueueStatus = status;
         
         // If we get a status update, ensure our order tracking is up to date
@@ -119,7 +115,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Listen for download progress updates
     this.downloadProgressSubscription = this.socketService.onDownloadProgress().subscribe(
       (progress: DownloadProgress) => {
-        console.log('Download progress:', progress);
         if (progress.jobId) {
           this.updateJobProgress(progress.jobId, progress.progress, progress.task);
         }
@@ -129,7 +124,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Listen for processing progress updates
     this.processingProgressSubscription = this.socketService.onProcessingProgress().subscribe(
       (progress: DownloadProgress) => {
-        console.log('Processing progress:', progress);
         if (progress.jobId) {
           this.updateJobProgress(progress.jobId, progress.progress, progress.task);
         }
@@ -186,12 +180,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     // Connection status handling
     this.socketService.onConnect().subscribe(() => {
-      console.log('Socket connected');
       this.refreshBatchStatus();
     });
     
     this.socketService.onDisconnect().subscribe(() => {
-      console.log('Socket disconnected');
     });
   }
 
@@ -450,10 +442,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return job;
     }).filter(job => job !== null);
     
-    if (result.length > 0) {
-      console.log(`Returning ${result.length} jobs in preserved original order`);
-    }
-    
     return result;
   }
     
@@ -613,8 +601,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
 
   addUrlsFromTextarea(): void {
-    console.log('Textarea content:', this.multiUrlText);
-    
     if (!this.multiUrlText || this.multiUrlText.trim() === '') {
       this.snackBar.open('Please enter URLs in the textarea', 'Dismiss', { duration: 3000 });
       return;
@@ -914,7 +900,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
                   
                   // Add to download queue array
                   this.batchQueueStatus.downloadQueue.push(placeholderJob);
-                  console.log(`Created placeholder job for ${url} with ID ${jobId}`);
                 }
               }
             }
@@ -1024,7 +1009,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   refreshBatchStatus(): void {
     this.batchApiService.getBatchStatus().subscribe({
       next: (status) => {
-        console.log('Received batch status update from server:', status);
         this.batchQueueStatus = status;
         
         // Ensure we're tracking any new jobs from the server
@@ -1040,7 +1024,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             // This job came from the server but wasn't in our tracking
             // Add it to the end of our tracked order
             this.originalJobOrder.push(id);
-            console.log(`Added new job ${id} from server refresh`);
           }
         });
         

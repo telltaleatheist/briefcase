@@ -26,12 +26,6 @@ if (AppConfig.isDevelopment) {
   log.transports.file.level = 'debug';
 }
 
-// Log startup information
-log.info('Application starting...');
-log.info(`Environment: ${AppConfig.isDevelopment ? 'development' : 'production'}`);
-log.info(`App path: ${app.getAppPath()}`);
-log.info(`Resources path: ${process.resourcesPath || 'not available'}`);
-
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -51,7 +45,6 @@ app.on('second-instance', () => {
 
 // App is ready - start initialization sequence
 app.whenReady().then(async () => {
-  log.info('Electron app ready, initializing...');
   
   try {
     // Check required executables first
@@ -78,7 +71,6 @@ app.whenReady().then(async () => {
     // Create window based on backend status
     if (backendStarted) {
       windowService.createMainWindow();
-      updateService.checkForUpdates();
     } else {
       windowService.showBackendErrorWindow();
     }

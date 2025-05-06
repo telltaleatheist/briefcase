@@ -38,9 +38,6 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-    console.log('DownloadProgressComponent initialized', this.jobId ? `with jobId: ${this.jobId}` : 'without jobId');
-    
-    // Monitor connection status
     this.connectionSubscription = this.socketService.getConnectionStatus().subscribe(isConnected => {
       this.isConnected = isConnected;
       if (!isConnected) {
@@ -51,7 +48,6 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
     
     // Download progress events
     this.downloadSubscription = this.socketService.onDownloadProgress().subscribe((data: DownloadProgress) => {
-      console.log('Received download progress:', data);
       
       // Only update if no jobId is set or if the jobId matches
       if (!this.jobId || (data.jobId && data.jobId === this.jobId)) {
@@ -61,9 +57,7 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
 
     // Processing progress events  
     this.processingSubscription = this.socketService.onProcessingProgress().subscribe((data: DownloadProgress) => {
-      console.log('Received processing progress:', data);
-      
-      // Only update if no jobId is set or if the jobId matches
+
       if (!this.jobId || (data.jobId && data.jobId === this.jobId)) {
         this.updateProgress(data.progress, data.task || 'Processing video...');
       }
@@ -73,7 +67,6 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
     if (this.jobId) {
       const lastProgress = this.socketService.getLastKnownProgress(this.jobId);
       if (lastProgress) {
-        console.log('Using cached progress data:', lastProgress);
         this.updateProgress(lastProgress.progress, lastProgress.task || 'Processing...');
       }
     }

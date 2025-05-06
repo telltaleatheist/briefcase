@@ -15,9 +15,6 @@ export class ServerConfig {
   static get config(): EnvServerConfig {
     if (!this._config) {
       this._config = EnvironmentUtil.getServerConfig();
-      log.info(`Server configuration loaded:`);
-      log.info(`- NestJS backend: ${this._config.nestBackend.host}:${this._config.nestBackend.port}`);
-      log.info(`- Electron server: ${this._config.electronServer.host}:${this._config.electronServer.port}`);
     }
     return this._config;
   }

@@ -20,12 +20,10 @@ export class SocketService {
   
   private setupConnectionListeners(): void {
     this.socket.on('connect', () => {
-      console.log('Socket connected');
       this.connectionStatus.next(true);
     });
     
     this.socket.on('disconnect', () => {
-      console.log('Socket disconnected');
       this.connectionStatus.next(false);
     });
     

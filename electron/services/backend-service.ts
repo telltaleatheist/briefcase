@@ -27,11 +27,9 @@ export class BackendService {
    * Start the backend server and HTTP server
    */
   async startBackendServer(): Promise<boolean> {
-    log.info('Starting backend servers...');
     
     // If backend already started, return true
     if (this.backendStarted) {
-      log.info('Backend already started. Skipping.');
       return true;
     }
     
@@ -52,30 +50,16 @@ export class BackendService {
     try {
       fs.writeFileSync(this.lockFilePath, new Date().toString());
     } catch (err) {
-      log.error('Failed to create lock file:', err);
     }
     
     try {
-      // Start the Node.js backend (NestJS)
       const success = await this.startNodeBackend();
-      
-      if (!success) {
-        log.warn('Failed to start Node.js backend, falling back to HTTP server only');
-      }
-      
-      // Start the HTTP server for frontend regardless of backend status
       await this.startHttpServer();
-      
-      // Mark backend as started
+
       this.backendStarted = true;
-      
-      // Wait for backend to initialize
-      log.info('Waiting for backend to initialize...');
       await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Check if backend is running
+
       const isRunning = await ServerConfig.isBackendRunning();
-      log.info(`Backend server status check: ${isRunning ? 'RUNNING' : 'NOT RUNNING'}`);
       
       return isRunning;
       
@@ -92,7 +76,6 @@ export class BackendService {
     try {
       // Get backend path
       const backendPath = AppConfig.backendPath;
-      log.info(`Backend entry point: ${backendPath} (exists: ${fs.existsSync(backendPath)})`);
       
       // If backend doesn't exist, return false
       if (!fs.existsSync(backendPath)) {
@@ -100,15 +83,9 @@ export class BackendService {
         return false;
       }
       
-      // Get Node.js executable
       const nodePath = process.execPath;
-      log.info(`Using Node.js executable: ${nodePath}`);
-      
-      // Get frontend path for backend to serve
       const frontendPath = AppConfig.frontendPath;
-      log.info(`Frontend path for backend: ${frontendPath} (exists: ${fs.existsSync(frontendPath)})`);
       
-      // Create environment for backend process
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -121,21 +98,11 @@ export class BackendService {
         VERBOSE: 'true'
       };
       
-      // Log environment variables
-      log.info('Environment variables for backend process:');
-      log.info(`- FRONTEND_PATH: ${backendEnv.FRONTEND_PATH}`);
-      log.info(`- NODE_ENV: ${backendEnv.NODE_ENV}`);
-      log.info(`- PORT: ${backendEnv.PORT}`);
-      
-      // Spawn backend process
       this.backendProcess = spawn(nodePath, [backendPath], {
         env: backendEnv,
         stdio: 'pipe',
       });
       
-      log.info(`Backend process spawned with PID: ${this.backendProcess.pid}`);
-      
-      // Set up process event handlers
       this.setupProcessEventHandlers();
       
       return true;
@@ -154,17 +121,10 @@ export class BackendService {
     const frontendPath = AppConfig.frontendPath;
     const serverConfig = ServerConfig.config;
     
-    log.info(`Starting HTTP server to serve frontend from: ${frontendPath}`);
-    
-    // Create HTTP server
     this.server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
       const url = req.url || '/';
       
-      log.info(`[HTTP Server] Received request: ${url}`);
-      
-      // Proxy API and socket.io routes to NestJS
       if (url.startsWith('/api/') || url.includes('/socket.io/')) {
-        log.info(`[HTTP Server] Proxying request to backend: ${url}`);
         
         const proxyOptions = {
           hostname: serverConfig.nestBackend.host,
@@ -184,7 +144,6 @@ export class BackendService {
           res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
           res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
           proxyRes.pipe(res);
-          log.info(`[HTTP Server] Proxy response for ${url}: ${proxyRes.statusCode}`);
         });
       
         req.pipe(proxyReq);
@@ -245,7 +204,6 @@ export class BackendService {
 
       // Serve static frontend files
       let filePath = path.join(frontendPath, url === '/' ? 'index.html' : url);
-      log.info(`[HTTP Server] Checking for file: ${filePath}`);
 
       if (fs.existsSync(filePath)) {
         if (fs.statSync(filePath).isDirectory()) {
@@ -253,7 +211,6 @@ export class BackendService {
         }
         
         if (fs.existsSync(filePath)) {
-          log.info(`[HTTP Server] Serving file: ${filePath}`);
                 
           const content = fs.readFileSync(filePath);
           const ext = path.extname(filePath).toLowerCase();
@@ -274,16 +231,13 @@ export class BackendService {
       }
       
       // Fallback to serving index.html for client-side routing
-      log.info(`[HTTP Server] File not found: ${filePath}, falling back to index.html`);
       
       const indexPath = path.join(frontendPath, 'index.html');
       if (fs.existsSync(indexPath)) {
-        log.info(`[HTTP Server] Serving index.html as fallback`);
         const content = fs.readFileSync(indexPath);
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(content);
       } else {
-        log.error(`[HTTP Server] Index.html not found at: ${indexPath}`);
         res.writeHead(404);
         res.end('Not Found');
       }
@@ -296,7 +250,6 @@ export class BackendService {
 
     // Start HTTP server
     this.server.listen(serverConfig.electronServer.port, serverConfig.electronServer.host, () => {
-      log.info(`HTTP Server started on ${serverConfig.electronServer.host}:${serverConfig.electronServer.port}`);
     });
   }
 
@@ -351,9 +304,6 @@ export class BackendService {
    * Shutdown the backend server
    */
   shutdown(): void {
-    log.info('Shutting down backend server...');
-    
-    // Clean up lock file
     if (fs.existsSync(this.lockFilePath)) {
       try {
         fs.unlinkSync(this.lockFilePath);

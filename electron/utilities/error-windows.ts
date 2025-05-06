@@ -10,8 +10,6 @@ export class ErrorWindows {
    * Create a window to show backend errors
    */
   static createBackendErrorWindow(): BrowserWindow {
-    log.info('Creating backend error window');
-    
     const errorWindow = new BrowserWindow({
       width: 500,
       height: 300,
@@ -107,8 +105,6 @@ export class ErrorWindows {
    * Create a window to show configuration errors
    */
   static createConfigErrorWindow(message: string): BrowserWindow {
-    log.info('Creating configuration error window');
-    
     const errorWindow = new BrowserWindow({
       width: 500,
       height: 300,

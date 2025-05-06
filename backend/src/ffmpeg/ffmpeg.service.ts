@@ -28,7 +28,7 @@ export class FfmpegService {
       if (!ffprobePath) {
         throw new Error('FFprobe path not found. Please configure it in the application settings.');
       }
-      
+
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegPath);
       ffmpeg.setFfprobePath(ffprobePath);

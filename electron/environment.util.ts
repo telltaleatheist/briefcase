@@ -84,7 +84,6 @@ export class EnvironmentUtil {
 
       // Write the config file
       fs.writeFileSync(configPath, JSON.stringify(configToWrite, null, 2), 'utf8');
-      log.info(`Environment config written to: ${configPath}`);
     } catch (error) {
       log.error('Error writing environment config:', error);
     }
@@ -129,7 +128,6 @@ export class EnvironmentUtil {
       const configContent = fs.readFileSync(configPath, 'utf8');
       const parsedConfig: ConfigFile = JSON.parse(configContent);
 
-      log.info(`Environment config read from: ${configPath}`);
       return parsedConfig;
     } catch (error) {
       log.error('Error reading environment config:', error);
@@ -185,44 +183,14 @@ export class EnvironmentUtil {
   
       if (!hasIndexHtml || !hasMainJs || !hasStyles) {
         log.warn('Missing essential frontend files');
-        log.info(`Directory contents: ${dirContents.join(', ')}`);
         throw new Error('Missing essential frontend files');
       }
   
-      log.info(`Frontend path resolved: ${this.frontendPath}`);
-      log.info(`Frontend directory contents: ${dirContents.join(', ')}`);
-      
       return this.frontendPath;
   
     } catch (error) {
       // Error handling remains the same
       log.error('Error resolving frontend path:', error);
-      
-      log.info('Development mode:', isDevelopment);
-      log.info('Current working directory:', process.cwd());
-      log.info('Resources path:', process.resourcesPath);
-      log.info('__dirname:', __dirname);
-  
-      // List contents of possible parent directories
-      try {
-        // List resources path if it exists
-        if (process.resourcesPath && fs.existsSync(process.resourcesPath)) {
-          log.info('Resources directory contents:', 
-            fs.readdirSync(process.resourcesPath).join(', ')
-          );
-        }
-        
-        // List frontend parent directory if possible
-        const frontendParent = path.join(process.cwd(), 'frontend');
-        if (fs.existsSync(frontendParent)) {
-          log.info('Frontend parent directory contents:', 
-            fs.readdirSync(frontendParent).join(', ')
-          );
-        }
-      } catch (listError) {
-        log.error('Could not list directories:', listError);
-      }
-  
       throw error;
     }
   }
@@ -274,7 +242,6 @@ export class EnvironmentUtil {
       }
     }
 
-    log.info(`Backend path resolved to: ${this.backendPath} (exists: ${fs.existsSync(this.backendPath || '')})`);
     return this.backendPath || '';
   }
   

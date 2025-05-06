@@ -20,8 +20,6 @@ export function setupIpcHandlers(
   windowService: WindowService,
   backendService: BackendService
 ): void {
-  log.info('Setting up IPC handlers');
-  
   // Create services
   downloadService = new DownloadService(windowService);
   updateService = new UpdateService(windowService);
@@ -111,13 +109,11 @@ function setupFileSystemHandlers(): void {
   
   // Open file in native application
   ipcMain.handle('open-file', (_, filePath) => {
-    log.info(`Opening file: ${filePath}`);
     return shell.openPath(filePath);
   });
   
   // Show file in folder
   ipcMain.handle('show-in-folder', (_, filePath) => {
-    log.info(`Showing file in folder: ${filePath}`);
     return shell.showItemInFolder(filePath);
   });
   

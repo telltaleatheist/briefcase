@@ -18,20 +18,6 @@ export class LogUtil {
       log.transports.console.level = false;
       log.transports.file.level = 'debug';
     }
-    
-    log.info('Logger configured');
-    log.info(`Environment: ${AppConfig.isDevelopment ? 'development' : 'production'}`);
-  }
-  
-  /**
-   * Log application paths for debugging
-   */
-  static logApplicationPaths(): void {
-    log.info('Application paths:');
-    log.info(`- App path: ${AppConfig.appPath}`);
-    log.info(`- __dirname: ${__dirname}`);
-    log.info(`- Resources path: ${AppConfig.resourcesPath}`);
-    log.info(`- Current working directory: ${process.cwd()}`);
   }
   
   /**

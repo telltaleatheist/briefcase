@@ -19,29 +19,9 @@ export class UpdateService {
   }
   
   /**
-   * Check for updates
-   */
-  checkForUpdates(): void {
-    // Only check for updates in production
-    if (!AppConfig.isDevelopment) {
-      try {
-        log.info('Checking for updates...');
-        autoUpdater.checkForUpdatesAndNotify().catch(err => {
-          log.warn('Auto-updater error:', err);
-        });
-      } catch (error) {
-        log.warn('Failed to check for updates:', error);
-      }
-    } else {
-      log.info('Skipping update check in development mode');
-    }
-  }
-  
-  /**
    * Install available update
    */
   installUpdate(): void {
-    log.info('Installing update...');
     autoUpdater.quitAndInstall();
   }
   
@@ -60,7 +40,6 @@ export class UpdateService {
     
     // Update downloaded
     autoUpdater.on('update-downloaded', () => {
-      log.info('Update downloaded');
       const mainWindow = this.windowService.getMainWindow();
       if (mainWindow) {
         mainWindow.webContents.send('update-downloaded');

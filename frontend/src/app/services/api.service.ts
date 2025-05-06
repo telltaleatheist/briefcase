@@ -13,7 +13,6 @@ export class ApiService {
   private readonly apiUrl = environment.apiBaseUrl;
 
   constructor(private http: HttpClient) {
-    console.log('API URL:', this.apiUrl);
   }
   
   private getFullUrl(path: string): string {
@@ -56,12 +55,10 @@ export class ApiService {
    * Check if a URL is valid and get video info
    */
   checkUrl(url: string): Observable<{ valid: boolean; message: string; info?: any }> {
-    console.log('Checking URL:', url);
     return this.http.get<{ valid: boolean; message: string; info?: any }>(
       this.getFullUrl('/downloader/check'), 
       { params: { url } }
     ).pipe(
-      tap(result => console.log('URL check result:', result)),
       catchError(error => {
         console.error('URL check error:', error);
         // Basic validation fallback

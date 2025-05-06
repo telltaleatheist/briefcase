@@ -223,7 +223,6 @@ export class PathValidator {
         }
       }
       
-      log.info(`Found executables in directory: ${JSON.stringify(result)}`);
       return result;
     } catch (error) {
       log.error('Error looking for executables:', error);
@@ -282,7 +281,6 @@ export class PathValidator {
         }
       }
       
-      log.info(`Found executables in PATH: ${JSON.stringify(result)}`);
       return result;
     } catch (error) {
       log.error('Error looking for executables in PATH:', error);

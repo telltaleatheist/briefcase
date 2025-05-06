@@ -54,7 +54,6 @@ export class PathService {
     
     // If not in Electron or the function doesn't exist, return null
     return new Observable<string | null>(observer => {
-      console.log('Directory picker not available in this environment');
       observer.next(null);
       observer.complete();
     });
