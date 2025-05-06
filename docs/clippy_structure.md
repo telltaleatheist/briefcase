@@ -158,7 +158,6 @@
 ├── package-lock.json
 ├── package.json
 ├── scripts
-│   ├── analyze-dependencies.js
 │   ├── refresh-app-tree.sh
 │   ├── refresh-full-tree.sh
 │   ├── refresh-packaged-app-tree.sh
@@ -170,5 +169,5 @@
     ├── index.ts
     └── PathValidator.ts
 
-41 directories, 129 files
+41 directories, 128 files
 ```

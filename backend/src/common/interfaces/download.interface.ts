@@ -8,6 +8,7 @@ export interface DownloadOptions {
   useCookies?: boolean;
   browser?: string;
   fixAspectRatio?: boolean;
+  displayName?: string;
 }
 
 export interface DownloadResult {

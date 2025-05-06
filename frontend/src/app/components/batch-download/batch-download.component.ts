@@ -89,10 +89,15 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     });
     
     // Listen for batch queue updates
-    this.socketSubscription = this.socketService.onBatchQueueUpdated().subscribe(
+    this.socketService.onBatchQueueUpdated().subscribe(
       (status: BatchQueueStatus) => {
-        this.batchQueueStatus = status;
+        console.log('Batch queue update received:', status);
         
+        // Check download queue contents
+        if (status.downloadQueue.length > 0) {
+          console.log('Download queue jobs:', status.downloadQueue);
+        }
+            
         // If we get a status update, ensure our order tracking is up to date
         const allJobIds = [
           ...(status.downloadQueue || []).map(job => job.id),
@@ -350,18 +355,48 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    * Get a human-readable display name for a job
    */
   getDisplayName(job: any): string {
-    // If we have a stored display name for this URL, use it
+    if (!job) {
+      return 'Unknown';
+    }
+    
+    // First priority: use the displayName property that we added to job objects
+    if (job.displayName && typeof job.displayName === 'string' && job.displayName.trim() !== '') {
+      return job.displayName;
+    }
+    
+    // Second priority: check if we have a stored display name for this URL in our map
     if (job.url && this.urlDisplayNames.has(job.url)) {
       return this.urlDisplayNames.get(job.url) as string;
     }
     
-    // Otherwise, generate a short URL and store it
-    const displayName = this.getShortUrl(job.url);
-    this.urlDisplayNames.set(job.url, displayName);
+    // Third priority: use the output file name if available (for completed jobs)
+    if (job.outputFile) {
+      try {
+        // Extract just the filename from the path
+        const parts = job.outputFile.split(/[\/\\]/);
+        const filename = parts[parts.length - 1];
+        
+        // Store it for future reference
+        if (job.url) {
+          this.urlDisplayNames.set(job.url, filename);
+        }
+        
+        return filename;
+      } catch (e) {
+        // If parsing fails, fall back to URL
+        console.warn('Failed to parse output file path:', e);
+      }
+    }
     
-    return displayName;
+    // Last resort: use a truncated URL
+    if (job.url) {
+      const displayName = job.url.length > 50 ? job.url.substring(0, 50) + '...' : job.url;
+      return displayName;
+    }
+    
+    return 'Unknown Job';
   }
-  
+
   // Update progress for a specific job
   updateJobProgress(jobId: string, progress: number, task: string | undefined): void {
     if (!this.batchQueueStatus) return;
@@ -735,9 +770,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           urlGroup.get('loading')?.setValue(false);
           
           // Set default values
-          urlGroup.get('title')?.setValue('URL ' + (index + 1));
+          const safeUrl = this.sanitizeFilename(url);
+          urlGroup.get('title')?.setValue(safeUrl);
           urlGroup.get('uploadDate')?.setValue('');
-          urlGroup.get('fullFileName')?.setValue('URL ' + (index + 1));
+          urlGroup.get('fullFileName')?.setValue(safeUrl);
           
           return of(null);
         })
@@ -756,25 +792,63 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
           }
           
+          // Sanitize the title before using it
+          const safeTitle = this.sanitizeFilename(info.title);
+          
           // Set the full filename for tooltip (which matches what the backend will create)
-          const fullFileName = `${dateStr} ${info.title}`;
+          const fullFileName = `${dateStr} ${safeTitle}`;
           
           // Update form values
-          urlGroup.get('title')?.setValue(info.title);
+          urlGroup.get('title')?.setValue(safeTitle);
           urlGroup.get('uploadDate')?.setValue(dateStr);
           urlGroup.get('fullFileName')?.setValue(fullFileName);
-          
-          // Store the display name for this URL
-          if (url) {
-            this.urlDisplayNames.set(url, this.getShortUrl(url));
-          }
         } else {
           // Set fallback values
-          urlGroup.get('title')?.setValue('URL ' + (index + 1));
+          const safeUrl = this.sanitizeFilename(url);
+          urlGroup.get('title')?.setValue(safeUrl);
           urlGroup.get('uploadDate')?.setValue('');
-          urlGroup.get('fullFileName')?.setValue('URL ' + (index + 1));
+          urlGroup.get('fullFileName')?.setValue(safeUrl);
         }
       });
+  }
+
+  private sanitizeFilename(input: string): string {
+    if (!input) return 'Unknown';
+    
+    // Step 1: Replace characters that are illegal in macOS filenames
+    let sanitized = input
+      .replace(/[\/:]/g, '-')        // Replace : and / with hyphens
+      .replace(/[\\<>*|?]/g, '')     // Remove characters illegal in most filesystems
+      .replace(/"/g, '')             // Remove quotes
+      .replace(/'/g, '')             // Remove single quotes
+      .replace(/\u2018|\u2019/g, '') // Remove smart single quotes
+      .replace(/\u201C|\u201D/g, '') // Remove smart double quotes
+      .replace(/\uFEFF/g, '')        // Remove BOM
+      .replace(/\u00A0/g, ' ')       // Replace non-breaking spaces with regular spaces
+      .replace(/\u2002-\u2003/g, ' ') // Replace various Unicode spaces with regular spaces
+      .replace(/\t/g, ' ')           // Replace tabs with spaces
+      .replace(/\r?\n|\r/g, ' ')     // Replace line breaks with spaces
+      .replace(/\u00A9/g, '(c)')     // Replace © with (c)
+      .replace(/\u00AE/g, '(r)')     // Replace ® with (r)
+      .replace(/\u2122/g, '(tm)');   // Replace ™ with (tm)
+      
+    // Step 2: Collapse multiple spaces into one
+    sanitized = sanitized.replace(/\s+/g, ' ');
+    
+    // Step 3: Trim to reasonable length (avoid filesystem path length issues)
+    if (sanitized.length > 200) {
+      sanitized = sanitized.substring(0, 197) + '...';
+    }
+    
+    // Step 4: Trim leading/trailing whitespace
+    sanitized = sanitized.trim();
+    
+    // If nothing is left, provide a fallback
+    if (!sanitized) {
+      return 'Unknown';
+    }
+    
+    return sanitized;
   }
 
   updateMultiUrlTextarea(): void {
@@ -834,30 +908,43 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
     
-    // Create download options for each URL
-    const downloadOptions: DownloadOptions[] = validUrls.map(url => ({
-      url,
-      quality: formValues.quality,
-      convertToMp4: formValues.convertToMp4,
-      fixAspectRatio: formValues.fixAspectRatio,
-      useCookies: formValues.useCookies,
-      browser: formValues.browser,
-      outputDir: formValues.outputDir
-    }));
+    // Create download options for each URL - adding sanitized displayName to each option
+    const downloadOptions: DownloadOptions[] = [];
     
-    // Store display names for all URLs right away
     validUrls.forEach((url, index) => {
-      if (url) {
-        // Generate a display name immediately
-        const displayName = this.getShortUrl(url);
-        this.urlDisplayNames.set(url, displayName);
-        
-        // Also, extract title from any available metadata in the form
-        const urlGroup = urlControls[index] as FormGroup;
+      // Get the corresponding form group to extract metadata
+      const urlGroup = urlControls[index] as FormGroup;
+      
+      // Get the full filename that was determined during metadata fetch and sanitize it
+      let fullFileName = urlGroup.get('fullFileName')?.value || '';
+      if (fullFileName) {
+        fullFileName = this.sanitizeFilename(fullFileName);
+      }
+      
+      // Create the download options with the sanitized displayName field
+      downloadOptions.push({
+        url,
+        quality: formValues.quality,
+        convertToMp4: formValues.convertToMp4,
+        fixAspectRatio: formValues.fixAspectRatio,
+        useCookies: formValues.useCookies,
+        browser: formValues.browser,
+        outputDir: formValues.outputDir,
+        displayName: fullFileName || this.sanitizeFilename(url)
+      });
+      
+      // Also store in the local map for immediate UI display
+      if (fullFileName) {
+        this.urlDisplayNames.set(url, fullFileName);
+      } else {
+        // Fallback to sanitized title or truncated URL if no filename
         const title = urlGroup.get('title')?.value;
         if (title && title.trim() !== '') {
-          // If we have a title from metadata, prefer that
-          this.urlDisplayNames.set(url, title);
+          this.urlDisplayNames.set(url, this.sanitizeFilename(title));
+        } else {
+          // Last resort - sanitized and truncated URL
+          const shortUrl = url.length > 50 ? url.substring(0, 50) + '...' : url;
+          this.urlDisplayNames.set(url, this.sanitizeFilename(shortUrl));
         }
       }
     });
@@ -887,6 +974,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
                 ].find(job => job.id === jobId);
                 
                 if (!existingJob) {
+                  // Get the display name we just set (should already be sanitized)
+                  const displayName = this.urlDisplayNames.get(url) || this.sanitizeFilename(url);
+                  
                   // Create a properly typed placeholder job
                   const placeholderJob: BatchJob = {
                     id: jobId,
@@ -895,7 +985,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
                     progress: 0,
                     currentTask: 'Waiting in queue...',
                     createdAt: new Date().toISOString(),
-                    queueType: 'download'
+                    queueType: 'download',
+                    displayName: displayName
                   };
                   
                   // Add to download queue array

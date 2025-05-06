@@ -27,6 +27,7 @@ export interface BatchJob {
   processingEndTime?: string;
   isActive: boolean;
   queueType: 'download' | 'process';
+  displayName?: string;
 }
 
 // Response interface for batch jobs
@@ -45,6 +46,7 @@ export interface BatchJobResponse {
   outputFile?: string;
   isActive?: boolean;
   queueType?: 'download' | 'process';
+  displayName?: string;
 }
 
 // Status interface for batch queue
@@ -103,6 +105,9 @@ export class BatchDownloaderService {
   addToBatchQueue(options: DownloadOptions): string {
     const jobId = `batch-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
+    // Use the displayName from options directly (it should already be sanitized by the frontend)
+    const displayName = options.displayName || options.url;
+    
     // Create the job
     const job: BatchJob = {
       id: jobId,
@@ -112,7 +117,8 @@ export class BatchDownloaderService {
       currentTask: 'Waiting in queue...',
       createdAt: new Date().toISOString(),
       isActive: false,
-      queueType: 'download'
+      queueType: 'download',
+      displayName // Use the display name directly
     };
     
     // Add to collections
@@ -126,8 +132,7 @@ export class BatchDownloaderService {
     this.processDownloadQueue();
     
     return jobId;
-  }
-
+  }  
   // Add multiple jobs
   addMultipleToBatchQueue(optionsArray: DownloadOptions[]): string[] {
     return optionsArray.map(options => this.addToBatchQueue(options));
@@ -431,10 +436,11 @@ export class BatchDownloaderService {
       processingEndTime: job.processingEndTime,
       outputFile: job.downloadResult?.outputFile,
       isActive: job.isActive,
-      queueType: job.queueType
+      queueType: job.queueType,
+      displayName: job.displayName || job.options.displayName
     };
   }
-
+  
   // Clear active queues
   clearQueues(): void {
     // Move active jobs to failed

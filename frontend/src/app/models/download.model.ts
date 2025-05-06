@@ -17,6 +17,7 @@ export interface DownloadOptions {
   useCookies: boolean;
   browser: string;
   outputDir: string;
+  displayName?: string;
 }
 
 export interface BatchDownloadOptions {
@@ -90,7 +91,8 @@ export interface BatchJob {
   processingStartTime?: string;
   processingEndTime?: string;
   outputFile?: string;
-  queueType?: string; // Added to track which queue a job belongs to
+  queueType?: string;
+  displayName?: string;
 }
 
 export interface BatchQueueStatus {
