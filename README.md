@@ -40,7 +40,8 @@ async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadR
   // Initialize download process
   // Track and emit progress events with jobId
   // Return result with output file path and success status
-}```
+}
+```
 
 ### Key Events:
 
@@ -119,8 +120,6 @@ private async processQueue(): Promise<void> {
 **Key Events:**
 - `batch-queue-updated`: Emitted when job states change
 - `batch-completed`: Emitted when all jobs are processed
-
-```
 
 ### Media Processing Service
 
@@ -318,7 +317,6 @@ export interface DownloadProgress {
 }
 ```
 
-```markdown
 ### Critical Components for Progress Tracking
 
 The progress tracking system relies on a consistent event structure:
@@ -441,7 +439,6 @@ updateJobProgress(jobId: string, progress: number, task: string | undefined): vo
 - Network issues
 - Site restrictions or changes
 
-```markdown
 ### Debugging
 
 **Debugging Steps:**
@@ -520,7 +517,7 @@ try {
 git clone https://github.com/your-username/clippy.git
 cd clippy
 ```
-```markdown
+
 ### Install Dependencies
 
 ```bash
