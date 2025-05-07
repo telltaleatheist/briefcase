@@ -42,7 +42,6 @@ async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadR
   // Return result with output file path and success status
 }```
 
-```markdown
 ### Key Events:
 
 - **download-started**: Emitted when download begins
