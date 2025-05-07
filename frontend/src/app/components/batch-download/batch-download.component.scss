@@ -316,13 +316,18 @@ mat-progress-bar {
   }
   
   .status-queued {
-    border-left-color: #2196f3; // Blue
-    background-color: rgba(33, 150, 243, 0.05);
+    background-color: #f0f0f0;
+    border-left: 4px solid #3f51b5;
   }
   
   .status-downloading {
-    border-left-color: #673ab7; // Purple
-    background-color: rgba(103, 58, 183, 0.05);
+    background-color: #e3f2fd;
+    border-left: 4px solid #2196f3;
+  }
+    
+  .status-downloaded {
+    background-color: #e8f5e9;
+    border-left: 4px solid #4caf50;
   }
   
   .status-processing-queued {
@@ -331,18 +336,18 @@ mat-progress-bar {
   }
   
   .status-processing {
-    border-left-color: #ff5722; // Deep Orange
-    background-color: rgba(255, 87, 34, 0.05);
+    background-color: #fff8e1;
+    border-left: 4px solid #ff9800;
   }
   
   .status-completed {
-    border-left-color: #4caf50; // Green
-    background-color: rgba(76, 175, 80, 0.05);
+    background-color: #e8f5e9;
+    border-left: 4px solid #4caf50;
   }
-  
+    
   .status-failed {
-    border-left-color: #f44336; // Red
-    background-color: rgba(244, 67, 54, 0.05);
+    background-color: #ffebee;
+    border-left: 4px solid #f44336;
   }
 }
 

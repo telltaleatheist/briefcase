@@ -83,7 +83,7 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
     // Force change detection
     this.cdr.detectChanges();
   }
-
+  
   ngOnDestroy(): void {
     if (this.downloadSubscription) {
       this.downloadSubscription.unsubscribe();

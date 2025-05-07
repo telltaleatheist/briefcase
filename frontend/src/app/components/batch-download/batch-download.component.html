@@ -162,16 +162,19 @@
     <mat-card-content>
       <div class="status-info">
         <div class="status-item">
-          <strong>Active Downloads:</strong> {{ batchQueueStatus.activeDownloads.length }}
+          <strong>Active Downloads:</strong> {{ batchQueueStatus.activeDownloadCount }}
         </div>
         <div class="status-item">
-          <strong>Queued Downloads:</strong> {{ batchQueueStatus.downloadQueue.length }}
+          <strong>Queued:</strong> {{ batchQueueStatus.queuedJobs.length }}
         </div>
         <div class="status-item">
-          <strong>Processing Queue:</strong> {{ batchQueueStatus.processingQueue.length }}
+          <strong>Waiting for Processing:</strong> {{ batchQueueStatus.downloadedJobs.length }}
+        </div>
+        <div class="status-item">
+          <strong>Processing:</strong> {{ batchQueueStatus.processingJobs.length }}
         </div>
       </div>
-      
+                  
       <!-- Configuration -->
       <mat-expansion-panel>
         <mat-expansion-panel-header>

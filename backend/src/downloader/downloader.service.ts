@@ -308,10 +308,13 @@ export class DownloaderService implements OnModuleInit {
     try {
       this.logger.log(`Fetching info for Reddit URL: ${url}`);
       
+      // Strip out query parameters to get a clean URL
+      const cleanUrl = url.split('?')[0];
+      
       // Create and configure YtDlpManager
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);
       ytDlpManager
-        .input(url)
+        .input(cleanUrl)  // Use clean URL
         .addOption('--dump-json')
         .addOption('--simulate')
         .addOption('--no-playlist')
@@ -365,8 +368,15 @@ export class DownloaderService implements OnModuleInit {
           }
         }
         
+        // Fallback method: extract title from URL if possible
+        const titleFromUrl = this.extractTitleFromRedditUrl(url);
+        if (titleFromUrl) {
+          this.logger.log(`Extracted title from URL: ${titleFromUrl}`);
+          return { title: titleFromUrl };
+        }
+        
         // No image URL found in the error message
-        throw new Error(`Could not extract image URL from Reddit post. Error: ${errorMessage}`);
+        throw new Error(`Could not extract image URL or title from Reddit post. Error: ${errorMessage}`);
       }
       
       // Fallback case - should rarely hit this
@@ -377,10 +387,7 @@ export class DownloaderService implements OnModuleInit {
       throw error;
     }
   }
-
-  /**
-   * Extract a title from a Reddit URL
-   */
+  
   private extractTitleFromRedditUrl(url: string): string | null {
     try {
       // Reddit URLs often contain the title after the post ID
@@ -398,6 +405,11 @@ export class DownloaderService implements OnModuleInit {
           urlTitle = decodeURIComponent(urlTitle);
         } catch (e) {
           // Ignore decoding errors
+        }
+        
+        // Truncate if too long
+        if (urlTitle.length > 100) {
+          urlTitle = urlTitle.substring(0, 97) + '...';
         }
         
         return urlTitle;

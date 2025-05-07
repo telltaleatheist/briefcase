@@ -2,6 +2,25 @@
 
 // Add these missing type definitions
 export type BrowserType = 'auto' | 'chrome' | 'firefox' | 'edge' | 'safari' | 'brave' | 'opera';
+export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'completed' | 'failed';
+
+export interface Job {
+  id: string;
+  url: string;
+  displayName: string;
+  status: JobStatus;
+  progress: number;
+  currentTask: string;
+  error?: string;
+  createdAt: string;
+  options: DownloadOptions;
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  processingStartTime?: string;
+  processingEndTime?: string;
+  outputFile?: string;
+  thumbnail?: string;
+}
 
 export interface QualityOption {
   value: string;
@@ -95,14 +114,31 @@ export interface BatchJob {
   displayName?: string;
 }
 
+export interface JobResponse {
+  id: string;
+  url: string;
+  displayName: string;
+  status: JobStatus;
+  progress: number;
+  currentTask: string;
+  error?: string;
+  createdAt: string;
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  processingStartTime?: string;
+  processingEndTime?: string;
+  outputFile?: string;
+  thumbnail?: string;
+}
+
 export interface BatchQueueStatus {
-  downloadQueue: BatchJob[];
-  processingQueue: BatchJob[];
-  completedJobs?: BatchJob[];
-  failedJobs?: BatchJob[];
-  activeDownloads: string[];
+  queuedJobs: JobResponse[];
+  downloadingJobs: JobResponse[];
+  downloadedJobs: JobResponse[];
+  processingJobs: JobResponse[];
+  completedJobs: JobResponse[];
+  failedJobs: JobResponse[];
+  activeDownloadCount: number;
   maxConcurrentDownloads: number;
   isProcessing: boolean;
-  processingPaused?: boolean;
-  downloadsPaused?: boolean;
 }

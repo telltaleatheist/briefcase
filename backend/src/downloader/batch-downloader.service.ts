@@ -5,76 +5,21 @@ import { MediaEventService } from '../media/media-event.service';
 import { MediaProcessingService } from '../media/media-processing.service';
 import { 
   DownloadOptions, 
-  DownloadResult 
+  DownloadResult,
+  Job,
+  JobResponse,
+  JobStatus,
+  BatchQueueStatus
 } from '../common/interfaces/download.interface';
-
-// Unified job status type
-export type JobStatus = 'queued' | 'downloading' | 'processing' | 'completed' | 'failed';
-
-// Interface for batch jobs
-export interface BatchJob {
-  id: string;
-  options: DownloadOptions;
-  status: JobStatus;
-  progress: number;
-  currentTask: string;
-  downloadResult?: DownloadResult;
-  error?: string;
-  createdAt: string;
-  downloadStartTime?: string;
-  downloadEndTime?: string;
-  processingStartTime?: string;
-  processingEndTime?: string;
-  isActive: boolean;
-  queueType: 'download' | 'process';
-  displayName?: string;
-}
-
-// Response interface for batch jobs
-export interface BatchJobResponse {
-  id: string;
-  url: string;
-  status: JobStatus;
-  progress: number;
-  currentTask: string;
-  error?: string;
-  createdAt: string;
-  downloadStartTime?: string;
-  downloadEndTime?: string;
-  processingStartTime?: string;
-  processingEndTime?: string;
-  outputFile?: string;
-  isActive?: boolean;
-  queueType?: 'download' | 'process';
-  displayName?: string;
-}
-
-// Status interface for batch queue
-export interface BatchQueueStatus {
-  downloadQueue: BatchJobResponse[];
-  processingQueue: BatchJobResponse[];
-  completedJobs: BatchJobResponse[];
-  failedJobs: BatchJobResponse[];
-  activeDownloads: string[];
-  maxConcurrentDownloads: number;
-  isProcessing: boolean;
-}
 
 @Injectable()
 export class BatchDownloaderService {
   private readonly logger = new Logger(BatchDownloaderService.name);
   
   // Single collection of all jobs
-  private allJobs: Map<string, BatchJob> = new Map();
+  private jobs: Map<string, Job> = new Map();
   
-  // Queue tracking collections
-  private downloadQueue: string[] = [];
-  private processingQueue: string[] = [];
-  private completedJobIds: string[] = [];
-  private failedJobIds: string[] = [];
-  
-  // Active job tracking
-  private activeDownloads: Set<string> = new Set();
+  // Processing state
   private maxConcurrentDownloads: number = 2;
   private isProcessing: boolean = false;
   
@@ -94,223 +39,247 @@ export class BatchDownloaderService {
     this.logger.log(`Max concurrent downloads set to: ${max}`);
     
     // Process queue with new limit
-    this.processDownloadQueue();
+    this.processQueue();
   }
 
   getMaxConcurrentDownloads(): number {
     return this.maxConcurrentDownloads;
   }
 
-  // Add a new job to the queue
+  // Add a new job to the system
   addToBatchQueue(options: DownloadOptions): string {
     const jobId = `batch-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
-    // Use the displayName from options directly (it should already be sanitized by the frontend)
+    // Use the displayName from options directly
     const displayName = options.displayName || options.url;
     
     // Create the job
-    const job: BatchJob = {
+    const job: Job = {
       id: jobId,
-      options,
+      url: options.url,
+      displayName: displayName,
       status: 'queued',
       progress: 0,
       currentTask: 'Waiting in queue...',
       createdAt: new Date().toISOString(),
-      isActive: false,
-      queueType: 'download',
-      displayName // Use the display name directly
+      options: options
     };
     
-    // Add to collections
-    this.allJobs.set(jobId, job);
-    this.downloadQueue.push(jobId);
+    // Add to jobs collection
+    this.jobs.set(jobId, job);
     
-    this.logger.log(`Added job ${jobId} to batch queue. Queue size: ${this.downloadQueue.length}`);
+    this.logger.log(`Added job ${jobId} to batch queue. Total jobs: ${this.jobs.size}`);
     
     // Update UI and start processing
     this.emitQueueUpdate();
-    this.processDownloadQueue();
+    this.processQueue();
     
     return jobId;
-  }  
+  }
+
   // Add multiple jobs
   addMultipleToBatchQueue(optionsArray: DownloadOptions[]): string[] {
     return optionsArray.map(options => this.addToBatchQueue(options));
   }
 
-  // Process download queue
-  private async processDownloadQueue(): Promise<void> {
-    // If queue is empty, check for processing
-    if (this.downloadQueue.length === 0) {
-      if (this.activeDownloads.size === 0 && this.processingQueue.length > 0 && !this.isProcessing) {
-        this.logger.log('All downloads complete. Starting video processing.');
-        await this.processVideos();
-      }
+  // Get jobs by status
+  private getJobsByStatus(status: JobStatus): Job[] {
+    return Array.from(this.jobs.values())
+      .filter(job => job.status === status);
+  }
+
+  // Process the download and processing queues
+  private async processQueue(): Promise<void> {
+    // Get job counts for logging
+    const queuedCount = this.getJobsByStatus('queued').length;
+    const downloadingCount = this.getJobsByStatus('downloading').length;
+    const downloadedCount = this.getJobsByStatus('downloaded').length;
+    const processingCount = this.getJobsByStatus('processing').length;
+    const completedCount = this.getJobsByStatus('completed').length;
+    const failedCount = this.getJobsByStatus('failed').length;
+    
+    // Comprehensive logging
+    this.logger.log(`Processing queue: 
+      - Queued: ${queuedCount}
+      - Downloading: ${downloadingCount}
+      - Downloaded: ${downloadedCount}
+      - Processing: ${processingCount}
+      - Completed: ${completedCount}
+      - Failed: ${failedCount}
+      - Total jobs: ${this.jobs.size}`
+    );
+    
+    // Early exit if no work to do
+    if (queuedCount === 0 && downloadingCount === 0 && downloadedCount === 0) {
+      this.logger.log('No work to do in queue');
       return;
     }
     
     // Process downloads within concurrency limit
-    while (this.activeDownloads.size < this.maxConcurrentDownloads && this.downloadQueue.length > 0) {
-      const jobId = this.downloadQueue.shift();
-      if (!jobId) continue;
+    if (downloadingCount < this.maxConcurrentDownloads && queuedCount > 0) {
+      // Get queued jobs up to the concurrency limit
+      const queuedJobs = this.getJobsByStatus('queued')
+        .slice(0, this.maxConcurrentDownloads - downloadingCount);
       
-      const job = this.allJobs.get(jobId);
-      if (!job) continue;
+      this.logger.log(`Starting download for ${queuedJobs.length} jobs`);
       
-      // Mark as downloading
-      this.updateJobState(job, 'downloading', 'Starting download...', true);
-      job.downloadStartTime = new Date().toISOString();
-      this.activeDownloads.add(job.id);
-      
-      this.emitQueueUpdate();
-      
-      try {
-        // Start download
-        this.logger.log(`Starting download for job ${job.id}`);
-        const result = await this.downloaderService.downloadVideo(job.options, job.id);
-        
-        job.downloadEndTime = new Date().toISOString();
-        
-        if (result.success) {
-          job.downloadResult = result;
-          
-          if (result.isImage) {
-            // Images require no processing
-            this.moveJobToCompleted(job);
-            job.processingEndTime = job.downloadEndTime;
-            job.currentTask = 'Image download completed';
-          } else {
-            // Videos need processing
-            this.moveJobToProcessing(job);
-          }
-        } else {
-          // Handle download failure
-          this.moveJobToFailed(job, result.error || 'Download failed');
-        }
-      } catch (error) {
-        // Handle exceptions
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.moveJobToFailed(job, errorMessage);
+      // Start downloads for queued jobs
+      for (const job of queuedJobs) {
+        this.startDownload(job);
       }
-      
-      // Remove from active downloads
-      this.activeDownloads.delete(job.id);
-      this.emitQueueUpdate();
     }
-  
-    // Check if we can process videos
-    if (this.activeDownloads.size === 0 && this.processingQueue.length > 0 && !this.isProcessing) {
+    
+    // Only process videos when no active downloads
+    if (downloadingCount === 0 && downloadedCount > 0 && !this.isProcessing) {
+      this.logger.log('All downloads complete. Starting video processing.');
       await this.processVideos();
     }
   }
-
-  // Process videos in queue
+  
+  // Start a download for a job
+  private async startDownload(job: Job): Promise<void> {
+    // Update job state
+    job.status = 'downloading';
+    job.currentTask = 'Initializing download...';
+    job.downloadStartTime = new Date().toISOString();
+    this.emitQueueUpdate();
+    
+    try {
+      // Start download with downloaderService
+      this.logger.log(`Starting download for job ${job.id}: ${job.url}`);
+      
+      const result = await this.downloaderService.downloadVideo(job.options, job.id);
+      
+      // Mark download end time
+      job.downloadEndTime = new Date().toISOString();
+      
+      // Process download result
+      if (result.success) {
+        job.outputFile = result.outputFile;
+        
+        if (result.isImage) {
+          // Images don't need processing
+          job.status = 'completed';
+          job.processingEndTime = job.downloadEndTime;
+          job.currentTask = 'Image download completed';
+          job.progress = 100;
+          this.logger.log(`Image download completed for job ${job.id}`);
+        } else {
+          // Mark videos as downloaded but not yet processed
+          job.status = 'downloaded';
+          job.currentTask = 'Download complete, waiting for processing...';
+          job.progress = 100; // Download is 100% complete
+          this.logger.log(`Video download completed, waiting for processing: ${job.id}`);
+        }
+      } else {
+        // Handle download failure
+        job.status = 'failed';
+        job.error = result.error || 'Download failed';
+        job.currentTask = `Failed: ${job.error}`;
+        job.progress = 0;
+        this.logger.error(`Download failed for job ${job.id}`, { error: result.error });
+      }
+    } catch (error) {
+      // Handle unexpected errors
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Unknown error during download';
+      
+      job.status = 'failed';
+      job.error = errorMessage;
+      job.currentTask = `Failed: ${errorMessage}`;
+      job.progress = 0;
+      
+      this.logger.error(`Unexpected error during download for job ${job.id}`, { 
+        error: errorMessage,
+        jobDetails: job 
+      });
+    } finally {
+      // Always update UI and process queue again
+      this.emitQueueUpdate();
+      this.processQueue();
+    }
+  }
+  
+  // Process downloaded videos
   private async processVideos(): Promise<void> {
-    if (this.processingQueue.length === 0 || this.isProcessing) {
+    const downloadedJobs = this.getJobsByStatus('downloaded');
+    
+    if (downloadedJobs.length === 0 || this.isProcessing) {
       return;
     }
     
     this.isProcessing = true;
-    this.logger.log(`Starting to process ${this.processingQueue.length} videos`);
+    this.logger.log(`Starting to process ${downloadedJobs.length} videos`);
     
-    while (this.processingQueue.length > 0) {
-      const jobId = this.processingQueue[0];
-      const job = this.allJobs.get(jobId);
-      
-      if (!job || !job.downloadResult?.outputFile) {
-        this.processingQueue.shift();
+    for (const job of downloadedJobs) {
+      // Skip jobs without output files
+      if (!job.outputFile) {
+        job.status = 'failed';
+        job.error = 'Missing output file for processing';
+        job.currentTask = 'Failed: Missing output file';
+        this.emitQueueUpdate();
         continue;
       }
       
       // Mark as processing
+      job.status = 'processing';
       job.processingStartTime = new Date().toISOString();
-      this.updateJobState(job, 'processing', 'Starting processing...', true);
+      job.currentTask = 'Starting processing...';
+      job.progress = 0; // Reset progress for processing phase
       this.emitQueueUpdate();
       
       try {
-        // Check if image (shouldn't happen, but just in case)
-        if (job.downloadResult.isImage) {
-          this.moveJobToCompleted(job);
-          this.processingQueue.shift();
-          continue;
-        }
-        
         // Process video if needed
-        let processedFile = job.downloadResult.outputFile;
-        
         if (job.options.fixAspectRatio) {
-          this.updateJobState(job, 'processing', 'Processing video...', true);
+          this.logger.log(`Processing video for job ${job.id}: ${job.outputFile}`);
+          job.currentTask = 'Processing video...';
           
           const result = await this.mediaProcessingService.processMedia(
-            processedFile,
+            job.outputFile,
             { fixAspectRatio: job.options.fixAspectRatio },
             job.id
           );
           
           if (result.success && result.outputFile) {
-            processedFile = result.outputFile;
+            job.outputFile = result.outputFile;
           }
         }
         
-        // Update job with processed file
-        job.downloadResult.outputFile = processedFile;
-        
         // Mark as completed
-        this.moveJobToCompleted(job);
+        job.status = 'completed';
         job.processingEndTime = new Date().toISOString();
+        job.currentTask = 'Processing completed';
+        job.progress = 100;
+        
+        this.logger.log(`Processing completed for job ${job.id}`);
         
       } catch (error) {
         // Handle processing error
         const errorMsg = error instanceof Error ? error.message : String(error);
-        this.moveJobToFailed(job, errorMsg);
+        job.status = 'failed';
+        job.error = errorMsg;
+        job.currentTask = `Failed: ${errorMsg}`;
+        job.progress = 0;
+        
+        this.logger.error(`Processing failed for job ${job.id}`, { error: errorMsg });
       }
       
-      // Remove from processing queue
-      this.processingQueue.shift();
       this.emitQueueUpdate();
     }
     
     this.isProcessing = false;
     this.logger.log('All videos processed');
     
-    // Emit batch completed event
-    this.eventService.emitBatchCompleted(
-      this.completedJobIds.length,
-      this.failedJobIds.length
-    );
-  }
-
-  // Helper methods for job state management
-  
-  private updateJobState(job: BatchJob, status: JobStatus, task: string, isActive: boolean): void {
-    job.status = status;
-    job.currentTask = task;
-    job.isActive = isActive;
-  }
-  
-  private moveJobToCompleted(job: BatchJob): void {
-    this.updateJobState(job, 'completed', 'Processing completed', false);
-    job.progress = 100;
-    this.completedJobIds.push(job.id);
-  }
-  
-  private moveJobToFailed(job: BatchJob, error: string): void {
-    this.updateJobState(job, 'failed', `Failed: ${error}`, false);
-    job.error = error;
-    job.progress = 0;
-    this.failedJobIds.push(job.id);
-  }
-  
-  private moveJobToProcessing(job: BatchJob): void {
-    this.updateJobState(job, 'processing', 'Download complete, queued for processing...', false);
-    job.progress = 0;
-    job.queueType = 'process';
-    this.processingQueue.push(job.id);
+    // Emit batch completed event with counts
+    const completedCount = this.getJobsByStatus('completed').length;
+    const failedCount = this.getJobsByStatus('failed').length;
+    this.eventService.emitBatchCompleted(completedCount, failedCount);
   }
 
   // Update job progress from events
   updateJobProgress(jobId: string, progress: number, task: string): void {
-    const job = this.allJobs.get(jobId);
+    const job = this.jobs.get(jobId);
     
     if (job) {
       job.progress = progress;
@@ -321,110 +290,98 @@ export class BatchDownloaderService {
   
   // Cancel a job
   cancelJob(jobId: string): boolean {
-    const job = this.allJobs.get(jobId);
+    const job = this.jobs.get(jobId);
     if (!job) return false;
     
-    // Handle different queue types
-    if (this.removeFromQueue(this.downloadQueue, jobId)) {
-      this.moveJobToFailed(job, 'Cancelled by user');
+    // Handle different job states
+    if (job.status === 'queued') {
+      job.status = 'failed';
+      job.error = 'Cancelled by user';
+      job.currentTask = 'Cancelled by user';
+      job.progress = 0;
+      this.emitQueueUpdate();
       return true;
     }
     
-    if (this.activeDownloads.has(jobId)) {
+    if (job.status === 'downloading') {
       if (this.downloaderService.cancelDownload(jobId)) {
-        this.activeDownloads.delete(jobId);
-        this.moveJobToFailed(job, 'Cancelled by user');
+        job.status = 'failed';
+        job.error = 'Cancelled by user';
+        job.currentTask = 'Cancelled by user';
+        job.progress = 0;
+        this.emitQueueUpdate();
         return true;
       }
     }
     
-    if (this.removeFromQueue(this.processingQueue, jobId)) {
-      this.moveJobToFailed(job, 'Cancelled by user');
+    if (job.status === 'downloaded' || job.status === 'processing') {
+      job.status = 'failed';
+      job.error = 'Cancelled by user';
+      job.currentTask = 'Cancelled by user';
+      job.progress = 0;
+      this.emitQueueUpdate();
       return true;
     }
     
-    return false;
-  }
-  
-  // Helper to remove a job from a queue
-  private removeFromQueue(queue: string[], jobId: string): boolean {
-    const index = queue.indexOf(jobId);
-    if (index >= 0) {
-      queue.splice(index, 1);
-      return true;
-    }
     return false;
   }
   
   // Retry a failed job
   retryJob(jobId: string): boolean {
-    const job = this.allJobs.get(jobId);
+    const job = this.jobs.get(jobId);
     if (!job || job.status !== 'failed') {
       return false;
     }
     
-    // Remove from failed jobs
-    this.removeFromQueue(this.failedJobIds, jobId);
-    
     // Reset job state
-    this.updateJobState(job, 'queued', 'Waiting in queue...', false);
-    job.progress = 0;
-    job.error = undefined;
-    
-    // Add to appropriate queue
-    if (job.downloadResult) {
-      job.queueType = 'process';
-      this.processingQueue.push(jobId);
-      
-      if (this.activeDownloads.size === 0 && !this.isProcessing) {
-        this.processVideos();
-      }
+    if (job.outputFile) {
+      // If we have an output file, we can retry from processing
+      job.status = 'downloaded';
+      job.error = undefined;
+      job.currentTask = 'Waiting for processing...';
+      job.progress = 100; // Download was complete
     } else {
-      job.queueType = 'download';
-      this.downloadQueue.unshift(jobId);
-      this.processDownloadQueue();
+      // Otherwise retry from the beginning
+      job.status = 'queued';
+      job.error = undefined;
+      job.currentTask = 'Waiting in queue...';
+      job.progress = 0;
     }
     
     this.emitQueueUpdate();
+    this.processQueue();
     return true;
   }
   
   // Get current queue status
   getBatchStatus(): BatchQueueStatus {
+    // Get jobs by state
+    const queuedJobs = this.getJobsByStatus('queued').map(job => this.formatJobForResponse(job));
+    const downloadingJobs = this.getJobsByStatus('downloading').map(job => this.formatJobForResponse(job));
+    const downloadedJobs = this.getJobsByStatus('downloaded').map(job => this.formatJobForResponse(job));
+    const processingJobs = this.getJobsByStatus('processing').map(job => this.formatJobForResponse(job));
+    const completedJobs = this.getJobsByStatus('completed').map(job => this.formatJobForResponse(job));
+    const failedJobs = this.getJobsByStatus('failed').map(job => this.formatJobForResponse(job));
+    
     return {
-      downloadQueue: this.getJobsFromQueue(this.downloadQueue),
-      processingQueue: this.getJobsFromQueue(this.processingQueue),
-      completedJobs: this.getJobsFromQueue(this.completedJobIds),
-      failedJobs: this.getJobsFromQueue(this.failedJobIds),
-      activeDownloads: Array.from(this.activeDownloads),
+      queuedJobs,
+      downloadingJobs,
+      downloadedJobs,
+      processingJobs,
+      completedJobs,
+      failedJobs,
+      activeDownloadCount: downloadingJobs.length,
       maxConcurrentDownloads: this.maxConcurrentDownloads,
       isProcessing: this.isProcessing
     };
   }
-  
-  // Helper to get job responses from queue IDs
-  private getJobsFromQueue(queue: string[]): BatchJobResponse[] {
-    return queue.map(id => this.formatJobForResponse(id));
-  }
-  
+    
   // Format job for API response
-  private formatJobForResponse(jobId: string): BatchJobResponse {
-    const job = this.allJobs.get(jobId);
-    
-    if (!job) {
-      return {
-        id: jobId,
-        url: 'Unknown URL',
-        status: 'failed',
-        progress: 0,
-        currentTask: 'Job not found',
-        createdAt: new Date().toISOString()
-      };
-    }
-    
+  private formatJobForResponse(job: Job): JobResponse {
     return {
       id: job.id,
-      url: job.options.url,
+      url: job.url,
+      displayName: job.displayName,
       status: job.status,
       progress: job.progress,
       currentTask: job.currentTask,
@@ -434,26 +391,29 @@ export class BatchDownloaderService {
       downloadEndTime: job.downloadEndTime,
       processingStartTime: job.processingStartTime,
       processingEndTime: job.processingEndTime,
-      outputFile: job.downloadResult?.outputFile,
-      isActive: job.isActive,
-      queueType: job.queueType,
-      displayName: job.displayName || job.options.displayName
+      outputFile: job.outputFile,
+      thumbnail: job.thumbnail
     };
   }
   
-  // Clear active queues
+  // Clear active jobs
   clearQueues(): void {
-    // Move active jobs to failed
-    [...this.downloadQueue, ...this.processingQueue].forEach(jobId => {
-      const job = this.allJobs.get(jobId);
-      if (job) {
-        this.moveJobToFailed(job, 'Cancelled by user');
-      }
-    });
+    // Find all active jobs
+    const activeJobs = Array.from(this.jobs.values())
+      .filter(job => ['queued', 'downloading', 'downloaded', 'processing'].includes(job.status));
     
-    // Clear queues
-    this.downloadQueue = [];
-    this.processingQueue = [];
+    // Mark them as failed
+    for (const job of activeJobs) {
+      job.status = 'failed';
+      job.error = 'Cancelled by user';
+      job.currentTask = 'Cancelled by user';
+      job.progress = 0;
+    }
+    
+    // Cancel any active downloads
+    this.getJobsByStatus('downloading').forEach(job => {
+      this.downloaderService.cancelDownload(job.id);
+    });
     
     this.logger.log('All active queues cleared');
     this.emitQueueUpdate();
@@ -461,23 +421,29 @@ export class BatchDownloaderService {
 
   // Clear completed jobs
   clearCompletedJobs(): void {
-    this.completedJobIds.forEach(jobId => {
-      this.allJobs.delete(jobId);
+    // Get completed job IDs
+    const completedJobIds = this.getJobsByStatus('completed').map(job => job.id);
+    
+    // Remove from jobs collection
+    completedJobIds.forEach(id => {
+      this.jobs.delete(id);
     });
     
-    this.completedJobIds = [];
-    this.logger.log('Completed jobs cleared');
+    this.logger.log(`Cleared ${completedJobIds.length} completed jobs`);
     this.emitQueueUpdate();
   }
 
   // Clear failed jobs
   clearFailedJobs(): void {
-    this.failedJobIds.forEach(jobId => {
-      this.allJobs.delete(jobId);
+    // Get failed job IDs
+    const failedJobIds = this.getJobsByStatus('failed').map(job => job.id);
+    
+    // Remove from jobs collection
+    failedJobIds.forEach(id => {
+      this.jobs.delete(id);
     });
     
-    this.failedJobIds = [];
-    this.logger.log('Failed jobs cleared');
+    this.logger.log(`Cleared ${failedJobIds.length} failed jobs`);
     this.emitQueueUpdate();
   }
 

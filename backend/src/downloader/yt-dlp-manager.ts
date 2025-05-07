@@ -77,7 +77,11 @@ export class YtDlpManager extends EventEmitter {
    * Set the input URL for the download
    */
   input(url: string): YtDlpManager {
-    this.inputUrl = url;
+    const cleanUrl = url
+    .split('?')[0]           // Remove query string
+    .replace(/\/+$/, '');    // Remove trailing slashes
+  
+    this.inputUrl = cleanUrl;
     return this;
   }
 

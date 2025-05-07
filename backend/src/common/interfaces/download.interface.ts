@@ -1,4 +1,54 @@
 // clippy/backend/src/common/interfaces/download.interface.ts
+
+export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'completed' | 'failed';
+
+export interface Job {
+  id: string;
+  url: string;
+  displayName: string;
+  status: JobStatus;
+  progress: number;
+  currentTask: string;
+  error?: string;
+  createdAt: string;
+  options: DownloadOptions;
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  processingStartTime?: string;
+  processingEndTime?: string;
+  outputFile?: string;
+  thumbnail?: string;
+}
+
+export interface JobResponse {
+  id: string;
+  url: string;
+  displayName: string;
+  status: JobStatus;
+  progress: number;
+  currentTask: string;
+  error?: string;
+  createdAt: string;
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  processingStartTime?: string;
+  processingEndTime?: string;
+  outputFile?: string;
+  thumbnail?: string;
+}
+
+export interface BatchQueueStatus {
+  queuedJobs: JobResponse[];
+  downloadingJobs: JobResponse[];
+  downloadedJobs: JobResponse[];
+  processingJobs: JobResponse[];
+  completedJobs: JobResponse[];
+  failedJobs: JobResponse[];
+  activeDownloadCount: number;
+  maxConcurrentDownloads: number;
+  isProcessing: boolean;
+}
+
 export interface DownloadOptions {
   url: string;
   outputDir?: string;
@@ -31,14 +81,6 @@ export interface BatchJobInfo {
   url: string;
   status: 'queued' | 'downloading' | 'processing' | 'completed' | 'failed';
   error?: string;
-}
-
-export interface BatchQueueStatus {
-  downloadQueue: BatchJobInfo[];
-  processingQueue: BatchJobInfo[];
-  activeDownloads: string[];
-  maxConcurrentDownloads: number;
-  isProcessing: boolean;
 }
 
 export interface HistoryItem {

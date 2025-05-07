@@ -150,7 +150,7 @@ export class SocketService {
   onBatchQueueUpdated(): Observable<BatchQueueStatus> {
     return this.listenTo<BatchQueueStatus>('batch-queue-updated');
   }
-
+  
   /**
    * Listen for batch completion
    */
