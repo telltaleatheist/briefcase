@@ -189,7 +189,6 @@ getAllJobsForDisplay(): JobResponse[] {
 }
 ```
 
-```markdown
 ### Data Flow
 
 Understanding data flow is crucial for debugging and development:
