@@ -2,7 +2,7 @@
   "name": "clippy",
   "version": "1.0.0",
   "description": "Video downloader application using NestJS and Angular",
-  "asar": false,
+  "asar": true,
   "main": "./dist-electron/main/electron/main.js",
   "scripts": {
     "install:all": "npm install && npm run install:backend && npm run install:frontend && npm run install:electron",

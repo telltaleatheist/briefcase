@@ -12,7 +12,7 @@ Clippy is built using a modern web application architecture with Electron as the
 - **Downloader Module**: Handles video downloading using yt-dlp
 - **FFmpeg Module**: Processes videos (aspect ratio adjustment, thumbnail creation)
 - **Path Module**: Handles file path resolution and directory operations
-- **Socket Communication**: Provides real-time progress updates
+- **Socket Communication**: Provides real-time progress updates via WebSockets
 
 ### Frontend (Angular)
 
@@ -32,26 +32,44 @@ Clippy is built using a modern web application architecture with Electron as the
 
 #### Downloader Service
 
-The `DownloaderService` is responsible for processing video download requests:
+The DownloaderService is responsible for processing video download requests:
 
 ```typescript
 // Key method for downloading videos
-async downloadVideo(options: DownloadOptions, jobId?: string): Promise<string> {
+async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadResult> {
   // Initialize download process
   // Track and emit progress events with jobId
-  // Return path to downloaded file
+  // Return result with output file path and success status
+}```
+
+```markdown
+### Key Events:
+
+- **download-started**: Emitted when download begins
+- **download-progress**: Emitted during download (includes progress %)
+- **download-completed**: Emitted when download finishes
+- **download-failed**: Emitted on error
+
+### YtDlpManager
+
+The `YtDlpManager` is a utility class that wraps the yt-dlp command-line tool:
+
+```typescript
+// Execute the yt-dlp command with retries
+async runWithRetry(maxRetries = 3, delayMs = 1000): Promise<string> {
+  // Execute command with exponential backoff on failure
+  // Emit progress events during download
+  // Handle cancellation and error cases
 }
 ```
 
 **Key Events:**
-- `download-started`: Emitted when download begins
-- `download-progress`: Emitted during download (includes progress %)
-- `download-completed`: Emitted when download finishes
-- `download-failed`: Emitted on error
+- `progress`: Emitted as download progresses with percentage and speed info
+- `retry`: Emitted when a download is being retried after failure
 
-#### FFmpeg Service
+### FFmpeg Service
 
-The `FfmpegService` handles video processing:
+The `FFmpegService` handles video processing:
 
 ```typescript
 // Key method for fixing aspect ratio
@@ -66,21 +84,62 @@ async reencodeVideo(videoFile: string, jobId?: string): Promise<string | null> {
 - `processing-progress`: Emitted during FFmpeg processing
 - `processing-failed`: Emitted on error
 
-#### Batch Downloader Service
+### Batch Downloader Service
 
-The `BatchDownloaderService` manages queues for multiple downloads:
+The `BatchDownloaderService` manages jobs using a state-based architecture:
 
 ```typescript
+// Single collection of all jobs
+private jobs: Map<string, Job> = new Map();
+
+// Add a new job to the system
+addToBatchQueue(options: DownloadOptions): string {
+  // Generate unique job ID
+  // Create job with 'queued' status
+  // Add to jobs collection
+  // Start queue processing
+  // Return job ID
+}
+
 // Process the queue
-async processQueue(): Promise<void> {
-  // Process items in queue with concurrency limits
-  // Update queue status
+private async processQueue(): Promise<void> {
+  // Process queued jobs up to concurrency limit
+  // When all downloads complete, process downloaded jobs
+  // Update job states and emit updates
 }
 ```
 
+**Job States:**
+- `queued`: Initial state, waiting to start downloading
+- `downloading`: Currently being downloaded with yt-dlp
+- `downloaded`: Download complete, waiting for processing
+- `processing`: Currently being processed with FFmpeg
+- `completed`: All processing finished
+- `failed`: Error occurred during download or processing
+
 **Key Events:**
-- `batch-queue-updated`: Emitted when queue status changes
-- `batch-completed`: Emitted when all items are processed
+- `batch-queue-updated`: Emitted when job states change
+- `batch-completed`: Emitted when all jobs are processed
+
+```
+
+### Media Processing Service
+
+The `MediaProcessingService` handles post-download processing operations:
+
+```typescript
+// Process a media file with options
+async processMedia(
+  inputFile: string, 
+  options: ProcessingOptions,
+  jobId?: string
+): Promise<ProcessingResult> {
+  // Fix aspect ratio if requested
+  // Create thumbnail if requested
+  // Extract audio if requested
+  // Return paths to processed files
+}
+```
 
 ### Frontend Components
 
@@ -106,44 +165,165 @@ The `DownloadProgressComponent` displays download and processing progress:
 ngOnInit(): void {
   // Subscribe to download-progress events
   // Subscribe to processing-progress events
-  // Update UI accordingly
+  // Update UI based on job progress
 }
 ```
 
 #### Batch Download Component
 
-The `BatchDownloadComponent` manages batch queue operations:
+The `BatchDownloadComponent` manages batch job operations:
 
 ```typescript
 // Update job progress
 updateJobProgress(jobId: string, progress: number, task: string | undefined): void {
-  // Find job in appropriate queue
+  // Find job in the appropriate state array
   // Update job progress value
   // Update job task description
 }
+
+// Get all jobs for display
+getAllJobsForDisplay(): JobResponse[] {
+  // Combine jobs from all state arrays
+  // Sort by original order
+  // Display in UI
+}
 ```
 
-## Data Flow
+```markdown
+### Data Flow
 
 Understanding data flow is crucial for debugging and development:
 
-### Download Flow
+#### Download Flow
 
-User submits URL → Frontend service calls API → Backend controller receives request → Downloader service processes request → Progress events emitted via WebSockets → Frontend updates UI
+1. User submits URL(s) → Frontend validates and generates `displayName`
+2. Frontend sends `DownloadOptions` to backend API (includes `displayName`)
+3. Backend creates `Job` object with `'queued'` status
+4. Backend processes queue and updates job to `'downloading'`
+5. `yt-dlp` downloads the video and emits progress events
+6. Job updates to `'downloaded'` when complete
+7. `FFmpeg` processes the video when no downloads are active
+8. Job updates to `'processing'` and then `'completed'`
+9. WebSockets broadcast updates to frontend
+10. Frontend displays job progress and status
 
-### Batch Processing Flow
+### State-Based Job Management
 
-Jobs added to queue → Batch service processes queue → Jobs move through download/processing stages → Events emitted for each stage → Frontend updates UI
+The system uses a state-based approach to job management:
 
-### Event Communication Flow
+- **Single Source of Truth:** All jobs are stored in a single `Map<string, Job>` indexed by ID
+- **State Transitions:**
+  - `queued` → `downloading` → `downloaded` → `processing` → `completed`
+  - `queued` → `failed`
 
-- Backend emits events with `this.server.emit('event-name', data)`
-- Frontend subscribes using `this.socketService.onEventName().subscribe()`
-- **Critical**: All progress events must include `jobId` for proper tracking
+#### Job Status Functions:
 
-## Critical Components for Progress Tracking
+```typescript
+// Get jobs by status
+private getJobsByStatus(status: JobStatus): Job[] {
+  return Array.from(this.jobs.values())
+    .filter(job => job.status === status);
+}
 
-The progress tracking system relies on consistent event structure:
+// Update job progress
+updateJobProgress(jobId: string, progress: number, task: string): void {
+  const job = this.jobs.get(jobId);
+  if (job) {
+    job.progress = progress;
+    job.currentTask = task;
+    this.emitQueueUpdate();
+  }
+}
+```
+
+#### Batch Status Reporting:
+
+```typescript
+// Get current queue status
+getBatchStatus(): BatchQueueStatus {
+  // Create arrays for each job state
+  const queuedJobs = this.getJobsByStatus('queued')
+    .map(job => this.formatJobForResponse(job));
+  
+  // Return comprehensive status object
+  return {
+    queuedJobs,
+    downloadingJobs,
+    downloadedJobs,
+    processingJobs,
+    completedJobs,
+    failedJobs,
+    activeDownloadCount: downloadingJobs.length,
+    maxConcurrentDownloads: this.maxConcurrentDownloads,
+    isProcessing: this.isProcessing
+  };
+}
+```
+
+### Benefits of State-Based Approach
+
+- No data loss during state transitions
+- Clear visualization of job status
+- Simplified error handling and recovery
+- Better control over concurrent operations
+- Single source of truth for job data
+
+### Core Data Types
+
+#### Backend Types
+
+```typescript
+// Job status type for state-based processing
+export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'completed' | 'failed';
+
+// Job interface represents a download/processing task
+export interface Job {
+  id: string;              // Unique identifier
+  url: string;             // Source URL
+  displayName: string;     // Sanitized filename (created in frontend)
+  status: JobStatus;       // Current state
+  progress: number;        // 0-100 percentage
+  currentTask: string;     // Description of current action
+  error?: string;          // Error message if failed
+  createdAt: string;       // Creation timestamp
+  options: DownloadOptions; // Original download options
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  processingStartTime?: string;
+  processingEndTime?: string;
+  outputFile?: string;     // Path to downloaded/processed file
+  thumbnail?: string;      // Path to generated thumbnail
+}
+```
+
+#### Frontend Types
+
+```typescript
+// Response type for batch status
+export interface BatchQueueStatus {
+  queuedJobs: JobResponse[];
+  downloadingJobs: JobResponse[];
+  downloadedJobs: JobResponse[];
+  processingJobs: JobResponse[];
+  completedJobs: JobResponse[];
+  failedJobs: JobResponse[];
+  activeDownloadCount: number;
+  maxConcurrentDownloads: number;
+  isProcessing: boolean;
+}
+
+// Progress event structure
+export interface DownloadProgress {
+  progress: number;
+  task?: string;
+  jobId?: string;
+}
+```
+
+```markdown
+### Critical Components for Progress Tracking
+
+The progress tracking system relies on a consistent event structure:
 
 ```typescript
 {
@@ -153,92 +333,199 @@ The progress tracking system relies on consistent event structure:
 }
 ```
 
-**Key Event Handlers:**
-- `stderr` handler in FFmpeg service (parses output text)
-- `progress` handler in FFmpeg service (receives direct progress)
-- Progress calculation in downloader service
+### Key Event Handlers
 
-**Progress Calculation Logic:**
-- FFmpeg duration-based: `progress = (currentTime / totalDuration) * 100`
-- Download size-based: `progress = (downloadedBytes / totalBytes) * 100`
+#### YtDlpManager Progress Parsing
 
-## Common Issues and Solutions
+The `YtDlpManager` parses download progress from yt-dlp output:
 
-### Progress Bar Not Updating
+```typescript
+private parseDownloadProgress(line: string): boolean {
+  // Matches: [download] 32.5% of ~50.33MiB at 2.43MiB/s ETA 00:20
+  const downloadProgressRegex = /\[download\]\s+(\d+\.\d+)%\s+of\s+~?(\d+\.\d+)(\w+)\s+at\s+(\d+\.\d+)(\w+\/s)\s+ETA\s+(\d+:\d+)/;
+  const match = line.match(downloadProgressRegex);
+  
+  if (match) {
+    // Extract and calculate progress data
+    this.emit('progress', { percent, totalSize, downloadedBytes, downloadSpeed, eta });
+    return true;
+  }
+  return false;
+}
+```
+
+#### FFmpeg Progress Calculation
+
+FFmpeg progress calculation in the FFmpeg service:
+
+```typescript
+command.on('stderr', (stderrLine) => {
+  // Extract time from FFmpeg output
+  const timeMatch = stderrLine.match(/time=(\d+:\d+:\d+\.\d+)/);
+  if (timeMatch) {
+    // Calculate progress based on current time / total duration
+    const currentTimeInSeconds = /* convert time string to seconds */;
+    let progressPercent = (currentTimeInSeconds / totalDuration) * 100;
+    // Emit progress
+    this.eventService.emitProcessingProgress(progressPercent, task, jobId);
+  }
+});
+```
+
+### Common Issues and Solutions
+
+#### Progress Bar Not Updating
 
 **Possible Causes:**
-- Missing `jobId` in emitted events
+
+- Missing jobId in emitted events
 - Socket connection issues
 - Progress events not properly parsed
+- Job not found in the correct state array
 
 **Debugging Steps:**
+
 - Check backend logs for emitted events
 - Verify `jobId` is included in all events
 - Ensure frontend components are subscribing correctly
 - Verify change detection is triggered after updates
 
-**Solution Examples:**
+### Frontend Progress Handling
 
 ```typescript
-// In FFmpeg service:
-this.safeEmit('processing-progress', { 
-  progress: progressPercent,
-  task: `Adjusting aspect ratio ${speedInfo}`,
-  jobId // Must include jobId
-});
-
-// In download-progress.component.ts:
-this.processingSubscription = this.socketService.onProcessingProgress().subscribe(
-  (data: DownloadProgress) => {
-    console.log('Received processing progress:', data);
-    this.progress = data.progress;
-    this.task = data.task || 'Processing video...';
-    this.cdr.detectChanges(); // Force change detection
+// In batch-download.component.ts
+updateJobProgress(jobId: string, progress: number, task: string | undefined): void {
+  if (!this.batchQueueStatus) return;
+  
+  // Function to find and update job in a specific state array
+  const updateJobInArray = (array: JobResponse[]): boolean => {
+    const jobIndex = array.findIndex(j => j.id === jobId);
+    if (jobIndex >= 0) {
+      array[jobIndex].progress = progress;
+      if (task !== undefined) {
+        array[jobIndex].currentTask = task;
+      }
+      return true;
+    }
+    return false;
+  };
+  
+  // Try to find the job in all state arrays
+  const stateArrays = [
+    this.batchQueueStatus.queuedJobs || [],
+    this.batchQueueStatus.downloadingJobs || [],
+    this.batchQueueStatus.downloadedJobs || [],
+    this.batchQueueStatus.processingJobs || [],
+    this.batchQueueStatus.completedJobs || [],
+    this.batchQueueStatus.failedJobs || []
+  ];
+  
+  let found = false;
+  for (const array of stateArrays) {
+    if (updateJobInArray(array)) {
+      found = true;
+      break;
+    }
   }
-);
+  
+  // Force change detection when job is updated
+  if (found) {
+    this.cdr.detectChanges();
+  }
+}
 ```
 
 ### Download Failures
 
 **Common Causes:**
-- Missing yt-dlp, ffmpeg, and ffprobe binaries (can't find, not in PATH, etc)
+
+- Missing `yt-dlp` executable or incorrect path
 - Network issues
 - Site restrictions or changes
 
-**Debugging:**
-- Check yt-dlp output in logs
-- Verify network connectivity
-- Test URL directly with yt-dlp CLI
+```markdown
+### Debugging
+
+**Debugging Steps:**
+
+- Check `yt-dlp` error output in logs
+- Verify the path to the `yt-dlp` executable:
+
+```typescript
+private getYtDlpPath(): string {
+  // Check environment variable first
+  if (process.env.YT_DLP_PATH && fs.existsSync(process.env.YT_DLP_PATH)) {
+    return process.env.YT_DLP_PATH;
+  }
+  
+  // Fall back to shared config
+  const ytDlpPath = this.sharedConfigService.getYtDlpPath();
+  if (!ytDlpPath || !fs.existsSync(ytDlpPath)) {
+    throw new Error('yt-dlp executable not found');
+  }
+  
+  return ytDlpPath;
+}
+```
 
 ### FFmpeg Processing Issues
 
 **Common Causes:**
+
 - Incorrect FFmpeg path
 - Invalid video format
 - Insufficient permissions
 
-**Debugging:**
-- Check FFmpeg command in logs
-- Verify FFmpeg binary location
-- Test with a known good video file
+#### Error Handling:
 
-## Development Environment Setup
+```typescript
+try {
+  // Process video if needed
+  if (job.options.fixAspectRatio) {
+    job.currentTask = 'Processing video...';
+    
+    const result = await this.mediaProcessingService.processMedia(
+      job.outputFile,
+      { fixAspectRatio: job.options.fixAspectRatio },
+      job.id
+    );
+    
+    if (result.success && result.outputFile) {
+      job.outputFile = result.outputFile;
+    }
+  }
+} catch (error) {
+  // Handle processing error
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  job.status = 'failed';
+  job.error = errorMsg;
+  job.currentTask = `Failed: ${errorMsg}`;
+  job.progress = 0;
+  
+  this.logger.error(`Processing failed for job ${job.id}`, { error: errorMsg });
+}
+```
 
-### Prerequisites
+### Development Environment Setup
+
+#### Prerequisites:
 
 - Node.js (version 18+)
 - npm or yarn
 - FFmpeg (binary in path or included in project)
 - yt-dlp (binary in path or included in project)
 
-### Installation Steps
+#### Installation Steps:
 
 ```bash
 # Clone Repository
 git clone https://github.com/your-username/clippy.git
 cd clippy
+```
+```markdown
+### Install Dependencies
 
-# Install Dependencies
+```bash
 npm install
 cd frontend && npm install
 cd ../backend && npm install
@@ -246,39 +533,53 @@ cd ../backend && npm install
 
 ### Start Development Servers
 
+#### Terminal 1 - Backend
+
 ```bash
-# Terminal 1 - Backend
 cd backend
 npm run start:dev
+```
 
-# Terminal 2 - Frontend
+#### Terminal 2 - Frontend
+
+```bash
 cd frontend
 npm run start
+```
 
-# Terminal 3 - Electron
+#### Terminal 3 - Electron
+
+```bash
 npm run electron:dev
 ```
 
-## Debugging Techniques
+### Debugging Techniques
 
-### Backend Debugging
+#### Backend Debugging
 
 **Enable Verbose Logging:**
 - Set log level in `main.ts`
 - Add debug logs in critical paths
 
-**Event Tracing:**
+#### Event Tracing:
 
 ```typescript
-// Add to safeEmit or similar method
-private safeEmit(event: string, data: any): void {
-  this.logger.log(`Emitting event: ${event}`);
-  this.logger.log(data);
-  // Rest of emission code
+// Add to emitEvent or similar method
+private emitQueueUpdate(): void {
+  const status = this.getBatchStatus();
+  this.logger.debug(`Emitting batch-queue-updated event with status:`, {
+    queuedCount: status.queuedJobs.length,
+    downloadingCount: status.downloadingJobs.length,
+    downloadedCount: status.downloadedJobs.length,
+    processingCount: status.processingJobs.length,
+    completedCount: status.completedJobs.length,
+    failedCount: status.failedJobs.length
+  });
+  this.eventService.emitBatchQueueUpdated(status);
 }
 ```
 
-**Socket Connection Verification:**
+#### Socket Connection Verification:
 
 ```typescript
 // In main.ts after WebSocketAdapter setup
@@ -288,20 +589,19 @@ console.log('WebSocket adapter configured');
 
 ### Frontend Debugging
 
-**Event Subscription Logging:**
+#### Event Subscription Logging:
 
 ```typescript
 this.socketService.onProcessingProgress().subscribe((data) => {
   console.log('Processing progress received:', data);
-  // Rest of handler code
 });
 ```
 
-**Component State Inspection:**
+#### Component State Inspection:
 - Use Angular DevTools Chrome extension
-- Add console.log statements in key lifecycle methods
+- Add `console.log` statements in key lifecycle methods
 
-**Change Detection Verification:**
+#### Change Detection Verification:
 
 ```typescript
 // Add in progress event handlers
@@ -310,7 +610,7 @@ console.log('Updated progress to:', this.progress);
 this.cdr.detectChanges();
 ```
 
-## Code Contribution Guidelines
+### Code Contribution Guidelines
 
 **Branch Naming:**
 - Features: `feature/description`
@@ -322,11 +622,11 @@ this.cdr.detectChanges();
 - Example: `fix(ffmpeg): include jobId in processing-progress events`
 
 **Testing:**
-Testing libraries largely ignored in the project
+- Testing libraries largely ignored in the project
 
-## Deployment
+### Deployment
 
-### Building for Production
+#### Building for Production:
 
 ```bash
 # Build everything
@@ -339,31 +639,34 @@ npm run package:win
 npm run package:linux
 ```
 
-## Project Roadmap
+### Project Roadmap
 
-**Planned Features:**
-- Enhanced Queue Management:
+#### Planned Features:
+
+- **Enhanced Job Management:**
   - Advanced priority settings
   - Resume interrupted downloads
-- Media Processing:
+
+- **Media Processing:**
   - Audio extraction
   - Trimming and clipping
-- Platform Support:
+
+- **Platform Support:**
   - Linux distribution
   - ARM support for Apple Silicon
 
-## Need Help?
+### Need Help?
 
 This documentation should provide a comprehensive understanding of the project architecture and implementation details. For specific issues:
 
-**Check logs first:**
-- Backend logs for API and process issues
-- Frontend console for UI and event issues
-- Log location for Mac: ~/Library/Logs/clippy/main.log
+- Check logs first:
+  - Backend logs for API and process issues
+  - Frontend console for UI and event issues
+  - Log location for Mac: `~/Library/Logs/clippy/main.log`
 
 **Key log patterns:**
 - "Emitting event" logs for WebSocket communication
-- FFmpeg command logs for processing issues
+- `FFmpeg` command logs for processing issues
 - "Progress" logs for tracking calculation issues
 
 **Ask for help with context:**
