@@ -41,8 +41,8 @@
   "devDependencies": {
     "@electron/typescript-definitions": "^9.1.2",
     "@types/electron": "^1.6.12",
-    "@types/node": "^22.15.3",
     "@types/fluent-ffmpeg": "^2.1.27",
+    "@types/node": "^22.15.3",
     "cross-env": "^7.0.3",
     "electron": "^36.0.1",
     "electron-builder": "^24.13.3",
@@ -53,13 +53,15 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@nestjs/core": "^10.0.0",
+    "@angular/core": "^19.2.9",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@nestjs/common": "^10.0.0",
+    "@nestjs/config": "^3.1.0",
+    "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/platform-socket.io": "^10.0.0",
-    "@nestjs/websockets": "^10.0.0",  
-    "@nestjs/config": "^3.1.0",
-    "@angular/core": "^19.2.9",
+    "@nestjs/websockets": "^10.0.0",
     "electron-log": "^5.3.3",
     "electron-updater": "^6.6.2",
     "fluent-ffmpeg": "^2.1.3",
@@ -76,8 +78,14 @@
       "buildResources": "assets"
     },
     "extraResources": [
-      { "from": "backend/node_modules", "to": "backend/node_modules" },
-      { "from": "utilities", "to": "utilities" }
+      {
+        "from": "backend/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
+        "from": "utilities",
+        "to": "utilities"
+      }
     ],
     "files": [
       "dist-electron/main/**/*",

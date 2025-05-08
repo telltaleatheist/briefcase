@@ -5,6 +5,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
+import * as ffmpegPath from '@ffmpeg-installer/ffmpeg';
+import * as ffprobePath from '@ffprobe-installer/ffprobe';
+import { SharedConfigService } from '@/config/shared-config.service';
 
 @Injectable()
 export class FfmpegService {
@@ -12,37 +15,46 @@ export class FfmpegService {
   private readonly logger = new Logger(FfmpegService.name);
 
   constructor(
-    private readonly eventService: MediaEventService
+    private readonly eventService: MediaEventService,
+    private readonly configService: SharedConfigService
   ) {
     try {
-      // Use configured paths from environment variables first
-      const ffmpegPath = process.env.FFMPEG_PATH || 
-                        (require('@ffmpeg-installer/ffmpeg') || {}).path;
-      const ffprobePath = process.env.FFPROBE_PATH || 
-                         (require('@ffprobe-installer/ffprobe') || {}).path;
+      // Prioritize config service paths, then environment variables, then installer paths
+      const configFfmpegPath = this.configService.getFfmpegPath();
+      const configFfprobePath = this.configService.getFfprobePath();
+
+      const ffmpegExecutablePath = 
+        configFfmpegPath || 
+        process.env.FFMPEG_PATH || 
+        ffmpegPath.path;
+
+      const ffprobeExecutablePath = 
+        configFfprobePath || 
+        process.env.FFPROBE_PATH || 
+        ffprobePath.path;
       
-      if (!ffmpegPath) {
+      if (!ffmpegExecutablePath) {
         throw new Error('FFmpeg path not found. Please configure it in the application settings.');
       }
       
-      if (!ffprobePath) {
+      if (!ffprobeExecutablePath) {
         throw new Error('FFprobe path not found. Please configure it in the application settings.');
       }
 
       // Set paths for fluent-ffmpeg
-      ffmpeg.setFfmpegPath(ffmpegPath);
-      ffmpeg.setFfprobePath(ffprobePath);
+      ffmpeg.setFfmpegPath(ffmpegExecutablePath);
+      ffmpeg.setFfprobePath(ffprobeExecutablePath);
       
-      this.logger.log(`FFmpeg path: ${ffmpegPath}`);
-      this.logger.log(`FFprobe path: ${ffprobePath}`);
+      this.logger.log(`FFmpeg path: ${ffmpegExecutablePath}`);
+      this.logger.log(`FFprobe path: ${ffprobeExecutablePath}`);
       
       // Verify if the paths are valid by checking file existence
-      if (!fs.existsSync(ffmpegPath)) {
-        throw new Error(`FFmpeg executable not found at path: ${ffmpegPath}`);
+      if (!fs.existsSync(ffmpegExecutablePath)) {
+        throw new Error(`FFmpeg executable not found at path: ${ffmpegExecutablePath}`);
       }
       
-      if (!fs.existsSync(ffprobePath)) {
-        throw new Error(`FFprobe executable not found at path: ${ffprobePath}`);
+      if (!fs.existsSync(ffprobeExecutablePath)) {
+        throw new Error(`FFprobe executable not found at path: ${ffprobeExecutablePath}`);
       }
     } catch (error) {
       this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
