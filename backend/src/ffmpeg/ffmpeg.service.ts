@@ -115,11 +115,12 @@ export class FfmpegService {
       audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak'
     }
   ): Promise<string | null> {
-        if (!fs.existsSync(videoFile)) {
-      this.logger.error(`Video file doesn't exist: ${videoFile}`);
-      return null;
-    }
-    
+    this.logger.log('Received reencoding options:', JSON.stringify({
+      fixAspectRatio: options?.fixAspectRatio,
+      normalizeAudio: options?.normalizeAudio,
+      audioNormalizationMethod: options?.audioNormalizationMethod
+    }, null, 2));
+        
     try {
       // Use a single default encoder without detection
       const selectedEncoder = 'libx264';  
@@ -269,12 +270,6 @@ export class FfmpegService {
                   `Re-encoding video ${speedInfo}`,
                   jobId
                 );
-                console.log(`FFmpeg Progress [JobID: ${jobId}]:`, {
-                  progressPercent,
-                  task: `Re-encoding video ${speedInfo}`,
-                  totalDuration,
-                  currentTimeInSeconds
-                });
               }
             }
           });

@@ -40,12 +40,12 @@ export class MediaProcessingService {
     options: ProcessingOptions,
     jobId?: string
   ): Promise<ProcessingResult> {
-    if (!fs.existsSync(inputFile)) {
-      const error = `Input file does not exist: ${inputFile}`;
-      this.logger.error(error);
-      return { success: false, error };
-    }
-    
+    this.logger.log('Received processing options:', JSON.stringify({
+      fixAspectRatio: options.fixAspectRatio,
+      normalizeAudio: options.normalizeAudio,
+      audioNormalizationMethod: options.audioNormalizationMethod
+    }, null, 2));
+      
     try {
       this.logger.log(`Processing media: ${inputFile} with options: ${JSON.stringify(options)}`);
       
@@ -133,7 +133,7 @@ export class MediaProcessingService {
       };
     }
   }
-    
+
   /**
    * Extract metadata from a media file
    */

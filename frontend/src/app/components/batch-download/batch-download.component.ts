@@ -900,10 +900,11 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
     
+
     const urlControls = this.urls.controls;
     const urlValues = urlControls.map(control => (control as FormGroup).get('url')?.value);
     const formValues = this.batchForm.value;
-    
+
     // Validate URLs
     const validUrls = urlValues.filter(url => url && url.trim().length > 0);
     
@@ -918,7 +919,16 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     validUrls.forEach((url, index) => {
       // Get the corresponding form group to extract metadata
       const urlGroup = urlControls[index] as FormGroup;
-      
+      console.log(`Processing URL: ${urlValues}`, {
+        overrideSettings: urlGroup.get('overrideBatchSettings')?.value,
+        individualQuality: urlGroup.get('quality')?.value,
+        batchQuality: formValues.quality,
+        individualFixAspectRatio: urlGroup.get('fixAspectRatio')?.value,
+        batchFixAspectRatio: formValues.fixAspectRatio,
+        individualNormalizeAudio: urlGroup.get('normalizeAudio')?.value,
+        individualAudioNormalizationMethod: urlGroup.get('audioNormalizationMethod')?.value
+      });
+  
       // Get the full filename that was determined during metadata fetch and sanitize it
       let fullFileName = urlGroup.get('fullFileName')?.value || '';
       console.log('Before sanitization:', fullFileName);
