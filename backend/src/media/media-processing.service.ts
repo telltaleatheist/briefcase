@@ -11,6 +11,8 @@ export interface ProcessingOptions {
   extractAudio?: boolean;
   qualityPreset?: 'low' | 'medium' | 'high';
   customOptions?: Record<string, any>;
+  normalizeAudio?: boolean;
+  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
 }
 
 export interface ProcessingResult {
@@ -59,29 +61,30 @@ export class MediaProcessingService {
         outputFile: inputFile // Default to input file if no processing occurs
       };
       
-      // Fix aspect ratio if requested
       if (options.fixAspectRatio) {
         try {
-          this.logger.log(`Fixing aspect ratio for: ${inputFile}`);
+          this.logger.log(`Processing media with audio normalization: ${inputFile}`);
           
-          const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId);
+          const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
+            normalizeAudio: options.normalizeAudio,
+            method: options.audioNormalizationMethod
+          });
           
           if (outputFile && fs.existsSync(outputFile)) {
-            this.logger.log(`Aspect ratio fixed: ${outputFile}`);
+            this.logger.log(`Media processed: ${outputFile}`);
             result.outputFile = outputFile;
           } else {
-            this.logger.warn(`Failed to fix aspect ratio, using original file: ${inputFile}`);
+            this.logger.warn(`Failed to process media, using original file: ${inputFile}`);
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          this.logger.error(`Error fixing aspect ratio: ${errorMessage}`);
+          this.logger.error(`Error processing media: ${errorMessage}`);
           
-          // Don't fail the entire process for aspect ratio errors
-          // Just continue with original file
-          this.eventService.emitProcessingProgress(50, `Warning: Couldn't fix aspect ratio. Continuing with original file.`, jobId);
+          // Don't fail the entire process for processing errors
+          this.eventService.emitProcessingProgress(50, `Warning: Couldn't process media. Continuing with original file.`, jobId);
         }
       }
-      
+            
       // Create thumbnail if requested
       if (options.createThumbnail) {
         try {

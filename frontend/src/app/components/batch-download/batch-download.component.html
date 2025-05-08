@@ -45,7 +45,7 @@
                     </div>
                   </mat-panel-title>
                 </mat-expansion-panel-header>
-                
+            
                 <mat-form-field appearance="outline" class="url-field">
                   <mat-label>Video URL {{ i+1 }}</mat-label>
                   <input 
@@ -71,8 +71,85 @@
                     <mat-icon>content_paste</mat-icon>
                   </button>
                 </mat-form-field>
+            
+                <div class="url-specific-settings">
+                  <mat-checkbox formControlName="overrideBatchSettings">
+                    Override Batch Settings
+                  </mat-checkbox>
+            
+                  <ng-container *ngIf="urlControl.get('overrideBatchSettings')?.value">
+                    <div class="video-specific-options">
+                      <mat-form-field appearance="outline">
+                        <mat-label>Quality</mat-label>
+                        <mat-select formControlName="quality">
+                          <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
+                            {{ option.label }}
+                          </mat-option>
+                        </mat-select>
+                      </mat-form-field>
+            
+                      <div class="checkbox-setting">
+                        <mat-checkbox formControlName="convertToMp4">
+                          Convert to MP4
+                        </mat-checkbox>
+                      </div>
+            
+                      <div class="checkbox-setting">
+                        <mat-checkbox formControlName="fixAspectRatio">
+                          Fix aspect ratio with blurred background
+                        </mat-checkbox>
+                      </div>
+            
+                      <div class="checkbox-setting">
+                        <mat-checkbox formControlName="useCookies">
+                          Use browser cookies
+                        </mat-checkbox>
+                      </div>
+            
+                      <div *ngIf="urlControl.get('useCookies')?.value">
+                        <mat-form-field appearance="outline">
+                          <mat-label>Browser</mat-label>
+                          <mat-select formControlName="browser">
+                            <mat-option *ngFor="let option of browserOptions" [value]="option.value">
+                              {{ option.label }}
+                            </mat-option>
+                          </mat-select>
+                        </mat-form-field>
+                      </div>
+            
+                      <div class="audio-normalization-options">
+                        <div class="checkbox-setting">
+                          <mat-checkbox formControlName="normalizeAudio">
+                            Normalize Audio
+                            <mat-hint>Standardize audio levels for this video</mat-hint>
+                          </mat-checkbox>
+                          <button 
+                            mat-icon-button 
+                            type="button"
+                            (click)="openAudioNormalizationDialog(i)"
+                            matTooltip="Advanced Audio Normalization Options"
+                          >
+                            <mat-icon>settings</mat-icon>
+                          </button>
+                        </div>
+                        
+                        <ng-container *ngIf="urlControl.get('normalizeAudio')?.value">
+                          <mat-form-field appearance="outline">
+                            <mat-label>Normalization Method</mat-label>
+                            <mat-select formControlName="audioNormalizationMethod">
+                              <mat-option value="ebur128">EBU R128 (Broadcast Standard)</mat-option>
+                              <mat-option value="rms">RMS Leveling</mat-option>
+                              <mat-option value="peak">Peak Normalization</mat-option>
+                            </mat-select>
+                            <mat-hint>Choose audio leveling method</mat-hint>
+                          </mat-form-field>
+                        </ng-container>
+                      </div>
+                    </div>
+                  </ng-container>
+                </div>
               </mat-expansion-panel>
-
+            
               <button 
                 type="button" 
                 mat-icon-button 
@@ -85,13 +162,13 @@
               </button>
             </div>
           </div>
-
+        
           <div class="url-actions">
             <button type="button" mat-stroked-button (click)="addUrlField()">
               <mat-icon>add</mat-icon> Add URL
             </button>
           </div>
-        </div>          
+        </div>
         <!-- Batch Options -->
         <mat-expansion-panel>
           <mat-expansion-panel-header>
@@ -117,6 +194,24 @@
             </div>
             
             <div class="checkbox-setting">
+              <mat-checkbox formControlName="normalizeAudio">
+                <mat-hint>Standardize audio levels across downloaded videos</mat-hint>
+              </mat-checkbox>
+            </div>
+            
+            <div *ngIf="batchForm.get('normalizeAudio')?.value" class="option-row">
+              <mat-form-field appearance="outline">
+                <mat-label>Normalization Method</mat-label>
+                <mat-select formControlName="audioNormalizationMethod">
+                  <mat-option value="ebur128">EBU R128 (Broadcast Standard)</mat-option>
+                  <mat-option value="rms">RMS Leveling</mat-option>
+                  <mat-option value="peak">Peak Normalization</mat-option>
+                </mat-select>
+                <mat-hint>Choose audio leveling method</mat-hint>
+              </mat-form-field>
+            </div>
+            
+            <div class="checkbox-setting">
               <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
             </div>
             
@@ -138,7 +233,7 @@
             </mat-form-field>
           </div>
         </mat-expansion-panel>
-        
+
         <div class="form-actions">
           <button
             mat-raised-button

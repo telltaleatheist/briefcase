@@ -59,6 +59,8 @@ export interface DownloadOptions {
   browser?: string;
   fixAspectRatio?: boolean;
   displayName?: string;
+  normalizeAudio?: boolean;
+  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
 }
 
 export interface DownloadResult {

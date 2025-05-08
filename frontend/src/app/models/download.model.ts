@@ -37,6 +37,8 @@ export interface DownloadOptions {
   browser: string;
   outputDir: string;
   displayName?: string;
+  normalizeAudio?: boolean;
+  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
 }
 
 export interface BatchDownloadOptions {

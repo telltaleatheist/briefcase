@@ -12,6 +12,7 @@ import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
 import { SharedConfigService } from '../config/shared-config.service';
 import { MediaEventService } from '../media/media-event.service';
+import { MediaProcessingService, ProcessingOptions } from '@/media/media-processing.service';
 
 @Injectable()
 export class DownloaderService implements OnModuleInit {
@@ -25,6 +26,7 @@ export class DownloaderService implements OnModuleInit {
     private readonly pathService: PathService,
     private readonly sharedConfigService: SharedConfigService,
     private readonly eventService: MediaEventService,
+    private readonly mediaProcessingService: MediaProcessingService
   ) {
     try {
       this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
@@ -163,6 +165,32 @@ export class DownloaderService implements OnModuleInit {
           // Determine if this is an image based on file extension
           const fileExt = path.extname(outputFile).toLowerCase();
           const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
+          
+          // Only process non-image files
+          if (!isImage) {
+            try {
+              // Process the video with audio normalization options
+              const processingOptions: ProcessingOptions = {
+                fixAspectRatio: options.fixAspectRatio ?? true,
+                normalizeAudio: options.normalizeAudio ?? true,
+                audioNormalizationMethod: options.audioNormalizationMethod ?? 'ebur128'
+              };
+    
+              const processingResult = await this.mediaProcessingService.processMedia(
+                outputFile, 
+                processingOptions, 
+                jobId
+              );
+    
+              // Update output file if processing was successful
+              if (processingResult.success && processingResult.outputFile) {
+                outputFile = processingResult.outputFile;
+              }
+            } catch (processingError) {
+              this.logger.error(`Media processing failed: ${processingError}`);
+              // Continue with original file if processing fails
+            }
+          }
           
           // Add to history
           this.addToHistory(outputFile, options.url);

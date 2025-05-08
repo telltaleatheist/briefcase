@@ -16,6 +16,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialog } from '@angular/material/dialog';
 
 import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
@@ -24,6 +25,7 @@ import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
 import { Subscription, catchError, of, interval } from 'rxjs';
+import { AudioNormalizationDialogComponent } from '../audio-normalization/audio-normalization-dialog.component';
 
 @Component({
   selector: 'app-batch-download',
@@ -77,7 +79,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     private socketService: SocketService,
     private settingsService: SettingsService,
     private snackBar: MatSnackBar,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private dialog: MatDialog
   ) {
     this.batchForm = this.createBatchForm();
     this.configForm = this.createConfigForm();
@@ -624,22 +627,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    * Form creation and management
    */
   createBatchForm(): FormGroup {
-    const form = this.fb.group({
-      urls: this.fb.array([this.createUrlField()]),
+    return this.fb.group({
+      urls: this.fb.array([this.createUrlField()], Validators.required),
       quality: ['720'],
       convertToMp4: [true],
       fixAspectRatio: [true],
       useCookies: [false],
       browser: ['auto'],
-      outputDir: ['']
+      outputDir: [''],
+      normalizeAudio: [true],
+      audioNormalizationMethod: ['ebur128']
     });
-  
-    // Store the subscription so we can unsubscribe later
-    this.urlChangeSubscription = this.subscribeToUrlChanges(form.get('urls') as FormArray);
-  
-    return form;
   }
-
+    
   subscribeToUrlChanges(urlArray: FormArray): Subscription {
     return urlArray.valueChanges.subscribe(values => {
       // Skip if the listener is disabled
@@ -670,22 +670,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Get the current FormArray
     const urlsFormArray = this.batchForm.get('urls') as FormArray;
     
-    // Temporarily turn off valueChanges emission to prevent feedback loop
-    this.disableUrlChangesListener = true;
-    
-    // Clear and rebuild the form array entirely
-    while (urlsFormArray.length) {
+    // Clear existing URLs if you want, or comment out if you want to append
+    while (urlsFormArray.length !== 0) {
       urlsFormArray.removeAt(0);
     }
     
     // Add new form controls for each URL
     urls.forEach(url => {
-      urlsFormArray.push(this.createUrlFieldWithUrl(url));
+      const urlGroup = this.createUrlField();
+      urlGroup.get('url')?.setValue(url);
+      urlsFormArray.push(urlGroup);
       
-      // Get the index of the just-added URL
+      // Load filename for this URL
       const index = urlsFormArray.length - 1;
-      
-      // Load the filename for this URL
       this.loadFileNameForUrl(index);
     });
     
@@ -696,18 +693,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     // Clear the textarea
     this.multiUrlText = '';
-    
-    // IMPORTANT: Unsubscribe and set up a new subscription that doesn't update the textarea
-    this.setupOneWayUrlBinding();
-    
-    // Re-enable the listener
-    setTimeout(() => {
-      this.disableUrlChangesListener = false;
-    }, 0);
-    
-    this.snackBar.open('URLs added to the list', 'Dismiss', { duration: 3000 });
   }
-
+  
   setupOneWayUrlBinding(): void {
     // First, unsubscribe from the existing subscription if it exists
     if (this.urlChangeSubscription) {
@@ -729,16 +716,48 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     });
   }
 
-  createUrlField(): FormGroup {
-    return this.fb.group({
-      url: ['', [Validators.required, Validators.pattern(/^https?:\/\/.+/)]],
-      title: [''],
-      uploadDate: [''],
-      fullFileName: [''],
-      loading: [false]
+  openAudioNormalizationDialog(index: number): void {
+    const urlGroup = (this.batchForm.get('urls') as FormArray).at(index);
+    
+    const dialogRef = this.dialog.open(AudioNormalizationDialogComponent, {
+      width: '400px',
+      data: {
+        method: urlGroup.get('audioNormalizationMethod')?.value || 'ebur128',
+        advanced: false,
+        targetLoudness: -16
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        urlGroup.patchValue({
+          audioNormalizationMethod: result.method
+        });
+      }
     });
   }
   
+  createUrlField(): FormGroup {
+    return this.fb.group({
+      url: ['', [
+        Validators.required, 
+        Validators.pattern(/^https?:\/\/.+/)
+      ]],
+      title: [''],
+      uploadDate: [''],
+      fullFileName: [''],
+      loading: [false],
+      overrideBatchSettings: [false],
+      quality: ['720'],
+      convertToMp4: [true],
+      fixAspectRatio: [true],
+      useCookies: [false],
+      browser: ['auto'],
+      normalizeAudio: [true],
+      audioNormalizationMethod: ['ebur128']
+    });
+  }
+          
   createUrlFieldWithUrl(url: string): FormGroup {
     return this.fb.group({
       url: [url, [Validators.required, Validators.pattern(/^https?:\/\/.+/)]],
@@ -752,7 +771,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   get urls(): FormArray {
     return this.batchForm.get('urls') as FormArray;
   }
-
+  
   addUrlField(): void {
     this.urls.push(this.createUrlField());
   }
@@ -911,15 +930,32 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       // Create the download options with the sanitized displayName field
       downloadOptions.push({
         url,
-        quality: formValues.quality,
-        convertToMp4: formValues.convertToMp4,
-        fixAspectRatio: formValues.fixAspectRatio,
-        useCookies: formValues.useCookies,
-        browser: formValues.browser,
+        // Use individual video settings if override is checked, otherwise use batch settings
+        quality: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('quality')?.value 
+          : formValues.quality,
+        convertToMp4: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('convertToMp4')?.value 
+          : formValues.convertToMp4,
+        fixAspectRatio: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('fixAspectRatio')?.value 
+          : formValues.fixAspectRatio,
+        useCookies: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('useCookies')?.value 
+          : formValues.useCookies,
+        browser: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('browser')?.value 
+          : formValues.browser,
         outputDir: formValues.outputDir,
-        displayName: fullFileName
+        displayName: fullFileName,
+        normalizeAudio: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('normalizeAudio')?.value 
+          : true,
+        audioNormalizationMethod: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('audioNormalizationMethod')?.value 
+          : 'ebur128'
       });
-
+      
       // Also store in the local map for immediate UI display
       if (fullFileName) {
         this.urlDisplayNames.set(url, fullFileName);

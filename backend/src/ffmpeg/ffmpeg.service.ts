@@ -106,8 +106,15 @@ export class FfmpegService {
     });
   }
 
-  async reencodeVideo(videoFile: string, jobId?: string): Promise<string | null> {
-    if (!fs.existsSync(videoFile)) {
+  async reencodeVideo(
+    videoFile: string, 
+    jobId?: string, 
+    audioOptions?: {
+      normalizeAudio?: boolean, 
+      method?: 'ebur128' | 'rms' | 'peak'
+    }
+  ): Promise<string | null> {
+      if (!fs.existsSync(videoFile)) {
       this.logger.error(`Video file doesn't exist: ${videoFile}`);
       return null;
     }
@@ -189,10 +196,15 @@ export class FfmpegService {
           // Simplified encoder options
           const encoderOptions = ['-c:v', selectedEncoder, '-b:v', '3M'];
           
+          const audioNormalizationOptions = audioOptions?.normalizeAudio 
+            ? this.getAudioNormalizationFilter(audioOptions.method || 'ebur128') 
+            : [];
+          
           // Create FFmpeg command
           let command = ffmpeg(videoFile)
             .outputOptions([
               ...filterOptions,
+              ...audioNormalizationOptions,
               '-pix_fmt', 'yuv420p',
               ...encoderOptions,
               '-c:a', 'aac',
@@ -200,7 +212,7 @@ export class FfmpegService {
               '-movflags', '+faststart'
             ])
             .output(outputFile);
-          
+                      
           // Start progress at 0%
           this.eventService.emitProcessingProgress(0, 'Preparing video re-encoding', jobId);
               
@@ -293,7 +305,32 @@ export class FfmpegService {
       return null;
     }
   }
-  
+
+  private getAudioNormalizationFilter(method: 'ebur128' | 'rms' | 'peak'): string[] {
+    switch (method) {
+      case 'ebur128':
+        return [
+          '-filter_complex', 
+          '[0:a]loudnorm=I=-16:LRA=11:tp=-1.5[normalized_audio]',
+          '-map', '[normalized_audio]'
+        ];
+      case 'rms':
+        return [
+          '-filter_complex', 
+          '[0:a]volumedetect,volume=replaygain=track[normalized_audio]',
+          '-map', '[normalized_audio]'
+        ];
+      case 'peak':
+        return [
+          '-filter_complex', 
+          '[0:a]volumedetect,volume=adjustment=+0dB[normalized_audio]',
+          '-map', '[normalized_audio]'
+        ];
+      default:
+        return [];
+    }
+  }
+    
   private safeDeleteFile(filePath: string): boolean {
     if (!filePath) return false;
     

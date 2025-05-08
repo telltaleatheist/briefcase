@@ -59,6 +59,14 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsBoolean()
   fixAspectRatio?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  normalizeAudio?: boolean = true;  // Default to true
+
+  @IsOptional()
+  @IsIn(['ebur128', 'rms', 'peak'])
+  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak' = 'ebur128';  // Default to broadcast standard
 }
 
 export class DownloadProgressDto {
