@@ -269,6 +269,12 @@ export class FfmpegService {
                   `Re-encoding video ${speedInfo}`,
                   jobId
                 );
+                console.log(`FFmpeg Progress [JobID: ${jobId}]:`, {
+                  progressPercent,
+                  task: `Re-encoding video ${speedInfo}`,
+                  totalDuration,
+                  currentTimeInSeconds
+                });
               }
             }
           });

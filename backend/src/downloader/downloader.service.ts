@@ -166,32 +166,6 @@ export class DownloaderService implements OnModuleInit {
           const fileExt = path.extname(outputFile).toLowerCase();
           const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
           
-          // Only process non-image files
-          if (!isImage) {
-            try {
-              // Consolidate all processing options from the initial download
-              const processingOptions: ProcessingOptions = {
-                fixAspectRatio: options.fixAspectRatio ?? true,
-                normalizeAudio: options.normalizeAudio ?? true,
-                audioNormalizationMethod: options.audioNormalizationMethod ?? 'ebur128'
-              };
-          
-              const processingResult = await this.mediaProcessingService.processMedia(
-                outputFile, 
-                processingOptions, 
-                jobId
-              );
-          
-              // Update output file if processing was successful
-              if (processingResult.success && processingResult.outputFile) {
-                outputFile = processingResult.outputFile;
-              }
-            } catch (processingError) {
-              // Log error but continue with original file
-              this.logger.error(`Media processing failed: ${processingError}`);
-            }
-          }
-                    
           // Add to history
           this.addToHistory(outputFile, options.url);
           

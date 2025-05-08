@@ -2,7 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DownloaderService } from './downloader.service';
 import { MediaEventService } from '../media/media-event.service';
-import { MediaProcessingService } from '../media/media-processing.service';
+import { MediaProcessingService, ProcessingOptions } from '../media/media-processing.service';
 import { 
   DownloadOptions, 
   DownloadResult,
@@ -21,8 +21,10 @@ export class BatchDownloaderService {
   
   // Processing state
   private maxConcurrentDownloads: number = 2;
+  private maxConcurrentProcessing: number = 2;
   private isProcessing: boolean = false;
-  
+  private allDownloadsComplete: boolean = false;
+
   constructor(
     private readonly downloaderService: DownloaderService,
     private readonly mediaProcessingService: MediaProcessingService,
@@ -98,15 +100,13 @@ export class BatchDownloaderService {
     const completedCount = this.getJobsByStatus('completed').length;
     const failedCount = this.getJobsByStatus('failed').length;
     
-    // Comprehensive logging
     this.logger.log(`Processing queue: 
       - Queued: ${queuedCount}
       - Downloading: ${downloadingCount}
       - Downloaded: ${downloadedCount}
       - Processing: ${processingCount}
       - Completed: ${completedCount}
-      - Failed: ${failedCount}
-      - Total jobs: ${this.jobs.size}`
+      - Failed: ${failedCount}`
     );
     
     // Early exit if no work to do
@@ -117,25 +117,26 @@ export class BatchDownloaderService {
     
     // Process downloads within concurrency limit
     if (downloadingCount < this.maxConcurrentDownloads && queuedCount > 0) {
-      // Get queued jobs up to the concurrency limit
       const queuedJobs = this.getJobsByStatus('queued')
         .slice(0, this.maxConcurrentDownloads - downloadingCount);
       
       this.logger.log(`Starting download for ${queuedJobs.length} jobs`);
       
-      // Start downloads for queued jobs
       for (const job of queuedJobs) {
         this.startDownload(job);
       }
     }
     
-    // Only process videos when no active downloads
-    if (downloadingCount === 0 && downloadedCount > 0 && !this.isProcessing) {
-      this.logger.log('All downloads complete. Starting video processing.');
+    // Check if ALL downloads are complete
+    if (queuedCount === 0 && downloadingCount === 0 && downloadedCount > 0) {
+      this.allDownloadsComplete = true;
+      this.logger.log('All downloads complete. Preparing to process videos.');
+      
+      // Start processing videos
       await this.processVideos();
     }
   }
-  
+      
   // Start a download for a job
   private async startDownload(job: Job): Promise<void> {
     // Update job state
@@ -168,7 +169,7 @@ export class BatchDownloaderService {
           // Mark videos as downloaded but not yet processed
           job.status = 'downloaded';
           job.currentTask = 'Download complete, waiting for processing...';
-          job.progress = 100; // Download is 100% complete
+          job.progress = 0; // Reset progress to 0 when waiting for processing
           this.logger.log(`Video download completed, waiting for processing: ${job.id}`);
         }
       } else {
@@ -203,43 +204,125 @@ export class BatchDownloaderService {
   
   // Process downloaded videos
   private async processVideos(): Promise<void> {
+    // Ensure we only process once and only when all downloads are complete
+    if (!this.allDownloadsComplete || this.isProcessing) {
+      this.logger.log('Processing already in progress or downloads not complete');
+      return;
+    }
+
     const downloadedJobs = this.getJobsByStatus('downloaded');
     
-    if (downloadedJobs.length === 0 || this.isProcessing) {
+    if (downloadedJobs.length === 0) {
+      this.logger.log('No jobs to process');
       return;
     }
     
     this.isProcessing = true;
     this.logger.log(`Starting to process ${downloadedJobs.length} videos`);
     
-    for (const job of downloadedJobs) {
-      // Skip jobs without output files
-      if (!job.outputFile) {
-        job.status = 'failed';
-        job.error = 'Missing output file for processing';
-        job.currentTask = 'Failed: Missing output file';
-        this.emitQueueUpdate();
-        continue;
+    // Process videos concurrently, respecting maxConcurrentProcessing
+    const processQueue = async () => {
+      // Get jobs that are ready for processing but not yet started
+      const processingJobs = this.getJobsByStatus('downloaded');
+      
+      // Stop if no more jobs to process
+      if (processingJobs.length === 0) {
+        this.isProcessing = false;
+        this.allDownloadsComplete = false;
+        
+        // Emit batch completed event
+        const completedCount = this.getJobsByStatus('completed').length;
+        const failedCount = this.getJobsByStatus('failed').length;
+        this.eventService.emitBatchCompleted(completedCount, failedCount);
+        
+        return;
       }
-      job.status = 'completed';
-      job.processingEndTime = new Date().toISOString();
-      job.currentTask = 'Processing completed';
-      job.progress = 100;
       
-      this.logger.log(`Processing completed for job ${job.id}`);
+      // Determine how many jobs we can start processing
+      const availableProcessingSlots = this.maxConcurrentProcessing - 
+        this.getJobsByStatus('processing').length;
       
-      this.emitQueueUpdate();
-    }
-    
-    this.isProcessing = false;
-    this.logger.log('All videos processed');
-    
-    // Emit batch completed event with counts
-    const completedCount = this.getJobsByStatus('completed').length;
-    const failedCount = this.getJobsByStatus('failed').length;
-    this.eventService.emitBatchCompleted(completedCount, failedCount);
-  }
+      // Start processing jobs
+      const jobsToProcess = processingJobs.slice(0, availableProcessingSlots);
+      
+      const processPromises = jobsToProcess.map(async (job) => {
+        // Explicitly set status to processing
+        job.status = 'processing';
+        job.processingStartTime = new Date().toISOString();
+        job.currentTask = 'Preparing video processing';
+        job.progress = 0;
+        this.emitQueueUpdate();
+        
+        try {
+          // CRITICAL CHANGE: Retrieve outputFile from the job itself or its options
+          const outputFile = job.outputFile || 
+            // Fallback to options if outputFile is not set
+            (job.options as any).outputFile || 
+            // Last resort logging and throwing
+            (() => {
+              this.logger.error(`No output file found for job ${job.id}`);
+              throw new Error(`No output file for job ${job.id}`);
+            })();
 
+          const processingOptions: ProcessingOptions = {
+            fixAspectRatio: job.options.fixAspectRatio ?? true,
+            normalizeAudio: job.options.normalizeAudio ?? true,
+            audioNormalizationMethod: job.options.audioNormalizationMethod ?? 'ebur128'
+          };
+          
+          const processingResult = await this.mediaProcessingService.processMedia(
+            outputFile, 
+            processingOptions, 
+            job.id
+          );
+          
+          // Update job based on processing result
+          if (processingResult.success) {
+            job.status = 'completed';
+            job.processingEndTime = new Date().toISOString();
+            job.currentTask = 'Processing completed';
+            job.progress = 100;
+            
+            // Update output file if processing changed it
+            if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
+              job.outputFile = processingResult.outputFile;
+            }
+            
+            this.logger.log(`Processing completed for job ${job.id}`);
+          } else {
+            // Handle processing failure
+            job.status = 'failed';
+            job.error = processingResult.error || 'Unknown processing error';
+            job.currentTask = `Processing failed: ${job.error}`;
+            job.progress = 0;
+            
+            this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
+          }
+        } catch (error) {
+          // Catch any unexpected errors during processing
+          job.status = 'failed';
+          job.error = error instanceof Error ? error.message : 'Unexpected processing error';
+          job.currentTask = `Processing failed: ${job.error}`;
+          job.progress = 0;
+          
+          this.logger.error(`Unexpected error processing job ${job.id}`, error);
+        }
+        
+        // Always update queue after processing attempt
+        this.emitQueueUpdate();
+      });
+      
+      // Wait for current batch of jobs to complete
+      await Promise.all(processPromises);
+      
+      // Continue processing remaining jobs
+      await processQueue();
+    };
+    
+    // Start processing
+    await processQueue();
+  }
+    
   // Update job progress from events
   updateJobProgress(jobId: string, progress: number, task: string): void {
     const job = this.jobs.get(jobId);

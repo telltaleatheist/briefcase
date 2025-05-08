@@ -102,6 +102,9 @@
 │   │   │   ├── app.module.ts
 │   │   │   ├── app.routes.ts
 │   │   │   ├── components
+│   │   │   │   ├── audio-normalization
+│   │   │   │   │   └── audio-normalization-dialog.component.ts
+│   │   │   │   ├── backend-status
 │   │   │   │   ├── batch-download
 │   │   │   │   │   ├── batch-download.component.html
 │   │   │   │   │   ├── batch-download.component.scss
@@ -169,5 +172,5 @@
     ├── index.ts
     └── PathValidator.ts
 
-41 directories, 128 files
+43 directories, 129 files
 ```

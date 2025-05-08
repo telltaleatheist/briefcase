@@ -2,7 +2,7 @@
 import { Injectable } from '@angular/core';
 import { Socket } from 'ngx-socket-io';
 import { Observable, BehaviorSubject } from 'rxjs';
-import { DownloadProgress, HistoryItem, BatchQueueStatus } from '../models/download.model';
+import { DownloadProgress, HistoryItem, BatchQueueStatus, JobStatus } from '../models/download.model';
 
 @Injectable({
   providedIn: 'root'
@@ -149,6 +149,10 @@ export class SocketService {
    */
   onBatchQueueUpdated(): Observable<BatchQueueStatus> {
     return this.listenTo<BatchQueueStatus>('batch-queue-updated');
+  }
+  
+  onJobStatusUpdated(): Observable<{jobId: string, status: JobStatus, task: string}> {
+    return this.listenTo<{jobId: string, status: JobStatus, task: string}>('job-status-updated');
   }
   
   /**

@@ -51,15 +51,16 @@ export class MediaProcessingService {
       
       // Emit processing started event
       this.eventService.emitProcessingStarted(inputFile, options, jobId);
-      
+            
       // Initialize result
       const result: ProcessingResult = { 
         success: true,
         outputFile: inputFile // Default to input file if no processing occurs
       };
-      
-      // Explicitly check if any processing is needed
+            
+      // Check if any processing is needed
       if (options.fixAspectRatio || options.normalizeAudio) {
+        // Attempt to reencode video
         const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
           fixAspectRatio: options.fixAspectRatio,
           normalizeAudio: options.normalizeAudio,
@@ -67,13 +68,16 @@ export class MediaProcessingService {
         });
         
         if (outputFile && fs.existsSync(outputFile)) {
-          this.logger.log(`Media processed: ${outputFile}`);
+          this.logger.log(`Media processed successfully: ${outputFile}`);
           result.outputFile = outputFile;
+          result.success = true;
         } else {
           this.logger.warn(`Failed to process media, using original file: ${inputFile}`);
+          result.success = false;
+          result.error = 'Video reencoding failed';
         }
       }
-              
+                  
       // Create thumbnail if requested
       if (options.createThumbnail) {
         try {
@@ -87,23 +91,36 @@ export class MediaProcessingService {
           } else {
             this.logger.warn(`Failed to create thumbnail`);
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+        } catch (thumbnailError) {
+          const errorMessage = thumbnailError instanceof Error 
+            ? thumbnailError.message 
+            : String(thumbnailError);
+          
           this.logger.error(`Error creating thumbnail: ${errorMessage}`);
         }
       }
       
-      // Emit processing completed event
-      this.eventService.emitProcessingCompleted(
-        result.outputFile || inputFile,
-        jobId,
-        result.thumbnailFile,
-        result.audioFile
-      );
+      // Emit processing completed or failed event
+      if (result.success) {
+        this.eventService.emitProcessingCompleted(
+          result.outputFile || inputFile,
+          jobId,
+          result.thumbnailFile,
+          result.audioFile
+        );
+      } else {
+        this.eventService.emitProcessingFailed(
+          inputFile, 
+          result.error || 'Unknown processing error', 
+          jobId
+        );
+      }
       
       return result;
+  
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      
       this.logger.error(`Error processing media: ${errorMessage}`);
       
       // Emit processing failed event
@@ -111,11 +128,12 @@ export class MediaProcessingService {
       
       return { 
         success: false, 
-        error: errorMessage
+        error: errorMessage,
+        outputFile: inputFile // Fallback to original file
       };
     }
   }
-  
+    
   /**
    * Extract metadata from a media file
    */

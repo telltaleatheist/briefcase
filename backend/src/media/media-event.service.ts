@@ -90,6 +90,13 @@ export class MediaEventService {
   }
   
   emitProcessingProgress(progress: number, task: string, jobId?: string, additionalInfo?: any): void {
+    console.log(`Emitting Processing Progress [JobID: ${jobId}]:`, {
+      progress: this.normalizeProgress(progress),
+      task,
+      jobId,
+      additionalInfo
+    });
+  
     this.emitEvent('processing-progress', {
       progress: this.normalizeProgress(progress),
       task,
@@ -97,7 +104,7 @@ export class MediaEventService {
       ...additionalInfo
     });
   }
-  
+    
   emitProcessingCompleted(outputFile: string, jobId?: string, thumbnailFile?: string, audioFile?: string): void {
     this.emitEvent('processing-completed', { 
       outputFile,
