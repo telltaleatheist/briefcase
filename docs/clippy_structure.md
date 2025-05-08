@@ -55,7 +55,6 @@
 │   ├── backend-refactoring.md
 │   ├── clippy_structure.md
 │   ├── config-integration-guide.md
-│   ├── development.md
 │   ├── full_structure.md
 │   └── packaged_structure.md
 ├── downloads
@@ -157,6 +156,7 @@
 ├── index.html
 ├── package-lock.json
 ├── package.json
+├── README.md
 ├── scripts
 │   ├── refresh-app-tree.sh
 │   ├── refresh-full-tree.sh
