@@ -35,9 +35,6 @@ export class MediaProcessingService {
     private readonly eventService: MediaEventService
   ) {}
   
-  /**
-   * Process a media file with the specified options
-   */
   async processMedia(
     inputFile: string, 
     options: ProcessingOptions,
@@ -61,30 +58,22 @@ export class MediaProcessingService {
         outputFile: inputFile // Default to input file if no processing occurs
       };
       
-      if (options.fixAspectRatio) {
-        try {
-          this.logger.log(`Processing media with audio normalization: ${inputFile}`);
-          
-          const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
-            normalizeAudio: options.normalizeAudio,
-            method: options.audioNormalizationMethod
-          });
-          
-          if (outputFile && fs.existsSync(outputFile)) {
-            this.logger.log(`Media processed: ${outputFile}`);
-            result.outputFile = outputFile;
-          } else {
-            this.logger.warn(`Failed to process media, using original file: ${inputFile}`);
-          }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          this.logger.error(`Error processing media: ${errorMessage}`);
-          
-          // Don't fail the entire process for processing errors
-          this.eventService.emitProcessingProgress(50, `Warning: Couldn't process media. Continuing with original file.`, jobId);
+      // Explicitly check if any processing is needed
+      if (options.fixAspectRatio || options.normalizeAudio) {
+        const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
+          fixAspectRatio: options.fixAspectRatio,
+          normalizeAudio: options.normalizeAudio,
+          audioNormalizationMethod: options.audioNormalizationMethod
+        });
+        
+        if (outputFile && fs.existsSync(outputFile)) {
+          this.logger.log(`Media processed: ${outputFile}`);
+          result.outputFile = outputFile;
+        } else {
+          this.logger.warn(`Failed to process media, using original file: ${inputFile}`);
         }
       }
-            
+              
       // Create thumbnail if requested
       if (options.createThumbnail) {
         try {
@@ -101,12 +90,8 @@ export class MediaProcessingService {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error(`Error creating thumbnail: ${errorMessage}`);
-          
-          // Don't fail the entire process for thumbnail errors
         }
       }
-      
-      // Extract audio if requested (would be implemented here)
       
       // Emit processing completed event
       this.eventService.emitProcessingCompleted(

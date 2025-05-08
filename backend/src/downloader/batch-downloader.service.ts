@@ -221,49 +221,12 @@ export class BatchDownloaderService {
         this.emitQueueUpdate();
         continue;
       }
+      job.status = 'completed';
+      job.processingEndTime = new Date().toISOString();
+      job.currentTask = 'Processing completed';
+      job.progress = 100;
       
-      // Mark as processing
-      job.status = 'processing';
-      job.processingStartTime = new Date().toISOString();
-      job.currentTask = 'Starting processing...';
-      job.progress = 0; // Reset progress for processing phase
-      this.emitQueueUpdate();
-      
-      try {
-        // Process video if needed
-        if (job.options.fixAspectRatio) {
-          this.logger.log(`Processing video for job ${job.id}: ${job.outputFile}`);
-          job.currentTask = 'Processing video...';
-          
-          const result = await this.mediaProcessingService.processMedia(
-            job.outputFile,
-            { fixAspectRatio: job.options.fixAspectRatio },
-            job.id
-          );
-          
-          if (result.success && result.outputFile) {
-            job.outputFile = result.outputFile;
-          }
-        }
-        
-        // Mark as completed
-        job.status = 'completed';
-        job.processingEndTime = new Date().toISOString();
-        job.currentTask = 'Processing completed';
-        job.progress = 100;
-        
-        this.logger.log(`Processing completed for job ${job.id}`);
-        
-      } catch (error) {
-        // Handle processing error
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        job.status = 'failed';
-        job.error = errorMsg;
-        job.currentTask = `Failed: ${errorMsg}`;
-        job.progress = 0;
-        
-        this.logger.error(`Processing failed for job ${job.id}`, { error: errorMsg });
-      }
+      this.logger.log(`Processing completed for job ${job.id}`);
       
       this.emitQueueUpdate();
     }

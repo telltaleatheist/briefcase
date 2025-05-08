@@ -169,29 +169,29 @@ export class DownloaderService implements OnModuleInit {
           // Only process non-image files
           if (!isImage) {
             try {
-              // Process the video with audio normalization options
+              // Consolidate all processing options from the initial download
               const processingOptions: ProcessingOptions = {
                 fixAspectRatio: options.fixAspectRatio ?? true,
                 normalizeAudio: options.normalizeAudio ?? true,
                 audioNormalizationMethod: options.audioNormalizationMethod ?? 'ebur128'
               };
-    
+          
               const processingResult = await this.mediaProcessingService.processMedia(
                 outputFile, 
                 processingOptions, 
                 jobId
               );
-    
+          
               // Update output file if processing was successful
               if (processingResult.success && processingResult.outputFile) {
                 outputFile = processingResult.outputFile;
               }
             } catch (processingError) {
+              // Log error but continue with original file
               this.logger.error(`Media processing failed: ${processingError}`);
-              // Continue with original file if processing fails
             }
           }
-          
+                    
           // Add to history
           this.addToHistory(outputFile, options.url);
           

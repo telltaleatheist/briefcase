@@ -109,12 +109,13 @@ export class FfmpegService {
   async reencodeVideo(
     videoFile: string, 
     jobId?: string, 
-    audioOptions?: {
+    options?: {
+      fixAspectRatio?: boolean,
       normalizeAudio?: boolean, 
-      method?: 'ebur128' | 'rms' | 'peak'
+      audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak'
     }
   ): Promise<string | null> {
-      if (!fs.existsSync(videoFile)) {
+        if (!fs.existsSync(videoFile)) {
       this.logger.error(`Video file doesn't exist: ${videoFile}`);
       return null;
     }
@@ -196,10 +197,10 @@ export class FfmpegService {
           // Simplified encoder options
           const encoderOptions = ['-c:v', selectedEncoder, '-b:v', '3M'];
           
-          const audioNormalizationOptions = audioOptions?.normalizeAudio 
-            ? this.getAudioNormalizationFilter(audioOptions.method || 'ebur128') 
-            : [];
-          
+          const audioNormalizationOptions = options?.normalizeAudio 
+          ? this.getAudioNormalizationFilter(options.audioNormalizationMethod || 'ebur128') 
+          : [];
+                
           // Create FFmpeg command
           let command = ffmpeg(videoFile)
             .outputOptions([
