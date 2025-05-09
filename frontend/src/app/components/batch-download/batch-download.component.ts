@@ -16,7 +16,6 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatDialog } from '@angular/material/dialog';
 import { MatSliderModule } from '@angular/material/slider';
 
 import { BatchApiService } from '../../services/batch-api.service';

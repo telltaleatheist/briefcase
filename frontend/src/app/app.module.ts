@@ -20,7 +20,6 @@ import { SettingsComponent } from './components/settings/settings.component';
 import { DownloadHistoryComponent } from './components/download-history/download-history.component';
 import { DownloadProgressComponent } from './components/download-progress/download-progress.component';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
-import { AudioNormalizationDialogComponent } from './components/audio-normalization/audio-normalization-dialog.component';
 
 // Socket.io configuration
 const socketIoConfig: SocketIoConfig = {
@@ -39,7 +38,6 @@ const socketIoConfig: SocketIoConfig = {
     CommonModule,
     AppRoutingModule,
     BrowserAnimationsModule,
-    AudioNormalizationDialogComponent,
     MaterialModule,
     HttpClientModule,
     FormsModule,
