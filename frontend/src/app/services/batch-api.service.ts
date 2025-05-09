@@ -21,7 +21,7 @@ export class BatchApiService {
   addMultipleToBatchQueue(options: DownloadOptions[]): Observable<{success: boolean, jobIds: string[]}> {
     return this.http.post<{success: boolean, jobIds: string[]}>(`${this.apiUrl}/downloader/batch/bulk`, options);
   }
-
+  
   getBatchStatus(): Observable<BatchQueueStatus> {
     return this.http.get<BatchQueueStatus>(`${this.apiUrl}/downloader/batch/status`);
   }

@@ -13,6 +13,11 @@ export interface ProcessingOptions {
   customOptions?: Record<string, any>;
   normalizeAudio?: boolean;
   audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
+
+  useRmsNormalization?: boolean;
+  rmsNormalizationLevel?: number;
+  useCompression?: boolean;
+  compressionLevel?: number;
 }
 
 export interface ProcessingResult {
@@ -21,6 +26,12 @@ export interface ProcessingResult {
   outputFile?: string;
   thumbnailFile?: string;
   audioFile?: string;
+  audioProcessingDetails?: {
+    rmsNormalization?: boolean;
+    rmsNormalizationLevel?: number;
+    compression?: boolean;
+    compressionLevel?: number;
+  };
 }
 
 /**
@@ -40,7 +51,7 @@ export class MediaProcessingService {
     options: ProcessingOptions,
     jobId?: string
   ): Promise<ProcessingResult> {
-    this.logger.log('Received processing options:', JSON.stringify({
+      this.logger.log('Received processing options:', JSON.stringify({
       fixAspectRatio: options.fixAspectRatio,
       normalizeAudio: options.normalizeAudio,
       audioNormalizationMethod: options.audioNormalizationMethod
@@ -59,14 +70,18 @@ export class MediaProcessingService {
       };
             
       // Check if any processing is needed
-      if (options.fixAspectRatio || options.normalizeAudio) {
-        // Attempt to reencode video
+      if (options.fixAspectRatio || options.normalizeAudio || 
+          options.useRmsNormalization || options.useCompression) {
         const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
           fixAspectRatio: options.fixAspectRatio,
           normalizeAudio: options.normalizeAudio,
-          audioNormalizationMethod: options.audioNormalizationMethod
+          audioNormalizationMethod: options.audioNormalizationMethod,
+          useRmsNormalization: options.useRmsNormalization,
+          rmsNormalizationLevel: options.rmsNormalizationLevel,
+          useCompression: options.useCompression,
+          compressionLevel: options.compressionLevel
         });
-        
+          
         if (outputFile && fs.existsSync(outputFile)) {
           this.logger.log(`Media processed successfully: ${outputFile}`);
           result.outputFile = outputFile;

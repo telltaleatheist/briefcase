@@ -61,6 +61,10 @@ export interface DownloadOptions {
   displayName?: string;
   normalizeAudio?: boolean;
   audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
+  useRmsNormalization?: boolean;
+  rmsNormalizationLevel?: number;
+  useCompression?: boolean;
+  compressionLevel?: number;
 }
 
 export interface DownloadResult {

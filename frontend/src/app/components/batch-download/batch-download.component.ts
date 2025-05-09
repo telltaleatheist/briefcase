@@ -17,6 +17,7 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog } from '@angular/material/dialog';
+import { MatSliderModule } from '@angular/material/slider';
 
 import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
@@ -25,13 +26,13 @@ import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
 import { Subscription, catchError, of, interval } from 'rxjs';
-import { AudioNormalizationDialogComponent } from '../audio-normalization/audio-normalization-dialog.component';
 
 @Component({
   selector: 'app-batch-download',
   standalone: true,
   imports: [
     CommonModule,
+    MatSliderModule,
     ReactiveFormsModule,
     MatCardModule,
     FormsModule,
@@ -79,8 +80,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     private socketService: SocketService,
     private settingsService: SettingsService,
     private snackBar: MatSnackBar,
-    private cdr: ChangeDetectorRef,
-    private dialog: MatDialog
+    private cdr: ChangeDetectorRef
   ) {
     this.batchForm = this.createBatchForm();
     this.configForm = this.createConfigForm();
@@ -90,7 +90,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     this.settingsSubscription = this.settingsService.getSettings().subscribe((settings: Settings) => {
       this.updateDefaultValues(settings);
     });
-    
+
     // Listen for batch queue updates
     this.socketService.onBatchQueueUpdated().subscribe(
       (status: BatchQueueStatus) => {
@@ -636,7 +636,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       browser: ['auto'],
       outputDir: [''],
       normalizeAudio: [true],
-      audioNormalizationMethod: ['ebur128']
+      useRmsNormalization: [false],
+      rmsNormalizationLevel: [0],
+      useCompression: [false],
+      compressionLevel: [5]
     });
   }
     
@@ -716,27 +719,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     });
   }
 
-  openAudioNormalizationDialog(index: number): void {
-    const urlGroup = (this.batchForm.get('urls') as FormArray).at(index);
-    
-    const dialogRef = this.dialog.open(AudioNormalizationDialogComponent, {
-      width: '400px',
-      data: {
-        method: urlGroup.get('audioNormalizationMethod')?.value || 'ebur128',
-        advanced: false,
-        targetLoudness: -16
-      }
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      if (result) {
-        urlGroup.patchValue({
-          audioNormalizationMethod: result.method
-        });
-      }
-    });
-  }
-  
   createUrlField(): FormGroup {
     return this.fb.group({
       url: ['', [
@@ -754,7 +736,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       useCookies: [false],
       browser: ['auto'],
       normalizeAudio: [true],
-      audioNormalizationMethod: ['ebur128']
+      useRmsNormalization: [false],
+      rmsNormalizationLevel: [0],
+      useCompression: [false],
+      compressionLevel: [5]
     });
   }
           
@@ -885,7 +870,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       fixAspectRatio: settings.fixAspectRatio,
       useCookies: false,
       browser: settings.browser,
-      outputDir: settings.outputDir
+      outputDir: settings.outputDir,
+      rmsNormalizationLevel: 0,
+      compressionLevel: 5
     });
     
     this.configForm.patchValue({
@@ -925,8 +912,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         batchQuality: formValues.quality,
         individualFixAspectRatio: urlGroup.get('fixAspectRatio')?.value,
         batchFixAspectRatio: formValues.fixAspectRatio,
-        individualNormalizeAudio: urlGroup.get('normalizeAudio')?.value,
-        individualAudioNormalizationMethod: urlGroup.get('audioNormalizationMethod')?.value
+        individualNormalizeAudio: urlGroup.get('normalizeAudio')?.value
       });
   
       // Get the full filename that was determined during metadata fetch and sanitize it
@@ -958,13 +944,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           : formValues.browser,
         outputDir: formValues.outputDir,
         displayName: fullFileName,
-        normalizeAudio: urlGroup.get('overrideBatchSettings')?.value 
-          ? urlGroup.get('normalizeAudio')?.value 
-          : true,
-        audioNormalizationMethod: urlGroup.get('overrideBatchSettings')?.value 
-          ? urlGroup.get('audioNormalizationMethod')?.value 
-          : 'ebur128'
-      });
+        useRmsNormalization: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('useRmsNormalization')?.value 
+          : this.batchForm.get('useRmsNormalization')?.value,
+        rmsNormalizationLevel: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('rmsNormalizationLevel')?.value 
+          : this.batchForm.get('rmsNormalizationLevel')?.value,
+        useCompression: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('useCompression')?.value 
+          : this.batchForm.get('useCompression')?.value,
+        compressionLevel: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('compressionLevel')?.value 
+          : this.batchForm.get('compressionLevel')?.value
+          });
       
       // Also store in the local map for immediate UI display
       if (fullFileName) {

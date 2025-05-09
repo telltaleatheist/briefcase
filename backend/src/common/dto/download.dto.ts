@@ -11,6 +11,26 @@ export class BatchConfigDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  useRmsNormalization?: boolean = false;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-20)
+  @Max(20)
+  rmsNormalizationLevel?: number = 0;
+
+  @IsOptional()
+  @IsBoolean()
+  useCompression?: boolean = false;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(10)
+  compressionLevel?: number = 5;
 }
 
 export class BatchDownloadDto {
@@ -38,6 +58,26 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsBoolean()
   convertToMp4?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  useRmsNormalization?: boolean = false;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-20)
+  @Max(20)
+  rmsNormalizationLevel?: number = 0;
+
+  @IsOptional()
+  @IsBoolean()
+  useCompression?: boolean = false;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(10)
+  compressionLevel?: number = 5;
 
   @IsOptional()
   @IsNumber()

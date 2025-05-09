@@ -38,7 +38,10 @@ export interface DownloadOptions {
   outputDir: string;
   displayName?: string;
   normalizeAudio?: boolean;
-  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
+  useRmsNormalization?: boolean;
+  rmsNormalizationLevel?: number;
+  useCompression?: boolean;
+  compressionLevel?: number;
 }
 
 export interface BatchDownloadOptions {
@@ -49,6 +52,11 @@ export interface BatchDownloadOptions {
   useCookies: boolean;
   browser: string;
   outputDir: string;
+  normalizeAudio?: boolean;
+  useRmsNormalization?: boolean;
+  rmsNormalizationLevel?: number;
+  useCompression?: boolean;
+  compressionLevel?: number;
 }
 
 export interface DownloadResult {
@@ -94,6 +102,11 @@ export interface VideoMetadata {
 export interface BatchConfig {
   maxConcurrentDownloads: number;
   enabled: boolean;
+
+  useRmsNormalization?: boolean;
+  rmsNormalizationLevel?: number;
+  useCompression?: boolean;
+  compressionLevel?: number;
 }
 
 // Updated interfaces to include job progress information with string dates

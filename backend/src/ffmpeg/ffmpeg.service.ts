@@ -112,10 +112,14 @@ export class FfmpegService {
     options?: {
       fixAspectRatio?: boolean,
       normalizeAudio?: boolean, 
-      audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak'
+      audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak',
+      useRmsNormalization?: boolean,
+      rmsNormalizationLevel?: number,
+      useCompression?: boolean,
+      compressionLevel?: number
     }
   ): Promise<string | null> {
-    this.logger.log('Received reencoding options:', JSON.stringify({
+      this.logger.log('Received reencoding options:', JSON.stringify({
       fixAspectRatio: options?.fixAspectRatio,
       normalizeAudio: options?.normalizeAudio,
       audioNormalizationMethod: options?.audioNormalizationMethod
@@ -198,10 +202,13 @@ export class FfmpegService {
           // Simplified encoder options
           const encoderOptions = ['-c:v', selectedEncoder, '-b:v', '3M'];
           
-          const audioNormalizationOptions = options?.normalizeAudio 
-          ? this.getAudioNormalizationFilter(options.audioNormalizationMethod || 'ebur128') 
-          : [];
-                
+          const audioNormalizationOptions = this.getAudioNormalizationFilter({
+            useRmsNormalization: options?.useRmsNormalization,
+            rmsNormalizationLevel: options?.rmsNormalizationLevel,
+            useCompression: options?.useCompression,
+            compressionLevel: options?.compressionLevel
+          });
+                          
           // Create FFmpeg command
           let command = ffmpeg(videoFile)
             .outputOptions([
@@ -308,31 +315,62 @@ export class FfmpegService {
     }
   }
 
-  private getAudioNormalizationFilter(method: 'ebur128' | 'rms' | 'peak'): string[] {
-    switch (method) {
-      case 'ebur128':
-        return [
-          '-filter_complex', 
-          '[0:a]loudnorm=I=-16:LRA=11:tp=-1.5[normalized_audio]',
-          '-map', '[normalized_audio]'
-        ];
-      case 'rms':
-        return [
-          '-filter_complex', 
-          '[0:a]volumedetect,volume=replaygain=track[normalized_audio]',
-          '-map', '[normalized_audio]'
-        ];
-      case 'peak':
-        return [
-          '-filter_complex', 
-          '[0:a]volumedetect,volume=adjustment=+0dB[normalized_audio]',
-          '-map', '[normalized_audio]'
-        ];
-      default:
-        return [];
+  private getAudioNormalizationFilter(options?: {
+    normalizeAudio?: boolean;
+    audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
+    useRmsNormalization?: boolean;
+    rmsNormalizationLevel?: number;
+    useCompression?: boolean;
+    compressionLevel?: number;
+  }): string[] {
+    const filters: string[] = [];
+  
+    // Existing EBU R128 normalization
+    if (options?.normalizeAudio && options?.audioNormalizationMethod === 'ebur128') {
+      filters.push(
+        '-filter_complex', 
+        '[0:a]loudnorm=I=-16:LRA=11:tp=-1.5[normalized_audio]',
+        '-map', '[normalized_audio]'
+      );
+    }
+  
+    // New RMS Normalization
+    if (options?.useRmsNormalization) {
+      const rmsLevel = options.rmsNormalizationLevel || 0;
+      const rmsGain = rmsLevel; // Direct mapping of slider value to gain
+      filters.push(
+        '-filter_complex', 
+        `[0:a]volume=replaygain=track:replaygain-adjustment=${rmsGain}[rms_normalized]`,
+        '-map', '[rms_normalized]'
+      );
+    }
+  
+    // New Compression
+    if (options?.useCompression) {
+      const compressionLevel = options.compressionLevel || 5;
+      const compandPoints = this.getCompandPointsForLevel(compressionLevel);
+      filters.push(
+        '-filter_complex', 
+        `[0:a]compand=attacks=0.3:decays=0.3:points=${compandPoints}[compressed]`,
+        '-map', '[compressed]'
+      );
+    }
+  
+    return filters;
+  }
+
+  private getCompandPointsForLevel(level: number): string {
+    // Provide different compression curves based on level
+    switch (true) {
+      case level <= 2: 
+        return '-90/-900|-45/-900|-27/-18|0/-9|12/0'; // Light compression
+      case level <= 5: 
+        return '-90/-900|-45/-900|-30/-15|0/-6|15/0'; // Moderate compression
+      default: 
+        return '-90/-900|-45/-900|-35/-10|0/-3|20/0'; // Heavy compression
     }
   }
-    
+
   private safeDeleteFile(filePath: string): boolean {
     if (!filePath) return false;
     

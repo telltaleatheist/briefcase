@@ -116,35 +116,47 @@
                           </mat-select>
                         </mat-form-field>
                       </div>
-            
-                      <div class="audio-normalization-options">
-                        <div class="checkbox-setting">
-                          <mat-checkbox formControlName="normalizeAudio">
-                            Normalize Audio
-                            <mat-hint>Standardize audio levels for this video</mat-hint>
-                          </mat-checkbox>
-                          <button 
-                            mat-icon-button 
-                            type="button"
-                            (click)="openAudioNormalizationDialog(i)"
-                            matTooltip="Advanced Audio Normalization Options"
-                          >
-                            <mat-icon>settings</mat-icon>
-                          </button>
-                        </div>
-                        
-                        <ng-container *ngIf="urlControl.get('normalizeAudio')?.value">
-                          <mat-form-field appearance="outline">
-                            <mat-label>Normalization Method</mat-label>
-                            <mat-select formControlName="audioNormalizationMethod">
-                              <mat-option value="ebur128">EBU R128 (Broadcast Standard)</mat-option>
-                              <mat-option value="rms">RMS Leveling</mat-option>
-                              <mat-option value="peak">Peak Normalization</mat-option>
-                            </mat-select>
-                            <mat-hint>Choose audio leveling method</mat-hint>
-                          </mat-form-field>
-                        </ng-container>
+                      
+                      <div class="rms-normalization-option">
+                        <mat-checkbox formControlName="useRmsNormalization">
+                          RMS Normalization
+                        </mat-checkbox>&nbsp;&nbsp;&nbsp;
+                        <mat-slider 
+                          *ngIf="urlControl.get('useRmsNormalization')?.value"
+                          formControlName="rmsNormalizationLevel"
+                          min="-20" 
+                          max="20" 
+                          step="1"
+                          discrete
+                          thumbLabel>
+                          <input matSliderThumb>
+                        </mat-slider>&nbsp;&nbsp;
+                        <mat-hint *ngIf="urlControl.get('rmsNormalizationLevel')?.value === -21">
+                          🔇 Audio Muted
+                        </mat-hint>
+                        <mat-hint *ngIf="urlControl.get('rmsNormalizationLevel')?.value !== -21">
+                          Adjust volume gain (-20 to +20 dB)
+                        </mat-hint>
                       </div>
+                    
+                      <div class="compression-option">
+                        <mat-checkbox formControlName="useCompression">
+                          Audio Compression
+                        </mat-checkbox>&nbsp;&nbsp;&nbsp;
+                        <mat-slider 
+                          *ngIf="urlControl.get('useCompression')?.value"
+                          formControlName="compressionLevel"
+                          min="0" 
+                          max="10" 
+                          step="1"
+                          discrete>
+                          <input matSliderThumb>
+                        </mat-slider>&nbsp;&nbsp;
+                        <mat-hint *ngIf="urlControl.get('useCompression')?.value">
+                          Adjust compression intensity (0 to 10)
+                        </mat-hint>
+                      </div>
+
                     </div>
                   </ng-container>
                 </div>
@@ -195,22 +207,53 @@
             
             <div class="checkbox-setting">
               <mat-checkbox formControlName="normalizeAudio">
+                Normalize Audio
                 <mat-hint>Standardize audio levels across downloaded videos</mat-hint>
               </mat-checkbox>
             </div>
             
-            <div *ngIf="batchForm.get('normalizeAudio')?.value" class="option-row">
-              <mat-form-field appearance="outline">
-                <mat-label>Normalization Method</mat-label>
-                <mat-select formControlName="audioNormalizationMethod">
-                  <mat-option value="ebur128">EBU R128 (Broadcast Standard)</mat-option>
-                  <mat-option value="rms">RMS Leveling</mat-option>
-                  <mat-option value="peak">Peak Normalization</mat-option>
-                </mat-select>
-                <mat-hint>Choose audio leveling method</mat-hint>
-              </mat-form-field>
-            </div>
+            <div *ngIf="batchForm.get('normalizeAudio')?.value" class="audio-processing-options">
+              <div class="rms-normalization-option">
+                <mat-checkbox formControlName="useRmsNormalization">
+                  RMS Normalization
+                </mat-checkbox>&nbsp;&nbsp;&nbsp;
+                <mat-slider 
+                  *ngIf="batchForm.get('useRmsNormalization')?.value"
+                  formControlName="rmsNormalizationLevel"
+                  min="-20" 
+                  max="20" 
+                  step="1"
+                  discrete
+                  thumbLabel>
+                  <input matSliderThumb>
+                </mat-slider>&nbsp;&nbsp;
+                <mat-hint *ngIf="batchForm.get('rmsNormalizationLevel')?.value === -21">
+                  🔇 Audio Muted
+                </mat-hint>
+                <mat-hint *ngIf="batchForm.get('rmsNormalizationLevel')?.value !== -21">
+                  Adjust volume gain (-20 to +20 dB)
+                </mat-hint>
+              </div>
             
+              <div class="compression-option">
+                <mat-checkbox formControlName="useCompression">
+                  Audio Compression
+                </mat-checkbox>&nbsp;&nbsp;&nbsp;
+                <mat-slider 
+                  *ngIf="batchForm.get('useCompression')?.value"
+                  formControlName="compressionLevel"
+                  min="0" 
+                  max="10" 
+                  step="1"
+                  discrete>
+                  <input matSliderThumb>
+                </mat-slider>&nbsp;&nbsp;
+                <mat-hint *ngIf="batchForm.get('useCompression')?.value">
+                  Adjust compression intensity (0 to 10)
+                </mat-hint>
+              </div>
+            </div>
+                                                
             <div class="checkbox-setting">
               <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
             </div>
