@@ -35,18 +35,16 @@ export class BatchDownloaderService {
     this.eventService.server?.on('job-status-updated', (data: {jobId: string, status: string, task: string}) => {
       this.updateJobStatus(data.jobId, data.status as JobStatus, data.task);
     });
-  }
-
-  private handleJobStatusUpdate(jobId: string, status: JobStatus, task: string): void {
-    const job = this.jobs.get(jobId);
-    
-    if (job) {
-      // Use the state manager to update the job
-      this.jobStateManager.updateJobStatus(job, status, task, false); // Don't re-emit
-      this.emitQueueUpdate();
-    } else {
-      this.logger.warn(`Cannot update job status: job ${jobId} not found`);
-    }
+    this.eventService.server?.on('transcription-completed', (data: {jobId?: string, outputFile: string}) => {
+      if (data.jobId) {
+        const job = this.jobs.get(data.jobId);
+        if (job && job.status === 'transcribing') {
+          this.jobStateManager.updateJobStatus(job, 'completed', 'Transcription completed');
+          this.logger.log(`Transcription completed for job ${data.jobId}, setting to completed`);
+          this.emitQueueUpdate();
+        }
+      }
+    });
   }
 
   updateJobStatus(jobId: string, status: JobStatus, task: string): void {
@@ -294,28 +292,30 @@ export class BatchDownloaderService {
               job.id
             );
             
-            // Update job based on processing result
             if (processingResult.success) {
-              this.jobStateManager.updateJobStatus(job, 'completed', 'Processing completed');
-
               if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
                 job.outputFile = processingResult.outputFile;
               }
-
+            
               if (processingResult.transcriptFile) {
                 job.transcriptFile = processingResult.transcriptFile;
               }
               
-              this.logger.log(`Processing completed for job ${job.id}`);
+              if (job.status !== 'transcribing') {
+                this.jobStateManager.updateJobStatus(job, 'completed', 'Processing completed');
+                this.logger.log(`Processing completed for job ${job.id}`);
+              } else {
+                this.logger.log(`Job ${job.id} is in transcribing state, waiting for transcription to complete`);
+              }
             } else {
               this.jobStateManager.updateJobStatus(job, 'failed', 'Unknown processing error');
               this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
-            }
+                        }
           } catch (error) {
             this.jobStateManager.updateJobStatus(job, 'failed', 'Unexpected processing error');
             this.logger.error(`Unexpected error processing job ${job.id}`, error);
           }
-          
+
           this.emitQueueUpdate();
         } catch {
           this.logger.error(`Unexpected error processing job ${job.id}`);

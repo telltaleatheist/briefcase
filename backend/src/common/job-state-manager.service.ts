@@ -30,7 +30,22 @@ export class JobStateManagerService {
   updateJobStatus(job: Job, newStatus: JobStatus, task: string, emitEvent = true): boolean {
     const oldStatus = job.status;
     
-    // Validate state transition
+    // Log the transition
+    this.logger.log(`Considering job ${job.id} status update from ${oldStatus} to ${newStatus}: ${task}`);
+    
+    if (newStatus === 'failed') {
+    }
+    else if (oldStatus === 'failed' && newStatus === 'queued') {
+    }
+    // Check for backward transitions and block them
+    else if (this.isBackwardTransition(oldStatus, newStatus)) {
+      this.logger.warn(
+        `Backward state transition rejected: ${job.id} from ${oldStatus} to ${newStatus} - jobs can only move forward in the workflow`
+      );
+      return false;
+    }
+    
+    // Validate state transition using the valid transitions map
     if (!this.isValidTransition(oldStatus, newStatus)) {
       this.logger.warn(
         `Invalid state transition rejected: ${job.id} from ${oldStatus} to ${newStatus}`
@@ -38,7 +53,6 @@ export class JobStateManagerService {
       return false;
     }
     
-    // Log the transition
     this.logger.log(`Updating job ${job.id} status from ${oldStatus} to ${newStatus}: ${task}`);
     
     // Update job state
@@ -68,6 +82,29 @@ export class JobStateManagerService {
     }
     
     return true;
+  }
+    
+  private isBackwardTransition(from: JobStatus, to: JobStatus): boolean {
+    // Define the linear progression of states
+    const stateOrder: JobStatus[] = [
+      'queued',
+      'downloading', 
+      'downloaded',
+      'processing',
+      'transcribing',
+      'completed'
+    ];
+    
+    // Get the indices of the states in our progression
+    const fromIndex = stateOrder.indexOf(from);
+    const toIndex = stateOrder.indexOf(to);
+    
+    // If either state is not in our progression, it's not a backward transition
+    // This handles 'failed' state which can transition from any state
+    if (fromIndex === -1 || toIndex === -1) return false;
+    
+    // If the to-index is less than from-index, it's going backward
+    return toIndex < fromIndex;
   }
   
   /**
