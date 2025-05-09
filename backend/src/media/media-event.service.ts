@@ -60,6 +60,7 @@ export class MediaEventService {
   }
   
   emitTranscriptionProgress(progress: number, task: string, jobId?: string): void {
+    // Send the progress event
     this.emitEvent('transcription-progress', {
       progress: this.normalizeProgress(progress),
       task,

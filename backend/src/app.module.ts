@@ -9,6 +9,7 @@ import { MediaModule } from './media/media.module';
 import { ConfigModule } from '@nestjs/config';
 import { SharedConfigModule } from './config/shared-config.module';
 import { environment } from './config/environment';
+import { JobStateManagerModule } from './common/job-state-manager.module';
 
 @Module({
   imports: [
@@ -20,7 +21,8 @@ import { environment } from './config/environment';
     DownloaderModule,
     FfmpegModule,
     PathModule,
-    MediaModule
+    MediaModule,
+    JobStateManagerModule,
   ],
   controllers: [AppController],
   providers: [AppService],

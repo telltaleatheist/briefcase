@@ -122,6 +122,11 @@ export class WhisperManager extends EventEmitter {
 
   async transcribe(audioFile: string, outputDir: string): Promise<string> {
     this.progressCounter = 0;
+
+    console.log('Starting Whisper transcription with extensive logging');
+    console.log('Audio file:', audioFile);
+    console.log('Output directory:', outputDir);
+  
     if (!audioFile || !fs.existsSync(audioFile)) {
       throw new Error(`Audio file not found: ${audioFile}`);
     }
@@ -316,7 +321,8 @@ export class WhisperManager extends EventEmitter {
   }
 
   private parseProgress(output: string): void {
-    // More granular and dynamic progress tracking
+    console.log('Raw Whisper output:', output);  // Log ALL output
+  
     const percentMatch = output.match(/(\d+)%/);
     const milestones = [
       { pattern: 'Loading model', percent: 10, task: 'Loading Whisper model' },
@@ -330,6 +336,7 @@ export class WhisperManager extends EventEmitter {
     // Check milestone events first
     for (const milestone of milestones) {
       if (output.includes(milestone.pattern)) {
+        console.log(`Milestone detected: ${milestone.pattern}, Emitting progress: ${milestone.percent}%`);
         this.emit('progress', { 
           percent: milestone.percent, 
           task: milestone.task 
@@ -338,26 +345,37 @@ export class WhisperManager extends EventEmitter {
       }
     }
   
-    // Use actual percentage if available
-    if (percentMatch && !output.includes('Estimated duration:')) {
+    // Forcing progress emission
+    if (percentMatch) {
       const percent = parseInt(percentMatch[1], 10);
       const scaledPercent = Math.min(100, percent);
       
+      console.log(`Percentage match: ${scaledPercent}%`);
       this.emit('progress', { 
         percent: scaledPercent, 
         task: 'Transcribing audio' 
       });
+      return;
     }
   
-    // Periodic update to show activity if no progress detected
-    if (!percentMatch && this.isRunning) {
-      this.emit('progress', { 
-        percent: Math.min(90, (this.progressCounter++ * 5)), 
-        task: 'Transcribing audio' 
-      });
-    }
+    // Periodic progress if no explicit progress
+    this.progressCounter = Math.min(90, this.progressCounter + 5);
+    console.log(`Periodic progress: ${this.progressCounter}%`);
+    this.emit('progress', { 
+      percent: this.progressCounter, 
+      task: 'Transcribing audio' 
+    });
   }
-      
+  
+  private getCurrentTask(percent: number): string {
+    if (percent < 10) return 'Loading Whisper model';
+    if (percent < 30) return 'Detecting language';
+    if (percent < 50) return 'Preparing transcription';
+    if (percent < 70) return 'Processing audio segments';
+    if (percent < 90) return 'Generating transcript';
+    return 'Finalizing transcript';
+  }
+  
   cancel(): void {
     if (this.currentProcess && this.isRunning) {
       this.logger.log('Cancelling Whisper transcription');

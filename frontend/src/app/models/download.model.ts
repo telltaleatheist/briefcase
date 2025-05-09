@@ -155,6 +155,7 @@ export interface BatchQueueStatus {
   downloadingJobs: JobResponse[];
   downloadedJobs: JobResponse[];
   processingJobs: JobResponse[];
+  transcribingJobs: JobResponse[];
   completedJobs: JobResponse[];
   failedJobs: JobResponse[];
   activeDownloadCount: number;

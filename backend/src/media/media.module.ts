@@ -5,9 +5,10 @@ import { MediaProcessingService } from './media-processing.service';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { WhisperService } from './whisper.service';
 import { WhisperManager } from './whisper-manager';
+import { JobStateManagerModule } from '../common/job-state-manager.module';
 
 @Module({
-  imports: [forwardRef(() => FfmpegModule)], // Use forwardRef to resolve circular dependency
+  imports: [forwardRef(() => FfmpegModule), forwardRef(() => JobStateManagerModule)],
   providers: [
     MediaEventService,
     MediaProcessingService,

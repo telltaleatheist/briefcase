@@ -16,6 +16,10 @@ export class WhisperService {
   ) {}
 
   async transcribeVideo(videoFile: string, jobId?: string): Promise<string | null> {
+    console.log(`[WHISPER SERVICE] Transcription started`);
+    console.log(`[WHISPER SERVICE] Video file: ${videoFile}`);
+    console.log(`[WHISPER SERVICE] Job ID: ${jobId}`);
+  
     try {
       if (!fs.existsSync(videoFile)) {
         throw new Error(`Video file not found: ${videoFile}`);
@@ -32,6 +36,8 @@ export class WhisperService {
           progress.task,
           jobId
         );
+
+        console.log(`Progress event: ${JSON.stringify(progress)}`);
       });
     
       this.logger.log(`Starting transcription for ${videoFile}`);

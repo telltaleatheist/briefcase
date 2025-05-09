@@ -259,36 +259,43 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
   
   updateJobStatus(jobId: string, status: JobStatus, task: string): void {
-    console.log(`Updating UI job status: Job ${jobId} → ${status} (${task})`);
-    
+    console.log(`DETAILED STATUS TRANSITION TRACE: Job ${jobId}`, {
+      fromStatus: this.findJobById(jobId)?.status,
+      toStatus: status,
+      task: task,
+      currentArrays: {
+        queuedJobs: this.batchQueueStatus?.queuedJobs?.length,
+        downloadingJobs: this.batchQueueStatus?.downloadingJobs?.length,
+        downloadedJobs: this.batchQueueStatus?.downloadedJobs?.length,
+        processingJobs: this.batchQueueStatus?.processingJobs?.length,
+        completedJobs: this.batchQueueStatus?.completedJobs?.length,
+        failedJobs: this.batchQueueStatus?.failedJobs?.length
+      },
+      stackTrace: new Error().stack?.split('\n').slice(1, 5).join('\n')
+    });
+            
     if (!this.batchQueueStatus) return;
     
-    // Initialize arrays if they don't exist
     this.batchQueueStatus.queuedJobs = this.batchQueueStatus.queuedJobs || [];
     this.batchQueueStatus.downloadingJobs = this.batchQueueStatus.downloadingJobs || [];
     this.batchQueueStatus.downloadedJobs = this.batchQueueStatus.downloadedJobs || [];
     this.batchQueueStatus.processingJobs = this.batchQueueStatus.processingJobs || [];
+    this.batchQueueStatus.transcribingJobs = this.batchQueueStatus.transcribingJobs || [];
     this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs || [];
     this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs || [];
     
-    // Function to find and update job in a specific state array
     const updateJobInArray = (array: JobResponse[]): boolean => {
       if (!array) return false;
       
       const jobIndex = array.findIndex(j => j.id === jobId);
       if (jobIndex >= 0) {
-        // CRITICAL FIX: First save the current job
         const job = array[jobIndex];
-        
-        // Now we need to REMOVE it from the current array
         array.splice(jobIndex, 1);
         
-        // Update the job properties
         job.status = status;
         job.currentTask = task;
-        job.progress = 0; // Reset progress when status changes
+        job.progress = 0;
         
-        // Now place it in the right array based on status
         if (status === 'queued' && this.batchQueueStatus?.queuedJobs) {
           this.batchQueueStatus.queuedJobs.push(job);
         } else if (status === 'downloading' && this.batchQueueStatus?.downloadingJobs) {
@@ -298,8 +305,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         } else if (status === 'processing' && this.batchQueueStatus?.processingJobs) {
           this.batchQueueStatus.processingJobs.push(job);
         } else if (status === 'transcribing' && this.batchQueueStatus?.processingJobs) {
-          // Make sure we handle 'transcribing' status!
-          // This job should be shown in processingJobs with transcribing status
           this.batchQueueStatus.processingJobs.push(job);
         } else if (status === 'completed' && this.batchQueueStatus?.completedJobs) {
           this.batchQueueStatus.completedJobs.push(job);
@@ -312,12 +317,12 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return false;
     };
     
-    // Try to find the job in all state arrays
     const stateArrays = [
       this.batchQueueStatus.queuedJobs || [],
       this.batchQueueStatus.downloadingJobs || [],
       this.batchQueueStatus.downloadedJobs || [],
       this.batchQueueStatus.processingJobs || [],
+      this.batchQueueStatus.transcribingJobs || [],
       this.batchQueueStatus.completedJobs || [],
       this.batchQueueStatus.failedJobs || []
     ];
@@ -330,7 +335,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       }
     }
     
-    // Force change detection when job is updated
     if (found) {
       console.log(`Job ${jobId} status updated to ${status} successfully`);
       this.cdr.detectChanges();
@@ -533,6 +537,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       ...(this.batchQueueStatus.downloadingJobs || []),
       ...(this.batchQueueStatus.downloadedJobs || []),
       ...(this.batchQueueStatus.processingJobs || []),
+      ...(this.batchQueueStatus.transcribingJobs || []),
       ...(this.batchQueueStatus.completedJobs || []),
       ...(this.batchQueueStatus.failedJobs || [])
     ];
@@ -573,9 +578,18 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   // Update job status class based on state
   getJobStatusClassWithQueueType(job: any): string {
     if (!job) return '';
-    
-    console.log(`Getting status class for job ${job.id} with status ${job.status}`);
-    
+    const jobId = job?.id || 'unknown';
+    const jobStatus = job?.status || 'unknown';
+  
+    console.log(`COMPREHENSIVE STATUS CLASS INVESTIGATION: Job ${jobId}`, {
+      fullJobObject: JSON.parse(JSON.stringify(job)), // Deep clone to see full context
+      status: jobStatus,
+      progress: job?.progress,
+      currentTask: job?.currentTask,
+      timestamp: new Date().toISOString(),
+      stackTrace: new Error().stack?.split('\n').slice(1, 5).join('\n')
+    });
+        
     // Use the status directly for CSS class
     switch (job.status) {
       case 'queued': 
@@ -587,7 +601,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       case 'processing': 
         return 'status-processing';
       case 'transcribing': 
-        console.log('APPLYING TRANSCRIBING CLASS'); // Debug log
+        console.log('APPLYING TRANSCRIBING CLASS');
         return 'status-transcribing';
       case 'completed': 
         return 'status-completed';
@@ -1267,6 +1281,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             downloadingJobs: [],
             downloadedJobs: [],
             processingJobs: [],
+            transcribingJobs: [],
             completedJobs: [],
             failedJobs: [],
             activeDownloadCount: 0,

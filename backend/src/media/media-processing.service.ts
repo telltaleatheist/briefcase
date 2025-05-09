@@ -126,7 +126,7 @@ export class MediaProcessingService {
           this.logger.log(`Updating job ${jobId} status to 'transcribing'`);
           this.eventService.emitJobStatusUpdate(jobId || '', 'transcribing', 'Starting transcription...');
           await new Promise(resolve => setTimeout(resolve, 50));
-                
+
           this.logger.log(`Starting transcription for job ${jobId}`);
           const transcriptFile = await this.whisperService.transcribeVideo(
             result.outputFile || inputFile, // Use the re-encoded file
@@ -139,11 +139,9 @@ export class MediaProcessingService {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error(`Transcription failed: ${errorMessage}`);
-          // Don't fail the entire job if transcription fails
         }
       }
       
-      // Emit processing completed or failed event
       if (result.success) {
         this.eventService.emitProcessingCompleted(
           result.outputFile || inputFile,

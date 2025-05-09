@@ -122,13 +122,20 @@ export class SocketService {
   onTranscriptionProgress(): Observable<DownloadProgress> {
     return new Observable<DownloadProgress>(observer => {
       this.socket.on('transcription-progress', (data: DownloadProgress) => {
-        console.log(`Received transcription progress: ${data.progress}% - ${data.task}`);
-        // Store in cache
-        if (data.jobId) {
-          this.progressCache.set(data.jobId, data);
+        console.log('RAW Transcription Progress:', JSON.stringify(data));
+        
+        // Validate and normalize data
+        const normalizedData = {
+          progress: Math.max(0, Math.min(100, data.progress || 0)),
+          task: data.task || 'Transcribing',
+          jobId: data.jobId
+        };
+        
+        if (normalizedData.jobId) {
+          this.progressCache.set(normalizedData.jobId, normalizedData);
         }
         
-        observer.next(data);
+        observer.next(normalizedData);
       });
       
       return () => {
@@ -136,7 +143,7 @@ export class SocketService {
       };
     });
   }
-  
+    
   /**
    * Listen for transcription completed event
    */
@@ -215,6 +222,10 @@ export class SocketService {
    * Send an event to the server
    */
   emitEvent(eventName: string, data: any): void {
+    console.log(`EVENT TRACE: Emitting ${eventName}`, {
+      data: data,
+      callStack: new Error().stack?.split('\n').slice(1, 5).join('\n')
+    });
     this.socket.emit(eventName, data);
   }
 }

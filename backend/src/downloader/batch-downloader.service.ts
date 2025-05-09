@@ -11,6 +11,7 @@ import {
   JobStatus,
   BatchQueueStatus
 } from '../common/interfaces/download.interface';
+import { JobStateManagerService } from '../common/job-state-manager.service';
 
 @Injectable()
 export class BatchDownloaderService {
@@ -29,28 +30,30 @@ export class BatchDownloaderService {
     private readonly downloaderService: DownloaderService,
     private readonly mediaProcessingService: MediaProcessingService,
     private readonly eventService: MediaEventService,
+    private readonly jobStateManager: JobStateManagerService
   ) {
     this.eventService.server?.on('job-status-updated', (data: {jobId: string, status: string, task: string}) => {
       this.updateJobStatus(data.jobId, data.status as JobStatus, data.task);
     });
   }
 
+  private handleJobStatusUpdate(jobId: string, status: JobStatus, task: string): void {
+    const job = this.jobs.get(jobId);
+    
+    if (job) {
+      // Use the state manager to update the job
+      this.jobStateManager.updateJobStatus(job, status, task, false); // Don't re-emit
+      this.emitQueueUpdate();
+    } else {
+      this.logger.warn(`Cannot update job status: job ${jobId} not found`);
+    }
+  }
+
   updateJobStatus(jobId: string, status: JobStatus, task: string): void {
     const job = this.jobs.get(jobId);
     
     if (job) {
-      this.logger.log(`Updating job ${jobId} status from ${job.status} to ${status}`);
-      
-      // Update job status
-      job.status = status;
-      job.currentTask = task;
-      
-      // Reset progress to 0 when changing status
-      if (status === 'transcribing') {
-        job.progress = 0;
-      }
-      
-      // Emit update
+      this.jobStateManager.updateJobStatus(job, status, task);
       this.emitQueueUpdate();
     } else {
       this.logger.warn(`Cannot update job status: job ${jobId} not found`);
@@ -166,10 +169,7 @@ export class BatchDownloaderService {
   // Start a download for a job
   private async startDownload(job: Job): Promise<void> {
     // Update job state
-    job.status = 'downloading';
-    job.currentTask = 'Initializing download...';
-    job.downloadStartTime = new Date().toISOString();
-    this.emitQueueUpdate();
+    this.jobStateManager.updateJobStatus(job, 'downloading', 'Initializing download...');
     
     try {
       // Start download with downloaderService
@@ -186,25 +186,15 @@ export class BatchDownloaderService {
         
         if (result.isImage) {
           // Images don't need processing
-          job.status = 'completed';
-          job.processingEndTime = job.downloadEndTime;
-          job.currentTask = 'Image download completed';
-          job.progress = 100;
+          this.jobStateManager.updateJobStatus(job, 'completed', 'Image download completed');
           this.logger.log(`Image download completed for job ${job.id}`);
         } else {
           // Mark videos as downloaded but not yet processed
-          job.status = 'downloaded';
-          job.currentTask = 'Download complete, waiting for processing...';
-          job.progress = 0; // Reset progress to 0 when waiting for processing
+          this.jobStateManager.updateJobStatus(job, 'downloaded', 'Download complete, waiting for processing...');
           this.logger.log(`Video download completed, waiting for processing: ${job.id}`);
         }
       } else {
-        // Handle download failure
-        job.status = 'failed';
-        job.error = result.error || 'Download failed';
-        job.currentTask = `Failed: ${job.error}`;
-        job.progress = 0;
-        this.logger.error(`Download failed for job ${job.id}`, { error: result.error });
+        this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');
       }
     } catch (error) {
       // Handle unexpected errors
@@ -212,11 +202,7 @@ export class BatchDownloaderService {
         ? error.message 
         : 'Unknown error during download';
       
-      job.status = 'failed';
-      job.error = errorMessage;
-      job.currentTask = `Failed: ${errorMessage}`;
-      job.progress = 0;
-      
+      this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');
       this.logger.error(`Unexpected error during download for job ${job.id}`, { 
         error: errorMessage,
         jobDetails: job 
@@ -273,11 +259,7 @@ export class BatchDownloaderService {
       
       const processPromises = jobsToProcess.map(async (job) => {
         // Explicitly set status to processing
-        job.status = 'processing';
-        job.processingStartTime = new Date().toISOString();
-        job.currentTask = 'Preparing video processing';
-        job.progress = 0;
-        this.emitQueueUpdate();
+        this.jobStateManager.updateJobStatus(job, 'processing', 'Preparing video processing');
         
         try {
           const outputFile = job.outputFile || 
@@ -314,12 +296,8 @@ export class BatchDownloaderService {
             
             // Update job based on processing result
             if (processingResult.success) {
-              job.status = 'completed';
-              job.processingEndTime = new Date().toISOString();
-              job.currentTask = 'Processing completed';
-              job.progress = 100;
-              
-              // Update output file if processing changed it
+              this.jobStateManager.updateJobStatus(job, 'completed', 'Processing completed');
+
               if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
                 job.outputFile = processingResult.outputFile;
               }
@@ -330,21 +308,11 @@ export class BatchDownloaderService {
               
               this.logger.log(`Processing completed for job ${job.id}`);
             } else {
-              // Handle processing failure
-              job.status = 'failed';
-              job.error = processingResult.error || 'Unknown processing error';
-              job.currentTask = `Processing failed: ${job.error}`;
-              job.progress = 0;
-              
+              this.jobStateManager.updateJobStatus(job, 'failed', 'Unknown processing error');
               this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
             }
           } catch (error) {
-            // Catch any unexpected errors during processing
-            job.status = 'failed';
-            job.error = error instanceof Error ? error.message : 'Unexpected processing error';
-            job.currentTask = `Processing failed: ${job.error}`;
-            job.progress = 0;
-            
+            this.jobStateManager.updateJobStatus(job, 'failed', 'Unexpected processing error');
             this.logger.error(`Unexpected error processing job ${job.id}`, error);
           }
           
@@ -370,8 +338,7 @@ export class BatchDownloaderService {
     const job = this.jobs.get(jobId);
     
     if (job) {
-      job.progress = progress;
-      job.currentTask = task;
+      this.jobStateManager.updateJobProgress(job, progress, task);
       this.emitQueueUpdate();
     }
   }
@@ -383,31 +350,19 @@ export class BatchDownloaderService {
     
     // Handle different job states
     if (job.status === 'queued') {
-      job.status = 'failed';
-      job.error = 'Cancelled by user';
-      job.currentTask = 'Cancelled by user';
-      job.progress = 0;
-      this.emitQueueUpdate();
+      this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
       return true;
     }
     
     if (job.status === 'downloading') {
       if (this.downloaderService.cancelDownload(jobId)) {
-        job.status = 'failed';
-        job.error = 'Cancelled by user';
-        job.currentTask = 'Cancelled by user';
-        job.progress = 0;
-        this.emitQueueUpdate();
+        this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
         return true;
       }
     }
     
     if (job.status === 'downloaded' || job.status === 'processing') {
-      job.status = 'failed';
-      job.error = 'Cancelled by user';
-      job.currentTask = 'Cancelled by user';
-      job.progress = 0;
-      this.emitQueueUpdate();
+      this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
       return true;
     }
     
@@ -424,19 +379,11 @@ export class BatchDownloaderService {
     // Reset job state
     if (job.outputFile) {
       // If we have an output file, we can retry from processing
-      job.status = 'downloaded';
-      job.error = undefined;
-      job.currentTask = 'Waiting for processing...';
-      job.progress = 100; // Download was complete
+      this.jobStateManager.updateJobStatus(job, 'downloaded', 'Waiting for processing...');
     } else {
-      // Otherwise retry from the beginning
-      job.status = 'queued';
-      job.error = undefined;
-      job.currentTask = 'Waiting in queue...';
-      job.progress = 0;
+      this.jobStateManager.updateJobStatus(job, 'queued', 'Waiting in queue...');
     }
-    
-    this.emitQueueUpdate();
+
     this.processQueue();
     return true;
   }
@@ -448,6 +395,7 @@ export class BatchDownloaderService {
     const downloadingJobs = this.getJobsByStatus('downloading').map(job => this.formatJobForResponse(job));
     const downloadedJobs = this.getJobsByStatus('downloaded').map(job => this.formatJobForResponse(job));
     const processingJobs = this.getJobsByStatus('processing').map(job => this.formatJobForResponse(job));
+    const transcribingJobs = this.getJobsByStatus('transcribing').map(job => this.formatJobForResponse(job));
     const completedJobs = this.getJobsByStatus('completed').map(job => this.formatJobForResponse(job));
     const failedJobs = this.getJobsByStatus('failed').map(job => this.formatJobForResponse(job));
     
@@ -456,6 +404,7 @@ export class BatchDownloaderService {
       downloadingJobs,
       downloadedJobs,
       processingJobs,
+      transcribingJobs,
       completedJobs,
       failedJobs,
       activeDownloadCount: downloadingJobs.length,
@@ -493,10 +442,7 @@ export class BatchDownloaderService {
     
     // Mark them as failed
     for (const job of activeJobs) {
-      job.status = 'failed';
-      job.error = 'Cancelled by user';
-      job.currentTask = 'Cancelled by user';
-      job.progress = 0;
+      this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
     }
     
     // Cancel any active downloads

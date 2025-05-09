@@ -7,13 +7,16 @@ import { MediaModule } from '../media/media.module';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { PathModule } from '../path/path.module';
 import { SharedConfigModule } from '../config/shared-config.module';
+import { JobStateManagerModule } from '../common/job-state-manager.module';
 
 @Module({
   imports: [
-    forwardRef(() => MediaModule), // Using forwardRef to handle circular dependencies
+    forwardRef(() => MediaModule),
     forwardRef(() => FfmpegModule),
+    forwardRef(() => MediaModule),
     PathModule,
-    SharedConfigModule
+    SharedConfigModule,
+    forwardRef(() => JobStateManagerModule)
   ],
   providers: [DownloaderService, BatchDownloaderService],
   controllers: [DownloaderController],

@@ -11,8 +11,10 @@
 │   │   ├── common
 │   │   │   ├── dto
 │   │   │   │   └── download.dto.ts
-│   │   │   └── interfaces
-│   │   │       └── download.interface.ts
+│   │   │   ├── interfaces
+│   │   │   │   └── download.interface.ts
+│   │   │   ├── job-state-manager.module.ts
+│   │   │   └── job-state-manager.service.ts
 │   │   ├── config
 │   │   │   ├── environment.ts
 │   │   │   ├── environment.util.ts
@@ -173,5 +175,5 @@
     ├── index.ts
     └── PathValidator.ts
 
-43 directories, 130 files
+43 directories, 132 files
 ```
