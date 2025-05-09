@@ -303,6 +303,14 @@ mat-progress-bar {
     color: rgba(255, 255, 255, 0.7);
   }
   
+  // dark theme:
+  :host-context(.dark-theme) {
+    .status-transcribing {
+      border-left-color: #00bcd4;
+      background-color: rgba(0, 188, 212, 0.1);
+    }
+  }
+  
   .status-info {
     background-color: rgba(255, 255, 255, 0.05);
   }
@@ -323,6 +331,24 @@ mat-progress-bar {
   .status-downloading {
     background-color: #e3f2fd;
     border-left: 4px solid #2196f3;
+  }
+    
+  .status-transcribing {
+    border-left-color: #00bcd4; // Teal
+    background-color: rgba(0, 188, 212, 0.08);
+    animation: pulse 2s infinite ease-in-out;
+  }
+  
+  @keyframes pulse {
+    0% {
+      border-left-color: #00bcd4;
+    }
+    50% {
+      border-left-color: #009bb2;
+    }
+    100% {
+      border-left-color: #00bcd4;
+    }
   }
     
   .status-downloaded {

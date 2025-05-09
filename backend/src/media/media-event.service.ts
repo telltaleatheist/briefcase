@@ -38,6 +38,52 @@ export class MediaEventService {
     return new Date().toISOString();
   }
   
+  emitJobStatusUpdate(jobId: string, status: string, task: string): void {
+    this.logger.log(`Emitting job status update for ${jobId}: ${status} - ${task}`);
+    this.emitEvent('job-status-updated', {
+      jobId,
+      status,
+      task,
+      timestamp: this.getTimestamp()
+    });
+  }
+    
+  /** 
+   * transcription methods
+  */
+  emitTranscriptionStarted(inputFile: string, jobId?: string): void {
+    this.emitEvent('transcription-started', {
+      inputFile,
+      jobId,
+      timestamp: this.getTimestamp()
+    });
+  }
+  
+  emitTranscriptionProgress(progress: number, task: string, jobId?: string): void {
+    this.emitEvent('transcription-progress', {
+      progress: this.normalizeProgress(progress),
+      task,
+      jobId
+    });
+  }
+    
+  emitTranscriptionCompleted(outputFile: string, jobId?: string): void {
+    this.emitEvent('transcription-completed', {
+      outputFile,
+      jobId,
+      timestamp: this.getTimestamp()
+    });
+  }
+  
+  emitTranscriptionFailed(inputFile: string, error: string, jobId?: string): void {
+    this.emitEvent('transcription-failed', {
+      inputFile,
+      error,
+      jobId,
+      timestamp: this.getTimestamp()
+    });
+  }
+  
   /**
    * Download events
    */
@@ -98,12 +144,19 @@ export class MediaEventService {
     });
   }
     
-  emitProcessingCompleted(outputFile: string, jobId?: string, thumbnailFile?: string, audioFile?: string): void {
+  emitProcessingCompleted(
+    outputFile: string, 
+    jobId?: string, 
+    thumbnailFile?: string, 
+    audioFile?: string,
+    transcriptFile?: string
+  ): void {
     this.emitEvent('processing-completed', { 
       outputFile,
       jobId,
       thumbnailFile,
       audioFile,
+      transcriptFile, // Added this parameter
       timestamp: this.getTimestamp()
     });
   }

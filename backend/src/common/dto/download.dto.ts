@@ -5,12 +5,16 @@ import { Type } from 'class-transformer';
 export class BatchConfigDto {
   @IsNumber()
   @Min(1)
-  @Max(10)
+  @Max(20)
   maxConcurrentDownloads: number;
 
   @IsOptional()
   @IsBoolean()
   enabled?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  transcribeVideo?: boolean = false;
 
   @IsOptional()
   @IsBoolean()
@@ -58,6 +62,10 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsBoolean()
   convertToMp4?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  transcribeVideo?: boolean = false;
 
   @IsOptional()
   @IsBoolean()

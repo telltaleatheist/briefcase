@@ -1,6 +1,6 @@
 // clippy/backend/src/common/interfaces/download.interface.ts
 
-export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'transcribing' | 'completed' | 'failed';
 
 export interface Job {
   id: string;
@@ -18,6 +18,7 @@ export interface Job {
   processingEndTime?: string;
   outputFile?: string;
   thumbnail?: string;
+  transcriptFile?: string;
 }
 
 export interface JobResponse {
@@ -35,6 +36,7 @@ export interface JobResponse {
   processingEndTime?: string;
   outputFile?: string;
   thumbnail?: string;
+  transcriptFile?: string;
 }
 
 export interface BatchQueueStatus {
@@ -59,12 +61,11 @@ export interface DownloadOptions {
   browser?: string;
   fixAspectRatio?: boolean;
   displayName?: string;
-  normalizeAudio?: boolean;
-  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
   useRmsNormalization?: boolean;
   rmsNormalizationLevel?: number;
   useCompression?: boolean;
   compressionLevel?: number;
+  transcribeVideo?: boolean;
 }
 
 export interface DownloadResult {

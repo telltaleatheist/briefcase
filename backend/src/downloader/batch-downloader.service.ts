@@ -29,8 +29,34 @@ export class BatchDownloaderService {
     private readonly downloaderService: DownloaderService,
     private readonly mediaProcessingService: MediaProcessingService,
     private readonly eventService: MediaEventService,
-  ) {}
+  ) {
+    this.eventService.server?.on('job-status-updated', (data: {jobId: string, status: string, task: string}) => {
+      this.updateJobStatus(data.jobId, data.status as JobStatus, data.task);
+    });
+  }
 
+  updateJobStatus(jobId: string, status: JobStatus, task: string): void {
+    const job = this.jobs.get(jobId);
+    
+    if (job) {
+      this.logger.log(`Updating job ${jobId} status from ${job.status} to ${status}`);
+      
+      // Update job status
+      job.status = status;
+      job.currentTask = task;
+      
+      // Reset progress to 0 when changing status
+      if (status === 'transcribing') {
+        job.progress = 0;
+      }
+      
+      // Emit update
+      this.emitQueueUpdate();
+    } else {
+      this.logger.warn(`Cannot update job status: job ${jobId} not found`);
+    }
+  }
+    
   // Set max concurrent downloads
   setMaxConcurrentDownloads(max: number): void {
     if (max < 1) {
@@ -254,11 +280,8 @@ export class BatchDownloaderService {
         this.emitQueueUpdate();
         
         try {
-          // CRITICAL CHANGE: Retrieve outputFile from the job itself or its options
           const outputFile = job.outputFile || 
-            // Fallback to options if outputFile is not set
             (job.options as any).outputFile || 
-            // Last resort logging and throwing
             (() => {
               this.logger.error(`No output file found for job ${job.id}`);
               throw new Error(`No output file for job ${job.id}`);
@@ -266,59 +289,78 @@ export class BatchDownloaderService {
 
           const processingOptions: ProcessingOptions = {
             fixAspectRatio: job.options.fixAspectRatio ?? true,
-            normalizeAudio: job.options.normalizeAudio ?? true,
-            audioNormalizationMethod: job.options.audioNormalizationMethod ?? 'ebur128'
           };
           
-          const processingResult = await this.mediaProcessingService.processMedia(
-            outputFile, 
-            processingOptions, 
-            job.id
-          );
-          
-          // Update job based on processing result
-          if (processingResult.success) {
-            job.status = 'completed';
-            job.processingEndTime = new Date().toISOString();
-            job.currentTask = 'Processing completed';
-            job.progress = 100;
+          try {
+            const outputFile = job.outputFile || (() => {
+              this.logger.error(`No output file found for job ${job.id}`);
+              throw new Error(`No output file for job ${job.id}`);
+            })();
+    
+            const processingOptions: ProcessingOptions = {
+              fixAspectRatio: job.options.fixAspectRatio ?? true,
+              useRmsNormalization: job.options.useRmsNormalization ?? false,
+              rmsNormalizationLevel: job.options.rmsNormalizationLevel ?? 0,
+              useCompression: job.options.useCompression ?? false,
+              compressionLevel: job.options.compressionLevel ?? 5,
+              transcribeVideo: job.options.transcribeVideo ?? false
+            };
             
-            // Update output file if processing changed it
-            if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
-              job.outputFile = processingResult.outputFile;
+            const processingResult = await this.mediaProcessingService.processMedia(
+              outputFile, 
+              processingOptions, 
+              job.id
+            );
+            
+            // Update job based on processing result
+            if (processingResult.success) {
+              job.status = 'completed';
+              job.processingEndTime = new Date().toISOString();
+              job.currentTask = 'Processing completed';
+              job.progress = 100;
+              
+              // Update output file if processing changed it
+              if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
+                job.outputFile = processingResult.outputFile;
+              }
+
+              if (processingResult.transcriptFile) {
+                job.transcriptFile = processingResult.transcriptFile;
+              }
+              
+              this.logger.log(`Processing completed for job ${job.id}`);
+            } else {
+              // Handle processing failure
+              job.status = 'failed';
+              job.error = processingResult.error || 'Unknown processing error';
+              job.currentTask = `Processing failed: ${job.error}`;
+              job.progress = 0;
+              
+              this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
             }
-            
-            this.logger.log(`Processing completed for job ${job.id}`);
-          } else {
-            // Handle processing failure
+          } catch (error) {
+            // Catch any unexpected errors during processing
             job.status = 'failed';
-            job.error = processingResult.error || 'Unknown processing error';
+            job.error = error instanceof Error ? error.message : 'Unexpected processing error';
             job.currentTask = `Processing failed: ${job.error}`;
             job.progress = 0;
             
-            this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
+            this.logger.error(`Unexpected error processing job ${job.id}`, error);
           }
-        } catch (error) {
-          // Catch any unexpected errors during processing
-          job.status = 'failed';
-          job.error = error instanceof Error ? error.message : 'Unexpected processing error';
-          job.currentTask = `Processing failed: ${job.error}`;
-          job.progress = 0;
           
-          this.logger.error(`Unexpected error processing job ${job.id}`, error);
+          this.emitQueueUpdate();
+        } catch {
+          this.logger.error(`Unexpected error processing job ${job.id}`);
         }
-        
-        // Always update queue after processing attempt
-        this.emitQueueUpdate();
       });
-      
+        
       // Wait for current batch of jobs to complete
       await Promise.all(processPromises);
       
       // Continue processing remaining jobs
       await processQueue();
     };
-    
+      
     // Start processing
     await processQueue();
   }
@@ -438,7 +480,8 @@ export class BatchDownloaderService {
       processingStartTime: job.processingStartTime,
       processingEndTime: job.processingEndTime,
       outputFile: job.outputFile,
-      thumbnail: job.thumbnail
+      thumbnail: job.thumbnail,
+      transcriptFile: job.transcriptFile
     };
   }
   

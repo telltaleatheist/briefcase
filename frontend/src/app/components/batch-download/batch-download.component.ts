@@ -117,6 +117,51 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         this.cdr.detectChanges();
       }
     );
+
+    this.socketService.onTranscriptionProgress().subscribe(
+      (progress: DownloadProgress) => {
+        console.log(`Received transcription progress update: ${progress.progress}% - ${progress.task}`);
+        if (progress.jobId) {
+          this.updateJobProgress(progress.jobId, progress.progress, progress.task);
+        }
+      }
+    );
+        
+    this.socketService.onJobStatusUpdated().subscribe(
+      (data: {jobId: string, status: JobStatus, task: string}) => {
+        console.log(`Received job status update: ${data.jobId} - ${data.status} - ${data.task}`);
+        if (data.jobId) {
+          this.updateJobStatus(data.jobId, data.status, data.task);
+        }
+      }
+    );
+  
+    // Listen for transcription started events
+    this.socketService.onTranscriptionStarted().subscribe(
+      (data: {inputFile: string, jobId?: string}) => {
+        if (data.jobId) {
+          this.updateJobStatus(data.jobId, 'transcribing', 'Starting transcription...');
+        }
+      }
+    );
+    
+    // Listen for transcription completed events
+    this.socketService.onTranscriptionCompleted().subscribe(
+      (data: {outputFile: string, jobId?: string}) => {
+        if (data.jobId) {
+          this.updateJobStatus(data.jobId, 'completed', 'Transcription completed');
+        }
+      }
+    );
+    
+    // Listen for transcription failed events
+    this.socketService.onTranscriptionFailed().subscribe(
+      (data: {error: string, jobId?: string, inputFile?: string}) => {
+        if (data.jobId) {
+          this.updateJobStatus(data.jobId, 'failed', `Transcription failed: ${data.error}`);
+        }
+      }
+    );
     
     // Listen for download progress updates
     this.downloadProgressSubscription = this.socketService.onDownloadProgress().subscribe(
@@ -214,14 +259,54 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
   
   updateJobStatus(jobId: string, status: JobStatus, task: string): void {
+    console.log(`Updating UI job status: Job ${jobId} → ${status} (${task})`);
+    
     if (!this.batchQueueStatus) return;
+    
+    // Initialize arrays if they don't exist
+    this.batchQueueStatus.queuedJobs = this.batchQueueStatus.queuedJobs || [];
+    this.batchQueueStatus.downloadingJobs = this.batchQueueStatus.downloadingJobs || [];
+    this.batchQueueStatus.downloadedJobs = this.batchQueueStatus.downloadedJobs || [];
+    this.batchQueueStatus.processingJobs = this.batchQueueStatus.processingJobs || [];
+    this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs || [];
+    this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs || [];
     
     // Function to find and update job in a specific state array
     const updateJobInArray = (array: JobResponse[]): boolean => {
+      if (!array) return false;
+      
       const jobIndex = array.findIndex(j => j.id === jobId);
       if (jobIndex >= 0) {
-        array[jobIndex].status = status;
-        array[jobIndex].currentTask = task;
+        // CRITICAL FIX: First save the current job
+        const job = array[jobIndex];
+        
+        // Now we need to REMOVE it from the current array
+        array.splice(jobIndex, 1);
+        
+        // Update the job properties
+        job.status = status;
+        job.currentTask = task;
+        job.progress = 0; // Reset progress when status changes
+        
+        // Now place it in the right array based on status
+        if (status === 'queued' && this.batchQueueStatus?.queuedJobs) {
+          this.batchQueueStatus.queuedJobs.push(job);
+        } else if (status === 'downloading' && this.batchQueueStatus?.downloadingJobs) {
+          this.batchQueueStatus.downloadingJobs.push(job);
+        } else if (status === 'downloaded' && this.batchQueueStatus?.downloadedJobs) {
+          this.batchQueueStatus.downloadedJobs.push(job);
+        } else if (status === 'processing' && this.batchQueueStatus?.processingJobs) {
+          this.batchQueueStatus.processingJobs.push(job);
+        } else if (status === 'transcribing' && this.batchQueueStatus?.processingJobs) {
+          // Make sure we handle 'transcribing' status!
+          // This job should be shown in processingJobs with transcribing status
+          this.batchQueueStatus.processingJobs.push(job);
+        } else if (status === 'completed' && this.batchQueueStatus?.completedJobs) {
+          this.batchQueueStatus.completedJobs.push(job);
+        } else if (status === 'failed' && this.batchQueueStatus?.failedJobs) {
+          this.batchQueueStatus.failedJobs.push(job);
+        }
+        
         return true;
       }
       return false;
@@ -245,12 +330,15 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       }
     }
     
-    // If job was found and updated, trigger change detection
+    // Force change detection when job is updated
     if (found) {
+      console.log(`Job ${jobId} status updated to ${status} successfully`);
       this.cdr.detectChanges();
+    } else {
+      console.warn(`Could not find job ${jobId} to update status`);
     }
   }
-  
+      
   /**
    * Extract a readable name from a URL
    */
@@ -448,7 +536,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       ...(this.batchQueueStatus.completedJobs || []),
       ...(this.batchQueueStatus.failedJobs || [])
     ];
-    
+      
     // Create a map for efficient lookups
     const jobsMap = new Map<string, JobResponse>();
     allJobs.forEach(job => {
@@ -486,18 +574,30 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   getJobStatusClassWithQueueType(job: any): string {
     if (!job) return '';
     
+    console.log(`Getting status class for job ${job.id} with status ${job.status}`);
+    
     // Use the status directly for CSS class
     switch (job.status) {
-      case 'queued': return 'status-queued';
-      case 'downloading': return 'status-downloading';
-      case 'downloaded': return 'status-downloaded';
-      case 'processing': return 'status-processing';
-      case 'completed': return 'status-completed';
-      case 'failed': return 'status-failed';
-      default: return '';
+      case 'queued': 
+        return 'status-queued';
+      case 'downloading': 
+        return 'status-downloading';
+      case 'downloaded': 
+        return 'status-downloaded';
+      case 'processing': 
+        return 'status-processing';
+      case 'transcribing': 
+        console.log('APPLYING TRANSCRIBING CLASS'); // Debug log
+        return 'status-transcribing';
+      case 'completed': 
+        return 'status-completed';
+      case 'failed': 
+        return 'status-failed';
+      default: 
+        return '';
     }
   }
-  
+    
   private findJobById(id: string): JobResponse | undefined {
     if (!this.batchQueueStatus) return undefined;
     
@@ -570,6 +670,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       case 'downloading': return 'primary';
       case 'downloaded': return 'accent';
       case 'processing': return 'accent';
+      case 'transcribing': return 'accent';
       case 'completed': return 'primary';
       case 'failed': return 'warn';
       default: return 'default';
@@ -600,6 +701,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       case 'downloading': return 'Downloading...';
       case 'downloaded': return 'Waiting for processing...';
       case 'processing': return 'Processing...';
+      case 'transcribing': return 'Transcribing...';
       case 'completed': return 'Download completed';
       case 'failed': return 'Download failed';
       default: return 'Waiting...';
@@ -638,7 +740,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       useRmsNormalization: [false],
       rmsNormalizationLevel: [0],
       useCompression: [false],
-      compressionLevel: [5]
+      compressionLevel: [5],
+      transcribeVideo: [false]
     });
   }
     
@@ -738,7 +841,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       useRmsNormalization: [false],
       rmsNormalizationLevel: [0],
       useCompression: [false],
-      compressionLevel: [5]
+      compressionLevel: [5],
+      transcribeVideo: [false]
     });
   }
           
@@ -954,7 +1058,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           : this.batchForm.get('useCompression')?.value,
         compressionLevel: urlGroup.get('overrideBatchSettings')?.value 
           ? urlGroup.get('compressionLevel')?.value 
-          : this.batchForm.get('compressionLevel')?.value
+          : this.batchForm.get('compressionLevel')?.value,
+        transcribeVideo: urlGroup.get('overrideBatchSettings')?.value 
+          ? urlGroup.get('transcribeVideo')?.value 
+          : this.batchForm.get('transcribeVideo')?.value
           });
       
       // Also store in the local map for immediate UI display

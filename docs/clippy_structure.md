@@ -32,7 +32,9 @@
 │   │   ├── media
 │   │   │   ├── media-event.service.ts
 │   │   │   ├── media-processing.service.ts
-│   │   │   └── media.module.ts
+│   │   │   ├── media.module.ts
+│   │   │   ├── whisper-manager.ts
+│   │   │   └── whisper.service.ts
 │   │   ├── path
 │   │   │   ├── path.controller.ts
 │   │   │   ├── path.module.ts
@@ -103,7 +105,6 @@
 │   │   │   ├── app.routes.ts
 │   │   │   ├── components
 │   │   │   │   ├── audio-normalization
-│   │   │   │   │   └── audio-normalization-dialog.component.ts
 │   │   │   │   ├── backend-status
 │   │   │   │   ├── batch-download
 │   │   │   │   │   ├── batch-download.component.html
@@ -172,5 +173,5 @@
     ├── index.ts
     └── PathValidator.ts
 
-43 directories, 129 files
+43 directories, 130 files
 ```

@@ -2,7 +2,7 @@
 
 // Add these missing type definitions
 export type BrowserType = 'auto' | 'chrome' | 'firefox' | 'edge' | 'safari' | 'brave' | 'opera';
-export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'transcribing' | 'completed' | 'failed';
 
 export interface Job {
   id: string;
@@ -20,6 +20,7 @@ export interface Job {
   processingEndTime?: string;
   outputFile?: string;
   thumbnail?: string;
+  transcriptFile?: string;
 }
 
 export interface QualityOption {
@@ -42,6 +43,7 @@ export interface DownloadOptions {
   rmsNormalizationLevel?: number;
   useCompression?: boolean;
   compressionLevel?: number;
+  transcribeVideo?: boolean;
 }
 
 export interface BatchDownloadOptions {
@@ -107,6 +109,7 @@ export interface BatchConfig {
   rmsNormalizationLevel?: number;
   useCompression?: boolean;
   compressionLevel?: number;
+  transcribeVideo?: boolean;
 }
 
 // Updated interfaces to include job progress information with string dates
@@ -144,6 +147,7 @@ export interface JobResponse {
   processingEndTime?: string;
   outputFile?: string;
   thumbnail?: string;
+  transcriptFile?: string;
 }
 
 export interface BatchQueueStatus {

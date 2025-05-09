@@ -1,9 +1,11 @@
-// clippy/backend/src/media/media-processing.service.ts
+// Fix for media-processing.service.ts
+
 import { Injectable, Logger } from '@nestjs/common';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from './media-event.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { WhisperService } from './whisper.service';
 
 export interface ProcessingOptions {
   fixAspectRatio?: boolean;
@@ -18,6 +20,7 @@ export interface ProcessingOptions {
   rmsNormalizationLevel?: number;
   useCompression?: boolean;
   compressionLevel?: number;
+  transcribeVideo?: boolean;
 }
 
 export interface ProcessingResult {
@@ -32,6 +35,7 @@ export interface ProcessingResult {
     compression?: boolean;
     compressionLevel?: number;
   };
+  transcriptFile?: string;
 }
 
 /**
@@ -43,7 +47,8 @@ export class MediaProcessingService {
   
   constructor(
     private readonly ffmpegService: FfmpegService,
-    private readonly eventService: MediaEventService
+    private readonly eventService: MediaEventService,
+    private readonly whisperService: WhisperService
   ) {}
   
   async processMedia(
@@ -51,10 +56,11 @@ export class MediaProcessingService {
     options: ProcessingOptions,
     jobId?: string
   ): Promise<ProcessingResult> {
-      this.logger.log('Received processing options:', JSON.stringify({
+    this.logger.log('Received processing options:', JSON.stringify({
       fixAspectRatio: options.fixAspectRatio,
       normalizeAudio: options.normalizeAudio,
-      audioNormalizationMethod: options.audioNormalizationMethod
+      audioNormalizationMethod: options.audioNormalizationMethod,
+      transcribeVideo: options.transcribeVideo
     }, null, 2));
       
     try {
@@ -69,7 +75,7 @@ export class MediaProcessingService {
         outputFile: inputFile // Default to input file if no processing occurs
       };
             
-      // Check if any processing is needed
+      // FIRST: Do video processing/re-encoding if needed
       if (options.fixAspectRatio || options.normalizeAudio || 
           options.useRmsNormalization || options.useCompression) {
         const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
@@ -115,13 +121,36 @@ export class MediaProcessingService {
         }
       }
       
+      if (options.transcribeVideo && result.success) {
+        try {
+          this.logger.log(`Updating job ${jobId} status to 'transcribing'`);
+          this.eventService.emitJobStatusUpdate(jobId || '', 'transcribing', 'Starting transcription...');
+          await new Promise(resolve => setTimeout(resolve, 50));
+                
+          this.logger.log(`Starting transcription for job ${jobId}`);
+          const transcriptFile = await this.whisperService.transcribeVideo(
+            result.outputFile || inputFile, // Use the re-encoded file
+            jobId
+          );
+          
+          if (transcriptFile) {
+            result.transcriptFile = transcriptFile;
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(`Transcription failed: ${errorMessage}`);
+          // Don't fail the entire job if transcription fails
+        }
+      }
+      
       // Emit processing completed or failed event
       if (result.success) {
         this.eventService.emitProcessingCompleted(
           result.outputFile || inputFile,
           jobId,
           result.thumbnailFile,
-          result.audioFile
+          result.audioFile,
+          result.transcriptFile
         );
       } else {
         this.eventService.emitProcessingFailed(

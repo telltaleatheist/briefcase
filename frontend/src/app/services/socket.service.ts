@@ -110,6 +110,48 @@ export class SocketService {
   }
 
   /**
+   * Listen for transcription started event
+   */
+  onTranscriptionStarted(): Observable<{inputFile: string, jobId?: string}> {
+    return this.listenTo<{inputFile: string, jobId?: string}>('transcription-started');
+  }
+
+  /**
+   * Listen for transcription progress updates
+   */
+  onTranscriptionProgress(): Observable<DownloadProgress> {
+    return new Observable<DownloadProgress>(observer => {
+      this.socket.on('transcription-progress', (data: DownloadProgress) => {
+        console.log(`Received transcription progress: ${data.progress}% - ${data.task}`);
+        // Store in cache
+        if (data.jobId) {
+          this.progressCache.set(data.jobId, data);
+        }
+        
+        observer.next(data);
+      });
+      
+      return () => {
+        this.socket.off('transcription-progress');
+      };
+    });
+  }
+  
+  /**
+   * Listen for transcription completed event
+   */
+  onTranscriptionCompleted(): Observable<{outputFile: string, jobId?: string}> {
+    return this.listenTo<{outputFile: string, jobId?: string}>('transcription-completed');
+  }
+
+  /**
+   * Listen for transcription failed event
+   */
+  onTranscriptionFailed(): Observable<{error: string, jobId?: string, inputFile?: string}> {
+    return this.listenTo<{error: string, jobId?: string, inputFile?: string}>('transcription-failed');
+  }
+
+  /**
    * Get the last known progress for a job
    */
   getLastKnownProgress(jobId: string): DownloadProgress | undefined {
@@ -154,7 +196,7 @@ export class SocketService {
   onJobStatusUpdated(): Observable<{jobId: string, status: JobStatus, task: string}> {
     return this.listenTo<{jobId: string, status: JobStatus, task: string}>('job-status-updated');
   }
-  
+    
   /**
    * Listen for batch completion
    */
