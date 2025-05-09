@@ -20,8 +20,8 @@ export class BatchDownloaderService {
   private jobs: Map<string, Job> = new Map();
   
   // Processing state
-  private maxConcurrentDownloads: number = 2;
-  private maxConcurrentProcessing: number = 2;
+  private maxConcurrentDownloads: number = 5;
+  private maxConcurrentProcessing: number = 5;
   private isProcessing: boolean = false;
   private allDownloadsComplete: boolean = false;
 

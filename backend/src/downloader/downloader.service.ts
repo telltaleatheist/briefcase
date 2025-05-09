@@ -162,34 +162,6 @@ export class DownloaderService implements OnModuleInit {
           this.logger.log(`Download successful: ${outputFile}`);
           outputFile = await this.processOutputFilename(outputFile);
           
-          if ((options.fixAspectRatio || 
-              options.normalizeAudio || 
-              options.useRmsNormalization || 
-              options.useCompression) && 
-              outputFile && fs.existsSync(outputFile)) {
-         
-            const processingOptions: ProcessingOptions = {
-              fixAspectRatio: options.fixAspectRatio,
-              normalizeAudio: options.normalizeAudio,
-              audioNormalizationMethod: options.audioNormalizationMethod,
-              useRmsNormalization: options.useRmsNormalization,
-              rmsNormalizationLevel: options.rmsNormalizationLevel,
-              useCompression: options.useCompression,
-              compressionLevel: options.compressionLevel
-            };
-            
-            const processingResult = await this.mediaProcessingService.processMedia(
-              outputFile, 
-              processingOptions, 
-              jobId
-            );
-            
-            // Update outputFile if processing resulted in a new file
-            if (processingResult.success && processingResult.outputFile) {
-              outputFile = processingResult.outputFile;
-            }
-          }
-     
           // Determine if this is an image based on file extension
           const fileExt = path.extname(outputFile).toLowerCase();
           const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
