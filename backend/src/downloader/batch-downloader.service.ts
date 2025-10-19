@@ -33,7 +33,12 @@ export class BatchDownloaderService {
     private readonly jobStateManager: JobStateManagerService
   ) {
     this.eventService.server?.on('job-status-updated', (data: {jobId: string, status: string, task: string}) => {
-      this.updateJobStatus(data.jobId, data.status as JobStatus, data.task);
+      const job = this.jobs.get(data.jobId);
+      if (job) {
+        this.jobStateManager.updateJobStatus(job, data.status as JobStatus, data.task);
+      } else {
+        this.logger.warn(`Job with ID ${data.jobId} not found for status update`);
+      }
     });
     this.eventService.server?.on('transcription-completed', (data: {jobId?: string, outputFile: string}) => {
       if (data.jobId) {
@@ -47,17 +52,23 @@ export class BatchDownloaderService {
     });
   }
 
-  updateJobStatus(jobId: string, status: JobStatus, task: string): void {
-    const job = this.jobs.get(jobId);
+  private transitionJobState(job: Job, newStatus: JobStatus, task: string): void {
+    this.updateJobState(job, newStatus, task);
+    this.emitQueueUpdate(); // Centralized update method
+  }
+
+  updateJobState(job: Job, newStatus: JobStatus, task: string): void {
+    const result = this.jobStateManager.updateJobStatus(job, newStatus, task);
     
-    if (job) {
-      this.jobStateManager.updateJobStatus(job, status, task);
-      this.emitQueueUpdate();
+    if (result.success) {
+      // Emit event or log successful transition
+      this.eventService.emitJobStatusUpdate(job.id, newStatus, task);
     } else {
-      this.logger.warn(`Cannot update job status: job ${jobId} not found`);
+      // Log or handle invalid transition
+      this.logger.warn(`State transition failed: ${result.error}`);
     }
   }
-    
+
   // Set max concurrent downloads
   setMaxConcurrentDownloads(max: number): void {
     if (max < 1) {

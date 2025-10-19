@@ -7,6 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { SharedConfigService } from '../config/shared-config.service';
 import * as readline from 'readline';
 import * as logger from 'electron-log';
+import { log } from 'electron-log';
 
 export interface YtDlpProgress {
   percent: number;
@@ -55,11 +56,9 @@ export class YtDlpManager extends EventEmitter {
   private getYtDlpPath(): string {
     // First try to use the configured path from environment variable
     if (process.env.YT_DLP_PATH && fs.existsSync(process.env.YT_DLP_PATH)) {
-      console.log(`Using configured yt-dlp path: ${process.env.YT_DLP_PATH}`);
       return process.env.YT_DLP_PATH;
     }
 
-    console.log('yt-dlp not found in env. Falling back to shared config.');
     const ytDlpPath = this.sharedConfigService.getYtDlpPath();
     if (!ytDlpPath) {
       throw new Error('yt-dlp path is not defined in the shared configuration.');
@@ -69,7 +68,6 @@ export class YtDlpManager extends EventEmitter {
       throw new Error(`yt-dlp executable not found at path: ${ytDlpPath}`);
     }
     
-    console.log(`Using yt-dlp from shared config: ${ytDlpPath}`);
     return ytDlpPath;
   }
 
@@ -193,7 +191,7 @@ export class YtDlpManager extends EventEmitter {
     // Add URL as the last argument
     finalArgs.push(this.inputUrl);
   
-    console.log(`Executing yt-dlp with args: ${finalArgs.join(' ')}`);
+    logger.info(`Executing yt-dlp with args: ${finalArgs.join(' ')}`);
     
     // Store output and error data
     let stdoutBuffer = '';
@@ -417,7 +415,7 @@ export class YtDlpManager extends EventEmitter {
         }
         
         lastError = errorObj;
-        console.log(`yt-dlp execution failed (attempt ${attempt}/${maxRetries}): ${errorObj.message}`);
+        logger.info(`yt-dlp execution failed (attempt ${attempt}/${maxRetries}): ${errorObj.message}`);
         
         if (attempt < maxRetries) {
           // Emit retry event
@@ -525,7 +523,6 @@ export class YtDlpManager extends EventEmitter {
       
       // Run the update command
       const result = await this.run();
-      console.log(`yt-dlp update result: ${result}`);
       
       // Restore original configuration
       this.inputUrl = savedUrl;
@@ -535,7 +532,6 @@ export class YtDlpManager extends EventEmitter {
       return result.includes('Updated');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.log(`Failed to update yt-dlp: ${errorMsg}`);
       return false;
     }
   }
@@ -566,7 +562,6 @@ export class YtDlpManager extends EventEmitter {
       return result.trim();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.log(`Failed to get yt-dlp version: ${errorMsg}`);
       throw new Error(`Failed to get yt-dlp version: ${errorMsg}`);
     }
   }

@@ -4,15 +4,22 @@ import { Job, JobStatus } from './interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaProcessingService } from '@/media/media-processing.service';
 
+export interface JobStateTransitions {
+  [fromState: string]: JobStatus[];
+}
+
+interface Result<T> {
+  success: boolean;
+  result?: T;
+  error?: string;
+}
+
 @Injectable()
 export class JobStateManagerService {
-  private readonly logger = new Logger(JobStateManagerService.name);
-  
-  // State transition validation map
-  private readonly validTransitions: Record<JobStatus, JobStatus[]> = {
+  private readonly VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
     'queued': ['downloading', 'failed'],
     'downloading': ['downloaded', 'failed'],
-    'downloaded': ['processing', 'failed'],
+    'downloaded': ['processing', 'transcribing', 'failed'],
     'processing': ['transcribing', 'completed', 'failed'],
     'transcribing': ['completed', 'failed'],
     'completed': ['failed'],
@@ -24,89 +31,82 @@ export class JobStateManagerService {
     private eventService: MediaEventService
   ) {}
 
+  validateStateTransition(from: JobStatus, to: JobStatus): boolean {
+    const allowedTransitions = this.VALID_TRANSITIONS[from] || [];
+    return allowedTransitions.includes(to);
+  }
+
+  private getInitialProgressForState(status: JobStatus): number {
+    switch (status) {
+      case 'queued': return 0;
+      case 'downloading': return 0;
+      case 'processing': return 0;
+      case 'transcribing': return 0;
+      case 'completed': return 100;
+      case 'failed': return 0;
+      default: return 0;
+    }
+  }
+
   /**
    * Update job status with validation of transitions
    */
-  updateJobStatus(job: Job, newStatus: JobStatus, task: string, emitEvent = true): boolean {
+  updateJobStatus(job: Job, newStatus: JobStatus, task: string): Result<Job> {
     const oldStatus = job.status;
-    
-    // Log the transition
-    this.logger.log(`Considering job ${job.id} status update from ${oldStatus} to ${newStatus}: ${task}`);
-    
-    if (newStatus === 'failed') {
+
+    // Validate the transition
+    if (!this.validateStateTransition(oldStatus, newStatus)) {
+      return {
+        success: false,
+        error: `Invalid state transition from ${oldStatus} to ${newStatus}`
+      };
     }
-    else if (oldStatus === 'failed' && newStatus === 'queued') {
-    }
-    // Check for backward transitions and block them
-    else if (this.isBackwardTransition(oldStatus, newStatus)) {
-      this.logger.warn(
-        `Backward state transition rejected: ${job.id} from ${oldStatus} to ${newStatus} - jobs can only move forward in the workflow`
-      );
-      return false;
-    }
-    
-    // Validate state transition using the valid transitions map
-    if (!this.isValidTransition(oldStatus, newStatus)) {
-      this.logger.warn(
-        `Invalid state transition rejected: ${job.id} from ${oldStatus} to ${newStatus}`
-      );
-      return false;
-    }
-    
-    this.logger.log(`Updating job ${job.id} status from ${oldStatus} to ${newStatus}: ${task}`);
-    
+
     // Update job state
     job.status = newStatus;
     job.currentTask = task;
-    
-    // Reset progress when changing state (except for completion)
-    if (newStatus !== 'completed') {
-      job.progress = 0;
+
+    // Set progress based on state
+    job.progress = this.getProgressForState(newStatus);
+
+    // Update timestamps
+    this.updateJobTimestamps(job, newStatus);
+
+    return {
+      success: true,
+      result: job
+    };
+  }
+
+  private getProgressForState(status: JobStatus): number {
+    switch (status) {
+      case 'queued': return 0;
+      case 'downloading': return 0;
+      case 'processing': return 0;
+      case 'transcribing': return 0;
+      case 'completed': return 100;
+      case 'failed': return 0;
+      default: return 0;
     }
-    
-    // Set timestamps based on state
-    if (newStatus === 'downloading' && !job.downloadStartTime) {
-      job.downloadStartTime = new Date().toISOString();
-    } else if (newStatus === 'downloaded' && !job.downloadEndTime) {
-      job.downloadEndTime = new Date().toISOString();
-    } else if (newStatus === 'processing' && !job.processingStartTime) {
-      job.processingStartTime = new Date().toISOString();
-    } else if ((newStatus === 'completed' || newStatus === 'failed') && 
-               !job.processingEndTime) {
-      job.processingEndTime = new Date().toISOString();
-    }
-    
-    // Emit event if requested
-    if (emitEvent) {
-      this.eventService.emitJobStatusUpdate(job.id, newStatus, task);
-    }
-    
-    return true;
   }
     
-  private isBackwardTransition(from: JobStatus, to: JobStatus): boolean {
-    // Define the linear progression of states
-    const stateOrder: JobStatus[] = [
-      'queued',
-      'downloading', 
-      'downloaded',
-      'processing',
-      'transcribing',
-      'completed'
-    ];
-    
-    // Get the indices of the states in our progression
-    const fromIndex = stateOrder.indexOf(from);
-    const toIndex = stateOrder.indexOf(to);
-    
-    // If either state is not in our progression, it's not a backward transition
-    // This handles 'failed' state which can transition from any state
-    if (fromIndex === -1 || toIndex === -1) return false;
-    
-    // If the to-index is less than from-index, it's going backward
-    return toIndex < fromIndex;
+  private updateJobTimestamps(job: Job, newStatus: JobStatus): void {
+    const now = new Date().toISOString();
+
+    switch (newStatus) {
+      case 'downloading':
+        job.downloadStartTime = now;
+        break;
+      case 'completed':
+      case 'failed':
+        // Ensure end timestamps are set
+        if (!job.processingEndTime) {
+          job.processingEndTime = now;
+        }
+        break;
+    }
   }
-  
+
   /**
    * Update job progress without changing state
    */
@@ -133,16 +133,5 @@ export class JobStateManagerService {
           break;
       }
     }
-  }
-  
-  /**
-   * Check if a state transition is valid
-   */
-  private isValidTransition(from: JobStatus, to: JobStatus): boolean {
-    // Same state is always valid
-    if (from === to) return true;
-    
-    // Check if the transition is in our allowed transitions map
-    return this.validTransitions[from]?.includes(to) || false;
   }
 }

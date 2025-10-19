@@ -33,6 +33,7 @@ yarn-error.log
 
 # macOS files
 .DS_Store
+._*
 
 scripts/refresh-tree.sh
 scripts/refresh-full-tree.sh
@@ -56,3 +57,4 @@ package-lock 2.json
 docs/completed_app_structure.md
 docs/full_structure.md
 docs/full_structure.md
+electron/._.DS_Store

@@ -120,13 +120,30 @@ export class DownloaderService implements OnModuleInit {
       if (options.url.includes('reddit.com')) {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
-        ytDlpManager.addOption('--format', `bestvideo[height<=${options.quality}]+bestaudio/best[height<=${options.quality}]`);
+        // YouTube-specific configuration
+        // Always use cookies from Safari for YouTube
+        ytDlpManager.addOption('--cookies-from-browser', 'safari');
+
+        // Check if this is a YouTube Shorts URL
+        const isShorts = options.url.includes('/shorts/');
+
+        if (isShorts) {
+          // For YouTube Shorts, use Android client to avoid 403 errors
+          ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+        } else {
+          // For regular YouTube videos, try Android client first to avoid 403 errors
+          ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+        }
+
+        // Use QuickTime-compatible format (mp4 with avc1 video codec)
+        ytDlpManager.addOption('--format', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best');
       } else {
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
-      }
-      
-      if (options.useCookies && options.browser) {
-        ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
+
+        // Use cookies for other sites if specified
+        if (options.useCookies && options.browser) {
+          ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
+        }
       }
       
       let outputFile: string | null = null;

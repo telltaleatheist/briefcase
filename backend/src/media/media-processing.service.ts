@@ -14,7 +14,7 @@ export interface ProcessingOptions {
   qualityPreset?: 'low' | 'medium' | 'high';
   customOptions?: Record<string, any>;
   normalizeAudio?: boolean;
-  audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak';
+  audioNormalizationMethod?: 'rms' | 'peak';
 
   useRmsNormalization?: boolean;
   rmsNormalizationLevel?: number;
@@ -74,8 +74,7 @@ export class MediaProcessingService {
         success: true,
         outputFile: inputFile // Default to input file if no processing occurs
       };
-            
-      // FIRST: Do video processing/re-encoding if needed
+
       if (options.fixAspectRatio || options.normalizeAudio || 
           options.useRmsNormalization || options.useCompression) {
         const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {

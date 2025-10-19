@@ -30,6 +30,7 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
   
   private downloadSubscription: Subscription | null = null;
   private processingSubscription: Subscription | null = null;
+  private transcriptionSubscription: Subscription | null = null;
   private connectionSubscription: Subscription | null = null;
 
   constructor(
@@ -63,6 +64,14 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
       }
     });
     
+    // transcription progress events  
+    this.transcriptionSubscription = this.socketService.onTranscriptionProgress().subscribe((data: DownloadProgress) => {
+
+      if (!this.jobId || (data.jobId && data.jobId === this.jobId)) {
+        this.updateProgress(data.progress, data.task || 'Transcribing video...');
+      }
+    });
+    
     // Initialize with last known progress if we have a jobId
     if (this.jobId) {
       const lastProgress = this.socketService.getLastKnownProgress(this.jobId);
@@ -90,6 +99,9 @@ export class DownloadProgressComponent implements OnInit, OnDestroy {
     }
     if (this.processingSubscription) {
       this.processingSubscription.unsubscribe();
+    }
+    if (this.transcriptionSubscription) {
+      this.transcriptionSubscription.unsubscribe();
     }
     if (this.connectionSubscription) {
       this.connectionSubscription.unsubscribe();

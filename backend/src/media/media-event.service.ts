@@ -20,7 +20,6 @@ export class MediaEventService {
       return;
     }
     
-    this.logger.debug(`Emitting event: ${eventType}`);
     this.server.emit(eventType, data);
   }
   

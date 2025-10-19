@@ -70,6 +70,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   private settingsSubscription: Subscription | null = null;
   private downloadProgressSubscription: Subscription | null = null;
   private processingProgressSubscription: Subscription | null = null;
+  private transcribingProgressSubscription: Subscription | null = null;
   private refreshSubscription: Subscription | null = null;
   private originalJobOrder: string[] = [];
 
@@ -103,6 +104,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           ...(status.downloadingJobs || []).map(job => job.id),
           ...(status.downloadedJobs || []).map(job => job.id),
           ...(status.processingJobs || []).map(job => job.id),
+          ...(status.transcribingJobs || []).map(job => job.id),
           ...(status.completedJobs || []).map(job => job.id),
           ...(status.failedJobs || []).map(job => job.id)
         ];
@@ -174,6 +176,15 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     // Listen for processing progress updates
     this.processingProgressSubscription = this.socketService.onProcessingProgress().subscribe(
+      (progress: DownloadProgress) => {
+        if (progress.jobId) {
+          this.updateJobProgress(progress.jobId, progress.progress, progress.task);
+        }
+      }
+    );
+    
+    // Listen for transcription progress updates
+    this.transcribingProgressSubscription = this.socketService.onTranscriptionProgress().subscribe(
       (progress: DownloadProgress) => {
         if (progress.jobId) {
           this.updateJobProgress(progress.jobId, progress.progress, progress.task);
@@ -253,36 +264,58 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.processingProgressSubscription.unsubscribe();
     }
     
+    if (this.transcribingProgressSubscription) {
+      this.transcribingProgressSubscription.unsubscribe();
+    }
+  
     if (this.refreshSubscription) {
       this.refreshSubscription.unsubscribe();
     }
   }
   
   updateJobStatus(jobId: string, status: JobStatus, task: string): void {
+    // Maintain detailed logging
     console.log(`DETAILED STATUS TRANSITION TRACE: Job ${jobId}`, {
       fromStatus: this.findJobById(jobId)?.status,
       toStatus: status,
       task: task,
-      currentArrays: {
-        queuedJobs: this.batchQueueStatus?.queuedJobs?.length,
-        downloadingJobs: this.batchQueueStatus?.downloadingJobs?.length,
-        downloadedJobs: this.batchQueueStatus?.downloadedJobs?.length,
-        processingJobs: this.batchQueueStatus?.processingJobs?.length,
-        completedJobs: this.batchQueueStatus?.completedJobs?.length,
-        failedJobs: this.batchQueueStatus?.failedJobs?.length
-      },
       stackTrace: new Error().stack?.split('\n').slice(1, 5).join('\n')
     });
-            
+              
     if (!this.batchQueueStatus) return;
     
+    // Ensure all job status arrays exist
     this.batchQueueStatus.queuedJobs = this.batchQueueStatus.queuedJobs || [];
     this.batchQueueStatus.downloadingJobs = this.batchQueueStatus.downloadingJobs || [];
-    this.batchQueueStatus.downloadedJobs = this.batchQueueStatus.downloadedJobs || [];
     this.batchQueueStatus.processingJobs = this.batchQueueStatus.processingJobs || [];
     this.batchQueueStatus.transcribingJobs = this.batchQueueStatus.transcribingJobs || [];
     this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs || [];
     this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs || [];
+    
+    // Validation method for state transitions
+    const isValidTransition = (currentStatus: JobStatus, newStatus: JobStatus): boolean => {
+      const validTransitions: Record<JobStatus, JobStatus[]> = {
+        'queued': ['downloading', 'failed'],
+        'downloading': ['downloaded', 'failed'],
+        'downloaded': ['processing', 'transcribing', 'failed'],
+        'processing': ['transcribing', 'completed', 'failed'],
+        'transcribing': ['completed', 'failed'],
+        'completed': ['failed'],
+        'failed': ['queued']
+      };
+      
+      const currentJob = this.findJobById(jobId);
+      if (!currentJob) return false;
+      
+      const allowedTransitions = validTransitions[currentJob.status] || [];
+      const isTransitionAllowed = allowedTransitions.includes(newStatus);
+      
+      if (!isTransitionAllowed) {
+        console.warn(`Invalid state transition from ${currentJob.status} to ${newStatus} for job ${jobId}`);
+      }
+      
+      return isTransitionAllowed;
+    };
     
     const updateJobInArray = (array: JobResponse[]): boolean => {
       if (!array) return false;
@@ -290,26 +323,38 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       const jobIndex = array.findIndex(j => j.id === jobId);
       if (jobIndex >= 0) {
         const job = array[jobIndex];
+        
+        // Validate state transition
+        if (!isValidTransition(job.status, status)) {
+          return false;
+        }
+        
+        // Remove from current array
         array.splice(jobIndex, 1);
         
+        // Update job details
         job.status = status;
         job.currentTask = task;
-        job.progress = 0;
         
-        if (status === 'queued' && this.batchQueueStatus?.queuedJobs) {
-          this.batchQueueStatus.queuedJobs.push(job);
-        } else if (status === 'downloading' && this.batchQueueStatus?.downloadingJobs) {
-          this.batchQueueStatus.downloadingJobs.push(job);
-        } else if (status === 'downloaded' && this.batchQueueStatus?.downloadedJobs) {
-          this.batchQueueStatus.downloadedJobs.push(job);
-        } else if (status === 'processing' && this.batchQueueStatus?.processingJobs) {
-          this.batchQueueStatus.processingJobs.push(job);
-        } else if (status === 'transcribing' && this.batchQueueStatus?.processingJobs) {
-          this.batchQueueStatus.processingJobs.push(job);
-        } else if (status === 'completed' && this.batchQueueStatus?.completedJobs) {
-          this.batchQueueStatus.completedJobs.push(job);
-        } else if (status === 'failed' && this.batchQueueStatus?.failedJobs) {
-          this.batchQueueStatus.failedJobs.push(job);
+        // Set progress based on status
+        job.progress = status === 'completed' ? 100 : 0;
+        
+        // Assign to correct array
+        const stateMap = {
+          'queued': this.batchQueueStatus?.queuedJobs,
+          'downloading': this.batchQueueStatus?.downloadingJobs,
+          'downloaded': this.batchQueueStatus?.downloadedJobs,
+          'processing': this.batchQueueStatus?.processingJobs,
+          'transcribing': this.batchQueueStatus?.transcribingJobs,
+          'completed': this.batchQueueStatus?.completedJobs,
+          'failed': this.batchQueueStatus?.failedJobs
+        };
+        
+        const targetArray = stateMap[status];
+        if (targetArray) {
+          targetArray.push(job);
+        } else {
+          console.warn(`No target array found for status: ${status}`);
         }
         
         return true;
@@ -317,10 +362,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return false;
     };
     
+    // Arrays to search for the job
     const stateArrays = [
       this.batchQueueStatus.queuedJobs || [],
       this.batchQueueStatus.downloadingJobs || [],
-      this.batchQueueStatus.downloadedJobs || [],
       this.batchQueueStatus.processingJobs || [],
       this.batchQueueStatus.transcribingJobs || [],
       this.batchQueueStatus.completedJobs || [],
@@ -339,10 +384,50 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       console.log(`Job ${jobId} status updated to ${status} successfully`);
       this.cdr.detectChanges();
     } else {
-      console.warn(`Could not find job ${jobId} to update status`);
+      console.warn(`Could not find job ${jobId} to update status or transition is invalid`);
     }
   }
-      
+         
+  private moveJobBetweenStateArrays(job: JobResponse, fromState: JobStatus, toState: JobStatus): void {
+    if (!this.batchQueueStatus) {
+      console.warn('Batch queue status is null');
+      return;
+    }
+  
+    // Ensure all arrays exist
+    this.batchQueueStatus.queuedJobs = this.batchQueueStatus.queuedJobs || [];
+    this.batchQueueStatus.downloadingJobs = this.batchQueueStatus.downloadingJobs || [];
+    this.batchQueueStatus.downloadedJobs = this.batchQueueStatus.downloadedJobs || [];
+    this.batchQueueStatus.processingJobs = this.batchQueueStatus.processingJobs || [];
+    this.batchQueueStatus.transcribingJobs = this.batchQueueStatus.transcribingJobs || [];
+    this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs || [];
+    this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs || [];
+  
+    const stateArrayMap: Record<JobStatus, JobResponse[]> = {
+      'queued': this.batchQueueStatus.queuedJobs,
+      'downloading': this.batchQueueStatus.downloadingJobs,
+      'downloaded': this.batchQueueStatus.downloadedJobs,
+      'processing': this.batchQueueStatus.processingJobs,
+      'transcribing': this.batchQueueStatus.transcribingJobs,
+      'completed': this.batchQueueStatus.completedJobs,
+      'failed': this.batchQueueStatus.failedJobs
+    };
+  
+    // Remove from current state array
+    const fromArray = stateArrayMap[fromState];
+    const jobIndex = fromArray.findIndex(j => j.id === job.id);
+    if (jobIndex !== -1) {
+      fromArray.splice(jobIndex, 1);
+    }
+  
+    // Add to new state array
+    const toArray = stateArrayMap[toState];
+    toArray.push(job);
+  
+    // Force change detection
+    this.cdr.detectChanges();
+  }
+  
   /**
    * Extract a readable name from a URL
    */
@@ -503,12 +588,12 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         return false;
       };
       
-      // Try to find the job in all state arrays
       const stateArrays = [
         this.batchQueueStatus.queuedJobs || [],
         this.batchQueueStatus.downloadingJobs || [],
         this.batchQueueStatus.downloadedJobs || [],
         this.batchQueueStatus.processingJobs || [],
+        this.batchQueueStatus.transcribingJobs || [],
         this.batchQueueStatus.completedJobs || [],
         this.batchQueueStatus.failedJobs || []
       ];
@@ -521,12 +606,13 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         }
       }
       
-      // If job was found and updated, trigger change detection
       if (found) {
         this.cdr.detectChanges();
+      } else {
+        console.warn(`Could not find job ${jobId} to update progress`);
       }
     }
-    
+        
   // Get all jobs as a single array for display
   getAllJobsForDisplay(): JobResponse[] {
     if (!this.batchQueueStatus) return [];
@@ -578,19 +664,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   // Update job status class based on state
   getJobStatusClassWithQueueType(job: any): string {
     if (!job) return '';
-    const jobId = job?.id || 'unknown';
-    const jobStatus = job?.status || 'unknown';
   
-    console.log(`COMPREHENSIVE STATUS CLASS INVESTIGATION: Job ${jobId}`, {
-      fullJobObject: JSON.parse(JSON.stringify(job)), // Deep clone to see full context
-      status: jobStatus,
-      progress: job?.progress,
-      currentTask: job?.currentTask,
-      timestamp: new Date().toISOString(),
-      stackTrace: new Error().stack?.split('\n').slice(1, 5).join('\n')
-    });
-        
-    // Use the status directly for CSS class
     switch (job.status) {
       case 'queued': 
         return 'status-queued';
@@ -621,6 +695,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.batchQueueStatus.downloadingJobs || [],
       this.batchQueueStatus.downloadedJobs || [],
       this.batchQueueStatus.processingJobs || [],
+      this.batchQueueStatus.transcribingJobs || [],
       this.batchQueueStatus.completedJobs || [],
       this.batchQueueStatus.failedJobs || []
     ];
@@ -638,9 +713,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    */
   isProcessingJob(job: any): boolean {
     if (!job) return false;
-    return job.status === 'processing' || job.status === 'downloaded';
+    return job.status === 'processing' || job.status === 'downloaded' || job.status === 'transcribing';
   }
-    
+  
   /**
    * Get CSS class for job status with null check
    */
@@ -651,6 +726,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       case 'queued': return 'status-queued';
       case 'downloading': return 'status-downloading';
       case 'processing': return 'status-processing';
+      case 'transcribing': return 'status-transcribing';
       case 'completed': return 'status-completed';
       case 'failed': return 'status-failed';
       default: return '';
@@ -700,6 +776,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'downloading': return 'primary';
       case 'processing': return 'accent';
+      case 'transcribing': return 'accent';
       case 'completed': return 'primary';
       case 'failed': return 'warn';
       default: return 'primary';
@@ -733,6 +810,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       (this.batchQueueStatus.downloadingJobs?.length || 0) > 0 ||
       (this.batchQueueStatus.downloadedJobs?.length || 0) > 0 ||
       (this.batchQueueStatus.processingJobs?.length || 0) > 0 ||
+      (this.batchQueueStatus.transcribingJobs?.length || 0) > 0 ||
       (this.batchQueueStatus.completedJobs?.length || 0) > 0 ||
       (this.batchQueueStatus.failedJobs?.length || 0) > 0
     );
@@ -1116,6 +1194,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
                   ...(this.batchQueueStatus.downloadingJobs || []),
                   ...(this.batchQueueStatus.downloadedJobs || []),
                   ...(this.batchQueueStatus.processingJobs || []),
+                  ...(this.batchQueueStatus.transcribingJobs || []),
                   ...(this.batchQueueStatus.completedJobs || []),
                   ...(this.batchQueueStatus.failedJobs || [])
                 ].find(job => job.id === jobId);
@@ -1231,6 +1310,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             this.batchQueueStatus.downloadingJobs = [];
             this.batchQueueStatus.downloadedJobs = [];
             this.batchQueueStatus.processingJobs = [];
+            this.batchQueueStatus.transcribingJobs = [];
             this.batchQueueStatus.activeDownloadCount = 0;
           }
           
@@ -1256,6 +1336,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             ...(status.downloadingJobs || []).map(job => job.id),
             ...(status.downloadedJobs || []).map(job => job.id),
             ...(status.processingJobs || []).map(job => job.id),
+            ...(status.transcribingJobs || []).map(job => job.id),
             ...(status.completedJobs || []).map(job => job.id),
             ...(status.failedJobs || []).map(job => job.id)
           ];
