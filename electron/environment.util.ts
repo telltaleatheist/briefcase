@@ -135,61 +135,58 @@ export class EnvironmentUtil {
     }
   }
 
-  static getFrontEndPath(isDevelopment: boolean): string {
-    // First, check if frontendPath is already set and exists
+  static getFrontEndPath(): string {
+    // Return cached path if available and still exists
     if (this.frontendPath && fs.existsSync(this.frontendPath)) {
       return this.frontendPath;
     }
-  
+
     try {
-      if (isDevelopment) {
-        const devPaths = [
-          path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
-          path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend'),
-          path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend', 'browser'),
-          path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend'),
-          // Add Angular 17 standalone output path
-          path.join(process.cwd(), 'frontend', 'dist', 'browser'),
-          path.join(__dirname, '..', '..', 'frontend', 'dist', 'browser')
-        ];
-  
-        this.frontendPath = devPaths.find(p => fs.existsSync(p));
-      } else {
-        const prodPaths = [
-          path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend', 'browser'),
-          path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend'),
-          path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend', 'browser'),
-          path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend'),
-          // Add more paths
-          path.join(process.resourcesPath, 'frontend', 'dist', 'browser'),
-          path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend'),
-          path.join(process.resourcesPath, 'frontend')
-        ];
-  
-        this.frontendPath = prodPaths.find(p => fs.existsSync(p));
-      }
-  
+      // Try all possible paths in order - works for both packaged and unpackaged
+      const possiblePaths = [
+        // Unpackaged/development paths (from project root)
+        path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
+        path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend'),
+        path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend', 'browser'),
+        path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend'),
+        path.join(app.getAppPath(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
+        path.join(app.getAppPath(), 'frontend', 'dist', 'clippy-frontend'),
+
+        // Packaged paths (inside app bundle)
+        path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend', 'browser'),
+        path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend'),
+        path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend', 'browser'),
+        path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend'),
+        path.join(process.resourcesPath, 'frontend')
+      ];
+
+      // Find the first path that exists
+      this.frontendPath = possiblePaths.find(p => {
+        if (fs.existsSync(p)) {
+          log.info(`Found frontend path: ${p}`);
+          return true;
+        }
+        return false;
+      });
+
       if (!this.frontendPath) {
+        log.error('Frontend not found in any of these locations:', possiblePaths);
         throw new Error('Frontend distribution directory not found');
       }
-  
+
       // Verify essential files exist
       const hasIndexHtml = fs.existsSync(path.join(this.frontendPath, 'index.html'));
-      
-      // Check for JS files (main bundle)
-      const dirContents = fs.readdirSync(this.frontendPath);
-      const hasMainJs = dirContents.some(file => file.match(/main-.*\.js$/));
-      const hasStyles = dirContents.some(file => file.match(/styles-.*\.css$/));
-  
-      if (!hasIndexHtml || !hasMainJs || !hasStyles) {
-        log.warn('Missing essential frontend files');
-        throw new Error('Missing essential frontend files');
+
+      if (!hasIndexHtml) {
+        log.error(`Found frontend directory but missing index.html: ${this.frontendPath}`);
+        throw new Error('Missing essential frontend files (index.html)');
       }
-  
+
+      log.info(`Using frontend path: ${this.frontendPath}`);
       return this.frontendPath;
-  
+
     } catch (error) {
-      // Error handling remains the same
       log.error('Error resolving frontend path:', error);
       throw error;
     }
@@ -207,42 +204,42 @@ export class EnvironmentUtil {
     return !this.isDevelopment();
   }
     
-  static getBackEndPath(isDevelopment: boolean): string {
-    // Return cached path if available
-    if (this.backendPath) {
+  static getBackEndPath(): string {
+    // Return cached path if available and still exists
+    if (this.backendPath && fs.existsSync(this.backendPath)) {
       return this.backendPath;
     }
-    
-    if (isDevelopment) {
-      // Development path
-      this.backendPath = path.join(app.getAppPath(), 'backend/dist/main.js');
-    } else {
-      // Production paths with fallbacks
-      this.backendPath = path.join(process.resourcesPath, 'app.asar', 'backend/dist/main.js');
-      
-      if (!fs.existsSync(this.backendPath)) {
-        // Try unpackaged location
-        this.backendPath = path.join(process.resourcesPath, 'backend/dist/main.js');
-        
-        if (!fs.existsSync(this.backendPath)) {
-          // Try other common locations
-          const alternatives = [
-            path.join(process.resourcesPath, 'app', 'backend/dist/main.js'),
-            path.join(app.getAppPath(), 'backend/dist/main.js'),
-            path.join(app.getAppPath(), '../backend/dist/main.js')
-          ];
-          
-          for (const altPath of alternatives) {
-            if (fs.existsSync(altPath)) {
-              this.backendPath = altPath;
-              break;
-            }
-          }
-        }
+
+    // Try all possible paths in order - works for both packaged and unpackaged
+    const possiblePaths = [
+      // Unpackaged paths (from project root)
+      path.join(process.cwd(), 'backend', 'dist', 'main.js'),
+      path.join(__dirname, '..', '..', 'backend', 'dist', 'main.js'),
+      path.join(app.getAppPath(), 'backend', 'dist', 'main.js'),
+
+      // Packaged paths (inside app bundle)
+      path.join(process.resourcesPath, 'app.asar', 'backend', 'dist', 'main.js'),
+      path.join(process.resourcesPath, 'backend', 'dist', 'main.js'),
+      path.join(process.resourcesPath, 'app', 'backend', 'dist', 'main.js'),
+      path.join(app.getAppPath(), '..', 'backend', 'dist', 'main.js')
+    ];
+
+    // Find the first path that exists
+    this.backendPath = possiblePaths.find(p => {
+      if (fs.existsSync(p)) {
+        log.info(`Found backend path: ${p}`);
+        return true;
       }
+      return false;
+    });
+
+    if (!this.backendPath) {
+      log.error('Backend not found in any of these locations:', possiblePaths);
+      throw new Error('Backend main.js not found');
     }
 
-    return this.backendPath || '';
+    log.info(`Using backend path: ${this.backendPath}`);
+    return this.backendPath;
   }
   
   static setupEnvironmentConfig(mainWindow: Electron.BrowserWindow): void {

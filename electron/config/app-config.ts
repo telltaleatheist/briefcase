@@ -7,23 +7,9 @@ import { EnvironmentUtil } from '../environment.util';
 
 /**
  * Application configuration service
- * Centralizes all environment and path configuration
+ * Centralizes all path configuration - works the same whether packaged or not
  */
 export class AppConfig {
-  // Environment detection
-  static get isPackaged(): boolean {
-    return app.isPackaged;
-  }
-
-  static get isDevelopment(): boolean {
-    return process.argv.includes('development') || 
-      (!this.isPackaged && process.env.NODE_ENV?.trim().toLowerCase() === 'development');
-  }
-
-  static get isProduction(): boolean {
-    return !this.isDevelopment;
-  }
-
   // Path configurations
   static get resourcesPath(): string {
     return process.resourcesPath || app.getAppPath();
@@ -38,14 +24,25 @@ export class AppConfig {
   }
 
   static get preloadPath(): string {
-    return this.isPackaged
-      ? path.join(__dirname, 'preload.js')
-      : path.join(__dirname, '../../electron', 'preload.js');
+    // Try both packaged and unpackaged locations
+    const possiblePaths = [
+      path.join(__dirname, 'preload.js'),
+      path.join(__dirname, '../../electron', 'preload.js'),
+      path.join(__dirname, '../preload', 'preload.js')
+    ];
+
+    const foundPath = possiblePaths.find(p => fs.existsSync(p));
+    if (!foundPath) {
+      log.error('Preload script not found in:', possiblePaths);
+      throw new Error('Preload script not found');
+    }
+
+    return foundPath;
   }
 
   static get frontendPath(): string {
     try {
-      return EnvironmentUtil.getFrontEndPath(this.isDevelopment);
+      return EnvironmentUtil.getFrontEndPath();
     } catch (error) {
       log.error('Error getting frontend path:', error);
       throw error;
@@ -54,7 +51,7 @@ export class AppConfig {
 
   static get backendPath(): string {
     try {
-      return EnvironmentUtil.getBackEndPath(this.isDevelopment);
+      return EnvironmentUtil.getBackEndPath();
     } catch (error) {
       log.error('Error getting backend path:', error);
       throw error;
@@ -66,7 +63,7 @@ export class AppConfig {
     return app.getPath('downloads');
   }
 
-  // Initialization - run at app start
+  // Initialization - run at app start (must be called after app.whenReady())
   static initialize(): void {
     // Set environment paths
     process.env.ELECTRON_RESOURCES_PATH = this.resourcesPath;
@@ -74,6 +71,3 @@ export class AppConfig {
     process.env.APP_ROOT = this.appPath;
   }
 }
-
-// Initialize on import
-AppConfig.initialize();

@@ -8,16 +8,11 @@ import { AppConfig } from '../config/app-config';
  */
 export class LogUtil {
   /**
-   * Configure the logger based on environment
+   * Configure the logger - always log to both console and file
    */
   static configureLogger(): void {
-    if (AppConfig.isDevelopment) {
-      log.transports.console.level = 'debug';
-      log.transports.file.level = false;
-    } else {
-      log.transports.console.level = false;
-      log.transports.file.level = 'debug';
-    }
+    log.transports.console.level = 'info';
+    log.transports.file.level = 'debug';
   }
   
   /**

@@ -93,7 +93,7 @@ export class BackendService {
         FRONTEND_PATH: frontendPath,
         NODE_PATH: path.join(process.resourcesPath, 'backend/node_modules'),
         PORT: ServerConfig.config.nestBackend.port.toString(),
-        NODE_ENV: AppConfig.isDevelopment ? 'development' : 'production',
+        NODE_ENV: 'production',
         APP_ROOT: process.resourcesPath,
         VERBOSE: 'true'
       };

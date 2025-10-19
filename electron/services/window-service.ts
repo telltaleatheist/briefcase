@@ -32,12 +32,7 @@ export class WindowService {
     
     // Set up CSP headers
     this.setupContentSecurityPolicy();
-    
-    // Set up event handlers for debugging in development mode
-    if (AppConfig.isDevelopment) {
-      this.setupDebugEventHandlers();
-    }
-    
+
     // Load the frontend URL
     this.mainWindow.loadURL(ServerConfig.frontendUrl);
 

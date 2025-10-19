@@ -17,14 +17,9 @@ let windowService: WindowService;
 let backendService: BackendService;
 let updateService: UpdateService;
 
-// Configure logging based on environment
-if (AppConfig.isDevelopment) {
-  log.transports.console.level = 'debug';
-  log.transports.file.level = false;
-} else {
-  log.transports.console.level = false;
-  log.transports.file.level = 'debug';
-}
+// Configure logging - always log to file
+log.transports.console.level = 'info';
+log.transports.file.level = 'debug';
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -45,8 +40,11 @@ app.on('second-instance', () => {
 
 // App is ready - start initialization sequence
 app.whenReady().then(async () => {
-  
+
   try {
+    // Initialize AppConfig first
+    AppConfig.initialize();
+
     // Check required executables first
     const executablesUtil = new ExecutablesUtil();
     const executablesConfigured = await executablesUtil.checkAndConfigureExecutables();
