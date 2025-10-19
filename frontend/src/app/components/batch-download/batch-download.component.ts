@@ -17,6 +17,7 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
+import { MatDialog } from '@angular/material/dialog';
 
 import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
@@ -25,6 +26,7 @@ import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
 import { Subscription, catchError, of, interval } from 'rxjs';
+import { ErrorDialogComponent } from '../error-dialog/error-dialog.component';
 
 @Component({
   selector: 'app-batch-download',
@@ -74,13 +76,17 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   private refreshSubscription: Subscription | null = null;
   private originalJobOrder: string[] = [];
 
+  // Store full error messages for jobs
+  private jobFullErrors: Map<string, string> = new Map();
+
   constructor(
     private fb: FormBuilder,
     private batchApiService: BatchApiService,
     private socketService: SocketService,
     private settingsService: SettingsService,
     private snackBar: MatSnackBar,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private dialog: MatDialog
   ) {
     this.batchForm = this.createBatchForm();
     this.configForm = this.createConfigForm();
@@ -95,7 +101,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     this.socketService.onBatchQueueUpdated().subscribe(
       (status: BatchQueueStatus) => {
         console.log('Batch queue update received:', status);
-        
+
+        // Process jobs to shorten error messages and store full errors
+        this.processJobErrors(status);
+
         this.batchQueueStatus = status;
         
         // If we get a status update, ensure our order tracking is up to date
@@ -1377,6 +1386,54 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         });
         
         this.cdr.detectChanges();
+      }
+    });
+  }
+
+  /**
+   * Process job errors to shorten them and store full errors
+   */
+  private processJobErrors(status: BatchQueueStatus): void {
+    const allJobs = [
+      ...(status.failedJobs || []),
+      ...(status.queuedJobs || []),
+      ...(status.downloadingJobs || []),
+      ...(status.downloadedJobs || []),
+      ...(status.processingJobs || []),
+      ...(status.transcribingJobs || []),
+      ...(status.completedJobs || [])
+    ];
+
+    allJobs.forEach(job => {
+      if (job.error && job.error.length > 100) {
+        // Store the full error
+        this.jobFullErrors.set(job.id, job.error);
+
+        // Create a shortened error message
+        const errorStart = job.error.substring(0, 80);
+        job.error = errorStart + '... (click to view full error)';
+      } else if (job.currentTask && job.currentTask.includes('Failed:') && job.currentTask.length > 100) {
+        // Store the full error from currentTask
+        this.jobFullErrors.set(job.id, job.currentTask);
+
+        // Create a shortened message
+        job.currentTask = 'Download failed (click to view details)';
+      }
+    });
+  }
+
+  /**
+   * Show error dialog for a job
+   */
+  showJobError(job: JobResponse): void {
+    const fullError = this.jobFullErrors.get(job.id) || job.error || job.currentTask || 'No error details available';
+
+    this.dialog.open(ErrorDialogComponent, {
+      width: '600px',
+      data: {
+        title: 'Download Error',
+        message: `Failed to download: ${this.getDisplayName(job)}`,
+        fullError: fullError
       }
     });
   }

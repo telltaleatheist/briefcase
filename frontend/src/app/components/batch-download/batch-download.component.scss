@@ -190,6 +190,16 @@
   color: rgba(0, 0, 0, 0.6);
 }
 
+.error-clickable {
+  cursor: pointer;
+  color: #f44336;
+  text-decoration: underline;
+
+  &:hover {
+    color: #d32f2f;
+  }
+}
+
 .progress-value {
   grid-column: 2;
   grid-row: 1;

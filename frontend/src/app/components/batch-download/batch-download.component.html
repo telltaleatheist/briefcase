@@ -384,27 +384,39 @@
        </div>
        
        <div class="job-progress">
-         <div class="task-label">{{ job.currentTask || getDefaultTaskForStatus(job.status) }}</div>
-         <mat-progress-bar 
-           [mode]="job.status === 'queued' ? 'buffer' : 'determinate'" 
+         <div class="task-label"
+              [class.error-clickable]="job.status === 'failed'"
+              (click)="job.status === 'failed' ? showJobError(job) : null"
+              [matTooltip]="job.status === 'failed' ? 'Click to view full error' : ''">
+           {{ job.currentTask || getDefaultTaskForStatus(job.status) }}
+         </div>
+         <mat-progress-bar
+           [mode]="job.status === 'queued' ? 'buffer' : 'determinate'"
            [value]="job.progress || 0"
            [color]="isProcessingJob(job) ? 'accent' : getProgressBarColor(job.status || '')">
          </mat-progress-bar>
          <div class="progress-value">{{ job.progress || 0 }}%</div>
        </div>
-       
+
        <div class="job-actions">
-         <button *ngIf="job.status !== 'completed'" 
-                 mat-icon-button 
+         <button *ngIf="job.status === 'failed'"
+                 mat-icon-button
                  class="action-button"
-                 (click)="cancelJob(job.id)" 
+                 (click)="showJobError(job)"
+                 matTooltip="View Error Details">
+           <mat-icon>error_outline</mat-icon>
+         </button>
+         <button *ngIf="job.status !== 'completed'"
+                 mat-icon-button
+                 class="action-button"
+                 (click)="cancelJob(job.id)"
                  matTooltip="Cancel">
            <mat-icon>cancel</mat-icon>
          </button>
-         <button *ngIf="job.status === 'failed'" 
-                 mat-icon-button 
+         <button *ngIf="job.status === 'failed'"
+                 mat-icon-button
                  class="action-button"
-                 (click)="retryJob(job.id)" 
+                 (click)="retryJob(job.id)"
                  matTooltip="Retry">
            <mat-icon>refresh</mat-icon>
          </button>

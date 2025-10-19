@@ -1,18 +1,12 @@
 // clippy/backend/src/downloader/downloader.service.ts
 import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
 import * as fs from 'fs';
-import { 
-  DownloadOptions, 
-  DownloadResult, 
-  HistoryItem 
-} from '../common/interfaces/download.interface';
+import { DownloadOptions, DownloadResult, HistoryItem } from '../common/interfaces/download.interface';
 import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
 import { SharedConfigService } from '../config/shared-config.service';
 import { MediaEventService } from '../media/media-event.service';
-import { MediaProcessingService, ProcessingOptions } from '@/media/media-processing.service';
 
 @Injectable()
 export class DownloaderService implements OnModuleInit {
