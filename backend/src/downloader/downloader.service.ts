@@ -121,22 +121,15 @@ export class DownloaderService implements OnModuleInit {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
         // YouTube-specific configuration
-        // Always use cookies from Safari for YouTube
-        ytDlpManager.addOption('--cookies-from-browser', 'safari');
 
-        // Check if this is a YouTube Shorts URL
-        const isShorts = options.url.includes('/shorts/');
-
-        if (isShorts) {
-          // For YouTube Shorts, use Android client to avoid 403 errors
-          ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
-        } else {
-          // For regular YouTube videos, try Android client first to avoid 403 errors
-          ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
-        }
+        // Use Android client to avoid 403 errors (works without cookies on most videos)
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
 
         // Use QuickTime-compatible format (mp4 with avc1 video codec)
         ytDlpManager.addOption('--format', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best');
+
+        // Note: Safari cookies require Full Disk Access permission on macOS
+        // The Android client works well without cookies for most videos
       } else {
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
 
