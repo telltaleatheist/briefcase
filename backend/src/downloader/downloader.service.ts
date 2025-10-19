@@ -16,19 +16,13 @@ export class DownloaderService implements OnModuleInit {
   private activeDownloads: Map<string, YtDlpManager> = new Map();
   
   constructor(
-    private readonly configService: ConfigService,
     private readonly pathService: PathService,
     private readonly sharedConfigService: SharedConfigService,
-    private readonly eventService: MediaEventService,
-    private readonly mediaProcessingService: MediaProcessingService
+    private readonly eventService: MediaEventService
   ) {
-    try {
-      this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
-      this.ensureDirectoriesExist();
-      this.loadDownloadHistory();
-    } catch (error) {
-      throw error;
-    }
+    this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
+    this.ensureDirectoriesExist();
+    this.loadDownloadHistory();
   }
     
   private ensureDirectoriesExist(): void {

@@ -47,11 +47,9 @@ interface ConfigFile {
 }
 
 export class EnvironmentUtil {
-  static frontendPath: string | undefined;
-  private static readonly CONFIG_FILENAME = 'clippy-config.json';
-  private static binaryPathCache: { [key: string]: string } = {};
+  private static frontendPath: string | undefined;
   private static backendPath: string | undefined;
-  private static isDevMode: boolean | undefined;
+  private static readonly CONFIG_FILENAME = 'clippy-config.json';
 
   private static getConfigPath(): string {
     // Use app.getPath for a user-specific, persistent location
@@ -192,18 +190,6 @@ export class EnvironmentUtil {
     }
   }
   
-  static isDevelopment(): boolean {
-    // Cache the development mode status
-    if (this.isDevMode === undefined) {
-      this.isDevMode = process.env.NODE_ENV === 'development';
-    }
-    return this.isDevMode;
-  }
-
-  static isProduction(): boolean {
-    return !this.isDevelopment();
-  }
-    
   static getBackEndPath(): string {
     // Return cached path if available and still exists
     if (this.backendPath && fs.existsSync(this.backendPath)) {
@@ -242,12 +228,10 @@ export class EnvironmentUtil {
     return this.backendPath;
   }
   
-  static setupEnvironmentConfig(mainWindow: Electron.BrowserWindow): void {
+  static setupEnvironmentConfig(): void {
     // Collect environment variables to persist
     const envToPersist = { ...process.env };
-
-    // Additional environment detection or modification can happen here
-    envToPersist.NODE_ENV = this.isDevelopment() ? 'development' : 'production';
+    envToPersist.NODE_ENV = 'production';
 
     // Write the environment config
     this.writeEnvironmentConfig(envToPersist);
