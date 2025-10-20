@@ -1,6 +1,7 @@
 // clippy/electron/services/window-service.ts
 import { BrowserWindow, shell } from 'electron';
 import * as log from 'electron-log';
+import * as path from 'path';
 import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 
@@ -15,12 +16,16 @@ export class WindowService {
    * Create the main application window
    */
   createMainWindow(): BrowserWindow {
+    // Get icon path - works for both development and production
+    const iconPath = path.join(AppConfig.appPath, 'assets', 'icon.png');
+
     this.mainWindow = new BrowserWindow({
       width: 800,
       height: 1000,
       minWidth: 800,  // Reasonable minimum width
       minHeight: 600, // Reasonable minimum height
       autoHideMenuBar: true,
+      icon: iconPath,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,

@@ -74,6 +74,8 @@
   "build": {
     "appId": "com.owenmorgan.clippy",
     "productName": "Clippy",
+    "asar": true,
+    "compression": "maximum",
     "directories": {
       "output": "dist-electron",
       "buildResources": "assets"
@@ -107,7 +109,10 @@
       "!**/node_modules/**/license*",
       "!**/node_modules/**/docs/**",
       "!**/node_modules/**/example*/**",
-      "!**/node_modules/**/coverage/**"
+      "!**/node_modules/**/coverage/**",
+      "!**/node_modules/**/*.ts",
+      "!**/node_modules/**/README*",
+      "!**/node_modules/**/CHANGELOG*"
     ],
     "asarUnpack": [
       "backend/node_modules/**",
@@ -125,6 +130,7 @@
       }
     },
     "dmg": {
+      "format": "ULFO",
       "contents": [
         {
           "x": 130,
