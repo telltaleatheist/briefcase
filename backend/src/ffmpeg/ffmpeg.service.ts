@@ -536,4 +536,125 @@ export class FfmpegService {
   private calculateGCD(a: number, b: number): number {
     return b === 0 ? a : this.calculateGCD(b, a % b);
   }
+
+  /**
+   * Normalize audio volume of a file
+   * @param filePath - Path to the input file
+   * @param targetVolume - Target volume in dB (e.g., -20)
+   * @returns Path to the normalized file
+   */
+  async normalizeAudio(filePath: string, targetVolume: number = -20): Promise<string | null> {
+    if (!fs.existsSync(filePath)) {
+      this.logger.error(`File doesn't exist: ${filePath}`);
+      return null;
+    }
+
+    try {
+      const fileDir = path.dirname(filePath);
+      const fileName = path.basename(filePath);
+      const fileExt = path.extname(fileName);
+      const fileBase = path.parse(fileName).name;
+
+      // Generate output file path with _normalized suffix
+      const outputFile = path.join(fileDir, `${fileBase}_normalized${fileExt}`);
+
+      return new Promise<string | null>((resolve, reject) => {
+        // Use loudnorm filter for professional audio normalization
+        // This uses EBU R128 standard for loudness normalization
+        const command = ffmpeg(filePath)
+          .audioFilters([
+            {
+              filter: 'loudnorm',
+              options: {
+                I: targetVolume,           // Integrated loudness target
+                TP: -1.5,                  // True peak limit
+                LRA: 11                    // Loudness range target
+              }
+            }
+          ])
+          .audioCodec('aac')              // Use AAC codec for audio
+          .audioBitrate('192k')           // Set audio bitrate
+          .output(outputFile);
+
+        command.on('start', (cmdline: string) => {
+          this.logger.log(`Audio normalization started: ${cmdline}`);
+        });
+
+        command.on('progress', (progress: any) => {
+          if (progress.percent) {
+            this.logger.log(`Normalizing: ${Math.round(progress.percent)}%`);
+          }
+        });
+
+        command.on('end', () => {
+          this.logger.log(`Successfully normalized audio: ${outputFile}`);
+          resolve(outputFile);
+        });
+
+        command.on('error', (err: any) => {
+          this.logger.error(`Error normalizing audio: ${err.message}`);
+          resolve(null);
+        });
+
+        command.run();
+      });
+    } catch (error) {
+      this.logger.error('Error in normalizeAudio:', error);
+      return null;
+    }
+  }
+
+  /**
+   * List all media files in a directory
+   * @param dirPath - Directory path to scan
+   * @returns Array of file paths
+   */
+  async listMediaFiles(dirPath: string): Promise<string[]> {
+    const mediaExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.aac', '.flac', '.m4a', '.webm'];
+
+    if (!fs.existsSync(dirPath)) {
+      this.logger.error(`Directory doesn't exist: ${dirPath}`);
+      return [];
+    }
+
+    try {
+      const files = fs.readdirSync(dirPath);
+      const mediaFiles: string[] = [];
+
+      for (const file of files) {
+        // Skip macOS metadata files that start with ._
+        if (file.startsWith('._')) {
+          continue;
+        }
+
+        // Skip hidden files
+        if (file.startsWith('.')) {
+          continue;
+        }
+
+        const filePath = path.join(dirPath, file);
+
+        try {
+          const stat = fs.statSync(filePath);
+
+          if (stat.isFile()) {
+            const ext = path.extname(file).toLowerCase();
+            if (mediaExtensions.includes(ext)) {
+              mediaFiles.push(filePath);
+            }
+          }
+        } catch (statError) {
+          this.logger.warn(`Could not stat file: ${filePath}`, statError);
+          // Continue to next file if we can't stat this one
+          continue;
+        }
+      }
+
+      this.logger.log(`Found ${mediaFiles.length} media files in ${dirPath}`);
+      return mediaFiles;
+    } catch (error) {
+      this.logger.error(`Error listing media files: ${error}`);
+      return [];
+    }
+  }
 }

@@ -95,22 +95,22 @@ export class FfmpegController {
   ) {
     try {
       if (!video) {
-        return { 
-          success: false, 
-          message: 'No video file uploaded' 
+        return {
+          success: false,
+          message: 'No video file uploaded'
         };
       }
-  
+
       // Pass the jobId to the ffmpeg service
       const processedVideoPath = await this.ffmpegService.reencodeVideo(video.path, jobId);
-      
+
       if (!processedVideoPath) {
         return {
           success: false,
           message: 'Failed to process video aspect ratio'
         };
       }
-  
+
       return {
         success: true,
         outputFile: path.basename(processedVideoPath)
@@ -119,6 +119,84 @@ export class FfmpegController {
       return {
         success: false,
         message: error instanceof Error ? error.message : 'Error fixing aspect ratio'
+      };
+    }
+  }
+
+  @Post('normalize-audio')
+  async normalizeAudio(
+    @Body('filePath') filePath: string,
+    @Body('targetVolume') targetVolume?: number
+  ) {
+    try {
+      if (!filePath) {
+        return {
+          success: false,
+          message: 'File path is required'
+        };
+      }
+
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
+        return {
+          success: false,
+          message: 'File not found'
+        };
+      }
+
+      // Normalize audio with target volume (default -20dB)
+      const outputFile = await this.ffmpegService.normalizeAudio(
+        filePath,
+        targetVolume || -20
+      );
+
+      if (!outputFile) {
+        return {
+          success: false,
+          message: 'Failed to normalize audio'
+        };
+      }
+
+      return {
+        success: true,
+        outputFile: path.basename(outputFile)
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error normalizing audio'
+      };
+    }
+  }
+
+  @Post('list-media-files')
+  async listMediaFiles(@Body('folderPath') folderPath: string) {
+    try {
+      if (!folderPath) {
+        return {
+          success: false,
+          message: 'Folder path is required'
+        };
+      }
+
+      // Check if directory exists
+      if (!fs.existsSync(folderPath)) {
+        return {
+          success: false,
+          message: 'Directory not found'
+        };
+      }
+
+      const files = await this.ffmpegService.listMediaFiles(folderPath);
+
+      return {
+        success: true,
+        files: files
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error listing files'
       };
     }
   }

@@ -120,14 +120,25 @@ function setupFileSystemHandlers(): void {
   // Directory picker dialog
   ipcMain.handle('open-directory-picker', async (event) => {
     const window = event.sender ? require('electron').BrowserWindow.fromWebContents(event.sender) : null;
-    
+
     if (!window) return { canceled: true, filePaths: [] };
-    
+
     const result = await dialog.showOpenDialog(window, {
       properties: ['openDirectory'],
       title: 'Select Download Location'
     });
-    
+
+    return result;
+  });
+
+  // Generic open dialog (for file/folder selection)
+  ipcMain.handle('show-open-dialog', async (event, options) => {
+    const window = event.sender ? require('electron').BrowserWindow.fromWebContents(event.sender) : null;
+
+    if (!window) return { canceled: true, filePaths: [] };
+
+    const result = await dialog.showOpenDialog(window, options);
+
     return result;
   });
   

@@ -21,6 +21,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
   },
   {
+    path: 'normalize',
+    loadComponent: () => import('./components/audio-normalize/audio-normalize.component').then(m => m.AudioNormalizeComponent)
+  },
+  {
     path: '**',
     redirectTo: 'batch'
   }

@@ -1,0 +1,199 @@
+.normalize-card {
+  max-width: 1200px;
+  margin: 20px auto;
+  padding: 20px;
+}
+
+.selection-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+
+  button {
+    mat-icon {
+      margin-right: 8px;
+    }
+  }
+}
+
+.normalize-form {
+  margin-bottom: 24px;
+
+  .volume-field {
+    width: 100%;
+    max-width: 400px;
+  }
+}
+
+.files-section {
+  margin-bottom: 24px;
+
+  h3 {
+    margin-bottom: 12px;
+    color: var(--mdc-theme-primary, #3f51b5);
+  }
+}
+
+.files-list {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  max-height: 600px;
+  overflow-y: auto;
+  padding: 0;
+  width: 100%;
+
+  .file-item {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    position: relative;
+    background: white;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    .file-item-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 16px;
+      width: 100%;
+    }
+
+    .file-icon {
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .file-details {
+      flex: 1;
+      min-width: 0; // Important for text truncation
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .file-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .file-name {
+      font-weight: 500;
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.87);
+      word-break: break-word;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .status-chip {
+      font-size: 11px;
+      min-height: 24px;
+      padding: 4px 8px;
+      flex-shrink: 0;
+    }
+
+    .file-path {
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.6);
+      word-break: break-all;
+    }
+
+    .error-message {
+      color: #f44336;
+      font-size: 12px;
+    }
+
+    .remove-button {
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+
+    .file-progress {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+    }
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: rgba(0, 0, 0, 0.54);
+
+  .empty-icon {
+    font-size: 80px;
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 16px;
+    opacity: 0.3;
+  }
+
+  p {
+    margin: 8px 0;
+
+    &.empty-hint {
+      font-size: 14px;
+      color: rgba(0, 0, 0, 0.38);
+    }
+  }
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+
+  button {
+    min-width: 200px;
+
+    mat-icon {
+      margin-right: 8px;
+    }
+  }
+}
+
+.overall-progress {
+  margin-top: 24px;
+  padding: 16px;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 4px;
+
+  p {
+    margin: 0 0 12px 0;
+    text-align: center;
+    font-weight: 500;
+  }
+}
+
+// Dark theme support
+@media (prefers-color-scheme: dark) {
+  .files-list {
+    border-color: rgba(255, 255, 255, 0.12);
+
+    .file-item {
+      border-bottom-color: rgba(255, 255, 255, 0.08);
+
+      .file-path {
+        color: rgba(255, 255, 255, 0.6);
+      }
+    }
+  }
+
+  .empty-state {
+    color: rgba(255, 255, 255, 0.54);
+
+    p.empty-hint {
+      color: rgba(255, 255, 255, 0.38);
+    }
+  }
+
+  .overall-progress {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+}
