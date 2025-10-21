@@ -141,7 +141,19 @@ function setupFileSystemHandlers(): void {
 
     return result;
   });
-  
+
+  // Check if a path is a directory
+  ipcMain.handle('is-directory', async (_, filePath) => {
+    try {
+      const fs = require('fs');
+      const stats = fs.statSync(filePath);
+      return stats.isDirectory();
+    } catch (error) {
+      log.error('Error checking if path is directory:', error);
+      return false;
+    }
+  });
+
   // Get downloads path
   ipcMain.handle('get-downloads-path', () => {
     return require('electron').app.getPath('downloads');

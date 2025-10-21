@@ -22,6 +22,7 @@ import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angu
 import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
 import { SettingsService } from '../../services/settings.service';
+import { BatchStateService, PendingJob } from '../../services/batch-state.service';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
@@ -79,8 +80,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   // Store full error messages for jobs
   private jobFullErrors: Map<string, string> = new Map();
 
-  // Store pending jobs that haven't been submitted yet
-  pendingJobs: Array<{id: string; url: string; displayName: string; uploadDate: string; options: DownloadOptions; loading: boolean}> = [];
+  // Store pending jobs that haven't been submitted yet (now coming from service)
+  pendingJobs: PendingJob[] = [];
+  private pendingJobsSubscription: Subscription | null = null;
   private pendingJobIdCounter = 0;
 
   constructor(
@@ -88,6 +90,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     private batchApiService: BatchApiService,
     private socketService: SocketService,
     private settingsService: SettingsService,
+    private batchStateService: BatchStateService,
     private snackBar: MatSnackBar,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
@@ -99,6 +102,12 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.settingsSubscription = this.settingsService.getSettings().subscribe((settings: Settings) => {
       this.updateDefaultValues(settings);
+    });
+
+    // Subscribe to pending jobs from the service
+    this.pendingJobsSubscription = this.batchStateService.getPendingJobs().subscribe(jobs => {
+      this.pendingJobs = jobs;
+      this.cdr.detectChanges();
     });
 
     // Listen for batch queue updates
@@ -260,29 +269,33 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     if (this.socketSubscription) {
       this.socketSubscription.unsubscribe();
     }
-    
+
     if (this.settingsSubscription) {
       this.settingsSubscription.unsubscribe();
     }
-    
+
     if (this.urlChangeSubscription) {
       this.urlChangeSubscription.unsubscribe();
     }
-    
+
     if (this.downloadProgressSubscription) {
       this.downloadProgressSubscription.unsubscribe();
     }
-    
+
     if (this.processingProgressSubscription) {
       this.processingProgressSubscription.unsubscribe();
     }
-    
+
     if (this.transcribingProgressSubscription) {
       this.transcribingProgressSubscription.unsubscribe();
     }
-  
+
     if (this.refreshSubscription) {
       this.refreshSubscription.unsubscribe();
+    }
+
+    if (this.pendingJobsSubscription) {
+      this.pendingJobsSubscription.unsubscribe();
     }
   }
   
@@ -922,8 +935,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
     // Add each URL to pending jobs and fetch metadata
     urls.forEach(url => {
-      const jobId = `pending-${this.pendingJobIdCounter++}`;
-
       const downloadOptions: DownloadOptions = {
         url,
         quality: this.batchForm.get('quality')?.value,
@@ -941,17 +952,14 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         displayName: this.getShortUrl(url)
       };
 
-      // Add job with temporary display name
-      const pendingJob = {
-        id: jobId,
+      // Add job to the service with temporary display name
+      const jobId = this.batchStateService.addPendingJob({
         url,
         displayName: this.getShortUrl(url),
         uploadDate: '',
         options: downloadOptions,
         loading: true
-      };
-
-      this.pendingJobs.push(pendingJob);
+      });
 
       // Fetch video info to get title and upload date
       this.batchApiService.getVideoInfo(url)
@@ -959,24 +967,24 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           catchError(err => {
             console.error('Error fetching video info:', err);
             // Keep the short URL as display name if fetch fails
-            const job = this.pendingJobs.find(j => j.id === jobId);
-            if (job) {
-              job.loading = false;
-            }
+            this.batchStateService.updatePendingJob(jobId, { loading: false });
             return of(null);
           })
         )
         .subscribe((info: VideoInfo | null) => {
-          const job = this.pendingJobs.find(j => j.id === jobId);
-          if (job) {
-            job.loading = false;
-            if (info && info.title) {
-              const sanitizedTitle = this.generateSanitizedFilename(info.title);
-              job.displayName = sanitizedTitle;
-              job.uploadDate = info.uploadDate || '';
-              job.options.displayName = sanitizedTitle;
-            }
-            this.cdr.detectChanges();
+          if (info && info.title) {
+            const sanitizedTitle = this.generateSanitizedFilename(info.title);
+            this.batchStateService.updatePendingJob(jobId, {
+              loading: false,
+              displayName: sanitizedTitle,
+              uploadDate: info.uploadDate || '',
+              options: {
+                ...downloadOptions,
+                displayName: sanitizedTitle
+              }
+            });
+          } else {
+            this.batchStateService.updatePendingJob(jobId, { loading: false });
           }
         });
     });
@@ -1003,8 +1011,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       next: (response) => {
         this.snackBar.open(`Started processing ${response.jobIds.length} job(s)`, 'Dismiss', { duration: 3000 });
 
-        // Clear pending jobs since they've been submitted
-        this.pendingJobs = [];
+        // Clear pending jobs since they've been submitted (using service)
+        this.batchStateService.clearPendingJobs();
 
         // Refresh to show jobs in the actual queue
         this.refreshBatchStatus();
@@ -1028,12 +1036,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    * Remove a pending job from the local queue
    */
   removePendingJob(jobId: string): void {
-    const index = this.pendingJobs.findIndex(job => job.id === jobId);
-    if (index >= 0) {
-      this.pendingJobs.splice(index, 1);
-      this.snackBar.open('Removed from pending queue', 'Dismiss', { duration: 2000 });
-      this.cdr.detectChanges();
-    }
+    this.batchStateService.removePendingJob(jobId);
+    this.snackBar.open('Removed from pending queue', 'Dismiss', { duration: 2000 });
   }
   
   setupOneWayUrlBinding(): void {

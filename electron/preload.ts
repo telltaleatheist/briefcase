@@ -6,6 +6,7 @@ import * as path from 'path';
 interface ElectronAPI {
   openDirectoryPicker: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   showOpenDialog: (options: any) => Promise<any>; // Use 'any' for now to avoid type conflicts
+  isDirectory: (filePath: string) => Promise<boolean>;
   getAppVersion: () => Promise<string>;
   getBinaryPaths: () => Promise<{
     ytDlpPath: string;
@@ -39,6 +40,7 @@ const resourcesPath = process.resourcesPath || '';
 contextBridge.exposeInMainWorld('electron', {
   openDirectoryPicker: () => ipcRenderer.invoke('open-directory-picker'),
   showOpenDialog: (options: any) => ipcRenderer.invoke('show-open-dialog', options),
+  isDirectory: (filePath: string) => ipcRenderer.invoke('is-directory', filePath),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getBinaryPaths: () => ipcRenderer.invoke('get-binary-paths'),
   environment: {
@@ -47,7 +49,7 @@ contextBridge.exposeInMainWorld('electron', {
     appPath: process.cwd(),
     getBinaryPath: (binaryName: string) => {
       const executable = process.platform === 'win32' ? `${binaryName}.exe` : binaryName;
-      
+
       if (isDevelopment) {
         // In development, binaries are in the project root's bin directory
         return path.join(process.cwd(), 'bin', executable);
@@ -59,17 +61,17 @@ contextBridge.exposeInMainWorld('electron', {
     checkPathConfig: () => {
       return ipcRenderer.invoke('check-path-config');
     },
-    
+
     // Notify about missing executables
     showPathConfigDialog: () => {
       return ipcRenderer.invoke('show-path-config-dialog');
     },
-    
+
     // Get current configuration
     getPathConfig: () => {
       return ipcRenderer.invoke('get-path-config');
     },
-    
+
     // Update configuration programmatically
     updatePathConfig: (config: any) => {
       return ipcRenderer.invoke('update-path-config', config);

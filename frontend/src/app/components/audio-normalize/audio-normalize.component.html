@@ -1,137 +1,63 @@
+<!-- Audio Normalization - Creamsicle Theme -->
 <div class="normalize-container">
-  <!-- Hero Header -->
-  <div class="page-hero">
-    <h1 class="hero-title">🎵 Audio Normalization</h1>
-    <p class="hero-subtitle">Normalize audio levels across your video/audio files</p>
-  </div>
-
   <div class="page-content">
-    <!-- Selection buttons -->
-    <div class="selection-buttons">
-      <button
-        mat-raised-button
-        color="primary"
-        (click)="selectFiles()"
-        [disabled]="isProcessing"
-      >
-        <mat-icon>audio_file</mat-icon>
-        Select Files
-      </button>
+    <!-- Audio Normalization Panel -->
+    <div class="panel full-height-panel">
+      <div class="panel-header">
+        <h4 class="panel-title">🎵 Audio Normalization</h4>
+        <div class="panel-header-actions">
+          <button mat-raised-button (click)="openSettingsDialog()" [disabled]="isProcessing">
+            <mat-icon>settings</mat-icon> Settings
+          </button>
+          <button mat-raised-button color="primary" (click)="selectMedia()" [disabled]="isProcessing">
+            <mat-icon>add</mat-icon> Select Media
+          </button>
+          <button mat-stroked-button color="warn" (click)="clearAll()" [disabled]="isProcessing || selectedFiles.length === 0">
+            <mat-icon>clear_all</mat-icon> Clear All
+          </button>
+        </div>
+      </div>
 
-      <button
-        mat-raised-button
-        color="primary"
-        (click)="selectFolder()"
-        [disabled]="isProcessing"
-      >
-        <mat-icon>folder_open</mat-icon>
-        Select Folder
-      </button>
+      <div class="panel-content">
+        <div class="files-list">
+          <div *ngFor="let file of selectedFiles; let i = index"
+               class="file-card"
+               [ngClass]="'file-' + (file.status || 'unknown')">
 
-      <button
-        mat-stroked-button
-        color="warn"
-        (click)="clearAll()"
-        [disabled]="isProcessing || selectedFiles.length === 0"
-      >
-        <mat-icon>clear_all</mat-icon>
-        Clear All
-      </button>
-    </div>
-
-    <!-- Normalization settings -->
-    <form [formGroup]="normalizeForm" class="normalize-form">
-      <mat-form-field appearance="outline" class="volume-field">
-        <mat-label>Target Volume (dB)</mat-label>
-        <input
-          matInput
-          type="number"
-          formControlName="targetVolume"
-          placeholder="-20"
-        >
-        <mat-hint>Recommended: -20dB to -14dB (quieter to louder)</mat-hint>
-        <mat-error *ngIf="normalizeForm.get('targetVolume')?.hasError('required')">
-          Target volume is required
-        </mat-error>
-        <mat-error *ngIf="normalizeForm.get('targetVolume')?.hasError('min')">
-          Minimum value is -60dB
-        </mat-error>
-        <mat-error *ngIf="normalizeForm.get('targetVolume')?.hasError('max')">
-          Maximum value is 0dB
-        </mat-error>
-      </mat-form-field>
-    </form>
-
-    <!-- Selected files list -->
-    <div class="files-section" *ngIf="selectedFiles.length > 0">
-      <h3>Selected Files ({{ selectedFiles.length }})</h3>
-
-      <div class="files-list">
-        <div *ngFor="let file of selectedFiles; let i = index" class="file-item">
-          <div class="file-item-content">
-            <mat-icon class="file-icon" [color]="getStatusColor(file.status)">
-              {{ getStatusIcon(file.status) }}
-            </mat-icon>
-
-            <div class="file-details">
-              <div class="file-header">
-                <span class="file-name">{{ file.name }}</span>
-                <mat-chip class="status-chip" [color]="getStatusColor(file.status)">
+            <div class="file-content">
+              <span class="file-title">{{ file.name }}</span>
+              <div class="file-right">
+                <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(file.status || '')">
                   {{ file.status }}
-                </mat-chip>
-              </div>
-
-              <div class="file-path">{{ file.path }}</div>
-
-              <div *ngIf="file.error" class="error-message">
-                Error: {{ file.error }}
+                </span>
+                <button *ngIf="file.status !== 'processing'"
+                        type="button"
+                        class="remove-button"
+                        (click)="removeFile(i)"
+                        [disabled]="isProcessing"
+                        title="Remove file">
+                  <mat-icon>close</mat-icon>
+                </button>
               </div>
             </div>
 
-            <button
-              mat-icon-button
-              class="remove-button"
-              (click)="removeFile(i)"
-              [disabled]="isProcessing"
-              matTooltip="Remove file"
-            >
-              <mat-icon>close</mat-icon>
-            </button>
+            <div class="progress-bar processing-bar" *ngIf="file.status === 'processing'"></div>
           </div>
 
-          <mat-progress-bar
-            *ngIf="file.status === 'processing'"
-            mode="indeterminate"
-            class="file-progress"
-          ></mat-progress-bar>
+          <div class="empty-state" *ngIf="selectedFiles.length === 0">
+            <mat-icon class="empty-icon">music_note</mat-icon>
+            <p>No files selected</p>
+            <p class="empty-hint">Select individual files or choose a folder to normalize audio</p>
+          </div>
+        </div>
+
+        <div class="panel-actions">
+          <button mat-raised-button color="primary" (click)="startNormalization()"
+                  [disabled]="isProcessing || selectedFiles.length === 0 || normalizeForm.invalid">
+            <mat-icon>equalizer</mat-icon> {{ isProcessing ? 'Processing...' : 'Normalize Audio' }}
+          </button>
         </div>
       </div>
-    </div>
-
-    <!-- Empty state -->
-    <div class="empty-state" *ngIf="selectedFiles.length === 0">
-      <mat-icon class="empty-icon">music_note</mat-icon>
-      <p>No files selected</p>
-      <p class="empty-hint">Select individual files or choose a folder to normalize audio</p>
-    </div>
-
-    <!-- Action buttons -->
-    <div class="actions">
-      <button
-        mat-raised-button
-        color="accent"
-        (click)="startNormalization()"
-        [disabled]="isProcessing || selectedFiles.length === 0 || normalizeForm.invalid"
-      >
-        <mat-icon>equalizer</mat-icon>
-        {{ isProcessing ? 'Processing...' : 'Normalize Audio' }}
-      </button>
-    </div>
-
-    <!-- Overall progress -->
-    <div class="overall-progress" *ngIf="isProcessing">
-      <p>Processing files...</p>
-      <mat-progress-bar mode="indeterminate"></mat-progress-bar>
     </div>
   </div>
 </div>

@@ -1,5 +1,5 @@
 // clippy/frontend/src/app/app.component.ts
-import { Component, OnInit, inject, ViewEncapsulation } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, RouterOutlet } from '@angular/router';
 
@@ -12,6 +12,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 
 import { SocketService } from './services/socket.service';
 import { SettingsService } from './services/settings.service';
+import { BatchStateService } from './services/batch-state.service';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
 
 @Component({
@@ -32,13 +33,14 @@ import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.com
     ThemeToggleComponent  // Import the ThemeToggleComponent
   ]
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
   title = 'Clippy - Video Downloader';
   isDownloading = false;
   currentYear = new Date().getFullYear();
 
   private socketService = inject(SocketService);
   private settingsService = inject(SettingsService);
+  private batchStateService = inject(BatchStateService);
   private snackBar = inject(MatSnackBar);
   private themeService = inject(ThemeService);  // Inject the ThemeService
   public router = inject(Router);
@@ -46,7 +48,7 @@ export class AppComponent implements OnInit {
   ngOnInit(): void {
     // Force dark mode on startup
     this.themeService.setDarkMode(false);
-    
+
     this.socketService.onConnect().subscribe(() => {
       this.snackBar.open('Connected to server', 'Dismiss', { duration: 3000 });
     });
@@ -68,6 +70,19 @@ export class AppComponent implements OnInit {
       this.isDownloading = false;
       this.snackBar.open(`Download failed: ${error}`, 'Dismiss', { duration: 5000 });
     });
+
+    // Listen for beforeunload event to clear queue when app closes
+    window.addEventListener('beforeunload', this.handleBeforeUnload.bind(this));
+  }
+
+  ngOnDestroy(): void {
+    // Clean up event listener
+    window.removeEventListener('beforeunload', this.handleBeforeUnload.bind(this));
+  }
+
+  private handleBeforeUnload(): void {
+    // Clear the pending jobs queue when the app is closing
+    this.batchStateService.clearPendingJobs();
   }
 
   navigateToBatch(): void {
