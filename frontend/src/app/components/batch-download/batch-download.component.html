@@ -1,279 +1,62 @@
-<!-- clippy/frontend/src/app/components/batch-download/batch-download.component.html -->
-<div class="batch-download-container">
-  <!-- Batch Download Form (Moved to top) -->
-  <mat-card class="batch-form-card">
-    <mat-card-header>
-      <mat-card-title>Batch Download</mat-card-title>
-    </mat-card-header>
-    
-    <mat-card-content>
-      <form [formGroup]="batchForm" (ngSubmit)="onSubmit()">
-        <!-- URL Fields -->
-        <mat-form-field appearance="outline" class="multiline-url-input full-width">
-          <mat-label>Paste multiple URLs (one per line)</mat-label>
-          <textarea
-            matInput
-            [(ngModel)]="multiUrlText"
-            [ngModelOptions]="{standalone: true}"
-            rows="4"
-            style="width: 100%; margin-bottom: 12px;"
-            placeholder="Paste multiple URLs, one per line"></textarea>
-          <button 
-            type="button" 
-            mat-icon-button 
-            matSuffix 
-            (click)="addUrlsFromTextarea()" 
-            matTooltip="Add URLs to list"
-          >
-            <mat-icon>add_circle</mat-icon>
-          </button>
-        </mat-form-field>
-        
-        <div formArrayName="urls" class="url-fields">
-          <div *ngFor="let urlControl of urls.controls; let i = index" class="url-field-row">
-            <div [formGroupName]="i" class="url-input-container">
-              <mat-expansion-panel class="url-expansion-panel">
-                <mat-expansion-panel-header>
-                  <mat-panel-title>
-                    <mat-icon *ngIf="urlControl.get('loading')?.value" class="loading-icon">hourglass_empty</mat-icon>
-                    <div class="filename-container" *ngIf="!urlControl.get('loading')?.value"
-                         [matTooltip]="urlControl.get('fullFileName')?.value || ''">
-                      <span class="video-title">{{ urlControl.get('title')?.value || 'URL ' + (i+1) }}</span>
-                      <span class="upload-date-badge" *ngIf="urlControl.get('uploadDate')?.value">
-                        {{ urlControl.get('uploadDate')?.value }}
-                      </span>
-                    </div>
-                  </mat-panel-title>
-                </mat-expansion-panel-header>
-            
-                <mat-form-field appearance="outline" class="url-field">
-                  <mat-label>Video URL {{ i+1 }}</mat-label>
-                  <input 
-                    matInput 
-                    placeholder="https://www.youtube.com/watch?v=..." 
-                    formControlName="url" 
-                    autocomplete="off"
-                    (input)="updateMultiUrlTextarea(); loadFileNameForUrl(i)"
-                  >
-                  <mat-error *ngIf="urlControl.get('url')?.hasError('required')">
-                    URL is required
-                  </mat-error>
-                  <mat-error *ngIf="urlControl.get('url')?.hasError('pattern')">
-                    Please enter a valid URL
-                  </mat-error>
-                  <button 
-                    type="button" 
-                    mat-icon-button 
-                    matSuffix 
-                    (click)="pasteFromClipboard(i)" 
-                    matTooltip="Paste from clipboard"
-                  >
-                    <mat-icon>content_paste</mat-icon>
-                  </button>
-                </mat-form-field>
-            
-                <div class="url-specific-settings">
-                  <mat-checkbox formControlName="overrideBatchSettings">
-                    Override Batch Settings
-                  </mat-checkbox>
-            
-                  <ng-container *ngIf="urlControl.get('overrideBatchSettings')?.value">
-                    <div class="video-specific-options">
-                      <mat-form-field appearance="outline">
-                        <mat-label>Quality</mat-label>
-                        <mat-select formControlName="quality">
-                          <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
-                            {{ option.label }}
-                          </mat-option>
-                        </mat-select>
-                      </mat-form-field>
-            
-                      <div class="checkbox-setting">
-                        <mat-checkbox formControlName="convertToMp4">
-                          Convert to MP4
-                        </mat-checkbox>
-                      </div>
-            
-                      <div class="checkbox-setting">
-                        <mat-checkbox formControlName="fixAspectRatio">
-                          Fix aspect ratio with blurred background
-                        </mat-checkbox>
-                      </div>
-            
-                      <div class="checkbox-setting">
-                        <mat-checkbox formControlName="useCookies">
-                          Use browser cookies
-                        </mat-checkbox>
-                      </div>
-            
-                      <div *ngIf="urlControl.get('useCookies')?.value">
-                        <mat-form-field appearance="outline">
-                          <mat-label>Browser</mat-label>
-                          <mat-select formControlName="browser">
-                            <mat-option *ngFor="let option of browserOptions" [value]="option.value">
-                              {{ option.label }}
-                            </mat-option>
-                          </mat-select>
-                        </mat-form-field>
-                      </div>
-                      
-                      <div class="rms-normalization-option">
-                        <mat-checkbox formControlName="useRmsNormalization">
-                          RMS Normalization
-                        </mat-checkbox>&nbsp;&nbsp;&nbsp;
-                        <mat-slider 
-                          *ngIf="urlControl.get('useRmsNormalization')?.value"
-                          formControlName="rmsNormalizationLevel"
-                          min="-20" 
-                          max="20" 
-                          step="1"
-                          discrete
-                          thumbLabel>
-                          <input matSliderThumb>
-                        </mat-slider>&nbsp;&nbsp;
-                        <mat-hint *ngIf="urlControl.get('rmsNormalizationLevel')?.value === -21">
-                          🔇 Audio Muted
-                        </mat-hint>
-                        <mat-hint *ngIf="urlControl.get('rmsNormalizationLevel')?.value !== -21">
-                          Adjust volume gain (-20 to +20 dB)
-                        </mat-hint>
-                      </div>
-                    
-                      <div class="compression-option">
-                        <mat-checkbox formControlName="useCompression">
-                          Audio Compression
-                        </mat-checkbox>&nbsp;&nbsp;&nbsp;
-                        <mat-slider 
-                          *ngIf="urlControl.get('useCompression')?.value"
-                          formControlName="compressionLevel"
-                          min="0" 
-                          max="10" 
-                          step="1"
-                          discrete>
-                          <input matSliderThumb>
-                        </mat-slider>&nbsp;&nbsp;
-                        <mat-hint *ngIf="urlControl.get('useCompression')?.value">
-                          Adjust compression intensity (0 to 10)
-                        </mat-hint>
-                      </div>
+<!-- Batch Download - Creamsicle Theme -->
+<div class="batch-container">
+  <!-- Hero Header -->
+  <div class="page-hero">
+    <h1 class="hero-title">📥 Video Downloader</h1>
+    <p class="hero-subtitle">Download videos from YouTube and other platforms</p>
+  </div>
 
-                      <div class="checkbox-setting">
-                        <mat-checkbox formControlName="transcribeVideo">
-                          Transcribe Video
-                          <mat-hint>Generate SRT subtitles for this video</mat-hint>
-                        </mat-checkbox>
-                      </div>
-
-                    </div>
-                  </ng-container>
-                </div>
-              </mat-expansion-panel>
-            
-              <button 
-                type="button" 
-                mat-icon-button 
-                color="warn"
-                (click)="removeUrlField(i)"
-                [disabled]="urls.length === 1"
-                matTooltip="Remove URL"
-              >
-                <mat-icon>delete</mat-icon>
-              </button>
-            </div>
-          </div>
-        
-          <div class="url-actions">
-            <button type="button" mat-stroked-button (click)="addUrlField()">
-              <mat-icon>add</mat-icon> Add URL
+  <div class="page-content">
+    <!-- Batch Download Form -->
+    <div class="panel">
+      <div class="panel-header">
+        <h4 class="panel-title">Add Videos to Queue</h4>
+      </div>
+      <div class="panel-content">
+        <form [formGroup]="batchForm" (ngSubmit)="onSubmit()">
+          <!-- Multi URL Textarea -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Paste multiple URLs (one per line)</mat-label>
+            <textarea
+              matInput
+              [(ngModel)]="multiUrlText"
+              [ngModelOptions]="{standalone: true}"
+              rows="4"
+              placeholder="Paste multiple URLs, one per line"></textarea>
+            <button
+              type="button"
+              mat-icon-button
+              matSuffix
+              (click)="addUrlsFromTextarea()"
+              matTooltip="Add URLs to list"
+            >
+              <mat-icon>add_circle</mat-icon>
             </button>
-          </div>
-        </div>
-        <!-- Batch Options -->
-        <mat-expansion-panel>
-          <mat-expansion-panel-header>
-            <mat-panel-title>Download Options</mat-panel-title>
-          </mat-expansion-panel-header>
-          
-          <div class="batch-options">
-            <mat-form-field appearance="outline">
-              <mat-label>Quality</mat-label>
-              <mat-select formControlName="quality">
-                <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
-                  {{ option.label }}
-                </mat-option>
-              </mat-select>
-            </mat-form-field>
-            
-            <div class="checkbox-setting">
-              <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
-            </div>
-            
-            <div class="checkbox-setting">
-              <mat-checkbox formControlName="fixAspectRatio">Fix aspect ratio with blurred background</mat-checkbox>
-            </div>
-            
-            <div class="checkbox-setting">
-              <mat-checkbox formControlName="normalizeAudio">
-                Normalize Audio
-                <mat-hint>Standardize audio levels across downloaded videos</mat-hint>
-              </mat-checkbox>
-            </div>
-            
-            <div *ngIf="batchForm.get('normalizeAudio')?.value" class="audio-processing-options">
-              <div class="rms-normalization-option">
-                <mat-checkbox formControlName="useRmsNormalization">
-                  RMS Normalization
-                </mat-checkbox>&nbsp;&nbsp;&nbsp;
-                <mat-slider 
-                  *ngIf="batchForm.get('useRmsNormalization')?.value"
-                  formControlName="rmsNormalizationLevel"
-                  min="-20" 
-                  max="20" 
-                  step="1"
-                  discrete
-                  thumbLabel>
-                  <input matSliderThumb>
-                </mat-slider>&nbsp;&nbsp;
-                <mat-hint *ngIf="batchForm.get('rmsNormalizationLevel')?.value === -21">
-                  🔇 Audio Muted
-                </mat-hint>
-                <mat-hint *ngIf="batchForm.get('rmsNormalizationLevel')?.value !== -21">
-                  Adjust volume gain (-20 to +20 dB)
-                </mat-hint>
-              </div>
-            
-              <div class="compression-option">
-                <mat-checkbox formControlName="useCompression">
-                  Audio Compression
-                </mat-checkbox>&nbsp;&nbsp;&nbsp;
-                <mat-slider 
-                  *ngIf="batchForm.get('useCompression')?.value"
-                  formControlName="compressionLevel"
-                  min="0" 
-                  max="10" 
-                  step="1"
-                  discrete>
-                  <input matSliderThumb>
-                </mat-slider>&nbsp;&nbsp;
-                <mat-hint *ngIf="batchForm.get('useCompression')?.value">
-                  Adjust compression intensity (0 to 10)
-                </mat-hint>
-              </div>
-            </div>
+          </mat-form-field>
 
-            <div class="checkbox-setting">
-              <mat-checkbox formControlName="transcribeVideo">
-                Transcribe Video
-                <mat-hint>Generate SRT subtitles using Whisper (tiny model)</mat-hint>
-              </mat-checkbox>
-            </div>
-                                                
-            <div class="checkbox-setting">
-              <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
-            </div>
-            
-            <div *ngIf="batchForm.get('useCookies')?.value">
+          <!-- Batch Options -->
+          <mat-expansion-panel class="options-panel">
+            <mat-expansion-panel-header>
+              <mat-panel-title>⚙️ Download Options</mat-panel-title>
+            </mat-expansion-panel-header>
+
+            <div class="options-grid">
               <mat-form-field appearance="outline">
+                <mat-label>Quality</mat-label>
+                <mat-select formControlName="quality">
+                  <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
+                    {{ option.label }}
+                  </mat-option>
+                </mat-select>
+              </mat-form-field>
+
+              <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
+              <mat-checkbox formControlName="fixAspectRatio">Fix aspect ratio</mat-checkbox>
+              <mat-checkbox formControlName="normalizeAudio">Normalize Audio</mat-checkbox>
+              <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
+              <mat-checkbox formControlName="transcribeVideo">Transcribe Video</mat-checkbox>
+
+              <mat-form-field appearance="outline" *ngIf="batchForm.get('useCookies')?.value">
                 <mat-label>Browser</mat-label>
                 <mat-select formControlName="browser">
                   <mat-option *ngFor="let option of browserOptions" [value]="option.value">
@@ -281,165 +64,232 @@
                   </mat-option>
                 </mat-select>
               </mat-form-field>
+
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Output Directory</mat-label>
+                <input matInput formControlName="outputDir" readonly>
+                <mat-hint>Leave empty to use default location</mat-hint>
+              </mat-form-field>
             </div>
-            
-            <mat-form-field appearance="outline">
-              <mat-label>Output Directory</mat-label>
-              <input matInput formControlName="outputDir" readonly>
-              <mat-hint>Leave empty to use default location</mat-hint>
-            </mat-form-field>
+          </mat-expansion-panel>
+
+          <!-- URL List -->
+          <div formArrayName="urls" class="url-list-compact">
+            <div *ngFor="let urlControl of urls.controls; let i = index" [formGroupName]="i" class="url-list-item">
+              <mat-expansion-panel class="url-accordion">
+                <mat-expansion-panel-header>
+                  <mat-panel-title class="url-accordion-title">
+                    <mat-icon *ngIf="urlControl.get('loading')?.value" class="status-icon loading">hourglass_empty</mat-icon>
+                    <mat-icon *ngIf="!urlControl.get('loading')?.value" class="status-icon">videocam</mat-icon>
+                    <span class="video-title">{{ urlControl.get('title')?.value || 'Video ' + (i+1) }}</span>
+                  </mat-panel-title>
+                  <button
+                    type="button"
+                    mat-icon-button
+                    class="btn-delete"
+                    (click)="removeUrlField(i); $event.stopPropagation()"
+                    [disabled]="urls.length === 1"
+                    matTooltip="Remove"
+                  >
+                    <mat-icon>close</mat-icon>
+                  </button>
+                </mat-expansion-panel-header>
+
+                <div class="url-accordion-content">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Video URL</mat-label>
+                    <input
+                      matInput
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      formControlName="url"
+                      autocomplete="off"
+                      (input)="updateMultiUrlTextarea(); loadFileNameForUrl(i)"
+                    >
+                    <mat-error *ngIf="urlControl.get('url')?.hasError('required')">URL is required</mat-error>
+                    <mat-error *ngIf="urlControl.get('url')?.hasError('pattern')">Please enter a valid URL</mat-error>
+                    <button
+                      type="button"
+                      mat-icon-button
+                      matSuffix
+                      (click)="pasteFromClipboard(i)"
+                      matTooltip="Paste from clipboard"
+                    >
+                      <mat-icon>content_paste</mat-icon>
+                    </button>
+                  </mat-form-field>
+
+                  <div class="url-specific-options">
+                    <mat-checkbox formControlName="overrideBatchSettings">
+                      Override Batch Settings
+                    </mat-checkbox>
+
+                    <ng-container *ngIf="urlControl.get('overrideBatchSettings')?.value">
+                      <div class="options-grid">
+                        <mat-form-field appearance="outline">
+                          <mat-label>Quality</mat-label>
+                          <mat-select formControlName="quality">
+                            <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
+                              {{ option.label }}
+                            </mat-option>
+                          </mat-select>
+                        </mat-form-field>
+
+                        <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
+                        <mat-checkbox formControlName="fixAspectRatio">Fix aspect ratio</mat-checkbox>
+                        <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
+
+                        <mat-form-field appearance="outline" *ngIf="urlControl.get('useCookies')?.value">
+                          <mat-label>Browser</mat-label>
+                          <mat-select formControlName="browser">
+                            <mat-option *ngFor="let option of browserOptions" [value]="option.value">
+                              {{ option.label }}
+                            </mat-option>
+                          </mat-select>
+                        </mat-form-field>
+
+                        <mat-checkbox formControlName="transcribeVideo">Transcribe Video</mat-checkbox>
+                      </div>
+                    </ng-container>
+                  </div>
+                </div>
+              </mat-expansion-panel>
+            </div>
           </div>
-        </mat-expansion-panel>
 
-        <div class="form-actions">
-          <button
-            mat-raised-button
-            color="primary"
-            type="submit"
-            [disabled]="batchForm.invalid">
-            <mat-icon>cloud_download</mat-icon>
-            Add to Batch Queue
-          </button>
-        </div>
-      </form>
-    </mat-card-content>
-  </mat-card>
-  
-  <!-- Batch Queue Status -->
-  <mat-card class="status-card" *ngIf="batchQueueStatus">
-    <mat-card-header>
-      <mat-card-title>Processing Status: {{ batchQueueStatus.isProcessing ? 'Running' : 'Idle' }}</mat-card-title>
-    </mat-card-header>
-
-    <mat-card-content>
-      <div class="status-info">
-        <div class="status-item">
-          <strong>Active Downloads:</strong> {{ batchQueueStatus.activeDownloadCount }}
-        </div>
-        <div class="status-item">
-          <strong>Queued:</strong> {{ batchQueueStatus.queuedJobs.length }}
-        </div>
-        <div class="status-item">
-          <strong>Waiting for Processing:</strong> {{ batchQueueStatus.downloadedJobs.length }}
-        </div>
-        <div class="status-item">
-          <strong>Transcribing:</strong> {{ batchQueueStatus.transcribingJobs.length }}
-        </div>
-        <div class="status-item">
-          <strong>Processing:</strong> {{ batchQueueStatus.processingJobs.length }}
-        </div>
+          <div class="form-actions">
+            <button
+              mat-raised-button
+              color="accent"
+              type="submit"
+              [disabled]="batchForm.invalid">
+              <mat-icon>add_to_queue</mat-icon>
+              Add to Queue
+            </button>
+          </div>
+        </form>
       </div>
-                  
-      <!-- Configuration -->
-      <mat-expansion-panel>
-        <mat-expansion-panel-header>
-          <mat-panel-title>Batch Configuration</mat-panel-title>
-        </mat-expansion-panel-header>
-        
-        <form [formGroup]="configForm" (ngSubmit)="saveConfig()">
-          <div class="config-form">
-            <mat-form-field appearance="outline">
-              <mat-label>Max Concurrent Downloads</mat-label>
-              <input matInput type="number" formControlName="maxConcurrentDownloads" min="1" max="10">
-              <mat-hint>Set between 1-10 downloads</mat-hint>
-              <mat-error *ngIf="configForm.get('maxConcurrentDownloads')?.hasError('required')">
-                This field is required
-              </mat-error>
-              <mat-error *ngIf="configForm.get('maxConcurrentDownloads')?.hasError('min')">
-                Minimum value is 1
-              </mat-error>
-              <mat-error *ngIf="configForm.get('maxConcurrentDownloads')?.hasError('max')">
-                Maximum value is 10
-              </mat-error>
-            </mat-form-field>
-            
-            <div class="checkbox-setting">
+    </div>
+
+    <!-- Batch Queue Status -->
+    <div class="panel" *ngIf="batchQueueStatus">
+      <div class="panel-header">
+        <h4 class="panel-title">📊 Queue Status</h4>
+        <span class="badge" [ngClass]="batchQueueStatus.isProcessing ? 'badge-success' : 'badge-info'">
+          {{ batchQueueStatus.isProcessing ? 'Processing' : 'Idle' }}
+        </span>
+      </div>
+
+      <div class="panel-content">
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value">{{ batchQueueStatus.activeDownloadCount }}</div>
+            <div class="stat-label">Active</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">{{ batchQueueStatus.queuedJobs.length }}</div>
+            <div class="stat-label">Queued</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">{{ batchQueueStatus.processingJobs.length }}</div>
+            <div class="stat-label">Processing</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">{{ batchQueueStatus.downloadedJobs.length }}</div>
+            <div class="stat-label">Downloaded</div>
+          </div>
+        </div>
+
+        <!-- Configuration -->
+        <mat-expansion-panel class="config-panel">
+          <mat-expansion-panel-header>
+            <mat-panel-title>⚙️ Batch Configuration</mat-panel-title>
+          </mat-expansion-panel-header>
+
+          <form [formGroup]="configForm" (ngSubmit)="saveConfig()">
+            <div class="config-options">
+              <mat-form-field appearance="outline">
+                <mat-label>Max Concurrent Downloads</mat-label>
+                <input matInput type="number" formControlName="maxConcurrentDownloads" min="1" max="10">
+                <mat-hint>Set between 1-10 downloads</mat-hint>
+              </mat-form-field>
+
               <mat-checkbox formControlName="enabled">Enable batch processing</mat-checkbox>
-            </div>
-            
-            <div class="config-actions">
+
               <button mat-raised-button color="primary" type="submit" [disabled]="configForm.invalid">
                 Save Configuration
               </button>
             </div>
-          </div>
-        </form>
-      </mat-expansion-panel>
-      
-      <!-- Jobs Display Section -->
-      <div class="all-jobs-section">
-        <h3>All Jobs</h3>
-        
-        <!-- Combine all job types into a single array for display -->
-        <mat-list class="job-list">
-          <!-- Jobs -->
-          <div *ngFor="let job of getAllJobsForDisplay()" 
-          class="job-item" 
-          [ngClass]="getJobStatusClassWithQueueType(job)">
-          <div class="job-header">
-         <span class="job-title">{{ getDisplayName(job) }}</span>
-         <mat-chip [color]="getStatusChipColor(job.status || '')" selected>
-           {{ isProcessingJob(job) ? 'Processing' : job.status }}
-         </mat-chip>
-       </div>
-       
-       <div class="job-progress">
-         <div class="task-label"
-              [class.error-clickable]="job.status === 'failed'"
-              (click)="job.status === 'failed' ? showJobError(job) : null"
-              [matTooltip]="job.status === 'failed' ? 'Click to view full error' : ''">
-           {{ job.currentTask || getDefaultTaskForStatus(job.status) }}
-         </div>
-         <mat-progress-bar
-           [mode]="job.status === 'queued' ? 'buffer' : 'determinate'"
-           [value]="job.progress || 0"
-           [color]="isProcessingJob(job) ? 'accent' : getProgressBarColor(job.status || '')">
-         </mat-progress-bar>
-         <div class="progress-value">{{ job.progress || 0 }}%</div>
-       </div>
+          </form>
+        </mat-expansion-panel>
 
-       <div class="job-actions">
-         <button *ngIf="job.status === 'failed'"
-                 mat-icon-button
-                 class="action-button"
-                 (click)="showJobError(job)"
-                 matTooltip="View Error Details">
-           <mat-icon>error_outline</mat-icon>
-         </button>
-         <button *ngIf="job.status !== 'completed'"
-                 mat-icon-button
-                 class="action-button"
-                 (click)="cancelJob(job.id)"
-                 matTooltip="Cancel">
-           <mat-icon>cancel</mat-icon>
-         </button>
-         <button *ngIf="job.status === 'failed'"
-                 mat-icon-button
-                 class="action-button"
-                 (click)="retryJob(job.id)"
-                 matTooltip="Retry">
-           <mat-icon>refresh</mat-icon>
-         </button>
-       </div>
-     </div>
-                          
-          <!-- Show message if no jobs -->
-          <div class="no-jobs-message" *ngIf="getAllJobsForDisplay().length === 0">
-            No active jobs. Add URLs above to start downloading.
+        <!-- Jobs List -->
+        <div class="jobs-section">
+          <h3>All Jobs</h3>
+
+          <div class="jobs-list">
+            <div *ngFor="let job of getAllJobsForDisplay()"
+                 class="job-card"
+                 [ngClass]="'job-' + (job.status || 'unknown')">
+              <div class="job-header">
+                <span class="job-title">{{ getDisplayName(job) }}</span>
+                <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
+                  {{ isProcessingJob(job) ? 'Processing' : job.status }}
+                </span>
+              </div>
+
+              <div class="job-progress-row">
+                <div class="job-progress">
+                  <div class="progress-label">
+                    {{ job.currentTask || getDefaultTaskForStatus(job.status) }}
+                  </div>
+                  <div class="progress-bar-container">
+                    <div class="progress-bar" [style.width.%]="job.progress || 0"></div>
+                  </div>
+                  <div class="progress-value">{{ job.progress || 0 }}%</div>
+                </div>
+
+                <div class="job-actions">
+                  <button *ngIf="job.status === 'failed'"
+                          mat-icon-button
+                          (click)="showJobError(job)"
+                          matTooltip="View Error">
+                    <mat-icon>error_outline</mat-icon>
+                  </button>
+                  <button *ngIf="job.status !== 'completed'"
+                          mat-icon-button
+                          (click)="cancelJob(job.id)"
+                          matTooltip="Cancel">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                  <button *ngIf="job.status === 'failed'"
+                          mat-icon-button
+                          (click)="retryJob(job.id)"
+                          matTooltip="Retry">
+                    <mat-icon>refresh</mat-icon>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="empty-state" *ngIf="getAllJobsForDisplay().length === 0">
+              <mat-icon class="empty-icon">inbox</mat-icon>
+              <p>No active jobs</p>
+              <p class="empty-hint">Add URLs above to start downloading</p>
+            </div>
           </div>
-        </mat-list>
+        </div>
+
+        <div class="panel-actions">
+          <button mat-raised-button color="primary" (click)="refreshBatchStatus()">
+            <mat-icon>refresh</mat-icon> Refresh
+          </button>
+
+          <button mat-stroked-button color="warn" (click)="clearQueue()"
+                [disabled]="!hasActiveJobs()">
+            <mat-icon>clear_all</mat-icon> Clear Queue
+          </button>
+        </div>
       </div>
-      
-      <div class="status-actions">
-        <button mat-stroked-button color="primary" (click)="refreshBatchStatus()">
-          <mat-icon>refresh</mat-icon> Refresh Status
-        </button>
-        
-        <button mat-stroked-button color="warn" (click)="clearQueue()" 
-              [disabled]="!hasActiveJobs()">
-          <mat-icon>clear_all</mat-icon> Clear Queue
-        </button>
-      </div>
-    </mat-card-content>
-  </mat-card>
+    </div>
+  </div>
 </div>

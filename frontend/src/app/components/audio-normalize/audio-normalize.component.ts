@@ -1,7 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
@@ -9,6 +8,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../environment/environment';
 
@@ -28,14 +28,14 @@ interface AudioFile {
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    MatCardModule,
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
     MatIconModule,
     MatProgressBarModule,
     MatChipsModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    MatTooltipModule
   ]
 })
 export class AudioNormalizeComponent implements OnInit {

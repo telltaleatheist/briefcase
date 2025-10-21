@@ -807,6 +807,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       default: return 'Waiting...';
     }
   }
+
+  getStatusBadgeType(status: string): string {
+    switch (status) {
+      case 'completed': return 'success';
+      case 'failed': return 'danger';
+      case 'downloading':
+      case 'processing':
+      case 'transcribing': return 'warning';
+      case 'queued':
+      case 'downloaded': return 'info';
+      default: return 'info';
+    }
+  }
     
   /**
    * Check if there are any active jobs

@@ -2,21 +2,13 @@
   <mat-toolbar color="primary">
     <span class="app-title">{{ title }}</span>
     <span class="spacer"></span>
-    <button 
-      mat-icon-button 
-      [routerLink]="['/single']" 
-      matTooltip="Single Download"
-      class="header-button"
-    >
-      <mat-icon>cloud_download</mat-icon>
-    </button>
     <button
       mat-icon-button
       [routerLink]="['/batch']"
-      matTooltip="Batch Download"
+      matTooltip="Download Videos"
       class="header-button"
     >
-      <mat-icon>playlist_add</mat-icon>
+      <mat-icon>download</mat-icon>
     </button>
     <button
       mat-icon-button

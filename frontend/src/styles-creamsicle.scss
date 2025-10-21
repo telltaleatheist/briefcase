@@ -1,0 +1,192 @@
+/* ============================================================================
+   OWEN MORGAN DESIGN SYSTEM - CREAMSICLE THEME
+   ============================================================================ */
+
+:root {
+  --primary-orange: #ff6b35;
+  --light-orange: #ff8c5a;
+  --dark-orange: #e55529;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-tertiary: #e9ecef;
+  --bg-card: #ffffff;
+
+  --text-primary: #212529;
+  --text-secondary: #6c757d;
+  --text-muted: #adb5bd;
+  --border-color: #d1d5db;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+
+  --border-radius: 8px;
+  --border-radius-large: 12px;
+  --transition: all 0.3s ease;
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --shadow-sm: 0 1px 2px 0 var(--shadow-color);
+  --shadow-md: 0 4px 6px -1px var(--shadow-color);
+  --shadow-lg: 0 10px 15px -3px var(--shadow-color);
+  --shadow-xl: 0 20px 25px -5px var(--shadow-color);
+
+  // Status colors
+  --success-bg: #dcfce7;
+  --success-text: #16a34a;
+  --warning-bg: #fef3c7;
+  --warning-text: #d97706;
+  --danger-bg: #fee2e2;
+  --danger-text: #dc2626;
+  --info-bg: #dbeafe;
+  --info-text: #2563eb;
+}
+
+/* Dark Theme */
+[data-theme="dark"],
+.dark-theme {
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #2d2d2d;
+  --bg-card: #1e1e1e;
+  --text-primary: #ffffff;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --border-color: #374151;
+  --shadow-color: rgba(0, 0, 0, 0.5);
+
+  // Dark mode Material component overrides
+  .mat-mdc-card {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-form-field {
+    color: var(--text-primary) !important;
+
+    .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__leading,
+    .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__notch,
+    .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: var(--border-color) !important;
+    }
+
+    .mdc-text-field--filled {
+      background-color: var(--bg-secondary) !important;
+    }
+
+    input, textarea {
+      color: var(--text-primary) !important;
+    }
+
+    .mat-mdc-floating-label {
+      color: var(--text-secondary) !important;
+    }
+  }
+
+  .mat-mdc-select {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-option {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-dialog-container {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-snack-bar-container {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-expansion-panel {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-expansion-panel-header {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-checkbox .mdc-checkbox__background {
+    border-color: var(--text-secondary) !important;
+  }
+
+  .mat-mdc-text-field-wrapper {
+    background: transparent !important;
+  }
+
+  .mat-mdc-checkbox .mdc-form-field label,
+  .mat-mdc-checkbox .mdc-label,
+  .mat-mdc-form-field .mdc-floating-label,
+  .mat-mdc-form-field .mat-mdc-floating-label,
+  .mat-mdc-select-value,
+  .mat-mdc-select-arrow,
+  .mat-mdc-form-field-hint-wrapper,
+  .mat-hint {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-form-field .mdc-text-field--outlined:not(.mdc-text-field--disabled) .mdc-floating-label,
+  .mat-mdc-form-field .mdc-text-field--outlined:not(.mdc-text-field--disabled) input,
+  .mat-mdc-form-field .mdc-text-field--outlined:not(.mdc-text-field--disabled) textarea {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-expansion-panel-header-title,
+  .mat-expansion-panel-header-description,
+  .mat-mdc-option,
+  .mdc-list-item__primary-text {
+    color: var(--text-primary) !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 1;
+  }
+}
+
+/* Fix placeholder overlap with Material floating label */
+.mat-mdc-form-field:not(.mat-focused) input::placeholder,
+.mat-mdc-form-field:not(.mat-focused) textarea::placeholder {
+  opacity: 0;
+}
+
+/* Override Material Theme Colors */
+.mat-mdc-raised-button.mat-primary,
+.mat-mdc-fab.mat-primary,
+.mat-mdc-mini-fab.mat-primary {
+  --mdc-protected-button-container-color: var(--primary-orange) !important;
+  --mdc-protected-button-label-text-color: white !important;
+}
+
+.mat-mdc-raised-button.mat-primary:hover,
+.mat-mdc-fab.mat-primary:hover,
+.mat-mdc-mini-fab.mat-primary:hover {
+  --mdc-protected-button-container-color: var(--dark-orange) !important;
+}
+
+.mat-mdc-raised-button.mat-accent {
+  --mdc-protected-button-container-color: var(--primary-orange) !important;
+  --mdc-protected-button-label-text-color: white !important;
+}
+
+.mat-toolbar.mat-primary {
+  --mdc-elevated-card-container-color: var(--bg-primary) !important;
+  background: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+.mat-icon.mat-primary {
+  color: var(--primary-orange) !important;
+}
+
+// Apply design system to body
+body {
+  font-family: var(--font-family) !important;
+  background: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
