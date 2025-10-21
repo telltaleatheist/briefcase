@@ -402,17 +402,36 @@ export class FfmpegService {
   
     command.on('end', () => {
       this.logger.log(`Successfully re-encoded video: ${outputFile}`);
-      
+
       // Delete the original video safely
       if (this.safeDeleteFile(videoFile)) {
         this.logger.log(`Deleted original video: ${videoFile}`);
+
+        // Rename the reencoded file to the original name
+        const fs = require('fs');
+        const originalName = videoFile.replace(/\.[^/.]+$/, '.mov');
+        try {
+          fs.renameSync(outputFile, originalName);
+          this.logger.log(`Renamed ${outputFile} to ${originalName}`);
+
+          // Emit 100% completion
+          this.lastReportedProgress.set(progressKey, 100);
+          this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
+
+          if (resolve) resolve(originalName);
+        } catch (err: any) {
+          this.logger.error(`Failed to rename file: ${err.message}`);
+          // Still resolve with the _reencoded file if rename fails
+          this.lastReportedProgress.set(progressKey, 100);
+          this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
+          if (resolve) resolve(outputFile);
+        }
+      } else {
+        // If deletion failed, keep the _reencoded version
+        this.lastReportedProgress.set(progressKey, 100);
+        this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
+        if (resolve) resolve(outputFile);
       }
-      
-      // Emit 100% completion
-      this.lastReportedProgress.set(progressKey, 100);
-      this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
-      
-      if (resolve) resolve(outputFile);
     });          
     
     command.on('error', (err: any) => {
