@@ -1,5 +1,5 @@
 // clippy/frontend/src/app/components/batch-download/batch-download.component.ts
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -17,7 +17,7 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
-import { MatDialog } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 
 import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
@@ -78,6 +78,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
   // Store full error messages for jobs
   private jobFullErrors: Map<string, string> = new Map();
+
+  // Store pending jobs that haven't been submitted yet
+  pendingJobs: Array<{id: string; url: string; displayName: string; uploadDate: string; options: DownloadOptions; loading: boolean}> = [];
+  private pendingJobIdCounter = 0;
 
   constructor(
     private fb: FormBuilder,
@@ -304,6 +308,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Validation method for state transitions
     const isValidTransition = (currentStatus: JobStatus, newStatus: JobStatus): boolean => {
       const validTransitions: Record<JobStatus, JobStatus[]> = {
+        'pending': ['queued', 'failed'],
         'queued': ['downloading', 'failed'],
         'downloading': ['downloaded', 'failed'],
         'downloaded': ['processing', 'transcribing', 'failed'],
@@ -348,8 +353,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         // Set progress based on status
         job.progress = status === 'completed' ? 100 : 0;
         
-        // Assign to correct array
-        const stateMap = {
+        // Assign to correct array (pending jobs are not in batchQueueStatus)
+        const stateMap: Partial<Record<JobStatus, JobResponse[] | undefined>> = {
           'queued': this.batchQueueStatus?.queuedJobs,
           'downloading': this.batchQueueStatus?.downloadingJobs,
           'downloaded': this.batchQueueStatus?.downloadedJobs,
@@ -358,7 +363,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           'completed': this.batchQueueStatus?.completedJobs,
           'failed': this.batchQueueStatus?.failedJobs
         };
-        
+
         const targetArray = stateMap[status];
         if (targetArray) {
           targetArray.push(job);
@@ -412,7 +417,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs || [];
     this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs || [];
   
-    const stateArrayMap: Record<JobStatus, JobResponse[]> = {
+    const stateArrayMap: Partial<Record<JobStatus, JobResponse[]>> = {
       'queued': this.batchQueueStatus.queuedJobs,
       'downloading': this.batchQueueStatus.downloadingJobs,
       'downloaded': this.batchQueueStatus.downloadedJobs,
@@ -424,14 +429,18 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   
     // Remove from current state array
     const fromArray = stateArrayMap[fromState];
-    const jobIndex = fromArray.findIndex(j => j.id === job.id);
-    if (jobIndex !== -1) {
-      fromArray.splice(jobIndex, 1);
+    if (fromArray) {
+      const jobIndex = fromArray.findIndex(j => j.id === job.id);
+      if (jobIndex !== -1) {
+        fromArray.splice(jobIndex, 1);
+      }
     }
-  
+
     // Add to new state array
     const toArray = stateArrayMap[toState];
-    toArray.push(job);
+    if (toArray) {
+      toArray.push(job);
+    }
   
     // Force change detection
     this.cdr.detectChanges();
@@ -622,10 +631,26 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       }
     }
         
-  // Get all jobs as a single array for display
-  getAllJobsForDisplay(): JobResponse[] {
-    if (!this.batchQueueStatus) return [];
-    
+  // Get all jobs as a single array for display (including pending jobs)
+  getAllJobsForDisplay(): any[] {
+    // Start with pending jobs (convert to JobResponse-like format)
+    const pendingJobsDisplay = this.pendingJobs.map(job => ({
+      id: job.id,
+      url: job.url,
+      displayName: job.displayName,
+      uploadDate: job.uploadDate,
+      status: 'pending' as JobStatus,
+      progress: 0,
+      currentTask: job.loading ? 'Loading video info...' : 'Pending - waiting to start',
+      createdAt: new Date().toISOString(),
+      loading: job.loading
+    }));
+
+    // If no batch queue status, just return pending jobs
+    if (!this.batchQueueStatus) {
+      return pendingJobsDisplay;
+    }
+
     // Combine all jobs from all state arrays
     const allJobs = [
       ...(this.batchQueueStatus.queuedJobs || []),
@@ -636,7 +661,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       ...(this.batchQueueStatus.completedJobs || []),
       ...(this.batchQueueStatus.failedJobs || [])
     ];
-      
+
     // Create a map for efficient lookups
     const jobsMap = new Map<string, JobResponse>();
     allJobs.forEach(job => {
@@ -646,51 +671,54 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         console.log("Filtering out job with insufficient display info:", job?.id);
       }
     });
-    
+
     // Add any new jobs to our tracking
     const newJobIds = Array.from(jobsMap.keys())
       .filter(id => !this.originalJobOrder.includes(id));
-    
+
     if (newJobIds.length > 0) {
       newJobIds.forEach(id => {
         this.originalJobOrder.push(id);
         console.log(`Added new job ${id} to original order tracking`);
       });
     }
-    
+
     // Filter out jobs that no longer exist
     this.originalJobOrder = this.originalJobOrder
       .filter(id => jobsMap.has(id));
-    
+
     // Create the result array using the original order
-    const result = this.originalJobOrder
+    const activeJobs = this.originalJobOrder
       .map(id => jobsMap.get(id))
       .filter(job => job !== undefined) as JobResponse[];
-    
-    return result;
+
+    // Return pending jobs first, then active jobs
+    return [...pendingJobsDisplay, ...activeJobs];
   }
       
   // Update job status class based on state
   getJobStatusClassWithQueueType(job: any): string {
     if (!job) return '';
-  
+
     switch (job.status) {
-      case 'queued': 
+      case 'pending':
+        return 'status-pending';
+      case 'queued':
         return 'status-queued';
-      case 'downloading': 
+      case 'downloading':
         return 'status-downloading';
-      case 'downloaded': 
+      case 'downloaded':
         return 'status-downloaded';
-      case 'processing': 
+      case 'processing':
         return 'status-processing';
-      case 'transcribing': 
+      case 'transcribing':
         console.log('APPLYING TRANSCRIBING CLASS');
         return 'status-transcribing';
-      case 'completed': 
+      case 'completed':
         return 'status-completed';
-      case 'failed': 
+      case 'failed':
         return 'status-failed';
-      default: 
+      default:
         return '';
     }
   }
@@ -810,6 +838,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
   getStatusBadgeType(status: string): string {
     switch (status) {
+      case 'pending': return 'info';
       case 'completed': return 'success';
       case 'failed': return 'danger';
       case 'downloading':
@@ -879,39 +908,132 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.snackBar.open('Please enter URLs in the textarea', 'Dismiss', { duration: 3000 });
       return;
     }
-    
+
     // Process the URLs
     const urls = this.multiUrlText
       .split('\n')
       .map(url => url.trim())
       .filter(url => url.length > 0);
-      
-    // Get the current FormArray
-    const urlsFormArray = this.batchForm.get('urls') as FormArray;
-    
-    // Clear existing URLs if you want, or comment out if you want to append
-    while (urlsFormArray.length !== 0) {
-      urlsFormArray.removeAt(0);
+
+    if (urls.length === 0) {
+      this.snackBar.open('No valid URLs found', 'Dismiss', { duration: 3000 });
+      return;
     }
-    
-    // Add new form controls for each URL
+
+    // Add each URL to pending jobs and fetch metadata
     urls.forEach(url => {
-      const urlGroup = this.createUrlField();
-      urlGroup.get('url')?.setValue(url);
-      urlsFormArray.push(urlGroup);
-      
-      // Load filename for this URL
-      const index = urlsFormArray.length - 1;
-      this.loadFileNameForUrl(index);
+      const jobId = `pending-${this.pendingJobIdCounter++}`;
+
+      const downloadOptions: DownloadOptions = {
+        url,
+        quality: this.batchForm.get('quality')?.value,
+        convertToMp4: this.batchForm.get('convertToMp4')?.value,
+        fixAspectRatio: this.batchForm.get('fixAspectRatio')?.value,
+        useCookies: this.batchForm.get('useCookies')?.value,
+        browser: this.batchForm.get('browser')?.value,
+        outputDir: this.batchForm.get('outputDir')?.value,
+        normalizeAudio: this.batchForm.get('normalizeAudio')?.value,
+        useRmsNormalization: this.batchForm.get('useRmsNormalization')?.value,
+        rmsNormalizationLevel: this.batchForm.get('rmsNormalizationLevel')?.value,
+        useCompression: this.batchForm.get('useCompression')?.value,
+        compressionLevel: this.batchForm.get('compressionLevel')?.value,
+        transcribeVideo: this.batchForm.get('transcribeVideo')?.value,
+        displayName: this.getShortUrl(url)
+      };
+
+      // Add job with temporary display name
+      const pendingJob = {
+        id: jobId,
+        url,
+        displayName: this.getShortUrl(url),
+        uploadDate: '',
+        options: downloadOptions,
+        loading: true
+      };
+
+      this.pendingJobs.push(pendingJob);
+
+      // Fetch video info to get title and upload date
+      this.batchApiService.getVideoInfo(url)
+        .pipe(
+          catchError(err => {
+            console.error('Error fetching video info:', err);
+            // Keep the short URL as display name if fetch fails
+            const job = this.pendingJobs.find(j => j.id === jobId);
+            if (job) {
+              job.loading = false;
+            }
+            return of(null);
+          })
+        )
+        .subscribe((info: VideoInfo | null) => {
+          const job = this.pendingJobs.find(j => j.id === jobId);
+          if (job) {
+            job.loading = false;
+            if (info && info.title) {
+              const sanitizedTitle = this.generateSanitizedFilename(info.title);
+              job.displayName = sanitizedTitle;
+              job.uploadDate = info.uploadDate || '';
+              job.options.displayName = sanitizedTitle;
+            }
+            this.cdr.detectChanges();
+          }
+        });
     });
-    
-    // If no URLs, ensure at least one empty field
-    if (urlsFormArray.length === 0) {
-      urlsFormArray.push(this.createUrlField());
+
+    this.snackBar.open(`Added ${urls.length} video(s) to pending queue`, 'Dismiss', { duration: 3000 });
+    this.multiUrlText = ''; // Clear the textarea
+    this.cdr.detectChanges(); // Update the UI to show pending jobs
+  }
+
+  /**
+   * Start processing the queue - submit all pending jobs to backend
+   */
+  startQueue(): void {
+    if (!this.hasPendingJobs()) {
+      this.snackBar.open('No pending jobs to start', 'Dismiss', { duration: 3000 });
+      return;
     }
-    
-    // Clear the textarea
-    this.multiUrlText = '';
+
+    // Extract download options from pending jobs
+    const downloadOptions: DownloadOptions[] = this.pendingJobs.map(job => job.options);
+
+    // Submit all pending jobs to backend
+    this.batchApiService.addMultipleToBatchQueue(downloadOptions).subscribe({
+      next: (response) => {
+        this.snackBar.open(`Started processing ${response.jobIds.length} job(s)`, 'Dismiss', { duration: 3000 });
+
+        // Clear pending jobs since they've been submitted
+        this.pendingJobs = [];
+
+        // Refresh to show jobs in the actual queue
+        this.refreshBatchStatus();
+        this.cdr.detectChanges();
+      },
+      error: (error) => {
+        console.error('Error starting queue:', error);
+        this.snackBar.open('Error starting queue', 'Dismiss', { duration: 3000 });
+      }
+    });
+  }
+
+  /**
+   * Check if there are any pending jobs in the local queue
+   */
+  hasPendingJobs(): boolean {
+    return this.pendingJobs.length > 0;
+  }
+
+  /**
+   * Remove a pending job from the local queue
+   */
+  removePendingJob(jobId: string): void {
+    const index = this.pendingJobs.findIndex(job => job.id === jobId);
+    if (index >= 0) {
+      this.pendingJobs.splice(index, 1);
+      this.snackBar.open('Removed from pending queue', 'Dismiss', { duration: 2000 });
+      this.cdr.detectChanges();
+    }
   }
   
   setupOneWayUrlBinding(): void {
@@ -1346,7 +1468,34 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       });
     }
   }
-  
+
+  /**
+   * Open dialog to paste URLs
+   */
+  openPasteUrlsDialog(): void {
+    const dialogRef = this.dialog.open(PasteUrlsDialogComponent, {
+      width: '600px',
+      data: { batchForm: this.batchForm }
+    });
+
+    dialogRef.afterClosed().subscribe((result: string | null) => {
+      if (result) {
+        this.multiUrlText = result;
+        this.addUrlsFromTextarea();
+      }
+    });
+  }
+
+  /**
+   * Open dialog to configure download options
+   */
+  openDownloadOptionsDialog(): void {
+    this.dialog.open(DownloadOptionsDialogComponent, {
+      width: '600px',
+      data: { form: this.batchForm }
+    });
+  }
+
   refreshBatchStatus(): void {
     this.batchApiService.getBatchStatus().subscribe({
       next: (status) => {
@@ -1449,5 +1598,122 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         fullError: fullError
       }
     });
+  }
+}
+
+// Dialog component for pasting URLs
+@Component({
+  selector: 'app-paste-urls-dialog',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatButtonModule,
+    MatIconModule,
+    MatDialogModule
+  ],
+  template: `
+    <h2 mat-dialog-title>Paste URLs</h2>
+    <mat-dialog-content>
+      <mat-form-field appearance="outline" style="width: 100%;">
+        <mat-label>Paste multiple URLs (one per line)</mat-label>
+        <textarea
+          matInput
+          [(ngModel)]="urlText"
+          rows="10"
+          placeholder="Paste multiple URLs, one per line"
+          autofocus></textarea>
+      </mat-form-field>
+    </mat-dialog-content>
+    <mat-dialog-actions align="end">
+      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-raised-button color="primary" [mat-dialog-close]="urlText" [disabled]="!urlText || urlText.trim() === ''">
+        <mat-icon>add</mat-icon> Add to Queue
+      </button>
+    </mat-dialog-actions>
+  `
+})
+export class PasteUrlsDialogComponent {
+  urlText: string = '';
+}
+
+// Dialog component for download options
+@Component({
+  selector: 'app-download-options-dialog',
+  standalone: true,
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatButtonModule,
+    MatIconModule,
+    MatDialogModule,
+    MatSelectModule,
+    MatCheckboxModule
+  ],
+  template: `
+    <h2 mat-dialog-title>⚙️ Download Options</h2>
+    <mat-dialog-content>
+      <form [formGroup]="form">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+          <mat-form-field appearance="outline">
+            <mat-label>Quality</mat-label>
+            <mat-select formControlName="quality">
+              <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
+                {{ option.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" *ngIf="form.get('useCookies')?.value">
+            <mat-label>Browser</mat-label>
+            <mat-select formControlName="browser">
+              <mat-option *ngFor="let option of browserOptions" [value]="option.value">
+                {{ option.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" style="grid-column: 1 / -1;">
+            <mat-label>Output Directory</mat-label>
+            <input matInput formControlName="outputDir" readonly>
+            <mat-hint>Leave empty to use default location</mat-hint>
+          </mat-form-field>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+          <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
+          <mat-checkbox formControlName="fixAspectRatio">Fix aspect ratio</mat-checkbox>
+          <mat-checkbox formControlName="normalizeAudio">Normalize Audio</mat-checkbox>
+          <mat-checkbox formControlName="useCookies">Use browser cookies</mat-checkbox>
+          <mat-checkbox formControlName="transcribeVideo">Transcribe Video</mat-checkbox>
+        </div>
+      </form>
+    </mat-dialog-content>
+    <mat-dialog-actions align="end">
+      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-raised-button color="primary" (click)="save()">
+        <mat-icon>save</mat-icon> Save Options
+      </button>
+    </mat-dialog-actions>
+  `
+})
+export class DownloadOptionsDialogComponent {
+  form: FormGroup;
+  qualityOptions = QUALITY_OPTIONS;
+  browserOptions = BROWSER_OPTIONS;
+
+  constructor(
+    @Inject(MAT_DIALOG_DATA) public data: { form: FormGroup },
+    private dialogRef: MatDialogRef<DownloadOptionsDialogComponent>
+  ) {
+    this.form = data.form;
+  }
+
+  save(): void {
+    this.dialogRef.close(true);
   }
 }

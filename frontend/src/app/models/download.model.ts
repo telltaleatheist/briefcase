@@ -2,7 +2,7 @@
 
 // Add these missing type definitions
 export type BrowserType = 'auto' | 'chrome' | 'firefox' | 'edge' | 'safari' | 'brave' | 'opera';
-export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'transcribing' | 'completed' | 'failed';
+export type JobStatus = 'pending' | 'queued' | 'downloading' | 'downloaded' | 'processing' | 'transcribing' | 'completed' | 'failed';
 
 export interface Job {
   id: string;

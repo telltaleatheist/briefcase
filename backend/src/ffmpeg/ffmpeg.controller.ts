@@ -1,13 +1,15 @@
 // clippy/backend/src/ffmpeg/ffmpeg.controller.ts
-import { 
+import {
   Body,
-  Controller, 
-  Get, 
-  Param, 
-  Post, 
-  UploadedFile, 
-  UseInterceptors 
+  Controller,
+  Get,
+  Param,
+  Post,
+  Res,
+  UploadedFile,
+  UseInterceptors
 } from '@nestjs/common';
+import { Response } from 'express';
 import { Multer } from 'multer';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { FfmpegService } from './ffmpeg.service';
@@ -198,6 +200,29 @@ export class FfmpegController {
         success: false,
         message: error instanceof Error ? error.message : 'Error listing files'
       };
+    }
+  }
+
+  @Get('thumbnail/:filename')
+  async getThumbnail(@Param('filename') filename: string, @Res() res: Response) {
+    try {
+      const downloadsDir = path.join(process.cwd(), 'downloads');
+      const thumbnailPath = path.join(downloadsDir, filename);
+
+      if (!fs.existsSync(thumbnailPath)) {
+        return res.status(404).json({
+          success: false,
+          message: 'Thumbnail not found'
+        });
+      }
+
+      // Send the image file
+      res.sendFile(thumbnailPath);
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Error retrieving thumbnail'
+      });
     }
   }
 }
