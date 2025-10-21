@@ -16,7 +16,6 @@ import { environment } from '../environment/environment';
 import { AppComponent } from './app.component';
 import { BatchDownloadComponent } from './components/batch-download/batch-download.component';
 import { DownloadFormComponent } from './components/download-form/download-form.component';
-import { SettingsComponent } from './components/settings/settings.component';
 import { DownloadHistoryComponent } from './components/download-history/download-history.component';
 import { DownloadProgressComponent } from './components/download-progress/download-progress.component';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
@@ -48,7 +47,6 @@ const socketIoConfig: SocketIoConfig = {
     AppComponent,
     BatchDownloadComponent,
     DownloadFormComponent,
-    SettingsComponent,
     DownloadHistoryComponent,
     DownloadProgressComponent,
     ThemeToggleComponent  
