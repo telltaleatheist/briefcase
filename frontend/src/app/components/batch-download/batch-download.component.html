@@ -17,61 +17,43 @@
 
       <div class="panel-content">
         <div class="jobs-list">
-            <div *ngFor="let job of getAllJobsForDisplay()"
-                 class="job-card"
-                 [ngClass]="'job-' + (job.status || 'unknown')">
-              <div class="job-header">
-                <div class="job-title-container">
-                  <span class="job-title">{{ getDisplayName(job) }}</span>
-                  <span class="job-date" *ngIf="job.uploadDate">{{ job.uploadDate }}</span>
-                </div>
+          <div *ngFor="let job of getAllJobsForDisplay()"
+               class="job-card"
+               [ngClass]="'job-' + (job.status || 'unknown')">
+
+            <button *ngIf="job.status === 'pending'"
+                    type="button"
+                    class="remove-button"
+                    (click)="removePendingJob(job.id)"
+                    title="Remove from queue">
+              <mat-icon>close</mat-icon>
+            </button>
+
+            <div class="job-header">
+              <div class="job-title-section">
+                <span class="job-title">{{ getDisplayName(job) }}</span>
+                <span class="job-date" *ngIf="job.uploadDate">{{ job.uploadDate }}</span>
+              </div>
+              <div class="header-right">
                 <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
                   {{ isProcessingJob(job) ? 'Processing' : job.status }}
                 </span>
               </div>
+            </div>
 
-              <div class="job-progress-row">
-                <div class="job-progress">
-                  <div class="progress-label">
-                    {{ job.currentTask || getDefaultTaskForStatus(job.status) }}
-                  </div>
-                  <div class="progress-bar-container">
-                    <div class="progress-bar" [style.width.%]="job.progress || 0"></div>
-                  </div>
-                  <div class="progress-value">{{ job.progress || 0 }}%</div>
+            <div class="job-progress-section">
+              <div class="progress-bar-wrapper">
+                <div class="progress-bar-container">
+                  <div class="progress-bar" [style.width.%]="job.progress || 0"></div>
                 </div>
-
-                <div class="job-actions">
-                  <!-- Pending jobs: show remove button -->
-                  <button *ngIf="job.status === 'pending'"
-                          mat-icon-button
-                          (click)="removePendingJob(job.id)"
-                          matTooltip="Remove">
-                    <mat-icon>close</mat-icon>
-                  </button>
-
-                  <!-- Active/failed jobs: show error/cancel/retry buttons -->
-                  <button *ngIf="job.status === 'failed'"
-                          mat-icon-button
-                          (click)="showJobError(job)"
-                          matTooltip="View Error">
-                    <mat-icon>error_outline</mat-icon>
-                  </button>
-                  <button *ngIf="job.status !== 'completed' && job.status !== 'pending'"
-                          mat-icon-button
-                          (click)="cancelJob(job.id)"
-                          matTooltip="Cancel">
-                    <mat-icon>close</mat-icon>
-                  </button>
-                  <button *ngIf="job.status === 'failed'"
-                          mat-icon-button
-                          (click)="retryJob(job.id)"
-                          matTooltip="Retry">
-                    <mat-icon>refresh</mat-icon>
-                  </button>
-                </div>
+                <span class="progress-percent">{{ job.progress || 0 }}%</span>
               </div>
             </div>
+
+            <div class="job-task" *ngIf="job.currentTask">
+              {{ job.currentTask }}
+            </div>
+          </div>
 
           <div class="empty-state" *ngIf="getAllJobsForDisplay().length === 0">
             <mat-icon class="empty-icon">inbox</mat-icon>
