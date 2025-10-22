@@ -31,9 +31,11 @@
   gap: 0;
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   border: 1px solid var(--border-color);
   border-bottom: none;
+  max-height: 100%;
 }
 
 .job-card {
@@ -43,6 +45,8 @@
   padding: 0;
   transition: background 0.15s ease;
   overflow: hidden;
+  flex-shrink: 0;
+  min-height: 50px;
 
   &:hover {
     background: var(--bg-secondary);

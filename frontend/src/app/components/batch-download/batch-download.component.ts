@@ -1451,7 +1451,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.batchApiService.clearBatchQueues().subscribe({
         next: () => {
           this.snackBar.open('Batch queue cleared', 'Dismiss', { duration: 3000 });
-          
+
           // Clear local state immediately before server responds
           if (this.batchQueueStatus) {
             this.batchQueueStatus.queuedJobs = [];
@@ -1459,9 +1459,17 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             this.batchQueueStatus.downloadedJobs = [];
             this.batchQueueStatus.processingJobs = [];
             this.batchQueueStatus.transcribingJobs = [];
+            this.batchQueueStatus.completedJobs = [];
+            this.batchQueueStatus.failedJobs = [];
             this.batchQueueStatus.activeDownloadCount = 0;
           }
-          
+
+          // Clear pending jobs as well
+          this.batchStateService.clearPendingJobs();
+
+          // Clear the job order tracking
+          this.originalJobOrder = [];
+
           // Then refresh from server
           setTimeout(() => this.refreshBatchStatus(), 300);
         },
