@@ -1,9 +1,9 @@
-:host {display: flex; flex: 1; margin: 0; overflow: hidden;}
+:host {display: flex; flex: 1; margin: 0; overflow: hidden; min-height: 0; height: 100%;}
 :host *, :host *::before, :host *::after {box-sizing: border-box;}
-.normalize-container {flex: 1; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden;}
-.page-content {flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;}
-.panel {background: var(--bg-card); box-shadow: var(--shadow-md); border: 1px solid var(--border-color); overflow: hidden;}
-.full-height-panel {display: flex; flex-direction: column; height: 100%; min-height: 0;}
+.normalize-container {flex: 1; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden; min-height: 0; height: 100%;}
+.page-content {flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; height: 100%;}
+.panel {background: var(--bg-card); box-shadow: var(--shadow-md); border: 1px solid var(--border-color); overflow: hidden; flex: 1;}
+.full-height-panel {display: flex; flex-direction: column; flex: 1; min-height: 0;}
 .panel-header {background: var(--bg-secondary); padding: 1rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;}
 .panel-title {font-weight: 600; color: var(--primary-orange); margin: 0; font-size: 1.25rem;}
 .panel-header-left {display: flex; align-items: center;}
@@ -58,8 +58,6 @@
   overflow-x: hidden;
   min-height: 0;
   border: 1px solid var(--border-color);
-  border-bottom: none;
-  max-height: 100%;
 }
 
 .file-card {
@@ -162,7 +160,18 @@
   }
 }
 
-.empty-state {text-align: center; padding: 3rem 2rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);}
+.empty-state {
+  text-align: center;
+  padding: 3rem 2rem;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
 .empty-icon {font-size: 60px; width: 60px; height: 60px; margin: 0 auto 1rem; opacity: 0.3; color: var(--primary-orange);}
 .empty-state p {margin: 0.5rem 0; color: var(--text-secondary);}
 .empty-hint {font-size: 0.9rem; color: var(--text-muted);}

@@ -9,6 +9,8 @@ import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSidenavModule } from '@angular/material/sidenav';
+import { MatListModule } from '@angular/material/list';
 
 import { SocketService } from './services/socket.service';
 import { SettingsService } from './services/settings.service';
@@ -30,6 +32,8 @@ import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.com
     MatIconModule,
     MatButtonModule,
     MatTooltipModule,
+    MatSidenavModule,
+    MatListModule,
     ThemeToggleComponent  // Import the ThemeToggleComponent
   ]
 })
@@ -46,8 +50,8 @@ export class AppComponent implements OnInit, OnDestroy {
   public router = inject(Router);
 
   ngOnInit(): void {
-    // Force dark mode on startup
-    this.themeService.setDarkMode(false);
+    // Let theme service handle default (which is dark mode)
+    // Don't override the saved preference or default
 
     this.socketService.onConnect().subscribe(() => {
       this.snackBar.open('Connected to server', 'Dismiss', { duration: 3000 });

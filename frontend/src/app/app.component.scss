@@ -88,9 +88,13 @@
   color: inherit;
 }
 
-mat-toolbar {
+.app-toolbar {
   flex-shrink: 0;
-  z-index: 1000;
+  z-index: 1001;
+}
+
+.spacer {
+  flex: 1 1 auto;
 }
 
 .app-title {
@@ -98,13 +102,93 @@ mat-toolbar {
   font-weight: 500;
 }
 
-.header-button {
-  margin-left: 8px;
+// Sidebar Container - must fill remaining space after toolbar
+.sidenav-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
 }
 
+// Sidebar Navigation
+.app-sidenav {
+  width: 250px;
+  background-color: var(--bg-secondary) !important;
+  border-right: 1px solid var(--border-color);
+
+  .sidenav-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .nav-list {
+    flex: 1;
+  }
+
+  .theme-toggle-container {
+    padding: 16px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: var(--bg-secondary);
+  }
+
+  ::ng-deep .mat-mdc-list-base {
+    padding-top: 0;
+  }
+
+  ::ng-deep .mat-mdc-list-item {
+    height: 56px;
+    padding: 0 16px;
+    color: var(--text-primary) !important;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background-color: var(--bg-card) !important;
+    }
+
+    &.active-link {
+      background-color: var(--primary-orange) !important;
+      color: white !important;
+
+      .mat-icon {
+        color: white !important;
+      }
+
+      span {
+        color: white !important;
+      }
+    }
+
+    .mat-icon {
+      margin-right: 16px;
+      color: var(--text-secondary) !important;
+      opacity: 1 !important;
+    }
+
+    span {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: var(--text-primary) !important;
+    }
+  }
+}
+
+// Ensure sidenav-content is flexbox and fills height
+::ng-deep .mat-drawer-content {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+// Main Content
 .main-content {
   flex: 1;
-  padding: 16px;
+  padding: 0;
   overflow: hidden;
   background-color: inherit;
   min-height: 0;
@@ -112,6 +196,7 @@ mat-toolbar {
   flex-direction: column;
 }
 
+// Footer - pinned to bottom inside sidenav-content
 .app-footer {
   flex-shrink: 0;
   padding: 12px 16px;
@@ -119,7 +204,7 @@ mat-toolbar {
   text-align: center;
   border-top: 1px solid rgba(0, 0, 0, 0.1);
   background-color: var(--bg-primary);
-  z-index: 1000;
+  margin-top: auto; // This pushes footer to bottom
 }
 
 body.theme-dark .app-footer,

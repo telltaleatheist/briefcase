@@ -1,33 +1,37 @@
 <div class="app-container">
-  <mat-toolbar color="primary">
+  <!-- Top Toolbar -->
+  <mat-toolbar color="primary" class="app-toolbar">
     <span class="app-title">{{ title }}</span>
     <span class="spacer"></span>
-    <button
-      mat-icon-button
-      [routerLink]="['/batch']"
-      matTooltip="Download Videos"
-      class="header-button"
-    >
-      <mat-icon>download</mat-icon>
-    </button>
-    <button
-      mat-icon-button
-      [routerLink]="['/normalize']"
-      matTooltip="Audio Normalization"
-      class="header-button"
-    >
-      <mat-icon>equalizer</mat-icon>
-    </button>
-    <app-theme-toggle></app-theme-toggle>
   </mat-toolbar>
 
-  <main class="main-content">
-    <router-outlet></router-outlet>
-  </main>
+  <!-- Sidebar + Content Layout -->
+  <mat-sidenav-container class="sidenav-container">
+    <!-- Left Sidebar Navigation -->
+    <mat-sidenav mode="side" opened class="app-sidenav">
+      <div class="sidenav-content">
+        <mat-nav-list class="nav-list">
+          <a mat-list-item [routerLink]="['/batch']" routerLinkActive="active-link">
+            <mat-icon matListItemIcon>download</mat-icon>
+            <span matListItemTitle>Download Videos</span>
+          </a>
+          <a mat-list-item [routerLink]="['/normalize']" routerLinkActive="active-link">
+            <mat-icon matListItemIcon>equalizer</mat-icon>
+            <span matListItemTitle>Normalize Audio</span>
+          </a>
+        </mat-nav-list>
 
-  <footer class="app-footer">
-    <div class="footer-content">
-      <span>Clippy Video Downloader &copy; {{ currentYear }}</span>
-    </div>
-  </footer>
+        <div class="theme-toggle-container">
+          <app-theme-toggle></app-theme-toggle>
+        </div>
+      </div>
+    </mat-sidenav>
+
+    <!-- Main Content Area -->
+    <mat-sidenav-content>
+      <main class="main-content">
+        <router-outlet></router-outlet>
+      </main>
+    </mat-sidenav-content>
+  </mat-sidenav-container>
 </div>

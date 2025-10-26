@@ -16,8 +16,9 @@
       </div>
 
       <div class="panel-content">
+        <!-- Active Jobs List -->
         <div class="jobs-list">
-          <div *ngFor="let job of getAllJobsForDisplay()"
+          <div *ngFor="let job of getActiveJobsForDisplay()"
                class="job-card"
                [ngClass]="'job-' + (job.status || 'unknown')">
 
@@ -27,10 +28,9 @@
                 <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
                   {{ isProcessingJob(job) ? 'Processing' : job.status }}
                 </span>
-                <button *ngIf="job.status === 'pending'"
-                        type="button"
+                <button type="button"
                         class="remove-button"
-                        (click)="removePendingJob(job.id)"
+                        (click)="removeJob(job)"
                         title="Remove from queue">
                   <mat-icon>close</mat-icon>
                 </button>
@@ -40,12 +40,46 @@
             <div class="progress-bar" [style.width.%]="job.progress || 0"></div>
           </div>
 
-          <div class="empty-state" *ngIf="getAllJobsForDisplay().length === 0">
+          <div class="empty-state" *ngIf="getActiveJobsForDisplay().length === 0">
             <mat-icon class="empty-icon">inbox</mat-icon>
             <p>No active jobs</p>
             <p class="empty-hint">Click "Paste URLs" to add videos to the queue</p>
           </div>
         </div>
+
+        <!-- Completed Jobs Accordion -->
+        <mat-accordion *ngIf="hasCompletedJobs()" class="completed-accordion">
+          <mat-expansion-panel>
+            <mat-expansion-panel-header>
+              <mat-panel-title>
+                <mat-icon>history</mat-icon>
+                Completed & Failed ({{ getCompletedJobsForDisplay().length }})
+              </mat-panel-title>
+            </mat-expansion-panel-header>
+
+            <div class="completed-jobs-list">
+              <div *ngFor="let job of getCompletedJobsForDisplay()"
+                   class="job-card job-completed"
+                   [ngClass]="'job-' + (job.status || 'unknown')">
+
+                <div class="job-content">
+                  <span class="job-title">{{ getDisplayName(job) }}</span>
+                  <div class="job-right">
+                    <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
+                      {{ job.status }}
+                    </span>
+                    <button type="button"
+                            class="remove-button"
+                            (click)="removeJob(job)"
+                            title="Remove from list">
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </mat-expansion-panel>
+        </mat-accordion>
 
         <div class="panel-actions">
           <button mat-raised-button color="primary" (click)="startQueue()" [disabled]="!hasPendingJobs()">

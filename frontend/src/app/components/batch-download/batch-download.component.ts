@@ -708,6 +708,27 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Return pending jobs first, then active jobs
     return [...pendingJobsDisplay, ...activeJobs];
   }
+
+  // Get only active jobs (not completed or failed)
+  getActiveJobsForDisplay(): any[] {
+    const allJobs = this.getAllJobsForDisplay();
+    return allJobs.filter(job =>
+      job.status !== 'completed' && job.status !== 'failed'
+    );
+  }
+
+  // Get completed and failed jobs
+  getCompletedJobsForDisplay(): any[] {
+    const allJobs = this.getAllJobsForDisplay();
+    return allJobs.filter(job =>
+      job.status === 'completed' || job.status === 'failed'
+    );
+  }
+
+  // Check if there are completed jobs
+  hasCompletedJobs(): boolean {
+    return this.getCompletedJobsForDisplay().length > 0;
+  }
       
   // Update job status class based on state
   getJobStatusClassWithQueueType(job: any): string {
@@ -1038,6 +1059,32 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   removePendingJob(jobId: string): void {
     this.batchStateService.removePendingJob(jobId);
     this.snackBar.open('Removed from pending queue', 'Dismiss', { duration: 2000 });
+  }
+
+  /**
+   * Remove any job (pending, active, completed, or failed)
+   */
+  removeJob(job: any): void {
+    if (job.status === 'pending') {
+      // Remove pending job
+      this.removePendingJob(job.id);
+    } else if (job.status === 'completed' || job.status === 'failed') {
+      // Remove completed or failed job from the list
+      if (this.batchQueueStatus) {
+        if (job.status === 'completed') {
+          this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs?.filter(j => j.id !== job.id) || [];
+        } else {
+          this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs?.filter(j => j.id !== job.id) || [];
+        }
+        // Remove from order tracking
+        this.originalJobOrder = this.originalJobOrder.filter(id => id !== job.id);
+        this.cdr.detectChanges();
+        this.snackBar.open('Removed from list', 'Dismiss', { duration: 2000 });
+      }
+    } else {
+      // For active jobs (queued, downloading, processing, etc.), cancel them
+      this.cancelJob(job.id);
+    }
   }
   
   setupOneWayUrlBinding(): void {
@@ -1447,38 +1494,46 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
 
   clearQueue(): void {
-    if (confirm('Are you sure you want to clear the batch queue?')) {
-      this.batchApiService.clearBatchQueues().subscribe({
-        next: () => {
-          this.snackBar.open('Batch queue cleared', 'Dismiss', { duration: 3000 });
+    // Clear everything immediately - no confirmation needed
+    this.batchApiService.clearBatchQueues().subscribe({
+      next: () => {
+        this.snackBar.open('All videos cleared and operations cancelled', 'Dismiss', { duration: 3000 });
 
-          // Clear local state immediately before server responds
-          if (this.batchQueueStatus) {
-            this.batchQueueStatus.queuedJobs = [];
-            this.batchQueueStatus.downloadingJobs = [];
-            this.batchQueueStatus.downloadedJobs = [];
-            this.batchQueueStatus.processingJobs = [];
-            this.batchQueueStatus.transcribingJobs = [];
-            this.batchQueueStatus.completedJobs = [];
-            this.batchQueueStatus.failedJobs = [];
-            this.batchQueueStatus.activeDownloadCount = 0;
-          }
-
-          // Clear pending jobs as well
-          this.batchStateService.clearPendingJobs();
-
-          // Clear the job order tracking
-          this.originalJobOrder = [];
-
-          // Then refresh from server
-          setTimeout(() => this.refreshBatchStatus(), 300);
-        },
-        error: (error) => {
-          this.snackBar.open('Failed to clear batch queue', 'Dismiss', { duration: 3000 });
-          console.error('Error clearing batch queue:', error);
+        // Clear local state immediately before server responds
+        if (this.batchQueueStatus) {
+          this.batchQueueStatus.queuedJobs = [];
+          this.batchQueueStatus.downloadingJobs = [];
+          this.batchQueueStatus.downloadedJobs = [];
+          this.batchQueueStatus.processingJobs = [];
+          this.batchQueueStatus.transcribingJobs = [];
+          this.batchQueueStatus.completedJobs = [];
+          this.batchQueueStatus.failedJobs = [];
+          this.batchQueueStatus.activeDownloadCount = 0;
         }
-      });
-    }
+
+        // Clear pending jobs as well
+        this.batchStateService.clearPendingJobs();
+
+        // Clear the job order tracking
+        this.originalJobOrder = [];
+
+        // Clear display name mappings
+        this.urlDisplayNames.clear();
+
+        // Clear full error storage
+        this.jobFullErrors.clear();
+
+        // Force UI update
+        this.cdr.detectChanges();
+
+        // Then refresh from server to confirm everything is clear
+        setTimeout(() => this.refreshBatchStatus(), 300);
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to clear batch queue', 'Dismiss', { duration: 3000 });
+        console.error('Error clearing batch queue:', error);
+      }
+    });
   }
 
   /**
@@ -1628,24 +1683,31 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   ],
   template: `
     <h2 mat-dialog-title>Paste URLs</h2>
-    <mat-dialog-content>
+    <mat-dialog-content style="padding-top: 20px;">
       <mat-form-field appearance="outline" style="width: 100%;">
         <mat-label>Paste multiple URLs (one per line)</mat-label>
         <textarea
           matInput
           [(ngModel)]="urlText"
           rows="10"
-          placeholder="Paste multiple URLs, one per line"
+          placeholder="https://youtube.com/watch?v=..."
           autofocus></textarea>
       </mat-form-field>
     </mat-dialog-content>
-    <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Cancel</button>
+    <mat-dialog-actions align="end" style="padding: 16px 24px;">
+      <button mat-stroked-button mat-dialog-close style="margin-right: 8px;">
+        Cancel
+      </button>
       <button mat-raised-button color="primary" [mat-dialog-close]="urlText" [disabled]="!urlText || urlText.trim() === ''">
         <mat-icon>add</mat-icon> Add to Queue
       </button>
     </mat-dialog-actions>
-  `
+  `,
+  styles: [`
+    :host ::ng-deep .mat-mdc-dialog-content {
+      max-height: 70vh;
+    }
+  `]
 })
 export class PasteUrlsDialogComponent {
   urlText: string = '';

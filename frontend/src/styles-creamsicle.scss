@@ -52,6 +52,11 @@
   --border-color: #374151;
   --shadow-color: rgba(0, 0, 0, 0.5);
 
+  // Brighter icons in sidebar
+  .app-sidenav .mat-icon {
+    color: #e5e7eb !important;
+  }
+
   // Dark mode Material component overrides
   .mat-mdc-card {
     background: var(--bg-card) !important;
@@ -145,6 +150,86 @@
     color: var(--text-secondary) !important;
     opacity: 1;
   }
+
+  // Sidenav dark mode
+  .mat-drawer-container {
+    background-color: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-drawer {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-drawer-content {
+    background-color: var(--bg-primary) !important;
+  }
+
+  // List items dark mode
+  .mat-mdc-list-item,
+  .mdc-list-item {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-list-item .mdc-list-item__primary-text {
+    color: var(--text-primary) !important;
+  }
+
+  // Dialog dark mode (for paste URLs modal and others)
+  .mat-mdc-dialog-surface,
+  .mdc-dialog__surface {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-dialog-title {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-dialog-content {
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-dialog-actions {
+    background-color: var(--bg-card) !important;
+  }
+
+  // Dialog buttons dark mode
+  .mat-mdc-dialog-actions .mat-mdc-button,
+  .mat-mdc-dialog-actions .mat-mdc-outlined-button,
+  .mat-mdc-dialog-actions .mdc-button {
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+  }
+
+  .mat-mdc-outlined-button:not(:disabled) {
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+
+  .mat-mdc-outlined-button:hover:not(:disabled) {
+    background-color: var(--bg-secondary) !important;
+  }
+
+  // Stroked buttons in dark mode
+  .mat-mdc-unelevated-button:not(.mat-primary):not(.mat-accent):not(.mat-warn),
+  .mdc-button--outlined {
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+
+  // Fix emojis appearing black in dark mode
+  .panel-title {
+    color: var(--primary-orange) !important;
+
+    // Ensure emojis don't inherit dark text color
+    filter: none !important;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary) !important;
+  }
 }
 
 /* Fix placeholder overlap with Material floating label */
@@ -189,4 +274,24 @@ body {
   font-family: var(--font-family) !important;
   background: var(--bg-primary) !important;
   color: var(--text-primary) !important;
+}
+
+// FORCE full height layout - override Angular Material defaults
+.mat-drawer-container {
+  height: 100% !important;
+  position: relative !important;
+}
+
+.mat-drawer-content {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+}
+
+// Force router outlet to fill height
+router-outlet + * {
+  display: flex !important;
+  flex: 1 !important;
+  min-height: 0 !important;
 }
