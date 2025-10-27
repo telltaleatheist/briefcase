@@ -22,7 +22,7 @@
                class="job-card"
                [ngClass]="'job-' + (job.status || 'unknown')">
 
-            <div class="job-content">
+            <div class="job-content" (click)="toggleJobDetails(job.id)">
               <span class="job-title">{{ getDisplayName(job) }}</span>
               <div class="job-right">
                 <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
@@ -30,9 +30,23 @@
                 </span>
                 <button type="button"
                         class="remove-button"
-                        (click)="removeJob(job)"
+                        (click)="removeJob(job); $event.stopPropagation()"
                         title="Remove from queue">
                   <mat-icon>close</mat-icon>
+                </button>
+              </div>
+            </div>
+
+            <!-- Expandable URL section -->
+            <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
+              <div class="url-container">
+                <span class="url-label">URL:</span>
+                <input class="url-input" [value]="job.url" readonly (click)="($any($event.target)).select()">
+                <button mat-icon-button
+                        class="copy-button"
+                        (click)="copyUrl(job.url)"
+                        title="Copy URL">
+                  <mat-icon>content_copy</mat-icon>
                 </button>
               </div>
             </div>
@@ -62,7 +76,7 @@
                    class="job-card job-completed"
                    [ngClass]="'job-' + (job.status || 'unknown')">
 
-                <div class="job-content">
+                <div class="job-content" (click)="toggleJobDetails(job.id)">
                   <span class="job-title">{{ getDisplayName(job) }}</span>
                   <div class="job-right">
                     <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
@@ -70,9 +84,23 @@
                     </span>
                     <button type="button"
                             class="remove-button"
-                            (click)="removeJob(job)"
+                            (click)="removeJob(job); $event.stopPropagation()"
                             title="Remove from list">
                       <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Expandable URL section -->
+                <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
+                  <div class="url-container">
+                    <span class="url-label">URL:</span>
+                    <input class="url-input" [value]="job.url" readonly (click)="($any($event.target)).select()">
+                    <button mat-icon-button
+                            class="copy-button"
+                            (click)="copyUrl(job.url)"
+                            title="Copy URL">
+                      <mat-icon>content_copy</mat-icon>
                     </button>
                   </div>
                 </div>

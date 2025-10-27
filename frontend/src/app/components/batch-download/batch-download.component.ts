@@ -80,6 +80,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   // Store full error messages for jobs
   private jobFullErrors: Map<string, string> = new Map();
 
+  // Track which job details are expanded
+  private expandedJobIds = new Set<string>();
+
   // Store pending jobs that haven't been submitted yet (now coming from service)
   pendingJobs: PendingJob[] = [];
   private pendingJobsSubscription: Subscription | null = null;
@@ -1099,7 +1102,37 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.cancelJob(job.id);
     }
   }
-  
+
+  /**
+   * Toggle job details expansion
+   */
+  toggleJobDetails(jobId: string): void {
+    if (this.expandedJobIds.has(jobId)) {
+      this.expandedJobIds.delete(jobId);
+    } else {
+      this.expandedJobIds.add(jobId);
+    }
+  }
+
+  /**
+   * Check if job details are expanded
+   */
+  isJobDetailsExpanded(jobId: string): boolean {
+    return this.expandedJobIds.has(jobId);
+  }
+
+  /**
+   * Copy URL to clipboard
+   */
+  copyUrl(url: string): void {
+    navigator.clipboard.writeText(url).then(() => {
+      this.snackBar.open('URL copied to clipboard', 'Dismiss', { duration: 2000 });
+    }).catch(err => {
+      console.error('Failed to copy URL:', err);
+      this.snackBar.open('Failed to copy URL', 'Dismiss', { duration: 2000 });
+    });
+  }
+
   setupOneWayUrlBinding(): void {
     // First, unsubscribe from the existing subscription if it exists
     if (this.urlChangeSubscription) {

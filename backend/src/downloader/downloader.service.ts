@@ -41,20 +41,71 @@ export class DownloaderService implements OnModuleInit {
   onModuleInit() {
     this.logger.log('Downloader service initialized');
   }
-  
+
   /**
-   * Main method to download a video from a URL
+   * Configure YouTube download with multiple fallback client methods
+   * Tries: android -> ios -> mweb -> web -> default
+   */
+  private configureYouTubeDownload(ytDlpManager: YtDlpManager, options: DownloadOptions, clientType: string = 'android'): void {
+    this.logger.log(`Configuring YouTube download with client: ${clientType}`);
+
+    // Use QuickTime-compatible format (mp4 with avc1 video codec)
+    ytDlpManager.addOption('--format', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best');
+
+    // Set the player client based on type
+    switch (clientType) {
+      case 'android':
+        // Android client - works without cookies for most videos
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+        this.logger.log('Using Android client (no cookies required)');
+        break;
+
+      case 'ios':
+        // iOS client - another alternative that often works
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=ios');
+        this.logger.log('Using iOS client');
+        break;
+
+      case 'mweb':
+        // Mobile web client - lightweight fallback
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=mweb');
+        this.logger.log('Using mobile web client');
+        break;
+
+      case 'web':
+        // Standard web client
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=web');
+        this.logger.log('Using web client');
+        break;
+
+      case 'default':
+        // No client override - use yt-dlp default behavior
+        this.logger.log('Using yt-dlp default client');
+        break;
+
+      default:
+        // Fallback to android if unknown type
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+        this.logger.log('Unknown client type, defaulting to Android');
+    }
+  }
+
+  /**
+   * Main method to download a video from a URL with automatic retry on different clients
    */
   async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadResult> {
     try {
       this.logger.log(`Starting download for URL: ${options.url}`);
-      
+
+      // Capture start time BEFORE starting download
+      const downloadStartTime = Date.now();
+
       // Emit download-started event
       this.eventService.emitDownloadStarted(options.url, jobId);
-      
+
       const downloadFolder = this.pathService.getSafePath(options.outputDir);
       this.logger.log(`Using download directory: ${downloadFolder}`);
-      
+
       if (!this.pathService.ensurePathExists(downloadFolder)) {
         const error = `Cannot create or access download directory: ${downloadFolder}`;
         this.eventService.emitDownloadFailed(options.url, error, jobId);
@@ -108,16 +159,8 @@ export class DownloaderService implements OnModuleInit {
       if (options.url.includes('reddit.com')) {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
-        // YouTube-specific configuration
-
-        // Use Android client to avoid 403 errors (works without cookies on most videos)
-        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
-
-        // Use QuickTime-compatible format (mp4 with avc1 video codec)
-        ytDlpManager.addOption('--format', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best');
-
-        // Note: Safari cookies require Full Disk Access permission on macOS
-        // The Android client works well without cookies for most videos
+        // YouTube-specific configuration with fallback methods
+        this.configureYouTubeDownload(ytDlpManager, options);
       } else {
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
 
@@ -150,11 +193,90 @@ export class DownloaderService implements OnModuleInit {
       });
       
       try {
-        // Run the download with retries
-        const output = await ytDlpManager.runWithRetry(3, 2000);
-        
-        // Try to determine the output file
-        outputFile = await this.determineOutputFile(output, downloadFolder);
+        // For YouTube, try multiple client methods if the first one fails
+        if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
+          const clientMethods = ['android', 'ios', 'mweb', 'web', 'default'];
+          let lastError: Error | null = null;
+
+          for (const clientType of clientMethods) {
+            try {
+              this.logger.log(`Attempting YouTube download with ${clientType} client...`);
+
+              // Re-create ytDlpManager with new client configuration
+              const newYtDlpManager = new YtDlpManager(this.sharedConfigService);
+              newYtDlpManager.input(options.url).output(outputTemplate);
+
+              const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+              if (ffmpegPath) {
+                newYtDlpManager.addOption('--ffmpeg-location', ffmpegPath);
+              }
+
+              newYtDlpManager.addOption('--verbose')
+                            .addOption('--no-check-certificates')
+                            .addOption('--no-playlist')
+                            .addOption('--force-overwrites');
+
+              if (options.convertToMp4) {
+                newYtDlpManager.addOption('--merge-output-format', 'mp4');
+              }
+
+              // Configure YouTube download with current client type
+              this.configureYouTubeDownload(newYtDlpManager, options, clientType);
+
+              // Update active downloads reference
+              if (jobId) {
+                this.activeDownloads.set(jobId, newYtDlpManager);
+              }
+
+              // Set up progress tracking
+              newYtDlpManager.on('progress', (progress) => {
+                this.eventService.emitDownloadProgress(
+                  progress.percent,
+                  `Downloading (${clientType} client)`,
+                  jobId,
+                  {
+                    speed: progress.downloadSpeed,
+                    eta: progress.eta,
+                    totalSize: progress.totalSize,
+                    downloadedBytes: progress.downloadedBytes
+                  }
+                );
+              });
+
+              // Try this client method
+              const output = await newYtDlpManager.runWithRetry(2, 1000);
+              outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+
+              if (outputFile && fs.existsSync(outputFile)) {
+                this.logger.log(`✓ Success with ${clientType} client!`);
+                break; // Success! Exit the loop
+              } else {
+                // No file was created - treat this as a failure
+                const errorMsg = `${clientType} client completed but no output file was created`;
+                this.logger.warn(`✗ ${errorMsg}`);
+                throw new Error(errorMsg);
+              }
+            } catch (error) {
+              lastError = error as Error;
+              this.logger.warn(`✗ ${clientType} client failed: ${lastError.message}`);
+
+              // Continue to next client method
+              if (clientType !== clientMethods[clientMethods.length - 1]) {
+                this.logger.log(`Trying next client method...`);
+                continue;
+              } else {
+                // This was the last method, throw the error
+                throw lastError;
+              }
+            }
+          }
+        } else {
+          // Non-YouTube download - use standard method
+          const output = await ytDlpManager.runWithRetry(3, 2000);
+          outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+        }
+
+        // Check if we have a valid output file
         
         if (outputFile && fs.existsSync(outputFile)) {
           this.logger.log(`Download successful: ${outputFile}`);
@@ -242,7 +364,7 @@ export class DownloaderService implements OnModuleInit {
   /**
    * Determine the output file from yt-dlp output or file system
    */
-  private async determineOutputFile(output: string, downloadFolder: string): Promise<string | null> {
+  private async determineOutputFile(output: string, downloadFolder: string, downloadStartTime: number): Promise<string | null> {
     // Try to extract from output first
     let outputFile: string | null = null;
     
@@ -274,25 +396,52 @@ export class DownloaderService implements OnModuleInit {
     try {
       // Add delay to give the file system time to update
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       const files = fs.readdirSync(downloadFolder);
       if (files.length === 0) {
         this.logger.warn(`No files found in download directory: ${downloadFolder}`);
         return null;
       }
-      
+
+      // Define valid media file extensions
+      const validExtensions = [
+        '.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.wmv', '.m4v',
+        '.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac',
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'
+      ];
+
       const mostRecentFile = files
-        .map(file => ({ 
-          file, 
+        .filter(file => {
+          // Filter out hidden files, system files, and macOS metadata files
+          if (file.startsWith('.') || file.startsWith('._')) return false;
+
+          // Filter for valid media extensions
+          const ext = path.extname(file).toLowerCase();
+          if (!validExtensions.includes(ext)) return false;
+
+          // CRITICAL: Only consider files created AFTER download started
+          const filePath = path.join(downloadFolder, file);
+          const fileStats = fs.statSync(filePath);
+          const fileModTime = fileStats.mtime.getTime();
+
+          // File must have been modified after we started the download
+          return fileModTime >= downloadStartTime;
+        })
+        .map(file => ({
+          file,
           path: path.join(downloadFolder, file),
-          mtime: fs.statSync(path.join(downloadFolder, file)).mtime 
+          mtime: fs.statSync(path.join(downloadFolder, file)).mtime
         }))
         .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())[0];
-        
+
       if (mostRecentFile) {
         outputFile = mostRecentFile.path;
         this.logger.log(`Inferred output file from file system: ${outputFile}`);
         return outputFile;
+      } else {
+        this.logger.warn(`No valid media files found in download directory created after ${new Date(downloadStartTime).toISOString()}`);
+        this.logger.warn(`Download folder: ${downloadFolder}`);
+        this.logger.warn(`Files in folder: ${files.join(', ')}`);
       }
     } catch (error) {
       this.logger.error(`Error while trying to infer output file: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -527,43 +676,58 @@ export class DownloaderService implements OnModuleInit {
         this.logger.error(`File does not exist: ${filePath}`);
         return filePath;
       }
-      
+
       const filename = path.basename(filePath);
       const directory = path.dirname(filePath);
-      
+      const extension = path.extname(filename);
+      const nameWithoutExt = filename.slice(0, -extension.length);
+
+      // Sanitize the filename by replacing special characters
+      // Replace slashes, backslashes, colons, pipes, asterisks, question marks, quotes, and other problematic chars
+      const sanitizedName = nameWithoutExt.replace(/[\/\\:*?"<>|]/g, '-');
+
       // Check if the filename already starts with a date pattern (YYYY-MM-DD )
-      if (/^\d{4}-\d{2}-\d{2} /.test(filename)) {
+      if (/^\d{4}-\d{2}-\d{2} /.test(sanitizedName)) {
+        const sanitizedFilename = sanitizedName + extension;
+
+        // Only rename if sanitization changed the name
+        if (sanitizedFilename !== filename) {
+          const sanitizedPath = path.join(directory, sanitizedFilename);
+          fs.renameSync(filePath, sanitizedPath);
+          this.logger.log(`Sanitized filename: ${sanitizedFilename}`);
+          return sanitizedPath;
+        }
+
         this.logger.log(`File already has correct date format: ${filename}`);
         return filePath;
       }
       
       // Check if it has the YYYYMMDD- format
-      if (/^\d{8}[-_ ]/.test(filename)) {
-        // Convert YYYYMMDD- to YYYY-MM-DD 
-        const dateStr = filename.substring(0, 8);
-        const separator = filename.charAt(8);
-        const restOfFilename = filename.substring(9);
-        
+      if (/^\d{8}[-_ ]/.test(sanitizedName)) {
+        // Convert YYYYMMDD- to YYYY-MM-DD
+        const dateStr = sanitizedName.substring(0, 8);
+        const restOfFilename = sanitizedName.substring(9);
+
         // Format the date with dashes
         const year = dateStr.substring(0, 4);
         const month = dateStr.substring(4, 6);
         const day = dateStr.substring(6, 8);
         const newDateFormat = `${year}-${month}-${day} `;
-        
-        const newFilename = `${newDateFormat}${restOfFilename}`;
+
+        const newFilename = `${newDateFormat}${restOfFilename}${extension}`;
         const newPath = path.join(directory, newFilename);
-        
+
         // Rename the file
         fs.renameSync(filePath, newPath);
         this.logger.log(`Reformatted date in filename: ${newFilename}`);
         return newPath;
       }
-      
+
       // If no date, add today's date as prefix with proper format
       const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const newFilename = `${today} ${filename}`;
+      const newFilename = `${today} ${sanitizedName}${extension}`;
       const newPath = path.join(directory, newFilename);
-      
+
       // Rename the file
       fs.renameSync(filePath, newPath);
       this.logger.log(`Adding date prefix to file: ${newFilename}`);
@@ -657,7 +821,7 @@ export class DownloaderService implements OnModuleInit {
   async getVideoInfo(url: string): Promise<any> {
     try {
       this.logger.log(`Fetching video info for URL: ${url}`);
-      
+
       // Create and configure YtDlpManager
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);
       ytDlpManager
@@ -665,10 +829,19 @@ export class DownloaderService implements OnModuleInit {
         .addOption('--dump-json')
         .addOption('--no-playlist')
         .addOption('--flat-playlist');
-      
+
+      // For YouTube URLs, use android client for better reliability
+      if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+      }
+
       // Execute the command and get output
       const output = await ytDlpManager.run();
-      
+
+      this.logger.log(`yt-dlp output length: ${output.length} characters`);
+      this.logger.log(`yt-dlp output preview: ${output.substring(0, 200)}...`);
+      this.logger.log(`yt-dlp output end: ...${output.substring(Math.max(0, output.length - 100))}`);
+
       try {
         // Parse the JSON output
         const videoInfo = JSON.parse(output.trim());

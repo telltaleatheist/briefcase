@@ -57,6 +57,11 @@
   justify-content: space-between;
   padding: 0.75rem 1rem;
   gap: 1rem;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
 }
 
 .job-title {
@@ -107,6 +112,67 @@
     mat-icon {
       color: var(--danger-text) !important;
     }
+  }
+}
+
+.job-details {
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 100px;
+  }
+}
+
+.url-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.url-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.url-input {
+  flex: 1;
+  padding: 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: monospace;
+  cursor: text;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+  }
+
+  &:hover {
+    border-color: var(--text-secondary);
+  }
+}
+
+.copy-button {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+
+  &:hover {
+    color: var(--primary-orange);
   }
 }
 

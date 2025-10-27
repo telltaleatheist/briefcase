@@ -75,10 +75,9 @@ export class YtDlpManager extends EventEmitter {
    * Set the input URL for the download
    */
   input(url: string): YtDlpManager {
-    const cleanUrl = url
-    .split('?')[0]           // Remove query string
-    .replace(/\/+$/, '');    // Remove trailing slashes
-  
+    // Just remove trailing slashes, but KEEP the query string (critical for YouTube, etc.)
+    const cleanUrl = url.replace(/\/+$/, '');
+
     this.inputUrl = cleanUrl;
     return this;
   }
@@ -179,12 +178,13 @@ export class YtDlpManager extends EventEmitter {
     if (this.outputTemplate) {
       finalArgs.push('-o', this.outputTemplate);
     }
-    
-    // Add progress option
-    if (!this.options.includes('--progress-template')) {
+
+    // Add progress option (but NOT for JSON dump operations)
+    const isDumpJson = this.options.includes('--dump-json');
+    if (!this.options.includes('--progress-template') && !isDumpJson) {
       finalArgs.push('--progress-template', '%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress.speed)s eta %(progress.eta)s [%(progress._percent_str)s]');
     }
-  
+
     // Add other options
     finalArgs.push(...this.options);
     
@@ -210,13 +210,17 @@ export class YtDlpManager extends EventEmitter {
       // Set up stdout and stderr handlers
       this.currentProcess.stdout?.on('data', (data) => {
         const chunk = data.toString();
+        logger.info(`[STDOUT] Received ${chunk.length} bytes`);
         stdoutBuffer += chunk;
-        
-        // Process output line by line
-        const lines = chunk.split(/\r?\n/);
-        for (const line of lines) {
-          if (line.trim()) {
-            this.parseProgressUpdate(line);
+
+        // Process output line by line (but skip for JSON dumps)
+        const isDumpJson = this.options.includes('--dump-json');
+        if (!isDumpJson) {
+          const lines = chunk.split(/\r?\n/);
+          for (const line of lines) {
+            if (line.trim()) {
+              this.parseProgressUpdate(line);
+            }
           }
         }
       });
@@ -256,12 +260,17 @@ export class YtDlpManager extends EventEmitter {
       // Handle process exit
       this.currentProcess.on('close', (code) => {
         this.isRunning = false;
-        
+
+        logger.info(`[PROCESS EXIT] Code: ${code}, Stdout length: ${stdoutBuffer.length}, Stderr length: ${stderrBuffer.length}`);
+        if (stderrBuffer.length > 0) {
+          logger.info(`[STDERR CONTENT]: ${stderrBuffer.substring(0, 500)}`);
+        }
+
         if (this.aborted) {
           reject(new Error('Download was cancelled'));
           return;
         }
-        
+
         if (code === 0) {
           // Emit a final progress event to show completion
           this.emit('progress', {
@@ -271,7 +280,7 @@ export class YtDlpManager extends EventEmitter {
             downloadSpeed: 0,
             eta: 0
           });
-          
+
           resolve(stdoutBuffer);
         } else {
           reject(new Error(`yt-dlp exited with code ${code}. Error: ${stderrBuffer}`));
