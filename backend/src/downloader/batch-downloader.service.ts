@@ -445,6 +445,29 @@ export class BatchDownloaderService {
     };
   }
   
+  // Delete a single job from the queue
+  deleteJob(jobId: string): boolean {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      this.logger.warn(`Attempted to delete non-existent job: ${jobId}`);
+      return false;
+    }
+
+    // If the job is actively downloading, cancel it first
+    if (job.status === 'downloading') {
+      this.logger.log(`Cancelling download for job ${jobId} before deletion`);
+      this.downloaderService.cancelDownload(jobId);
+    }
+
+    // Remove from jobs map
+    this.jobs.delete(jobId);
+    this.logger.log(`Deleted job ${jobId}. Remaining jobs: ${this.jobs.size}`);
+
+    // Update UI
+    this.emitQueueUpdate();
+    return true;
+  }
+
   // Clear ALL jobs and cancel any ongoing operations
   clearQueues(): void {
     this.logger.log(`Clearing all queues. Total jobs before clear: ${this.jobs.size}`);

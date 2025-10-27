@@ -1069,18 +1069,31 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       // Remove pending job
       this.removePendingJob(job.id);
     } else if (job.status === 'completed' || job.status === 'failed') {
-      // Remove completed or failed job from the list
-      if (this.batchQueueStatus) {
-        if (job.status === 'completed') {
-          this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs?.filter(j => j.id !== job.id) || [];
-        } else {
-          this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs?.filter(j => j.id !== job.id) || [];
+      // Delete completed or failed job from backend
+      this.batchApiService.deleteJob(job.id).subscribe({
+        next: (response) => {
+          if (response.success) {
+            // Remove from frontend display
+            if (this.batchQueueStatus) {
+              if (job.status === 'completed') {
+                this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs?.filter(j => j.id !== job.id) || [];
+              } else {
+                this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs?.filter(j => j.id !== job.id) || [];
+              }
+              // Remove from order tracking
+              this.originalJobOrder = this.originalJobOrder.filter(id => id !== job.id);
+              this.cdr.detectChanges();
+              this.snackBar.open('Removed from queue', 'Dismiss', { duration: 2000 });
+            }
+          } else {
+            this.snackBar.open('Failed to remove job', 'Dismiss', { duration: 2000 });
+          }
+        },
+        error: (error) => {
+          console.error('Error removing job:', error);
+          this.snackBar.open('Error removing job', 'Dismiss', { duration: 2000 });
         }
-        // Remove from order tracking
-        this.originalJobOrder = this.originalJobOrder.filter(id => id !== job.id);
-        this.cdr.detectChanges();
-        this.snackBar.open('Removed from list', 'Dismiss', { duration: 2000 });
-      }
+      });
     } else {
       // For active jobs (queued, downloading, processing, etc.), cancel them
       this.cancelJob(job.id);

@@ -63,6 +63,12 @@ export class DownloaderController {
     return { success: true, config };
   }
 
+  @Delete('batch/:jobId')
+  async deleteJob(@Param('jobId') jobId: string) {
+    const success = this.batchDownloaderService.deleteJob(jobId);
+    return { success, message: success ? 'Job deleted' : 'Job not found' };
+  }
+
   @Delete('batch')
   async clearBatchQueues() {
     this.batchDownloaderService.clearQueues();

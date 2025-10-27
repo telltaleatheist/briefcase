@@ -42,8 +42,12 @@ export class BatchApiService {
   cancelJob(jobId: string): Observable<{success: boolean, message: string}> {
     return this.http.delete<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/job/${jobId}`);
   }
-  
+
+  deleteJob(jobId: string): Observable<{success: boolean, message: string}> {
+    return this.http.delete<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/${jobId}`);
+  }
+
   retryJob(jobId: string): Observable<{success: boolean, message: string}> {
     return this.http.post<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/job/${jobId}/retry`, {});
-  }  
+  }
 }
