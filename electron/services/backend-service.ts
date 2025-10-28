@@ -259,10 +259,26 @@ export class BackendService {
   private setupProcessEventHandlers(): void {
     if (!this.backendProcess) return;
     
-    // Handle stdout
+    // Handle stdout - only log important messages, skip verbose progress updates
     if (this.backendProcess.stdout) {
       this.backendProcess.stdout.on('data', (data: Buffer) => {
-        log.info(`[Backend stdout]: ${data.toString().trim()}`);
+        const output = data.toString().trim();
+
+        // Skip routine progress logging (only log errors, warnings, or important info)
+        // Suppress "Python progress:" messages unless they're important milestones
+        if (output.includes('Python progress:')) {
+          // Only log major phase changes or important milestones
+          if (output.includes('Starting') ||
+              output.includes('complete') ||
+              output.includes('Failed') ||
+              output.includes('Error')) {
+            log.info(`[Backend]: ${output}`);
+          }
+          // Skip routine "Analyzing chunk X/Y" messages
+        } else {
+          // Log all non-progress messages
+          log.info(`[Backend]: ${output}`);
+        }
       });
     } else {
       log.warn('Backend stdout stream is not available');
