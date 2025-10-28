@@ -240,7 +240,7 @@ def analyze_with_ollama(
         analyzed_sections = []
 
         for i, chunk in enumerate(chunks, 1):
-            chunk_progress = 70 + (i / len(chunks)) * 20  # 70-90%
+            chunk_progress = round(70 + (i / len(chunks)) * 20)  # 70-90%
             send_progress("analysis", chunk_progress, f"Analyzing chunk {i}/{len(chunks)}...")
 
             # Identify interesting sections
