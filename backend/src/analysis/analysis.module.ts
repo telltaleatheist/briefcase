@@ -6,9 +6,10 @@ import { PythonBridgeService } from './python-bridge.service';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { PathModule } from '../path/path.module';
+import { SharedConfigModule } from '../config/shared-config.module';
 
 @Module({
-  imports: [FfmpegModule, DownloaderModule, PathModule],
+  imports: [FfmpegModule, DownloaderModule, PathModule, SharedConfigModule],
   controllers: [AnalysisController],
   providers: [AnalysisService, OllamaService, PythonBridgeService],
   exports: [AnalysisService, OllamaService],

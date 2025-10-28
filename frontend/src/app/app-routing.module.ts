@@ -17,6 +17,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/video-analysis/video-analysis.component').then(m => m.VideoAnalysisComponent)
   },
   {
+    path: 'reports',
+    loadComponent: () => import('./components/analysis-reports/analysis-reports.component').then(m => m.AnalysisReportsComponent)
+  },
+  {
     path: 'normalize',
     loadComponent: () => import('./components/audio-normalize/audio-normalize.component').then(m => m.AudioNormalizeComponent)
   },

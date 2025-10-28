@@ -60,6 +60,10 @@ export class SharedConfigService {
     return this.config.ytDlpPath;
   }
 
+  getOutputDir(): string | undefined {
+    return this.config.outputDir;
+  }
+
   getConfig(): any {
     return { ...this.config }; // Return a copy to prevent direct mutation
   }

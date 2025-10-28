@@ -1,0 +1,116 @@
+<!-- Analysis Reports Viewer -->
+<div class="reports-container">
+  <div class="page-content">
+
+    <!-- File Browser (Left Panel) -->
+    <div class="panel file-browser-panel">
+      <div class="panel-header">
+        <h4 class="panel-title">📊 Analysis Reports</h4>
+        <p class="panel-subtitle">{{ reports.length }} report{{ reports.length !== 1 ? 's' : '' }} found</p>
+      </div>
+
+      <div class="panel-content">
+        <div *ngIf="isLoading && reports.length === 0" class="loading-container">
+          <mat-spinner diameter="40"></mat-spinner>
+          <p>Loading reports...</p>
+        </div>
+
+        <div *ngIf="!isLoading && reports.length === 0" class="empty-state">
+          <mat-icon>description</mat-icon>
+          <p>No analysis reports found</p>
+          <small>Run video analysis to generate reports</small>
+        </div>
+
+        <mat-list *ngIf="reports.length > 0" class="reports-list">
+          <mat-list-item
+            *ngFor="let report of reports"
+            (click)="selectReport(report)"
+            [class.selected]="selectedReport?.path === report.path"
+            class="report-item">
+            <mat-icon matListItemIcon>description</mat-icon>
+            <div matListItemTitle class="report-title">{{ report.name }}</div>
+            <div matListItemLine class="report-meta">
+              <span class="report-date">{{ formatDate(report.date) }}</span>
+              <span class="report-size">{{ formatFileSize(report.size) }}</span>
+            </div>
+            <button mat-icon-button matListItemMeta (click)="openInEditor(report); $event.stopPropagation()">
+              <mat-icon>open_in_new</mat-icon>
+            </button>
+          </mat-list-item>
+        </mat-list>
+      </div>
+    </div>
+
+    <!-- Report Viewer (Right Panel) -->
+    <div class="panel report-viewer-panel">
+      <div class="panel-header" *ngIf="selectedReport">
+        <h4 class="panel-title">{{ selectedReport.name }}</h4>
+        <div class="panel-actions">
+          <button mat-stroked-button (click)="showInFolder(selectedReport)">
+            <mat-icon>folder</mat-icon>
+            Show in Folder
+          </button>
+          <button mat-raised-button color="primary" (click)="openInEditor(selectedReport)">
+            <mat-icon>edit</mat-icon>
+            Open in Editor
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-content viewer-content">
+        <div *ngIf="!selectedReport" class="empty-viewer">
+          <mat-icon>touch_app</mat-icon>
+          <p>Select a report to view</p>
+          <small>Click on a report from the list on the left</small>
+        </div>
+
+        <div *ngIf="isLoading && selectedReport" class="loading-container">
+          <mat-spinner diameter="40"></mat-spinner>
+          <p>Loading report...</p>
+        </div>
+
+        <div *ngIf="!isLoading && selectedReport && parsedSections.length > 0" class="report-sections">
+          <div *ngFor="let section of parsedSections; let i = index" class="section-card">
+            <!-- Section Header -->
+            <div class="section-header">
+              <div class="section-icon" [style.background-color]="getCategoryColor(section.category)">
+                <mat-icon>{{ getCategoryIcon(section.category) }}</mat-icon>
+              </div>
+              <div class="section-info">
+                <div class="section-title">
+                  <span class="time-range">{{ section.timeRange }}</span>
+                  <span class="category-badge" [style.background-color]="getCategoryColor(section.category)">
+                    {{ section.category }}
+                  </span>
+                </div>
+                <p class="section-description">{{ section.description }}</p>
+              </div>
+            </div>
+
+            <!-- Quotes -->
+            <div class="quotes-container">
+              <div *ngFor="let quote of section.quotes" class="quote-block">
+                <div class="quote-header">
+                  <mat-icon class="quote-icon">format_quote</mat-icon>
+                  <span class="timestamp">{{ quote.timestamp }}</span>
+                </div>
+                <blockquote class="quote-text">"{{ quote.text }}"</blockquote>
+                <div class="quote-significance" *ngIf="quote.significance">
+                  <mat-icon>lightbulb_outline</mat-icon>
+                  <p>{{ quote.significance }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div *ngIf="!isLoading && selectedReport && parsedSections.length === 0" class="empty-report">
+          <mat-icon>info</mat-icon>
+          <p>No sections found in this report</p>
+          <small>The report may be empty or malformed</small>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

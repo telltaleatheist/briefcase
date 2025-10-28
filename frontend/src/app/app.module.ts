@@ -19,6 +19,8 @@ import { DownloadFormComponent } from './components/download-form/download-form.
 import { DownloadHistoryComponent } from './components/download-history/download-history.component';
 import { DownloadProgressComponent } from './components/download-progress/download-progress.component';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
+import { VideoAnalysisComponent } from './components/video-analysis/video-analysis.component';
+import { AnalysisReportsComponent } from './components/analysis-reports/analysis-reports.component';
 
 // Socket.io configuration
 const socketIoConfig: SocketIoConfig = {
@@ -49,7 +51,9 @@ const socketIoConfig: SocketIoConfig = {
     DownloadFormComponent,
     DownloadHistoryComponent,
     DownloadProgressComponent,
-    ThemeToggleComponent  
+    ThemeToggleComponent,
+    VideoAnalysisComponent,
+    AnalysisReportsComponent
   ],
   bootstrap: [AppComponent]
 })

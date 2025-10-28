@@ -7,6 +7,7 @@ import { OllamaService } from './ollama.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { PathService } from '../path/path.service';
+import { SharedConfigService } from '../config/shared-config.service';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -45,6 +46,7 @@ export class AnalysisService {
     private downloader: DownloaderService,
     private pathService: PathService,
     private eventEmitter: EventEmitter2,
+    private configService: SharedConfigService,
   ) {}
 
   /**
@@ -335,6 +337,13 @@ export class AnalysisService {
    * Get default output path
    */
   private getDefaultOutputPath(): string {
+    // Try to get from config first
+    const configOutputDir = this.configService.getOutputDir();
+    if (configOutputDir) {
+      return configOutputDir;
+    }
+
+    // Fallback to default location
     const homeDir = require('os').homedir();
     return path.join(homeDir, 'Downloads', 'clippy');
   }

@@ -17,6 +17,9 @@ import { Server } from 'socket.io';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AnalysisService, AnalysisRequest } from './analysis.service';
 import { OllamaService } from './ollama.service';
+import { SharedConfigService } from '../config/shared-config.service';
+import * as path from 'path';
+import * as os from 'os';
 
 @Controller('api/analysis')
 @WebSocketGateway({ cors: true })
@@ -27,10 +30,23 @@ export class AnalysisController implements OnGatewayInit {
   constructor(
     private analysisService: AnalysisService,
     private ollamaService: OllamaService,
+    private configService: SharedConfigService,
   ) {}
 
   afterInit(server: Server) {
     console.log('Analysis WebSocket Gateway initialized');
+  }
+
+  /**
+   * Get the base output directory from config or default
+   */
+  private getBaseOutputDir(): string {
+    const configOutputDir = this.configService.getOutputDir();
+    if (configOutputDir) {
+      return configOutputDir;
+    }
+    // Fallback to default
+    return path.join(os.homedir(), 'Downloads', 'clippy');
   }
 
   /**
@@ -176,6 +192,91 @@ export class AnalysisController implements OnGatewayInit {
     } catch (error: any) {
       throw new HttpException(
         `Failed to check model: ${error.message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Get list of analysis reports
+   */
+  @Get('reports')
+  async getReports() {
+    try {
+      const fs = require('fs');
+
+      const baseOutputDir = this.getBaseOutputDir();
+      const reportsDir = path.join(baseOutputDir, 'analysis', 'reports');
+
+      // Check if directory exists
+      if (!fs.existsSync(reportsDir)) {
+        return {
+          success: true,
+          reports: []
+        };
+      }
+
+      // Read directory
+      const files = fs.readdirSync(reportsDir);
+
+      // Get file stats
+      const reports = files
+        .filter((file: string) => file.endsWith('.txt'))
+        .map((file: string) => {
+          const filePath = path.join(reportsDir, file);
+          const stats = fs.statSync(filePath);
+          return {
+            name: file,
+            path: filePath,
+            stats: {
+              mtime: stats.mtime,
+              size: stats.size
+            }
+          };
+        });
+
+      return {
+        success: true,
+        reports
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        `Failed to get reports: ${error.message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Read a specific report file
+   */
+  @Get('report/:filePath')
+  async getReport(@Param('filePath') filePath: string) {
+    try {
+      const fs = require('fs');
+      const decodedPath = decodeURIComponent(filePath);
+
+      // Security: ensure path is within reports directory
+      const baseOutputDir = this.getBaseOutputDir();
+      const reportsDir = path.join(baseOutputDir, 'analysis', 'reports');
+
+      if (!decodedPath.startsWith(reportsDir)) {
+        throw new HttpException('Invalid file path', HttpStatus.FORBIDDEN);
+      }
+
+      // Read file
+      const content = fs.readFileSync(decodedPath, 'utf-8');
+
+      return {
+        success: true,
+        content
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to read report: ${error.message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
