@@ -54,24 +54,7 @@ export class AnalysisController implements OnGatewayInit {
         );
       }
 
-      // Check if AI model is available
-      const modelAvailable = await this.ollamaService.isModelAvailable(
-        request.aiModel,
-        request.ollamaEndpoint,
-      );
-
-      if (!modelAvailable) {
-        throw new HttpException(
-          {
-            message: `AI model '${request.aiModel}' is not available`,
-            instructions: this.ollamaService.getInstallInstructions(
-              request.aiModel,
-            ),
-          },
-          HttpStatus.PRECONDITION_FAILED,
-        );
-      }
-
+      // Start analysis immediately - model availability will be checked during analysis
       const jobId = await this.analysisService.startAnalysis(request);
 
       return {

@@ -30,6 +30,7 @@ interface ElectronAPI {
     error?: string;
   }>;
   selectDirectory: () => Promise<string | null>;
+  selectVideoFile: () => Promise<{ canceled: boolean; filePaths: string[] }>;
 }
 
 // Get resource path information
@@ -82,7 +83,8 @@ contextBridge.exposeInMainWorld('electron', {
   showInFolder: (filePath: string) => ipcRenderer.invoke('show-in-folder', filePath),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   downloadVideo: (options: any) => ipcRenderer.invoke('download-video', options),
-  selectDirectory: () => ipcRenderer.invoke('select-directory')
+  selectDirectory: () => ipcRenderer.invoke('select-directory'),
+  selectVideoFile: () => ipcRenderer.invoke('select-video-file')
 } as ElectronAPI);
 
 // Listen for update events from main process

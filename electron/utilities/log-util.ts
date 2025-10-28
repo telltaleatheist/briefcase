@@ -104,7 +104,7 @@ export class LogUtil {
         log.info(contents.join(', '));
         
         // Log first-level subdirectories for more detail
-        contents.forEach(item => {
+        contents.forEach((item: string) => {
           const itemPath = path.join(dirPath, item);
           try {
             if (fs.statSync(itemPath).isDirectory()) {

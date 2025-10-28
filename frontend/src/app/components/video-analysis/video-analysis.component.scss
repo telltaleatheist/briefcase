@@ -34,6 +34,33 @@
 .input-action-btn { color: var(--text-secondary); transition: all 0.2s; }
 .input-action-btn:hover { color: var(--primary-orange); background: var(--bg-secondary); }
 
+// Browse file button
+.browse-file-btn {
+  padding: 0.75rem 1.5rem !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  white-space: nowrap !important;
+
+  mat-icon {
+    font-size: 1.25rem;
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}
+
+// Read-only input styling
+.custom-input[readonly] {
+  background: var(--bg-tertiary);
+  cursor: default;
+  color: var(--text-secondary);
+}
+
+.custom-input[readonly]:hover {
+  border-color: var(--border-color);
+}
+
 // Model Configuration
 .model-config-row { display: flex; gap: 1rem; align-items: flex-end; margin-bottom: 1rem; }
 .model-config-row .form-group { flex: 1; margin-bottom: 0; }

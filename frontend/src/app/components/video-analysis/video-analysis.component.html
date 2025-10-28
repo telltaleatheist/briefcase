@@ -34,25 +34,37 @@
             </div>
 
             <div class="input-field-row">
-              <input type="text"
-                     class="custom-input"
-                     [placeholder]="analysisForm.get('inputType')?.value === 'url' ? 'https://youtube.com/watch?v=...' : '/path/to/video.mp4'"
-                     formControlName="input">
-              <button type="button"
-                      mat-icon-button
-                      class="input-action-btn"
-                      (click)="pasteFromClipboard()"
-                      matTooltip="Paste from clipboard">
-                <mat-icon>content_paste</mat-icon>
-              </button>
-              <button type="button"
-                      mat-icon-button
-                      class="input-action-btn"
-                      *ngIf="analysisForm.get('inputType')?.value === 'file'"
-                      (click)="browseFile()"
-                      matTooltip="Browse for file">
-                <mat-icon>folder_open</mat-icon>
-              </button>
+              <!-- URL mode: editable input with paste button -->
+              <ng-container *ngIf="analysisForm.get('inputType')?.value === 'url'">
+                <input type="text"
+                       class="custom-input"
+                       placeholder="https://youtube.com/watch?v=..."
+                       formControlName="input">
+                <button type="button"
+                        mat-icon-button
+                        class="input-action-btn"
+                        (click)="pasteFromClipboard()"
+                        matTooltip="Paste from clipboard">
+                  <mat-icon>content_paste</mat-icon>
+                </button>
+              </ng-container>
+
+              <!-- File mode: read-only input with prominent browse button -->
+              <ng-container *ngIf="analysisForm.get('inputType')?.value === 'file'">
+                <input type="text"
+                       class="custom-input"
+                       placeholder="No file selected"
+                       formControlName="input"
+                       readonly>
+                <button type="button"
+                        mat-raised-button
+                        color="accent"
+                        class="browse-file-btn"
+                        (click)="browseFile()">
+                  <mat-icon>folder_open</mat-icon>
+                  Browse
+                </button>
+              </ng-container>
             </div>
           </div>
 
@@ -72,11 +84,6 @@
                 <option value="cogito:70b">Cogito 70B (Excellent, ~40GB)</option>
               </select>
             </div>
-
-            <div class="form-group">
-              <label class="field-label">Ollama Endpoint</label>
-              <input type="text" class="custom-input" formControlName="ollamaEndpoint" placeholder="http://localhost:11434">
-            </div>
           </div>
 
           <!-- Advanced Options -->
@@ -89,6 +96,11 @@
             </mat-expansion-panel-header>
 
             <div class="advanced-content">
+              <div class="form-group">
+                <label class="field-label">Ollama Endpoint</label>
+                <input type="text" class="custom-input" formControlName="ollamaEndpoint" placeholder="http://localhost:11434">
+              </div>
+
               <div class="form-group">
                 <label class="field-label">Whisper Model</label>
                 <select class="custom-select" formControlName="whisperModel">
@@ -124,7 +136,7 @@
             <button type="submit"
                     mat-raised-button
                     color="primary"
-                    [disabled]="analysisForm.invalid || isProcessing">
+                    [disabled]="isProcessing">
               <mat-icon>play_arrow</mat-icon>
               Start Analysis
             </button>

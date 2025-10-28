@@ -142,6 +142,24 @@ function setupFileSystemHandlers(): void {
     return result;
   });
 
+  // Select video file dialog
+  ipcMain.handle('select-video-file', async (event) => {
+    const window = event.sender ? require('electron').BrowserWindow.fromWebContents(event.sender) : null;
+
+    if (!window) return { canceled: true, filePaths: [] };
+
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openFile'],
+      title: 'Select Video File',
+      filters: [
+        { name: 'Video Files', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'mpg', 'mpeg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    return result;
+  });
+
   // Check if a path is a directory
   ipcMain.handle('is-directory', async (_, filePath) => {
     try {

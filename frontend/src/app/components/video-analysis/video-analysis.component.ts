@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, Inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, Inject, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -9,7 +9,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { MatExpansionModule } from '@angular/material/expansion';
+import { MatExpansionModule, MatExpansionPanel } from '@angular/material/expansion';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -54,6 +54,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   currentJob: AnalysisJob | null = null;
   isProcessing = false;
 
+  @ViewChild(MatExpansionPanel) advancedPanel!: MatExpansionPanel;
+
   private pollingInterval: any = null;
 
   constructor(
@@ -67,6 +69,9 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   async ngOnInit(): Promise<void> {
     // Load saved settings (AI model, etc.)
     await this.loadSettings();
+
+    // Check for any active jobs and restore state
+    await this.checkForActiveJobs();
   }
 
   ngOnDestroy(): void {
@@ -199,20 +204,20 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     }
   }
 
-  browseFile(): void {
-    // Trigger file input dialog
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'video/*';
+  async browseFile(): Promise<void> {
+    try {
+      // Use Electron dialog API to select file
+      const result = await (window as any).electron?.selectVideoFile();
 
-    fileInput.onchange = (event: any) => {
-      const file = event.target.files[0];
-      if (file) {
-        this.analysisForm.patchValue({ input: file.path });
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
+        const filePath = result.filePaths[0];
+        this.analysisForm.patchValue({ input: filePath });
+        this.snackBar.open('File selected', 'Dismiss', { duration: 2000 });
       }
-    };
-
-    fileInput.click();
+    } catch (error) {
+      console.error('Error selecting file:', error);
+      this.snackBar.open('Failed to select file', 'Dismiss', { duration: 3000 });
+    }
   }
 
   async pasteFromClipboard(): Promise<void> {
@@ -261,6 +266,11 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     const aiModel = this.analysisForm.get('aiModel')?.value;
     localStorage.setItem('clippy_ai_model', aiModel);
     this.snackBar.open('Settings saved', 'Dismiss', { duration: 2000 });
+
+    // Close the advanced options accordion
+    if (this.advancedPanel) {
+      this.advancedPanel.close();
+    }
   }
 
   async openAnalysisFile(): Promise<void> {
@@ -289,6 +299,33 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       width: '600px',
       data: { model, instructions }
     });
+  }
+
+  /**
+   * Check for any active jobs on component init
+   */
+  private async checkForActiveJobs(): Promise<void> {
+    try {
+      const response = await fetch('/api/api/analysis/jobs');
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (data.success && data.jobs && data.jobs.length > 0) {
+        // Find the first non-completed job
+        const activeJob = data.jobs.find((job: AnalysisJob) =>
+          job.status !== 'completed' && job.status !== 'failed'
+        );
+
+        if (activeJob) {
+          console.log('[Video Analysis] Found active job on init:', activeJob.id);
+          this.currentJob = activeJob;
+          this.isProcessing = true;
+          this.startPolling();
+        }
+      }
+    } catch (error) {
+      console.error('[Video Analysis] Error checking for active jobs:', error);
+    }
   }
 
   getPhaseDescription(phase: string): string {
