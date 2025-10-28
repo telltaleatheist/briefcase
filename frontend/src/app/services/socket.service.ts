@@ -217,7 +217,14 @@ export class SocketService {
   onProcessingFailed(): Observable<{error: string, jobId?: string, inputFile?: string}> {
     return this.listenTo<{error: string, jobId?: string, inputFile?: string}>('processing-failed');
   }
-  
+
+  /**
+   * Listen for video analysis progress updates
+   */
+  onAnalysisProgress(): Observable<any> {
+    return this.listenTo<any>('analysisProgress');
+  }
+
   /**
    * Send an event to the server
    */

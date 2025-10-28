@@ -7,6 +7,7 @@ import { WindowService } from './services/window-service';
 import { BackendService } from './services/backend-service';
 import { setupIpcHandlers } from './ipc/ipc-handlers';
 import { UpdateService } from './services/update-service';
+import { LogUtil } from './utilities/log-util';
 
 /**
  * Main application entry point
@@ -20,6 +21,9 @@ let updateService: UpdateService;
 // Configure logging - always log to file
 log.transports.console.level = 'info';
 log.transports.file.level = 'debug';
+
+// Clean up old log files (keep logs from last 7 days)
+LogUtil.cleanupOldLogs(7);
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();

@@ -6,10 +6,12 @@ import { DownloaderModule } from './downloader/downloader.module';
 import { FfmpegModule } from './ffmpeg/ffmpeg.module';
 import { PathModule } from './path/path.module';
 import { MediaModule } from './media/media.module';
+import { AnalysisModule } from './analysis/analysis.module';
 import { ConfigModule } from '@nestjs/config';
 import { SharedConfigModule } from './config/shared-config.module';
 import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
@@ -17,11 +19,13 @@ import { JobStateManagerModule } from './common/job-state-manager.module';
       isGlobal: true,
       load: [() => environment],
     }),
+    EventEmitterModule.forRoot(),
     SharedConfigModule,
     DownloaderModule,
     FfmpegModule,
     PathModule,
     MediaModule,
+    AnalysisModule,
     JobStateManagerModule,
   ],
   controllers: [AppController],

@@ -15,6 +15,10 @@
             <mat-icon matListItemIcon>download</mat-icon>
             <span matListItemTitle>Download Videos</span>
           </a>
+          <a mat-list-item [routerLink]="['/analysis']" routerLinkActive="active-link" (click)="navigateToAnalysis()">
+            <mat-icon matListItemIcon>psychology</mat-icon>
+            <span matListItemTitle>Video Analysis</span>
+          </a>
           <a mat-list-item [routerLink]="['/normalize']" routerLinkActive="active-link">
             <mat-icon matListItemIcon>equalizer</mat-icon>
             <span matListItemTitle>Normalize Audio</span>

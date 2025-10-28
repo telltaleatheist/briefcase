@@ -92,4 +92,13 @@ export class AppComponent implements OnInit, OnDestroy {
   navigateToBatch(): void {
     this.router.navigate(['/batch']);
   }
+
+  navigateToAnalysis(): void {
+    console.log('Navigating to analysis...');
+    this.router.navigate(['/analysis']).then(success => {
+      console.log('Navigation success:', success);
+    }).catch(error => {
+      console.error('Navigation error:', error);
+    });
+  }
 }
