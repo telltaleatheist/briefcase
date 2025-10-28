@@ -22,6 +22,17 @@ export interface AnalysisJob {
   analysisPath?: string;
   createdAt: Date;
   completedAt?: Date;
+  timing?: {
+    downloadStart?: Date;
+    downloadEnd?: Date;
+    extractionStart?: Date;
+    extractionEnd?: Date;
+    transcriptionStart?: Date;
+    transcriptionEnd?: Date;
+    analysisStart?: Date;
+    analysisEnd?: Date;
+    totalDuration?: number; // in seconds
+  };
 }
 
 export interface AnalysisRequest {
@@ -61,6 +72,7 @@ export class AnalysisService {
       progress: 0,
       currentPhase: 'Initializing...',
       createdAt: new Date(),
+      timing: {},
     };
 
     this.jobs.set(jobId, job);
@@ -141,6 +153,7 @@ export class AnalysisService {
           status: 'downloading',
           progress: 5,
           currentPhase: 'Downloading video (fast mode)...',
+          timing: { ...job.timing, downloadStart: new Date() },
         });
 
         const downloadResult = await this.downloadVideo(
@@ -154,6 +167,7 @@ export class AnalysisService {
         this.updateJob(jobId, {
           progress: 20,
           videoPath,
+          timing: { ...job.timing, downloadEnd: new Date() },
         });
       } else {
         // Local file
@@ -172,24 +186,30 @@ export class AnalysisService {
       }
 
       // Phase 2: Extract audio (20-30%)
+      const job2 = this.jobs.get(jobId);
       this.updateJob(jobId, {
         status: 'extracting',
         progress: 20,
         currentPhase: 'Extracting audio...',
+        timing: { ...job2?.timing, extractionStart: new Date() },
       });
 
       const audioPath = await this.extractAudio(videoPath, jobId);
 
+      const job3 = this.jobs.get(jobId);
       this.updateJob(jobId, {
         progress: 30,
         audioPath,
+        timing: { ...job3?.timing, extractionEnd: new Date() },
       });
 
       // Phase 3: Transcribe (30-60%)
+      const job4 = this.jobs.get(jobId);
       this.updateJob(jobId, {
         status: 'transcribing',
         progress: 30,
         currentPhase: 'Transcribing audio (this may take a few minutes)...',
+        timing: { ...job4?.timing, transcriptionStart: new Date() },
       });
 
       const transcriptResult = await this.pythonBridge.transcribe(
@@ -218,16 +238,20 @@ export class AnalysisService {
       await fs.writeFile(transcriptPath, transcriptResult.srt, 'utf-8');
       await fs.writeFile(txtTranscriptPath, transcriptResult.text, 'utf-8');
 
+      const job5 = this.jobs.get(jobId);
       this.updateJob(jobId, {
         progress: 60,
         transcriptPath,
+        timing: { ...job5?.timing, transcriptionEnd: new Date() },
       });
 
       // Phase 4: AI Analysis (60-95%)
+      const job6 = this.jobs.get(jobId);
       this.updateJob(jobId, {
         status: 'analyzing',
         progress: 60,
         currentPhase: `Analyzing with ${request.aiModel}...`,
+        timing: { ...job6?.timing, analysisStart: new Date() },
       });
 
       const analysisOutputPath = path.join(
@@ -249,9 +273,11 @@ export class AnalysisService {
         },
       );
 
+      const job7 = this.jobs.get(jobId);
       this.updateJob(jobId, {
         progress: 95,
         analysisPath: analysisOutputPath,
+        timing: { ...job7?.timing, analysisEnd: new Date() },
       });
 
       // Phase 5: Finalize (95-100%)
@@ -259,6 +285,36 @@ export class AnalysisService {
         progress: 98,
         currentPhase: 'Finalizing analysis...',
       });
+
+      // Calculate total duration and timing information
+      const job8 = this.jobs.get(jobId);
+      const timing = job8?.timing || {};
+      const totalDuration = job8
+        ? (new Date().getTime() - job8.createdAt.getTime()) / 1000
+        : 0;
+
+      // Calculate individual phase durations
+      const transcriptionDuration = timing.transcriptionStart && timing.transcriptionEnd
+        ? (timing.transcriptionEnd.getTime() - timing.transcriptionStart.getTime()) / 1000
+        : 0;
+
+      const analysisDuration = timing.analysisStart && timing.analysisEnd
+        ? (timing.analysisEnd.getTime() - timing.analysisStart.getTime()) / 1000
+        : 0;
+
+      // Append timing footer to the analysis report
+      try {
+        const timingFooter = this.generateTimingFooter(
+          transcriptionDuration,
+          analysisDuration,
+          totalDuration,
+          request.whisperModel || 'base',
+          request.aiModel
+        );
+        await fs.appendFile(analysisOutputPath, timingFooter, 'utf-8');
+      } catch (error) {
+        this.logger.warn(`Failed to append timing footer: ${error}`);
+      }
 
       // Clean up temporary audio file
       await fs.unlink(audioPath).catch(() => {});
@@ -269,6 +325,7 @@ export class AnalysisService {
         progress: 100,
         currentPhase: `Analysis complete! Found ${analysisResult.sections_count} interesting sections.`,
         completedAt: new Date(),
+        timing: { ...timing, totalDuration },
       });
 
       this.logger.log(`Analysis job ${jobId} completed successfully`);
@@ -346,6 +403,36 @@ export class AnalysisService {
     // Fallback to default location
     const homeDir = require('os').homedir();
     return path.join(homeDir, 'Downloads', 'clippy');
+  }
+
+  /**
+   * Generate timing footer for analysis report
+   */
+  private generateTimingFooter(
+    transcriptionDuration: number,
+    analysisDuration: number,
+    totalDuration: number,
+    whisperModel: string,
+    aiModel: string,
+  ): string {
+    const formatDuration = (seconds: number): string => {
+      if (seconds < 60) {
+        return `${seconds.toFixed(1)}s`;
+      }
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      return `${minutes}m ${remainingSeconds.toFixed(0)}s`;
+    };
+
+    return `\n${'='.repeat(80)}\n` +
+           `PERFORMANCE METRICS\n` +
+           `${'='.repeat(80)}\n\n` +
+           `Transcription (${whisperModel} model):\n` +
+           `  Duration: ${formatDuration(transcriptionDuration)}\n\n` +
+           `AI Analysis (${aiModel}):\n` +
+           `  Duration: ${formatDuration(analysisDuration)}\n\n` +
+           `Total Processing Time: ${formatDuration(totalDuration)}\n` +
+           `${'='.repeat(80)}\n`;
   }
 
   /**

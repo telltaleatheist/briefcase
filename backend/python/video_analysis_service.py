@@ -313,17 +313,29 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
 def identify_interesting_sections(endpoint: str, model: str, chunk_text: str, chunk_num: int) -> List[Dict]:
     """Use AI to identify interesting sections in a chunk"""
     try:
-        prompt = f"""TASK: Analyze this transcript to identify the most interesting sections worth saving.
+        prompt = f"""TASK: Analyze this transcript to identify ONLY highly inflammatory, extreme, or politically charged content.
 
-WHAT TO LOOK FOR:
-- Controversial statements or claims
-- Strong opinions or debates
-- Important factual claims
-- Emotional or dramatic moments
-- Key arguments or reasoning
-- Insightful observations
-- Technical explanations
-- Surprising information
+CRITICAL: This is designed to find rare, extreme moments in long videos (e.g., 3-hour sermons). Most content should be IGNORED.
+
+ONLY flag content that is:
+- Explicitly violent rhetoric (calls for violence, threats, violent imagery)
+- Extreme political statements (calls for civil war, government overthrow, militant action)
+- Hateful speech targeting groups (calls for harm/death to LGBT people, racial groups, religious groups, etc.)
+- Conspiracy theories with dangerous implications (calls to stockpile weapons, preparation for violent conflict)
+- Extreme authoritarian or theocratic statements (demanding execution, persecution, or elimination of groups)
+- Shocking confessions or admissions of illegal/immoral activity
+
+DO NOT FLAG:
+- Normal religious teaching, prayer, or theology
+- General conservative/liberal political opinions
+- Routine criticism of policies or politicians
+- Standard sermon content or biblical interpretation
+- Context-setting or introductions
+- Emotional stories that aren't extreme
+- Regular arguments or debates
+- Normal cultural commentary
+
+THINK: Would this be newsworthy or legally concerning? If not, SKIP IT.
 
 MANDATORY OUTPUT FORMAT:
 
@@ -334,22 +346,21 @@ INTERESTING SECTIONS:
 Section 1:
 Start: "exact first 5-10 words from transcript"
 End: "exact last 5-10 words from transcript"
-Category: controversy
-Description: One sentence explaining why this is interesting
+Category: violence|extremism|hate|conspiracy|shocking
+Description: One sentence explaining the extreme content
 
 Section 2:
 Start: "exact first 5-10 words from transcript"
 End: "exact last 5-10 words from transcript"
-Category: claim
-Description: One sentence explaining why this is interesting
-
-(Continue for all interesting sections found)
+Category: violence|extremism|hate|conspiracy|shocking
+Description: One sentence explaining the extreme content
 
 IMPORTANT RULES:
 - Start and End MUST be exact quotes from the transcript below
 - Use double quotes around the phrases
-- Categories: controversy, claim, argument, emotional, insight, technical, or other
+- Categories: violence, extremism, hate, conspiracy, or shocking
 - Keep descriptions to ONE sentence
+- If nothing meets the criteria, respond with: "INTERESTING SECTIONS:\n\nNone found."
 
 TRANSCRIPT TO ANALYZE:
 {chunk_text[:8000]}"""  # Limit to ~8k chars for speed
@@ -419,27 +430,32 @@ def analyze_section_detail(endpoint: str, model: str, section: Dict, all_segment
         timestamped_text = build_timestamped_transcript(section_segments)
 
         # Phase 4: Ask AI to extract quotes from this timestamped section
-        prompt = f"""Analyze this timestamped transcript section and extract the most significant quotes with their timestamps.
+        prompt = f"""Analyze this timestamped transcript section and extract ONLY the most extreme/inflammatory quotes.
 
 Category: {section['category']}
 Description: {section['description']}
 
-Extract 3-5 key quotes that exemplify this section. For each quote:
+IMPORTANT: Only extract quotes that are themselves extreme, inflammatory, or shocking. Skip:
+- Context-setting or background information
+- Normal explanations or introductions
+- Mild statements or routine content
+
+Extract 2-4 key quotes that capture the MOST extreme parts. For each quote:
 1. Include the exact timestamp [MM:SS]
-2. Quote the exact words spoken
-3. Explain why it's significant (1-2 sentences)
+2. Quote the exact words spoken (the inflammatory part)
+3. Explain why it's extreme/concerning (1-2 sentences)
 
 Format your response EXACTLY like this:
 
 Key quotes:
 
 1. Timestamp: [MM:SS]
-   Quote: "exact words from transcript"
-   Significance: Why this quote matters
+   Quote: "exact inflammatory words from transcript"
+   Significance: Why this is extreme/concerning
 
 2. Timestamp: [MM:SS]
-   Quote: "exact words from transcript"
-   Significance: Why this quote matters
+   Quote: "exact inflammatory words from transcript"
+   Significance: Why this is extreme/concerning
 
 TIMESTAMPED TRANSCRIPT:
 {timestamped_text[:6000]}"""

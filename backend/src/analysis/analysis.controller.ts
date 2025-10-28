@@ -283,6 +283,46 @@ export class AnalysisController implements OnGatewayInit {
   }
 
   /**
+   * Delete a specific report file
+   */
+  @Delete('report/:filePath')
+  async deleteReport(@Param('filePath') filePath: string) {
+    try {
+      const fs = require('fs');
+      const decodedPath = decodeURIComponent(filePath);
+
+      // Security: ensure path is within reports directory
+      const baseOutputDir = this.getBaseOutputDir();
+      const reportsDir = path.join(baseOutputDir, 'analysis', 'reports');
+
+      if (!decodedPath.startsWith(reportsDir)) {
+        throw new HttpException('Invalid file path', HttpStatus.FORBIDDEN);
+      }
+
+      // Check if file exists
+      if (!fs.existsSync(decodedPath)) {
+        throw new HttpException('Report file not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Delete the file
+      fs.unlinkSync(decodedPath);
+
+      return {
+        success: true,
+        message: 'Report deleted successfully'
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to delete report: ${error.message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Listen for analysis progress events and broadcast via WebSocket
    */
   @OnEvent('analysis.progress')

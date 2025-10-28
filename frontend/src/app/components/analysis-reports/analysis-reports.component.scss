@@ -118,6 +118,16 @@
 
     button[matListItemMeta] {
       color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      mat-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
       &:hover {
         color: var(--primary-orange);
       }

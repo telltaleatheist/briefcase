@@ -201,6 +201,12 @@ export class AnalysisReportsComponent implements OnInit {
 
   getCategoryIcon(category: string): string {
     const icons: {[key: string]: string} = {
+      'violence': 'dangerous',
+      'extremism': 'warning',
+      'hate': 'block',
+      'conspiracy': 'psychology',
+      'shocking': 'report',
+      // Legacy categories (for old reports)
       'controversy': 'warning',
       'claim': 'fact_check',
       'argument': 'forum',
@@ -214,6 +220,12 @@ export class AnalysisReportsComponent implements OnInit {
 
   getCategoryColor(category: string): string {
     const colors: {[key: string]: string} = {
+      'violence': '#d32f2f',      // Dark red
+      'extremism': '#f44336',     // Red
+      'hate': '#e91e63',          // Pink-red
+      'conspiracy': '#ff9800',    // Orange
+      'shocking': '#ff5722',      // Deep orange
+      // Legacy categories (for old reports)
       'controversy': '#ff5722',
       'claim': '#2196f3',
       'argument': '#9c27b0',
@@ -249,5 +261,43 @@ export class AnalysisReportsComponent implements OnInit {
 
   formatDate(date: Date): string {
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  async deleteReport(report: ReportFile) {
+    // Show confirmation dialog
+    const confirmed = confirm(
+      `Are you sure you want to delete "${report.name}"?\n\nThis will permanently delete the analysis report file. This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      // Call backend API to delete the file
+      const response = await fetch(`/api/api/analysis/report/${encodeURIComponent(report.path)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete report');
+      }
+
+      // Remove from local list
+      this.reports = this.reports.filter(r => r.path !== report.path);
+
+      // Clear selection if the deleted report was selected
+      if (this.selectedReport?.path === report.path) {
+        this.selectedReport = null;
+        this.reportContent = '';
+        this.parsedSections = [];
+      }
+
+      this.snackBar.open('Report deleted successfully', 'Dismiss', { duration: 3000 });
+
+    } catch (error: any) {
+      console.error('Error deleting report:', error);
+      this.snackBar.open('Failed to delete report', 'Dismiss', { duration: 3000 });
+    }
   }
 }
