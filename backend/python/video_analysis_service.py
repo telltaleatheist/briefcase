@@ -232,8 +232,8 @@ def analyze_with_ollama(
         if not check_ollama_model(endpoint, model):
             raise Exception(f"Model '{model}' not found in Ollama. Please install it first.")
 
-        # Chunk transcript into time-based segments (15 min chunks)
-        chunks = chunk_transcript(segments, chunk_minutes=15)
+        # Chunk transcript into time-based segments (5 min chunks for more granular analysis)
+        chunks = chunk_transcript(segments, chunk_minutes=5)
 
         send_progress("analysis", 70, f"Analyzing {len(chunks)} chunks...")
 
@@ -251,15 +251,33 @@ def analyze_with_ollama(
             if interesting_sections:
                 send_progress("analysis", chunk_progress + 0.5, f"Found {len(interesting_sections)} sections in chunk {i}")
 
-                # Process each interesting section
+                # Process each section
                 for section in interesting_sections:
-                    detailed_analysis = analyze_section_detail(
-                        endpoint, model, section, chunk['segments']
-                    )
-                    if detailed_analysis:
-                        analyzed_sections.append(detailed_analysis)
-                        # Write section immediately to file (streaming)
-                        write_section_to_file(output_file, detailed_analysis, is_first=(i == 1 and len(analyzed_sections) == 1))
+                    # For routine/boring sections, skip detailed analysis - just add a summary
+                    if section.get('category') == 'routine':
+                        # Find approximate timestamps
+                        start_phrase = section.get('start_phrase', '')
+                        start_time = find_phrase_timestamp(start_phrase, chunk['segments'])
+
+                        if start_time is not None:
+                            analyzed_sections.append({
+                                "category": "routine",
+                                "description": section['description'],
+                                "start_time": format_display_time(start_time),
+                                "end_time": None,
+                                "quotes": []
+                            })
+                            # Write immediately
+                            write_section_to_file(output_file, analyzed_sections[-1], is_first=(i == 1 and len(analyzed_sections) == 1))
+                    else:
+                        # For interesting sections, do detailed analysis
+                        detailed_analysis = analyze_section_detail(
+                            endpoint, model, section, chunk['segments']
+                        )
+                        if detailed_analysis:
+                            analyzed_sections.append(detailed_analysis)
+                            # Write section immediately to file (streaming)
+                            write_section_to_file(output_file, detailed_analysis, is_first=(i == 1 and len(analyzed_sections) == 1))
 
         send_progress("analysis", 90, f"Analysis complete. Found {len(analyzed_sections)} interesting sections.")
 
@@ -313,11 +331,15 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
 def identify_interesting_sections(endpoint: str, model: str, chunk_text: str, chunk_num: int) -> List[Dict]:
     """Use AI to identify interesting sections in a chunk"""
     try:
-        prompt = f"""TASK: Analyze this transcript to identify ONLY highly inflammatory, extreme, or politically charged content.
+        prompt = f"""TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
 
-CRITICAL: This is designed to find rare, extreme moments in long videos (e.g., 3-hour sermons). Most content should be IGNORED.
+This is from a long video (sermon, lecture, etc.). The goal is to provide a timeline showing:
+1. EXTREME/INFLAMMATORY moments that need immediate attention
+2. Brief descriptions of boring/normal sections so the user knows what was discussed
 
-ONLY flag content that is:
+FLAGGING CRITERIA:
+
+**INTERESTING (Flag as specific category):**
 - Explicitly violent rhetoric (calls for violence, threats, violent imagery)
 - Extreme political statements (calls for civil war, government overthrow, militant action)
 - Hateful speech targeting groups (calls for harm/death to LGBT people, racial groups, religious groups, etc.)
@@ -325,44 +347,46 @@ ONLY flag content that is:
 - Extreme authoritarian or theocratic statements (demanding execution, persecution, or elimination of groups)
 - Shocking confessions or admissions of illegal/immoral activity
 
-DO NOT FLAG:
+**BORING (Flag as "routine"):**
 - Normal religious teaching, prayer, or theology
 - General conservative/liberal political opinions
 - Routine criticism of policies or politicians
 - Standard sermon content or biblical interpretation
 - Context-setting or introductions
-- Emotional stories that aren't extreme
 - Regular arguments or debates
 - Normal cultural commentary
-
-THINK: Would this be newsworthy or legally concerning? If not, SKIP IT.
+- Prayers, hymns, announcements, etc.
 
 MANDATORY OUTPUT FORMAT:
 
-You MUST respond in this EXACT format. Do not deviate:
+You MUST analyze the ENTIRE segment and provide sections for ALL content (interesting AND boring).
 
 INTERESTING SECTIONS:
 
 Section 1:
 Start: "exact first 5-10 words from transcript"
 End: "exact last 5-10 words from transcript"
-Category: violence|extremism|hate|conspiracy|shocking
-Description: One sentence explaining the extreme content
+Category: violence|extremism|hate|conspiracy|shocking|routine
+Description: One sentence explaining the content
 
 Section 2:
 Start: "exact first 5-10 words from transcript"
 End: "exact last 5-10 words from transcript"
-Category: violence|extremism|hate|conspiracy|shocking
-Description: One sentence explaining the extreme content
+Category: violence|extremism|hate|conspiracy|shocking|routine
+Description: One sentence explaining the content
+
+[Continue for ALL distinct topics/sections in this segment]
 
 IMPORTANT RULES:
 - Start and End MUST be exact quotes from the transcript below
 - Use double quotes around the phrases
-- Categories: violence, extremism, hate, conspiracy, or shocking
+- Categories: violence, extremism, hate, conspiracy, shocking, OR routine
 - Keep descriptions to ONE sentence
-- If nothing meets the criteria, respond with: "INTERESTING SECTIONS:\n\nNone found."
+- Provide sections for the ENTIRE segment - don't skip boring parts
+- Break it up so each distinct topic/discussion gets its own section
+- If the entire segment is just one boring topic, that's fine - create one "routine" section
 
-TRANSCRIPT TO ANALYZE:
+TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 {chunk_text[:8000]}"""  # Limit to ~8k chars for speed
 
         response = call_ollama(endpoint, model, prompt, timeout=600)  # 10 minutes for large models
@@ -774,14 +798,24 @@ def write_section_to_file(output_file: str, section: Dict, is_first: bool = Fals
                 f.write("VIDEO ANALYSIS RESULTS\n")
                 f.write("=" * 80 + "\n\n")
 
-            # Write section
-            f.write(f"**{section['start_time']} - {section['end_time']} - {section['description']} [{section['category']}]**\n\n")
+            # Write section header
+            if section.get('category') == 'routine':
+                # Routine sections are simpler - just timestamp and description
+                f.write(f"**{section['start_time']} - {section['description']} [routine]**\n\n")
+            else:
+                # Interesting sections get full treatment
+                end_time = section.get('end_time', '')
+                if end_time:
+                    f.write(f"**{section['start_time']} - {end_time} - {section['description']} [{section['category']}]**\n\n")
+                else:
+                    f.write(f"**{section['start_time']} - {section['description']} [{section['category']}]**\n\n")
 
-            for quote in section.get('quotes', []):
-                f.write(f"{quote['timestamp']} - \"{quote['text']}\"\n")
-                if quote.get('significance'):
-                    f.write(f"   → {quote['significance']}\n")
-                f.write("\n")
+                # Write quotes if available
+                for quote in section.get('quotes', []):
+                    f.write(f"{quote['timestamp']} - \"{quote['text']}\"\n")
+                    if quote.get('significance'):
+                        f.write(f"   → {quote['significance']}\n")
+                    f.write("\n")
 
             f.write("-" * 80 + "\n\n")
             f.flush()

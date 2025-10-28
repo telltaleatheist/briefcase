@@ -21,17 +21,18 @@ export class BatchStateService {
   private readonly COUNTER_KEY = 'clippy_pending_job_counter';
 
   constructor() {
-    // Load pending jobs from localStorage on service initialization
+    // Load pending jobs from sessionStorage on service initialization
+    // sessionStorage clears when the browser/app closes, but persists during tab navigation
     this.loadFromStorage();
   }
 
   /**
-   * Load pending jobs from localStorage
+   * Load pending jobs from sessionStorage (clears on app close)
    */
   private loadFromStorage(): void {
     try {
-      const storedJobs = localStorage.getItem(this.STORAGE_KEY);
-      const storedCounter = localStorage.getItem(this.COUNTER_KEY);
+      const storedJobs = sessionStorage.getItem(this.STORAGE_KEY);
+      const storedCounter = sessionStorage.getItem(this.COUNTER_KEY);
 
       if (storedJobs) {
         const jobs = JSON.parse(storedJobs) as PendingJob[];
@@ -47,13 +48,13 @@ export class BatchStateService {
   }
 
   /**
-   * Save pending jobs to localStorage
+   * Save pending jobs to sessionStorage (clears on app close)
    */
   private saveToStorage(): void {
     try {
       const jobs = this.pendingJobsSubject.value;
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(jobs));
-      localStorage.setItem(this.COUNTER_KEY, this.pendingJobIdCounter.toString());
+      sessionStorage.setItem(this.STORAGE_KEY, JSON.stringify(jobs));
+      sessionStorage.setItem(this.COUNTER_KEY, this.pendingJobIdCounter.toString());
     } catch (error) {
       console.error('Error saving pending jobs to storage:', error);
     }

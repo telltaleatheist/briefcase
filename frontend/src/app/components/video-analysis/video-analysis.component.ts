@@ -254,8 +254,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   }
 
   private async loadSettings(): Promise<void> {
-    // Load saved model from localStorage
-    const savedModel = localStorage.getItem('clippy_ai_model');
+    // Load saved model from sessionStorage (persists during tab navigation, clears on app close)
+    const savedModel = sessionStorage.getItem('clippy_ai_model');
     if (savedModel) {
       this.analysisForm.patchValue({ aiModel: savedModel });
     }
@@ -264,7 +264,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   saveSettings(): void {
     const aiModel = this.analysisForm.get('aiModel')?.value;
-    localStorage.setItem('clippy_ai_model', aiModel);
+    sessionStorage.setItem('clippy_ai_model', aiModel);
     this.snackBar.open('Settings saved', 'Dismiss', { duration: 2000 });
 
     // Close the advanced options accordion
