@@ -11,7 +11,15 @@ import { ServerConfig } from '../config/server-config';
  */
 export class WindowService {
   private mainWindow: BrowserWindow | null = null;
-  
+  private frontendPort: number = 8080;
+
+  /**
+   * Set the frontend port to use
+   */
+  setFrontendPort(port: number): void {
+    this.frontendPort = port;
+  }
+
   /**
    * Create the main application window
    */
@@ -34,12 +42,14 @@ export class WindowService {
         preload: AppConfig.preloadPath,
       },
     });
-    
+
     // Set up CSP headers
     this.setupContentSecurityPolicy();
 
-    // Load the frontend URL
-    this.mainWindow.loadURL(ServerConfig.frontendUrl);
+    // Load the frontend URL using the actual port
+    const frontendUrl = `http://${ServerConfig.config.electronServer.host}:${this.frontendPort}`;
+    log.info(`Loading frontend from: ${frontendUrl}`);
+    this.mainWindow.loadURL(frontendUrl);
 
     // Window close handler
     this.mainWindow.on('closed', () => {
@@ -175,8 +185,10 @@ export class WindowService {
    */
   private setupContentSecurityPolicy(): void {
     if (!this.mainWindow) return;
-    
+
     this.mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      // Allow connections to the actual ports being used (support port ranges for flexibility)
+      const portRange = '3000-3010 8080-8090';
       callback({
         responseHeaders: {
           ...details.responseHeaders,
@@ -184,7 +196,7 @@ export class WindowService {
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
             "font-src 'self' https://fonts.gstatic.com; " +
-            "connect-src 'self' http://localhost:3000 http://localhost:8080 ws://localhost:3000 ws://localhost:8080;"
+            `connect-src 'self' http://localhost:${portRange} ws://localhost:${portRange};`
         }
       });
     });

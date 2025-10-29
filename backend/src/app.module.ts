@@ -1,5 +1,5 @@
 // clippy/backend/src/app.module.ts
-import { Module } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DownloaderModule } from './downloader/downloader.module';
@@ -13,13 +13,16 @@ import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
+@Global()
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       load: [() => environment],
     }),
-    EventEmitterModule.forRoot(),
+    EventEmitterModule.forRoot({
+      global: true,
+    }),
     SharedConfigModule,
     DownloaderModule,
     FfmpegModule,

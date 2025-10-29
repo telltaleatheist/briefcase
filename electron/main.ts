@@ -76,9 +76,11 @@ app.whenReady().then(async () => {
     
     // Start backend server
     const backendStarted = await backendService.startBackendServer();
-    
+
     // Create window based on backend status
     if (backendStarted) {
+      // Set the actual frontend port before creating the window
+      windowService.setFrontendPort(backendService.getFrontendPort());
       windowService.createMainWindow();
     } else {
       windowService.showBackendErrorWindow();
@@ -88,6 +90,7 @@ app.whenReady().then(async () => {
     app.on('activate', () => {
       if (windowService.getAllWindows().length === 0) {
         if (backendService.isRunning()) {
+          windowService.setFrontendPort(backendService.getFrontendPort());
           windowService.createMainWindow();
         } else {
           windowService.showBackendErrorWindow();

@@ -8,6 +8,7 @@ import * as log from 'electron-log';
 import { spawn, ChildProcess } from 'child_process';
 import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
+import { PortUtil } from '../utilities/port-util';
 
 /**
  * Backend server management service
@@ -18,7 +19,9 @@ export class BackendService {
   private server: Server | null = null;
   private backendStarted: boolean = false;
   private lockFilePath: string;
-  
+  private actualBackendPort: number = 3000;
+  private actualFrontendPort: number = 8080;
+
   constructor() {
     this.lockFilePath = path.join(app.getPath('userData'), 'backend.lock');
   }
@@ -27,31 +30,61 @@ export class BackendService {
    * Start the backend server and HTTP server
    */
   async startBackendServer(): Promise<boolean> {
-    
+
     // If backend already started, return true
     if (this.backendStarted) {
       return true;
     }
-    
+
     // Check if lock file exists and is recent (less than 10 seconds old)
     if (fs.existsSync(this.lockFilePath)) {
       const stats = fs.statSync(this.lockFilePath);
       const fileAge = Date.now() - stats.mtimeMs;
-      
+
       if (fileAge < 10000) {  // 10 seconds
-        log.info('Recent lock file found. Another backend instance may be running.');
-        return false;
+        log.info('Recent lock file found. Attempting to clean up stale processes...');
+        // Try to free the port instead of failing
+        const backendPortFreed = await PortUtil.attemptToFreePort(ServerConfig.config.nestBackend.port);
+        const frontendPortFreed = await PortUtil.attemptToFreePort(ServerConfig.config.electronServer.port);
+
+        if (backendPortFreed && frontendPortFreed) {
+          log.info('Successfully freed ports, continuing with startup');
+          fs.unlinkSync(this.lockFilePath);
+        } else {
+          log.warn('Could not free ports, will try alternative ports');
+        }
       } else {
         fs.unlinkSync(this.lockFilePath);
       }
     }
-    
+
+    // Find available ports
+    const backendPort = await PortUtil.findAvailablePort(ServerConfig.config.nestBackend.port, 10);
+    const frontendPort = await PortUtil.findAvailablePort(ServerConfig.config.electronServer.port, 10);
+
+    if (!backendPort || !frontendPort) {
+      log.error('Could not find available ports for backend and frontend servers');
+      return false;
+    }
+
+    this.actualBackendPort = backendPort;
+    this.actualFrontendPort = frontendPort;
+
+    if (backendPort !== ServerConfig.config.nestBackend.port) {
+      log.info(`Using alternative backend port: ${backendPort} (default ${ServerConfig.config.nestBackend.port} was in use)`);
+    }
+
+    if (frontendPort !== ServerConfig.config.electronServer.port) {
+      log.info(`Using alternative frontend port: ${frontendPort} (default ${ServerConfig.config.electronServer.port} was in use)`);
+    }
+
     // Create lock file
     try {
       fs.writeFileSync(this.lockFilePath, new Date().toString());
     } catch (err) {
+      log.warn(`Could not create lock file: ${err}`);
     }
-    
+
     try {
       const success = await this.startNodeBackend();
       await this.startHttpServer();
@@ -59,14 +92,72 @@ export class BackendService {
       this.backendStarted = true;
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      const isRunning = await ServerConfig.isBackendRunning();
-      
+      const isRunning = await this.checkBackendRunning();
+
+      if (isRunning) {
+        log.info(`Backend successfully started on port ${this.actualBackendPort}`);
+        log.info(`Frontend server successfully started on port ${this.actualFrontendPort}`);
+      }
+
       return isRunning;
-      
+
     } catch (error) {
       log.error('Error starting backend servers:', error);
+      // Clean up lock file on failure
+      if (fs.existsSync(this.lockFilePath)) {
+        try {
+          fs.unlinkSync(this.lockFilePath);
+        } catch (err) {
+          // Ignore
+        }
+      }
       return false;
     }
+  }
+
+  /**
+   * Check if backend is running on the actual port being used
+   */
+  private async checkBackendRunning(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const req = http.request({
+        hostname: ServerConfig.config.nestBackend.host,
+        port: this.actualBackendPort,
+        path: '/api',
+        method: 'GET',
+        timeout: 2000
+      }, (res) => {
+        log.info(`Backend check response status: ${res.statusCode}`);
+        resolve(res.statusCode === 200);
+      });
+
+      req.on('error', (err) => {
+        log.error(`Backend check error: ${err.message}`);
+        resolve(false);
+      });
+
+      req.on('timeout', () => {
+        log.error('Backend check timeout');
+        req.destroy();
+        resolve(false);
+      });
+
+      req.end();
+    });
+  }
+
+  /**
+   * Get the actual backend port being used
+   */
+  getBackendPort(): number {
+    return this.actualBackendPort;
+  }
+
+  /**
+   * Get the actual frontend port being used
+   */
+  getFrontendPort(): number {
+    return this.actualFrontendPort;
   }
   
   /**
@@ -92,7 +183,7 @@ export class BackendService {
         CLIPPY_BACKEND: 'true',
         FRONTEND_PATH: frontendPath,
         NODE_PATH: path.join(process.resourcesPath, 'backend/node_modules'),
-        PORT: ServerConfig.config.nestBackend.port.toString(),
+        PORT: this.actualBackendPort.toString(),
         NODE_ENV: 'production',
         APP_ROOT: process.resourcesPath,
         VERBOSE: 'true'
@@ -128,12 +219,12 @@ export class BackendService {
         
         const proxyOptions = {
           hostname: serverConfig.nestBackend.host,
-          port: serverConfig.nestBackend.port,
+          port: this.actualBackendPort,
           path: url,
           method: req.method,
           headers: {
             ...req.headers,
-            'Host': `${serverConfig.nestBackend.host}:${serverConfig.nestBackend.port}`
+            'Host': `${serverConfig.nestBackend.host}:${this.actualBackendPort}`
           }
         };
 
@@ -249,7 +340,8 @@ export class BackendService {
     });
 
     // Start HTTP server
-    this.server.listen(serverConfig.electronServer.port, serverConfig.electronServer.host, () => {
+    this.server.listen(this.actualFrontendPort, serverConfig.electronServer.host, () => {
+      log.info(`HTTP server listening on ${serverConfig.electronServer.host}:${this.actualFrontendPort}`);
     });
   }
 
