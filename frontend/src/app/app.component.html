@@ -11,23 +11,23 @@
     <mat-sidenav mode="side" opened class="app-sidenav">
       <div class="sidenav-content">
         <mat-nav-list class="nav-list">
-          <a mat-list-item [routerLink]="['/batch']" routerLinkActive="active-link">
+          <a mat-list-item routerLink="/batch" routerLinkActive="active-link">
             <mat-icon matListItemIcon>download</mat-icon>
             <span matListItemTitle>Download Videos</span>
           </a>
-          <a mat-list-item [routerLink]="['/analysis']" routerLinkActive="active-link" (click)="navigateToAnalysis()">
+          <a mat-list-item routerLink="/analysis" routerLinkActive="active-link">
             <mat-icon matListItemIcon>psychology</mat-icon>
             <span matListItemTitle>Video Analysis</span>
           </a>
-          <a mat-list-item [routerLink]="['/reports']" routerLinkActive="active-link">
+          <a mat-list-item routerLink="/reports" routerLinkActive="active-link">
             <mat-icon matListItemIcon>description</mat-icon>
             <span matListItemTitle>Analysis Reports</span>
           </a>
-          <a mat-list-item [routerLink]="['/normalize']" routerLinkActive="active-link">
+          <a mat-list-item routerLink="/normalize" routerLinkActive="active-link">
             <mat-icon matListItemIcon>equalizer</mat-icon>
             <span matListItemTitle>Normalize Audio</span>
           </a>
-          <a mat-list-item [routerLink]="['/settings']" routerLinkActive="active-link">
+          <a mat-list-item routerLink="/settings" routerLinkActive="active-link">
             <mat-icon matListItemIcon>settings</mat-icon>
             <span matListItemTitle>Settings</span>
           </a>

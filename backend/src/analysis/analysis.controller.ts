@@ -198,6 +198,64 @@ export class AnalysisController implements OnGatewayInit {
   }
 
   /**
+   * Check if a report already exists for a given input
+   */
+  @Post('check-existing-report')
+  async checkExistingReport(@Body() body: { input: string; inputType: string; outputPath?: string }) {
+    try {
+      const fs = require('fs');
+
+      // Determine the output directory
+      const baseOutputPath = body.outputPath || this.getBaseOutputDir();
+      const reportsPath = path.join(baseOutputPath, 'analysis', 'reports');
+
+      // Generate the sanitized title (same logic as in analysis.service.ts)
+      let videoTitle: string;
+
+      if (body.inputType === 'url') {
+        // For URLs, extract title from URL
+        const urlParts = body.input.split('/');
+        videoTitle = urlParts[urlParts.length - 1] || 'video';
+      } else {
+        // For local files, use the filename
+        videoTitle = path.basename(body.input, path.extname(body.input));
+      }
+
+      const sanitizedTitle = videoTitle.replace(/[^a-zA-Z0-9\s\-_]/g, '').trim();
+      const expectedReportPath = path.join(reportsPath, `${sanitizedTitle}.txt`);
+
+      // Check if file exists
+      const exists = fs.existsSync(expectedReportPath);
+
+      if (exists) {
+        const stats = fs.statSync(expectedReportPath);
+        return {
+          success: true,
+          exists: true,
+          reportPath: expectedReportPath,
+          reportName: `${sanitizedTitle}.txt`,
+          stats: {
+            mtime: stats.mtime,
+            size: stats.size
+          }
+        };
+      }
+
+      return {
+        success: true,
+        exists: false,
+        expectedPath: expectedReportPath,
+        expectedName: `${sanitizedTitle}.txt`
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        `Failed to check existing report: ${error.message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Get list of analysis reports
    */
   @Get('reports')

@@ -214,6 +214,39 @@ def check_ollama_model(endpoint: str, model: str) -> bool:
         return False
 
 
+def generate_video_summary(endpoint: str, model: str, transcript_text: str, duration: float) -> str:
+    """Generate a basic summary of the video content"""
+    try:
+        # For short videos, use the full transcript. For long ones, use first ~2000 chars
+        summary_text = transcript_text[:2000] if len(transcript_text) > 2000 else transcript_text
+
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
+
+        prompt = f"""Provide a brief 2-3 sentence summary of this {minutes}m{seconds}s video based on its transcript.
+Focus on: What is the video about? What is the main topic/subject? Who is speaking (if identifiable)?
+
+Keep it factual and concise.
+
+Transcript excerpt:
+{summary_text}
+
+Summary:"""
+
+        response = call_ollama(endpoint, model, prompt, timeout=30)
+
+        if response:
+            return response.strip()
+        else:
+            return f"This video is approximately {minutes} minutes {seconds} seconds long."
+
+    except Exception as e:
+        print(f"[DEBUG] Summary generation failed: {e}", file=sys.stderr)
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
+        return f"This video is approximately {minutes} minutes {seconds} seconds long."
+
+
 def analyze_with_ollama(
     endpoint: str,
     model: str,
@@ -226,11 +259,26 @@ def analyze_with_ollama(
     Chunks the transcript and streams analysis results
     """
     try:
-        send_progress("analysis", 65, f"Starting AI analysis with {model}...")
+        send_progress("analysis", 60, f"Starting AI analysis with {model}...")
 
         # Check model availability
         if not check_ollama_model(endpoint, model):
             raise Exception(f"Model '{model}' not found in Ollama. Please install it first.")
+
+        # Generate video summary FIRST (always runs, even for short/boring videos)
+        send_progress("analysis", 65, "Generating video summary...")
+        video_duration = segments[-1]['end'] if segments else 0
+        summary = generate_video_summary(endpoint, model, transcript_text, video_duration)
+
+        # Write header and summary to file
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("VIDEO ANALYSIS RESULTS\n")
+            f.write("=" * 80 + "\n\n")
+            f.write("**VIDEO OVERVIEW**\n\n")
+            f.write(summary + "\n\n")
+            f.write("-" * 80 + "\n\n")
+            f.flush()
 
         # Chunk transcript into time-based segments (5 min chunks for more granular analysis)
         chunks = chunk_transcript(segments, chunk_minutes=5)
@@ -267,8 +315,8 @@ def analyze_with_ollama(
                                 "end_time": None,
                                 "quotes": []
                             })
-                            # Write immediately
-                            write_section_to_file(output_file, analyzed_sections[-1], is_first=(i == 1 and len(analyzed_sections) == 1))
+                            # Write immediately (is_first=False since we already wrote header with summary)
+                            write_section_to_file(output_file, analyzed_sections[-1], is_first=False)
                     else:
                         # For interesting sections, do detailed analysis
                         detailed_analysis = analyze_section_detail(
@@ -276,8 +324,8 @@ def analyze_with_ollama(
                         )
                         if detailed_analysis:
                             analyzed_sections.append(detailed_analysis)
-                            # Write section immediately to file (streaming)
-                            write_section_to_file(output_file, detailed_analysis, is_first=(i == 1 and len(analyzed_sections) == 1))
+                            # Write section immediately to file (streaming, is_first=False since we already wrote header)
+                            write_section_to_file(output_file, detailed_analysis, is_first=False)
 
         send_progress("analysis", 90, f"Analysis complete. Found {len(analyzed_sections)} interesting sections.")
 

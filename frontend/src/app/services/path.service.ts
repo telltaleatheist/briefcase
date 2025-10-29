@@ -28,7 +28,7 @@ export class PathService {
   }
 
   /**
-   * Opens a native directory picker dialog 
+   * Opens a native directory picker dialog
    * (Only works in electron, not in web)
    */
   openDirectoryPicker(): Observable<string | null> {
@@ -36,12 +36,9 @@ export class PathService {
     if ((window as any).electron && typeof (window as any).electron.selectDirectory === 'function') {
       return new Observable<string | null>(observer => {
         (window as any).electron.selectDirectory()
-          .then((result: { canceled: boolean, filePaths: string[] }) => {
-            if (result.canceled || !result.filePaths.length) {
-              observer.next(null);
-            } else {
-              observer.next(result.filePaths[0]);
-            }
+          .then((result: string | null) => {
+            // The IPC handler returns the path directly as a string, or null if canceled
+            observer.next(result);
             observer.complete();
           })
           .catch((error: any) => {
@@ -51,7 +48,7 @@ export class PathService {
           });
       });
     }
-    
+
     // If not in Electron or the function doesn't exist, return null
     return new Observable<string | null>(observer => {
       observer.next(null);

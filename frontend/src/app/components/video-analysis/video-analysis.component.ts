@@ -99,6 +99,41 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     const formValue = this.analysisForm.value;
 
     try {
+      // First, check if a report already exists
+      const existingCheck = await fetch('/api/api/analysis/check-existing-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: formValue.input,
+          inputType: formValue.inputType,
+          outputPath: formValue.outputPath
+        }),
+      });
+
+      if (!existingCheck.ok) {
+        throw new Error('Failed to check for existing report');
+      }
+
+      const existingData = await existingCheck.json();
+
+      // If report exists, show dialog
+      if (existingData.exists) {
+        const action = await this.showExistingReportDialog(existingData.reportName, existingData.stats);
+
+        if (action === 'cancel') {
+          return; // User cancelled
+        }
+
+        if (action === 'new') {
+          // Generate new filename with timestamp
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+          const baseName = existingData.reportName.replace('.txt', '');
+          formValue.customReportName = `${baseName}_${timestamp}_${Date.now()}.txt`;
+        }
+
+        // For 'overwrite', we don't need to do anything special - just proceed
+      }
+
       this.isProcessing = true;
 
       // Start analysis via API (backend will check model availability)
@@ -301,6 +336,17 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     });
   }
 
+  async showExistingReportDialog(reportName: string, stats: any): Promise<string> {
+    const dialogRef = this.dialog.open(ExistingReportDialog, {
+      width: '500px',
+      data: { reportName, stats },
+      disableClose: true // Prevent closing by clicking outside
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+    return result || 'cancel';
+  }
+
   /**
    * Check for any active jobs on component init
    */
@@ -440,4 +486,143 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 })
 export class ModelUnavailableDialog {
   constructor(@Inject(MAT_DIALOG_DATA) public data: any) {}
+}
+
+// Dialog component for existing report
+@Component({
+  selector: 'existing-report-dialog',
+  standalone: true,
+  imports: [CommonModule, MatDialogModule, MatButtonModule, MatIconModule],
+  template: `
+    <div class="existing-report-dialog">
+      <h2 mat-dialog-title>
+        <mat-icon>warning</mat-icon>
+        Report Already Exists
+      </h2>
+      <mat-dialog-content>
+        <p class="dialog-message">
+          A report with the name <strong>{{ data.reportName }}</strong> already exists.
+        </p>
+
+        <div class="file-info">
+          <div class="info-row">
+            <mat-icon>schedule</mat-icon>
+            <span>Last modified: {{ formatDate(data.stats.mtime) }}</span>
+          </div>
+          <div class="info-row">
+            <mat-icon>storage</mat-icon>
+            <span>Size: {{ formatSize(data.stats.size) }}</span>
+          </div>
+        </div>
+
+        <p class="dialog-question">
+          What would you like to do?
+        </p>
+      </mat-dialog-content>
+      <mat-dialog-actions align="center">
+        <button mat-raised-button color="warn" [mat-dialog-close]="'overwrite'">
+          <mat-icon>refresh</mat-icon>
+          Overwrite
+        </button>
+        <button mat-raised-button color="primary" [mat-dialog-close]="'new'">
+          <mat-icon>add</mat-icon>
+          Save as New
+        </button>
+        <button mat-raised-button [mat-dialog-close]="'cancel'">
+          <mat-icon>cancel</mat-icon>
+          Cancel
+        </button>
+      </mat-dialog-actions>
+    </div>
+  `,
+  styles: [`
+    .existing-report-dialog {
+      h2 {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: #ff9800;
+        margin: 0;
+      }
+
+      mat-icon {
+        vertical-align: middle;
+      }
+
+      h2 mat-icon {
+        color: #ff9800;
+      }
+    }
+
+    .dialog-message {
+      margin: 1rem 0;
+      font-size: 1rem;
+      color: var(--text-primary);
+    }
+
+    .file-info {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: var(--border-radius);
+      padding: 1rem;
+      margin: 1rem 0;
+
+      .info-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.5rem 0;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+          color: var(--primary-orange);
+        }
+      }
+    }
+
+    .dialog-question {
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin: 1rem 0 0.5rem 0;
+    }
+
+    mat-dialog-actions {
+      display: flex;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 1rem 0 0 0;
+      margin: 0;
+
+      button {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
+  `]
+})
+export class ExistingReportDialog {
+  constructor(@Inject(MAT_DIALOG_DATA) public data: any) {}
+
+  formatDate(dateString: string): string {
+    const date = new Date(dateString);
+    return date.toLocaleString();
+  }
+
+  formatSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  }
 }

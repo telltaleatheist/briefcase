@@ -43,6 +43,7 @@ export interface AnalysisRequest {
   whisperModel?: string;
   language?: string;
   outputPath?: string;
+  customReportName?: string; // Custom name for the report file
 }
 
 @Injectable()
@@ -254,9 +255,11 @@ export class AnalysisService {
         timing: { ...job6?.timing, analysisStart: new Date() },
       });
 
+      // Use custom report name if provided, otherwise use sanitized title
+      const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
       const analysisOutputPath = path.join(
         reportsPath,
-        `${sanitizedTitle}.txt`,
+        reportFileName,
       );
 
       const analysisResult = await this.pythonBridge.analyze(
