@@ -187,8 +187,7 @@ export class WindowService {
     if (!this.mainWindow) return;
 
     this.mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-      // Allow connections to the actual ports being used (support port ranges for flexibility)
-      const portRange = '3000-3010 8080-8090';
+      // Allow connections to localhost on any port for development flexibility
       callback({
         responseHeaders: {
           ...details.responseHeaders,
@@ -196,7 +195,7 @@ export class WindowService {
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
             "font-src 'self' https://fonts.gstatic.com; " +
-            `connect-src 'self' http://localhost:${portRange} ws://localhost:${portRange};`
+            "connect-src 'self' http://localhost:* ws://localhost:*;"
         }
       });
     });

@@ -2,6 +2,7 @@
 import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { DownloadOptions, DownloadResult, HistoryItem } from '../common/interfaces/download.interface';
 import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
@@ -14,13 +15,19 @@ export class DownloaderService implements OnModuleInit {
   private downloadHistory: HistoryItem[] = [];
   private historyFilePath: string;
   private activeDownloads: Map<string, YtDlpManager> = new Map();
-  
+
   constructor(
     private readonly pathService: PathService,
     private readonly sharedConfigService: SharedConfigService,
     private readonly eventService: MediaEventService
   ) {
-    this.historyFilePath = path.join(process.cwd(), 'downloads', 'history.json');
+    // Use user's app data directory instead of process.cwd() to avoid permission issues
+    const userDataPath = process.env.APPDATA ||
+                        (process.platform === 'darwin' ?
+                        path.join(os.homedir(), 'Library', 'Application Support') :
+                        path.join(os.homedir(), '.config'));
+
+    this.historyFilePath = path.join(userDataPath, 'clippy', 'history.json');
     this.ensureDirectoriesExist();
     this.loadDownloadHistory();
   }
