@@ -495,118 +495,222 @@ export class ModelUnavailableDialog {
   imports: [CommonModule, MatDialogModule, MatButtonModule, MatIconModule],
   template: `
     <div class="existing-report-dialog">
-      <h2 mat-dialog-title>
-        <mat-icon>warning</mat-icon>
-        Report Already Exists
-      </h2>
-      <mat-dialog-content>
-        <p class="dialog-message">
-          A report with the name <strong>{{ data.reportName }}</strong> already exists.
-        </p>
+      <div class="dialog-header">
+        <div class="header-icon">
+          <mat-icon>description</mat-icon>
+        </div>
+        <div class="header-content">
+          <h2>Report Already Exists</h2>
+          <p class="filename">{{ data.reportName }}</p>
+        </div>
+      </div>
 
-        <div class="file-info">
-          <div class="info-row">
+      <mat-dialog-content>
+        <div class="file-details">
+          <div class="detail-item">
             <mat-icon>schedule</mat-icon>
-            <span>Last modified: {{ formatDate(data.stats.mtime) }}</span>
+            <div class="detail-text">
+              <span class="detail-label">Last Modified</span>
+              <span class="detail-value">{{ formatDate(data.stats.mtime) }}</span>
+            </div>
           </div>
-          <div class="info-row">
+          <div class="detail-item">
             <mat-icon>storage</mat-icon>
-            <span>Size: {{ formatSize(data.stats.size) }}</span>
+            <div class="detail-text">
+              <span class="detail-label">File Size</span>
+              <span class="detail-value">{{ formatSize(data.stats.size) }}</span>
+            </div>
           </div>
         </div>
 
-        <p class="dialog-question">
-          What would you like to do?
-        </p>
+        <div class="action-prompt">
+          <p>Choose how to proceed:</p>
+        </div>
       </mat-dialog-content>
-      <mat-dialog-actions align="center">
-        <button mat-raised-button color="warn" [mat-dialog-close]="'overwrite'">
-          <mat-icon>refresh</mat-icon>
-          Overwrite
-        </button>
-        <button mat-raised-button color="primary" [mat-dialog-close]="'new'">
-          <mat-icon>add</mat-icon>
-          Save as New
-        </button>
-        <button mat-raised-button [mat-dialog-close]="'cancel'">
-          <mat-icon>cancel</mat-icon>
+
+      <mat-dialog-actions>
+        <button mat-stroked-button class="cancel-btn" [mat-dialog-close]="'cancel'">
+          <mat-icon>close</mat-icon>
           Cancel
+        </button>
+        <button mat-raised-button class="overwrite-btn" [mat-dialog-close]="'overwrite'">
+          <mat-icon>sync</mat-icon>
+          Replace Existing
+        </button>
+        <button mat-raised-button class="new-btn" [mat-dialog-close]="'new'">
+          <mat-icon>add_circle_outline</mat-icon>
+          Save as New
         </button>
       </mat-dialog-actions>
     </div>
   `,
   styles: [`
     .existing-report-dialog {
-      h2 {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        color: #ff9800;
-        margin: 0;
-      }
-
-      mat-icon {
-        vertical-align: middle;
-      }
-
-      h2 mat-icon {
-        color: #ff9800;
-      }
+      min-width: 480px;
+      max-width: 560px;
     }
 
-    .dialog-message {
-      margin: 1rem 0;
-      font-size: 1rem;
-      color: var(--text-primary);
-    }
+    .dialog-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.5rem 1.5rem 1rem 1.5rem;
+      background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-card) 100%);
+      border-bottom: 2px solid var(--primary-orange);
 
-    .file-info {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--border-radius);
-      padding: 1rem;
-      margin: 1rem 0;
-
-      .info-row {
+      .header-icon {
+        background: var(--primary-orange);
+        border-radius: 12px;
+        width: 48px;
+        height: 48px;
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-        color: var(--text-secondary);
+        justify-content: center;
+        flex-shrink: 0;
+        box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
 
         mat-icon {
-          font-size: 18px;
-          width: 18px;
-          height: 18px;
+          color: white;
+          font-size: 28px;
+          width: 28px;
+          height: 28px;
+        }
+      }
+
+      .header-content {
+        flex: 1;
+        min-width: 0;
+
+        h2 {
+          margin: 0;
+          font-size: 1.5rem;
+          font-weight: 600;
+          color: var(--text-primary);
+          line-height: 1.2;
+        }
+
+        .filename {
+          margin: 0.5rem 0 0 0;
+          font-size: 0.9rem;
           color: var(--primary-orange);
+          font-weight: 500;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
       }
     }
 
-    .dialog-question {
-      font-size: 1rem;
-      font-weight: 500;
-      color: var(--text-primary);
-      margin: 1rem 0 0.5rem 0;
+    mat-dialog-content {
+      padding: 1.5rem;
+      margin: 0;
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+
+      mat-icon {
+        color: var(--primary-orange);
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
+      }
+
+      .info-text {
+        font-size: 0.95rem;
+        color: var(--text-secondary);
+      }
+    }
+
+    .action-prompt {
+      padding: 1rem 0 0 0;
+      border-top: 1px solid var(--border-color);
+
+      p {
+        margin: 0;
+        font-size: 1rem;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
     }
 
     mat-dialog-actions {
-      display: flex;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 1rem 0 0 0;
+      padding: 0 1.5rem 1.5rem 1.5rem;
       margin: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
 
       button {
         display: flex;
         align-items: center;
-        gap: 0.25rem;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0 1rem;
+        height: 42px;
+        font-weight: 600;
+        font-size: 0.875rem;
+        border-radius: 8px;
+        transition: all 0.2s ease;
+        white-space: nowrap;
 
         mat-icon {
           font-size: 18px;
           width: 18px;
           height: 18px;
+        }
+
+        &:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+      }
+
+      .cancel-btn {
+        color: var(--text-secondary);
+        border-color: var(--border-color);
+
+        &:hover {
+          background: var(--bg-secondary);
+          border-color: var(--text-secondary);
+        }
+      }
+
+      .overwrite-btn {
+        background: var(--primary-orange);
+        color: white;
+
+        &:hover {
+          background: var(--dark-orange);
+          box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+        }
+      }
+
+      .new-btn {
+        background: var(--primary-orange);
+        color: white;
+
+        &:hover {
+          background: var(--dark-orange);
+          box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+        }
+      }
+    }
+
+    @media (max-width: 600px) {
+      .existing-report-dialog {
+        min-width: 100%;
+      }
+
+      mat-dialog-actions {
+        grid-template-columns: 1fr;
+
+        button {
+          width: 100%;
         }
       }
     }
