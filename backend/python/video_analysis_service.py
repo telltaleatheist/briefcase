@@ -394,16 +394,22 @@ FLAGGING CRITERIA:
 - Conspiracy theories with dangerous implications (calls to stockpile weapons, preparation for violent conflict)
 - Extreme authoritarian or theocratic statements (demanding execution, persecution, or elimination of groups)
 - Shocking confessions or admissions of illegal/immoral activity
+- **Defense of slavery, genocide, or other historical atrocities** - THIS IS ALWAYS EXTREME, categorize as "extremism" or "hate"
+- **Claims that owning humans is acceptable** - THIS IS ALWAYS EXTREME, categorize as "extremism" or "hate"
+- Justification of systemic oppression (slavery, apartheid, ethnic cleansing, etc.) - categorize as "hate" or "extremism"
+- Dehumanization of any group of people - categorize as "hate"
 
 **BORING (Flag as "routine"):**
-- Normal religious teaching, prayer, or theology
-- General conservative/liberal political opinions
+- Normal religious teaching that does NOT defend atrocities
+- General conservative/liberal political opinions that do NOT advocate harm
 - Routine criticism of policies or politicians
-- Standard sermon content or biblical interpretation
+- Standard sermon content UNLESS it defends slavery, genocide, or oppression
 - Context-setting or introductions
-- Regular arguments or debates
+- Regular arguments or debates about non-extreme topics
 - Normal cultural commentary
 - Prayers, hymns, announcements, etc.
+
+CRITICAL: Biblical interpretation or religious teaching that defends slavery, genocide, or dehumanization is NOT routine - it is EXTREME and must be flagged as "hate" or "extremism".
 
 MANDATORY OUTPUT FORMAT:
 

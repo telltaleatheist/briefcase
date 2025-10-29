@@ -142,29 +142,57 @@ export class AnalysisReportsComponent implements OnInit {
   private parseReportContent(content: string): ParsedSection[] {
     const sections: ParsedSection[] = [];
 
-    // Split by section dividers
-    const parts = content.split('---');
+    // Split by section dividers (80+ dashes)
+    const parts = content.split(/[-]{80,}/);
 
     for (const part of parts) {
-      if (part.trim().length === 0 || part.includes('VIDEO ANALYSIS RESULTS')) continue;
+      if (part.trim().length === 0 ||
+          part.includes('VIDEO ANALYSIS RESULTS') ||
+          part.includes('VIDEO OVERVIEW') ||
+          part.includes('PERFORMANCE METRICS')) {
+        continue;
+      }
 
       const lines = part.trim().split('\n');
 
-      // Parse section header (e.g., "**0:09 - 0:12 - Description [category]**")
+      // Parse section header - handle both formats:
+      // Format 1: "**0:09 - 0:12 - Description [category]**"
+      // Format 2: "**0:00 - Description [routine]**"
       const headerLine = lines.find(l => l.trim().startsWith('**') && l.includes('[') && l.includes(']'));
       if (!headerLine) continue;
 
-      const headerMatch = headerLine.match(/\*\*(.+?)\s+-\s+(.+?)\s+-\s+(.+?)\s+\[(.+?)\]\*\*/);
-      if (!headerMatch) continue;
+      // Try format with both start and end time
+      let headerMatch = headerLine.match(/\*\*(.+?)\s+-\s+(.+?)\s+-\s+(.+?)\s+\[(.+?)\]\*\*/);
+      let timeRange = '';
+      let description = '';
+      let category = '';
+
+      if (headerMatch) {
+        // Format 1: start - end - description [category]
+        timeRange = `${headerMatch[1]} - ${headerMatch[2]}`;
+        description = headerMatch[3];
+        category = headerMatch[4];
+      } else {
+        // Try format with only start time
+        headerMatch = headerLine.match(/\*\*(.+?)\s+-\s+(.+?)\s+\[(.+?)\]\*\*/);
+        if (headerMatch) {
+          // Format 2: start - description [category]
+          timeRange = headerMatch[1];
+          description = headerMatch[2];
+          category = headerMatch[3];
+        } else {
+          continue;
+        }
+      }
 
       const section: ParsedSection = {
-        timeRange: `${headerMatch[1]} - ${headerMatch[2]}`,
-        description: headerMatch[3],
-        category: headerMatch[4],
+        timeRange,
+        description,
+        category,
         quotes: []
       };
 
-      // Parse quotes
+      // Parse quotes (if any)
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
@@ -191,9 +219,8 @@ export class AnalysisReportsComponent implements OnInit {
         }
       }
 
-      if (section.quotes.length > 0) {
-        sections.push(section);
-      }
+      // Add section even if it has no quotes (routine sections)
+      sections.push(section);
     }
 
     return sections;
@@ -206,6 +233,7 @@ export class AnalysisReportsComponent implements OnInit {
       'hate': 'block',
       'conspiracy': 'psychology',
       'shocking': 'report',
+      'routine': 'schedule',
       // Legacy categories (for old reports)
       'controversy': 'warning',
       'claim': 'fact_check',
@@ -225,6 +253,7 @@ export class AnalysisReportsComponent implements OnInit {
       'hate': '#e91e63',          // Pink-red
       'conspiracy': '#ff9800',    // Orange
       'shocking': '#ff5722',      // Deep orange
+      'routine': '#9e9e9e',       // Grey
       // Legacy categories (for old reports)
       'controversy': '#ff5722',
       'claim': '#2196f3',

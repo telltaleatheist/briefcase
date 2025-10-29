@@ -109,11 +109,38 @@ export class SettingsService {
       ...this.settingsSubject.getValue(),
       ...settings
     };
-    
+
     this.settingsSubject.next(updatedSettings);
     this.saveSettingsToStorage(updatedSettings);
+
+    // If outputDir changed, also save to backend config
+    if (settings.outputDir) {
+      this.saveOutputDirToBackend(settings.outputDir);
+    }
   }
-  
+
+  /**
+   * Save output directory to backend config file
+   */
+  private saveOutputDirToBackend(outputDir: string): void {
+    fetch('/api/config/output-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outputDir })
+    })
+      .then(response => response.json())
+      .then(result => {
+        if (result.success) {
+          this.logger.debug('Output directory saved to backend config');
+        } else {
+          this.logger.error('Failed to save output directory to backend:', result.message);
+        }
+      })
+      .catch(error => {
+        this.logger.error('Error saving output directory to backend:', error);
+      });
+  }
+
   /**
    * Reset settings to defaults
    */
