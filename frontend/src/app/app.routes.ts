@@ -3,6 +3,7 @@ import { Routes } from '@angular/router';
 import { BatchDownloadComponent } from './components/batch-download/batch-download.component';
 import { VideoAnalysisComponent } from './components/video-analysis/video-analysis.component';
 import { AnalysisReportsComponent } from './components/analysis-reports/analysis-reports.component';
+import { SettingsComponent } from './components/settings/settings.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: '/batch', pathMatch: 'full' },
@@ -10,4 +11,5 @@ export const routes: Routes = [
   { path: 'analysis', component: VideoAnalysisComponent },
   { path: 'reports', component: AnalysisReportsComponent },
   { path: 'normalize', component: BatchDownloadComponent }, // Placeholder - reuses batch for now
+  { path: 'settings', component: SettingsComponent },
 ];
