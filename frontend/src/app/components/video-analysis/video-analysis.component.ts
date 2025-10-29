@@ -338,7 +338,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   async showExistingReportDialog(reportName: string, stats: any): Promise<string> {
     const dialogRef = this.dialog.open(ExistingReportDialog, {
-      width: '500px',
+      width: '750px',
+      maxWidth: '90vw',
       data: { reportName, stats },
       disableClose: true // Prevent closing by clicking outside
     });
@@ -506,21 +507,9 @@ export class ModelUnavailableDialog {
       </div>
 
       <mat-dialog-content>
-        <div class="file-details">
-          <div class="detail-item">
-            <mat-icon>schedule</mat-icon>
-            <div class="detail-text">
-              <span class="detail-label">Last Modified</span>
-              <span class="detail-value">{{ formatDate(data.stats.mtime) }}</span>
-            </div>
-          </div>
-          <div class="detail-item">
-            <mat-icon>storage</mat-icon>
-            <div class="detail-text">
-              <span class="detail-label">File Size</span>
-              <span class="detail-value">{{ formatSize(data.stats.size) }}</span>
-            </div>
-          </div>
+        <div class="file-info">
+          <mat-icon>schedule</mat-icon>
+          <span class="info-text">Last modified: {{ formatDate(data.stats.mtime) }}</span>
         </div>
 
         <div class="action-prompt">
@@ -546,23 +535,23 @@ export class ModelUnavailableDialog {
   `,
   styles: [`
     .existing-report-dialog {
-      min-width: 480px;
-      max-width: 560px;
+      width: 750px;
+      max-width: 90vw;
     }
 
     .dialog-header {
       display: flex;
       align-items: flex-start;
-      gap: 1rem;
-      padding: 1.5rem 1.5rem 1rem 1.5rem;
+      gap: 1.25rem;
+      padding: 2.5rem 2.5rem 2rem 2.5rem;
       background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-card) 100%);
       border-bottom: 2px solid var(--primary-orange);
 
       .header-icon {
         background: var(--primary-orange);
         border-radius: 12px;
-        width: 48px;
-        height: 48px;
+        width: 56px;
+        height: 56px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -571,9 +560,9 @@ export class ModelUnavailableDialog {
 
         mat-icon {
           color: white;
-          font-size: 28px;
-          width: 28px;
-          height: 28px;
+          font-size: 32px;
+          width: 32px;
+          height: 32px;
         }
       }
 
@@ -583,15 +572,15 @@ export class ModelUnavailableDialog {
 
         h2 {
           margin: 0;
-          font-size: 1.5rem;
+          font-size: 1.75rem;
           font-weight: 600;
           color: var(--text-primary);
-          line-height: 1.2;
+          line-height: 1.3;
         }
 
         .filename {
-          margin: 0.5rem 0 0 0;
-          font-size: 0.9rem;
+          margin: 0.75rem 0 0 0;
+          font-size: 1rem;
           color: var(--primary-orange);
           font-weight: 500;
           overflow: hidden;
@@ -602,101 +591,79 @@ export class ModelUnavailableDialog {
     }
 
     mat-dialog-content {
-      padding: 1.5rem;
+      padding: 2.5rem;
       margin: 0;
+      overflow: visible !important;
+      max-height: none !important;
     }
 
     .file-info {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
 
       mat-icon {
         color: var(--primary-orange);
-        font-size: 20px;
-        width: 20px;
-        height: 20px;
+        font-size: 24px;
+        width: 24px;
+        height: 24px;
         flex-shrink: 0;
       }
 
       .info-text {
-        font-size: 0.95rem;
+        font-size: 1.05rem;
         color: var(--text-secondary);
       }
     }
 
     .action-prompt {
-      padding: 1rem 0 0 0;
+      padding: 1.5rem 0 0 0;
       border-top: 1px solid var(--border-color);
 
       p {
         margin: 0;
-        font-size: 1rem;
+        font-size: 1.1rem;
         color: var(--text-primary);
         font-weight: 500;
       }
     }
 
     mat-dialog-actions {
-      padding: 0 1.5rem 1.5rem 1.5rem;
+      padding: 0 2.5rem 2.5rem 2.5rem;
       margin: 0;
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 0.75rem;
+      gap: 1rem;
 
       button {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        padding: 0 1rem;
-        height: 42px;
-        font-weight: 600;
-        font-size: 0.875rem;
-        border-radius: 8px;
-        transition: all 0.2s ease;
         white-space: nowrap;
+        font-size: 0.875rem;
+        font-weight: 600;
+        padding: 0 1.5rem !important;
+        height: 40px !important;
+        line-height: 40px !important;
+        border-radius: 4px !important;
 
         mat-icon {
-          font-size: 18px;
-          width: 18px;
-          height: 18px;
-        }
-
-        &:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          font-size: 20px;
+          width: 20px;
+          height: 20px;
+          margin-right: 0.25rem;
         }
       }
 
       .cancel-btn {
-        color: var(--text-secondary);
-        border-color: var(--border-color);
-
-        &:hover {
-          background: var(--bg-secondary);
-          border-color: var(--text-secondary);
-        }
+        // Material default stroked button styling
       }
 
-      .overwrite-btn {
-        background: var(--primary-orange);
-        color: white;
-
-        &:hover {
-          background: var(--dark-orange);
-          box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
-        }
-      }
-
+      .overwrite-btn,
       .new-btn {
-        background: var(--primary-orange);
-        color: white;
+        background: var(--primary-orange) !important;
+        color: white !important;
 
         &:hover {
-          background: var(--dark-orange);
-          box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+          background: var(--dark-orange) !important;
         }
       }
     }
