@@ -25,22 +25,29 @@ log.transports.file.level = 'debug';
 // Clean up old log files (keep logs from last 7 days)
 LogUtil.cleanupOldLogs(7);
 
-// Single instance lock
-const gotTheLock = app.requestSingleInstanceLock();
+// Single instance lock - must be called before app.whenReady()
+// Wrap in try-catch to handle cases where app object isn't ready
+let gotTheLock = false;
+try {
+  gotTheLock = app.requestSingleInstanceLock();
 
-if (!gotTheLock) {
-  log.info('Another instance is already running. Exiting.');
-  app.quit();
-  process.exit(0);
-}
-
-// Handle second instance attempt
-app.on('second-instance', () => {
-  log.info('Second instance detected. Focusing main window.');
-  if (windowService) {
-    windowService.focusWindow();
+  if (!gotTheLock) {
+    log.info('Another instance is already running. Exiting.');
+    app.quit();
+    process.exit(0);
   }
-});
+
+  // Handle second instance attempt
+  app.on('second-instance', () => {
+    log.info('Second instance detected. Focusing main window.');
+    if (windowService) {
+      windowService.focusWindow();
+    }
+  });
+} catch (error) {
+  log.error('Error setting up single instance lock:', error);
+  // Continue anyway - better to run than fail completely
+}
 
 // App is ready - start initialization sequence
 app.whenReady().then(async () => {
