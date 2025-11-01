@@ -44,6 +44,7 @@ export interface AnalysisRequest {
   language?: string;
   outputPath?: string;
   customReportName?: string; // Custom name for the report file
+  customInstructions?: string; // Custom instructions for AI analysis
 }
 
 @Injectable()
@@ -274,6 +275,7 @@ export class AnalysisService {
             currentPhase: progress.message,
           });
         },
+        request.customInstructions,
       );
 
       const job7 = this.jobs.get(jobId);

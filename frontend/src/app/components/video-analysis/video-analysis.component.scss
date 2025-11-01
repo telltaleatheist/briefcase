@@ -31,6 +31,9 @@
 .custom-select { width: 100%; padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius); color: var(--text-primary); font-size: 0.95rem; cursor: pointer; transition: all 0.2s; }
 .custom-select:hover { border-color: var(--primary-orange); }
 .custom-select:focus { outline: none; border-color: var(--primary-orange); box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.1); }
+.custom-textarea { width: 100%; padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius); color: var(--text-primary); font-size: 0.95rem; font-family: inherit; line-height: 1.5; resize: vertical; transition: all 0.2s; }
+.custom-textarea:hover { border-color: var(--primary-orange); }
+.custom-textarea:focus { outline: none; border-color: var(--primary-orange); box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.1); }
 .input-action-btn { color: var(--text-secondary); transition: all 0.2s; }
 .input-action-btn:hover { color: var(--primary-orange); background: var(--bg-secondary); }
 

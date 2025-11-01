@@ -252,7 +252,8 @@ def analyze_with_ollama(
     model: str,
     transcript_text: str,
     segments: List[Dict],
-    output_file: str
+    output_file: str,
+    custom_instructions: str = ""
 ) -> Dict[str, Any]:
     """
     Analyze transcript using Ollama AI model
@@ -293,7 +294,7 @@ def analyze_with_ollama(
 
             # Identify interesting sections
             interesting_sections = identify_interesting_sections(
-                endpoint, model, chunk['text'], i
+                endpoint, model, chunk['text'], i, custom_instructions
             )
 
             if interesting_sections:
@@ -376,10 +377,23 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
     return chunks
 
 
-def identify_interesting_sections(endpoint: str, model: str, chunk_text: str, chunk_num: int) -> List[Dict]:
+def identify_interesting_sections(endpoint: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "") -> List[Dict]:
     """Use AI to identify interesting sections in a chunk"""
     try:
+        # Build custom instructions section if provided
+        custom_section = ""
+        if custom_instructions and custom_instructions.strip():
+            custom_section = f"""
+**CUSTOM USER INSTRUCTIONS:**
+{custom_instructions.strip()}
+
+Pay special attention to the custom instructions above when analyzing the content. In addition to the standard flagging criteria below, prioritize identifying content that matches the user's specific requests.
+
+"""
+
         prompt = f"""TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
+
+{custom_section}
 
 This is from a long video (sermon, lecture, etc.). The goal is to provide a timeline showing:
 1. EXTREME/INFLAMMATORY moments that need immediate attention
@@ -900,8 +914,9 @@ def main():
             transcript_text = command_data['transcript_text']
             segments = command_data['segments']
             output_file = command_data['output_file']
+            custom_instructions = command_data.get('custom_instructions', '')
 
-            result = analyze_with_ollama(endpoint, model, transcript_text, segments, output_file)
+            result = analyze_with_ollama(endpoint, model, transcript_text, segments, output_file, custom_instructions)
             send_result(result)
 
         elif command == 'check_model':

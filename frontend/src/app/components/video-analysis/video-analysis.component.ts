@@ -82,6 +82,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     return this.fb.group({
       inputType: ['url', Validators.required],
       input: ['', Validators.required],
+      customInstructions: [''], // Custom instructions for AI analysis
       aiModel: ['qwen2.5:7b', Validators.required],
       ollamaEndpoint: ['http://localhost:11434'],
       whisperModel: ['base'],

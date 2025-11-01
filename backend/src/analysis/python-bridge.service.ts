@@ -178,6 +178,7 @@ export class PythonBridgeService {
     segments: any[],
     outputFile: string,
     onProgress?: (progress: PythonProgress) => void,
+    customInstructions?: string,
   ): Promise<{ sections_count: number; sections: any[] }> {
     const command = {
       command: 'analyze',
@@ -186,6 +187,7 @@ export class PythonBridgeService {
       transcript_text: transcriptText,
       segments,
       output_file: outputFile,
+      custom_instructions: customInstructions || '',
     };
 
     return this.executeCommand(command, onProgress);
