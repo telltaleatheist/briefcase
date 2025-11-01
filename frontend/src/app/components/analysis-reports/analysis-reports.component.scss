@@ -81,11 +81,18 @@
 
 .reports-list {
   padding: 0;
+  display: flex;
+  flex-direction: column;
 
   .report-item {
     cursor: pointer;
     transition: all 0.2s;
     border-bottom: 1px solid var(--border-color);
+    padding: 0.875rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 76px;
 
     &:hover {
       background: var(--bg-secondary);
@@ -96,40 +103,49 @@
       border-left: 3px solid var(--primary-orange);
     }
 
-    mat-icon[matListItemIcon] {
-      color: var(--text-secondary);
+    .report-content {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
     }
 
     .report-title {
       font-weight: 500;
       color: var(--text-primary);
-      white-space: nowrap;
+      font-size: 0.875rem;
+      line-height: 1.4;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      word-break: break-word;
     }
 
     .report-meta {
       display: flex;
       gap: 0.75rem;
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       color: var(--text-secondary);
-      margin-top: 0.25rem;
     }
 
-    button[matListItemMeta] {
+    .delete-button {
       color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
 
       mat-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
       }
 
       &:hover {
         color: var(--primary-orange);
+        background: rgba(255, 107, 53, 0.1);
       }
     }
   }

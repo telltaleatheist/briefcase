@@ -21,23 +21,24 @@
           <small>Run video analysis to generate reports</small>
         </div>
 
-        <mat-list *ngIf="reports.length > 0" class="reports-list">
-          <mat-list-item
+        <div *ngIf="reports.length > 0" class="reports-list">
+          <div
             *ngFor="let report of reports"
             (click)="selectReport(report)"
             [class.selected]="selectedReport?.path === report.path"
             class="report-item">
-            <mat-icon matListItemIcon>description</mat-icon>
-            <div matListItemTitle class="report-title">{{ report.name }}</div>
-            <div matListItemLine class="report-meta">
-              <span class="report-date">{{ formatDate(report.date) }}</span>
-              <span class="report-size">{{ formatFileSize(report.size) }}</span>
+            <div class="report-content">
+              <div class="report-title">{{ report.name }}</div>
+              <div class="report-meta">
+                <span class="report-date">{{ formatDate(report.date) }}</span>
+                <span class="report-size">{{ formatFileSize(report.size) }}</span>
+              </div>
             </div>
-            <button mat-icon-button matListItemMeta (click)="deleteReport(report); $event.stopPropagation()" color="warn">
+            <button mat-icon-button (click)="deleteReport(report); $event.stopPropagation()" class="delete-button">
               <mat-icon>close</mat-icon>
             </button>
-          </mat-list-item>
-        </mat-list>
+          </div>
+        </div>
       </div>
     </div>
 
