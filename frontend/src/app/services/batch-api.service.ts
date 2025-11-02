@@ -50,4 +50,8 @@ export class BatchApiService {
   retryJob(jobId: string): Observable<{success: boolean, message: string}> {
     return this.http.post<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/job/${jobId}/retry`, {});
   }
+
+  skipJob(jobId: string): Observable<{success: boolean, message: string}> {
+    return this.http.post<{success: boolean, message: string}>(`${this.apiUrl}/downloader/batch/job/${jobId}/skip`, {});
+  }
 }

@@ -29,6 +29,14 @@
                   {{ isProcessingJob(job) ? 'Processing' : job.status }}
                 </span>
                 <button type="button"
+                        *ngIf="job.status === 'downloaded' || job.status === 'processing' || job.status === 'transcribing'"
+                        class="skip-button"
+                        (click)="skipJob(job.id); $event.stopPropagation()"
+                        title="Skip processing - keep original download"
+                        matTooltip="Skip re-encoding and processing. Keep the original downloaded file.">
+                  <mat-icon>skip_next</mat-icon>
+                </button>
+                <button type="button"
                         class="remove-button"
                         (click)="removeJob(job); $event.stopPropagation()"
                         title="Remove from queue">

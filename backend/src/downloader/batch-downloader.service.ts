@@ -386,7 +386,7 @@ export class BatchDownloaderService {
     if (!job || job.status !== 'failed') {
       return false;
     }
-    
+
     // Reset job state
     if (job.outputFile) {
       // If we have an output file, we can retry from processing
@@ -396,6 +396,35 @@ export class BatchDownloaderService {
     }
 
     this.processQueue();
+    return true;
+  }
+
+  // Skip processing for a job - keeps the original downloaded file
+  skipJob(jobId: string): boolean {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      this.logger.warn(`Cannot skip job ${jobId}: job not found`);
+      return false;
+    }
+
+    // Only allow skipping jobs that are in downloaded, processing, or transcribing state
+    if (job.status !== 'downloaded' && job.status !== 'processing' && job.status !== 'transcribing') {
+      this.logger.warn(`Cannot skip job ${jobId}: invalid status ${job.status}`);
+      return false;
+    }
+
+    this.logger.log(`Skipping processing for job ${jobId}. Keeping original download.`);
+
+    // Mark the job as completed with the original downloaded file
+    // Don't modify the outputFile - it already points to the original download
+    this.jobStateManager.updateJobStatus(job, 'completed', 'Processing skipped - original download kept');
+
+    // Emit update to notify frontend
+    this.emitQueueUpdate();
+
+    // Continue processing other jobs
+    this.processQueue();
+
     return true;
   }
   

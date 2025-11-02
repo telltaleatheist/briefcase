@@ -1539,6 +1539,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     });
   }
 
+  skipJob(jobId: string): void {
+    this.batchApiService.skipJob(jobId).subscribe({
+      next: () => {
+        this.snackBar.open('Processing skipped - original download kept', 'Dismiss', { duration: 3000 });
+        setTimeout(() => this.refreshBatchStatus(), 300);
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to skip job', 'Dismiss', { duration: 3000 });
+        console.error('Error skipping job:', error);
+      }
+    });
+  }
+
   clearQueue(): void {
     // Clear everything immediately - no confirmation needed
     this.batchApiService.clearBatchQueues().subscribe({

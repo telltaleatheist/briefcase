@@ -82,6 +82,39 @@
   flex-shrink: 0;
 }
 
+.skip-button {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 50% !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  outline: none;
+  transition: all 0.15s ease;
+
+  mat-icon {
+    font-size: 18px !important;
+    width: 18px !important;
+    height: 18px !important;
+    color: var(--text-secondary) !important;
+  }
+
+  &:hover {
+    background-color: var(--warning-bg) !important;
+    border-color: var(--warning-text) !important;
+
+    mat-icon {
+      color: var(--warning-text) !important;
+    }
+  }
+}
+
 .remove-button {
   width: 28px !important;
   height: 28px !important;

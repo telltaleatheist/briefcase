@@ -69,6 +69,18 @@ export class DownloaderController {
     return { success, message: success ? 'Job deleted' : 'Job not found' };
   }
 
+  @Post('batch/job/:jobId/skip')
+  async skipJob(@Param('jobId') jobId: string) {
+    const success = this.batchDownloaderService.skipJob(jobId);
+    return { success, message: success ? 'Job processing skipped' : 'Job not found or cannot be skipped' };
+  }
+
+  @Post('batch/job/:jobId/retry')
+  async retryJob(@Param('jobId') jobId: string) {
+    const success = this.batchDownloaderService.retryJob(jobId);
+    return { success, message: success ? 'Job retried' : 'Job not found or cannot be retried' };
+  }
+
   @Delete('batch')
   async clearBatchQueues() {
     this.batchDownloaderService.clearQueues();
