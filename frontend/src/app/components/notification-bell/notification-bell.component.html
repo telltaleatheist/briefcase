@@ -1,0 +1,46 @@
+<div class="notification-bell-container">
+  <button class="bell-button" (click)="togglePanel()" [class.has-notifications]="unreadCount > 0">
+    <svg class="bell-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 22C13.1 22 14 21.1 14 20H10C10 21.1 10.9 22 12 22ZM18 16V11C18 7.93 16.37 5.36 13.5 4.68V4C13.5 3.17 12.83 2.5 12 2.5C11.17 2.5 10.5 3.17 10.5 4V4.68C7.64 5.36 6 7.92 6 11V16L4 18V19H20V18L18 16Z" fill="currentColor"/>
+    </svg>
+    <span class="badge" *ngIf="unreadCount > 0">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+  </button>
+
+  <div class="notification-panel" *ngIf="isOpen">
+    <div class="panel-header">
+      <h3>Notifications</h3>
+      <button class="clear-all-btn" *ngIf="notifications.length > 0" (click)="clearAll()">Clear All</button>
+    </div>
+
+    <div class="notifications-list" *ngIf="notifications.length > 0">
+      <div
+        class="notification-item"
+        *ngFor="let notification of notifications"
+        [class]="'type-' + notification.type"
+        [class.unread]="!notification.read"
+        (click)="viewNotification(notification)"
+      >
+        <div class="notification-icon">
+          <span>{{ getNotificationIcon(notification.type) }}</span>
+        </div>
+        <div class="notification-content">
+          <div class="notification-header">
+            <span class="notification-title">{{ notification.title }}</span>
+            <span class="notification-time">{{ getTimeAgo(notification.timestamp) }}</span>
+          </div>
+          <p class="notification-message">{{ notification.message }}</p>
+        </div>
+        <button class="delete-btn" (click)="deleteNotification($event, notification.id)" title="Delete notification">
+          ×
+        </button>
+      </div>
+    </div>
+
+    <div class="empty-state" *ngIf="notifications.length === 0">
+      <svg class="empty-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 22C13.1 22 14 21.1 14 20H10C10 21.1 10.9 22 12 22ZM18 16V11C18 7.93 16.37 5.36 13.5 4.68V4C13.5 3.17 12.83 2.5 12 2.5C11.17 2.5 10.5 3.17 10.5 4V4.68C7.64 5.36 6 7.92 6 11V16L4 18V19H20V18L18 16Z" fill="currentColor" opacity="0.3"/>
+      </svg>
+      <p>No notifications yet</p>
+    </div>
+  </div>
+</div>

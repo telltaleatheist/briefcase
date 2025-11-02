@@ -21,6 +21,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 
 import { SettingsService } from '../../services/settings.service';
 import { PathService } from '../../services/path.service';
+import { NotificationService } from '../../services/notification.service';
 import { Settings } from '../../models/settings.model';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { finalize } from 'rxjs';
@@ -55,6 +56,7 @@ export class SettingsComponent implements OnInit {
   private settingsService = inject(SettingsService);
   private pathService = inject(PathService);
   private snackBar = inject(MatSnackBar);
+  private notificationService = inject(NotificationService);
   private router = inject(Router);
   private themeService = inject(ThemeService);
 
@@ -134,7 +136,7 @@ export class SettingsComponent implements OnInit {
       this.settingsService.resetSettings();
       // Get the default path from the backend
       this.getDefaultPath();
-      this.snackBar.open('Settings reset to defaults', 'Dismiss', { duration: 3000 });
+      this.notificationService.success('Settings Reset', 'All settings have been reset to defaults');
     }
   }
 
@@ -149,11 +151,11 @@ export class SettingsComponent implements OnInit {
         },
         error: (error) => {
           console.error('Error picking directory:', error);
-          this.snackBar.open('Error selecting directory', 'Dismiss', { duration: 3000 });
+          this.notificationService.error('Directory Selection Failed', error.message || 'Could not select directory');
         }
       });
     } else {
-      this.snackBar.open('Directory selection is not available in the web version', 'Dismiss', { duration: 3000 });
+      this.notificationService.info('Not Available', 'Directory selection is only available in the desktop version');
     }
   }
 
@@ -169,14 +171,14 @@ export class SettingsComponent implements OnInit {
       },
       error: (error) => {
         console.error('Error getting default path:', error);
-        this.snackBar.open('Error getting default download path', 'Dismiss', { duration: 3000 });
+        this.notificationService.error('Path Error', 'Could not get default download path');
       }
     });
   }
 
   validatePath(path: string, saveAfter = false): void {
     this.isValidatingPath = true;
-    
+
     this.pathService.validatePath(path)
       .pipe(finalize(() => this.isValidatingPath = false))
       .subscribe({
@@ -186,23 +188,23 @@ export class SettingsComponent implements OnInit {
               if (saveAfter) {
                 this.saveSettings();
               } else {
-                this.snackBar.open('Directory is valid and writable', 'Dismiss', { duration: 3000 });
+                this.notificationService.success('Path Valid', 'Directory is valid and writable');
               }
             } else {
-              this.snackBar.open('Directory is not writable. Please choose another location.', 'Dismiss', { duration: 5000 });
+              this.notificationService.warning('Path Not Writable', 'Directory is not writable. Please choose another location.');
             }
           }
         },
         error: (error) => {
           console.error('Error validating path:', error);
-          this.snackBar.open('Error validating directory', 'Dismiss', { duration: 3000 });
+          this.notificationService.error('Validation Error', 'Could not validate directory');
         }
       });
   }
 
   saveSettings(): void {
     this.settingsService.updateSettings(this.settingsForm.value);
-    this.snackBar.open('Settings saved', 'Dismiss', { duration: 3000 });
+    this.notificationService.success('Settings Saved', 'Your preferences have been updated successfully');
   }
 
   goBack(): void {

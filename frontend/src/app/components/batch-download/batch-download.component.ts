@@ -23,6 +23,7 @@ import { BatchApiService } from '../../services/batch-api.service';
 import { SocketService } from '../../services/socket.service';
 import { SettingsService } from '../../services/settings.service';
 import { BatchStateService, PendingJob } from '../../services/batch-state.service';
+import { NotificationService } from '../../services/notification.service';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
@@ -95,6 +96,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     private settingsService: SettingsService,
     private batchStateService: BatchStateService,
     private snackBar: MatSnackBar,
+    private notificationService: NotificationService,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
   ) {
@@ -159,6 +161,29 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         console.log(`Received job status update: ${data.jobId} - ${data.status} - ${data.task}`);
         if (data.jobId) {
           this.updateJobStatus(data.jobId, data.status, data.task);
+
+          // Show notification when job completes (regardless of what stage)
+          if (data.status === 'completed') {
+            const job = this.findJobById(data.jobId);
+            const displayName = job?.displayName || job?.url || 'Video';
+
+            this.notificationService.trackable(
+              `job-${data.jobId}`,
+              'success',
+              `${displayName}`,
+              'Completed successfully'
+            );
+          } else if (data.status === 'failed') {
+            const job = this.findJobById(data.jobId);
+            const displayName = job?.displayName || job?.url || 'Video';
+
+            this.notificationService.trackable(
+              `job-${data.jobId}`,
+              'error',
+              `${displayName}`,
+              `Failed: ${data.task}`
+            );
+          }
         }
       }
     );
@@ -177,15 +202,17 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       (data: {outputFile: string, jobId?: string}) => {
         if (data.jobId) {
           this.updateJobStatus(data.jobId, 'completed', 'Transcription completed');
+          // Notification handled by onJobStatusUpdated
         }
       }
     );
-    
+
     // Listen for transcription failed events
     this.socketService.onTranscriptionFailed().subscribe(
       (data: {error: string, jobId?: string, inputFile?: string}) => {
         if (data.jobId) {
           this.updateJobStatus(data.jobId, 'failed', `Transcription failed: ${data.error}`);
+          // Notification handled by onJobStatusUpdated
         }
       }
     );
@@ -230,20 +257,32 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     this.socketService.onDownloadCompleted().subscribe(
       (data: {outputFile: string, url: string, jobId?: string, isImage?: boolean}) => {
         if (data.jobId) {
+          const job = this.findJobById(data.jobId);
+          const displayName = job?.displayName || job?.url || 'Video';
+
           if (!data.isImage) {
             this.updateJobStatus(data.jobId, 'downloaded', 'Download complete, preparing to process...');
+            // Don't notify yet - will notify when fully complete (after processing/transcription)
           } else {
             this.updateJobStatus(data.jobId, 'completed', 'Image download completed');
+            // Final notification for images only (they don't need processing)
+            this.notificationService.trackable(
+              `job-${data.jobId}`,
+              'success',
+              `${displayName}`,
+              'Completed successfully'
+            );
           }
         }
       }
     );
-    
+
     // Listen for download failed events
     this.socketService.onDownloadFailed().subscribe(
       (data: {error: string, url: string, jobId?: string}) => {
         if (data.jobId) {
           this.updateJobStatus(data.jobId, 'failed', `Failed: ${data.error}`);
+          // Notification handled by onJobStatusUpdated
         }
       }
     );
@@ -253,7 +292,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     // Listen for batch completion
     this.socketService.onBatchCompleted().subscribe((data) => {
-      this.snackBar.open(`Batch processing completed! ${data.completedJobsCount} completed, ${data.failedJobsCount} failed.`, 'Dismiss', { duration: 5000 });
+      // Don't show batch notification - individual videos already have notifications
       this.refreshBatchStatus();
     });
     
@@ -1416,7 +1455,8 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Add to batch queue
     this.batchApiService.addMultipleToBatchQueue(downloadOptions).subscribe({
       next: (response) => {
-        this.snackBar.open(`Added ${response.jobIds.length} downloads to batch queue`, 'Dismiss', { duration: 3000 });
+        // Toast-only - individual videos will show completion notifications
+        this.notificationService.toastOnly('success', 'Downloads Added', `Added ${response.jobIds.length} video(s) to download queue`);
         
         // Create placeholder jobs in the UI immediately with the URLs and jobIds we know
         if (response.jobIds && response.jobIds.length > 0) {
@@ -1476,7 +1516,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         this.multiUrlText = '';
       },
       error: (error) => {
-        this.snackBar.open('Failed to add downloads to batch queue', 'Dismiss', { duration: 3000 });
+        this.notificationService.error('Failed to Add Downloads', error.message || 'Could not add downloads to batch queue');
         console.error('Error adding to batch queue:', error);
       }
     });

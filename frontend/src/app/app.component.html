@@ -3,6 +3,7 @@
   <mat-toolbar color="primary" class="app-toolbar">
     <span class="app-title">{{ title }}</span>
     <span class="spacer"></span>
+    <app-notification-bell></app-notification-bell>
   </mat-toolbar>
 
   <!-- Sidebar + Content Layout -->
@@ -46,4 +47,8 @@
       </main>
     </mat-sidenav-content>
   </mat-sidenav-container>
+
+  <!-- Notification Components -->
+  <app-notification-toast></app-notification-toast>
+  <app-notification-modal></app-notification-modal>
 </div>

@@ -15,7 +15,11 @@ import { MatListModule } from '@angular/material/list';
 import { SocketService } from './services/socket.service';
 import { SettingsService } from './services/settings.service';
 import { BatchStateService } from './services/batch-state.service';
+import { NotificationService } from './services/notification.service';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
+import { NotificationToastComponent } from './components/notification-toast/notification-toast.component';
+import { NotificationBellComponent } from './components/notification-bell/notification-bell.component';
+import { NotificationModalComponent } from './components/notification-modal/notification-modal.component';
 
 @Component({
   selector: 'app-root',
@@ -34,7 +38,10 @@ import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.com
     MatTooltipModule,
     MatSidenavModule,
     MatListModule,
-    ThemeToggleComponent  // Import the ThemeToggleComponent
+    ThemeToggleComponent,  // Import the ThemeToggleComponent
+    NotificationToastComponent,
+    NotificationBellComponent,
+    NotificationModalComponent
   ]
 })
 export class AppComponent implements OnInit, OnDestroy {
@@ -47,6 +54,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private batchStateService = inject(BatchStateService);
   private snackBar = inject(MatSnackBar);
   private themeService = inject(ThemeService);  // Inject the ThemeService
+  private notificationService = inject(NotificationService);  // Inject the NotificationService
   public router = inject(Router);
 
   ngOnInit(): void {
@@ -54,25 +62,27 @@ export class AppComponent implements OnInit, OnDestroy {
     // Don't override the saved preference or default
 
     this.socketService.onConnect().subscribe(() => {
-      this.snackBar.open('Connected to server', 'Dismiss', { duration: 3000 });
+      // No notification needed - connection is expected
     });
 
     this.socketService.onDisconnect().subscribe(() => {
-      this.snackBar.open('Disconnected from server', 'Dismiss', { duration: 3000 });
+      // Toast-only for disconnection - doesn't clutter history
+      this.notificationService.toastOnly('warning', 'Disconnected', 'Connection to server lost');
     });
 
     this.socketService.onDownloadStarted().subscribe(() => {
       this.isDownloading = true;
+      // No notification - batch component handles per-video notifications
     });
 
     this.socketService.onDownloadCompleted().subscribe(() => {
       this.isDownloading = false;
-      this.snackBar.open('Download completed!', 'Dismiss', { duration: 5000 });
+      // No notification - batch component handles per-video notifications
     });
 
     this.socketService.onDownloadFailed().subscribe((error) => {
       this.isDownloading = false;
-      this.snackBar.open(`Download failed: ${error}`, 'Dismiss', { duration: 5000 });
+      // No notification - batch component handles per-video notifications
     });
 
     // Listen for beforeunload event to clear queue when app closes
