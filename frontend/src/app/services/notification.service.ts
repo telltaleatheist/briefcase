@@ -68,8 +68,11 @@ export class NotificationService {
       trackingKey
     };
 
+    console.log('addNotification() - Adding to array:', notification);
+
     // Add to beginning of array
     this.notifications.unshift(notification);
+    console.log('addNotification() - Notifications array length:', this.notifications.length);
 
     // Keep only last 100 notifications
     if (this.notifications.length > this.MAX_NOTIFICATIONS) {
@@ -78,6 +81,7 @@ export class NotificationService {
 
     this.saveNotifications();
     this.notificationsSubject.next(this.notifications);
+    console.log('addNotification() - Emitted to subject');
 
     return notification;
   }
@@ -85,9 +89,11 @@ export class NotificationService {
   // Update an existing notification by tracking key
   private updateNotificationByKey(trackingKey: string, type: NotificationType, title: string, message: string): Notification | null {
     const existingIndex = this.notifications.findIndex(n => n.trackingKey === trackingKey);
+    console.log('updateNotificationByKey() - Looking for:', trackingKey, 'Found at index:', existingIndex);
 
     if (existingIndex !== -1) {
       // Update existing notification
+      console.log('updateNotificationByKey() - Updating existing notification at index:', existingIndex);
       this.notifications[existingIndex] = {
         ...this.notifications[existingIndex],
         type,
@@ -99,9 +105,11 @@ export class NotificationService {
 
       this.saveNotifications();
       this.notificationsSubject.next(this.notifications);
+      console.log('updateNotificationByKey() - Updated notification:', this.notifications[existingIndex]);
       return this.notifications[existingIndex];
     }
 
+    console.log('updateNotificationByKey() - No existing notification found');
     return null;
   }
 
@@ -197,11 +205,14 @@ export class NotificationService {
 
   // Trackable notification that can be updated later
   trackable(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = true): string {
+    console.log('trackable() called:', {trackingKey, type, title, message, showToast});
+
     // Check if notification with this tracking key already exists
     const updated = this.updateNotificationByKey(trackingKey, type, title, message);
 
     if (updated) {
       // Existing notification was updated
+      console.log('Updated existing notification:', updated);
       if (showToast) {
         this.toastSubject.next(updated);
       }
@@ -209,6 +220,7 @@ export class NotificationService {
     } else {
       // Create new notification with tracking key
       const notification = this.addNotification(type, title, message, trackingKey);
+      console.log('Created new notification:', notification);
       if (showToast) {
         this.toastSubject.next(notification);
       }

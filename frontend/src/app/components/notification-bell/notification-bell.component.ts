@@ -21,8 +21,10 @@ export class NotificationBellComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.subscription = this.notificationService.notifications$.subscribe(
       notifications => {
+        console.log('NotificationBell - Received notifications update:', notifications.length, 'notifications');
         this.notifications = notifications;
         this.unreadCount = this.notificationService.getUnreadCountSync();
+        console.log('NotificationBell - Unread count:', this.unreadCount);
       }
     );
   }

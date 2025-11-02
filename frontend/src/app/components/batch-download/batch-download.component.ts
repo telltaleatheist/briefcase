@@ -981,7 +981,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
   addUrlsFromTextarea(): void {
     if (!this.multiUrlText || this.multiUrlText.trim() === '') {
-      this.snackBar.open('Please enter URLs in the textarea', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('warning', 'No URLs', 'Please enter URLs in the textarea');
       return;
     }
 
@@ -992,7 +992,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       .filter(url => url.length > 0);
 
     if (urls.length === 0) {
-      this.snackBar.open('No valid URLs found', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('warning', 'No Valid URLs', 'No valid URLs found in the text');
       return;
     }
 
@@ -1052,7 +1052,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         });
     });
 
-    this.snackBar.open(`Added ${urls.length} video(s) to pending queue`, 'Dismiss', { duration: 3000 });
+    this.notificationService.toastOnly('success', 'URLs Added', `Added ${urls.length} video(s) to pending queue`);
     this.multiUrlText = ''; // Clear the textarea
     this.cdr.detectChanges(); // Update the UI to show pending jobs
   }
@@ -1062,7 +1062,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    */
   startQueue(): void {
     if (!this.hasPendingJobs()) {
-      this.snackBar.open('No pending jobs to start', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('info', 'No Jobs', 'No pending jobs to start');
       return;
     }
 
@@ -1072,7 +1072,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Submit all pending jobs to backend
     this.batchApiService.addMultipleToBatchQueue(downloadOptions).subscribe({
       next: (response) => {
-        this.snackBar.open(`Started processing ${response.jobIds.length} job(s)`, 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Queue Started', `Started processing ${response.jobIds.length} job(s)`);
 
         // Clear pending jobs since they've been submitted (using service)
         this.batchStateService.clearPendingJobs();
@@ -1083,7 +1083,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error starting queue:', error);
-        this.snackBar.open('Error starting queue', 'Dismiss', { duration: 3000 });
+        this.notificationService.error('Queue Error', 'Failed to start processing queue');
       }
     });
   }

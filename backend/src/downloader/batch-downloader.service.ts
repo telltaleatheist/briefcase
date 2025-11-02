@@ -45,6 +45,7 @@ export class BatchDownloaderService {
         const job = this.jobs.get(data.jobId);
         if (job && job.status === 'transcribing') {
           this.jobStateManager.updateJobStatus(job, 'completed', 'Transcription completed');
+          this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Transcription completed');
           this.logger.log(`Transcription completed for job ${data.jobId}, setting to completed`);
           this.emitQueueUpdate();
         }
@@ -196,6 +197,7 @@ export class BatchDownloaderService {
         if (result.isImage) {
           // Images don't need processing
           this.jobStateManager.updateJobStatus(job, 'completed', 'Image download completed');
+          this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Image download completed');
           this.logger.log(`Image download completed for job ${job.id}`);
         } else {
           // Mark videos as downloaded but not yet processed
@@ -204,17 +206,19 @@ export class BatchDownloaderService {
         }
       } else {
         this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');
+        this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Download failed');
       }
     } catch (error) {
       // Handle unexpected errors
-      const errorMessage = error instanceof Error 
-        ? error.message 
+      const errorMessage = error instanceof Error
+        ? error.message
         : 'Unknown error during download';
-      
+
       this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');
-      this.logger.error(`Unexpected error during download for job ${job.id}`, { 
+      this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Download failed');
+      this.logger.error(`Unexpected error during download for job ${job.id}`, {
         error: errorMessage,
-        jobDetails: job 
+        jobDetails: job
       });
     } finally {
       // Always update UI and process queue again
@@ -314,16 +318,19 @@ export class BatchDownloaderService {
               
               if (job.status !== 'transcribing') {
                 this.jobStateManager.updateJobStatus(job, 'completed', 'Processing completed');
+                this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Processing completed');
                 this.logger.log(`Processing completed for job ${job.id}`);
               } else {
                 this.logger.log(`Job ${job.id} is in transcribing state, waiting for transcription to complete`);
               }
             } else {
               this.jobStateManager.updateJobStatus(job, 'failed', 'Unknown processing error');
+              this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Unknown processing error');
               this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
                         }
           } catch (error) {
             this.jobStateManager.updateJobStatus(job, 'failed', 'Unexpected processing error');
+            this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Unexpected processing error');
             this.logger.error(`Unexpected error processing job ${job.id}`, error);
           }
 
@@ -418,6 +425,7 @@ export class BatchDownloaderService {
     // Mark the job as completed with the original downloaded file
     // Don't modify the outputFile - it already points to the original download
     this.jobStateManager.updateJobStatus(job, 'completed', 'Processing skipped - original download kept');
+    this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Processing skipped - original download kept');
 
     // Emit update to notify frontend
     this.emitQueueUpdate();
