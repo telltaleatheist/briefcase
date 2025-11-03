@@ -262,18 +262,39 @@ export class ConfigDialog {
         }
       }
     } else {
-      // In development mode
-      preloadPath = path.join(app.getAppPath(), 'utilities', 'configPreload.js');
-      
-      // Try alternate location if the first one doesn't exist
-      if (!fs.existsSync(preloadPath)) {
-        const altPreloadPath = path.join(app.getAppPath(), 'dist-electron', 'utilities', 'configPreload.js');
-        if (fs.existsSync(altPreloadPath)) {
-          preloadPath = altPreloadPath;
+      // In development mode - try multiple possible locations
+      const possiblePaths = [
+        path.join(app.getAppPath(), 'dist-electron', 'utilities', 'configPreload.js'),
+        path.join(app.getAppPath(), 'utilities', 'configPreload.js'),
+        path.join(__dirname, 'configPreload.js'),
+        path.join(__dirname, '..', 'utilities', 'configPreload.js')
+      ];
+
+      for (const potentialPath of possiblePaths) {
+        if (fs.existsSync(potentialPath)) {
+          preloadPath = potentialPath;
+          log.info(`Found preload script at: ${preloadPath}`);
+          break;
+        } else {
+          log.info(`Preload not found at: ${potentialPath}`);
         }
       }
+
+      if (!preloadPath) {
+        log.error('Could not find configPreload.js in any expected location');
+        log.error(`Checked paths: ${possiblePaths.join(', ')}`);
+      }
     }
-    
+
+    // Verify we found a preload path
+    if (!preloadPath) {
+      const errorMsg = 'Failed to locate configPreload.js. The application may not be built correctly.';
+      log.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    log.info(`Using preload script: ${preloadPath}`);
+
     // Now create the window with the correct preload path
     this.window = new BrowserWindow({
       width: 600,

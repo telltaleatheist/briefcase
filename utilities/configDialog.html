@@ -481,8 +481,32 @@
       window.electronAPI.exitApp();
     });
     
-    // Initialize
-    loadExistingConfig();
+    // Check if electronAPI is available before initializing
+    if (typeof window.electronAPI === 'undefined') {
+      document.body.innerHTML = `
+        <div class="container">
+          <h2 style="color: #c0392b;">Initialization Error</h2>
+          <div class="status error">
+            <p><strong>The application failed to load properly.</strong></p>
+            <p>The preload script (configPreload.js) was not loaded correctly.</p>
+            <p>This may indicate a build or packaging issue.</p>
+            <p><strong>Troubleshooting steps:</strong></p>
+            <ol style="text-align: left; margin-left: 20px;">
+              <li>Try rebuilding the application</li>
+              <li>Check the electron-log for detailed error messages</li>
+              <li>Ensure dist-electron/utilities/configPreload.js exists</li>
+            </ol>
+            <p style="margin-top: 20px;">
+              <button onclick="window.location.reload()">Reload</button>
+            </p>
+          </div>
+        </div>
+      `;
+      console.error('window.electronAPI is undefined - preload script failed to load');
+    } else {
+      // Initialize normally
+      loadExistingConfig();
+    }
         </script>
       </body>
       </html>
