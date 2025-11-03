@@ -16,8 +16,8 @@
                class="job-card"
                [ngClass]="'job-' + (currentJob.status || 'unknown')">
 
-            <div class="job-content">
-              <span class="job-title">{{ currentJob.videoPath ? (currentJob.videoPath | slice:-50) : 'Video Analysis' }}</span>
+            <div class="job-content" (click)="toggleJobDetails()">
+              <span class="job-title">{{ currentJob.input ? (currentJob.input | slice:-50) : 'Video Analysis' }}</span>
               <div class="job-right">
                 <span class="badge"
                       [ngClass]="{
@@ -28,6 +28,25 @@
                   <mat-icon class="badge-icon">{{ getStatusIcon() }}</mat-icon>
                   {{ currentJob.status | titlecase }}
                 </span>
+                <button type="button" mat-icon-button class="expand-btn">
+                  <mat-icon>{{ currentJob.expanded ? 'expand_less' : 'expand_more' }}</mat-icon>
+                </button>
+              </div>
+            </div>
+
+            <!-- Job Details Accordion -->
+            <div class="job-details" *ngIf="currentJob.expanded">
+              <div class="detail-row" *ngIf="currentJob.input">
+                <span class="detail-label">Input:</span>
+                <span class="detail-value">{{ currentJob.input }}</span>
+              </div>
+              <div class="detail-row" *ngIf="currentJob.customInstructions">
+                <span class="detail-label">Custom Instructions:</span>
+                <span class="detail-value">{{ currentJob.customInstructions }}</span>
+              </div>
+              <div class="detail-row" *ngIf="currentJob.aiModel">
+                <span class="detail-label">AI Model:</span>
+                <span class="detail-value">{{ currentJob.aiModel }}</span>
               </div>
             </div>
 
@@ -97,7 +116,7 @@
                 <button type="button"
                         class="toggle-button"
                         [class.active]="analysisForm.get('inputType')?.value === 'file'"
-                        (click)="analysisForm.patchValue({inputType: 'file'})">
+                        (click)="onLocalFileToggle()">
                   <mat-icon>video_file</mat-icon>
                   Local File
                 </button>
@@ -126,14 +145,6 @@
                          placeholder="No file selected"
                          formControlName="input"
                          readonly>
-                  <button type="button"
-                          mat-raised-button
-                          color="accent"
-                          class="browse-file-btn"
-                          (click)="browseFile()">
-                    <mat-icon>folder_open</mat-icon>
-                    Browse
-                  </button>
                 </ng-container>
               </div>
             </div>
@@ -225,21 +236,23 @@
                 </div>
               </div>
             </mat-expansion-panel>
-
-            <!-- Action Buttons -->
-            <div class="panel-actions">
-              <button type="submit"
-                      mat-raised-button
-                      color="primary"
-                      [disabled]="isProcessing || analysisForm.invalid">
-                <mat-icon>play_arrow</mat-icon>
-                Start Analysis
-              </button>
-            </div>
           </form>
         </div>
       </div>
     </div>
 
+  </div>
+
+  <!-- Sticky Footer with Start Analysis Button -->
+  <div class="sticky-footer">
+    <button type="button"
+            mat-raised-button
+            color="primary"
+            class="start-analysis-btn"
+            [disabled]="isProcessing || analysisForm.invalid"
+            (click)="onSubmit()">
+      <mat-icon>play_arrow</mat-icon>
+      Start Analysis
+    </button>
   </div>
 </div>

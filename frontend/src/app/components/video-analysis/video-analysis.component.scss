@@ -74,12 +74,32 @@
   gap: 1rem;
 }
 
-.panel-actions {
+// Sticky Footer
+.sticky-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-card);
+  padding: 1.5rem;
   display: flex;
-  gap: 1rem;
-  padding-top: 1rem;
-  justify-content: flex-end;
-  flex-shrink: 0;
+  justify-content: center;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+  margin-top: auto;
+  border-top: 1px solid var(--border-color);
+  z-index: 100;
+}
+
+.start-analysis-btn {
+  min-width: 500px;
+  height: 56px;
+  font-size: 1.125rem;
+  font-weight: 600;
+
+  mat-icon {
+    margin-right: 0.5rem;
+    font-size: 24px;
+    width: 24px;
+    height: 24px;
+  }
 }
 
 // Jobs List matching Batch Download
@@ -121,6 +141,11 @@
   justify-content: space-between;
   padding: 0.75rem 1rem;
   gap: 1rem;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
 }
 
 .job-title {
@@ -139,6 +164,48 @@
   align-items: center;
   gap: 0.75rem;
   flex-shrink: 0;
+}
+
+.expand-btn {
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+}
+
+// Job Details Accordion
+.job-details {
+  padding: 1rem;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.detail-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  word-break: break-word;
 }
 
 // Badge styles
@@ -413,10 +480,6 @@
   &:hover {
     color: var(--primary-orange);
   }
-}
-
-.browse-file-btn {
-  flex-shrink: 0;
 }
 
 .custom-textarea {

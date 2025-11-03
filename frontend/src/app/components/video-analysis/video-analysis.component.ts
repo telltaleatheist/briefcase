@@ -25,6 +25,10 @@ interface AnalysisJob {
   videoPath?: string;
   transcriptPath?: string;
   analysisPath?: string;
+  input?: string;
+  customInstructions?: string;
+  aiModel?: string;
+  expanded?: boolean;
 }
 
 @Component({
@@ -150,7 +154,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   async onSubmit(): Promise<void> {
     if (this.analysisForm.invalid) {
-      this.snackBar.open('Please fill in all required fields', 'Dismiss', { duration: 3000 });
+      this.notificationService.warning('Form Incomplete', 'Please fill in all required fields');
       return;
     }
 
@@ -242,14 +246,25 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
       const result = await response.json();
 
+      // Save job details including form data for display in accordion
       this.currentJob = {
         id: result.jobId,
         status: 'pending',
         progress: 0,
         currentPhase: 'Starting analysis...',
+        input: formValue.input,
+        customInstructions: formValue.customInstructions,
+        aiModel: formValue.aiModel,
+        expanded: false
       };
 
-      this.snackBar.open('Analysis started!', 'Dismiss', { duration: 3000 });
+      this.notificationService.success('Analysis Started', 'Video analysis has been queued');
+
+      // Clear form fields
+      this.analysisForm.patchValue({
+        input: '',
+        customInstructions: ''
+      });
 
       // Start polling for progress updates
       this.startPolling();
@@ -334,21 +349,29 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
         const filePath = result.filePaths[0];
         this.analysisForm.patchValue({ input: filePath });
-        this.snackBar.open('File selected', 'Dismiss', { duration: 2000 });
+        this.notificationService.success('File Selected', filePath);
       }
     } catch (error) {
       console.error('Error selecting file:', error);
-      this.snackBar.open('Failed to select file', 'Dismiss', { duration: 3000 });
+      this.notificationService.error('File Selection Failed', 'Could not select file');
     }
+  }
+
+  async onLocalFileToggle(): Promise<void> {
+    // Switch to file mode
+    this.analysisForm.patchValue({ inputType: 'file' });
+
+    // Immediately open file dialog
+    await this.browseFile();
   }
 
   async pasteFromClipboard(): Promise<void> {
     try {
       const text = await navigator.clipboard.readText();
       this.analysisForm.patchValue({ input: text });
-      this.snackBar.open('Pasted from clipboard', 'Dismiss', { duration: 2000 });
+      this.notificationService.success('Pasted', 'URL pasted from clipboard');
     } catch (error) {
-      this.snackBar.open('Failed to paste from clipboard', 'Dismiss', { duration: 2000 });
+      this.notificationService.error('Paste Failed', 'Could not paste from clipboard');
     }
   }
 
@@ -429,7 +452,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       }
 
       await (window as any).electron?.updateSettings(updates);
-      this.snackBar.open('Settings saved', 'Dismiss', { duration: 2000 });
+      this.notificationService.success('Settings Saved', 'Analysis preferences have been updated');
 
       // Close the advanced options accordion
       if (this.advancedPanel) {
@@ -437,7 +460,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       }
     } catch (error) {
       console.error('Failed to save settings:', error);
-      this.snackBar.open('Failed to save settings', 'Dismiss', { duration: 3000 });
+      this.notificationService.error('Save Failed', 'Could not save settings');
     }
   }
 
@@ -447,7 +470,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       try {
         await (window as any).electron?.openFile(this.currentJob.analysisPath);
       } catch (error) {
-        this.snackBar.open('Failed to open file', 'Dismiss', { duration: 3000 });
+        this.notificationService.error('Open Failed', 'Could not open analysis file');
       }
     }
   }
@@ -457,7 +480,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       try {
         await (window as any).electron?.openFile(this.currentJob.transcriptPath);
       } catch (error) {
-        this.snackBar.open('Failed to open file', 'Dismiss', { duration: 3000 });
+        this.notificationService.error('Open Failed', 'Could not open transcript file');
       }
     }
   }
@@ -522,6 +545,12 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       'Analysis complete...': 'Finalizing analysis report'
     };
     return descriptions[phase] || phase || 'Processing...';
+  }
+
+  toggleJobDetails(): void {
+    if (this.currentJob) {
+      this.currentJob.expanded = !this.currentJob.expanded;
+    }
   }
 }
 
