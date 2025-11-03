@@ -146,20 +146,22 @@ export class FfmpegService {
           // Set defaults for potentially undefined values
           const dimensions = videoAnalysis.dimensions || { width: 0, height: 0 };
           const duration = videoAnalysis.duration || 0;
-          const isVertical = videoAnalysis.isVertical ?? false; // Use nullish coalescing to ensure boolean
-  
+          const isVertical = videoAnalysis.isVertical ?? false;
+          const needsAspectRatioFix = videoAnalysis.needsAspectRatioFix ?? false;
+
           const { outputFile, progressKey } = this.generateOutputPath(videoFile);
-          
+
           // Reset the progress counter for this file
           this.lastReportedProgress.set(progressKey, 0);
-  
+
           // Create FFmpeg command
           const command = this.buildFfmpegCommand(
-            videoFile, 
-            outputFile, 
-            isVertical, 
-            selectedEncoder, 
-            options, 
+            videoFile,
+            outputFile,
+            isVertical,
+            needsAspectRatioFix,
+            selectedEncoder,
+            options,
             duration
           );
                       
@@ -182,11 +184,12 @@ export class FfmpegService {
     ffmpeg.ffprobe(videoFile, callback);
   }
 
-  private analyzeVideoMetadata(metadata: any): { 
-    isValid: boolean, 
-    dimensions?: { width: number, height: number }, 
-    duration?: number, 
-    isVertical?: boolean 
+  private analyzeVideoMetadata(metadata: any): {
+    isValid: boolean,
+    dimensions?: { width: number, height: number },
+    duration?: number,
+    isVertical?: boolean,
+    needsAspectRatioFix?: boolean
   } {
     const stream = metadata.streams.find((s: { codec_type: string; }) => s.codec_type === 'video');
     if (!stream) {
@@ -212,20 +215,31 @@ export class FfmpegService {
     }
   
     const aspectRatio = width / height;
+
+    // Target aspect ratio is 16:9 (1.777...)
+    const targetAspectRatio = 16 / 9;
+    const aspectRatioTolerance = 0.01; // Allow small variations
+
+    // Does it need aspect ratio correction? (Not already 16:9)
+    const needsAspectRatioFix = Math.abs(aspectRatio - targetAspectRatio) > aspectRatioTolerance;
+
+    // Is it a vertical video?
+    const isVertical = aspectRatio <= 1.0;
+
     this.logger.log(`REENCODING ANALYSIS:
       Original Dimensions: ${width}x${height}
       Calculated Aspect Ratio: ${aspectRatio.toFixed(4)}
-      Is Vertical Video: ${aspectRatio <= 1.0}
+      Target Aspect Ratio: ${targetAspectRatio.toFixed(4)}
+      Is Vertical Video: ${isVertical}
+      Needs Aspect Ratio Fix: ${needsAspectRatioFix}
       Video Duration: ${totalDuration}s`);
-                
-    // Is it a vertical video?
-    const isVertical = aspectRatio <= 1.0;
-    
-    return { 
-      isValid: true, 
-      dimensions: { width, height }, 
-      duration: totalDuration, 
-      isVertical 
+
+    return {
+      isValid: true,
+      dimensions: { width, height },
+      duration: totalDuration,
+      isVertical,
+      needsAspectRatioFix
     };
   }
 
@@ -257,10 +271,11 @@ export class FfmpegService {
   
   // Helper to build the full FFmpeg command
   private buildFfmpegCommand(
-    videoFile: string, 
-    outputFile: string, 
-    isVertical: boolean, 
-    encoder: string, 
+    videoFile: string,
+    outputFile: string,
+    isVertical: boolean,
+    needsAspectRatioFix: boolean,
+    encoder: string,
     options?: {
       fixAspectRatio?: boolean,
       useRmsNormalization?: boolean,
@@ -271,8 +286,10 @@ export class FfmpegService {
     duration?: number
   ): any {
     let filterComplex = '';
-    
-    if (isVertical) {
+
+    // Apply blurred background fix if fixAspectRatio is enabled AND video needs fixing
+    if (options?.fixAspectRatio && needsAspectRatioFix) {
+      // Use the same blurred background technique for ALL non-16:9 videos
       filterComplex = "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];" +
                        "[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];" +
                        "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]";

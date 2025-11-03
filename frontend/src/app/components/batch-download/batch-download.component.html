@@ -5,14 +5,6 @@
     <div class="panel full-height-panel">
       <div class="panel-header">
         <h4 class="panel-title">📥 Download Queue</h4>
-        <div class="panel-header-actions">
-          <button mat-raised-button (click)="openDownloadOptionsDialog()">
-            <mat-icon>settings</mat-icon> Download Options
-          </button>
-          <button mat-raised-button color="primary" (click)="openPasteUrlsDialog()">
-            <mat-icon>add</mat-icon> Paste URLs
-          </button>
-        </div>
       </div>
 
       <div class="panel-content">
@@ -71,11 +63,11 @@
 
         <!-- Completed Jobs Accordion -->
         <mat-accordion *ngIf="hasCompletedJobs()" class="completed-accordion">
-          <mat-expansion-panel>
+          <mat-expansion-panel [expanded]="isCompletedAccordionExpanded">
             <mat-expansion-panel-header>
               <mat-panel-title>
                 <mat-icon>history</mat-icon>
-                Completed & Failed ({{ getCompletedJobsForDisplay().length }})
+                History ({{ getCompletedJobsForDisplay().length }})
               </mat-panel-title>
             </mat-expansion-panel-header>
 
@@ -118,6 +110,10 @@
         </mat-accordion>
 
         <div class="panel-actions">
+          <button mat-raised-button color="primary" (click)="openPasteUrlsDialog()">
+            <mat-icon>add</mat-icon> Paste URLs
+          </button>
+
           <button mat-raised-button color="primary" (click)="startQueue()" [disabled]="!hasPendingJobs()">
             <mat-icon>play_arrow</mat-icon> Start Queue
           </button>

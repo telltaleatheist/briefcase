@@ -277,7 +277,7 @@
 }
 
 .completed-jobs-list {
-  max-height: 300px;
+  max-height: 180px; // Limit to approximately 3 job cards (60px each)
   overflow-y: auto;
   border-top: 1px solid var(--border-color);
 

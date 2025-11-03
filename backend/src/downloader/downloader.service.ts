@@ -162,6 +162,9 @@ export class DownloaderService implements OnModuleInit {
         ytDlpManager.addOption('--merge-output-format', 'mp4');
       }
       
+      // Add --restrict-filenames to avoid unsafe extension issues
+      ytDlpManager.addOption('--restrict-filenames');
+
       // Configure format options based on source
       if (options.url.includes('reddit.com')) {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
@@ -169,7 +172,9 @@ export class DownloaderService implements OnModuleInit {
         // YouTube-specific configuration with fallback methods
         this.configureYouTubeDownload(ytDlpManager, options);
       } else {
+        // For other sites (including Rumble), use format that forces mp4 extension
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
+        ytDlpManager.addOption('--merge-output-format', 'mp4');
 
         // Use cookies for other sites if specified
         if (options.useCookies && options.browser) {
