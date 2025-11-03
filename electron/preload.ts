@@ -38,6 +38,8 @@ interface ElectronAPI {
   setSetting: (key: string, value: any) => Promise<{ success: boolean; error?: string }>;
   clearSettings: () => Promise<{ success: boolean; error?: string }>;
   getSettingsPath: () => Promise<string>;
+  // Setup progress listener
+  onSetupProgress?: (callback: (event: any, data: any) => void) => void;
 }
 
 // Get resource path information
@@ -100,6 +102,13 @@ contextBridge.exposeInMainWorld('electron', {
   clearSettings: () => ipcRenderer.invoke('clear-settings'),
   getSettingsPath: () => ipcRenderer.invoke('get-settings-path')
 } as ElectronAPI);
+
+// Expose setup progress listener to window.electronAPI
+contextBridge.exposeInMainWorld('electronAPI', {
+  onSetupProgress: (callback: (event: any, data: any) => void) => {
+    ipcRenderer.on('setup-progress', callback);
+  }
+});
 
 // Listen for update events from main process
 ipcRenderer.on('update-available', () => {
