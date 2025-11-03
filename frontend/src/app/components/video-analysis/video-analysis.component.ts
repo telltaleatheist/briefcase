@@ -14,6 +14,7 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatDialog, MatDialogModule, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { NotificationService } from '../../services/notification.service';
 
 interface AnalysisJob {
   id: string;
@@ -62,6 +63,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     private fb: FormBuilder,
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
+    private notificationService: NotificationService,
   ) {
     this.analysisForm = this.createForm();
   }
@@ -172,7 +174,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       this.startPolling();
 
     } catch (error: any) {
-      this.snackBar.open(`Error: ${error.message}`, 'Dismiss', { duration: 5000 });
+      // Use notification service for detailed error reporting
+      this.notificationService.error('Analysis Start Failed', error.message || 'Failed to start video analysis');
       this.isProcessing = false;
     }
   }
@@ -216,11 +219,13 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
           if (data.job.status === 'completed') {
             this.isProcessing = false;
             this.stopPolling();
-            this.snackBar.open('Analysis complete!', 'Dismiss', { duration: 5000 });
+            this.notificationService.success('Analysis Complete', 'Video analysis finished successfully');
           } else if (data.job.status === 'failed') {
             this.isProcessing = false;
             this.stopPolling();
-            this.snackBar.open(`Analysis failed: ${data.job.error || 'Unknown error'}`, 'Dismiss', { duration: 5000 });
+            // Use notification service for errors with full error details
+            const errorMessage = data.job.error || 'Unknown error occurred during analysis';
+            this.notificationService.error('Analysis Failed', errorMessage);
           }
         }
       } catch (error: any) {

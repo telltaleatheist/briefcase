@@ -150,9 +150,11 @@ function setupFileSystemHandlers(): void {
 
     const result = await dialog.showOpenDialog(window, {
       properties: ['openFile'],
-      title: 'Select Video File',
+      title: 'Select Video or Audio File',
       filters: [
+        { name: 'All Media Files', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'mpg', 'mpeg', 'mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg', 'wma', 'opus'] },
         { name: 'Video Files', extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'mpg', 'mpeg'] },
+        { name: 'Audio Files', extensions: ['mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg', 'wma', 'opus'] },
         { name: 'All Files', extensions: ['*'] }
       ]
     });

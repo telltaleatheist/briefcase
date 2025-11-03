@@ -1,89 +1,156 @@
-<!-- Video Analysis - Creamsicle Theme -->
-<div class="analysis-container">
+<!-- Video Analysis - Queue Style matching Batch Download -->
+<div class="batch-container">
   <div class="page-content">
 
-    <!-- Configuration Panel -->
-    <div class="panel config-panel">
+    <!-- Analysis Queue Panel -->
+    <div class="panel full-height-panel">
       <div class="panel-header">
-        <h4 class="panel-title">🎬 Video Analysis</h4>
-        <p class="panel-subtitle">AI-powered video content analysis using Whisper and Ollama</p>
+        <h4 class="panel-title">🎬 Video Analysis Queue</h4>
       </div>
 
       <div class="panel-content">
-        <form [formGroup]="analysisForm" (ngSubmit)="onSubmit()">
+        <!-- Active Analysis Jobs List -->
+        <div class="jobs-list">
+          <!-- Current Job Display -->
+          <div *ngIf="currentJob"
+               class="job-card"
+               [ngClass]="'job-' + (currentJob.status || 'unknown')">
 
-          <!-- Input Source -->
-          <div class="form-section">
-            <label class="section-label">Video Source</label>
-
-            <div class="input-type-toggle">
-              <button type="button"
-                      class="toggle-button"
-                      [class.active]="analysisForm.get('inputType')?.value === 'url'"
-                      (click)="analysisForm.patchValue({inputType: 'url'})">
-                <mat-icon>link</mat-icon>
-                Video URL
-              </button>
-              <button type="button"
-                      class="toggle-button"
-                      [class.active]="analysisForm.get('inputType')?.value === 'file'"
-                      (click)="analysisForm.patchValue({inputType: 'file'})">
-                <mat-icon>video_file</mat-icon>
-                Local File
-              </button>
+            <div class="job-content">
+              <span class="job-title">{{ currentJob.videoPath ? (currentJob.videoPath | slice:-50) : 'Video Analysis' }}</span>
+              <div class="job-right">
+                <span class="badge"
+                      [ngClass]="{
+                        'badge-info': currentJob.status === 'pending' || currentJob.status === 'downloading' || currentJob.status === 'extracting' || currentJob.status === 'transcribing' || currentJob.status === 'analyzing',
+                        'badge-success': currentJob.status === 'completed',
+                        'badge-danger': currentJob.status === 'failed'
+                      }">
+                  <mat-icon class="badge-icon">{{ getStatusIcon() }}</mat-icon>
+                  {{ currentJob.status | titlecase }}
+                </span>
+              </div>
             </div>
 
-            <div class="input-field-row">
-              <!-- URL mode: editable input with paste button -->
-              <ng-container *ngIf="analysisForm.get('inputType')?.value === 'url'">
-                <input type="text"
-                       class="custom-input"
-                       placeholder="https://youtube.com/watch?v=..."
-                       formControlName="input">
-                <button type="button"
-                        mat-icon-button
-                        class="input-action-btn"
-                        (click)="pasteFromClipboard()"
-                        matTooltip="Paste from clipboard">
-                  <mat-icon>content_paste</mat-icon>
-                </button>
-              </ng-container>
+            <!-- Progress Section -->
+            <div class="job-progress-section" *ngIf="currentJob.status !== 'completed' && currentJob.status !== 'failed'">
+              <div class="progress-info">
+                <span class="progress-label">{{ currentJob.currentPhase }}</span>
+                <span class="progress-percent">{{ currentJob.progress }}%</span>
+              </div>
+              <div class="progress-bar-track">
+                <div class="progress-bar" [style.width.%]="currentJob.progress || 0"></div>
+              </div>
+              <div class="phase-description">
+                <mat-icon class="phase-icon spinning">sync</mat-icon>
+                <span class="phase-text">{{ getPhaseDescription(currentJob.currentPhase) }}</span>
+              </div>
+            </div>
 
-              <!-- File mode: read-only input with prominent browse button -->
-              <ng-container *ngIf="analysisForm.get('inputType')?.value === 'file'">
-                <input type="text"
-                       class="custom-input"
-                       placeholder="No file selected"
-                       formControlName="input"
-                       readonly>
-                <button type="button"
-                        mat-raised-button
-                        color="accent"
-                        class="browse-file-btn"
-                        (click)="browseFile()">
-                  <mat-icon>folder_open</mat-icon>
-                  Browse
-                </button>
-              </ng-container>
+            <!-- Error Display -->
+            <div class="error-message" *ngIf="currentJob.error">
+              <mat-icon class="error-icon">error</mat-icon>
+              <span>{{ currentJob.error }}</span>
+            </div>
+
+            <!-- Completion Actions -->
+            <div class="result-actions" *ngIf="currentJob.status === 'completed'">
+              <button mat-raised-button
+                      color="primary"
+                      *ngIf="currentJob.analysisPath"
+                      (click)="openAnalysisFile()">
+                <mat-icon>description</mat-icon>
+                Open Analysis
+              </button>
+              <button mat-stroked-button
+                      *ngIf="currentJob.transcriptPath"
+                      (click)="openTranscriptFile()">
+                <mat-icon>subtitles</mat-icon>
+                Open Transcript
+              </button>
             </div>
           </div>
 
-          <!-- Custom Instructions -->
-          <div class="form-section">
-            <label class="section-label">Custom Instructions (Optional)</label>
-            <textarea class="custom-textarea"
-                      formControlName="customInstructions"
-                      rows="4"
-                      placeholder="e.g., 'This is pastor Greg Locke. Look for instances where he talks about Donald Trump or politics generally. Look for victim mentality and inflammatory rhetoric.'"></textarea>
-            <span class="field-hint">Provide context about the video and specific things you want the AI to look for. This will be included in the analysis prompt along with the standard analysis criteria.</span>
+          <!-- Empty State when no job is running -->
+          <div class="empty-state" *ngIf="!currentJob">
+            <mat-icon class="empty-icon">psychology</mat-icon>
+            <p>No analysis in progress</p>
+            <p class="empty-hint">Configure settings below and click "Start Analysis"</p>
           </div>
+        </div>
 
-          <!-- AI Model Configuration -->
-          <div class="form-section">
-            <label class="section-label">AI Model Configuration</label>
+        <!-- Configuration Form -->
+        <div class="config-section">
+          <form [formGroup]="analysisForm" (ngSubmit)="onSubmit()">
 
-            <div class="form-group">
-              <label class="field-label">AI Model</label>
+            <!-- Input Source Toggle -->
+            <div class="form-section">
+              <label class="section-label">Video Source</label>
+
+              <div class="input-type-toggle">
+                <button type="button"
+                        class="toggle-button"
+                        [class.active]="analysisForm.get('inputType')?.value === 'url'"
+                        (click)="analysisForm.patchValue({inputType: 'url'})">
+                  <mat-icon>link</mat-icon>
+                  URL
+                </button>
+                <button type="button"
+                        class="toggle-button"
+                        [class.active]="analysisForm.get('inputType')?.value === 'file'"
+                        (click)="analysisForm.patchValue({inputType: 'file'})">
+                  <mat-icon>video_file</mat-icon>
+                  Local File
+                </button>
+              </div>
+
+              <div class="input-field-row">
+                <!-- URL mode -->
+                <ng-container *ngIf="analysisForm.get('inputType')?.value === 'url'">
+                  <input type="text"
+                         class="custom-input"
+                         placeholder="https://youtube.com/watch?v=..."
+                         formControlName="input">
+                  <button type="button"
+                          mat-icon-button
+                          class="input-action-btn"
+                          (click)="pasteFromClipboard()"
+                          matTooltip="Paste from clipboard">
+                    <mat-icon>content_paste</mat-icon>
+                  </button>
+                </ng-container>
+
+                <!-- File mode -->
+                <ng-container *ngIf="analysisForm.get('inputType')?.value === 'file'">
+                  <input type="text"
+                         class="custom-input"
+                         placeholder="No file selected"
+                         formControlName="input"
+                         readonly>
+                  <button type="button"
+                          mat-raised-button
+                          color="accent"
+                          class="browse-file-btn"
+                          (click)="browseFile()">
+                    <mat-icon>folder_open</mat-icon>
+                    Browse
+                  </button>
+                </ng-container>
+              </div>
+            </div>
+
+            <!-- Custom Instructions -->
+            <div class="form-section">
+              <label class="section-label">Custom Instructions (Optional)</label>
+              <textarea class="custom-textarea"
+                        formControlName="customInstructions"
+                        rows="3"
+                        placeholder="e.g., 'Look for mentions of specific topics or themes...'"></textarea>
+              <span class="field-hint">Provide context and specific things to look for in the analysis.</span>
+            </div>
+
+            <!-- AI Model -->
+            <div class="form-section">
+              <label class="section-label">AI Model</label>
               <select class="custom-select" formControlName="aiModel">
                 <option value="qwen2.5:7b">Qwen 2.5 7B (Balanced, ~4GB)</option>
                 <option value="qwen2.5:14b">Qwen 2.5 14B (Better, ~8GB)</option>
@@ -94,127 +161,66 @@
                 <option value="cogito:70b">Cogito 70B (Excellent, ~40GB)</option>
               </select>
             </div>
-          </div>
 
-          <!-- Advanced Options -->
-          <mat-expansion-panel class="advanced-panel">
-            <mat-expansion-panel-header>
-              <mat-panel-title>
-                <mat-icon>tune</mat-icon>
-                Advanced Options
-              </mat-panel-title>
-            </mat-expansion-panel-header>
+            <!-- Advanced Options -->
+            <mat-expansion-panel class="advanced-panel">
+              <mat-expansion-panel-header>
+                <mat-panel-title>
+                  <mat-icon>tune</mat-icon>
+                  Advanced Options
+                </mat-panel-title>
+              </mat-expansion-panel-header>
 
-            <div class="advanced-content">
-              <div class="form-group">
-                <label class="field-label">Ollama Endpoint</label>
-                <input type="text" class="custom-input" formControlName="ollamaEndpoint" placeholder="http://localhost:11434">
+              <div class="advanced-content">
+                <div class="form-group">
+                  <label class="field-label">Ollama Endpoint</label>
+                  <input type="text" class="custom-input" formControlName="ollamaEndpoint" placeholder="http://localhost:11434">
+                </div>
+
+                <div class="form-group">
+                  <label class="field-label">Whisper Model</label>
+                  <select class="custom-select" formControlName="whisperModel">
+                    <option value="tiny">Tiny (Fastest, least accurate)</option>
+                    <option value="base">Base (Fast, good accuracy)</option>
+                    <option value="small">Small (Slower, better accuracy)</option>
+                    <option value="medium">Medium (Slow, very accurate)</option>
+                    <option value="large">Large (Slowest, best accuracy)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label class="field-label">Language</label>
+                  <input type="text" class="custom-input" formControlName="language" placeholder="en">
+                  <span class="field-hint">Leave as 'en' for English, or specify language code</span>
+                </div>
+
+                <div class="form-group">
+                  <label class="field-label">Output Path (Optional)</label>
+                  <input type="text" class="custom-input" formControlName="outputPath" placeholder="Leave empty for default">
+                </div>
+
+                <div class="advanced-actions">
+                  <button type="button"
+                          mat-stroked-button
+                          (click)="saveSettings()">
+                    <mat-icon>save</mat-icon>
+                    Save Settings
+                  </button>
+                </div>
               </div>
+            </mat-expansion-panel>
 
-              <div class="form-group">
-                <label class="field-label">Whisper Model</label>
-                <select class="custom-select" formControlName="whisperModel">
-                  <option value="tiny">Tiny (Fastest, least accurate)</option>
-                  <option value="base">Base (Fast, good accuracy)</option>
-                  <option value="small">Small (Slower, better accuracy)</option>
-                  <option value="medium">Medium (Slow, very accurate)</option>
-                  <option value="large">Large (Slowest, best accuracy)</option>
-                </select>
-              </div>
-
-              <div class="form-group">
-                <label class="field-label">Language</label>
-                <input type="text" class="custom-input" formControlName="language" placeholder="en">
-                <span class="field-hint">Leave as 'en' for English, or specify language code</span>
-              </div>
-
-              <div class="form-group">
-                <label class="field-label">Output Path (Optional)</label>
-                <input type="text" class="custom-input" formControlName="outputPath" placeholder="Leave empty for default">
-              </div>
+            <!-- Action Buttons -->
+            <div class="panel-actions">
+              <button type="submit"
+                      mat-raised-button
+                      color="primary"
+                      [disabled]="isProcessing || analysisForm.invalid">
+                <mat-icon>play_arrow</mat-icon>
+                Start Analysis
+              </button>
             </div>
-          </mat-expansion-panel>
-
-          <!-- Actions -->
-          <div class="panel-actions">
-            <button type="button"
-                    mat-stroked-button
-                    (click)="saveSettings()">
-              <mat-icon>save</mat-icon>
-              Save Settings
-            </button>
-            <button type="submit"
-                    mat-raised-button
-                    color="primary"
-                    [disabled]="isProcessing">
-              <mat-icon>play_arrow</mat-icon>
-              Start Analysis
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Progress Panel -->
-    <div class="panel progress-panel" *ngIf="currentJob">
-      <div class="panel-header">
-        <h4 class="panel-title">📊 Analysis Progress</h4>
-      </div>
-
-      <div class="panel-content">
-        <div class="progress-section">
-          <!-- Status Badge -->
-          <div class="status-row">
-            <span class="badge badge-large"
-                  [ngClass]="{
-                    'badge-info': currentJob.status === 'pending' || currentJob.status === 'downloading' || currentJob.status === 'extracting' || currentJob.status === 'transcribing' || currentJob.status === 'analyzing',
-                    'badge-success': currentJob.status === 'completed',
-                    'badge-danger': currentJob.status === 'failed'
-                  }">
-              <mat-icon>{{ getStatusIcon() }}</mat-icon>
-              {{ currentJob.status | titlecase }}
-            </span>
-          </div>
-
-          <!-- Progress Bar -->
-          <div class="progress-container">
-            <div class="progress-info">
-              <span class="progress-label">{{ currentJob.currentPhase }}</span>
-              <span class="progress-percent">{{ currentJob.progress }}%</span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-fill" [style.width.%]="currentJob.progress"></div>
-            </div>
-          </div>
-
-          <!-- Current Phase Description -->
-          <div class="phase-description" *ngIf="currentJob.status !== 'completed' && currentJob.status !== 'failed'">
-            <mat-icon class="phase-icon spinning">sync</mat-icon>
-            <span>{{ getPhaseDescription(currentJob.currentPhase) }}</span>
-          </div>
-
-          <!-- Error Message -->
-          <div class="error-message" *ngIf="currentJob.error">
-            <mat-icon>error</mat-icon>
-            <span>{{ currentJob.error }}</span>
-          </div>
-
-          <!-- Result Actions -->
-          <div class="result-actions" *ngIf="currentJob.status === 'completed'">
-            <button mat-raised-button
-                    color="primary"
-                    *ngIf="currentJob.analysisPath"
-                    (click)="openAnalysisFile()">
-              <mat-icon>description</mat-icon>
-              Open Analysis
-            </button>
-            <button mat-stroked-button
-                    *ngIf="currentJob.transcriptPath"
-                    (click)="openTranscriptFile()">
-              <mat-icon>subtitles</mat-icon>
-              Open Transcript
-            </button>
-          </div>
+          </form>
         </div>
       </div>
     </div>

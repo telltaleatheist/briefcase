@@ -230,6 +230,28 @@
   h1, h2, h3, h4, h5, h6 {
     color: var(--text-primary) !important;
   }
+
+  // Disabled buttons in dark mode - make them visible but clearly disabled
+  .mat-mdc-button:disabled,
+  .mat-mdc-raised-button:disabled,
+  .mat-mdc-outlined-button:disabled,
+  .mat-mdc-unelevated-button:disabled,
+  button:disabled,
+  button[disabled] {
+    opacity: 0.5 !important;
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-muted) !important;
+    border-color: var(--border-color) !important;
+    cursor: not-allowed !important;
+  }
+
+  // Disabled raised/primary buttons need special handling
+  .mat-mdc-raised-button.mat-primary:disabled,
+  .mat-mdc-raised-button.mat-accent:disabled {
+    --mdc-protected-button-container-color: var(--bg-tertiary) !important;
+    --mdc-protected-button-label-text-color: var(--text-muted) !important;
+    opacity: 0.6 !important;
+  }
 }
 
 /* Fix placeholder overlap with Material floating label */
