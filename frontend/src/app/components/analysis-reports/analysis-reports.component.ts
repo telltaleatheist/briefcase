@@ -94,10 +94,14 @@ export class AnalysisReportsComponent implements OnInit {
   private async getDefaultOutputDir(): Promise<string> {
     try {
       const homeDir = await (window as any).electron?.environment?.getPathConfig?.();
-      return `${homeDir?.downloadsPath || '/Users/telltale/Downloads'}/clippy`;
+      if (homeDir?.downloadsPath) {
+        return `${homeDir.downloadsPath}/clippy`;
+      }
+      // Fallback to a generic path
+      return 'clippy';
     } catch (error) {
       console.error('Error getting default output dir:', error);
-      return '/Users/telltale/Downloads/clippy';
+      return 'clippy';
     }
   }
 

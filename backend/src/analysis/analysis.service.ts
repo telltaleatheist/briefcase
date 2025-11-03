@@ -280,6 +280,8 @@ export class AnalysisService {
           });
         },
         request.customInstructions,
+        request.aiProvider,
+        request.apiKey,
       );
 
       const job7 = this.jobs.get(jobId);

@@ -13,6 +13,20 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import requests
 
+# Try to import OpenAI client (optional dependency)
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+# Try to import Anthropic client (optional dependency)
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
 
 def send_progress(phase: str, progress: float, message: str):
     """Send progress update to Node.js via stdout"""
@@ -214,7 +228,7 @@ def check_ollama_model(endpoint: str, model: str) -> bool:
         return False
 
 
-def generate_video_summary(endpoint: str, model: str, transcript_text: str, duration: float) -> str:
+def generate_video_summary(provider: str, endpoint_or_key: str, model: str, transcript_text: str, duration: float) -> str:
     """Generate a basic summary of the video content"""
     try:
         # For short videos, use the full transcript. For long ones, use first ~2000 chars
@@ -233,7 +247,7 @@ Transcript excerpt:
 
 Summary:"""
 
-        response = call_ollama(endpoint, model, prompt, timeout=30)
+        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=30)
 
         if response:
             return response.strip()
@@ -247,8 +261,9 @@ Summary:"""
         return f"This video is approximately {minutes} minutes {seconds} seconds long."
 
 
-def analyze_with_ollama(
-    endpoint: str,
+def analyze_with_ai(
+    provider: str,
+    endpoint_or_key: str,
     model: str,
     transcript_text: str,
     segments: List[Dict],
@@ -256,20 +271,21 @@ def analyze_with_ollama(
     custom_instructions: str = ""
 ) -> Dict[str, Any]:
     """
-    Analyze transcript using Ollama AI model
+    Analyze transcript using AI model (Ollama, OpenAI, or Claude)
     Chunks the transcript and streams analysis results
     """
     try:
         send_progress("analysis", 60, f"Starting AI analysis with {model}...")
 
-        # Check model availability
-        if not check_ollama_model(endpoint, model):
-            raise Exception(f"Model '{model}' not found in Ollama. Please install it first.")
+        # Check model availability (only for Ollama)
+        if provider == 'ollama':
+            if not check_ollama_model(endpoint_or_key, model):
+                raise Exception(f"Model '{model}' not found in Ollama. Please install it first.")
 
         # Generate video summary FIRST (always runs, even for short/boring videos)
         send_progress("analysis", 65, "Generating video summary...")
         video_duration = segments[-1]['end'] if segments else 0
-        summary = generate_video_summary(endpoint, model, transcript_text, video_duration)
+        summary = generate_video_summary(provider, endpoint_or_key, model, transcript_text, video_duration)
 
         # Write header and summary to file
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -294,7 +310,7 @@ def analyze_with_ollama(
 
             # Identify interesting sections
             interesting_sections = identify_interesting_sections(
-                endpoint, model, chunk['text'], i, custom_instructions
+                provider, endpoint_or_key, model, chunk['text'], i, custom_instructions
             )
 
             if interesting_sections:
@@ -321,7 +337,7 @@ def analyze_with_ollama(
                     else:
                         # For interesting sections, do detailed analysis
                         detailed_analysis = analyze_section_detail(
-                            endpoint, model, section, chunk['segments']
+                            provider, endpoint_or_key, model, section, chunk['segments']
                         )
                         if detailed_analysis:
                             analyzed_sections.append(detailed_analysis)
@@ -377,7 +393,7 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
     return chunks
 
 
-def identify_interesting_sections(endpoint: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "") -> List[Dict]:
+def identify_interesting_sections(provider: str, endpoint_or_key: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "") -> List[Dict]:
     """Use AI to identify interesting sections in a chunk"""
     try:
         # Build custom instructions section if provided
@@ -457,7 +473,7 @@ IMPORTANT RULES:
 TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 {chunk_text[:8000]}"""  # Limit to ~8k chars for speed
 
-        response = call_ollama(endpoint, model, prompt, timeout=600)  # 10 minutes for large models
+        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=600)  # 10 minutes for large models
 
         if not response:
             return []
@@ -473,7 +489,7 @@ TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
         return []
 
 
-def analyze_section_detail(endpoint: str, model: str, section: Dict, all_segments: List[Dict]) -> Optional[Dict]:
+def analyze_section_detail(provider: str, endpoint_or_key: str, model: str, section: Dict, all_segments: List[Dict]) -> Optional[Dict]:
     """
     Perform detailed analysis on a specific section
     Uses two-phase approach: correlate phrases to timestamps, then analyze
@@ -552,7 +568,7 @@ Key quotes:
 TIMESTAMPED TRANSCRIPT:
 {timestamped_text[:6000]}"""
 
-        response = call_ollama(endpoint, model, prompt, timeout=600)  # 10 minutes for detailed analysis
+        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=600)  # 10 minutes for detailed analysis
 
         if not response:
             print(f"[DEBUG] No response from AI for detailed analysis", file=sys.stderr)
@@ -666,6 +682,99 @@ def extract_segment_range(segments: List[Dict], start_time: float, end_time: flo
         seg for seg in segments
         if seg.get('start', 0) >= start_time and seg.get('end', 0) <= end_time
     ]
+
+
+def call_ai(provider: str, endpoint_or_key: str, model: str, prompt: str, timeout: int = 60) -> Optional[str]:
+    """Call AI provider (Ollama, OpenAI, or Claude) with prompt"""
+    if provider == 'openai':
+        return call_openai(endpoint_or_key, model, prompt, timeout)
+    elif provider == 'claude':
+        return call_claude(endpoint_or_key, model, prompt, timeout)
+    else:  # default to ollama
+        return call_ollama(endpoint_or_key, model, prompt, timeout)
+
+
+def call_openai(api_key: str, model: str, prompt: str, timeout: int = 60) -> Optional[str]:
+    """Call OpenAI API with prompt"""
+    if not OPENAI_AVAILABLE:
+        print(f"[ERROR] OpenAI package not available. Install with: pip install openai", file=sys.stderr)
+        return None
+
+    import time
+    start_time = time.time()
+
+    try:
+        print(f"[DEBUG] Calling OpenAI with model {model}, timeout={timeout}s", file=sys.stderr)
+        print(f"[DEBUG] Prompt length: {len(prompt)} chars", file=sys.stderr)
+
+        client = OpenAI(api_key=api_key, timeout=timeout)
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=4096,
+            temperature=0.7
+        )
+
+        elapsed = time.time() - start_time
+        response_text = response.choices[0].message.content or ''
+
+        print(f"[DEBUG] OpenAI responded successfully in {elapsed:.1f}s", file=sys.stderr)
+        print(f"[DEBUG] Response length: {len(response_text)} chars", file=sys.stderr)
+        return response_text
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"[ERROR] OpenAI request failed after {elapsed:.1f}s: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return None
+
+
+def call_claude(api_key: str, model: str, prompt: str, timeout: int = 60) -> Optional[str]:
+    """Call Claude (Anthropic) API with prompt"""
+    if not ANTHROPIC_AVAILABLE:
+        print(f"[ERROR] Anthropic package not available. Install with: pip install anthropic", file=sys.stderr)
+        return None
+
+    import time
+    start_time = time.time()
+
+    try:
+        print(f"[DEBUG] Calling Claude with model {model}, timeout={timeout}s", file=sys.stderr)
+        print(f"[DEBUG] Prompt length: {len(prompt)} chars", file=sys.stderr)
+
+        client = Anthropic(api_key=api_key, timeout=timeout)
+
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            temperature=0.7,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        elapsed = time.time() - start_time
+
+        # Extract text from response
+        response_text = ''
+        for block in response.content:
+            if hasattr(block, 'text'):
+                response_text += block.text
+
+        print(f"[DEBUG] Claude responded successfully in {elapsed:.1f}s", file=sys.stderr)
+        print(f"[DEBUG] Response length: {len(response_text)} chars", file=sys.stderr)
+        return response_text
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"[ERROR] Claude request failed after {elapsed:.1f}s: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return None
 
 
 def call_ollama(endpoint: str, model: str, prompt: str, timeout: int = 60) -> Optional[str]:
@@ -909,14 +1018,29 @@ def main():
             send_result(result)
 
         elif command == 'analyze':
-            endpoint = command_data['ollama_endpoint']
+            provider = command_data.get('ai_provider', 'ollama')  # default to ollama for backwards compatibility
             model = command_data['ai_model']
             transcript_text = command_data['transcript_text']
             segments = command_data['segments']
             output_file = command_data['output_file']
             custom_instructions = command_data.get('custom_instructions', '')
 
-            result = analyze_with_ollama(endpoint, model, transcript_text, segments, output_file, custom_instructions)
+            # Determine endpoint_or_key based on provider
+            if provider in ['openai', 'claude']:
+                # For cloud providers, use API key
+                endpoint_or_key = command_data.get('api_key', '')
+                if not endpoint_or_key:
+                    raise Exception(f"API key required for {provider} but not provided")
+            else:
+                # For Ollama, use endpoint
+                endpoint_or_key = command_data.get('ollama_endpoint', 'http://localhost:11434')
+
+            # Debug logging to verify provider and model are correct
+            print(f"[DEBUG] Analysis starting with provider='{provider}', model='{model}'", file=sys.stderr)
+            print(f"[DEBUG] Endpoint/Key type: {'API Key' if provider in ['openai', 'claude'] else 'Ollama Endpoint'}", file=sys.stderr)
+            print(f"[DEBUG] Endpoint/Key value: {endpoint_or_key if provider == 'ollama' else '***' if endpoint_or_key else 'NOT PROVIDED'}", file=sys.stderr)
+
+            result = analyze_with_ai(provider, endpoint_or_key, model, transcript_text, segments, output_file, custom_instructions)
             send_result(result)
 
         elif command == 'check_model':
@@ -925,6 +1049,28 @@ def main():
 
             available = check_ollama_model(endpoint, model)
             send_result({"available": available})
+
+        elif command == 'check_dependencies':
+            # Check if required Python packages are installed
+            whisper_available = False
+            requests_available = False
+
+            try:
+                import whisper
+                whisper_available = True
+            except ImportError:
+                pass
+
+            try:
+                import requests
+                requests_available = True
+            except ImportError:
+                pass
+
+            send_result({
+                "whisper": whisper_available,
+                "requests": requests_available
+            })
 
         else:
             send_error(f"Unknown command: {command}")

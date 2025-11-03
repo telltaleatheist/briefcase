@@ -5,6 +5,7 @@ import { AppConfig } from './config/app-config';
 import { ExecutablesUtil } from './utilities/executables';
 import { WindowService } from './services/window-service';
 import { BackendService } from './services/backend-service';
+import { SetupService } from './services/setup-service';
 import { setupIpcHandlers } from './ipc/ipc-handlers';
 import { UpdateService } from './services/update-service';
 import { LogUtil } from './utilities/log-util';
@@ -17,6 +18,7 @@ import { LogUtil } from './utilities/log-util';
 let windowService: WindowService;
 let backendService: BackendService;
 let updateService: UpdateService;
+let setupService: SetupService;
 
 // Configure logging - always log to file
 log.transports.console.level = 'info';
@@ -70,19 +72,41 @@ app.whenReady().then(async () => {
     backendService = new BackendService();
     windowService = new WindowService();
     updateService = new UpdateService(windowService);
-    
+    setupService = new SetupService();
+
     // Set up IPC handlers
     setupIpcHandlers(windowService, backendService);
-    
-    // Start backend server
-    const backendStarted = await backendService.startBackendServer();
+
+    // Start backend server with retry logic for first-time installs
+    let backendStarted = await backendService.startBackendServer();
+
+    // If backend fails on first try (common on fresh install), retry once after a delay
+    if (!backendStarted) {
+      log.warn('Backend failed to start on first attempt, retrying in 2 seconds...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      backendStarted = await backendService.startBackendServer();
+    }
 
     // Create window based on backend status
     if (backendStarted) {
       // Set the actual frontend port before creating the window
       windowService.setFrontendPort(backendService.getFrontendPort());
       windowService.createMainWindow();
+
+      // Run optional AI features setup after window is created (non-blocking)
+      // This runs in the background and won't prevent the app from starting
+      setTimeout(async () => {
+        try {
+          const checkResult = await setupService.checkDependencies();
+          await setupService.runOptionalSetups(checkResult);
+        } catch (error) {
+          log.error('Error during optional setups:', error);
+          // Silently fail - don't interrupt user experience
+        }
+      }, 2000); // Wait 2 seconds after launch to let user see the app first
     } else {
+      // Backend failed twice - show error
+      log.error('Backend failed to start after retry attempt');
       windowService.showBackendErrorWindow();
     }
     

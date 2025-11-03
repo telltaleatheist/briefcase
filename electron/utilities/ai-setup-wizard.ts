@@ -244,13 +244,42 @@ export class AISetupWizard {
   }
 
   /**
-   * Install Ollama
+   * Check if Ollama is already installed
+   */
+  private async checkOllamaInstalled(): Promise<boolean> {
+    try {
+      child_process.execSync('ollama --version', {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Install Ollama or provide manual installation instructions
    */
   private async installOllama(
     packageManager: 'chocolatey' | 'scoop' | 'winget' | 'none',
     progressCallback?: AISetupProgressCallback
   ): Promise<boolean> {
     log.info('Installing Ollama...');
+
+    // First check if already installed
+    const alreadyInstalled = await this.checkOllamaInstalled();
+    if (alreadyInstalled) {
+      log.info('Ollama is already installed');
+      if (progressCallback) {
+        progressCallback({
+          stage: 'ollama',
+          status: 'success',
+          message: 'Ollama is already installed'
+        });
+      }
+      return true;
+    }
 
     if (progressCallback) {
       progressCallback({
@@ -273,12 +302,52 @@ export class AISetupWizard {
         command = 'winget install Ollama.Ollama --silent';
         break;
       default:
+        // No package manager - offer manual installation
+        const response = await dialog.showMessageBox({
+          type: 'info',
+          buttons: ['Open Download Page', 'Cancel'],
+          defaultId: 0,
+          cancelId: 1,
+          title: 'Manual Installation Required',
+          message: 'Install Ollama',
+          detail: 'Ollama needs to be installed manually.\n\n' +
+            'Steps:\n' +
+            '1. Click "Open Download Page" to visit ollama.ai\n' +
+            '2. Download the Windows installer\n' +
+            '3. Run the installer\n' +
+            '4. Restart Clippy after installation\n\n' +
+            'After installing Ollama, return here and click "Check Again".',
+          noLink: true
+        });
+
+        if (response.response === 0) {
+          // Open Ollama website
+          require('electron').shell.openExternal('https://ollama.ai/download');
+
+          // Wait for user to install and confirm
+          const checkResponse = await dialog.showMessageBox({
+            type: 'question',
+            buttons: ['Check Again', 'I\'ll Install Later'],
+            defaultId: 0,
+            cancelId: 1,
+            title: 'Check Installation',
+            message: 'Have you installed Ollama?',
+            detail: 'After installing Ollama, click "Check Again" to continue setup.',
+            noLink: true
+          });
+
+          if (checkResponse.response === 0) {
+            // Check again
+            return await this.checkOllamaInstalled();
+          }
+        }
+
         if (progressCallback) {
           progressCallback({
             stage: 'ollama',
             status: 'failed',
-            message: 'No package manager available',
-            error: 'Please install Ollama manually from https://ollama.ai'
+            message: 'Manual installation required',
+            error: 'User needs to install Ollama manually'
           });
         }
         return false;
@@ -305,6 +374,23 @@ export class AISetupWizard {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       log.error('Failed to install Ollama:', errorMsg);
+
+      // Offer manual installation as fallback
+      const response = await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['Try Manual Installation', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Automatic Installation Failed',
+        message: 'Could not install Ollama automatically',
+        detail: `Error: ${errorMsg}\n\n` +
+          'Would you like to install manually instead?',
+        noLink: true
+      });
+
+      if (response.response === 0) {
+        return await this.installOllama('none', progressCallback);
+      }
 
       if (progressCallback) {
         progressCallback({
@@ -428,6 +514,30 @@ export class AISetupWizard {
   }
 
   /**
+   * Check if user already has any models installed
+   */
+  private async checkExistingModels(): Promise<string[]> {
+    try {
+      const output = child_process.execSync('ollama list', {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+
+      // Parse output to get model names
+      const lines = output.split('\n').slice(1); // Skip header
+      const models = lines
+        .filter(line => line.trim())
+        .map(line => line.split(/\s+/)[0])
+        .filter(name => name && name !== 'NAME');
+
+      return models;
+    } catch (error) {
+      log.error('Failed to check existing models:', error);
+      return [];
+    }
+  }
+
+  /**
    * Run the complete AI setup wizard
    */
   async runWizard(
@@ -465,13 +575,53 @@ export class AISetupWizard {
       return result;
     }
 
-    // Step 3: Install Ollama
+    // Step 3: Install Ollama (or check if already installed)
     const ollamaInstalled = await this.installOllama(packageManager, progressCallback);
     result.ollamaInstalled = ollamaInstalled;
 
     if (!ollamaInstalled) {
       result.error = 'Failed to install Ollama';
       return result;
+    }
+
+    // Step 3.5: Check if user already has models installed
+    const existingModels = await this.checkExistingModels();
+
+    if (existingModels.length > 0) {
+      log.info(`Found existing models: ${existingModels.join(', ')}`);
+
+      const response = await dialog.showMessageBox({
+        type: 'info',
+        buttons: ['Use Existing Models', 'Install New Model'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Models Already Installed',
+        message: 'Ollama Models Detected',
+        detail: `You already have ${existingModels.length} model(s) installed:\n\n` +
+          existingModels.map(m => `  • ${m}`).join('\n') + '\n\n' +
+          'Would you like to use these models or install a new one?',
+        noLink: true
+      });
+
+      if (response.response === 0) {
+        // User wants to use existing models
+        result.modelInstalled = true;
+        result.modelName = existingModels[0]; // Use first model
+        log.info(`User chose to use existing models: ${existingModels[0]}`);
+
+        await dialog.showMessageBox({
+          type: 'info',
+          buttons: ['OK'],
+          title: 'Setup Complete',
+          message: 'AI Features Ready!',
+          detail: `You can now use AI-powered features in Clippy with your existing models.\n\n` +
+            `Available models:\n` + existingModels.map(m => `  • ${m}`).join('\n'),
+          noLink: true
+        });
+
+        return result;
+      }
+      // Otherwise, continue to model selection
     }
 
     // Step 4: Select model

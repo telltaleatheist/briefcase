@@ -2,10 +2,12 @@
 import { BrowserWindow, app, dialog } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';
+import Store from 'electron-store';
 import { DependencyChecker, DependencyCheckResult } from '../utilities/dependency-checker';
 import { DependencyInstaller, BatchInstallResult } from '../utilities/dependency-installer';
 import { PortableDependencyManager } from '../utilities/portable-dependency-manager';
 import { AISetupWizard } from '../utilities/ai-setup-wizard';
+import { WhisperSetupWizard } from '../utilities/whisper-setup-wizard';
 
 /**
  * Service for handling first-run setup and dependency installation
@@ -16,11 +18,15 @@ export class SetupService {
   private installer: DependencyInstaller | null = null;
   private portableManager: PortableDependencyManager;
   private aiWizard: AISetupWizard;
+  private whisperWizard: WhisperSetupWizard;
+  private store: Store<Record<string, any>>;
 
   constructor() {
     this.checker = new DependencyChecker();
     this.portableManager = new PortableDependencyManager();
     this.aiWizard = new AISetupWizard();
+    this.whisperWizard = new WhisperSetupWizard();
+    this.store = new Store<Record<string, any>>();
   }
 
   /**
@@ -206,5 +212,140 @@ export class SetupService {
    */
   async checkDependencies(): Promise<DependencyCheckResult> {
     return await this.checker.checkAll();
+  }
+
+  /**
+   * Check if AI setup has been offered before
+   */
+  private hasOfferedAISetup(): boolean {
+    return (this.store as any).get('aiSetupOffered', false) as boolean;
+  }
+
+  /**
+   * Mark AI setup as offered
+   */
+  private markAISetupOffered(): void {
+    (this.store as any).set('aiSetupOffered', true);
+  }
+
+  /**
+   * Check if Whisper setup has been offered before
+   */
+  private hasOfferedWhisperSetup(): boolean {
+    return (this.store as any).get('whisperSetupOffered', false) as boolean;
+  }
+
+  /**
+   * Mark Whisper setup as offered
+   */
+  private markWhisperSetupOffered(): void {
+    (this.store as any).set('whisperSetupOffered', true);
+  }
+
+  /**
+   * Run AI features setup (Ollama) on first launch
+   * Returns true if setup completed or was skipped, false if user wants to try later
+   */
+  async runAISetup(checkResult: DependencyCheckResult): Promise<boolean> {
+    // Don't offer if already offered before
+    if (this.hasOfferedAISetup()) {
+      log.info('AI setup already offered in a previous session');
+      return true;
+    }
+
+    log.info('Offering AI features setup...');
+
+    try {
+      // Determine which package manager to use
+      let packageManager: 'chocolatey' | 'scoop' | 'winget' | 'none' = 'none';
+
+      if (process.platform === 'win32') {
+        packageManager = checkResult.packageManagerAvailable || 'none';
+      }
+
+      // Run the AI setup wizard
+      const result = await this.aiWizard.runWizard(packageManager);
+
+      // Mark as offered regardless of outcome
+      this.markAISetupOffered();
+
+      if (result.skipped) {
+        log.info('User skipped AI setup');
+        return true;
+      }
+
+      if (result.ollamaInstalled && result.modelInstalled) {
+        log.info(`AI setup completed: ${result.modelName}`);
+        return true;
+      }
+
+      if (result.error) {
+        log.error(`AI setup error: ${result.error}`);
+        return true; // Continue anyway
+      }
+
+      return true;
+    } catch (error) {
+      log.error('Error during AI setup:', error);
+      return true; // Continue anyway
+    }
+  }
+
+  /**
+   * Run Whisper setup on first launch
+   * Returns true if setup completed or was skipped
+   */
+  async runWhisperSetup(): Promise<boolean> {
+    // Don't offer if already offered before
+    if (this.hasOfferedWhisperSetup()) {
+      log.info('Whisper setup already offered in a previous session');
+      return true;
+    }
+
+    log.info('Offering Whisper transcription setup...');
+
+    try {
+      // Run the Whisper setup wizard
+      const result = await this.whisperWizard.runWizard();
+
+      // Mark as offered regardless of outcome
+      this.markWhisperSetupOffered();
+
+      if (result.skipped) {
+        log.info('User skipped Whisper setup');
+        return true;
+      }
+
+      if (result.installed) {
+        log.info('Whisper setup completed successfully');
+        return true;
+      }
+
+      if (result.error) {
+        log.error(`Whisper setup error: ${result.error}`);
+        return true; // Continue anyway
+      }
+
+      return true;
+    } catch (error) {
+      log.error('Error during Whisper setup:', error);
+      return true; // Continue anyway
+    }
+  }
+
+  /**
+   * Run optional AI features setup after main app is ready
+   * This runs after the main window is created so it doesn't block startup
+   */
+  async runOptionalSetups(checkResult: DependencyCheckResult): Promise<void> {
+    log.info('Running optional AI features setup...');
+
+    // Run AI setup first (Ollama)
+    await this.runAISetup(checkResult);
+
+    // Then offer Whisper setup
+    await this.runWhisperSetup();
+
+    log.info('Optional setups complete');
   }
 }

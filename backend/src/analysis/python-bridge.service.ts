@@ -50,8 +50,8 @@ export class PythonBridgeService {
       let resultData: any = null;
       let errorMessage: string | null = null;
 
-      // Use Python from metadata-generator conda environment (has whisper installed)
-      const pythonPath = '/opt/homebrew/Caskroom/miniconda/base/envs/metadata-generator/bin/python';
+      // Use system Python (cross-platform)
+      const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
 
       // Spawn Python process
       const pythonProcess: ChildProcess = spawn(pythonPath, [
@@ -169,7 +169,7 @@ export class PythonBridgeService {
   }
 
   /**
-   * Analyze transcript using Ollama
+   * Analyze transcript using AI (Ollama, OpenAI, or Claude)
    */
   async analyze(
     ollamaEndpoint: string,
@@ -179,10 +179,14 @@ export class PythonBridgeService {
     outputFile: string,
     onProgress?: (progress: PythonProgress) => void,
     customInstructions?: string,
+    aiProvider?: 'ollama' | 'openai' | 'claude',
+    apiKey?: string,
   ): Promise<{ sections_count: number; sections: any[] }> {
     const command = {
       command: 'analyze',
+      ai_provider: aiProvider || 'ollama',
       ollama_endpoint: ollamaEndpoint,
+      api_key: apiKey,
       ai_model: aiModel,
       transcript_text: transcriptText,
       segments,
