@@ -5,14 +5,15 @@
       "moduleResolution": "node",
       "esModuleInterop": true,
       "sourceMap": true,
-      "outDir": "../dist-electron/preload",
+      "outDir": "../dist-electron",
+      "rootDir": "..",
       "strict": true,
       "lib": ["ESNext", "DOM"],
       "types": ["node"],
       "skipLibCheck": true
     },
     "include": [
-      "*.ts"
+      "../electron/preload.ts"
     ],
     "exclude": [
       "node_modules"

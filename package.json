@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Video downloader application using NestJS and Angular",
   "asar": true,
-  "main": "dist-electron/main/electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "install:all": "npm install && npm run install:backend && npm run install:frontend && npm run install:electron",
     "install:backend": "cd backend && npm install",
@@ -89,8 +89,10 @@
       }
     ],
     "files": [
-      "dist-electron/main/**/*",
-      "!dist-electron/main/**/*.map",
+      "dist-electron/electron/**/*",
+      "dist-electron/config/**/*",
+      "dist-electron/utilities/**/*",
+      "!dist-electron/**/*.map",
       "backend/dist/**/*",
       "!backend/dist/**/*.map",
       "backend/package.json",
@@ -150,8 +152,18 @@
     },
     "win": {
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
     },
     "linux": {
       "target": [

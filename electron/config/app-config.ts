@@ -27,6 +27,8 @@ export class AppConfig {
     // Try both packaged and unpackaged locations
     const possiblePaths = [
       path.join(__dirname, 'preload.js'),
+      path.join(__dirname, '../../preload/electron/preload.js'),  // Development
+      path.join(__dirname, '../preload/electron/preload.js'),      // Alternative dev
       path.join(__dirname, '../../electron', 'preload.js'),
       path.join(__dirname, '../preload', 'preload.js')
     ];
@@ -34,9 +36,12 @@ export class AppConfig {
     const foundPath = possiblePaths.find(p => fs.existsSync(p));
     if (!foundPath) {
       log.error('Preload script not found in:', possiblePaths);
+      log.error('Current __dirname:', __dirname);
+      log.error('Checked paths:', possiblePaths);
       throw new Error('Preload script not found');
     }
 
+    log.info('Using preload script from:', foundPath);
     return foundPath;
   }
 
