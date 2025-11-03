@@ -29,7 +29,7 @@ export class PathController {
       throw new HttpException({
         status: HttpStatus.BAD_REQUEST,
         error: 'Invalid path provided',
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? (error as Error).message : String(error)
       }, HttpStatus.BAD_REQUEST);
     }
   }

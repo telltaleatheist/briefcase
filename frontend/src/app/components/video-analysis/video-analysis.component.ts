@@ -85,12 +85,67 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       inputType: ['url', Validators.required],
       input: ['', Validators.required],
       customInstructions: [''], // Custom instructions for AI analysis
-      aiModel: ['qwen2.5:7b', Validators.required],
+      aiModel: ['ollama:qwen2.5:7b', Validators.required], // Format: provider:model
+      apiKey: [''], // API key for Claude/OpenAI
       ollamaEndpoint: ['http://localhost:11434'],
       whisperModel: ['base'],
       language: ['en'],
-      outputPath: [''],
     });
+  }
+
+  /**
+   * Check if the selected model needs an API key
+   */
+  needsApiKey(): boolean {
+    const model = this.analysisForm.get('aiModel')?.value || '';
+    return model.startsWith('claude:') || model.startsWith('openai:');
+  }
+
+  /**
+   * Get the appropriate API key label based on selected provider
+   */
+  getApiKeyLabel(): string {
+    const model = this.analysisForm.get('aiModel')?.value || '';
+    if (model.startsWith('claude:')) {
+      return 'Claude API Key';
+    } else if (model.startsWith('openai:')) {
+      return 'OpenAI API Key';
+    }
+    return 'API Key';
+  }
+
+  /**
+   * Handle model change - auto-update aiProvider field and load appropriate API key
+   */
+  async onModelChange(): Promise<void> {
+    const model = this.analysisForm.get('aiModel')?.value || '';
+
+    // Extract provider from model string (format: provider:model)
+    let provider = 'ollama';
+    if (model.startsWith('claude:')) {
+      provider = 'claude';
+    } else if (model.startsWith('openai:')) {
+      provider = 'openai';
+    }
+
+    // Store provider for backend (though we can also parse it from aiModel)
+    this.analysisForm.patchValue({ aiProvider: provider }, { emitEvent: false });
+
+    // Load the appropriate API key when switching models
+    try {
+      const settings = await (window as any).electron?.getSettings();
+      if (settings) {
+        if (provider === 'claude' && settings.claudeApiKey) {
+          this.analysisForm.patchValue({ apiKey: settings.claudeApiKey });
+        } else if (provider === 'openai' && settings.openaiApiKey) {
+          this.analysisForm.patchValue({ apiKey: settings.openaiApiKey });
+        } else if (provider === 'ollama') {
+          this.analysisForm.patchValue({ apiKey: '' });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load API key for provider:', error);
+    }
   }
 
   async onSubmit(): Promise<void> {
@@ -139,11 +194,37 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
       this.isProcessing = true;
 
+      // Auto-save settings when starting analysis
+      await this.saveSettings();
+
+      // Parse provider and model from combined format (provider:model)
+      const fullModel = formValue.aiModel || '';
+      let provider = 'ollama';
+      let modelName = fullModel;
+
+      if (fullModel.startsWith('claude:')) {
+        provider = 'claude';
+        modelName = fullModel.replace('claude:', '');
+      } else if (fullModel.startsWith('openai:')) {
+        provider = 'openai';
+        modelName = fullModel.replace('openai:', '');
+      } else if (fullModel.startsWith('ollama:')) {
+        provider = 'ollama';
+        modelName = fullModel.replace('ollama:', '');
+      }
+
+      // Prepare request with separated provider and model
+      const requestData = {
+        ...formValue,
+        aiProvider: provider,
+        aiModel: modelName,
+      };
+
       // Start analysis via API (backend will check model availability)
       const response = await fetch('/api/api/analysis/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formValue),
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
@@ -295,22 +376,68 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   }
 
   private async loadSettings(): Promise<void> {
-    // Load saved model from sessionStorage (persists during tab navigation, clears on app close)
-    const savedModel = sessionStorage.getItem('clippy_ai_model');
-    if (savedModel) {
-      this.analysisForm.patchValue({ aiModel: savedModel });
+    try {
+      // Load settings from electron-store
+      const settings = await (window as any).electron?.getSettings();
+
+      if (settings) {
+        // Load last used model (now in format provider:model)
+        if (settings.lastUsedModel) {
+          this.analysisForm.patchValue({ aiModel: settings.lastUsedModel });
+        }
+
+        // Load the appropriate API key based on last used model
+        const lastModel = settings.lastUsedModel || '';
+        if (lastModel.startsWith('claude:') && settings.claudeApiKey) {
+          this.analysisForm.patchValue({ apiKey: settings.claudeApiKey });
+        } else if (lastModel.startsWith('openai:') && settings.openaiApiKey) {
+          this.analysisForm.patchValue({ apiKey: settings.openaiApiKey });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+      // Continue with defaults if loading fails
     }
-    // No validation - we'll check when user actually starts analysis
   }
 
-  saveSettings(): void {
-    const aiModel = this.analysisForm.get('aiModel')?.value;
-    sessionStorage.setItem('clippy_ai_model', aiModel);
-    this.snackBar.open('Settings saved', 'Dismiss', { duration: 2000 });
+  async saveSettings(): Promise<void> {
+    try {
+      const model = this.analysisForm.get('aiModel')?.value || '';
+      const apiKey = this.analysisForm.get('apiKey')?.value;
 
-    // Close the advanced options accordion
-    if (this.advancedPanel) {
-      this.advancedPanel.close();
+      // Extract provider from model string (format: provider:model)
+      let provider = 'ollama';
+      if (model.startsWith('claude:')) {
+        provider = 'claude';
+      } else if (model.startsWith('openai:')) {
+        provider = 'openai';
+      }
+
+      // Save to electron-store
+      const updates: any = {
+        lastUsedProvider: provider,
+        lastUsedModel: model, // Save full format: provider:model
+      };
+
+      // Save API key if provided and not masked
+      if (apiKey && apiKey !== '***') {
+        if (provider === 'claude') {
+          updates.claudeApiKey = apiKey;
+        } else if (provider === 'openai') {
+          updates.openaiApiKey = apiKey;
+        }
+      }
+
+      await (window as any).electron?.updateSettings(updates);
+      this.snackBar.open('Settings saved', 'Dismiss', { duration: 2000 });
+
+      // Close the advanced options accordion
+      if (this.advancedPanel) {
+        this.advancedPanel.close();
+      }
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      this.snackBar.open('Failed to save settings', 'Dismiss', { duration: 3000 });
     }
   }
 

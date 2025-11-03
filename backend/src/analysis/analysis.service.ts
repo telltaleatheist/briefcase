@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { PythonBridgeService } from './python-bridge.service';
 import { OllamaService } from './ollama.service';
+import { AIProviderService } from './ai-provider.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { PathService } from '../path/path.service';
@@ -39,6 +40,8 @@ export interface AnalysisRequest {
   input: string; // URL or file path
   inputType: 'url' | 'file';
   aiModel: string;
+  aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
+  apiKey?: string; // API key for Claude/OpenAI
   ollamaEndpoint: string;
   whisperModel?: string;
   language?: string;
@@ -55,6 +58,7 @@ export class AnalysisService {
   constructor(
     private pythonBridge: PythonBridgeService,
     private ollama: OllamaService,
+    private aiProvider: AIProviderService,
     private ffmpeg: FfmpegService,
     private downloader: DownloaderService,
     private pathService: PathService,
@@ -81,10 +85,10 @@ export class AnalysisService {
 
     // Start processing asynchronously
     this.processAnalysis(jobId, request).catch((error) => {
-      this.logger.error(`Analysis job ${jobId} failed: ${error.message}`);
+      this.logger.error(`Analysis job ${jobId} failed: ${(error as Error).message}`);
       this.updateJob(jobId, {
         status: 'failed',
-        error: error.message,
+        error: (error as Error).message,
       });
     });
 
@@ -116,7 +120,7 @@ export class AnalysisService {
     try {
       if (job.audioPath) await fs.unlink(job.audioPath).catch(() => {});
     } catch (error: any) {
-      this.logger.warn(`Error cleaning up job ${jobId}: ${error.message || 'Unknown error'}`);
+      this.logger.warn(`Error cleaning up job ${jobId}: ${(error as Error).message || 'Unknown error'}`);
     }
 
     this.jobs.delete(jobId);
@@ -335,7 +339,7 @@ export class AnalysisService {
 
       this.logger.log(`Analysis job ${jobId} completed successfully`);
     } catch (error: any) {
-      this.logger.error(`Analysis job ${jobId} failed: ${error.message || 'Unknown error'}`);
+      this.logger.error(`Analysis job ${jobId} failed: ${(error as Error).message || 'Unknown error'}`);
       throw error;
     }
   }

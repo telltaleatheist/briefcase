@@ -136,7 +136,7 @@ export class MediaProcessingService {
             result.transcriptFile = transcriptFile;
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage = error instanceof Error ? (error as Error).message : String(error);
           this.logger.error(`Transcription failed: ${errorMessage}`);
         }
       }
@@ -160,7 +160,7 @@ export class MediaProcessingService {
       return result;
   
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? (error as Error).message : String(error);
       
       this.logger.error(`Error processing media: ${errorMessage}`);
       
@@ -187,7 +187,7 @@ export class MediaProcessingService {
       const metadata = await this.ffmpegService.getVideoMetadata(filePath);
       return metadata;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? (error as Error).message : String(error);
       this.logger.error(`Error getting media metadata: ${errorMessage}`);
       throw error;
     }

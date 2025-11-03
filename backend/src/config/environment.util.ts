@@ -35,7 +35,7 @@ export class EnvironmentUtil {
       log.info(`Using downloads directory: ${downloadsPath}`);
       return downloadsPath;
     } catch (error) {
-      log.error(`Failed to create downloads directory: ${error instanceof Error ? error.message : String(error)}`);
+      log.error(`Failed to create downloads directory: ${error instanceof Error ? (error as Error).message : String(error)}`);
       // Fallback to a temporary directory
       const tmpDir = path.join(require('os').tmpdir(), 'clippy-downloads');
       try {

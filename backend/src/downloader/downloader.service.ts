@@ -131,7 +131,7 @@ export class DownloaderService implements OnModuleInit {
             return { ...result, isImage: true };
           }
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
           this.logger.warn(`Failed to get Reddit info, trying regular download: ${errorMessage}`);
         }
       }
@@ -327,7 +327,7 @@ export class DownloaderService implements OnModuleInit {
           return { success: false, error: errorMsg };
         }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error during yt-dlp execution';
+        const errorMsg = error instanceof Error ? (error as Error).message : 'Unknown error during yt-dlp execution';
         this.logger.error(`yt-dlp execution failed: ${errorMsg}`);
         this.eventService.emitDownloadFailed(options.url, errorMsg, jobId);
         
@@ -340,7 +340,7 @@ export class DownloaderService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error('Error in downloadVideo:', error);
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const errorMsg = error instanceof Error ? (error as Error).message : 'Unknown error';
       
       this.eventService.emitDownloadFailed(options.url, errorMsg, jobId);
       
@@ -456,7 +456,7 @@ export class DownloaderService implements OnModuleInit {
         this.logger.warn(`Files in folder: ${files.join(', ')}`);
       }
     } catch (error) {
-      this.logger.error(`Error while trying to infer output file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(`Error while trying to infer output file: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
     }
     
     return null;
@@ -503,7 +503,7 @@ export class DownloaderService implements OnModuleInit {
       } catch (error) {
         // If we get an error, it might be because it's an image post
         // Check the error message for image URL patterns
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error ? (error as Error).message : String(error);
         this.logger.warn(`YtDlpManager execution failed, checking for image URL pattern: ${errorMessage}`);
         
         // Match the specific Reddit media URL format we're seeing in the error
@@ -544,7 +544,7 @@ export class DownloaderService implements OnModuleInit {
       return { title };
       
     } catch (error) {
-      this.logger.error(`Error in getRedditInfo: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(`Error in getRedditInfo: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
       throw error;
     }
   }
@@ -669,7 +669,7 @@ export class DownloaderService implements OnModuleInit {
         request.end();
       } catch (error) {
         this.logger.error('Error downloading Reddit image:', error);
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        const errorMsg = error instanceof Error ? (error as Error).message : 'Unknown error';
         this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
         reject({
           success: false,
@@ -817,12 +817,12 @@ export class DownloaderService implements OnModuleInit {
       } catch (error) {
         // Log detailed error information
         this.logger.error(`yt-dlp check failed for URL: ${url}`);
-        this.logger.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        this.logger.error(`Error: ${error instanceof Error ? (error as Error).message : String(error)}`);
         
-        throw new Error(`URL check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(`URL check failed: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
       }
     } catch (error) {
-      this.logger.error(`Error in checkUrl: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(`Error in checkUrl: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
       throw error;
     }
   }
@@ -892,7 +892,7 @@ export class DownloaderService implements OnModuleInit {
         throw new Error(`Failed to parse video info: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
       }
     } catch (error) {
-      this.logger.error(`Error in getVideoInfo: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(`Error in getVideoInfo: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
       throw error;
     }
   }

@@ -45,7 +45,7 @@ export class FfmpegController {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Error extracting metadata'
+        message: error instanceof Error ? (error as Error).message : 'Error extracting metadata'
       };
     }
   }
@@ -84,7 +84,7 @@ export class FfmpegController {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Error creating thumbnail'
+        message: error instanceof Error ? (error as Error).message : 'Error creating thumbnail'
       };
     }
   }
@@ -120,7 +120,7 @@ export class FfmpegController {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Error fixing aspect ratio'
+        message: error instanceof Error ? (error as Error).message : 'Error fixing aspect ratio'
       };
     }
   }
@@ -166,7 +166,7 @@ export class FfmpegController {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Error normalizing audio'
+        message: error instanceof Error ? (error as Error).message : 'Error normalizing audio'
       };
     }
   }
@@ -198,7 +198,7 @@ export class FfmpegController {
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Error listing files'
+        message: error instanceof Error ? (error as Error).message : 'Error listing files'
       };
     }
   }
@@ -221,7 +221,7 @@ export class FfmpegController {
     } catch (error) {
       return res.status(500).json({
         success: false,
-        message: error instanceof Error ? error.message : 'Error retrieving thumbnail'
+        message: error instanceof Error ? (error as Error).message : 'Error retrieving thumbnail'
       });
     }
   }

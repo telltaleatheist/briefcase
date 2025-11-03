@@ -520,6 +520,24 @@
   padding-top: 0.5rem;
 }
 
+// Form row for side-by-side inputs
+.form-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.form-group-half {
+  flex: 1;
+  min-width: 0; // Allow flex items to shrink
+}
+
+.custom-select-compact,
+.custom-input-compact {
+  font-size: 0.875rem;
+  padding: 0.6rem 0.8rem;
+}
+
 // Material Overrides
 ::ng-deep .mat-mdc-raised-button.mat-primary,
 ::ng-deep .mat-mdc-raised-button.mat-accent {

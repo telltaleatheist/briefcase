@@ -53,7 +53,7 @@ export class ConfigController {
     } catch (error: any) {
       return {
         success: false,
-        message: `Failed to save output directory: ${error.message}`
+        message: `Failed to save output directory: ${(error as Error).message}`
       };
     }
   }
@@ -72,7 +72,7 @@ export class ConfigController {
     } catch (error: any) {
       return {
         success: false,
-        message: `Failed to get output directory: ${error.message}`
+        message: `Failed to get output directory: ${(error as Error).message}`
       };
     }
   }

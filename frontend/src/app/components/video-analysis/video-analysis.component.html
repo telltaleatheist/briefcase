@@ -148,17 +148,29 @@
               <span class="field-hint">Provide context and specific things to look for in the analysis.</span>
             </div>
 
-            <!-- AI Model -->
+            <!-- AI Model (Combined) -->
             <div class="form-section">
               <label class="section-label">AI Model</label>
-              <select class="custom-select" formControlName="aiModel">
-                <option value="qwen2.5:7b">Qwen 2.5 7B (Balanced, ~4GB)</option>
-                <option value="qwen2.5:14b">Qwen 2.5 14B (Better, ~8GB)</option>
-                <option value="qwen2.5:32b">Qwen 2.5 32B (Best, ~18GB)</option>
-                <option value="llama3.2:3b">Llama 3.2 3B (Fast, ~2GB)</option>
-                <option value="llama3.1:8b">Llama 3.1 8B (Good, ~4.5GB)</option>
-                <option value="mistral:7b">Mistral 7B (Good, ~4GB)</option>
-                <option value="cogito:70b">Cogito 70B (Excellent, ~40GB)</option>
+              <select class="custom-select" formControlName="aiModel" (change)="onModelChange()">
+                <optgroup label="Claude (API - Requires Key)">
+                  <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5 (Newest)</option>
+                  <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Recommended)</option>
+                  <option value="claude:claude-3-5-haiku-20241022">Claude 3.5 Haiku (Faster)</option>
+                </optgroup>
+                <optgroup label="ChatGPT / OpenAI (API - Requires Key)">
+                  <option value="openai:gpt-4o">GPT-4o (Best)</option>
+                  <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo (Faster, Cheaper)</option>
+                </optgroup>
+                <optgroup label="Ollama (Local - No API Key)">
+                  <option value="ollama:qwen2.5:7b">Qwen 2.5 7B (Balanced, ~4GB)</option>
+                  <option value="ollama:qwen2.5:14b">Qwen 2.5 14B (Better, ~8GB)</option>
+                  <option value="ollama:qwen2.5:32b">Qwen 2.5 32B (Best, ~18GB)</option>
+                  <option value="ollama:llama3.2:3b">Llama 3.2 3B (Fast, ~2GB)</option>
+                  <option value="ollama:llama3.1:8b">Llama 3.1 8B (Good, ~4.5GB)</option>
+                  <option value="ollama:mistral:7b">Mistral 7B (Good, ~4GB)</option>
+                  <option value="ollama:cogito:70b">Cogito 70B (Excellent, ~40GB)</option>
+                </optgroup>
               </select>
             </div>
 
@@ -172,31 +184,35 @@
               </mat-expansion-panel-header>
 
               <div class="advanced-content">
-                <div class="form-group">
+                <!-- API Key (for Claude/OpenAI) -->
+                <div class="form-group" *ngIf="needsApiKey()">
+                  <label class="field-label">{{ getApiKeyLabel() }}</label>
+                  <input type="password" class="custom-input" formControlName="apiKey" [placeholder]="'Enter your ' + getApiKeyLabel()">
+                </div>
+
+                <!-- Ollama Endpoint (for local models) -->
+                <div class="form-group" *ngIf="!needsApiKey()">
                   <label class="field-label">Ollama Endpoint</label>
                   <input type="text" class="custom-input" formControlName="ollamaEndpoint" placeholder="http://localhost:11434">
                 </div>
 
-                <div class="form-group">
-                  <label class="field-label">Whisper Model</label>
-                  <select class="custom-select" formControlName="whisperModel">
-                    <option value="tiny">Tiny (Fastest, least accurate)</option>
-                    <option value="base">Base (Fast, good accuracy)</option>
-                    <option value="small">Small (Slower, better accuracy)</option>
-                    <option value="medium">Medium (Slow, very accurate)</option>
-                    <option value="large">Large (Slowest, best accuracy)</option>
-                  </select>
-                </div>
+                <!-- Whisper and Language on same line -->
+                <div class="form-row">
+                  <div class="form-group form-group-half">
+                    <label class="field-label">Whisper Model</label>
+                    <select class="custom-select custom-select-compact" formControlName="whisperModel">
+                      <option value="tiny">Tiny</option>
+                      <option value="base">Base</option>
+                      <option value="small">Small</option>
+                      <option value="medium">Medium</option>
+                      <option value="large">Large</option>
+                    </select>
+                  </div>
 
-                <div class="form-group">
-                  <label class="field-label">Language</label>
-                  <input type="text" class="custom-input" formControlName="language" placeholder="en">
-                  <span class="field-hint">Leave as 'en' for English, or specify language code</span>
-                </div>
-
-                <div class="form-group">
-                  <label class="field-label">Output Path (Optional)</label>
-                  <input type="text" class="custom-input" formControlName="outputPath" placeholder="Leave empty for default">
+                  <div class="form-group form-group-half">
+                    <label class="field-label">Language</label>
+                    <input type="text" class="custom-input custom-input-compact" formControlName="language" placeholder="en">
+                  </div>
                 </div>
 
                 <div class="advanced-actions">

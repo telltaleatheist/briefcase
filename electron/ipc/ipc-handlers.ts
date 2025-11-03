@@ -1,7 +1,8 @@
 // clippy/electron/ipc/ipc-handlers.ts
-import { ipcMain, dialog, shell } from 'electron';
+import { ipcMain, dialog, shell, app } from 'electron';
 import * as log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
+import Store from 'electron-store';
 import { ConfigManager } from '../../config/ConfigManager';
 import { PathValidator } from '../../utilities/PathValidator';
 import { WindowService } from '../services/window-service';
@@ -13,6 +14,26 @@ import { UpdateService } from '../services/update-service';
 let downloadService: DownloadService;
 let updateService: UpdateService;
 
+// Define settings schema
+interface Settings {
+  lastUsedProvider: string;
+  lastUsedModel: string;
+  claudeApiKey: string;
+  openaiApiKey: string;
+}
+
+// Initialize electron-store for user settings
+// Stored in user's app data directory - won't transfer with app
+const store = new Store<Settings>({
+  name: 'clippy-settings',
+  defaults: {
+    lastUsedProvider: 'ollama',
+    lastUsedModel: 'qwen2.5:7b',
+    claudeApiKey: '',
+    openaiApiKey: '',
+  }
+});
+
 /**
  * Set up all IPC handlers
  */
@@ -23,12 +44,13 @@ export function setupIpcHandlers(
   // Create services
   downloadService = new DownloadService(windowService);
   updateService = new UpdateService(windowService);
-  
+
   // Register handlers
   setupConfigHandlers();
   setupDownloadHandlers();
   setupFileSystemHandlers();
   setupUpdateHandlers();
+  setupSettingsHandlers();
 }
 
 /**
@@ -197,5 +219,70 @@ function setupUpdateHandlers(): void {
   // Install update
   ipcMain.handle('install-update', () => {
     updateService.installUpdate();
+  });
+}
+
+/**
+ * Set up settings-related IPC handlers
+ */
+function setupSettingsHandlers(): void {
+  // Get all settings
+  ipcMain.handle('get-settings', () => {
+    try {
+      return (store as any).store;
+    } catch (error) {
+      log.error('Error getting settings:', error);
+      return {};
+    }
+  });
+
+  // Update settings
+  ipcMain.handle('update-settings', (_, settings) => {
+    try {
+      Object.keys(settings).forEach(key => {
+        (store as any).set(key, settings[key]);
+      });
+      return { success: true };
+    } catch (error) {
+      log.error('Error updating settings:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Get a specific setting
+  ipcMain.handle('get-setting', (_, key) => {
+    try {
+      return (store as any).get(key);
+    } catch (error) {
+      log.error(`Error getting setting ${key}:`, error);
+      return null;
+    }
+  });
+
+  // Set a specific setting
+  ipcMain.handle('set-setting', (_, key, value) => {
+    try {
+      (store as any).set(key, value);
+      return { success: true };
+    } catch (error) {
+      log.error(`Error setting ${key}:`, error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Clear all settings (reset to defaults)
+  ipcMain.handle('clear-settings', () => {
+    try {
+      (store as any).clear();
+      return { success: true };
+    } catch (error) {
+      log.error('Error clearing settings:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Get settings file path (for debugging)
+  ipcMain.handle('get-settings-path', () => {
+    return (store as any).path;
   });
 }

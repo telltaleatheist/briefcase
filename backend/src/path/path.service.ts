@@ -53,7 +53,7 @@ export class PathService {
         } catch (error: unknown) {
             // Type guard to check if error is an Error object
             if (error instanceof Error) {
-              this.logger.error(`Path is not writable: ${linuxDownloads}, error: ${error.message}`);
+              this.logger.error(`Path is not writable: ${linuxDownloads}, error: ${(error as Error).message}`);
             } else {
               this.logger.error(`Path is not writable: ${linuxDownloads}, error: ${String(error)}`);
             }
@@ -74,7 +74,7 @@ export class PathService {
       return true;
     } catch (error) {
       if (error instanceof Error) {
-        this.logger.error(`Failed to create download directory: ${error.message}`);
+        this.logger.error(`Failed to create download directory: ${(error as Error).message}`);
       } else {
         this.logger.error(`Failed to create download directory: ${String(error)}`);
       }
@@ -96,7 +96,7 @@ export class PathService {
       return true;
     } catch (error) {
       if (error instanceof Error) {
-        this.logger.error(`Path is not writable: ${downloadPath}, error: ${error.message}`);
+        this.logger.error(`Path is not writable: ${downloadPath}, error: ${(error as Error).message}`);
       } else {
         this.logger.error(`Path is not writable: ${downloadPath}, error: ${String(error)}`);
       }

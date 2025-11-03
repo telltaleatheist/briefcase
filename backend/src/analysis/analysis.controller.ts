@@ -83,7 +83,7 @@ export class AnalysisController implements OnGatewayInit {
         throw error;
       }
       throw new HttpException(
-        `Failed to start analysis: ${error.message || 'Unknown error'}`,
+        `Failed to start analysis: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -164,7 +164,7 @@ export class AnalysisController implements OnGatewayInit {
       };
     } catch (error: any) {
       throw new HttpException(
-        `Failed to get models: ${error.message || 'Unknown error'}`,
+        `Failed to get models: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -191,7 +191,7 @@ export class AnalysisController implements OnGatewayInit {
       };
     } catch (error: any) {
       throw new HttpException(
-        `Failed to check model: ${error.message || 'Unknown error'}`,
+        `Failed to check model: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -249,7 +249,7 @@ export class AnalysisController implements OnGatewayInit {
       };
     } catch (error: any) {
       throw new HttpException(
-        `Failed to check existing report: ${error.message || 'Unknown error'}`,
+        `Failed to check existing report: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -299,7 +299,7 @@ export class AnalysisController implements OnGatewayInit {
       };
     } catch (error: any) {
       throw new HttpException(
-        `Failed to get reports: ${error.message || 'Unknown error'}`,
+        `Failed to get reports: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -334,7 +334,7 @@ export class AnalysisController implements OnGatewayInit {
         throw error;
       }
       throw new HttpException(
-        `Failed to read report: ${error.message || 'Unknown error'}`,
+        `Failed to read report: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -374,7 +374,7 @@ export class AnalysisController implements OnGatewayInit {
         throw error;
       }
       throw new HttpException(
-        `Failed to delete report: ${error.message || 'Unknown error'}`,
+        `Failed to delete report: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

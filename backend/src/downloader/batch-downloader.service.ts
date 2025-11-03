@@ -211,7 +211,7 @@ export class BatchDownloaderService {
     } catch (error) {
       // Handle unexpected errors
       const errorMessage = error instanceof Error
-        ? error.message
+        ? (error as Error).message
         : 'Unknown error during download';
 
       this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');

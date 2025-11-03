@@ -57,7 +57,7 @@ export class WhisperManager extends EventEmitter {
     try {
       exec(`${this.whisperPath} --help`, (error, stdout, stderr) => {
         if (error) {
-          this.logger.warn(`Error checking whisper version: ${error.message}`);
+          this.logger.warn(`Error checking whisper version: ${(error as Error).message}`);
           return;
         }
         

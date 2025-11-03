@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
     "@nestjs/common": "^11.0.13",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.13",
@@ -39,6 +40,7 @@
     "fluent-ffmpeg": "^2.1.2",
     "fs-extra": "^11.3.0",
     "node-ffmpeg-installer": "^1.0.22",
+    "openai": "^6.7.0",
     "path-to-regexp": "^8.2.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",

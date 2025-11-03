@@ -540,7 +540,7 @@ export class YtDlpManager extends EventEmitter {
       
       return result.includes('Updated');
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = error instanceof Error ? (error as Error).message : String(error);
       return false;
     }
   }
@@ -570,7 +570,7 @@ export class YtDlpManager extends EventEmitter {
       
       return result.trim();
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = error instanceof Error ? (error as Error).message : String(error);
       throw new Error(`Failed to get yt-dlp version: ${errorMsg}`);
     }
   }

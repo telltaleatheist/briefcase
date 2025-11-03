@@ -44,7 +44,7 @@ export class DownloaderController {
       return result;
     } catch (error) {
       return { 
-        error: error instanceof Error ? error.message : 'Failed to get video info',
+        error: error instanceof Error ? (error as Error).message : 'Failed to get video info',
         title: 'Unknown Title'
       };
     }

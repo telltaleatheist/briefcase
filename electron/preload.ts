@@ -31,6 +31,13 @@ interface ElectronAPI {
   }>;
   selectDirectory: () => Promise<string | null>;
   selectVideoFile: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+  // Settings API
+  getSettings: () => Promise<any>;
+  updateSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
+  getSetting: (key: string) => Promise<any>;
+  setSetting: (key: string, value: any) => Promise<{ success: boolean; error?: string }>;
+  clearSettings: () => Promise<{ success: boolean; error?: string }>;
+  getSettingsPath: () => Promise<string>;
 }
 
 // Get resource path information
@@ -84,7 +91,14 @@ contextBridge.exposeInMainWorld('electron', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   downloadVideo: (options: any) => ipcRenderer.invoke('download-video', options),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
-  selectVideoFile: () => ipcRenderer.invoke('select-video-file')
+  selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
+  // Settings API
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  updateSettings: (settings: any) => ipcRenderer.invoke('update-settings', settings),
+  getSetting: (key: string) => ipcRenderer.invoke('get-setting', key),
+  setSetting: (key: string, value: any) => ipcRenderer.invoke('set-setting', key, value),
+  clearSettings: () => ipcRenderer.invoke('clear-settings'),
+  getSettingsPath: () => ipcRenderer.invoke('get-settings-path')
 } as ElectronAPI);
 
 // Listen for update events from main process

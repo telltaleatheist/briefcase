@@ -26,7 +26,7 @@ export class OllamaService {
       const response = await axios.get(`${url}/api/tags`, { timeout: 5000 });
       return response.status === 200;
     } catch (error: any) {
-      this.logger.warn(`Cannot connect to Ollama at ${url}: ${error.message || 'Unknown error'}`);
+      this.logger.warn(`Cannot connect to Ollama at ${url}: ${(error as Error).message || 'Unknown error'}`);
       return false;
     }
   }
@@ -42,7 +42,7 @@ export class OllamaService {
       });
       return response.data.models || [];
     } catch (error: any) {
-      this.logger.error(`Failed to list Ollama models: ${error.message || 'Unknown error'}`);
+      this.logger.error(`Failed to list Ollama models: ${(error as Error).message || 'Unknown error'}`);
       throw new Error(`Cannot connect to Ollama at ${url}`);
     }
   }
@@ -127,7 +127,7 @@ export class OllamaService {
         this.logger.error(`[Model Check] ✗ Ollama returned error: HTTP ${error.response.status}`);
         this.logger.error(`[Model Check] Response: ${JSON.stringify(error.response.data)}`);
       } else {
-        this.logger.error(`[Model Check] ✗ Error checking model ${modelName}: ${error.message}`);
+        this.logger.error(`[Model Check] ✗ Error checking model ${modelName}: ${(error as Error).message}`);
         this.logger.error(`[Model Check] Error code: ${error.code || 'unknown'}`);
       }
 

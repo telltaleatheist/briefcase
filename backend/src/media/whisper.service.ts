@@ -55,7 +55,7 @@ export class WhisperService {
       }
   
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? (error as Error).message : String(error);
       this.logger.error(`Transcription failed: ${errorMessage}`);
       this.eventService.emitTranscriptionFailed(videoFile, errorMessage, jobId);
       return null;
