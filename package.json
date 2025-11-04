@@ -10,7 +10,7 @@
     "install:frontend": "cd frontend && npm install",
     "install:electron": "cd electron && [ -f package.json ] && npm install || echo 'No electron/package.json found, skipping...'",
     "clean": "rimraf dist-electron mac-arm64 mac-arm64* win-unpacked *.dmg *.dmg.blockmap *.exe *.exe.blockmap *.AppImage *.AppImage.blockmap",
-    "clean:win": "rimraf dist-electron/win-unpacked dist-electron/*Setup*.exe dist-electron/*Setup*.exe.blockmap dist-electron/latest.yml",
+    "clean:win": "rimraf dist-electron",
     "clean:mac": "rimraf dist-electron/mac dist-electron/mac-arm64 dist-electron/*.dmg dist-electron/*.dmg.blockmap dist-electron/latest-mac.yml mac-arm64 mac-arm64* *.dmg *.dmg.blockmap",
     "clean:linux": "rimraf dist-electron/linux-unpacked dist-electron/*.AppImage dist-electron/*.AppImage.blockmap dist-electron/*.deb dist-electron/latest-linux.yml",
     "clean:all": "npm run clean && rimraf frontend/dist backend/dist",
