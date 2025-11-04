@@ -7,6 +7,17 @@
       <mat-icon>movie</mat-icon>
       {{ data.analysis.title }}
     </h2>
+
+    <!-- Transcript Search -->
+    <div class="header-transcript-search" *ngIf="!error">
+      <app-transcript-search
+        [transcriptText]="transcriptText"
+        [transcriptExists]="transcriptExists"
+        (seekToTime)="onTranscriptSeek($event)"
+        (runAnalysis)="onRunTranscriptAnalysis()">
+      </app-transcript-search>
+    </div>
+
     <button mat-icon-button (click)="close()" class="close-button" matTooltip="Close">
       <mat-icon>close</mat-icon>
     </button>

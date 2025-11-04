@@ -22,7 +22,7 @@
 .dialog-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   padding: 16px 24px;
   border-bottom: 1px solid #333;
   background-color: #000;
@@ -46,7 +46,6 @@
     margin: 0;
     font-size: 18px;
     font-weight: 500;
-    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -58,6 +57,13 @@
       height: 24px;
       color: #ff6600;
     }
+  }
+
+  .header-transcript-search {
+    flex: 1;
+    display: flex;
+    justify-content: flex-end;
+    padding-right: 8px;
   }
 
   .close-button {

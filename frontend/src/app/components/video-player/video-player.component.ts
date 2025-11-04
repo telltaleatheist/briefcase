@@ -9,6 +9,7 @@ import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
+import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
 
@@ -24,6 +25,7 @@ import Player from 'video.js/dist/types/player';
     MatTooltipModule,
     MatSnackBarModule,
     VideoTimelineComponent,
+    TranscriptSearchComponent,
   ],
   templateUrl: './video-player.component.html',
   styleUrls: ['./video-player.component.scss']
@@ -43,6 +45,10 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   timelineSections: TimelineSection[] = [];
   currentSelection: TimelineSelection = { startTime: 0, endTime: 0 };
   activeSectionIndex: number | null = null;
+
+  // Transcript state
+  transcriptText: string | null = null;
+  transcriptExists = false;
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: { analysis: LibraryAnalysis },
@@ -66,6 +72,17 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
           description: section.description,
           color: '#ff6600' // Use orange for all sections in dark mode
         }));
+      }
+
+      // Load transcript
+      try {
+        const transcriptResult = await this.libraryService.getAnalysisTranscript(this.data.analysis.id);
+        this.transcriptExists = transcriptResult.exists;
+        this.transcriptText = transcriptResult.text;
+      } catch (error) {
+        console.error('Failed to load transcript:', error);
+        this.transcriptExists = false;
+        this.transcriptText = null;
       }
     } catch (error) {
       console.error('Failed to load metadata:', error);
@@ -397,5 +414,20 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     }, 0);
 
     return colors[Math.abs(hash) % colors.length];
+  }
+
+  /**
+   * Handle transcript search seek event
+   */
+  onTranscriptSeek(timestamp: number) {
+    this.seekToTime(timestamp);
+  }
+
+  /**
+   * Handle run analysis request from transcript search
+   */
+  onRunTranscriptAnalysis() {
+    this.notificationService.toastOnly('info', 'Run Analysis', 'Transcription feature coming soon!');
+    // TODO: Implement transcription-only analysis trigger
   }
 }

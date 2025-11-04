@@ -1,0 +1,66 @@
+<div class="transcript-search-container">
+  <div class="search-input-wrapper">
+    <mat-form-field appearance="outline" class="search-field" [class.disabled]="!transcriptExists">
+      <mat-label>Search transcript</mat-label>
+      <input
+        matInput
+        [(ngModel)]="searchQuery"
+        (ngModelChange)="onSearchInput()"
+        [disabled]="!transcriptExists"
+        placeholder="Search for words or phrases..."
+        autocomplete="off">
+      <button
+        mat-icon-button
+        matSuffix
+        *ngIf="searchQuery"
+        (click)="clearSearch()"
+        [disabled]="!transcriptExists">
+        <mat-icon>close</mat-icon>
+      </button>
+      <mat-icon matPrefix>search</mat-icon>
+    </mat-form-field>
+
+    <!-- Run Analysis Button (shown when transcript doesn't exist) -->
+    <button
+      *ngIf="!transcriptExists"
+      mat-raised-button
+      color="primary"
+      class="run-analysis-btn"
+      (click)="onRunAnalysis()">
+      <mat-icon>transcribe</mat-icon>
+      Run Transcription
+    </button>
+  </div>
+
+  <!-- Loading Spinner -->
+  <div *ngIf="isSearching" class="search-loading">
+    <mat-spinner diameter="20"></mat-spinner>
+  </div>
+
+  <!-- Search Results Dropdown -->
+  <div *ngIf="showResults && matches.length > 0" class="search-results">
+    <div class="results-header">
+      <span class="results-count">{{ matches.length }} result{{ matches.length !== 1 ? 's' : '' }}</span>
+    </div>
+    <div class="results-list">
+      <div
+        *ngFor="let match of matches"
+        class="result-item"
+        [class.selected]="selectedMatchIndex === match.index"
+        (click)="onMatchClick(match)">
+        <div class="result-timestamp" *ngIf="match.timestamp !== undefined">
+          {{ formatTime(match.timestamp) }}
+        </div>
+        <div class="result-context">
+          {{ match.context }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- No Results Message -->
+  <div *ngIf="showResults && matches.length === 0 && searchQuery" class="no-results">
+    <mat-icon>search_off</mat-icon>
+    <span>No matches found for "{{ searchQuery }}"</span>
+  </div>
+</div>

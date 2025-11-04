@@ -310,7 +310,7 @@ export class AnalysisService {
       // Phase 5: Finalize (95-100%)
       this.updateJob(jobId, {
         progress: 98,
-        currentPhase: 'Finalizing analysis...',
+        currentPhase: mode === 'transcribe-only' ? 'Finalizing transcription...' : 'Finalizing analysis...',
       });
 
       // Calculate total duration and timing information
@@ -329,75 +329,85 @@ export class AnalysisService {
         ? (timing.analysisEnd.getTime() - timing.analysisStart.getTime()) / 1000
         : 0;
 
-      // Append timing footer to the analysis report
-      try {
-        const timingFooter = this.generateTimingFooter(
-          transcriptionDuration,
-          analysisDuration,
-          totalDuration,
-          request.whisperModel || 'base',
-          request.aiModel
-        );
-        await fs.appendFile(analysisOutputPath, timingFooter, 'utf-8');
-      } catch (error) {
-        this.logger.warn(`Failed to append timing footer: ${error}`);
+      // Append timing footer to the analysis report (only for full analysis)
+      if (mode === 'full' && analysisOutputPath) {
+        try {
+          const timingFooter = this.generateTimingFooter(
+            transcriptionDuration,
+            analysisDuration,
+            totalDuration,
+            request.whisperModel || 'base',
+            request.aiModel
+          );
+          await fs.appendFile(analysisOutputPath, timingFooter, 'utf-8');
+        } catch (error) {
+          this.logger.warn(`Failed to append timing footer: ${error}`);
+        }
       }
 
       // Clean up temporary audio file
       await fs.unlink(audioPath).catch(() => {});
 
       // Complete
+      const completionMessage = mode === 'transcribe-only'
+        ? 'Transcription complete!'
+        : `Analysis complete! Found ${analysisResult?.sections_count || 0} interesting sections.`;
+
       this.updateJob(jobId, {
         status: 'completed',
         progress: 100,
-        currentPhase: `Analysis complete! Found ${analysisResult.sections_count} interesting sections.`,
+        currentPhase: completionMessage,
         completedAt: new Date(),
         timing: { ...timing, totalDuration },
       });
 
-      // Add to library
-      try {
-        const analysis = await this.libraryService.createAnalysis({
-          title: videoTitle,
-          videoPath: videoPath,
-          transcriptSrtPath: transcriptPath,
-          transcriptTxtPath: txtTranscriptPath,
-          analysisReportPath: analysisOutputPath,
-          analysisModel: request.aiModel,
-          transcriptionModel: request.whisperModel || 'base',
-        });
-        this.logger.log(`Added analysis to library for job ${jobId}`);
-
-        // Parse analysis report and generate metadata JSON
+      // Add to library (only if full analysis or if we have transcript)
+      if (mode === 'full' && analysisOutputPath) {
         try {
-          const { parseAnalysisReport, extractCategories, saveAnalysisMetadata } =
-            await import('../library/parsers/analysis-parser');
+          const analysis = await this.libraryService.createAnalysis({
+            title: videoTitle,
+            videoPath: videoPath,
+            transcriptSrtPath: transcriptPath,
+            transcriptTxtPath: txtTranscriptPath,
+            analysisReportPath: analysisOutputPath,
+            analysisModel: request.aiModel,
+            transcriptionModel: request.whisperModel || 'base',
+          });
+          this.logger.log(`Added analysis to library for job ${jobId}`);
 
-          const parsedMetadata = await parseAnalysisReport(
-            analysis.files.analysis,
-            analysis.id,
-            analysis.title,
-            analysis.createdAt
-          );
+          // Parse analysis report and generate metadata JSON
+          try {
+            const { parseAnalysisReport, extractCategories, saveAnalysisMetadata } =
+              await import('../library/parsers/analysis-parser');
 
-          // Save parsed metadata to JSON file
-          await saveAnalysisMetadata(analysis.files.analysisMetadata, parsedMetadata);
+            const parsedMetadata = await parseAnalysisReport(
+              analysis.files.analysis,
+              analysis.id,
+              analysis.title,
+              analysis.createdAt
+            );
 
-          // Extract and update categories
-          const categories = extractCategories(parsedMetadata);
-          if (categories.length > 0) {
-            analysis.metadata.categories = categories;
-            await this.libraryService.updateAnalysis(analysis.id, {});
+            // Save parsed metadata to JSON file
+            await saveAnalysisMetadata(analysis.files.analysisMetadata, parsedMetadata);
+
+            // Extract and update categories
+            const categories = extractCategories(parsedMetadata);
+            if (categories.length > 0) {
+              analysis.metadata.categories = categories;
+              await this.libraryService.updateAnalysis(analysis.id, {});
+            }
+
+            this.logger.log(`Generated metadata JSON for analysis ${analysis.id}`);
+          } catch (parseError) {
+            this.logger.warn(`Failed to generate metadata JSON: ${(parseError as Error).message}`);
+            // Don't fail the job if metadata generation fails
           }
-
-          this.logger.log(`Generated metadata JSON for analysis ${analysis.id}`);
-        } catch (parseError) {
-          this.logger.warn(`Failed to generate metadata JSON: ${(parseError as Error).message}`);
-          // Don't fail the job if metadata generation fails
+        } catch (error) {
+          this.logger.warn(`Failed to add analysis to library: ${(error as Error).message}`);
+          // Don't fail the job if library addition fails
         }
-      } catch (error) {
-        this.logger.warn(`Failed to add analysis to library: ${(error as Error).message}`);
-        // Don't fail the job if library addition fails
+      } else if (mode === 'transcribe-only') {
+        this.logger.log(`Transcription-only mode: Skipped library creation for job ${jobId}`);
       }
 
       this.logger.log(`Analysis job ${jobId} completed successfully`);
