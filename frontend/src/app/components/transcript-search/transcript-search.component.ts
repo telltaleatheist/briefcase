@@ -40,11 +40,9 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   searchQuery = '';
   matches: TranscriptMatch[] = [];
   isSearching = false;
-  showResults = false;
   selectedMatchIndex = -1;
 
   private searchSubject = new Subject<string>();
-  private clickListener?: (event: MouseEvent) => void;
 
   ngOnInit() {
     // Debounce search input
@@ -56,44 +54,19 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
       .subscribe(query => {
         this.performSearch(query);
       });
-
-    // Add click listener to close dropdown when clicking outside
-    this.clickListener = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      const searchContainer = target.closest('.transcript-search-container');
-
-      if (!searchContainer && this.showResults) {
-        this.showResults = false;
-      }
-    };
-
-    setTimeout(() => {
-      document.addEventListener('click', this.clickListener!);
-    }, 0);
   }
 
   ngOnDestroy() {
     this.searchSubject.complete();
-    if (this.clickListener) {
-      document.removeEventListener('click', this.clickListener);
-    }
   }
 
   onSearchInput() {
     this.searchSubject.next(this.searchQuery);
   }
 
-  onSearchFocus() {
-    // Show results when focusing if we have matches
-    if (this.matches.length > 0 && this.searchQuery) {
-      this.showResults = true;
-    }
-  }
-
   performSearch(query: string) {
     if (!query || !this.transcriptText) {
       this.matches = [];
-      this.showResults = false;
       return;
     }
 
@@ -121,8 +94,6 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
           });
         }
       });
-
-      this.showResults = this.matches.length > 0;
     } catch (error) {
       console.error('Search error:', error);
     } finally {
@@ -153,14 +124,12 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
     this.selectedMatchIndex = match.index;
     if (match.timestamp !== undefined) {
       this.seekToTime.emit(match.timestamp);
-      this.showResults = false;
     }
   }
 
   clearSearch() {
     this.searchQuery = '';
     this.matches = [];
-    this.showResults = false;
     this.selectedMatchIndex = -1;
   }
 

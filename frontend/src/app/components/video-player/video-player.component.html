@@ -39,46 +39,53 @@
       </video>
     </div>
 
-    <!-- Analysis Sections Sidebar -->
+    <!-- Analysis Sections Sidebar with Tabs -->
     <div class="sections-sidebar" *ngIf="metadata && !error">
-      <!-- Transcript Search Overlay -->
-      <div class="sidebar-transcript-search">
-        <app-transcript-search
-          [transcriptText]="transcriptText"
-          [transcriptExists]="transcriptExists"
-          (seekToTime)="onTranscriptSeek($event)"
-          (runAnalysis)="onRunTranscriptAnalysis()">
-        </app-transcript-search>
-      </div>
-
-      <h3>Analysis Sections</h3>
-      <p class="sections-hint">Click a section to jump to that timestamp</p>
-
-      <div class="sections-list">
-        <div
-          *ngFor="let section of metadata.sections; let i = index"
-          class="section-item"
-          [class.active]="isSectionActive(i)"
-          (click)="seekToTime(section.startSeconds, i)"
-          [matTooltip]="section.description">
-          <div class="section-marker" [style.background-color]="getCategoryColor(section.category)"></div>
-          <div class="section-content">
-            <div class="section-header">
-              <span class="section-time">{{ section.timeRange }}</span>
-              <span class="section-category" [style.color]="getCategoryColor(section.category)">
-                {{ section.category }}
-              </span>
-            </div>
-            <p class="section-description">{{ section.description }}</p>
-            <div class="section-quotes" *ngIf="section.quotes.length > 0">
-              <div *ngFor="let quote of section.quotes" class="quote-item">
-                <span class="quote-timestamp">{{ quote.timestamp }}</span>
-                <span class="quote-text">"{{ quote.text }}"</span>
+      <mat-tab-group class="sidebar-tabs" animationDuration="200ms">
+        <!-- AI Analysis Tab -->
+        <mat-tab label="AI Analysis">
+          <div class="tab-content">
+            <p class="sections-hint">Click a section to jump to that timestamp</p>
+            <div class="sections-list">
+              <div
+                *ngFor="let section of metadata.sections; let i = index"
+                class="section-item"
+                [class.active]="isSectionActive(i)"
+                (click)="seekToTime(section.startSeconds, i)"
+                [matTooltip]="section.description">
+                <div class="section-marker" [style.background-color]="getCategoryColor(section.category)"></div>
+                <div class="section-content">
+                  <div class="section-header">
+                    <span class="section-time">{{ section.timeRange }}</span>
+                    <span class="section-category" [style.color]="getCategoryColor(section.category)">
+                      {{ section.category }}
+                    </span>
+                  </div>
+                  <p class="section-description">{{ section.description }}</p>
+                  <div class="section-quotes" *ngIf="section.quotes.length > 0">
+                    <div *ngFor="let quote of section.quotes" class="quote-item">
+                      <span class="quote-timestamp">{{ quote.timestamp }}</span>
+                      <span class="quote-text">"{{ quote.text }}"</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        </mat-tab>
+
+        <!-- Transcript Search Tab -->
+        <mat-tab label="Search">
+          <div class="tab-content search-tab-content">
+            <app-transcript-search
+              [transcriptText]="transcriptText"
+              [transcriptExists]="transcriptExists"
+              (seekToTime)="onTranscriptSeek($event)"
+              (runAnalysis)="onRunTranscriptAnalysis()">
+            </app-transcript-search>
+          </div>
+        </mat-tab>
+      </mat-tab-group>
     </div>
   </div>
 
