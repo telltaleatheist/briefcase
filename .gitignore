@@ -4,6 +4,7 @@
 # Output build directories
 **/dist/
 **/dist-electron/
+dist-python/
 
 # Electron packaged app artifacts
 *.dmg

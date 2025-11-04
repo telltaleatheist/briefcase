@@ -7,13 +7,13 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatChipsModule } from '@angular/material/chips';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { HttpClient } from '@angular/common/http';
 import { Subscription } from 'rxjs';
 import { environment } from '../../../environment/environment';
 import { AudioNormalizeStateService, AudioFile } from '../../services/audio-normalize-state.service';
+import { NotificationService } from '../../services/notification.service';
 
 @Component({
   selector: 'app-audio-normalize',
@@ -29,7 +29,6 @@ import { AudioNormalizeStateService, AudioFile } from '../../services/audio-norm
     MatIconModule,
     MatProgressBarModule,
     MatChipsModule,
-    MatSnackBarModule,
     MatTooltipModule,
     MatDialogModule
   ]
@@ -37,7 +36,7 @@ import { AudioNormalizeStateService, AudioFile } from '../../services/audio-norm
 export class AudioNormalizeComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private http = inject(HttpClient);
-  private snackBar = inject(MatSnackBar);
+  private notificationService = inject(NotificationService);
   private dialog = inject(MatDialog);
   private stateService = inject(AudioNormalizeStateService);
 
@@ -89,7 +88,7 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
 
   async selectFiles(): Promise<void> {
     if (!this.isElectron) {
-      this.snackBar.open('File selection is only available in Electron', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('info', 'Electron Required', 'File selection is only available in Electron');
       return;
     }
 
@@ -119,16 +118,16 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
       });
 
       this.stateService.addFiles(newFiles);
-      this.snackBar.open(`Added ${result.filePaths.length} file(s)`, 'Dismiss', { duration: 2000 });
+      this.notificationService.toastOnly('success', 'Files Added', `Added ${result.filePaths.length} file(s)`);
     } catch (error) {
       console.error('Error selecting files:', error);
-      this.snackBar.open('Failed to select files', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Selection Failed', 'Failed to select files');
     }
   }
 
   async selectFolder(): Promise<void> {
     if (!this.isElectron) {
-      this.snackBar.open('Folder selection is only available in Electron', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('info', 'Electron Required', 'Folder selection is only available in Electron');
       return;
     }
 
@@ -172,14 +171,14 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
         });
 
         this.stateService.addFiles(newFiles);
-        this.snackBar.open(`Added ${newFiles.length} file(s) from folder`, 'Dismiss', { duration: 2000 });
+        this.notificationService.toastOnly('success', 'Files Added', `Added ${newFiles.length} file(s) from folder`);
       } else {
         console.log('Backend response:', response);
-        this.snackBar.open('No media files found in folder', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('info', 'No Files', 'No media files found in folder');
       }
     } catch (error) {
       console.error('Error selecting folder:', error);
-      this.snackBar.open('Failed to select folder', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Selection Failed', 'Failed to select folder');
     }
   }
 
@@ -193,12 +192,12 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
 
   async startNormalization(): Promise<void> {
     if (this.selectedFiles.length === 0) {
-      this.snackBar.open('Please select files first', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('warning', 'No Files', 'Please select files first');
       return;
     }
 
     if (this.normalizeForm.invalid) {
-      this.snackBar.open('Please enter a valid target volume', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('warning', 'Invalid Input', 'Please enter a valid target volume');
       return;
     }
 
@@ -260,10 +259,10 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
     const completed = this.selectedFiles.filter(f => f.status === 'completed').length;
     const failed = this.selectedFiles.filter(f => f.status === 'failed').length;
 
-    this.snackBar.open(
-      `Normalization complete: ${completed} succeeded, ${failed} failed`,
-      'Dismiss',
-      { duration: 5000 }
+    this.notificationService.toastOnly(
+      'info',
+      'Normalization Complete',
+      `${completed} succeeded, ${failed} failed`
     );
   }
 
@@ -300,7 +299,7 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
 
   async selectMedia(): Promise<void> {
     if (!this.isElectron) {
-      this.snackBar.open('File selection is only available in Electron', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('info', 'Electron Required', 'File selection is only available in Electron');
       return;
     }
 
@@ -357,13 +356,13 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
 
       if (newFiles.length > 0) {
         this.stateService.addFiles(newFiles);
-        this.snackBar.open(`Added ${newFiles.length} file(s)`, 'Dismiss', { duration: 2000 });
+        this.notificationService.toastOnly('success', 'Files Added', `Added ${newFiles.length} file(s)`);
       } else {
-        this.snackBar.open('No new files to add', 'Dismiss', { duration: 2000 });
+        this.notificationService.toastOnly('info', 'No New Files', 'No new files to add');
       }
     } catch (error) {
       console.error('Error selecting media:', error);
-      this.snackBar.open('Failed to select media', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Selection Failed', 'Failed to select media');
     }
   }
 

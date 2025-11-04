@@ -91,6 +91,23 @@
 .app-toolbar {
   flex-shrink: 0;
   z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.menu-button {
+  margin-left: -8px;
+
+  mat-icon {
+    font-size: 24px;
+    width: 24px;
+    height: 24px;
+  }
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .spacer {
@@ -144,7 +161,7 @@
     height: 56px;
     padding: 0 16px;
     color: var(--text-primary) !important;
-    transition: background-color 0.2s ease;
+    transition: all 0.2s ease;
 
     &:hover {
       background-color: var(--bg-card) !important;
@@ -160,6 +177,32 @@
 
       span {
         color: white !important;
+      }
+    }
+
+    &.clip-creator-nav {
+      border-left: 4px solid var(--primary-orange);
+      font-weight: 600;
+
+      .mat-icon {
+        color: var(--primary-orange) !important;
+      }
+
+      span {
+        font-weight: 600;
+      }
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.1) !important;
+      }
+
+      &.active-link {
+        background-color: var(--primary-orange) !important;
+        border-left-color: transparent;
+
+        .mat-icon {
+          color: white !important;
+        }
       }
     }
 

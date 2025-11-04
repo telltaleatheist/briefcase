@@ -2,7 +2,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ConfigService } from '../../services/config.service';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { NotificationService } from '../../services/notification.service';
 import { MatDialog } from '@angular/material/dialog';
 import { ExecutableConfigDialogComponent } from './executable-config-dialog.component';
 
@@ -17,7 +17,7 @@ export class ExecutableErrorHandlerComponent implements OnInit, OnDestroy {
 
   constructor(
     private configService: ConfigService,
-    private snackBar: MatSnackBar,
+    private notificationService: NotificationService,
     private dialog: MatDialog
   ) {}
 
@@ -41,18 +41,14 @@ export class ExecutableErrorHandlerComponent implements OnInit, OnDestroy {
   }
 
   private showConfigurationError(): void {
-    const snackBarRef = this.snackBar.open(
-      'Required executables (FFmpeg, FFprobe, yt-dlp) are not configured properly.',
-      'Configure Now',
-      {
-        duration: 10000,
-        panelClass: 'error-snackbar'
-      }
+    this.notificationService.toastOnly(
+      'error',
+      'Configuration Error',
+      'Required executables (FFmpeg, FFprobe, yt-dlp) are not configured properly.'
     );
 
-    snackBarRef.onAction().subscribe(() => {
-      this.openConfigDialog();
-    });
+    // Open config dialog automatically since we can't have action button with toastOnly
+    this.openConfigDialog();
   }
 
   private openConfigDialog(): void {
@@ -70,10 +66,11 @@ export class ExecutableErrorHandlerComponent implements OnInit, OnDestroy {
         // User chose to use Electron's native dialog
         this.configService.showPathConfigDialog().subscribe(success => {
           if (success) {
-            this.snackBar.open('Configuration saved successfully!', 'Close', {
-              duration: 3000,
-              panelClass: 'success-snackbar'
-            });
+            this.notificationService.toastOnly(
+              'success',
+              'Configuration Saved',
+              'Configuration saved successfully!'
+            );
           }
         });
       }

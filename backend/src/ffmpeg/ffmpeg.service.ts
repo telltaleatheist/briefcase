@@ -19,24 +19,53 @@ export class FfmpegService {
     private readonly configService: SharedConfigService
   ) {
     try {
-      // Prioritize config service paths, then environment variables, then installer paths
+      // Prioritize config service paths, then environment variables, then packaged binaries, then installer paths
       const configFfmpegPath = this.configService.getFfmpegPath();
       const configFfprobePath = this.configService.getFfprobePath();
 
-      const ffmpegExecutablePath = 
-        configFfmpegPath || 
-        process.env.FFMPEG_PATH || 
-        ffmpegPath.path;
+      let ffmpegExecutablePath = configFfmpegPath || process.env.FFMPEG_PATH;
+      let ffprobeExecutablePath = configFfprobePath || process.env.FFPROBE_PATH;
 
-      const ffprobeExecutablePath = 
-        configFfprobePath || 
-        process.env.FFPROBE_PATH || 
-        ffprobePath.path;
-      
+      // If not configured, try packaged binaries in production
+      const isPackaged = process.env.NODE_ENV === 'production' ||
+                         (process as any).resourcesPath !== undefined ||
+                         (process as any).defaultApp === false;
+
+      if (isPackaged && (!ffmpegExecutablePath || !ffprobeExecutablePath)) {
+        const resourcesPath = (process as any).resourcesPath || path.join(process.cwd(), 'resources');
+
+        if (!ffmpegExecutablePath) {
+          // Try to find packaged ffmpeg
+          const packagedFfmpegPath = path.join(resourcesPath, 'binaries', 'ffmpeg', 'ffmpeg',
+            process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+          if (fs.existsSync(packagedFfmpegPath)) {
+            ffmpegExecutablePath = packagedFfmpegPath;
+          }
+        }
+
+        if (!ffprobeExecutablePath) {
+          // Try to find packaged ffprobe
+          const packagedFfprobePath = path.join(resourcesPath, 'binaries', 'ffprobe', 'ffprobe',
+            process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+          if (fs.existsSync(packagedFfprobePath)) {
+            ffprobeExecutablePath = packagedFfprobePath;
+          }
+        }
+      }
+
+      // Fall back to installer paths if still not found
+      if (!ffmpegExecutablePath) {
+        ffmpegExecutablePath = ffmpegPath.path;
+      }
+
+      if (!ffprobeExecutablePath) {
+        ffprobeExecutablePath = ffprobePath.path;
+      }
+
       if (!ffmpegExecutablePath) {
         throw new Error('FFmpeg path not found. Please configure it in the application settings.');
       }
-      
+
       if (!ffprobeExecutablePath) {
         throw new Error('FFprobe path not found. Please configure it in the application settings.');
       }
@@ -44,15 +73,15 @@ export class FfmpegService {
       // Set paths for fluent-ffmpeg
       ffmpeg.setFfmpegPath(ffmpegExecutablePath);
       ffmpeg.setFfprobePath(ffprobeExecutablePath);
-      
+
       this.logger.log(`FFmpeg path: ${ffmpegExecutablePath}`);
       this.logger.log(`FFprobe path: ${ffprobeExecutablePath}`);
-      
+
       // Verify if the paths are valid by checking file existence
       if (!fs.existsSync(ffmpegExecutablePath)) {
         throw new Error(`FFmpeg executable not found at path: ${ffmpegExecutablePath}`);
       }
-      
+
       if (!fs.existsSync(ffprobeExecutablePath)) {
         throw new Error(`FFprobe executable not found at path: ${ffprobeExecutablePath}`);
       }

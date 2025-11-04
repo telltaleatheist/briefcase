@@ -17,7 +17,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatOptionModule } from '@angular/material/core';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { PathService } from '../../services/path.service';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { NotificationService } from '../../services/notification.service';
 
 @Component({
   selector: 'app-download-form',
@@ -54,7 +54,7 @@ export class DownloadFormComponent implements OnInit {
     private fb: FormBuilder,
     private apiService: ApiService,
     private pathService: PathService,
-    private snackBar: MatSnackBar
+    private notificationService: NotificationService
   ) {}
 
   ngOnInit(): void {
@@ -138,11 +138,11 @@ export class DownloadFormComponent implements OnInit {
         },
         error: (error) => {
           console.error('Error picking directory:', error);
-          this.snackBar.open('Error selecting directory', 'Dismiss', { duration: 3000 });
+          this.notificationService.toastOnly('error', 'Selection Error', 'Error selecting directory');
         }
       });
     } else {
-      this.snackBar.open('Directory selection is not available in the web version', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('info', 'Not Available', 'Directory selection is not available in the web version');
     }
   }
 }

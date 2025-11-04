@@ -1,22 +1,43 @@
 // Import Video.js styles
 @import 'video.js/dist/video-js.css';
 
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
 .video-player-dialog {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100vw;
-  max-height: none;
-  max-width: none;
+  height: 100%;
+  width: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .dialog-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   padding: 16px 24px;
   border-bottom: 1px solid #333;
   background-color: #000;
+
+  .back-button {
+    margin-left: -8px;
+
+    mat-icon {
+      color: #999;
+    }
+
+    &:hover mat-icon {
+      color: #fff;
+    }
+  }
 
   h2 {
     display: flex;
@@ -40,12 +61,25 @@
   }
 
   .close-button {
+    margin-right: -8px;
+
     mat-icon {
       color: #999;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
     }
 
-    &:hover mat-icon {
-      color: #fff;
+    &:hover {
+      background-color: rgba(255, 0, 0, 0.1);
+
+      mat-icon {
+        color: #ff4444;
+      }
+    }
+
+    &:active {
+      background-color: rgba(255, 0, 0, 0.2);
     }
   }
 }

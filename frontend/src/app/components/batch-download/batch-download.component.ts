@@ -14,7 +14,6 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatListModule } from '@angular/material/list';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
 import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
@@ -99,7 +98,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     private socketService: SocketService,
     private settingsService: SettingsService,
     private batchStateService: BatchStateService,
-    private snackBar: MatSnackBar,
     private notificationService: NotificationService,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
@@ -1127,7 +1125,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    */
   removePendingJob(jobId: string): void {
     this.batchStateService.removePendingJob(jobId);
-    this.snackBar.open('Removed from pending queue', 'Dismiss', { duration: 2000 });
+    this.notificationService.toastOnly('success', 'Job Removed', 'Removed from pending queue');
   }
 
   /**
@@ -1152,15 +1150,15 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
               // Remove from order tracking
               this.originalJobOrder = this.originalJobOrder.filter(id => id !== job.id);
               this.cdr.detectChanges();
-              this.snackBar.open('Removed from queue', 'Dismiss', { duration: 2000 });
+              this.notificationService.toastOnly('success', 'Job Removed', 'Removed from queue');
             }
           } else {
-            this.snackBar.open('Failed to remove job', 'Dismiss', { duration: 2000 });
+            this.notificationService.toastOnly('error', 'Remove Failed', 'Failed to remove job');
           }
         },
         error: (error) => {
           console.error('Error removing job:', error);
-          this.snackBar.open('Error removing job', 'Dismiss', { duration: 2000 });
+          this.notificationService.toastOnly('error', 'Error Occurred', 'Error removing job');
         }
       });
     } else {
@@ -1192,10 +1190,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    */
   copyUrl(url: string): void {
     navigator.clipboard.writeText(url).then(() => {
-      this.snackBar.open('URL copied to clipboard', 'Dismiss', { duration: 2000 });
+      this.notificationService.toastOnly('success', 'URL Copied', 'URL copied to clipboard');
     }).catch(err => {
       console.error('Failed to copy URL:', err);
-      this.snackBar.open('Failed to copy URL', 'Dismiss', { duration: 2000 });
+      this.notificationService.toastOnly('error', 'Copy Failed', 'Failed to copy URL');
     });
   }
 
@@ -1385,7 +1383,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
   onSubmit(): void {
     if (this.batchForm.invalid) {
-      this.snackBar.open('Please fill in all required fields correctly', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('warning', 'Form Invalid', 'Please fill in all required fields correctly');
       return;
     }
     
@@ -1398,7 +1396,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     const validUrls = urlValues.filter(url => url && url.trim().length > 0);
     
     if (validUrls.length === 0) {
-      this.snackBar.open('Please add at least one valid URL', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('warning', 'No URLs', 'Please add at least one valid URL');
       return;
     }
     
@@ -1558,7 +1556,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     this.batchApiService.updateBatchConfig(config).subscribe({
       next: () => {
-        this.snackBar.open('Batch configuration updated', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Config Updated', 'Batch configuration updated');
         
         // Get current settings and update just the batch fields
         this.settingsService.getSettings().subscribe(currentSettings => {
@@ -1574,7 +1572,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         this.refreshBatchStatus();
       },
       error: (error) => {
-        this.snackBar.open('Failed to update batch configuration', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('error', 'Update Failed', 'Failed to update batch configuration');
         console.error('Error updating batch config:', error);
       }
     });
@@ -1583,11 +1581,11 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   cancelJob(jobId: string): void {
     this.batchApiService.cancelJob(jobId).subscribe({
       next: () => {
-        this.snackBar.open('Job cancelled', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Job Cancelled', 'Job cancelled');
         setTimeout(() => this.refreshBatchStatus(), 300);
       },
       error: (error) => {
-        this.snackBar.open('Failed to cancel job', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('error', 'Cancel Failed', 'Failed to cancel job');
         console.error('Error cancelling job:', error);
       }
     });
@@ -1596,11 +1594,11 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   retryJob(jobId: string): void {
     this.batchApiService.retryJob(jobId).subscribe({
       next: () => {
-        this.snackBar.open('Job retried', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Job Retried', 'Job retried');
         setTimeout(() => this.refreshBatchStatus(), 300);
       },
       error: (error) => {
-        this.snackBar.open('Failed to retry job', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('error', 'Retry Failed', 'Failed to retry job');
         console.error('Error retrying job:', error);
       }
     });
@@ -1609,11 +1607,11 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   skipJob(jobId: string): void {
     this.batchApiService.skipJob(jobId).subscribe({
       next: () => {
-        this.snackBar.open('Processing skipped - original download kept', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Job Skipped', 'Processing skipped - original download kept');
         setTimeout(() => this.refreshBatchStatus(), 300);
       },
       error: (error) => {
-        this.snackBar.open('Failed to skip job', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('error', 'Skip Failed', 'Failed to skip job');
         console.error('Error skipping job:', error);
       }
     });
@@ -1623,7 +1621,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     // Clear everything immediately - no confirmation needed
     this.batchApiService.clearBatchQueues().subscribe({
       next: () => {
-        this.snackBar.open('All videos cleared and operations cancelled', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Queue Cleared', 'All videos cleared and operations cancelled');
 
         // Clear local state immediately before server responds
         if (this.batchQueueStatus) {
@@ -1656,7 +1654,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         setTimeout(() => this.refreshBatchStatus(), 300);
       },
       error: (error) => {
-        this.snackBar.open('Failed to clear batch queue', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('error', 'Clear Failed', 'Failed to clear batch queue');
         console.error('Error clearing batch queue:', error);
       }
     });
@@ -1736,9 +1734,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         }        
         
         // Show error notification to user
-        this.snackBar.open('Failed to refresh batch status. Will try again later.', 'Dismiss', { 
-          duration: 3000 
-        });
+        this.notificationService.toastOnly('error', 'Refresh Failed', 'Failed to refresh batch status. Will try again later.');
         
         this.cdr.detectChanges();
       }

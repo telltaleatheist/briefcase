@@ -61,18 +61,41 @@ def transcribe_audio(audio_path: str, model: str = "base", language: str = "en")
     """
     Transcribe audio using Whisper
     Uses the fastest settings for speed over quality
+    Default model is 'base' - good balance of speed and accuracy
     """
     try:
         import whisper
+        import os
 
         send_progress("transcription", 30, f"Loading Whisper model ({model})...")
 
+        # Set cache directory to use bundled model if available
+        # In production, models are bundled in python/cache/whisper/
+        python_dir = os.path.dirname(sys.executable)
+        bundled_cache = os.path.join(python_dir, 'cache', 'whisper')
+
+        print(f"[DEBUG] Python executable: {sys.executable}", file=sys.stderr)
+        print(f"[DEBUG] Checking for bundled cache: {bundled_cache}", file=sys.stderr)
+
         # Load model with speed optimizations
-        whisper_model = whisper.load_model(
-            model,
-            device="cpu",  # Force CPU for compatibility
-            in_memory=True
-        )
+        if os.path.exists(bundled_cache):
+            # Use bundled model
+            print(f"[DEBUG] Using bundled Whisper models from {bundled_cache}", file=sys.stderr)
+            os.environ['XDG_CACHE_HOME'] = os.path.join(python_dir, 'cache')
+            whisper_model = whisper.load_model(
+                model,
+                device="cpu",  # Force CPU for compatibility
+                in_memory=True,
+                download_root=bundled_cache
+            )
+        else:
+            # Download to user cache if needed
+            print(f"[DEBUG] Bundled cache not found, will download to user cache", file=sys.stderr)
+            whisper_model = whisper.load_model(
+                model,
+                device="cpu",  # Force CPU for compatibility
+                in_memory=True
+            )
 
         send_progress("transcription", 40, "Transcribing audio (this may take a few minutes)...")
 
@@ -346,6 +369,31 @@ def analyze_with_ai(
 
         send_progress("analysis", 90, f"Analysis complete. Found {len(analyzed_sections)} interesting sections.")
 
+        # Final safety check: if we have NO sections at all, add a warning note
+        if len(analyzed_sections) == 0:
+            print(f"[WARNING] Analysis produced zero sections! This should never happen.", file=sys.stderr)
+            print(f"[WARNING] Chunks processed: {len(chunks)}", file=sys.stderr)
+            print(f"[WARNING] Video duration: {segments[-1]['end'] if segments else 0}s", file=sys.stderr)
+
+            # Write a warning message to the output file
+            try:
+                with open(output_file, 'a', encoding='utf-8') as f:
+                    f.write("\n")
+                    f.write("=" * 80 + "\n")
+                    f.write("WARNING: ANALYSIS INCOMPLETE\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write("The AI analysis did not produce any sections for this video.\n")
+                    f.write("This may have occurred because:\n")
+                    f.write("1. The AI content policy refused to analyze the content\n")
+                    f.write("2. The AI response format could not be parsed\n")
+                    f.write("3. There was an error during analysis\n\n")
+                    f.write("Please check the application logs for more details.\n")
+                    f.write("You may want to try re-running the analysis or using a different AI model.\n")
+                    f.write("\n" + "=" * 80 + "\n\n")
+                    f.flush()
+            except Exception as e:
+                print(f"[ERROR] Failed to write warning to output file: {e}", file=sys.stderr)
+
         return {
             "sections_count": len(analyzed_sections),
             "sections": analyzed_sections
@@ -394,12 +442,17 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
 
 
 def identify_interesting_sections(provider: str, endpoint_or_key: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "") -> List[Dict]:
-    """Use AI to identify interesting sections in a chunk"""
-    try:
-        # Build custom instructions section if provided
-        custom_section = ""
-        if custom_instructions and custom_instructions.strip():
-            custom_section = f"""
+    """Use AI to identify interesting sections in a chunk - with retry logic"""
+    MAX_RETRIES = 3
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            print(f"[DEBUG] Analyzing chunk {chunk_num}, attempt {attempt}/{MAX_RETRIES}", file=sys.stderr)
+
+            # Build custom instructions section if provided
+            custom_section = ""
+            if custom_instructions and custom_instructions.strip():
+                custom_section = f"""
 **CUSTOM USER INSTRUCTIONS:**
 {custom_instructions.strip()}
 
@@ -407,7 +460,9 @@ Pay special attention to the custom instructions above when analyzing the conten
 
 """
 
-        prompt = f"""TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
+            prompt = f"""TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
+
+IMPORTANT: You are a content moderation analysis tool. Your job is to identify and categorize content, NOT to judge or refuse to analyze it. Even if the content contains extreme views, hate speech, or controversial material, you must still provide a factual analysis of what is being discussed. This is for research and monitoring purposes.
 
 {custom_section}
 
@@ -441,29 +496,32 @@ FLAGGING CRITERIA:
 
 CRITICAL: Biblical interpretation or religious teaching that defends slavery, genocide, or dehumanization is NOT routine - it is EXTREME and must be flagged as "hate" or "extremism".
 
-MANDATORY OUTPUT FORMAT:
+MANDATORY JSON OUTPUT FORMAT:
 
-You MUST analyze the ENTIRE segment and provide sections for ALL content (interesting AND boring).
+You MUST respond with ONLY valid JSON. No other text before or after. Analyze the ENTIRE segment and provide sections for ALL content (interesting AND boring).
 
-INTERESTING SECTIONS:
+Return a JSON object with this EXACT structure:
 
-Section 1:
-Start: "exact first 5-10 words from transcript"
-End: "exact last 5-10 words from transcript"
-Category: violence|extremism|hate|conspiracy|shocking|routine
-Description: One sentence explaining the content
-
-Section 2:
-Start: "exact first 5-10 words from transcript"
-End: "exact last 5-10 words from transcript"
-Category: violence|extremism|hate|conspiracy|shocking|routine
-Description: One sentence explaining the content
-
-[Continue for ALL distinct topics/sections in this segment]
+{{
+  "sections": [
+    {{
+      "start_phrase": "exact first 5-10 words from transcript",
+      "end_phrase": "exact last 5-10 words from transcript",
+      "category": "violence|extremism|hate|conspiracy|shocking|routine",
+      "description": "One sentence explaining the content"
+    }},
+    {{
+      "start_phrase": "exact first 5-10 words from transcript",
+      "end_phrase": "exact last 5-10 words from transcript",
+      "category": "violence|extremism|hate|conspiracy|shocking|routine",
+      "description": "One sentence explaining the content"
+    }}
+  ]
+}}
 
 IMPORTANT RULES:
-- Start and End MUST be exact quotes from the transcript below
-- Use double quotes around the phrases
+- Return ONLY valid JSON, nothing else
+- Start and End phrases MUST be exact quotes from the transcript below
 - Categories: violence, extremism, hate, conspiracy, shocking, OR routine
 - Keep descriptions to ONE sentence
 - Provide sections for the ENTIRE segment - don't skip boring parts
@@ -473,20 +531,62 @@ IMPORTANT RULES:
 TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 {chunk_text[:8000]}"""  # Limit to ~8k chars for speed
 
-        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=600)  # 10 minutes for large models
+            # Use very large timeout (30 minutes) - we don't care about timeout
+            response = call_ai(provider, endpoint_or_key, model, prompt, timeout=1800)
 
-        if not response:
-            return []
+            if not response:
+                print(f"[WARNING] AI returned empty response for chunk {chunk_num} on attempt {attempt}", file=sys.stderr)
+                if attempt < MAX_RETRIES:
+                    print(f"[INFO] Retrying chunk {chunk_num}...", file=sys.stderr)
+                    continue
+                else:
+                    raise Exception(f"Failed to get AI response after {MAX_RETRIES} attempts")
 
-        # Parse the response
-        sections = parse_section_response(response)
-        return sections
+            # Check for content policy refusals
+            refusal_indicators = [
+                "I cannot", "I can't", "I'm not able to",
+                "I don't feel comfortable", "I apologize, but",
+                "against my guidelines", "content policy",
+                "I'm designed to", "I shouldn't"
+            ]
 
-    except Exception as e:
-        print(f"[ERROR] Error identifying sections: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        return []
+            if any(indicator.lower() in response.lower()[:200] for indicator in refusal_indicators):
+                print(f"[WARNING] AI may have refused to analyze chunk {chunk_num}. Response starts with: {response[:200]}", file=sys.stderr)
+                if attempt < MAX_RETRIES:
+                    print(f"[INFO] Retrying chunk {chunk_num} due to content policy refusal...", file=sys.stderr)
+                    continue
+                else:
+                    raise Exception(f"AI refused to analyze chunk {chunk_num} after {MAX_RETRIES} attempts")
+
+            # Parse the response
+            sections = parse_section_response(response)
+
+            # If parsing succeeded and we got sections, return them
+            if sections:
+                print(f"[SUCCESS] Chunk {chunk_num} analyzed successfully on attempt {attempt}", file=sys.stderr)
+                return sections
+
+            # If parsing failed, retry
+            print(f"[WARNING] Failed to parse any sections from AI response for chunk {chunk_num} on attempt {attempt}", file=sys.stderr)
+            if attempt < MAX_RETRIES:
+                print(f"[INFO] Retrying chunk {chunk_num}...", file=sys.stderr)
+                continue
+            else:
+                raise Exception(f"Failed to parse sections from AI response after {MAX_RETRIES} attempts")
+
+        except Exception as e:
+            if attempt < MAX_RETRIES:
+                print(f"[ERROR] Error on attempt {attempt} for chunk {chunk_num}: {e}", file=sys.stderr)
+                print(f"[INFO] Retrying chunk {chunk_num}...", file=sys.stderr)
+                continue
+            else:
+                print(f"[ERROR] Failed to analyze chunk {chunk_num} after {MAX_RETRIES} attempts: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                raise Exception(f"FATAL: Chunk {chunk_num} failed after {MAX_RETRIES} attempts. Analysis cannot continue.")
+
+    # Should never reach here
+    raise Exception(f"FATAL: Chunk {chunk_num} failed unexpectedly")
 
 
 def analyze_section_detail(provider: str, endpoint_or_key: str, model: str, section: Dict, all_segments: List[Dict]) -> Optional[Dict]:
@@ -553,22 +653,38 @@ Extract 2-4 key quotes that capture the MOST extreme parts. For each quote:
 2. Quote the exact words spoken (the inflammatory part)
 3. Explain why it's extreme/concerning (1-2 sentences)
 
-Format your response EXACTLY like this:
+MANDATORY JSON OUTPUT FORMAT:
 
-Key quotes:
+You MUST respond with ONLY valid JSON. No other text before or after.
 
-1. Timestamp: [MM:SS]
-   Quote: "exact inflammatory words from transcript"
-   Significance: Why this is extreme/concerning
+Return a JSON object with this EXACT structure:
 
-2. Timestamp: [MM:SS]
-   Quote: "exact inflammatory words from transcript"
-   Significance: Why this is extreme/concerning
+{{
+  "quotes": [
+    {{
+      "timestamp": "MM:SS",
+      "text": "exact inflammatory words from transcript",
+      "significance": "Why this is extreme/concerning (1-2 sentences)"
+    }},
+    {{
+      "timestamp": "MM:SS",
+      "text": "exact inflammatory words from transcript",
+      "significance": "Why this is extreme/concerning (1-2 sentences)"
+    }}
+  ]
+}}
+
+IMPORTANT RULES:
+- Return ONLY valid JSON, nothing else
+- Timestamp must be in MM:SS or HH:MM:SS format
+- Quote must be exact words from the transcript
+- Significance should be 1-2 sentences explaining why it's extreme
 
 TIMESTAMPED TRANSCRIPT:
 {timestamped_text[:6000]}"""
 
-        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=600)  # 10 minutes for detailed analysis
+        # Use very large timeout (30 minutes) - we don't care about timeout
+        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=1800)
 
         if not response:
             print(f"[DEBUG] No response from AI for detailed analysis", file=sys.stderr)
@@ -721,8 +837,15 @@ def call_openai(api_key: str, model: str, prompt: str, timeout: int = 60) -> Opt
         elapsed = time.time() - start_time
         response_text = response.choices[0].message.content or ''
 
+        # Extract token usage
+        input_tokens = response.usage.prompt_tokens if response.usage else 0
+        output_tokens = response.usage.completion_tokens if response.usage else 0
+        total_tokens = input_tokens + output_tokens
+
         print(f"[DEBUG] OpenAI responded successfully in {elapsed:.1f}s", file=sys.stderr)
         print(f"[DEBUG] Response length: {len(response_text)} chars", file=sys.stderr)
+        print(f"[TOKEN_USAGE] OpenAI: {input_tokens} input + {output_tokens} output = {total_tokens} total", file=sys.stderr)
+
         return response_text
 
     except Exception as e:
@@ -765,8 +888,15 @@ def call_claude(api_key: str, model: str, prompt: str, timeout: int = 60) -> Opt
             if hasattr(block, 'text'):
                 response_text += block.text
 
+        # Extract token usage
+        input_tokens = response.usage.input_tokens if hasattr(response, 'usage') else 0
+        output_tokens = response.usage.output_tokens if hasattr(response, 'usage') else 0
+        total_tokens = input_tokens + output_tokens
+
         print(f"[DEBUG] Claude responded successfully in {elapsed:.1f}s", file=sys.stderr)
         print(f"[DEBUG] Response length: {len(response_text)} chars", file=sys.stderr)
+        print(f"[TOKEN_USAGE] Claude: {input_tokens} input + {output_tokens} output = {total_tokens} total", file=sys.stderr)
+
         return response_text
 
     except Exception as e:
@@ -825,7 +955,7 @@ def call_ollama(endpoint: str, model: str, prompt: str, timeout: int = 60) -> Op
 
 
 def parse_section_response(response: str) -> List[Dict]:
-    """Parse AI response to extract interesting sections"""
+    """Parse AI response to extract interesting sections - supports both JSON and legacy text format"""
     sections = []
 
     try:
@@ -835,20 +965,68 @@ def parse_section_response(response: str) -> List[Dict]:
         print(f"[DEBUG] First 500 chars: {response[:500]}", file=sys.stderr)
         print(f"[DEBUG] Last 500 chars: {response[-500:]}", file=sys.stderr)
 
-        # Find the INTERESTING SECTIONS block (be more flexible)
-        if "INTERESTING SECTIONS:" not in response and "Interesting Sections:" not in response:
-            print(f"[DEBUG] Could not find 'INTERESTING SECTIONS:' marker in response", file=sys.stderr)
+        # Try JSON parsing first (new format)
+        import json
+        import re
+
+        # Try to find JSON in the response (handle cases where AI adds extra text)
+        json_match = re.search(r'\{[\s\S]*"sections"[\s\S]*\}', response)
+        if json_match:
+            json_str = json_match.group(0)
+            print(f"[DEBUG] Found JSON structure in response", file=sys.stderr)
+
+            try:
+                data = json.loads(json_str)
+                if 'sections' in data and isinstance(data['sections'], list):
+                    sections = data['sections']
+                    print(f"[DEBUG] Successfully parsed {len(sections)} sections from JSON", file=sys.stderr)
+
+                    # Validate each section has required fields
+                    valid_sections = []
+                    for idx, section in enumerate(sections):
+                        if all(k in section for k in ['start_phrase', 'end_phrase', 'category', 'description']):
+                            valid_sections.append(section)
+                            print(f"[DEBUG] Section {idx+1} valid: {section['category']} - {section['description'][:50]}", file=sys.stderr)
+                        else:
+                            missing = [k for k in ['start_phrase', 'end_phrase', 'category', 'description'] if k not in section]
+                            print(f"[DEBUG] Section {idx+1} missing fields: {missing}", file=sys.stderr)
+
+                    return valid_sections
+            except json.JSONDecodeError as e:
+                print(f"[WARNING] JSON parsing failed: {e}", file=sys.stderr)
+                print(f"[WARNING] Falling back to legacy text parsing", file=sys.stderr)
+        else:
+            print(f"[DEBUG] No JSON structure found, trying legacy text parsing", file=sys.stderr)
+
+        # Legacy text-based parsing (fallback for old format)
+        has_section_header = any(marker in response for marker in [
+            "INTERESTING SECTIONS:", "Interesting Sections:", "interesting sections:",
+            "SECTIONS:", "Sections:", "sections:"
+        ])
+
+        if not has_section_header:
+            print(f"[DEBUG] Could not find section header in response", file=sys.stderr)
             # Try to extract anyway if we see Section patterns
-            if "Section " not in response:
-                print(f"[DEBUG] No 'Section' markers found either. Returning empty.", file=sys.stderr)
+            if "Section " not in response and "section " not in response:
+                print(f"[WARNING] No 'Section' markers found in AI response. Response may be malformed.", file=sys.stderr)
                 return []
             print(f"[DEBUG] Found 'Section' markers, attempting to parse anyway...", file=sys.stderr)
 
-        # Split by "Section N:" (case insensitive)
-        parts = response.split("Section ")[1:]  # Skip everything before first section
+        # Split by "Section N:" (case insensitive) - try both "Section " and "section "
+        parts = []
+        for pattern in ["Section ", "section "]:
+            if pattern in response:
+                parts = response.split(pattern)[1:]  # Skip everything before first section
+                break
+
+        if not parts:
+            print(f"[WARNING] Could not split response by section markers", file=sys.stderr)
+            return []
+
         print(f"[DEBUG] Found {len(parts)} potential sections", file=sys.stderr)
 
         for idx, part in enumerate(parts):
+            # Remove any BORING SECTIONS header if present
             if "BORING SECTIONS:" in part or "Boring Sections:" in part:
                 part = part.split("BORING SECTIONS:")[0].split("Boring Sections:")[0]
 
@@ -857,22 +1035,27 @@ def parse_section_response(response: str) -> List[Dict]:
 
             for line in lines:
                 line = line.strip()
-                if line.startswith("Start:"):
-                    section_data['start_phrase'] = line.replace("Start:", "").strip(' "')
-                elif line.startswith("End:"):
-                    section_data['end_phrase'] = line.replace("End:", "").strip(' "')
-                elif line.startswith("Category:"):
-                    section_data['category'] = line.replace("Category:", "").strip()
-                elif line.startswith("Description:"):
-                    section_data['description'] = line.replace("Description:", "").strip()
+                # Case-insensitive field detection
+                line_lower = line.lower()
+                if line_lower.startswith("start:"):
+                    section_data['start_phrase'] = line.split(":", 1)[1].strip(' "')
+                elif line_lower.startswith("end:"):
+                    section_data['end_phrase'] = line.split(":", 1)[1].strip(' "')
+                elif line_lower.startswith("category:"):
+                    section_data['category'] = line.split(":", 1)[1].strip()
+                elif line_lower.startswith("description:"):
+                    section_data['description'] = line.split(":", 1)[1].strip()
 
             if all(k in section_data for k in ['start_phrase', 'end_phrase', 'category', 'description']):
                 sections.append(section_data)
                 print(f"[DEBUG] Section {idx+1} parsed: {section_data['category']} - {section_data['description'][:50]}", file=sys.stderr)
             else:
-                print(f"[DEBUG] Section {idx+1} incomplete: {section_data}", file=sys.stderr)
+                print(f"[DEBUG] Section {idx+1} incomplete (missing fields): {section_data}", file=sys.stderr)
+                # Log which fields are missing for debugging
+                missing = [k for k in ['start_phrase', 'end_phrase', 'category', 'description'] if k not in section_data]
+                print(f"[DEBUG] Missing fields: {missing}", file=sys.stderr)
 
-        print(f"[DEBUG] Successfully parsed {len(sections)} sections", file=sys.stderr)
+        print(f"[DEBUG] Successfully parsed {len(sections)} sections from legacy format", file=sys.stderr)
 
     except Exception as e:
         print(f"[ERROR] Error parsing sections: {e}", file=sys.stderr)
@@ -883,7 +1066,7 @@ def parse_section_response(response: str) -> List[Dict]:
 
 
 def parse_quotes_response(response: str) -> List[Dict]:
-    """Parse AI response to extract quotes"""
+    """Parse AI response to extract quotes - supports both JSON and legacy text format"""
     quotes = []
 
     try:
@@ -892,7 +1075,40 @@ def parse_quotes_response(response: str) -> List[Dict]:
         print(f"[DEBUG] Response length: {len(response)} chars", file=sys.stderr)
         print(f"[DEBUG] First 800 chars: {response[:800]}", file=sys.stderr)
 
-        # More flexible marker detection
+        # Try JSON parsing first (new format)
+        import json
+        import re
+
+        # Try to find JSON in the response
+        json_match = re.search(r'\{[\s\S]*"quotes"[\s\S]*\}', response)
+        if json_match:
+            json_str = json_match.group(0)
+            print(f"[DEBUG] Found JSON structure in response", file=sys.stderr)
+
+            try:
+                data = json.loads(json_str)
+                if 'quotes' in data and isinstance(data['quotes'], list):
+                    quotes = data['quotes']
+                    print(f"[DEBUG] Successfully parsed {len(quotes)} quotes from JSON", file=sys.stderr)
+
+                    # Validate each quote has required fields
+                    valid_quotes = []
+                    for idx, quote in enumerate(quotes):
+                        if all(k in quote for k in ['timestamp', 'text', 'significance']):
+                            valid_quotes.append(quote)
+                            print(f"[DEBUG] Quote {idx+1} valid: {quote['timestamp']}", file=sys.stderr)
+                        else:
+                            missing = [k for k in ['timestamp', 'text', 'significance'] if k not in quote]
+                            print(f"[DEBUG] Quote {idx+1} missing fields: {missing}", file=sys.stderr)
+
+                    return valid_quotes
+            except json.JSONDecodeError as e:
+                print(f"[WARNING] JSON parsing failed: {e}", file=sys.stderr)
+                print(f"[WARNING] Falling back to legacy text parsing", file=sys.stderr)
+        else:
+            print(f"[DEBUG] No JSON structure found, trying legacy text parsing", file=sys.stderr)
+
+        # Legacy text-based parsing (fallback)
         if "Key quotes:" not in response and "Key Quotes:" not in response and "QUOTES:" not in response:
             print(f"[DEBUG] Could not find quotes marker in response", file=sys.stderr)
             # Try alternative formats

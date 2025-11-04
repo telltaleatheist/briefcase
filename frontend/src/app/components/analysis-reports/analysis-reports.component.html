@@ -56,10 +56,10 @@
                   </div>
                 </div>
                 <div class="report-actions">
-                  <button mat-icon-button (click)="archiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Archive">
+                  <button mat-icon-button class="archive-button" (click)="archiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Archive">
                     <mat-icon>archive</mat-icon>
                   </button>
-                  <button mat-icon-button (click)="deleteAnalysis(analysis); $event.stopPropagation()" matTooltip="Delete">
+                  <button mat-icon-button class="delete-button" (click)="deleteAnalysis(analysis); $event.stopPropagation()" matTooltip="Delete">
                     <mat-icon>delete</mat-icon>
                   </button>
                 </div>
@@ -103,10 +103,10 @@
                   </div>
                 </div>
                 <div class="report-actions">
-                  <button mat-icon-button (click)="unarchiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Unarchive">
+                  <button mat-icon-button class="unarchive-button" (click)="unarchiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Unarchive">
                     <mat-icon>unarchive</mat-icon>
                   </button>
-                  <button mat-icon-button (click)="deleteAnalysis(analysis); $event.stopPropagation()" matTooltip="Delete">
+                  <button mat-icon-button class="delete-button" (click)="deleteAnalysis(analysis); $event.stopPropagation()" matTooltip="Delete">
                     <mat-icon>delete</mat-icon>
                   </button>
                 </div>
@@ -132,9 +132,10 @@
           <button
             mat-raised-button
             color="primary"
+            class="clip-creator-button"
             (click)="manageClips(selectedAnalysis)">
-            <mat-icon>movie_edit</mat-icon>
-            Manage Clips
+            <mat-icon>content_cut</mat-icon>
+            CLIP CREATOR
           </button>
           <button
             mat-stroked-button

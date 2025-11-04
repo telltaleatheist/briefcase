@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { getPythonCommand } from '../shared/python-config';
+import { getPythonCommand, getPythonConfig } from '../shared/python-config';
 
 export interface PythonProgress {
   type: 'progress';
@@ -53,13 +53,37 @@ export class PythonBridgeService {
 
       // Use centralized Python configuration
       // This ensures we use the SAME Python everywhere in the app
-      const pythonPath = getPythonCommand();
-      this.logger.log(`Using Python: ${pythonPath}`);
+      const pythonConfig = getPythonConfig();
+      const pythonPath = pythonConfig.command;
 
-      // Spawn Python process
+      // CRITICAL: Verify we're using an absolute path in production
+      // This prevents accidentally using system Python from PATH
+      const isPackaged = process.env.NODE_ENV === 'production' ||
+                         (process as any).resourcesPath !== undefined ||
+                         (process as any).defaultApp === false;
+
+      if (isPackaged && !path.isAbsolute(pythonPath)) {
+        throw new Error(
+          `SECURITY: Refusing to use non-absolute Python path in production: ${pythonPath}. ` +
+          `This would use system PATH which is unsafe. Check python-config.ts`
+        );
+      }
+
+      this.logger.log(`Using Python: ${pythonPath}`);
+      this.logger.log(`Python config: packaged=${isPackaged}, absolute=${path.isAbsolute(pythonPath)}`);
+
+      // Spawn Python process with EXPLICIT path (no shell, no PATH lookup)
       const pythonProcess: ChildProcess = spawn(pythonPath, [
         this.pythonScriptPath,
-      ]);
+      ], {
+        shell: false,  // CRITICAL: Never use shell (prevents PATH lookup)
+        env: {
+          ...process.env,
+          // Clear Python-related environment variables to avoid conflicts
+          PYTHONHOME: undefined,
+          PYTHONPATH: undefined,
+        }
+      });
 
       // Send command via stdin
       pythonProcess.stdin?.write(JSON.stringify(command));

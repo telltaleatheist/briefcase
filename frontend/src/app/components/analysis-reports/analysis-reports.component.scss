@@ -63,6 +63,31 @@
   display: flex;
   gap: 0.5rem;
   align-items: center;
+
+  .clip-creator-button {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 0.75rem 2rem;
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.3);
+    transition: all 0.2s ease;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(255, 102, 0, 0.4);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      margin-right: 8px;
+    }
+  }
 }
 
 .panel-content {
@@ -131,21 +156,48 @@
       color: var(--text-secondary);
     }
 
-    .delete-button {
-      color: var(--text-secondary);
+    .report-actions {
+      display: flex;
+      gap: 0.25rem;
       flex-shrink: 0;
-      width: 36px;
-      height: 36px;
 
-      mat-icon {
-        font-size: 20px;
-        width: 20px;
-        height: 20px;
+      button {
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+
+        mat-icon {
+          font-size: 20px;
+          width: 20px;
+          height: 20px;
+        }
       }
+    }
+
+    .archive-button {
+      color: var(--text-secondary);
+
+      &:hover {
+        color: var(--light-orange);
+        background: rgba(255, 140, 90, 0.15);
+      }
+    }
+
+    .unarchive-button {
+      color: var(--text-secondary);
 
       &:hover {
         color: var(--primary-orange);
-        background: rgba(255, 107, 53, 0.1);
+        background: rgba(255, 107, 53, 0.15);
+      }
+    }
+
+    .delete-button {
+      color: var(--text-secondary);
+
+      &:hover {
+        color: #dc2626;
+        background: rgba(220, 38, 38, 0.1);
       }
     }
   }

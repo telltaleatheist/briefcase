@@ -1,6 +1,36 @@
 <div class="timeline-container">
   <!-- Timeline controls -->
   <div class="timeline-controls">
+    <div class="timeline-tools">
+      <button
+        mat-icon-button
+        (click)="selectTool('cursor')"
+        matTooltip="Cursor Tool (A) - Click to seek, drag to scrub"
+        class="tool-button"
+        [class.active]="selectedTool === 'cursor'">
+        <mat-icon>near_me</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="selectTool('highlight')"
+        matTooltip="Range Tool (R) - Select and edit timeline ranges"
+        class="tool-button"
+        [class.active]="selectedTool === 'highlight'">
+        <mat-icon>highlight_alt</mat-icon>
+      </button>
+
+      <div class="tool-divider"></div>
+
+      <button
+        mat-icon-button
+        (click)="togglePlayPause()"
+        matTooltip="Play/Pause (K)"
+        class="timeline-button playback-button">
+        <mat-icon>{{ isPlaying ? 'pause' : 'play_arrow' }}</mat-icon>
+      </button>
+    </div>
+
     <div class="selection-info">
       <span class="selection-label">Selection:</span>
       <span class="selection-time">{{ formatTime(selectionStart) }} - {{ formatTime(selectionEnd) }}</span>
@@ -35,10 +65,10 @@
       <button
         mat-icon-button
         (click)="resetZoom()"
-        matTooltip="Reset zoom (scroll to zoom)"
+        [matTooltip]="zoomLevel > 1 ? 'Reset zoom (' + zoomLevel.toFixed(1) + 'x)' : 'Scroll to zoom, Shift+Scroll to pan'"
         class="timeline-button"
         [class.active]="zoomLevel > 1">
-        <mat-icon>zoom_out_map</mat-icon>
+        <mat-icon>{{ zoomLevel > 1 ? 'zoom_in' : 'zoom_out_map' }}</mat-icon>
       </button>
     </div>
   </div>
@@ -48,6 +78,7 @@
     <div
       #timeline
       class="timeline"
+      [class.zoomed]="zoomLevel > 1"
       (click)="onTimelineClick($event)"
       (mousedown)="onTimelineMouseDown($event)">
 
@@ -93,13 +124,31 @@
       </div>
     </div>
 
-    <!-- Time markers -->
+    <!-- Time markers with detailed ticks -->
     <div class="time-markers">
-      <div class="time-marker" style="left: 0%">{{ formatTime(getVisibleStartTime()) }}</div>
-      <div class="time-marker" style="left: 25%">{{ formatTime(getVisibleStartTime() + getVisibleDuration() * 0.25) }}</div>
-      <div class="time-marker" style="left: 50%">{{ formatTime(getVisibleStartTime() + getVisibleDuration() * 0.5) }}</div>
-      <div class="time-marker" style="left: 75%">{{ formatTime(getVisibleStartTime() + getVisibleDuration() * 0.75) }}</div>
-      <div class="time-marker" style="left: 100%">{{ formatTime(getVisibleEndTime()) }}</div>
+      <ng-container *ngFor="let marker of getTimeMarkers()">
+        <div
+          class="time-marker"
+          [class.major]="marker.isMajor"
+          [class.minor]="!marker.isMajor"
+          [style.left.%]="marker.position">
+          <div class="time-tick"></div>
+          <span *ngIf="marker.showLabel" class="time-label">{{ marker.label }}</span>
+        </div>
+      </ng-container>
+    </div>
+
+    <!-- Horizontal scrollbar -->
+    <div class="timeline-scrollbar" [class.disabled]="zoomLevel <= 1">
+      <input
+        type="range"
+        [min]="0"
+        [max]="duration - getVisibleDuration()"
+        [step]="0.1"
+        [(ngModel)]="zoomOffset"
+        (input)="onScrollbarChange()"
+        [disabled]="zoomLevel <= 1"
+        class="scrollbar-input">
     </div>
   </div>
 </div>

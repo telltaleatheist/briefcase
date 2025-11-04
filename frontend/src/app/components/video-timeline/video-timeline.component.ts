@@ -1,5 +1,6 @@
 import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -17,10 +18,12 @@ export interface TimelineSelection {
   endTime: number;
 }
 
+export type TimelineTool = 'cursor' | 'highlight';
+
 @Component({
   selector: 'app-video-timeline',
   standalone: true,
-  imports: [CommonModule, MatIconModule, MatButtonModule, MatTooltipModule],
+  imports: [CommonModule, FormsModule, MatIconModule, MatButtonModule, MatTooltipModule],
   templateUrl: './video-timeline.component.html',
   styleUrls: ['./video-timeline.component.scss']
 })
@@ -28,11 +31,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   @Input() duration = 0; // Total video duration in seconds
   @Input() currentTime = 0; // Current playback time
   @Input() sections: TimelineSection[] = [];
+  @Input() isPlaying = false; // Playback state
   @Output() seek = new EventEmitter<number>();
   @Output() selectionChange = new EventEmitter<TimelineSelection>();
+  @Output() playPause = new EventEmitter<void>();
+  @Output() playbackSpeed = new EventEmitter<number>(); // Emit playback speed changes
 
   @ViewChild('timeline', { static: false }) timelineElement!: ElementRef<HTMLDivElement>;
   @ViewChild('selectionWindow', { static: false }) selectionWindowElement!: ElementRef<HTMLDivElement>;
+
+  // Tool selection state
+  selectedTool: TimelineTool = 'cursor';
 
   // Selection state
   selectionStart = 0;
@@ -55,9 +64,23 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   isDraggingRange = false;
   rangeStartTime = 0;
 
+  // Panning state
+  isPanning = false;
+  panStartX = 0;
+  panStartOffset = 0;
+
   ngOnInit() {
-    // Initialize selection to full duration
-    this.selectionEnd = this.duration;
+    // Initialize selection based on sections
+    if (this.sections && this.sections.length > 0) {
+      // Set selection to first section
+      const firstSection = this.sections[0];
+      this.selectionStart = firstSection.startTime;
+      this.selectionEnd = firstSection.endTime;
+    } else {
+      // No sections - leave selection empty/minimal
+      this.selectionStart = 0;
+      this.selectionEnd = 0;
+    }
     this.emitSelection();
 
     // Add global mouse event listeners for dragging
@@ -137,23 +160,64 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle timeline mouse down for range selection
+   * Handle timeline mouse down for range selection, panning, or cursor movement
    */
   onTimelineMouseDown(event: MouseEvent) {
-    // Check if clicking on empty timeline (not on handles or selection window)
     const target = event.target as HTMLElement;
-    if (target.classList.contains('timeline') || target.classList.contains('sections-layer') || target.classList.contains('section-marker')) {
+
+    // Check if clicking on timeline area (now includes selection window for easier interaction)
+    const isTimelineArea = target.classList.contains('timeline') ||
+                          target.classList.contains('sections-layer') ||
+                          target.classList.contains('section-marker') ||
+                          target.classList.contains('selection-window');
+
+    if (isTimelineArea) {
+      // If zoomed and shift key, start panning
+      if (this.zoomLevel > 1 && event.shiftKey) {
+        this.isPanning = true;
+        this.panStartX = event.clientX;
+        this.panStartOffset = this.zoomOffset;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      // Get click position
       const rect = this.timelineElement.nativeElement.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const time = this.pixelsToTime(x);
 
-      this.isDraggingRange = true;
-      this.rangeStartTime = time;
-      this.selectionStart = time;
-      this.selectionEnd = time;
+      // CURSOR TOOL: Click to seek, drag to scrub
+      if (this.selectedTool === 'cursor') {
+        this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+        this.isScrubbing = true;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
 
-      event.preventDefault();
-      event.stopPropagation();
+      // HIGHLIGHT TOOL: Click outside window to create new selection
+      if (this.selectedTool === 'highlight') {
+        // Check if click is within selection window
+        const clickInWindow = time >= this.selectionStart && time <= this.selectionEnd;
+
+        if (clickInWindow) {
+          // Click inside window - start dragging window
+          this.isDraggingWindow = true;
+          this.dragStartX = event.clientX;
+          this.dragStartSelectionStart = this.selectionStart;
+          this.dragStartSelectionEnd = this.selectionEnd;
+        } else {
+          // Click outside window - start new range selection
+          this.isDraggingRange = true;
+          this.rangeStartTime = time;
+          this.selectionStart = time;
+          this.selectionEnd = time;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+      }
     }
   }
 
@@ -167,9 +231,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Start dragging selection window
+   * Start dragging selection window (only works with highlight tool)
    */
   onWindowMouseDown(event: MouseEvent) {
+    if (this.selectedTool !== 'highlight') return;
+
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingWindow = true;
@@ -179,9 +245,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Start dragging left handle
+   * Start dragging left handle (only works with highlight tool)
    */
   onLeftHandleMouseDown(event: MouseEvent) {
+    if (this.selectedTool !== 'highlight') return;
+
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingLeftHandle = true;
@@ -189,9 +257,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Start dragging right handle
+   * Start dragging right handle (only works with highlight tool)
    */
   onRightHandleMouseDown(event: MouseEvent) {
+    if (this.selectedTool !== 'highlight') return;
+
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingRightHandle = true;
@@ -199,9 +269,24 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle mouse move for dragging and scrubbing
+   * Handle mouse move for dragging, scrubbing, and panning
    */
   handleMouseMove = (event: MouseEvent) => {
+    // Handle panning
+    if (this.isPanning) {
+      const deltaX = event.clientX - this.panStartX;
+      const rect = this.timelineElement.nativeElement.getBoundingClientRect();
+      const visibleDuration = this.getVisibleDuration();
+      const deltaTime = (deltaX / rect.width) * visibleDuration;
+
+      // Pan in opposite direction of mouse movement
+      this.zoomOffset = this.panStartOffset - deltaTime;
+
+      // Clamp offset to valid range
+      this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      return;
+    }
+
     if (this.isDraggingRange) {
       const rect = this.timelineElement.nativeElement.getBoundingClientRect();
       const x = event.clientX - rect.left;
@@ -279,7 +364,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   /**
    * Handle mouse up to end dragging
    */
-  handleMouseUp = (event: MouseEvent) => {
+  handleMouseUp = () => {
     // Clear range dragging flag after a short delay to prevent immediate seek
     if (this.isDraggingRange) {
       setTimeout(() => {
@@ -287,6 +372,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       }, 50);
     }
 
+    this.isPanning = false;
     this.isScrubbing = false;
     this.isDraggingWindow = false;
     this.isDraggingLeftHandle = false;
@@ -294,7 +380,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   };
 
   /**
-   * Handle mouse wheel for zooming
+   * Handle mouse wheel for zooming and horizontal panning
    */
   handleWheel = (event: WheelEvent) => {
     // Only zoom if hovering over timeline
@@ -310,21 +396,46 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
     event.preventDefault();
 
-    // Get mouse position in timeline before zoom
-    const mouseX = event.clientX - rect.left;
-    const timeAtMouse = this.pixelsToTime(mouseX);
+    // If shift key is held, do horizontal panning instead of zooming
+    if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      if (this.zoomLevel > 1) {
+        const visibleDuration = this.getVisibleDuration();
+        // Pan by 10% of visible duration per scroll tick
+        const panAmount = (visibleDuration * 0.1) * (event.deltaY > 0 || event.deltaX > 0 ? 1 : -1);
+        this.zoomOffset += panAmount;
 
-    // Adjust zoom level
-    const zoomDelta = event.deltaY > 0 ? -0.2 : 0.2;
-    const newZoomLevel = Math.max(1, Math.min(10, this.zoomLevel + zoomDelta));
+        // Clamp offset to valid range
+        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      }
+      return;
+    }
+
+    // Adjust zoom level with acceleration - zoom faster at higher zoom levels
+    // deltaY < 0 = scroll up = zoom in, deltaY > 0 = scroll down = zoom out
+    const baseZoomDelta = event.deltaY < 0 ? 1 : -1;
+    const zoomDelta = baseZoomDelta * this.calculateZoomIncrement(this.zoomLevel);
+    const newZoomLevel = Math.max(1, Math.min(200, this.zoomLevel + zoomDelta));
 
     if (newZoomLevel !== this.zoomLevel) {
+      // Get the current visible start and duration BEFORE the zoom
+      const oldVisibleStart = this.getVisibleStartTime();
+      const oldVisibleDuration = this.getVisibleDuration();
+
+      // Calculate what time the mouse is pointing at in the OLD zoom level
+      const mouseX = event.clientX - rect.left;
+      const mouseRatio = mouseX / rect.width;  // 0 to 1, where mouse is in the timeline
+      const timeAtMouse = oldVisibleStart + (mouseRatio * oldVisibleDuration);
+
+      // Update zoom level
       this.zoomLevel = newZoomLevel;
 
-      // Adjust offset to keep the time under the mouse in the same position
+      // Calculate new visible duration after zoom
       const newVisibleDuration = this.getVisibleDuration();
-      const mousePositionRatio = mouseX / rect.width;
-      this.zoomOffset = timeAtMouse - (newVisibleDuration * mousePositionRatio);
+
+      // Keep the same time under the mouse cursor at the same pixel position
+      // We want: newVisibleStart + (mouseRatio * newVisibleDuration) = timeAtMouse
+      // So: newVisibleStart = timeAtMouse - (mouseRatio * newVisibleDuration)
+      this.zoomOffset = timeAtMouse - (mouseRatio * newVisibleDuration);
 
       // Clamp offset to valid range
       this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
@@ -332,15 +443,70 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   };
 
   /**
-   * Handle keyboard shortcuts for zoom
+   * Handle keyboard shortcuts for zoom, panning, tools, and playback
    */
   handleKeyDown = (event: KeyboardEvent) => {
+    // Only handle if not in an input field
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    // Tool selection shortcuts
+    if (event.key === 'a' || event.key === 'A') {
+      event.preventDefault();
+      this.selectedTool = 'cursor';
+      return;
+    }
+
+    if (event.key === 'r' || event.key === 'R') {
+      event.preventDefault();
+      this.selectedTool = 'highlight';
+      return;
+    }
+
+    // Playback control shortcuts (J/K/L)
+    if (event.key === 'j' || event.key === 'J') {
+      event.preventDefault();
+      // Play backwards at 2x speed
+      this.playbackSpeed.emit(-2);
+      return;
+    }
+
+    if (event.key === 'k' || event.key === 'K') {
+      event.preventDefault();
+      // Pause
+      this.playPause.emit();
+      return;
+    }
+
+    if (event.key === 'l' || event.key === 'L') {
+      event.preventDefault();
+      // Play forward at 2x speed
+      this.playbackSpeed.emit(2);
+      return;
+    }
+
+    // Arrow keys for panning when zoomed
+    if (this.zoomLevel > 1 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      const visibleDuration = this.getVisibleDuration();
+      // Pan by 10% of visible duration
+      const panAmount = visibleDuration * 0.1 * (event.key === 'ArrowRight' ? 1 : -1);
+      this.zoomOffset += panAmount;
+
+      // Clamp offset to valid range
+      this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      return;
+    }
+
     // Cmd/Ctrl + Plus/Minus for zoom
     if ((event.metaKey || event.ctrlKey) && (event.key === '+' || event.key === '=' || event.key === '-')) {
       event.preventDefault();
 
-      const zoomDelta = (event.key === '-') ? -0.5 : 0.5;
-      const newZoomLevel = Math.max(1, Math.min(10, this.zoomLevel + zoomDelta));
+      // Use accelerated zoom increments for keyboard as well
+      const baseZoomDelta = (event.key === '-') ? -1 : 1;
+      const zoomDelta = baseZoomDelta * this.calculateZoomIncrement(this.zoomLevel);
+      const newZoomLevel = Math.max(1, Math.min(200, this.zoomLevel + zoomDelta));
 
       if (newZoomLevel !== this.zoomLevel) {
         // Zoom centered on current playhead or middle of visible range
@@ -427,37 +593,264 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Get CSS styles for playhead
+   * Get CSS styles for playhead (accounting for zoom and pan)
    */
   getPlayheadStyle() {
-    const percentage = (this.currentTime / this.duration) * 100;
+    const visibleStart = this.getVisibleStartTime();
+    const visibleDuration = this.getVisibleDuration();
+
+    // Only show if within visible range
+    if (this.currentTime < visibleStart || this.currentTime > visibleStart + visibleDuration) {
+      return { left: '-100px', display: 'none' };
+    }
+
+    const percentage = ((this.currentTime - visibleStart) / visibleDuration) * 100;
     return {
-      left: `${percentage}%`
+      left: `${percentage}%`,
+      display: 'block'
     };
   }
 
   /**
-   * Get CSS styles for selection window
+   * Get CSS styles for selection window (accounting for zoom and pan)
    */
   getSelectionStyle() {
-    const startPercentage = (this.selectionStart / this.duration) * 100;
-    const endPercentage = (this.selectionEnd / this.duration) * 100;
-    return {
-      left: `${startPercentage}%`,
-      width: `${endPercentage - startPercentage}%`
-    };
-  }
+    // If no selection (both start and end are 0), hide it
+    if (this.selectionStart === 0 && this.selectionEnd === 0) {
+      return { left: '0', width: '0', display: 'none' };
+    }
 
-  /**
-   * Get CSS styles for a section marker
-   */
-  getSectionStyle(section: TimelineSection) {
-    const startPercentage = (section.startTime / this.duration) * 100;
-    const endPercentage = (section.endTime / this.duration) * 100;
+    const visibleStart = this.getVisibleStartTime();
+    const visibleDuration = this.getVisibleDuration();
+    const visibleEnd = visibleStart + visibleDuration;
+
+    // Calculate visible portion of selection
+    const selStart = Math.max(this.selectionStart, visibleStart);
+    const selEnd = Math.min(this.selectionEnd, visibleEnd);
+
+    // If selection is completely outside visible range, hide it
+    if (this.selectionEnd < visibleStart || this.selectionStart > visibleEnd) {
+      return { left: '0', width: '0', display: 'none' };
+    }
+
+    const startPercentage = ((selStart - visibleStart) / visibleDuration) * 100;
+    const endPercentage = ((selEnd - visibleStart) / visibleDuration) * 100;
+
     return {
       left: `${startPercentage}%`,
       width: `${endPercentage - startPercentage}%`,
-      backgroundColor: section.color
+      display: 'block'
     };
+  }
+
+  /**
+   * Get CSS styles for a section marker (accounting for zoom and pan)
+   */
+  getSectionStyle(section: TimelineSection) {
+    const visibleStart = this.getVisibleStartTime();
+    const visibleDuration = this.getVisibleDuration();
+    const visibleEnd = visibleStart + visibleDuration;
+
+    // Calculate visible portion of section
+    const sectionStart = Math.max(section.startTime, visibleStart);
+    const sectionEnd = Math.min(section.endTime, visibleEnd);
+
+    // If section is completely outside visible range, hide it
+    if (section.endTime < visibleStart || section.startTime > visibleEnd) {
+      return {
+        left: '0',
+        width: '0',
+        backgroundColor: section.color,
+        display: 'none'
+      };
+    }
+
+    const startPercentage = ((sectionStart - visibleStart) / visibleDuration) * 100;
+    const endPercentage = ((sectionEnd - visibleStart) / visibleDuration) * 100;
+
+    return {
+      left: `${startPercentage}%`,
+      width: `${endPercentage - startPercentage}%`,
+      backgroundColor: section.color,
+      display: 'block'
+    };
+  }
+
+  /**
+   * Select a tool
+   */
+  selectTool(tool: TimelineTool) {
+    this.selectedTool = tool;
+  }
+
+  /**
+   * Toggle play/pause
+   */
+  togglePlayPause() {
+    this.playPause.emit();
+  }
+
+  /**
+   * Get time markers with major and minor ticks - optimized for performance
+   */
+  getTimeMarkers(): Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> {
+    const markers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
+    const visibleStart = this.getVisibleStartTime();
+    const visibleDuration = this.getVisibleDuration();
+
+    // Calculate optimal intervals based on visible duration, not just zoom level
+    // This ensures we don't create too many markers regardless of video length
+    const { majorInterval, minorInterval } = this.calculateOptimalIntervals(visibleDuration);
+
+    // Limit maximum number of markers for performance
+    const maxMajorMarkers = 20;
+    const maxMinorMarkers = 100;
+
+    // Generate major ticks
+    const startMajor = Math.ceil(visibleStart / majorInterval) * majorInterval;
+    const endMajor = visibleStart + visibleDuration;
+    let majorCount = 0;
+
+    for (let time = startMajor; time <= endMajor && majorCount < maxMajorMarkers; time += majorInterval) {
+      const position = ((time - visibleStart) / visibleDuration) * 100;
+      if (position >= 0 && position <= 100) {
+        markers.push({
+          position,
+          label: this.formatDetailedTime(time),
+          isMajor: true,
+          showLabel: true
+        });
+        majorCount++;
+      }
+    }
+
+    // Generate minor ticks only if we have reasonable spacing
+    if (minorInterval > 0 && visibleDuration / minorInterval < maxMinorMarkers) {
+      const startMinor = Math.ceil(visibleStart / minorInterval) * minorInterval;
+      let minorCount = 0;
+
+      for (let time = startMinor; time <= endMajor && minorCount < maxMinorMarkers; time += minorInterval) {
+        // Skip if it's close to a major tick (within 1% of majorInterval)
+        const nearestMajor = Math.round(time / majorInterval) * majorInterval;
+        if (Math.abs(time - nearestMajor) < majorInterval * 0.01) continue;
+
+        const position = ((time - visibleStart) / visibleDuration) * 100;
+        if (position >= 0 && position <= 100) {
+          markers.push({
+            position,
+            label: this.formatDetailedTime(time),
+            isMajor: false,
+            showLabel: false
+          });
+          minorCount++;
+        }
+      }
+    }
+
+    return markers;
+  }
+
+  /**
+   * Calculate zoom increment based on current zoom level
+   * Returns larger increments at higher zoom levels for smoother zooming
+   */
+  private calculateZoomIncrement(currentZoom: number): number {
+    if (currentZoom < 2) {
+      // Low zoom: small increments
+      return 0.2;
+    } else if (currentZoom < 5) {
+      // Low-medium zoom
+      return 0.5;
+    } else if (currentZoom < 10) {
+      // Medium zoom
+      return 1.0;
+    } else if (currentZoom < 20) {
+      // Medium-high zoom
+      return 2.0;
+    } else if (currentZoom < 40) {
+      // High zoom
+      return 4.0;
+    } else if (currentZoom < 60) {
+      // Very high zoom
+      return 6.0;
+    } else if (currentZoom < 100) {
+      // Extremely high zoom
+      return 10.0;
+    } else if (currentZoom < 150) {
+      // Ultra zoom
+      return 15.0;
+    } else {
+      // Maximum zoom
+      return 20.0;
+    }
+  }
+
+  /**
+   * Calculate optimal marker intervals based on visible duration
+   */
+  private calculateOptimalIntervals(visibleDuration: number): { majorInterval: number, minorInterval: number } {
+    // Define interval thresholds based on visible duration
+    let majorInterval: number;
+    let minorInterval: number;
+
+    if (visibleDuration <= 10) {
+      // Very zoomed in: < 10 seconds visible
+      majorInterval = 1;
+      minorInterval = 0.2;
+    } else if (visibleDuration <= 30) {
+      // Zoomed in: 10-30 seconds visible
+      majorInterval = 2;
+      minorInterval = 0.5;
+    } else if (visibleDuration <= 60) {
+      // 30-60 seconds visible
+      majorInterval = 5;
+      minorInterval = 1;
+    } else if (visibleDuration <= 300) {
+      // 1-5 minutes visible
+      majorInterval = 10;
+      minorInterval = 2;
+    } else if (visibleDuration <= 600) {
+      // 5-10 minutes visible
+      majorInterval = 30;
+      minorInterval = 10;
+    } else if (visibleDuration <= 1800) {
+      // 10-30 minutes visible
+      majorInterval = 60;
+      minorInterval = 30;
+    } else if (visibleDuration <= 3600) {
+      // 30-60 minutes visible
+      majorInterval = 300;
+      minorInterval = 60;
+    } else {
+      // > 1 hour visible
+      majorInterval = 600;
+      minorInterval = 300;
+    }
+
+    return { majorInterval, minorInterval };
+  }
+
+  /**
+   * Format time with frames: HH:MM:SS:FF
+   */
+  formatDetailedTime(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const frames = Math.floor((seconds % 1) * 30); // Assuming 30fps
+
+    if (h > 0) {
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+    }
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * Handle scrollbar change
+   */
+  onScrollbarChange() {
+    // Clamp the offset
+    const visibleDuration = this.getVisibleDuration();
+    this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
   }
 }

@@ -121,6 +121,15 @@ export class LibraryService {
   }
 
   /**
+   * Get transcript text for an analysis
+   */
+  async getAnalysisTranscript(id: string): Promise<{ exists: boolean; text: string | null }> {
+    return firstValueFrom(
+      this.http.get<{ exists: boolean; text: string | null }>(`${this.baseUrl}/analyses/${id}/transcript`)
+    );
+  }
+
+  /**
    * Update an analysis (archive, relink, etc.)
    */
   async updateAnalysis(id: string, update: {

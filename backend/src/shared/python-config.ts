@@ -28,8 +28,9 @@ export interface PythonConfig {
  * Get the Python command/path that should be used across the entire application
  *
  * Priority order:
- * 1. Conda environment (if available on macOS)
- * 2. System Python (python3 on Unix, python on Windows)
+ * 1. Packaged Python (if running in production/packaged app)
+ * 2. Conda environment (if available on macOS)
+ * 3. System Python (python3 on Unix, python on Windows)
  *
  * This function MUST return the same result whether called from:
  * - Electron main process (whisper-setup-wizard.ts)
@@ -39,6 +40,39 @@ export interface PythonConfig {
 export function getPythonConfig(): PythonConfig {
   const platform = process.platform;
 
+  // Check if we're running in a packaged app
+  const isPackaged = process.env.NODE_ENV === 'production' ||
+                     (process as any).resourcesPath !== undefined ||
+                     (process as any).defaultApp === false;
+
+  // If packaged, use bundled Python
+  if (isPackaged) {
+    // Get resources path
+    const resourcesPath = (process as any).resourcesPath ||
+                          path.join(process.cwd(), 'resources');
+
+    // Path to packaged Python
+    let packagedPythonPath: string;
+
+    if (platform === 'win32') {
+      packagedPythonPath = path.join(resourcesPath, 'python', 'python.exe');
+    } else if (platform === 'darwin') {
+      packagedPythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+    } else {
+      packagedPythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+    }
+
+    // Check if packaged Python exists
+    if (fs.existsSync(packagedPythonPath)) {
+      return {
+        command: packagedPythonPath,
+        isConda: false,
+        fullPath: packagedPythonPath,
+      };
+    }
+  }
+
+  // Development mode: use system Python
   // macOS: Try conda environment first
   if (platform === 'darwin') {
     const condaEnvPath = '/opt/homebrew/Caskroom/miniconda/base/envs/metadata-generator/bin/python';
@@ -58,15 +92,33 @@ export function getPythonConfig(): PythonConfig {
     };
   }
 
-  // Windows: Use 'python' command
+  // Windows: Use 'python' command (development only)
   if (platform === 'win32') {
+    // CRITICAL: In production, we must have found bundled Python above
+    // If we reach here in production, something is wrong
+    if (isPackaged) {
+      throw new Error(
+        'CRITICAL: Packaged app missing bundled Python! ' +
+        'Expected to find python.exe in resources/python/. ' +
+        'Check electron-builder configuration and packaging script.'
+      );
+    }
+
     return {
       command: 'python',
       isConda: false,
     };
   }
 
-  // Linux/other: Use 'python3' command
+  // Linux/other: Use 'python3' command (development only)
+  if (isPackaged) {
+    throw new Error(
+      'CRITICAL: Packaged app missing bundled Python! ' +
+      'Expected to find python3 in resources/python/bin/. ' +
+      'Check electron-builder configuration and packaging script.'
+    );
+  }
+
   return {
     command: 'python3',
     isConda: false,

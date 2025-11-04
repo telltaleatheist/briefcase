@@ -77,11 +77,14 @@ export async function parseAnalysisReport(
         sections.push(currentSection);
       }
 
+      // Reset quote for new section
+      currentQuote = null;
+
       // Parse new section
       const sectionText = sectionMatch[1];
 
-      // Try to parse: "MM:SS - MM:SS - Description [category]"
-      const fullMatch = sectionText.match(/^(\d+:\d+)\s*-\s*(\d+:\d+)\s*-\s*(.+?)\s*\[(.+?)\]$/);
+      // Try to parse: "HH:MM:SS - HH:MM:SS - Description [category]" or "MM:SS - MM:SS - Description [category]"
+      const fullMatch = sectionText.match(/^(\d+:\d+:\d+|\d+:\d+)\s*-\s*(\d+:\d+:\d+|\d+:\d+)\s*-\s*(.+?)\s*\[(.+?)\]$/);
       if (fullMatch) {
         const [, startTime, endTime, description, category] = fullMatch;
         currentSection = {
@@ -95,8 +98,8 @@ export async function parseAnalysisReport(
         continue;
       }
 
-      // Try to parse: "MM:SS - Description [category]"
-      const simpleMatch = sectionText.match(/^(\d+:\d+)\s*-\s*(.+?)\s*\[(.+?)\]$/);
+      // Try to parse: "HH:MM:SS - Description [category]" or "MM:SS - Description [category]"
+      const simpleMatch = sectionText.match(/^(\d+:\d+:\d+|\d+:\d+)\s*-\s*(.+?)\s*\[(.+?)\]$/);
       if (simpleMatch) {
         const [, startTime, description, category] = simpleMatch;
         currentSection = {
@@ -114,8 +117,8 @@ export async function parseAnalysisReport(
       continue;
     }
 
-    // Check for quote (MM:SS - "Quote text")
-    const quoteMatch = line.match(/^(\d+:\d+)\s*-\s*"(.+?)"$/);
+    // Check for quote (HH:MM:SS - "Quote text" or MM:SS - "Quote text")
+    const quoteMatch = line.match(/^(\d+:\d+:\d+|\d+:\d+)\s*-\s*"(.+?)"$/);
     if (quoteMatch && currentSection) {
       // Save previous quote if exists
       if (currentQuote && currentQuote.timestamp && currentQuote.text) {

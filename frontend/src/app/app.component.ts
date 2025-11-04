@@ -4,7 +4,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule, Router, RouterOutlet } from '@angular/router';
 
 import { ThemeService } from './services/theme.service';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -52,7 +52,6 @@ export class AppComponent implements OnInit, OnDestroy {
   private socketService = inject(SocketService);
   private settingsService = inject(SettingsService);
   private batchStateService = inject(BatchStateService);
-  private snackBar = inject(MatSnackBar);
   private themeService = inject(ThemeService);  // Inject the ThemeService
   private notificationService = inject(NotificationService);  // Inject the NotificationService
   public router = inject(Router);
@@ -60,6 +59,11 @@ export class AppComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     // Let theme service handle default (which is dark mode)
     // Don't override the saved preference or default
+
+    // Log router events for debugging
+    this.router.events.subscribe(event => {
+      console.log('Router event:', event);
+    });
 
     this.socketService.onConnect().subscribe(() => {
       // No notification needed - connection is expected

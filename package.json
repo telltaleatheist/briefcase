@@ -19,13 +19,14 @@
     "build:frontend": "tsc -p frontend/tsconfig.json && cd frontend && npm run build",
     "build:electron": "tsc -p electron/tsconfig.electron.json",
     "build:preload": "tsc -p electron/tsconfig.preload.json",
+    "package:python": "node scripts/package-python-windows.js",
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "cd backend && npm run test",
     "test:frontend": "cd frontend && npm run test",
     "electron:dev": "npm run build:all && cross-env NODE_ENV=development electron .",
     "electron": "npm run build:all && electron .",
     "package": "npm run build:all && electron-builder build",
-    "package:win": "npm run clean:win && npm run build:all && electron-builder build --win --publish never",
+    "package:win": "npm run clean:win && npm run build:all && npm run package:python && electron-builder build --win --publish never",
     "package:linux": "npm run clean:linux && npm run build:all && electron-builder build --linux --publish never",
     "package:mac": "npm run clean:mac && npm run build:all && electron-builder --mac",
     "package:mac-intel": "npm run clean:mac && npm run build:all && electron-builder --mac --x64"
@@ -49,6 +50,7 @@
     "cross-env": "^7.0.3",
     "electron": "^36.0.1",
     "electron-builder": "^24.13.3",
+    "extract-zip": "^2.0.1",
     "karma": "^6.4.4",
     "rimraf": "^6.0.1",
     "tsc-alias": "^1.8.15",
@@ -86,6 +88,21 @@
       {
         "from": "utilities",
         "to": "utilities"
+      },
+      {
+        "from": "dist-python/python",
+        "to": "python",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "node_modules/@ffmpeg-installer",
+        "to": "binaries/ffmpeg",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "node_modules/@ffprobe-installer",
+        "to": "binaries/ffprobe",
+        "filter": ["**/*"]
       }
     ],
     "files": [

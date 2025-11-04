@@ -1,13 +1,13 @@
 // clippy/frontend/src/app/components/download-history/download-history.component.ts
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { ApiService } from '../../services/api.service';
 import { SocketService } from '../../services/socket.service';
+import { NotificationService } from '../../services/notification.service';
 import { HistoryItem } from '../../models/download.model';
 import { Subscription } from 'rxjs';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -19,7 +19,6 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
   standalone: true,  // Add this line
   imports: [
     CommonModule,
-    MatSnackBarModule,
     MatDialogModule,
     MatCardModule,
     MatIconModule,
@@ -30,7 +29,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 export class DownloadHistoryComponent implements OnInit, OnDestroy {
   private apiService = inject(ApiService);
   private socketService = inject(SocketService);
-  private snackBar = inject(MatSnackBar);
+  private notificationService = inject(NotificationService);
   private dialog = inject(MatDialog);
 
   historyItems: HistoryItem[] = [];
@@ -58,9 +57,7 @@ export class DownloadHistoryComponent implements OnInit, OnDestroy {
         this.isLoading = false;
       },
       error: () => {
-        this.snackBar.open('Failed to load download history', 'Dismiss', {
-          duration: 3000
-        });
+        this.notificationService.toastOnly('error', 'Load Failed', 'Failed to load download history');
         this.isLoading = false;
       }
     });
@@ -98,13 +95,13 @@ export class DownloadHistoryComponent implements OnInit, OnDestroy {
       next: (result) => {
         if (result.success) {
           this.historyItems = this.historyItems.filter(i => i.id !== item.id);
-          this.snackBar.open('Removed from history', 'Dismiss', { duration: 3000 });
+          this.notificationService.toastOnly('success', 'Item Removed', 'Removed from history');
         } else {
-          this.snackBar.open('Failed to remove item', 'Dismiss', { duration: 3000 });
+          this.notificationService.toastOnly('error', 'Removal Failed', 'Failed to remove item');
         }
       },
       error: () => {
-        this.snackBar.open('Error removing item', 'Dismiss', { duration: 3000 });
+        this.notificationService.toastOnly('error', 'Removal Error', 'Error removing item');
       }
     });
   }
@@ -115,13 +112,13 @@ export class DownloadHistoryComponent implements OnInit, OnDestroy {
         next: (result) => {
           if (result.success) {
             this.historyItems = [];
-            this.snackBar.open('Download history cleared', 'Dismiss', { duration: 3000 });
+            this.notificationService.toastOnly('success', 'History Cleared', 'Download history cleared');
           } else {
-            this.snackBar.open('Failed to clear history', 'Dismiss', { duration: 3000 });
+            this.notificationService.toastOnly('error', 'Clear Failed', 'Failed to clear history');
           }
         },
         error: () => {
-          this.snackBar.open('Error clearing history', 'Dismiss', { duration: 3000 });
+          this.notificationService.toastOnly('error', 'Clear Error', 'Error clearing history');
         }
       });
     }

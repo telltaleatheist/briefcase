@@ -1,10 +1,13 @@
 <div class="video-player-dialog">
   <div class="dialog-header">
+    <button mat-icon-button (click)="close()" class="back-button" matTooltip="Back to Clip Creator">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
     <h2>
       <mat-icon>movie</mat-icon>
       {{ data.analysis.title }}
     </h2>
-    <button mat-icon-button (click)="close()" class="close-button">
+    <button mat-icon-button (click)="close()" class="close-button" matTooltip="Close">
       <mat-icon>close</mat-icon>
     </button>
   </div>
@@ -72,8 +75,11 @@
     [duration]="duration"
     [currentTime]="currentTime"
     [sections]="timelineSections"
+    [isPlaying]="isPlaying"
     (seek)="onTimelineSeek($event)"
-    (selectionChange)="onSelectionChange($event)">
+    (selectionChange)="onSelectionChange($event)"
+    (playPause)="onPlayPause()"
+    (playbackSpeed)="onPlaybackSpeed($event)">
   </app-video-timeline>
 
   <!-- Clip Creation Actions -->
@@ -91,8 +97,10 @@
   <!-- Keyboard Shortcuts Hint -->
   <div class="shortcuts-hint" *ngIf="!error">
     <mat-icon>keyboard</mat-icon>
+    <span>A: Cursor</span>
+    <span>R: Range</span>
+    <span>J/K/L: Playback</span>
     <span>Space: Play/Pause</span>
-    <span>←/→: Seek 5s</span>
     <span>F: Fullscreen</span>
     <span>I/O: Set In/Out</span>
   </div>

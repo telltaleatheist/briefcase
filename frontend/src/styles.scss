@@ -33,3 +33,20 @@ body {
     height: 100vh !important;
   }
 }
+
+/* Video player dialog */
+.video-player-dialog-container {
+  .mat-mdc-dialog-container {
+    padding: 0 !important;
+    border-radius: 0;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    overflow: hidden;
+  }
+
+  .mdc-dialog__surface {
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    overflow: hidden;
+  }
+}

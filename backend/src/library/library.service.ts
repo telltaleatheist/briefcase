@@ -1,5 +1,5 @@
 // clippy/backend/src/library/library.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -14,6 +14,7 @@ import {
   UpdateLibraryAnalysisRequest,
   CreateClipRequest,
 } from './interfaces/library.interface';
+import { SharedConfigService } from '../config/shared-config.service';
 
 @Injectable()
 export class LibraryService {
@@ -25,7 +26,10 @@ export class LibraryService {
   private readonly transcriptsDir: string;
   private readonly clipsDir: string;
 
-  constructor() {
+  constructor(
+    @Inject(forwardRef(() => SharedConfigService))
+    private readonly configService: SharedConfigService,
+  ) {
     // Set up paths
     this.libraryDir = path.join(
       os.homedir(),
@@ -316,6 +320,92 @@ export class LibraryService {
    * Delete an analysis
    */
   async deleteAnalysis(id: string): Promise<void> {
+    // Get analysis before deleting to access file paths
+    const analysis = await this.getAnalysis(id);
+    if (!analysis) {
+      throw new Error(`Analysis not found: ${id}`);
+    }
+
+    // Delete all associated clip video files
+    if (this.library) {
+      for (const clipId of analysis.clips) {
+        const clip = this.library.clips[clipId];
+        if (clip && clip.outputPath) {
+          try {
+            await fs.unlink(clip.outputPath);
+            this.logger.log(`Deleted clip file: ${clip.outputPath}`);
+          } catch (error) {
+            this.logger.warn(`Failed to delete clip file ${clip.outputPath}: ${(error as Error).message}`);
+          }
+        }
+      }
+    }
+
+    // Delete all associated analysis and transcript files from library
+    try {
+      // Delete analysis files
+      await fs.unlink(analysis.files.analysis).catch(() => {});
+      await fs.unlink(analysis.files.analysisMetadata).catch(() => {});
+
+      // Delete transcript files
+      await fs.unlink(analysis.files.transcriptSrt).catch(() => {});
+      await fs.unlink(analysis.files.transcriptTxt).catch(() => {});
+
+      this.logger.log(`Deleted library files for analysis ${id}`);
+    } catch (error) {
+      this.logger.warn(`Failed to delete some library files for analysis ${id}: ${(error as Error).message}`);
+      // Continue with library update even if file deletion fails
+    }
+
+    // Also try to delete original files from analysis/reports directory
+    // (These are the temporary files created during analysis that get copied to library)
+    try {
+      const sanitizedTitle = analysis.title
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+        .replace(/_{2,}/g, '_')
+        .replace(/[_\.]+$/, '')
+        .trim();
+
+      // Get the configured output directory
+      const configOutputDir = this.configService.getOutputDir();
+      const outputDir = configOutputDir || path.join(os.homedir(), 'Downloads', 'clippy');
+
+      this.logger.log(`Looking for original files in: ${outputDir}`);
+
+      const reportsPath = path.join(outputDir, 'analysis', 'reports');
+      const transcriptsPath = path.join(outputDir, 'analysis', 'transcripts');
+
+      // Delete original analysis report
+      const originalReportPath = path.join(reportsPath, `${sanitizedTitle}.txt`);
+      try {
+        await fs.unlink(originalReportPath);
+        this.logger.log(`Deleted original report: ${originalReportPath}`);
+      } catch (err) {
+        this.logger.warn(`Could not delete report ${originalReportPath}: ${(err as Error).message}`);
+      }
+
+      // Delete original transcripts
+      const originalSrtPath = path.join(transcriptsPath, `${sanitizedTitle}.srt`);
+      const originalTxtPath = path.join(transcriptsPath, `${sanitizedTitle}.txt`);
+      try {
+        await fs.unlink(originalSrtPath);
+        this.logger.log(`Deleted original transcript: ${originalSrtPath}`);
+      } catch (err) {
+        this.logger.warn(`Could not delete transcript ${originalSrtPath}`);
+      }
+      try {
+        await fs.unlink(originalTxtPath);
+        this.logger.log(`Deleted original transcript: ${originalTxtPath}`);
+      } catch (err) {
+        this.logger.warn(`Could not delete transcript ${originalTxtPath}`);
+      }
+
+      this.logger.log(`Finished cleanup for ${sanitizedTitle}`);
+    } catch (error) {
+      this.logger.warn(`Failed to delete original analysis files: ${(error as Error).message}`);
+      // Continue anyway
+    }
+
     await this.updateLibrary((library) => {
       const analysisIndex = library.analyses.findIndex(a => a.id === id);
 

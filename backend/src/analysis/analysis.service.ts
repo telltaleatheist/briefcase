@@ -40,6 +40,7 @@ export interface AnalysisJob {
 export interface AnalysisRequest {
   input: string; // URL or file path
   inputType: 'url' | 'file';
+  mode?: 'full' | 'transcribe-only'; // Analysis mode: full analysis or transcription only
   aiModel: string;
   aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
   apiKey?: string; // API key for Claude/OpenAI
@@ -253,45 +254,58 @@ export class AnalysisService {
         timing: { ...job5?.timing, transcriptionEnd: new Date() },
       });
 
-      // Phase 4: AI Analysis (60-95%)
-      const job6 = this.jobs.get(jobId);
-      this.updateJob(jobId, {
-        status: 'analyzing',
-        progress: 60,
-        currentPhase: `Analyzing with ${request.aiModel}...`,
-        timing: { ...job6?.timing, analysisStart: new Date() },
-      });
+      // Check if we should skip AI analysis (transcribe-only mode)
+      const mode = request.mode || 'full';
+      let analysisOutputPath: string | undefined;
+      let analysisResult: any;
 
-      // Use custom report name if provided, otherwise use sanitized title
-      const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
-      const analysisOutputPath = path.join(
-        reportsPath,
-        reportFileName,
-      );
+      if (mode === 'transcribe-only') {
+        // Skip AI analysis, jump to finalization
+        this.updateJob(jobId, {
+          progress: 95,
+          currentPhase: 'Transcription complete...',
+        });
+      } else {
+        // Phase 4: AI Analysis (60-95%)
+        const job6 = this.jobs.get(jobId);
+        this.updateJob(jobId, {
+          status: 'analyzing',
+          progress: 60,
+          currentPhase: `Analyzing with ${request.aiModel}...`,
+          timing: { ...job6?.timing, analysisStart: new Date() },
+        });
 
-      const analysisResult = await this.pythonBridge.analyze(
-        request.ollamaEndpoint,
-        request.aiModel,
-        transcriptResult.text,
-        transcriptResult.segments,
-        analysisOutputPath,
-        (progress) => {
-          this.updateJob(jobId, {
-            progress: progress.progress,
-            currentPhase: progress.message,
-          });
-        },
-        request.customInstructions,
-        request.aiProvider,
-        request.apiKey,
-      );
+        // Use custom report name if provided, otherwise use sanitized title
+        const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
+        analysisOutputPath = path.join(
+          reportsPath,
+          reportFileName,
+        );
 
-      const job7 = this.jobs.get(jobId);
-      this.updateJob(jobId, {
-        progress: 95,
-        analysisPath: analysisOutputPath,
-        timing: { ...job7?.timing, analysisEnd: new Date() },
-      });
+        analysisResult = await this.pythonBridge.analyze(
+          request.ollamaEndpoint,
+          request.aiModel,
+          transcriptResult.text,
+          transcriptResult.segments,
+          analysisOutputPath,
+          (progress) => {
+            this.updateJob(jobId, {
+              progress: progress.progress,
+              currentPhase: progress.message,
+            });
+          },
+          request.customInstructions,
+          request.aiProvider,
+          request.apiKey,
+        );
+
+        const job7 = this.jobs.get(jobId);
+        this.updateJob(jobId, {
+          progress: 95,
+          analysisPath: analysisOutputPath,
+          timing: { ...job7?.timing, analysisEnd: new Date() },
+        });
+      }
 
       // Phase 5: Finalize (95-100%)
       this.updateJob(jobId, {
@@ -343,7 +357,7 @@ export class AnalysisService {
 
       // Add to library
       try {
-        await this.libraryService.createAnalysis({
+        const analysis = await this.libraryService.createAnalysis({
           title: videoTitle,
           videoPath: videoPath,
           transcriptSrtPath: transcriptPath,
@@ -353,6 +367,34 @@ export class AnalysisService {
           transcriptionModel: request.whisperModel || 'base',
         });
         this.logger.log(`Added analysis to library for job ${jobId}`);
+
+        // Parse analysis report and generate metadata JSON
+        try {
+          const { parseAnalysisReport, extractCategories, saveAnalysisMetadata } =
+            await import('../library/parsers/analysis-parser');
+
+          const parsedMetadata = await parseAnalysisReport(
+            analysis.files.analysis,
+            analysis.id,
+            analysis.title,
+            analysis.createdAt
+          );
+
+          // Save parsed metadata to JSON file
+          await saveAnalysisMetadata(analysis.files.analysisMetadata, parsedMetadata);
+
+          // Extract and update categories
+          const categories = extractCategories(parsedMetadata);
+          if (categories.length > 0) {
+            analysis.metadata.categories = categories;
+            await this.libraryService.updateAnalysis(analysis.id, {});
+          }
+
+          this.logger.log(`Generated metadata JSON for analysis ${analysis.id}`);
+        } catch (parseError) {
+          this.logger.warn(`Failed to generate metadata JSON: ${(parseError as Error).message}`);
+          // Don't fail the job if metadata generation fails
+        }
       } catch (error) {
         this.logger.warn(`Failed to add analysis to library: ${(error as Error).message}`);
         // Don't fail the job if library addition fails

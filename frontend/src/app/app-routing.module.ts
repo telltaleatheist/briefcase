@@ -21,6 +21,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/analysis-reports/analysis-reports.component').then(m => m.AnalysisReportsComponent)
   },
   {
+    path: 'clips',
+    loadComponent: () => import('./components/clip-creator/clip-creator.component').then(m => m.ClipCreatorComponent)
+  },
+  {
     path: 'normalize',
     loadComponent: () => import('./components/audio-normalize/audio-normalize.component').then(m => m.AudioNormalizeComponent)
   },
@@ -35,7 +39,7 @@ const routes: Routes = [
 ];
 
 @NgModule({
-  imports: [RouterModule.forRoot(routes)],
+  imports: [RouterModule.forRoot(routes, { useHash: true })],
   exports: [RouterModule]
 })
 export class AppRoutingModule { }

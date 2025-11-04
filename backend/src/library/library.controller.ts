@@ -105,6 +105,52 @@ export class LibraryController {
   }
 
   /**
+   * Get transcript text for an analysis
+   */
+  @Get('analyses/:id/transcript')
+  async getAnalysisTranscript(@Param('id') id: string) {
+    try {
+      const analysis = await this.libraryService.getAnalysis(id);
+
+      if (!analysis) {
+        throw new HttpException('Analysis not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Check if transcript exists
+      if (!analysis.files.transcriptTxt) {
+        return {
+          exists: false,
+          text: null
+        };
+      }
+
+      try {
+        // Read the transcript text file
+        const fs = require('fs/promises');
+        const text = await fs.readFile(analysis.files.transcriptTxt, 'utf-8');
+        return {
+          exists: true,
+          text
+        };
+      } catch (error) {
+        // File doesn't exist or can't be read
+        return {
+          exists: false,
+          text: null
+        };
+      }
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get transcript: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Create a new analysis
    */
   @Post('analyses')

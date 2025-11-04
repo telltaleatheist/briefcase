@@ -5,8 +5,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
+import { NotificationService } from '../../services/notification.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
@@ -38,6 +39,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   // Timeline state
   currentTime = 0;
   duration = 0;
+  isPlaying = false;
   timelineSections: TimelineSection[] = [];
   currentSelection: TimelineSelection = { startTime: 0, endTime: 0 };
   activeSectionIndex: number | null = null;
@@ -47,7 +49,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     private dialogRef: MatDialogRef<VideoPlayerComponent>,
     private libraryService: LibraryService,
     private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private notificationService: NotificationService
   ) {}
 
   async ngOnInit() {
@@ -142,6 +144,15 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
             this.currentSelection = { startTime: 0, endTime: dur };
           }
         }
+      });
+
+      // Handle play/pause events
+      this.player.on('play', () => {
+        this.isPlaying = true;
+      });
+
+      this.player.on('pause', () => {
+        this.isPlaying = false;
       });
 
       // Handle errors
@@ -286,6 +297,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     this.dialogRef.close();
   }
 
+
   /**
    * Handle timeline seek event
    */
@@ -301,6 +313,47 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   onSelectionChange(selection: TimelineSelection) {
     this.currentSelection = selection;
     console.log('Selection changed:', selection);
+  }
+
+  /**
+   * Handle play/pause toggle from timeline
+   */
+  onPlayPause() {
+    if (this.player) {
+      if (this.player.paused()) {
+        this.player.play();
+      } else {
+        this.player.pause();
+      }
+    }
+  }
+
+  /**
+   * Handle playback speed change from timeline
+   */
+  onPlaybackSpeed(speed: number) {
+    if (!this.player) return;
+
+    if (speed < 0) {
+      // Backwards playback - Video.js doesn't support this natively
+      // We'll pause and jump backwards
+      this.player.pause();
+      const currentTime = this.player.currentTime();
+      if (typeof currentTime === 'number') {
+        // Jump back 2 seconds for J key (backwards at "2x")
+        this.player.currentTime(Math.max(0, currentTime - 2));
+      }
+    } else if (speed === 0) {
+      // Pause
+      this.player.pause();
+      this.player.playbackRate(1); // Reset to normal speed
+    } else {
+      // Forward playback at specified speed
+      this.player.playbackRate(Math.abs(speed));
+      if (this.player.paused()) {
+        this.player.play();
+      }
+    }
   }
 
   /**
@@ -321,7 +374,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     const result = await dialogRef.afterClosed().toPromise();
 
     if (result?.created) {
-      this.snackBar.open('Clip created successfully!', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('success', 'Clip Created', 'Clip created successfully!');
     }
   }
 

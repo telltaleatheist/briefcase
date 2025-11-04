@@ -5,11 +5,11 @@ import { MatListModule } from '@angular/material/list';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
+import { NotificationService } from '../../services/notification.service';
 
 @Component({
   selector: 'app-analysis-reports',
@@ -21,7 +21,6 @@ import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../s
     MatIconModule,
     MatButtonModule,
     MatDialogModule,
-    MatSnackBarModule,
     MatProgressSpinnerModule,
     MatTabsModule,
     MatTooltipModule,
@@ -39,7 +38,7 @@ export class AnalysisReportsComponent implements OnInit {
 
   constructor(
     private dialog: MatDialog,
-    private snackBar: MatSnackBar,
+    private notificationService: NotificationService,
     private libraryService: LibraryService
   ) {}
 
@@ -67,7 +66,7 @@ export class AnalysisReportsComponent implements OnInit {
 
     } catch (error: any) {
       console.error('Error loading analyses:', error);
-      this.snackBar.open('Failed to load analyses', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Load Failed', 'Failed to load analyses');
     } finally {
       this.isLoading = false;
     }
@@ -87,7 +86,7 @@ export class AnalysisReportsComponent implements OnInit {
 
     } catch (error: any) {
       console.error('Error loading analysis metadata:', error);
-      this.snackBar.open('Failed to load analysis details', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Load Failed', 'Failed to load analysis details');
     } finally {
       this.isLoading = false;
     }
@@ -107,10 +106,10 @@ export class AnalysisReportsComponent implements OnInit {
         this.parsedMetadata = null;
       }
 
-      this.snackBar.open('Analysis archived', 'Dismiss', { duration: 2000 });
+      this.notificationService.toastOnly('success', 'Analysis Archived', 'Analysis archived successfully');
     } catch (error: any) {
       console.error('Error archiving analysis:', error);
-      this.snackBar.open('Failed to archive analysis', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Archive Failed', 'Failed to archive analysis');
     }
   }
 
@@ -122,10 +121,10 @@ export class AnalysisReportsComponent implements OnInit {
       this.archivedAnalyses = this.archivedAnalyses.filter(a => a.id !== analysis.id);
       this.activeAnalyses.unshift({ ...analysis, archived: false });
 
-      this.snackBar.open('Analysis unarchived', 'Dismiss', { duration: 2000 });
+      this.notificationService.toastOnly('success', 'Analysis Unarchived', 'Analysis unarchived successfully');
     } catch (error: any) {
       console.error('Error unarchiving analysis:', error);
-      this.snackBar.open('Failed to unarchive analysis', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Unarchive Failed', 'Failed to unarchive analysis');
     }
   }
 
@@ -154,11 +153,11 @@ export class AnalysisReportsComponent implements OnInit {
         this.parsedMetadata = null;
       }
 
-      this.snackBar.open('Analysis deleted successfully', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('success', 'Analysis Deleted', 'Analysis deleted successfully');
 
     } catch (error: any) {
       console.error('Error deleting analysis:', error);
-      this.snackBar.open('Failed to delete analysis', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Delete Failed', 'Failed to delete analysis');
     }
   }
 
@@ -206,7 +205,7 @@ export class AnalysisReportsComponent implements OnInit {
         this.selectedAnalysis = updatedAnalysis;
       }
 
-      this.snackBar.open('Video relinked successfully!', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('success', 'Video Relinked', 'Video relinked successfully');
     }
   }
 
@@ -214,7 +213,7 @@ export class AnalysisReportsComponent implements OnInit {
     try {
       await (window as any).electron?.showInFolder(analysis.video.currentPath);
     } catch (error) {
-      this.snackBar.open('Failed to show file', 'Dismiss', { duration: 3000 });
+      this.notificationService.toastOnly('error', 'Show File Failed', 'Failed to show file in folder');
     }
   }
 
