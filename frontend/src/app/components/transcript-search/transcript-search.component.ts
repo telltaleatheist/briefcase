@@ -44,6 +44,7 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   selectedMatchIndex = -1;
 
   private searchSubject = new Subject<string>();
+  private clickListener?: (event: MouseEvent) => void;
 
   ngOnInit() {
     // Debounce search input
@@ -55,14 +56,38 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
       .subscribe(query => {
         this.performSearch(query);
       });
+
+    // Add click listener to close dropdown when clicking outside
+    this.clickListener = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const searchContainer = target.closest('.transcript-search-container');
+
+      if (!searchContainer && this.showResults) {
+        this.showResults = false;
+      }
+    };
+
+    setTimeout(() => {
+      document.addEventListener('click', this.clickListener!);
+    }, 0);
   }
 
   ngOnDestroy() {
     this.searchSubject.complete();
+    if (this.clickListener) {
+      document.removeEventListener('click', this.clickListener);
+    }
   }
 
   onSearchInput() {
     this.searchSubject.next(this.searchQuery);
+  }
+
+  onSearchFocus() {
+    // Show results when focusing if we have matches
+    if (this.matches.length > 0 && this.searchQuery) {
+      this.showResults = true;
+    }
   }
 
   performSearch(query: string) {

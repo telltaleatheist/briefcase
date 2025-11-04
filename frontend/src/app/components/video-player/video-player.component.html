@@ -8,15 +8,7 @@
       {{ data.analysis.title }}
     </h2>
 
-    <!-- Transcript Search -->
-    <div class="header-transcript-search" *ngIf="!error">
-      <app-transcript-search
-        [transcriptText]="transcriptText"
-        [transcriptExists]="transcriptExists"
-        (seekToTime)="onTranscriptSeek($event)"
-        (runAnalysis)="onRunTranscriptAnalysis()">
-      </app-transcript-search>
-    </div>
+    <div style="flex: 1"></div>
 
     <button mat-icon-button (click)="close()" class="close-button" matTooltip="Close">
       <mat-icon>close</mat-icon>
@@ -49,6 +41,16 @@
 
     <!-- Analysis Sections Sidebar -->
     <div class="sections-sidebar" *ngIf="metadata && !error">
+      <!-- Transcript Search Overlay -->
+      <div class="sidebar-transcript-search">
+        <app-transcript-search
+          [transcriptText]="transcriptText"
+          [transcriptExists]="transcriptExists"
+          (seekToTime)="onTranscriptSeek($event)"
+          (runAnalysis)="onRunTranscriptAnalysis()">
+        </app-transcript-search>
+      </div>
+
       <h3>Analysis Sections</h3>
       <p class="sections-hint">Click a section to jump to that timestamp</p>
 
@@ -99,20 +101,10 @@
       mat-raised-button
       color="primary"
       (click)="openCreateClipDialog()"
-      [disabled]="currentSelection.endTime - currentSelection.startTime < 1">
+      [disabled]="currentSelection.endTime - currentSelection.startTime < 1"
+      matTooltip="Keyboard: A (Cursor) • R (Range) • J/K/L (Playback) • Space (Play/Pause) • I/O (In/Out)">
       <mat-icon>content_cut</mat-icon>
       Create Clip ({{ formatTime(currentSelection.startTime) }} - {{ formatTime(currentSelection.endTime) }})
     </button>
-  </div>
-
-  <!-- Keyboard Shortcuts Hint -->
-  <div class="shortcuts-hint" *ngIf="!error">
-    <mat-icon>keyboard</mat-icon>
-    <span>A: Cursor</span>
-    <span>R: Range</span>
-    <span>J/K/L: Playback</span>
-    <span>Space: Play/Pause</span>
-    <span>F: Fullscreen</span>
-    <span>I/O: Set In/Out</span>
   </div>
 </div>

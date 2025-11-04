@@ -182,6 +182,7 @@
   border: 3px solid #ffcc00;
   border-radius: 2px;
   cursor: move;
+  pointer-events: auto; // Ensure it receives mouse events
   box-shadow: 0 0 12px rgba(255, 204, 0, 0.8), inset 0 0 0 1px rgba(255, 204, 0, 0.4);
 
   &:hover {
@@ -242,8 +243,8 @@
 
 .playhead {
   position: absolute;
-  top: 0;
-  height: 100%;
+  top: -100px; // Extend higher above timeline (was -50px)
+  height: calc(100% + 100px); // Make taller to extend upward (was +50px)
   pointer-events: none;
   z-index: 3;
 }
@@ -261,10 +262,10 @@
 
 .playhead-handle {
   position: absolute;
-  top: -4px;
+  top: 0; // Position at very top of the playhead container
   left: 50%;
-  width: 12px;
-  height: 12px;
+  width: 16px; // Made slightly larger for easier clicking
+  height: 16px;
   background-color: #fff;
   border: 2px solid #ff6600;
   border-radius: 50%;
@@ -354,10 +355,10 @@
   }
 }
 
-// Timeline scrollbar
+// Custom Timeline scrollbar (Adobe Premiere style)
 .timeline-scrollbar {
   margin-top: 12px;
-  padding: 12px 0;
+  padding: 12px 8px;
   background: rgba(0, 0, 0, 0.3);
   border-radius: 6px;
   border: 1px solid #333;
@@ -366,87 +367,85 @@
   &.disabled {
     opacity: 0.3;
     pointer-events: none;
+  }
 
-    .scrollbar-input {
-      cursor: not-allowed;
+  .scrollbar-track {
+    position: relative;
+    width: 100%;
+    height: 24px;
+    background: linear-gradient(to bottom, #1a1a1a, #2a2a2a);
+    border: 1px solid #555;
+    border-radius: 4px;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
+
+  .scrollbar-viewport {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: linear-gradient(to bottom, rgba(255, 102, 0, 0.3), rgba(255, 102, 0, 0.4));
+    border: 2px solid #ff6600;
+    border-radius: 4px;
+    cursor: grab;
+    transition: background 0.2s ease;
+    box-shadow: 0 0 8px rgba(255, 102, 0, 0.4);
+    min-width: 30px; // Ensure viewport is always wide enough to show handles
+
+    &:hover {
+      background: linear-gradient(to bottom, rgba(255, 102, 0, 0.4), rgba(255, 102, 0, 0.5));
+      box-shadow: 0 0 12px rgba(255, 102, 0, 0.6);
+    }
+
+    &:active {
+      cursor: grabbing;
+      background: linear-gradient(to bottom, rgba(255, 102, 0, 0.5), rgba(255, 102, 0, 0.6));
     }
   }
 
-  .scrollbar-input {
-    width: 100%;
-    height: 10px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: transparent;
-    outline: none;
-    cursor: pointer;
+  .scrollbar-handle {
+    position: absolute;
+    top: 0;
+    width: 14px;
+    height: 100%;
+    background: linear-gradient(135deg, #ff6600 0%, #ff8833 50%, #ff6600 100%);
+    cursor: ew-resize;
+    z-index: 2;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 
-    &::-webkit-slider-runnable-track {
-      width: 100%;
-      height: 10px;
-      background: linear-gradient(to bottom, #1a1a1a, #2a2a2a);
-      border: 1px solid #555;
-      border-radius: 5px;
-      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    &:hover {
+      background: linear-gradient(135deg, #ff8833 0%, #ffaa55 50%, #ff8833 100%);
+      box-shadow: 0 0 12px rgba(255, 102, 0, 0.8);
+      width: 16px; // Make slightly wider on hover for easier grabbing
     }
 
-    &::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 20px;
-      height: 20px;
-      background: linear-gradient(135deg, #ff6600 0%, #ff8833 50%, #ff6600 100%);
-      border: 2px solid #fff;
-      border-radius: 50%;
-      cursor: grab;
-      margin-top: -6px;
-      box-shadow: 0 3px 8px rgba(255, 102, 0, 0.6), 0 0 12px rgba(255, 102, 0, 0.4);
-      transition: all 0.2s ease;
-
-      &:hover {
-        transform: scale(1.3);
-        box-shadow: 0 4px 12px rgba(255, 102, 0, 0.8), 0 0 16px rgba(255, 102, 0, 0.6);
-        border-color: #ffcc00;
-      }
-
-      &:active {
-        cursor: grabbing;
-        transform: scale(1.2);
-        box-shadow: 0 2px 6px rgba(255, 102, 0, 0.7);
-      }
+    &:active {
+      background: linear-gradient(135deg, #ff9944 0%, #ffbb66 50%, #ff9944 100%);
+      box-shadow: 0 0 8px rgba(255, 102, 0, 0.6);
     }
 
-    &::-moz-range-track {
-      width: 100%;
-      height: 10px;
-      background: linear-gradient(to bottom, #1a1a1a, #2a2a2a);
-      border: 1px solid #555;
-      border-radius: 5px;
-      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    // Add handle indicators (vertical lines)
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 2px;
+      height: 60%;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 1px;
     }
+  }
 
-    &::-moz-range-thumb {
-      width: 20px;
-      height: 20px;
-      background: linear-gradient(135deg, #ff6600 0%, #ff8833 50%, #ff6600 100%);
-      border: 2px solid #fff;
-      border-radius: 50%;
-      cursor: grab;
-      box-shadow: 0 3px 8px rgba(255, 102, 0, 0.6), 0 0 12px rgba(255, 102, 0, 0.4);
-      transition: all 0.2s ease;
+  .scrollbar-handle-left {
+    left: 0;
+    border-radius: 4px 0 0 4px;
+  }
 
-      &:hover {
-        transform: scale(1.3);
-        box-shadow: 0 4px 12px rgba(255, 102, 0, 0.8), 0 0 16px rgba(255, 102, 0, 0.6);
-        border-color: #ffcc00;
-      }
-
-      &:active {
-        cursor: grabbing;
-        transform: scale(1.2);
-        box-shadow: 0 2px 6px rgba(255, 102, 0, 0.7);
-      }
-    }
+  .scrollbar-handle-right {
+    right: 0;
+    border-radius: 0 4px 4px 0;
   }
 }
 

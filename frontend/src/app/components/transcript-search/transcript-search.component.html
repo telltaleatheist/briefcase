@@ -6,6 +6,7 @@
         matInput
         [(ngModel)]="searchQuery"
         (ngModelChange)="onSearchInput()"
+        (focus)="onSearchFocus()"
         [disabled]="!transcriptExists"
         placeholder="Search for words or phrases..."
         autocomplete="off">

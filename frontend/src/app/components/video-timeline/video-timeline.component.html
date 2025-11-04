@@ -138,17 +138,28 @@
       </ng-container>
     </div>
 
-    <!-- Horizontal scrollbar -->
-    <div class="timeline-scrollbar" [class.disabled]="zoomLevel <= 1">
-      <input
-        type="range"
-        [min]="0"
-        [max]="duration - getVisibleDuration()"
-        [step]="0.1"
-        [(ngModel)]="zoomOffset"
-        (input)="onScrollbarChange()"
-        [disabled]="zoomLevel <= 1"
-        class="scrollbar-input">
+    <!-- Custom horizontal scrollbar with zoom handles -->
+    <div class="timeline-scrollbar">
+      <div class="scrollbar-track">
+        <!-- Viewport window (the visible range indicator) -->
+        <div
+          class="scrollbar-viewport"
+          [style]="getScrollbarViewportStyle()"
+          (mousedown)="onScrollbarMouseDown($event)">
+
+          <!-- Left zoom handle -->
+          <div
+            class="scrollbar-handle scrollbar-handle-left"
+            (mousedown)="onLeftZoomHandleMouseDown($event)">
+          </div>
+
+          <!-- Right zoom handle -->
+          <div
+            class="scrollbar-handle scrollbar-handle-right"
+            (mousedown)="onRightZoomHandleMouseDown($event)">
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
