@@ -243,6 +243,20 @@ export class SetupService {
   }
 
   /**
+   * Check if Whisper was successfully installed
+   */
+  private isWhisperInstalled(): boolean {
+    return (this.store as any).get('whisperInstalled', false) as boolean;
+  }
+
+  /**
+   * Mark Whisper as successfully installed
+   */
+  private markWhisperInstalled(installed: boolean): void {
+    (this.store as any).set('whisperInstalled', installed);
+  }
+
+  /**
    * Run AI features setup (Ollama) on first launch
    * Returns true if setup completed or was skipped, false if user wants to try later
    */
@@ -296,9 +310,16 @@ export class SetupService {
    * Returns true if setup completed or was skipped
    */
   async runWhisperSetup(): Promise<boolean> {
-    // Don't offer if already offered before
+    // If whisper is already successfully installed, skip setup entirely
+    if (this.isWhisperInstalled()) {
+      log.info('Whisper is already installed, skipping setup wizard');
+      return true;
+    }
+
+    // Don't offer wizard if already offered before (but installation failed/was skipped)
     if (this.hasOfferedWhisperSetup()) {
-      log.info('Whisper setup already offered in a previous session');
+      log.info('Whisper setup already offered in a previous session (but not installed)');
+      // Don't keep asking - only offer once
       return true;
     }
 
@@ -313,22 +334,26 @@ export class SetupService {
 
       if (result.skipped) {
         log.info('User skipped Whisper setup');
+        this.markWhisperInstalled(false);
         return true;
       }
 
       if (result.installed) {
         log.info('Whisper setup completed successfully');
+        this.markWhisperInstalled(true);
         return true;
       }
 
       if (result.error) {
         log.error(`Whisper setup error: ${result.error}`);
+        this.markWhisperInstalled(false);
         return true; // Continue anyway
       }
 
       return true;
     } catch (error) {
       log.error('Error during Whisper setup:', error);
+      this.markWhisperInstalled(false);
       return true; // Continue anyway
     }
   }

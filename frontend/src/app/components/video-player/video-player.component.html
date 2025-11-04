@@ -1,0 +1,99 @@
+<div class="video-player-dialog">
+  <div class="dialog-header">
+    <h2>
+      <mat-icon>movie</mat-icon>
+      {{ data.analysis.title }}
+    </h2>
+    <button mat-icon-button (click)="close()" class="close-button">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <div class="dialog-content">
+    <!-- Loading State -->
+    <div *ngIf="isLoading" class="loading-overlay">
+      <mat-spinner diameter="60"></mat-spinner>
+      <p>Loading video...</p>
+    </div>
+
+    <!-- Error State -->
+    <div *ngIf="error && !isLoading" class="error-container">
+      <mat-icon>error</mat-icon>
+      <h3>Failed to Load Video</h3>
+      <p>{{ error }}</p>
+      <button mat-raised-button color="primary" (click)="close()">Close</button>
+    </div>
+
+    <!-- Video Player -->
+    <div class="video-container" [class.hidden]="isLoading || error">
+      <video
+        #videoElement
+        class="video-js vjs-default-skin vjs-big-play-centered"
+        playsinline>
+      </video>
+    </div>
+
+    <!-- Analysis Sections Sidebar -->
+    <div class="sections-sidebar" *ngIf="metadata && !error">
+      <h3>Analysis Sections</h3>
+      <p class="sections-hint">Click a section to jump to that timestamp</p>
+
+      <div class="sections-list">
+        <div
+          *ngFor="let section of metadata.sections; let i = index"
+          class="section-item"
+          [class.active]="isSectionActive(i)"
+          (click)="seekToTime(section.startSeconds, i)"
+          [matTooltip]="section.description">
+          <div class="section-marker" [style.background-color]="getCategoryColor(section.category)"></div>
+          <div class="section-content">
+            <div class="section-header">
+              <span class="section-time">{{ section.timeRange }}</span>
+              <span class="section-category" [style.color]="getCategoryColor(section.category)">
+                {{ section.category }}
+              </span>
+            </div>
+            <p class="section-description">{{ section.description }}</p>
+            <div class="section-quotes" *ngIf="section.quotes.length > 0">
+              <div *ngFor="let quote of section.quotes" class="quote-item">
+                <span class="quote-timestamp">{{ quote.timestamp }}</span>
+                <span class="quote-text">"{{ quote.text }}"</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline with Range Selection -->
+  <app-video-timeline
+    *ngIf="!error && !isLoading && duration > 0"
+    [duration]="duration"
+    [currentTime]="currentTime"
+    [sections]="timelineSections"
+    (seek)="onTimelineSeek($event)"
+    (selectionChange)="onSelectionChange($event)">
+  </app-video-timeline>
+
+  <!-- Clip Creation Actions -->
+  <div class="clip-actions" *ngIf="!error && !isLoading">
+    <button
+      mat-raised-button
+      color="primary"
+      (click)="openCreateClipDialog()"
+      [disabled]="currentSelection.endTime - currentSelection.startTime < 1">
+      <mat-icon>content_cut</mat-icon>
+      Create Clip ({{ formatTime(currentSelection.startTime) }} - {{ formatTime(currentSelection.endTime) }})
+    </button>
+  </div>
+
+  <!-- Keyboard Shortcuts Hint -->
+  <div class="shortcuts-hint" *ngIf="!error">
+    <mat-icon>keyboard</mat-icon>
+    <span>Space: Play/Pause</span>
+    <span>←/→: Seek 5s</span>
+    <span>F: Fullscreen</span>
+    <span>I/O: Set In/Out</span>
+  </div>
+</div>

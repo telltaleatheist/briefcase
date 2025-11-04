@@ -1,0 +1,84 @@
+<div class="create-clip-dialog">
+  <h2 mat-dialog-title>
+    <mat-icon>content_cut</mat-icon>
+    Create Clip
+  </h2>
+
+  <mat-dialog-content>
+    <div class="clip-info">
+      <div class="info-row">
+        <span class="label">Source:</span>
+        <span class="value">{{ data.analysis.title }}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Time Range:</span>
+        <span class="value">{{ formatTime(data.startTime) }} - {{ formatTime(data.endTime) }}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Duration:</span>
+        <span class="value">{{ formatTime(duration) }}</span>
+      </div>
+    </div>
+
+    <div class="form-container" *ngIf="!isCreating">
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Clip Title</mat-label>
+        <input
+          matInput
+          [(ngModel)]="title"
+          placeholder="Enter clip title"
+          required
+          [disabled]="isCreating">
+        <mat-icon matPrefix>title</mat-icon>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Description (Optional)</mat-label>
+        <textarea
+          matInput
+          [(ngModel)]="description"
+          placeholder="Enter clip description"
+          rows="3"
+          [disabled]="isCreating"></textarea>
+        <mat-icon matPrefix>description</mat-icon>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Category (Optional)</mat-label>
+        <input
+          matInput
+          [(ngModel)]="category"
+          placeholder="e.g., violence, extremism, highlight"
+          [disabled]="isCreating">
+        <mat-icon matPrefix>label</mat-icon>
+      </mat-form-field>
+    </div>
+
+    <!-- Creating State -->
+    <div *ngIf="isCreating" class="creating-container">
+      <mat-spinner diameter="60"></mat-spinner>
+      <p>Extracting clip from video...</p>
+      <p class="hint">This may take a few moments depending on the clip duration</p>
+    </div>
+
+    <!-- Error Message -->
+    <div *ngIf="error && !isCreating" class="error-message">
+      <mat-icon>error</mat-icon>
+      <p>{{ error }}</p>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end">
+    <button mat-button (click)="cancel()" [disabled]="isCreating">
+      Cancel
+    </button>
+    <button
+      mat-raised-button
+      color="primary"
+      (click)="createClip()"
+      [disabled]="isCreating || !title.trim()">
+      <mat-icon>content_cut</mat-icon>
+      Create Clip
+    </button>
+  </mat-dialog-actions>
+</div>

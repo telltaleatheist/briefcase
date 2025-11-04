@@ -7,25 +7,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { SettingsService } from '../../services/settings.service';
-
-interface ReportFile {
-  name: string;
-  path: string;
-  date: Date;
-  size: number;
-}
-
-interface ParsedSection {
-  timeRange: string;
-  category: string;
-  description: string;
-  quotes: Array<{
-    timestamp: string;
-    text: string;
-    significance: string;
-  }>;
-}
+import { MatTabsModule } from '@angular/material/tabs';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 
 @Component({
   selector: 'app-analysis-reports',
@@ -39,195 +23,199 @@ interface ParsedSection {
     MatDialogModule,
     MatSnackBarModule,
     MatProgressSpinnerModule,
+    MatTabsModule,
+    MatTooltipModule,
   ],
   templateUrl: './analysis-reports.component.html',
   styleUrls: ['./analysis-reports.component.scss']
 })
 export class AnalysisReportsComponent implements OnInit {
-  reports: ReportFile[] = [];
-  selectedReport: ReportFile | null = null;
-  reportContent: string = '';
-  parsedSections: ParsedSection[] = [];
+  activeAnalyses: LibraryAnalysis[] = [];
+  archivedAnalyses: LibraryAnalysis[] = [];
+  selectedAnalysis: LibraryAnalysis | null = null;
+  parsedMetadata: ParsedAnalysisMetadata | null = null;
   isLoading = false;
-  reportsDirectory = '';
+  currentTab: 'active' | 'archived' = 'active';
 
   constructor(
     private dialog: MatDialog,
     private snackBar: MatSnackBar,
-    private settingsService: SettingsService
+    private libraryService: LibraryService
   ) {}
 
   async ngOnInit() {
-    await this.loadReports();
+    await this.loadAnalyses();
   }
 
-  async loadReports() {
+  async loadAnalyses() {
     try {
       this.isLoading = true;
 
-      // Get the configured output directory from settings
-      const settings = this.settingsService.getCurrentSettings();
-      const baseOutputDir = settings.outputDir || (await this.getDefaultOutputDir());
-      this.reportsDirectory = `${baseOutputDir}/analysis/reports`;
+      // Load active and archived analyses
+      const [active, archived] = await Promise.all([
+        this.libraryService.getAnalyses(false),
+        this.libraryService.getAnalyses(true)
+      ]);
 
-      // Use electron to read directory
-      const files = await this.readReportsDirectory();
+      this.activeAnalyses = active.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
 
-      this.reports = files
-        .filter((f: any) => f.name.endsWith('.txt'))
-        .map((f: any) => ({
-          name: f.name.replace('.txt', ''),
-          path: f.path,
-          date: new Date(f.stats.mtime),
-          size: f.stats.size
-        }))
-        .sort((a, b) => b.date.getTime() - a.date.getTime());
+      this.archivedAnalyses = archived.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
 
     } catch (error: any) {
-      console.error('Error loading reports:', error);
-      this.snackBar.open('Failed to load reports', 'Dismiss', { duration: 3000 });
+      console.error('Error loading analyses:', error);
+      this.snackBar.open('Failed to load analyses', 'Dismiss', { duration: 3000 });
     } finally {
       this.isLoading = false;
     }
   }
 
-  private async getDefaultOutputDir(): Promise<string> {
-    try {
-      const homeDir = await (window as any).electron?.environment?.getPathConfig?.();
-      if (homeDir?.downloadsPath) {
-        return `${homeDir.downloadsPath}/clippy`;
-      }
-      // Fallback to a generic path
-      return 'clippy';
-    } catch (error) {
-      console.error('Error getting default output dir:', error);
-      return 'clippy';
-    }
+  get currentAnalyses(): LibraryAnalysis[] {
+    return this.currentTab === 'active' ? this.activeAnalyses : this.archivedAnalyses;
   }
 
-  private async readReportsDirectory(): Promise<any[]> {
-    try {
-      const response = await fetch('/api/api/analysis/reports');
-      if (!response.ok) throw new Error('Failed to fetch reports');
-      const data = await response.json();
-      return data.reports || [];
-    } catch (error) {
-      console.error('Error reading reports directory:', error);
-      return [];
-    }
-  }
-
-  async selectReport(report: ReportFile) {
+  async selectAnalysis(analysis: LibraryAnalysis) {
     try {
       this.isLoading = true;
-      this.selectedReport = report;
+      this.selectedAnalysis = analysis;
 
-      // Read file content
-      this.reportContent = await this.readReportFile(report.path);
-
-      // Parse the content
-      this.parsedSections = this.parseReportContent(this.reportContent);
+      // Load parsed metadata
+      this.parsedMetadata = await this.libraryService.getAnalysisMetadata(analysis.id);
 
     } catch (error: any) {
-      console.error('Error reading report:', error);
-      this.snackBar.open('Failed to read report', 'Dismiss', { duration: 3000 });
+      console.error('Error loading analysis metadata:', error);
+      this.snackBar.open('Failed to load analysis details', 'Dismiss', { duration: 3000 });
     } finally {
       this.isLoading = false;
     }
   }
 
-  private async readReportFile(filePath: string): Promise<string> {
-    const response = await fetch(`/api/api/analysis/report/${encodeURIComponent(filePath)}`);
-    if (!response.ok) throw new Error('Failed to read file');
-    const data = await response.json();
-    return data.content || '';
-  }
+  async archiveAnalysis(analysis: LibraryAnalysis) {
+    try {
+      await this.libraryService.archiveAnalysis(analysis.id);
 
-  private parseReportContent(content: string): ParsedSection[] {
-    const sections: ParsedSection[] = [];
+      // Move from active to archived
+      this.activeAnalyses = this.activeAnalyses.filter(a => a.id !== analysis.id);
+      this.archivedAnalyses.unshift({ ...analysis, archived: true });
 
-    // Split by section dividers (80+ dashes)
-    const parts = content.split(/[-]{80,}/);
-
-    for (const part of parts) {
-      if (part.trim().length === 0 ||
-          part.includes('VIDEO ANALYSIS RESULTS') ||
-          part.includes('VIDEO OVERVIEW') ||
-          part.includes('PERFORMANCE METRICS')) {
-        continue;
+      // Clear selection if archived analysis was selected
+      if (this.selectedAnalysis?.id === analysis.id) {
+        this.selectedAnalysis = null;
+        this.parsedMetadata = null;
       }
 
-      const lines = part.trim().split('\n');
+      this.snackBar.open('Analysis archived', 'Dismiss', { duration: 2000 });
+    } catch (error: any) {
+      console.error('Error archiving analysis:', error);
+      this.snackBar.open('Failed to archive analysis', 'Dismiss', { duration: 3000 });
+    }
+  }
 
-      // Parse section header - handle both formats:
-      // Format 1: "**0:09 - 0:12 - Description [category]**"
-      // Format 2: "**0:00 - Description [routine]**"
-      const headerLine = lines.find(l => l.trim().startsWith('**') && l.includes('[') && l.includes(']'));
-      if (!headerLine) continue;
+  async unarchiveAnalysis(analysis: LibraryAnalysis) {
+    try {
+      await this.libraryService.unarchiveAnalysis(analysis.id);
 
-      // Try format with both start and end time
-      let headerMatch = headerLine.match(/\*\*(.+?)\s+-\s+(.+?)\s+-\s+(.+?)\s+\[(.+?)\]\*\*/);
-      let timeRange = '';
-      let description = '';
-      let category = '';
+      // Move from archived to active
+      this.archivedAnalyses = this.archivedAnalyses.filter(a => a.id !== analysis.id);
+      this.activeAnalyses.unshift({ ...analysis, archived: false });
 
-      if (headerMatch) {
-        // Format 1: start - end - description [category]
-        timeRange = `${headerMatch[1]} - ${headerMatch[2]}`;
-        description = headerMatch[3];
-        category = headerMatch[4];
+      this.snackBar.open('Analysis unarchived', 'Dismiss', { duration: 2000 });
+    } catch (error: any) {
+      console.error('Error unarchiving analysis:', error);
+      this.snackBar.open('Failed to unarchive analysis', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  async deleteAnalysis(analysis: LibraryAnalysis) {
+    const confirmed = confirm(
+      `Are you sure you want to delete "${analysis.title}"?\n\nThis will permanently delete the analysis and all associated files. This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await this.libraryService.deleteAnalysis(analysis.id);
+
+      // Remove from appropriate list
+      if (analysis.archived) {
+        this.archivedAnalyses = this.archivedAnalyses.filter(a => a.id !== analysis.id);
       } else {
-        // Try format with only start time
-        headerMatch = headerLine.match(/\*\*(.+?)\s+-\s+(.+?)\s+\[(.+?)\]\*\*/);
-        if (headerMatch) {
-          // Format 2: start - description [category]
-          timeRange = headerMatch[1];
-          description = headerMatch[2];
-          category = headerMatch[3];
-        } else {
-          continue;
-        }
+        this.activeAnalyses = this.activeAnalyses.filter(a => a.id !== analysis.id);
       }
 
-      const section: ParsedSection = {
-        timeRange,
-        description,
-        category,
-        quotes: []
-      };
-
-      // Parse quotes (if any)
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        // Quote line format: "00:09 - "quote text""
-        const quoteMatch = line.match(/^(\d+:\d+)\s+-\s+"(.+)"$/);
-        if (quoteMatch) {
-          const timestamp = quoteMatch[1];
-          const text = quoteMatch[2];
-
-          // Next line should be significance (starts with →)
-          let significance = '';
-          if (i + 1 < lines.length) {
-            const nextLine = lines[i + 1].trim();
-            if (nextLine.startsWith('→')) {
-              significance = nextLine.replace('→', '').trim();
-            }
-          }
-
-          section.quotes.push({
-            timestamp,
-            text,
-            significance
-          });
-        }
+      // Clear selection if deleted analysis was selected
+      if (this.selectedAnalysis?.id === analysis.id) {
+        this.selectedAnalysis = null;
+        this.parsedMetadata = null;
       }
 
-      // Add section even if it has no quotes (routine sections)
-      sections.push(section);
+      this.snackBar.open('Analysis deleted successfully', 'Dismiss', { duration: 3000 });
+
+    } catch (error: any) {
+      console.error('Error deleting analysis:', error);
+      this.snackBar.open('Failed to delete analysis', 'Dismiss', { duration: 3000 });
     }
+  }
 
-    return sections;
+  async manageClips(analysis: LibraryAnalysis) {
+    const { VideoPlayerComponent } = await import('../video-player/video-player.component');
+
+    this.dialog.open(VideoPlayerComponent, {
+      width: '100vw',
+      height: '100vh',
+      maxWidth: '100vw',
+      maxHeight: '100vh',
+      panelClass: 'fullscreen-dialog',
+      data: { analysis }
+    });
+  }
+
+  async relinkVideo(analysis: LibraryAnalysis) {
+    const { RelinkDialogComponent } = await import('../relink-dialog/relink-dialog.component');
+
+    const dialogRef = this.dialog.open(RelinkDialogComponent, {
+      width: '700px',
+      data: { analysis }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.relinked) {
+      // Update the analysis in the local list
+      const updatedAnalysis = await this.libraryService.getAnalysis(analysis.id);
+
+      if (analysis.archived) {
+        const index = this.archivedAnalyses.findIndex(a => a.id === analysis.id);
+        if (index !== -1) {
+          this.archivedAnalyses[index] = updatedAnalysis;
+        }
+      } else {
+        const index = this.activeAnalyses.findIndex(a => a.id === analysis.id);
+        if (index !== -1) {
+          this.activeAnalyses[index] = updatedAnalysis;
+        }
+      }
+
+      // Update selected analysis if it's the one we relinked
+      if (this.selectedAnalysis?.id === analysis.id) {
+        this.selectedAnalysis = updatedAnalysis;
+      }
+
+      this.snackBar.open('Video relinked successfully!', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  async showInFolder(analysis: LibraryAnalysis) {
+    try {
+      await (window as any).electron?.showInFolder(analysis.video.currentPath);
+    } catch (error) {
+      this.snackBar.open('Failed to show file', 'Dismiss', { duration: 3000 });
+    }
   }
 
   getCategoryIcon(category: string): string {
@@ -251,86 +239,51 @@ export class AnalysisReportsComponent implements OnInit {
   }
 
   getCategoryColor(category: string): string {
-    const colors: {[key: string]: string} = {
-      'violence': '#d32f2f',      // Dark red
-      'extremism': '#f44336',     // Red
-      'hate': '#e91e63',          // Pink-red
-      'conspiracy': '#ff9800',    // Orange
-      'shocking': '#ff5722',      // Deep orange
-      'routine': '#9e9e9e',       // Grey
-      // Legacy categories (for old reports)
-      'controversy': '#ff5722',
-      'claim': '#2196f3',
-      'argument': '#9c27b0',
-      'emotional': '#ff9800',
-      'insight': '#4caf50',
-      'technical': '#607d8b',
-      'other': '#757575'
-    };
-    return colors[category] || '#757575';
+    // Use consistent color hash for dynamic categories
+    if (!category) return '#757575';
+
+    const colors = [
+      '#ef4444', // red
+      '#f97316', // orange
+      '#eab308', // yellow
+      '#22c55e', // green
+      '#3b82f6', // blue
+      '#a855f7', // purple
+      '#ec4899', // pink
+    ];
+
+    // Simple hash to pick consistent color
+    const hash = category.split('').reduce((acc, char) => {
+      return char.charCodeAt(0) + ((acc << 5) - acc);
+    }, 0);
+
+    return colors[Math.abs(hash) % colors.length];
   }
 
-  async openInEditor(report: ReportFile) {
-    try {
-      await (window as any).electron?.openFile(report.path);
-    } catch (error) {
-      this.snackBar.open('Failed to open file', 'Dismiss', { duration: 3000 });
-    }
-  }
-
-  async showInFolder(report: ReportFile) {
-    try {
-      await (window as any).electron?.showInFolder(report.path);
-    } catch (error) {
-      this.snackBar.open('Failed to show file', 'Dismiss', { duration: 3000 });
-    }
-  }
-
-  formatFileSize(bytes: number): string {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  }
-
-  formatDate(date: Date): string {
+  formatDate(dateString: string): string {
+    const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  async deleteReport(report: ReportFile) {
-    // Show confirmation dialog
-    const confirmed = confirm(
-      `Are you sure you want to delete "${report.name}"?\n\nThis will permanently delete the analysis report file. This action cannot be undone.`
-    );
+  formatDuration(seconds?: number): string {
+    if (!seconds) return 'Unknown';
 
-    if (!confirmed) {
-      return;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (mins < 60) {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
 
-    try {
-      // Call backend API to delete the file
-      const response = await fetch(`/api/api/analysis/report/${encodeURIComponent(report.path)}`, {
-        method: 'DELETE'
-      });
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return `${hours}:${remainingMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
 
-      if (!response.ok) {
-        throw new Error('Failed to delete report');
-      }
-
-      // Remove from local list
-      this.reports = this.reports.filter(r => r.path !== report.path);
-
-      // Clear selection if the deleted report was selected
-      if (this.selectedReport?.path === report.path) {
-        this.selectedReport = null;
-        this.reportContent = '';
-        this.parsedSections = [];
-      }
-
-      this.snackBar.open('Report deleted successfully', 'Dismiss', { duration: 3000 });
-
-    } catch (error: any) {
-      console.error('Error deleting report:', error);
-      this.snackBar.open('Failed to delete report', 'Dismiss', { duration: 3000 });
-    }
+  onTabChange(index: number) {
+    this.currentTab = index === 0 ? 'active' : 'archived';
+    // Clear selection when switching tabs
+    this.selectedAnalysis = null;
+    this.parsedMetadata = null;
   }
 }

@@ -9,6 +9,7 @@ import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { PathService } from '../path/path.service';
 import { SharedConfigService } from '../config/shared-config.service';
+import { LibraryService } from '../library/library.service';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -64,6 +65,7 @@ export class AnalysisService {
     private pathService: PathService,
     private eventEmitter: EventEmitter2,
     private configService: SharedConfigService,
+    private libraryService: LibraryService,
   ) {}
 
   /**
@@ -338,6 +340,23 @@ export class AnalysisService {
         completedAt: new Date(),
         timing: { ...timing, totalDuration },
       });
+
+      // Add to library
+      try {
+        await this.libraryService.createAnalysis({
+          title: videoTitle,
+          videoPath: videoPath,
+          transcriptSrtPath: transcriptPath,
+          transcriptTxtPath: txtTranscriptPath,
+          analysisReportPath: analysisOutputPath,
+          analysisModel: request.aiModel,
+          transcriptionModel: request.whisperModel || 'base',
+        });
+        this.logger.log(`Added analysis to library for job ${jobId}`);
+      } catch (error) {
+        this.logger.warn(`Failed to add analysis to library: ${(error as Error).message}`);
+        // Don't fail the job if library addition fails
+      }
 
       this.logger.log(`Analysis job ${jobId} completed successfully`);
     } catch (error: any) {

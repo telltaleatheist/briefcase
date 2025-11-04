@@ -17,8 +17,9 @@
 .env.local
 .env.*.local
 
-# Binaries
-bin/
+# Binaries (but keep utilities/bin for bundled executables)
+bin/*
+!utilities/bin/*
 
 # Dependency lock files (optional, if not using lock files in version control)
 package-lock.json
@@ -61,3 +62,6 @@ electron/._.DS_Store
 
 # Claude Code configuration
 .claude/
+utilities/bin/yt-dlp_macos
+utilities/bin/yt-dlp.exe
+utilities/bin/yt-dlp_linux

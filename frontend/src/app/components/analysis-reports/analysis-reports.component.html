@@ -1,77 +1,173 @@
-<!-- Analysis Reports Viewer -->
+<!-- Analysis Reports Viewer with Library Integration -->
 <div class="reports-container">
   <div class="page-content">
 
-    <!-- File Browser (Left Panel) -->
+    <!-- File Browser (Left Panel) with Tabs -->
     <div class="panel file-browser-panel">
       <div class="panel-header">
-        <h4 class="panel-title">📊 Analysis Reports</h4>
-        <p class="panel-subtitle">{{ reports.length }} report{{ reports.length !== 1 ? 's' : '' }} found</p>
+        <h4 class="panel-title">📊 Analysis Library</h4>
       </div>
 
-      <div class="panel-content">
-        <div *ngIf="isLoading && reports.length === 0" class="loading-container">
-          <mat-spinner diameter="40"></mat-spinner>
-          <p>Loading reports...</p>
-        </div>
+      <!-- Tabs for Active/Archived -->
+      <mat-tab-group (selectedIndexChange)="onTabChange($event)">
+        <!-- Active Tab -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon class="tab-icon">folder_open</mat-icon>
+            Active ({{ activeAnalyses.length }})
+          </ng-template>
 
-        <div *ngIf="!isLoading && reports.length === 0" class="empty-state">
-          <mat-icon>description</mat-icon>
-          <p>No analysis reports found</p>
-          <small>Run video analysis to generate reports</small>
-        </div>
+          <div class="tab-content">
+            <div *ngIf="isLoading && activeAnalyses.length === 0" class="loading-container">
+              <mat-spinner diameter="40"></mat-spinner>
+              <p>Loading analyses...</p>
+            </div>
 
-        <div *ngIf="reports.length > 0" class="reports-list">
-          <div
-            *ngFor="let report of reports"
-            (click)="selectReport(report)"
-            [class.selected]="selectedReport?.path === report.path"
-            class="report-item">
-            <div class="report-content">
-              <div class="report-title">{{ report.name }}</div>
-              <div class="report-meta">
-                <span class="report-date">{{ formatDate(report.date) }}</span>
-                <span class="report-size">{{ formatFileSize(report.size) }}</span>
+            <div *ngIf="!isLoading && activeAnalyses.length === 0" class="empty-state">
+              <mat-icon>description</mat-icon>
+              <p>No active analyses</p>
+              <small>Run video analysis to create new analyses</small>
+            </div>
+
+            <div *ngIf="activeAnalyses.length > 0" class="reports-list">
+              <div
+                *ngFor="let analysis of activeAnalyses"
+                (click)="selectAnalysis(analysis)"
+                [class.selected]="selectedAnalysis?.id === analysis.id"
+                class="report-item">
+                <div class="report-content">
+                  <div class="report-title">{{ analysis.title }}</div>
+                  <div class="report-meta">
+                    <span class="report-date">{{ formatDate(analysis.createdAt) }}</span>
+                    <span class="report-duration" *ngIf="analysis.video.durationSeconds">
+                      {{ formatDuration(analysis.video.durationSeconds) }}
+                    </span>
+                    <span class="video-status" *ngIf="!analysis.video.isLinked" matTooltip="Video not found">
+                      <mat-icon>link_off</mat-icon>
+                    </span>
+                  </div>
+                  <div class="report-categories" *ngIf="analysis.metadata.categories.length > 0">
+                    <span
+                      *ngFor="let cat of analysis.metadata.categories"
+                      class="category-badge"
+                      [style.background-color]="getCategoryColor(cat)">
+                      {{ cat }}
+                    </span>
+                  </div>
+                </div>
+                <div class="report-actions">
+                  <button mat-icon-button (click)="archiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Archive">
+                    <mat-icon>archive</mat-icon>
+                  </button>
+                  <button mat-icon-button (click)="deleteAnalysis(analysis); $event.stopPropagation()" matTooltip="Delete">
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                </div>
               </div>
             </div>
-            <button mat-icon-button (click)="deleteReport(report); $event.stopPropagation()" class="delete-button">
-              <mat-icon>close</mat-icon>
-            </button>
           </div>
-        </div>
-      </div>
+        </mat-tab>
+
+        <!-- Archived Tab -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon class="tab-icon">inventory_2</mat-icon>
+            Archived ({{ archivedAnalyses.length }})
+          </ng-template>
+
+          <div class="tab-content">
+            <div *ngIf="isLoading && archivedAnalyses.length === 0" class="loading-container">
+              <mat-spinner diameter="40"></mat-spinner>
+              <p>Loading archived analyses...</p>
+            </div>
+
+            <div *ngIf="!isLoading && archivedAnalyses.length === 0" class="empty-state">
+              <mat-icon>inventory_2</mat-icon>
+              <p>No archived analyses</p>
+              <small>Archive analyses you don't need immediate access to</small>
+            </div>
+
+            <div *ngIf="archivedAnalyses.length > 0" class="reports-list">
+              <div
+                *ngFor="let analysis of archivedAnalyses"
+                (click)="selectAnalysis(analysis)"
+                [class.selected]="selectedAnalysis?.id === analysis.id"
+                class="report-item">
+                <div class="report-content">
+                  <div class="report-title">{{ analysis.title }}</div>
+                  <div class="report-meta">
+                    <span class="report-date">{{ formatDate(analysis.createdAt) }}</span>
+                    <span class="report-duration" *ngIf="analysis.video.durationSeconds">
+                      {{ formatDuration(analysis.video.durationSeconds) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="report-actions">
+                  <button mat-icon-button (click)="unarchiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Unarchive">
+                    <mat-icon>unarchive</mat-icon>
+                  </button>
+                  <button mat-icon-button (click)="deleteAnalysis(analysis); $event.stopPropagation()" matTooltip="Delete">
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
+      </mat-tab-group>
     </div>
 
-    <!-- Report Viewer (Right Panel) -->
+    <!-- Analysis Viewer (Right Panel) -->
     <div class="panel report-viewer-panel">
-      <div class="panel-header" *ngIf="selectedReport">
-        <h4 class="panel-title">{{ selectedReport.name }}</h4>
+      <div class="panel-header" *ngIf="selectedAnalysis">
+        <div class="header-content">
+          <h4 class="panel-title">{{ selectedAnalysis.title }}</h4>
+          <p class="panel-subtitle" *ngIf="selectedAnalysis.video.durationSeconds">
+            Duration: {{ formatDuration(selectedAnalysis.video.durationSeconds) }}
+            <span class="divider">•</span>
+            {{ formatDate(selectedAnalysis.createdAt) }}
+          </p>
+        </div>
         <div class="panel-actions">
-          <button mat-stroked-button (click)="showInFolder(selectedReport)">
+          <button
+            mat-raised-button
+            color="primary"
+            (click)="manageClips(selectedAnalysis)">
+            <mat-icon>movie_edit</mat-icon>
+            Manage Clips
+          </button>
+          <button
+            mat-stroked-button
+            (click)="showInFolder(selectedAnalysis)"
+            [disabled]="!selectedAnalysis.video.isLinked">
             <mat-icon>folder</mat-icon>
             Show in Folder
           </button>
-          <button mat-raised-button color="primary" (click)="openInEditor(selectedReport)">
-            <mat-icon>edit</mat-icon>
-            Open in Editor
+          <button
+            *ngIf="!selectedAnalysis.video.isLinked"
+            mat-stroked-button
+            color="warn"
+            (click)="relinkVideo(selectedAnalysis)">
+            <mat-icon>link_off</mat-icon>
+            Relink Video
           </button>
         </div>
       </div>
 
       <div class="panel-content viewer-content">
-        <div *ngIf="!selectedReport" class="empty-viewer">
+        <div *ngIf="!selectedAnalysis" class="empty-viewer">
           <mat-icon>touch_app</mat-icon>
-          <p>Select a report to view</p>
-          <small>Click on a report from the list on the left</small>
+          <p>Select an analysis to view</p>
+          <small>Click on an analysis from the list on the left</small>
         </div>
 
-        <div *ngIf="isLoading && selectedReport" class="loading-container">
+        <div *ngIf="isLoading && selectedAnalysis" class="loading-container">
           <mat-spinner diameter="40"></mat-spinner>
-          <p>Loading report...</p>
+          <p>Loading analysis...</p>
         </div>
 
-        <div *ngIf="!isLoading && selectedReport && parsedSections.length > 0" class="report-sections">
-          <div *ngFor="let section of parsedSections; let i = index" class="section-card">
+        <div *ngIf="!isLoading && selectedAnalysis && parsedMetadata && parsedMetadata.sections.length > 0" class="report-sections">
+          <div *ngFor="let section of parsedMetadata.sections; let i = index" class="section-card">
             <!-- Section Header -->
             <div class="section-header">
               <div class="section-icon" [style.background-color]="getCategoryColor(section.category)">
@@ -89,7 +185,7 @@
             </div>
 
             <!-- Quotes -->
-            <div class="quotes-container">
+            <div class="quotes-container" *ngIf="section.quotes.length > 0">
               <div *ngFor="let quote of section.quotes" class="quote-block">
                 <div class="quote-header">
                   <mat-icon class="quote-icon">format_quote</mat-icon>
@@ -105,10 +201,10 @@
           </div>
         </div>
 
-        <div *ngIf="!isLoading && selectedReport && parsedSections.length === 0" class="empty-report">
+        <div *ngIf="!isLoading && selectedAnalysis && parsedMetadata && parsedMetadata.sections.length === 0" class="empty-report">
           <mat-icon>info</mat-icon>
-          <p>No sections found in this report</p>
-          <small>The report may be empty or malformed</small>
+          <p>No sections found in this analysis</p>
+          <small>The analysis may be empty or malformed</small>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { EventEmitter } from 'events';
+import { getPythonCommand } from '../shared/python-config';
 
 export interface PythonProgress {
   type: 'progress';
@@ -50,8 +51,10 @@ export class PythonBridgeService {
       let resultData: any = null;
       let errorMessage: string | null = null;
 
-      // Use system Python (cross-platform)
-      const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
+      // Use centralized Python configuration
+      // This ensures we use the SAME Python everywhere in the app
+      const pythonPath = getPythonCommand();
+      this.logger.log(`Using Python: ${pythonPath}`);
 
       // Spawn Python process
       const pythonProcess: ChildProcess = spawn(pythonPath, [

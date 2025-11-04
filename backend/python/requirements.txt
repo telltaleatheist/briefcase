@@ -1,2 +1,17 @@
-openai-whisper==20231117
-requests==2.31.0
+# Core dependencies for audio transcription and AI analysis
+# Install these in order for best compatibility
+
+# Step 1: Install compatible numpy first (Whisper requires < 2.0)
+numpy==1.26.4
+
+# Step 2: Install PyTorch (CPU-only version to save space)
+torch==2.1.2
+torchaudio==2.1.2
+
+# Step 3: Install main packages
+openai-whisper==20231117  # Audio transcription
+requests==2.31.0  # HTTP requests for Ollama/APIs
+
+# Step 4: Optional - AI provider SDKs (for cloud AI services)
+# openai  # For GPT models (uncomment if using OpenAI API)
+# anthropic  # For Claude API (uncomment if using Anthropic API)

@@ -1,0 +1,105 @@
+<div class="timeline-container">
+  <!-- Timeline controls -->
+  <div class="timeline-controls">
+    <div class="selection-info">
+      <span class="selection-label">Selection:</span>
+      <span class="selection-time">{{ formatTime(selectionStart) }} - {{ formatTime(selectionEnd) }}</span>
+      <span class="selection-duration">({{ getSelectionDuration() }})</span>
+    </div>
+
+    <div class="timeline-buttons">
+      <button
+        mat-icon-button
+        (click)="setSelectionFromPlayhead()"
+        matTooltip="Set start to playhead (I)"
+        class="timeline-button">
+        <mat-icon>keyboard_tab</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="setSelectionToPlayhead()"
+        matTooltip="Set end to playhead (O)"
+        class="timeline-button">
+        <mat-icon>last_page</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="resetSelection()"
+        matTooltip="Reset selection"
+        class="timeline-button">
+        <mat-icon>reset_tv</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="resetZoom()"
+        matTooltip="Reset zoom (scroll to zoom)"
+        class="timeline-button"
+        [class.active]="zoomLevel > 1">
+        <mat-icon>zoom_out_map</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Timeline track -->
+  <div class="timeline-wrapper">
+    <div
+      #timeline
+      class="timeline"
+      (click)="onTimelineClick($event)"
+      (mousedown)="onTimelineMouseDown($event)">
+
+      <!-- Section markers (background) -->
+      <div class="sections-layer">
+        <div
+          *ngFor="let section of sections"
+          class="section-marker"
+          [style]="getSectionStyle(section)"
+          [matTooltip]="section.description">
+        </div>
+      </div>
+
+      <!-- Selection window -->
+      <div
+        #selectionWindow
+        class="selection-window"
+        [style]="getSelectionStyle()"
+        (mousedown)="onWindowMouseDown($event)">
+
+        <!-- Left handle -->
+        <div
+          class="selection-handle selection-handle-left"
+          (mousedown)="onLeftHandleMouseDown($event)">
+          <div class="handle-line"></div>
+        </div>
+
+        <!-- Right handle -->
+        <div
+          class="selection-handle selection-handle-right"
+          (mousedown)="onRightHandleMouseDown($event)">
+          <div class="handle-line"></div>
+        </div>
+      </div>
+
+      <!-- Playhead -->
+      <div
+        class="playhead"
+        [style]="getPlayheadStyle()"
+        (mousedown)="onPlayheadMouseDown($event)">
+        <div class="playhead-line"></div>
+        <div class="playhead-handle"></div>
+      </div>
+    </div>
+
+    <!-- Time markers -->
+    <div class="time-markers">
+      <div class="time-marker" style="left: 0%">{{ formatTime(getVisibleStartTime()) }}</div>
+      <div class="time-marker" style="left: 25%">{{ formatTime(getVisibleStartTime() + getVisibleDuration() * 0.25) }}</div>
+      <div class="time-marker" style="left: 50%">{{ formatTime(getVisibleStartTime() + getVisibleDuration() * 0.5) }}</div>
+      <div class="time-marker" style="left: 75%">{{ formatTime(getVisibleStartTime() + getVisibleDuration() * 0.75) }}</div>
+      <div class="time-marker" style="left: 100%">{{ formatTime(getVisibleEndTime()) }}</div>
+    </div>
+  </div>
+</div>

@@ -7,6 +7,7 @@ import { FfmpegModule } from './ffmpeg/ffmpeg.module';
 import { PathModule } from './path/path.module';
 import { MediaModule } from './media/media.module';
 import { AnalysisModule } from './analysis/analysis.module';
+import { LibraryModule } from './library/library.module';
 import { ConfigModule } from '@nestjs/config';
 import { SharedConfigModule } from './config/shared-config.module';
 import { environment } from './config/environment';
@@ -29,6 +30,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     PathModule,
     MediaModule,
     AnalysisModule,
+    LibraryModule,
     JobStateManagerModule,
   ],
   controllers: [AppController],
