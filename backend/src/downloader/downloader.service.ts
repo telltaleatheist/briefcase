@@ -171,8 +171,36 @@ export class DownloaderService implements OnModuleInit {
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
         // YouTube-specific configuration with fallback methods
         this.configureYouTubeDownload(ytDlpManager, options);
+      } else if (options.url.includes('rumble.com')) {
+        // Rumble-specific configuration: Use HLS formats to avoid .tar extension issues
+        // Map quality to HLS format codes based on Rumble's format naming
+        let formatSelector: string;
+        const quality = parseInt(options.quality || '720');
+
+        if (quality <= 360) {
+          // 360p or lower: use hls-222 (360p low bitrate) or hls-681 (360p high bitrate)
+          formatSelector = 'hls-681/hls-222';
+        } else if (quality <= 480) {
+          // 480p: use hls-1057
+          formatSelector = 'hls-1057/hls-681/hls-222';
+        } else if (quality <= 720) {
+          // 720p: use hls-2138
+          formatSelector = 'hls-2138/hls-1057/hls-681';
+        } else {
+          // 1080p or higher: use hls-4108
+          formatSelector = 'hls-4108/hls-2138/hls-1057';
+        }
+
+        // Add audio track and merge
+        ytDlpManager.addOption('--format', `${formatSelector}+audio-192p/best`);
+        ytDlpManager.addOption('--merge-output-format', 'mp4');
+
+        // Use cookies for Rumble if specified
+        if (options.useCookies && options.browser) {
+          ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
+        }
       } else {
-        // For other sites (including Rumble), use format that forces mp4 extension
+        // For other sites, use standard format selection
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
         ytDlpManager.addOption('--merge-output-format', 'mp4');
 

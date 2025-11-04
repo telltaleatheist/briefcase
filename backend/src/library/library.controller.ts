@@ -19,6 +19,7 @@ import { createReadStream, statSync } from 'fs';
 import { LibraryService } from './library.service';
 import { RelinkService } from './relink.service';
 import { ClipExtractorService } from './clip-extractor.service';
+import { SharedConfigService } from '../config/shared-config.service';
 import {
   CreateLibraryAnalysisRequest,
   UpdateLibraryAnalysisRequest,
@@ -32,7 +33,8 @@ export class LibraryController {
   constructor(
     private libraryService: LibraryService,
     private relinkService: RelinkService,
-    private clipExtractor: ClipExtractorService
+    private clipExtractor: ClipExtractorService,
+    private configService: SharedConfigService
   ) {}
 
   /**
@@ -500,8 +502,9 @@ export class LibraryController {
       weekStart.setHours(0, 0, 0, 0);
       const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Determine output path
-      const clipsBasePath = '/Volumes/Callisto/clips';
+      // Determine output path using configured output directory
+      const baseOutputDir = this.configService.getOutputDir() || '/Volumes/Callisto/clippy';
+      const clipsBasePath = path.join(baseOutputDir, 'clips');
       const outputDir = path.join(clipsBasePath, weekFolder);
       const outputPath = path.join(outputDir, clipFilename);
 

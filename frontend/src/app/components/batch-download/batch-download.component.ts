@@ -292,8 +292,24 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     this.socketService.onDownloadFailed().subscribe(
       (data: {error: string, url: string, jobId?: string}) => {
         if (data.jobId) {
-          this.updateJobStatus(data.jobId, 'failed', `Failed: ${data.error}`);
-          // Notification handled by onJobStatusUpdated
+          // Extract just the main error message, not the full debug output
+          let errorMessage = data.error;
+
+          // If error contains "ERROR:", extract just that line
+          if (errorMessage.includes('ERROR:')) {
+            const errorLines = errorMessage.split('\n');
+            const errorLine = errorLines.find(line => line.includes('ERROR:'));
+            if (errorLine) {
+              errorMessage = errorLine.replace(/^.*ERROR:\s*/, '');
+            }
+          }
+
+          // Store full error for the error dialog
+          this.jobFullErrors.set(data.jobId, data.error);
+
+          // Update status with shortened error message
+          this.updateJobStatus(data.jobId, 'failed', `Download failed`);
+          // Notification handled by onJobStatusUpdated with the short message
         }
       }
     );
