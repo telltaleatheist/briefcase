@@ -193,10 +193,19 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false,
-      "deleteAppDataOnUninstall": false
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "displayLanguageSelector": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "include": "assets/installer.nsh",
+      "warningsAsErrors": false,
+      "packElevateHelper": true
     },
     "linux": {
       "target": [
