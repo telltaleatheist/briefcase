@@ -250,9 +250,11 @@ export class ExecutablesUtil {
       if (ffmpegInstaller && ffmpegInstaller.path) {
         let ffmpegPath = ffmpegInstaller.path;
 
-        // If the path contains 'app.asar' and doesn't exist, try the unpacked version
-        if (ffmpegPath.includes('app.asar') && !fs.existsSync(ffmpegPath)) {
+        // If the path contains 'app.asar', replace with unpacked version
+        // This MUST happen before checking existence because files in .asar can't be executed
+        if (ffmpegPath.includes('app.asar') && !ffmpegPath.includes('app.asar.unpacked')) {
           ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+          log.info(`Converted asar path to unpacked: ${ffmpegPath}`);
         }
 
         // Verify the path actually exists
@@ -273,9 +275,11 @@ export class ExecutablesUtil {
       if (ffprobeInstaller && ffprobeInstaller.path) {
         let ffprobePath = ffprobeInstaller.path;
 
-        // If the path contains 'app.asar' and doesn't exist, try the unpacked version
-        if (ffprobePath.includes('app.asar') && !fs.existsSync(ffprobePath)) {
+        // If the path contains 'app.asar', replace with unpacked version
+        // This MUST happen before checking existence because files in .asar can't be executed
+        if (ffprobePath.includes('app.asar') && !ffprobePath.includes('app.asar.unpacked')) {
           ffprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
+          log.info(`Converted asar path to unpacked: ${ffprobePath}`);
         }
 
         // Verify the path actually exists
