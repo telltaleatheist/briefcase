@@ -90,6 +90,18 @@ export class PythonBridgeService {
       this.logger.log(`Using Python: ${pythonPath}`);
       this.logger.log(`Python config: packaged=${isPackaged}, absolute=${path.isAbsolute(pythonPath)}`);
 
+      // Get FFmpeg path for Whisper (it needs FFmpeg for audio extraction)
+      let ffmpegPath: string | undefined;
+      try {
+        const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+        if (ffmpegInstaller && ffmpegInstaller.path) {
+          ffmpegPath = ffmpegInstaller.path;
+          this.logger.log(`FFmpeg path for Python: ${ffmpegPath}`);
+        }
+      } catch (e) {
+        this.logger.warn('Could not load FFmpeg installer for Python environment');
+      }
+
       // Spawn Python process with EXPLICIT path (no shell, no PATH lookup)
       const pythonProcess: ChildProcess = spawn(pythonPath, [
         this.pythonScriptPath,
@@ -100,6 +112,8 @@ export class PythonBridgeService {
           // Clear Python-related environment variables to avoid conflicts
           PYTHONHOME: undefined,
           PYTHONPATH: undefined,
+          // Add FFmpeg to PATH so Whisper can find it
+          PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}${path.delimiter}${process.env.PATH}` : process.env.PATH,
         }
       });
 
