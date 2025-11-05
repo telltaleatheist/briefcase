@@ -5,6 +5,13 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "webpack": false,
-    "tsConfigPath": "tsconfig.json"
+    "tsConfigPath": "tsconfig.json",
+    "assets": [
+      {
+        "include": "../python/**/*",
+        "outDir": "dist/python",
+        "watchAssets": true
+      }
+    ]
   }
 }

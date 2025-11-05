@@ -30,13 +30,33 @@ export class PythonBridgeService {
 
   constructor() {
     // Path to the Python service script
-    this.pythonScriptPath = path.join(
-      __dirname,
-      '..',
-      '..',
-      'python',
-      'video_analysis_service.py',
-    );
+    // In packaged apps, Python files are unpacked from the asar archive
+    const isPackaged = process.env.NODE_ENV === 'production' ||
+                       (process as any).resourcesPath !== undefined ||
+                       (process as any).defaultApp === false;
+
+    if (isPackaged && (process as any).resourcesPath) {
+      // In production, use the unpacked location
+      this.pythonScriptPath = path.join(
+        (process as any).resourcesPath,
+        'app.asar.unpacked',
+        'backend',
+        'dist',
+        'python',
+        'video_analysis_service.py',
+      );
+    } else {
+      // In development, use relative path from dist folder
+      this.pythonScriptPath = path.join(
+        __dirname,
+        '..',
+        '..',
+        'python',
+        'video_analysis_service.py',
+      );
+    }
+
+    this.logger.log(`Python script path: ${this.pythonScriptPath}`);
   }
 
   /**
