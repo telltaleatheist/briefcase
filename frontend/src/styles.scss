@@ -69,3 +69,37 @@ body {
 .dialog-backdrop.cdk-overlay-backdrop-showing {
   opacity: 1 !important;
 }
+
+/* Hide ALL Video.js UI elements globally (including modals/menus appended to body) */
+.vjs-modal-dialog,
+.vjs-control-bar,
+.vjs-big-play-button,
+.vjs-menu,
+.vjs-menu-button,
+.vjs-menu-content,
+.vjs-menu-item,
+.vjs-text-track-display,
+.vjs-button,
+.vjs-control,
+.vjs-loading-spinner,
+.vjs-poster,
+.vjs-play-control,
+.vjs-volume-panel,
+.vjs-current-time,
+.vjs-time-divider,
+.vjs-duration,
+.vjs-progress-control,
+.vjs-fullscreen-control,
+.vjs-remaining-time,
+.vjs-playback-rate,
+.vjs-chapters-button,
+.vjs-descriptions-button,
+.vjs-captions-button,
+.vjs-subs-caps-button,
+.vjs-audio-button,
+.vjs-picture-in-picture-control {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

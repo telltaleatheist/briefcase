@@ -49,9 +49,13 @@ export class RelinkService {
         };
       }
 
-      // Get all video files in week folder
+      // Get all video files in week folder (exclude metadata files)
       const files = await fs.readdir(weekPath);
-      const videoFiles = files.filter(f => /\.(mp4|mov|avi|mkv)$/i.test(f));
+      const videoFiles = files.filter(f =>
+        /\.(mp4|mov|avi|mkv)$/i.test(f) &&
+        !f.startsWith('._') &&
+        !f.startsWith('.')
+      );
 
       if (videoFiles.length === 0) {
         return {
@@ -330,10 +334,12 @@ export class RelinkService {
           continue;
         }
 
-        // Search for files in this folder
+        // Search for files in this folder (exclude metadata files)
         const files = await fs.readdir(folderPath);
         for (const file of files) {
-          if (file.toLowerCase().includes(filename.toLowerCase())) {
+          if (file.toLowerCase().includes(filename.toLowerCase()) &&
+              !file.startsWith('._') &&
+              !file.startsWith('.')) {
             results.push(path.join(folderPath, file));
           }
         }

@@ -174,6 +174,15 @@
       }
     }
 
+    .relink-button {
+      color: var(--text-secondary);
+
+      &:hover {
+        color: #3b82f6;
+        background: rgba(59, 130, 246, 0.15);
+      }
+    }
+
     .archive-button {
       color: var(--text-secondary);
 

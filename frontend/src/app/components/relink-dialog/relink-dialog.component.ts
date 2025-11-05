@@ -98,23 +98,19 @@ export class RelinkDialogComponent implements OnInit {
   async manualSelect() {
     try {
       // Use electron file picker
-      const result = await (window as any).electron?.selectFile({
-        title: 'Select Video File',
-        filters: [
-          { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm'] }
-        ]
-      });
+      const result = await (window as any).electron?.selectVideoFile();
 
-      if (result && result.filePath) {
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
         this.isLoading = true;
+        const filePath = result.filePaths[0];
 
         const relinkResult = await this.libraryService.manualRelinkVideo(
           this.data.analysis.id,
-          result.filePath
+          filePath
         );
 
         if (relinkResult.success) {
-          this.dialogRef.close({ relinked: true, path: result.filePath });
+          this.dialogRef.close({ relinked: true, path: filePath });
         } else {
           this.errorMessage = relinkResult.reason || 'Failed to relink video';
           this.isLoading = false;

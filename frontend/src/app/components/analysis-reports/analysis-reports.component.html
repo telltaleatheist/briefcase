@@ -56,6 +56,9 @@
                   </div>
                 </div>
                 <div class="report-actions">
+                  <button mat-icon-button class="relink-button" (click)="relinkVideo(analysis); $event.stopPropagation()" matTooltip="Relink Video">
+                    <mat-icon>link</mat-icon>
+                  </button>
                   <button mat-icon-button class="archive-button" (click)="archiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Archive">
                     <mat-icon>archive</mat-icon>
                   </button>
@@ -103,6 +106,9 @@
                   </div>
                 </div>
                 <div class="report-actions">
+                  <button mat-icon-button class="relink-button" (click)="relinkVideo(analysis); $event.stopPropagation()" matTooltip="Relink Video">
+                    <mat-icon>link</mat-icon>
+                  </button>
                   <button mat-icon-button class="unarchive-button" (click)="unarchiveAnalysis(analysis); $event.stopPropagation()" matTooltip="Unarchive">
                     <mat-icon>unarchive</mat-icon>
                   </button>

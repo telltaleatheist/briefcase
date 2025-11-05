@@ -4,6 +4,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { LibraryService, LibraryAnalysis } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
@@ -17,6 +18,7 @@ import { NotificationService } from '../../services/notification.service';
     MatIconModule,
     MatCardModule,
     MatProgressSpinnerModule,
+    MatTooltipModule,
     MatDialogModule
   ],
   templateUrl: './clip-creator.component.html',
@@ -76,6 +78,23 @@ export class ClipCreatorComponent implements OnInit {
   async selectCustomVideo() {
     // TODO: Implement custom video file picker
     this.notificationService.toastOnly('info', 'Coming Soon', 'Custom video selection will be available soon');
+  }
+
+  async relinkVideo(analysis: LibraryAnalysis) {
+    const { RelinkDialogComponent } = await import('../relink-dialog/relink-dialog.component');
+
+    const dialogRef = this.dialog.open(RelinkDialogComponent, {
+      width: '700px',
+      data: { analysis }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.relinked) {
+      // Reload analyses to update the list
+      await this.loadAnalyses();
+      this.notificationService.toastOnly('success', 'Video Relinked', 'Video relinked successfully');
+    }
   }
 
   formatDate(date: string): string {

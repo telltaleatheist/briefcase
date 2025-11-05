@@ -125,6 +125,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         fill: true, // Fill container while maintaining aspect ratio
         preload: 'metadata',
         playbackRates: [0.5, 1, 1.5, 2],
+        controlBar: false, // Explicitly disable control bar
+        bigPlayButton: false, // Disable big play button
+        textTrackDisplay: false, // Disable text track display
+        errorDisplay: false, // Disable error display overlay
+        loadingSpinner: false, // Disable loading spinner overlay
         sources: [{
           src: videoUrl,
           type: 'video/mp4'
@@ -141,6 +146,27 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         if (dur && typeof dur === 'number') {
           this.duration = dur;
           this.currentSelection = { startTime: 0, endTime: dur };
+        }
+
+        // Disable context menu and any UI overlays
+        if (this.player) {
+          const playerEl = this.player.el();
+          if (playerEl) {
+            // Prevent right-click context menu
+            playerEl.addEventListener('contextmenu', (e: Event) => {
+              e.preventDefault();
+              e.stopPropagation();
+              return false;
+            });
+
+            // Remove all child elements except the video element itself
+            const videoTag = playerEl.querySelector('video');
+            if (videoTag) {
+              // Remove all Video.js UI elements
+              const uiElements = playerEl.querySelectorAll('.vjs-control-bar, .vjs-big-play-button, .vjs-loading-spinner, .vjs-modal-dialog, .vjs-text-track-display, .vjs-poster, .vjs-error-display');
+              uiElements.forEach(el => el.remove());
+            }
+          }
         }
       });
 
@@ -438,5 +464,38 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   onRunTranscriptAnalysis() {
     this.notificationService.toastOnly('info', 'Run Analysis', 'Transcription feature coming soon!');
     // TODO: Implement transcription-only analysis trigger
+  }
+
+  /**
+   * Open relink dialog to fix missing video
+   */
+  async relinkVideo() {
+    const { RelinkDialogComponent } = await import('../relink-dialog/relink-dialog.component');
+
+    const dialogRef = this.dialog.open(RelinkDialogComponent, {
+      width: '700px',
+      data: { analysis: this.data.analysis }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.relinked) {
+      // Video was successfully relinked, reload the player
+      this.error = null;
+      this.isLoading = true;
+
+      // Dispose of old player if it exists
+      if (this.player) {
+        this.player.dispose();
+        this.player = null;
+      }
+
+      // Reinitialize the player with new video path
+      setTimeout(() => {
+        this.initializePlayer();
+      }, 100);
+
+      this.notificationService.toastOnly('success', 'Video Relinked', 'Video has been successfully relinked!');
+    }
   }
 }

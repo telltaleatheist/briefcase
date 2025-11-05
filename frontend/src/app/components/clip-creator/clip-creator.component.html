@@ -67,7 +67,11 @@
           </div>
         </mat-card-content>
         <mat-card-actions>
-          <button mat-button color="primary">
+          <button mat-raised-button class="relink-button" (click)="relinkVideo(analysis); $event.stopPropagation()">
+            <mat-icon>link</mat-icon>
+            RELINK
+          </button>
+          <button mat-raised-button color="primary" class="edit-button">
             <mat-icon>content_cut</mat-icon>
             EDIT VIDEO
           </button>

@@ -10,6 +10,10 @@
 
     <div style="flex: 1"></div>
 
+    <button mat-icon-button (click)="relinkVideo()" class="relink-button" matTooltip="Relink Video">
+      <mat-icon>link</mat-icon>
+    </button>
+
     <button mat-icon-button (click)="close()" class="close-button" matTooltip="Close">
       <mat-icon>close</mat-icon>
     </button>
@@ -27,7 +31,13 @@
       <mat-icon>error</mat-icon>
       <h3>Failed to Load Video</h3>
       <p>{{ error }}</p>
-      <button mat-raised-button color="primary" (click)="close()">Close</button>
+      <div class="error-actions">
+        <button mat-raised-button color="accent" (click)="relinkVideo()">
+          <mat-icon>link</mat-icon>
+          Relink Video
+        </button>
+        <button mat-button (click)="close()">Close</button>
+      </div>
     </div>
 
     <!-- Video Player -->
