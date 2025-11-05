@@ -91,9 +91,8 @@
         "to": "backend/node_modules"
       },
       {
-        "from": "backend/dist/python",
-        "to": "backend/python",
-        "filter": ["**/*"]
+        "from": "backend/python",
+        "to": "backend/python"
       },
       {
         "from": "utilities",
