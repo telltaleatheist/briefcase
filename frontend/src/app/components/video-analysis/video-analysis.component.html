@@ -174,13 +174,8 @@
                   <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo (Faster, Cheaper)</option>
                 </optgroup>
                 <optgroup label="Ollama (Local - No API Key)">
-                  <option value="ollama:qwen2.5:7b">Qwen 2.5 7B (Balanced, ~4GB)</option>
-                  <option value="ollama:qwen2.5:14b">Qwen 2.5 14B (Better, ~8GB)</option>
-                  <option value="ollama:qwen2.5:32b">Qwen 2.5 32B (Best, ~18GB)</option>
-                  <option value="ollama:llama3.2:3b">Llama 3.2 3B (Fast, ~2GB)</option>
-                  <option value="ollama:llama3.1:8b">Llama 3.1 8B (Good, ~4.5GB)</option>
-                  <option value="ollama:mistral:7b">Mistral 7B (Good, ~4GB)</option>
-                  <option value="ollama:cogito:70b">Cogito 70B (Excellent, ~40GB)</option>
+                  <option *ngIf="availableOllamaModels.length === 0" value="" disabled>No Ollama models installed</option>
+                  <option *ngFor="let model of availableOllamaModels" [value]="'ollama:' + model">{{ model }}</option>
                 </optgroup>
               </select>
             </div>

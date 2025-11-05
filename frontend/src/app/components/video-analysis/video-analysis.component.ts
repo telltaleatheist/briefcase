@@ -58,6 +58,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   analysisForm: FormGroup;
   currentJob: AnalysisJob | null = null;
   isProcessing = false;
+  availableOllamaModels: string[] = [];
 
   @ViewChild(MatExpansionPanel) advancedPanel!: MatExpansionPanel;
 
@@ -73,6 +74,9 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   }
 
   async ngOnInit(): Promise<void> {
+    // Load available Ollama models
+    await this.loadAvailableOllamaModels();
+
     // Load saved settings (AI model, etc.)
     await this.loadSettings();
 
@@ -395,6 +399,54 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       case 'completed': return 'check_circle';
       case 'failed': return 'error';
       default: return 'hourglass_empty';
+    }
+  }
+
+  /**
+   * Load available Ollama models from the backend
+   */
+  private async loadAvailableOllamaModels(): Promise<void> {
+    try {
+      console.log('[Video Analysis] Loading available Ollama models...');
+      const response = await fetch('/api/api/analysis/models');
+
+      if (!response.ok) {
+        console.warn('[Video Analysis] Failed to fetch Ollama models, using defaults');
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.connected && data.models) {
+        // Extract model names from the response
+        this.availableOllamaModels = data.models.map((model: any) => model.name);
+        console.log(`[Video Analysis] Found ${this.availableOllamaModels.length} Ollama models:`, this.availableOllamaModels);
+
+        // If the current model is not in the available models list, update it to the first available model
+        const currentModel = this.analysisForm.get('aiModel')?.value || '';
+        if (currentModel.startsWith('ollama:')) {
+          const modelName = currentModel.replace('ollama:', '');
+          if (!this.availableOllamaModels.includes(modelName)) {
+            // Set to first available Ollama model, or Claude if no Ollama models available
+            if (this.availableOllamaModels.length > 0) {
+              this.analysisForm.patchValue({ aiModel: `ollama:${this.availableOllamaModels[0]}` });
+            } else {
+              // Default to Claude if no Ollama models available
+              this.analysisForm.patchValue({ aiModel: 'claude:claude-3-5-sonnet-20241022' });
+            }
+          }
+        }
+      } else {
+        console.warn('[Video Analysis] Ollama not connected or no models available');
+        // If Ollama not connected and current model is Ollama, switch to Claude
+        const currentModel = this.analysisForm.get('aiModel')?.value || '';
+        if (currentModel.startsWith('ollama:')) {
+          this.analysisForm.patchValue({ aiModel: 'claude:claude-3-5-sonnet-20241022' });
+        }
+      }
+    } catch (error) {
+      console.error('[Video Analysis] Error loading Ollama models:', error);
+      // Continue without Ollama models - user can still use Claude/OpenAI
     }
   }
 
