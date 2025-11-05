@@ -1,13 +1,12 @@
 <div class="transcript-search-container">
   <div class="search-input-wrapper">
     <mat-form-field appearance="outline" class="search-field" [class.disabled]="!transcriptExists">
-      <mat-label>Search transcript</mat-label>
       <input
         matInput
         [(ngModel)]="searchQuery"
         (ngModelChange)="onSearchInput()"
         [disabled]="!transcriptExists"
-        placeholder="Search for words or phrases..."
+        placeholder="Search transcript"
         autocomplete="off">
       <button
         mat-icon-button

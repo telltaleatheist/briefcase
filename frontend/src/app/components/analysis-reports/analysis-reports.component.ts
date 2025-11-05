@@ -170,6 +170,8 @@ export class AnalysisReportsComponent implements OnInit {
       maxWidth: '100vw',
       maxHeight: '100vh',
       panelClass: 'fullscreen-dialog',
+      hasBackdrop: true,
+      backdropClass: 'dialog-backdrop',
       data: { analysis }
     });
   }

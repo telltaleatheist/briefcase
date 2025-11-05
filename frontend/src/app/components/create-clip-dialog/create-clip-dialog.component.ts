@@ -33,8 +33,6 @@ export interface CreateClipDialogData {
 })
 export class CreateClipDialogComponent {
   title = '';
-  description = '';
-  category = '';
   isCreating = false;
   error: string | null = null;
 
@@ -78,8 +76,8 @@ export class CreateClipDialogComponent {
           startTime: this.data.startTime,
           endTime: this.data.endTime,
           title: this.title,
-          description: this.description,
-          category: this.category || undefined,
+          description: '',
+          category: undefined,
         }
       );
 

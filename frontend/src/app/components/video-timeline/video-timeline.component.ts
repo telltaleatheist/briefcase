@@ -68,6 +68,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   isPanning = false;
   panStartX = 0;
   panStartOffset = 0;
+  hasDraggedSincePanStart = false; // Track if user has actually dragged
 
   // Scrollbar state
   isDraggingScrollbar = false;
@@ -76,6 +77,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   scrollbarDragStartX = 0;
   scrollbarDragStartOffset = 0;
   scrollbarDragStartZoom = 1;
+
+  // Playback speed state for J/K/L behavior
+  private currentPlaybackSpeed = 1;
+  private lastKeyPressed: 'j' | 'k' | 'l' | null = null;
 
   ngOnInit() {
     // Initialize selection based on sections
@@ -161,6 +166,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Don't seek in cursor mode - only playhead dragging moves the playhead
+    if (this.selectedTool === 'cursor') {
+      return;
+    }
+
     const rect = this.timelineElement.nativeElement.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const time = this.pixelsToTime(x);
@@ -173,15 +183,19 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   onTimelineMouseDown(event: MouseEvent) {
     const target = event.target as HTMLElement;
 
+    // Check if clicking on selection window or its children
+    const isSelectionWindow = target.classList.contains('selection-window') ||
+                               target.closest('.selection-window');
+
     // Check if clicking on timeline area (now includes selection window for easier interaction)
     const isTimelineArea = target.classList.contains('timeline') ||
                           target.classList.contains('sections-layer') ||
                           target.classList.contains('section-marker') ||
-                          target.classList.contains('selection-window');
+                          isSelectionWindow;
 
     if (isTimelineArea) {
       // If zoomed and shift key, start panning
-      if (this.zoomLevel > 1 && event.shiftKey) {
+      if (this.zoomLevel > 1 && event.shiftKey && !isSelectionWindow) {
         this.isPanning = true;
         this.panStartX = event.clientX;
         this.panStartOffset = this.zoomOffset;
@@ -195,23 +209,24 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       const x = event.clientX - rect.left;
       const time = this.pixelsToTime(x);
 
-      // CURSOR TOOL: Click to seek, drag to pan viewport
+      // CURSOR TOOL: If clicking selection window, do nothing (let onWindowMouseDown handle it)
       if (this.selectedTool === 'cursor') {
-        // If zoomed in, dragging pans the viewport
-        if (this.zoomLevel > 1) {
-          this.isPanning = true;
-          this.panStartX = event.clientX;
-          this.panStartOffset = this.zoomOffset;
-        } else {
-          // If not zoomed, clicking seeks
-          this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+        // If clicking selection window, don't interfere
+        if (isSelectionWindow) {
+          return;
         }
+
+        // Start potential pan (we'll determine if it's a click or drag in mouse move/up)
+        this.isPanning = true;
+        this.panStartX = event.clientX;
+        this.panStartOffset = this.zoomOffset;
+        this.hasDraggedSincePanStart = false;
         event.preventDefault();
         event.stopPropagation();
         return;
       }
 
-      // HIGHLIGHT TOOL: Click outside window to create new selection
+      // HIGHLIGHT TOOL: Click outside window to create new selection, or inside to drag
       if (this.selectedTool === 'highlight') {
         // Check if click is within selection window
         const clickInWindow = time >= this.selectionStart && time <= this.selectionEnd;
@@ -358,15 +373,24 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     // Handle panning
     if (this.isPanning) {
       const deltaX = event.clientX - this.panStartX;
-      const rect = this.timelineElement.nativeElement.getBoundingClientRect();
-      const visibleDuration = this.getVisibleDuration();
-      const deltaTime = (deltaX / rect.width) * visibleDuration;
 
-      // Pan in opposite direction of mouse movement
-      this.zoomOffset = this.panStartOffset - deltaTime;
+      // Check if user has moved enough to be considered a drag (more than 3 pixels)
+      if (Math.abs(deltaX) > 3) {
+        this.hasDraggedSincePanStart = true;
+      }
 
-      // Clamp offset to valid range
-      this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      // Only pan if user has actually dragged
+      if (this.hasDraggedSincePanStart) {
+        const rect = this.timelineElement.nativeElement.getBoundingClientRect();
+        const visibleDuration = this.getVisibleDuration();
+        const deltaTime = (deltaX / rect.width) * visibleDuration;
+
+        // Pan in opposite direction of mouse movement
+        this.zoomOffset = this.panStartOffset - deltaTime;
+
+        // Clamp offset to valid range
+        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      }
       return;
     }
 
@@ -397,7 +421,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
     if (this.isDraggingWindow) {
       const deltaX = event.clientX - this.dragStartX;
-      const deltaTime = this.pixelsToTime(deltaX);
+      const rect = this.timelineElement.nativeElement.getBoundingClientRect();
+      const visibleDuration = this.getVisibleDuration();
+      // Convert pixel delta to time delta
+      const deltaTime = (deltaX / rect.width) * visibleDuration;
       const windowDuration = this.dragStartSelectionEnd - this.dragStartSelectionStart;
 
       let newStart = this.dragStartSelectionStart + deltaTime;
@@ -447,7 +474,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   /**
    * Handle mouse up to end dragging
    */
-  handleMouseUp = () => {
+  handleMouseUp = (event: MouseEvent) => {
+    // If we were panning but didn't actually drag, treat it as a click to seek
+    if (this.isPanning && !this.hasDraggedSincePanStart && this.selectedTool === 'cursor') {
+      const rect = this.timelineElement?.nativeElement?.getBoundingClientRect();
+      if (rect) {
+        const x = event.clientX - rect.left;
+        const time = this.pixelsToTime(x);
+        this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+      }
+    }
+
     // Clear range dragging flag after a short delay to prevent immediate seek
     if (this.isDraggingRange) {
       setTimeout(() => {
@@ -456,6 +493,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     }
 
     this.isPanning = false;
+    this.hasDraggedSincePanStart = false;
     this.isScrubbing = false;
     this.isDraggingWindow = false;
     this.isDraggingLeftHandle = false;
@@ -550,25 +588,44 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Playback control shortcuts (J/K/L)
+    // Playback control shortcuts (J/K/L) - Final Cut Pro X style
     if (event.key === 'j' || event.key === 'J') {
       event.preventDefault();
-      // Play backwards at 2x speed
-      this.playbackSpeed.emit(-2);
+      // J key: Reverse playback, increase speed with each press
+      if (this.lastKeyPressed === 'j' && this.currentPlaybackSpeed < 0) {
+        // Already going backwards, increase reverse speed (cycle: -1x → -2x → -4x → -8x → -1x)
+        const absSpeed = Math.abs(this.currentPlaybackSpeed);
+        this.currentPlaybackSpeed = absSpeed >= 8 ? -1 : -(absSpeed * 2);
+      } else {
+        // Start reverse playback at 1x
+        this.currentPlaybackSpeed = -1;
+      }
+      this.lastKeyPressed = 'j';
+      this.playbackSpeed.emit(this.currentPlaybackSpeed);
       return;
     }
 
     if (event.key === 'k' || event.key === 'K') {
       event.preventDefault();
-      // Pause
-      this.playPause.emit();
+      // K key: Pause and reset speed to 1x
+      this.currentPlaybackSpeed = 1;
+      this.lastKeyPressed = 'k';
+      this.playbackSpeed.emit(0); // 0 means pause
       return;
     }
 
     if (event.key === 'l' || event.key === 'L') {
       event.preventDefault();
-      // Play forward at 2x speed
-      this.playbackSpeed.emit(2);
+      // L key: Forward playback, increase speed with each press
+      if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0) {
+        // Already going forward, increase forward speed (cycle: 1x → 2x → 4x → 8x → 1x)
+        this.currentPlaybackSpeed = this.currentPlaybackSpeed >= 8 ? 1 : this.currentPlaybackSpeed * 2;
+      } else {
+        // Start forward playback at 1x
+        this.currentPlaybackSpeed = 1;
+      }
+      this.lastKeyPressed = 'l';
+      this.playbackSpeed.emit(this.currentPlaybackSpeed);
       return;
     }
 

@@ -109,7 +109,41 @@
   .video-js {
     width: 100%;
     height: 100%;
-    object-fit: contain; // Letterbox the video
+
+    video {
+      object-fit: contain; // Letterbox the video to fit container
+    }
+
+    // Hide ALL Video.js controls and UI elements
+    .vjs-control-bar,
+    .vjs-big-play-button,
+    .vjs-loading-spinner,
+    .vjs-button,
+    .vjs-menu,
+    .vjs-menu-button,
+    .vjs-control,
+    .vjs-text-track-display {
+      display: none !important;
+    }
+
+    // Hide all interactive elements and buttons
+    button,
+    .vjs-play-control,
+    .vjs-volume-panel,
+    .vjs-current-time,
+    .vjs-time-divider,
+    .vjs-duration,
+    .vjs-progress-control,
+    .vjs-fullscreen-control,
+    .vjs-remaining-time,
+    .vjs-playback-rate,
+    .vjs-chapters-button,
+    .vjs-descriptions-button,
+    .vjs-captions-button,
+    .vjs-subs-caps-button,
+    .vjs-audio-button {
+      display: none !important;
+    }
   }
 }
 
@@ -193,23 +227,31 @@
     }
 
     ::ng-deep .mat-mdc-tab {
-      color: #999;
       font-weight: 500;
       font-size: 14px;
       min-width: 100px;
+      opacity: 1 !important;
 
-      &.mdc-tab--active {
-        color: #ff6600;
+      .mdc-tab__text-label {
+        color: #999 !important;
+      }
+
+      &.mdc-tab--active .mdc-tab__text-label {
+        color: #ff6600 !important;
       }
     }
 
     ::ng-deep .mat-mdc-tab-label-content {
-      color: inherit;
+      color: #999;
     }
 
     ::ng-deep .mdc-tab-indicator__content--underline {
       border-color: #ff6600;
-      border-width: 2px;
+      border-width: 3px;
+    }
+
+    ::ng-deep .mat-mdc-tab:hover .mdc-tab__text-label {
+      color: #fff !important;
     }
 
     ::ng-deep .mat-mdc-tab-body-wrapper {
@@ -221,6 +263,11 @@
       height: 100%;
       overflow: hidden;
     }
+
+    // Fix Material Design 3 ripple color
+    ::ng-deep .mat-mdc-tab .mat-ripple-element {
+      background-color: rgba(255, 102, 0, 0.1);
+    }
   }
 
   .tab-content {
@@ -231,7 +278,7 @@
   }
 
   .search-tab-content {
-    padding: 16px;
+    padding: 32px 16px 16px 16px; // Extra top padding for floating label (increased to prevent clipping)
   }
 
   .sections-hint {

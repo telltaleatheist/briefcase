@@ -121,9 +121,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       const videoUrl = `/api/library/videos/${this.data.analysis.id}`;
 
       this.player = videojs(this.videoElement.nativeElement, {
-        controls: true,
-        fluid: true,
-        responsive: true,
+        controls: false, // Disable default controls (we have custom timeline)
+        fill: true, // Fill container while maintaining aspect ratio
         preload: 'metadata',
         playbackRates: [0.5, 1, 1.5, 2],
         sources: [{
@@ -208,6 +207,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     switch (event.code) {
       case 'Space':
         event.preventDefault();
+        // Spacebar always resets to 1x speed and toggles play/pause
+        this.player.playbackRate(1);
         if (this.player.paused()) {
           this.player.play();
         } else {
@@ -348,27 +349,29 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
-   * Handle playback speed change from timeline
+   * Handle playback speed change from timeline (J/K/L keys)
    */
   onPlaybackSpeed(speed: number) {
     if (!this.player) return;
 
     if (speed < 0) {
       // Backwards playback - Video.js doesn't support this natively
-      // We'll pause and jump backwards
+      // Simulate by jumping backwards repeatedly
+      const absSpeed = Math.abs(speed);
       this.player.pause();
       const currentTime = this.player.currentTime();
       if (typeof currentTime === 'number') {
-        // Jump back 2 seconds for J key (backwards at "2x")
-        this.player.currentTime(Math.max(0, currentTime - 2));
+        // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
+        const jumpAmount = 0.5 * absSpeed;
+        this.player.currentTime(Math.max(0, currentTime - jumpAmount));
       }
     } else if (speed === 0) {
-      // Pause
+      // Pause (K key)
       this.player.pause();
       this.player.playbackRate(1); // Reset to normal speed
     } else {
-      // Forward playback at specified speed
-      this.player.playbackRate(Math.abs(speed));
+      // Forward playback at specified speed (L key)
+      this.player.playbackRate(speed);
       if (this.player.paused()) {
         this.player.play();
       }
@@ -383,6 +386,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const dialogRef = this.dialog.open(CreateClipDialogComponent, {
       width: '600px',
+      hasBackdrop: true,
+      backdropClass: 'dialog-backdrop',
+      disableClose: false,
       data: {
         analysis: this.data.analysis,
         startTime: this.currentSelection.startTime,
@@ -422,6 +428,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle transcript search seek event
    */
   onTranscriptSeek(timestamp: number) {
+    console.log('onTranscriptSeek called with timestamp:', timestamp);
     this.seekToTime(timestamp);
   }
 

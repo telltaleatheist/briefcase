@@ -116,8 +116,10 @@ export class LibraryController {
         throw new HttpException('Analysis not found', HttpStatus.NOT_FOUND);
       }
 
-      // Check if transcript exists
-      if (!analysis.files.transcriptTxt) {
+      // Check if transcript exists - prefer SRT for timestamps, fallback to TXT
+      const transcriptPath = analysis.files.transcriptSrt || analysis.files.transcriptTxt;
+
+      if (!transcriptPath) {
         return {
           exists: false,
           text: null
@@ -125,9 +127,9 @@ export class LibraryController {
       }
 
       try {
-        // Read the transcript text file
+        // Read the transcript file (SRT format preferred for timestamps)
         const fs = require('fs/promises');
-        const text = await fs.readFile(analysis.files.transcriptTxt, 'utf-8');
+        const text = await fs.readFile(transcriptPath, 'utf-8');
         return {
           exists: true,
           text

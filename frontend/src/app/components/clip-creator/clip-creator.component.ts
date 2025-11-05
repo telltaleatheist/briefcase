@@ -67,7 +67,8 @@ export class ClipCreatorComponent implements OnInit {
       maxWidth: '100vw',
       maxHeight: '100vh',
       panelClass: 'video-player-dialog-container',
-      hasBackdrop: false,
+      hasBackdrop: true,
+      backdropClass: 'dialog-backdrop',
       disableClose: false
     });
   }

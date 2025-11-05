@@ -1,12 +1,15 @@
 .create-clip-dialog {
   min-width: 500px;
   max-width: 600px;
+  background-color: var(--background-color);
+  color: var(--text-color);
 
   h2 {
     display: flex;
     align-items: center;
     gap: 12px;
     margin: 0;
+    color: var(--text-color);
 
     mat-icon {
       font-size: 28px;
@@ -20,10 +23,12 @@
 mat-dialog-content {
   padding: 20px 24px !important;
   min-height: 350px;
+  background-color: var(--background-color);
+  color: var(--text-color);
 }
 
 .clip-info {
-  background-color: #f5f5f5;
+  background-color: var(--secondary-bg);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 24px;
@@ -40,12 +45,12 @@ mat-dialog-content {
 
     .label {
       font-weight: 500;
-      color: #666;
+      color: var(--text-secondary);
     }
 
     .value {
       font-weight: 600;
-      color: #333;
+      color: var(--text-color);
       font-family: monospace;
     }
   }
@@ -61,7 +66,7 @@ mat-dialog-content {
   }
 
   mat-icon {
-    color: #666;
+    color: var(--text-secondary);
   }
 }
 
@@ -75,13 +80,13 @@ mat-dialog-content {
 
   p {
     margin: 0;
-    color: #333;
+    color: var(--text-color);
     font-size: 16px;
     text-align: center;
 
     &.hint {
       font-size: 13px;
-      color: #666;
+      color: var(--text-secondary);
     }
   }
 }
@@ -111,6 +116,7 @@ mat-dialog-content {
 mat-dialog-actions {
   padding: 16px 24px !important;
   gap: 8px;
+  background-color: var(--background-color);
 
   button {
     mat-icon {

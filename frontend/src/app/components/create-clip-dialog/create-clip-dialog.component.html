@@ -31,27 +31,6 @@
           [disabled]="isCreating">
         <mat-icon matPrefix>title</mat-icon>
       </mat-form-field>
-
-      <mat-form-field appearance="outline" class="full-width">
-        <mat-label>Description (Optional)</mat-label>
-        <textarea
-          matInput
-          [(ngModel)]="description"
-          placeholder="Enter clip description"
-          rows="3"
-          [disabled]="isCreating"></textarea>
-        <mat-icon matPrefix>description</mat-icon>
-      </mat-form-field>
-
-      <mat-form-field appearance="outline" class="full-width">
-        <mat-label>Category (Optional)</mat-label>
-        <input
-          matInput
-          [(ngModel)]="category"
-          placeholder="e.g., violence, extremism, highlight"
-          [disabled]="isCreating">
-        <mat-icon matPrefix>label</mat-icon>
-      </mat-form-field>
     </div>
 
     <!-- Creating State -->

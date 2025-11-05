@@ -50,3 +50,22 @@ body {
     overflow: hidden;
   }
 }
+
+/* Dialog backdrop - ensure it's opaque and blocks content behind */
+.cdk-overlay-backdrop {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+
+.cdk-overlay-backdrop.cdk-overlay-backdrop-showing {
+  opacity: 1 !important;
+}
+
+/* Custom backdrop for dialogs that need to fully block content */
+.dialog-backdrop {
+  background-color: rgba(0, 0, 0, 0.95) !important;
+  backdrop-filter: blur(4px);
+}
+
+.dialog-backdrop.cdk-overlay-backdrop-showing {
+  opacity: 1 !important;
+}
