@@ -92,14 +92,40 @@ export class PythonBridgeService {
 
       // Get FFmpeg path for Whisper (it needs FFmpeg for audio extraction)
       let ffmpegPath: string | undefined;
-      try {
-        const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-        if (ffmpegInstaller && ffmpegInstaller.path) {
-          ffmpegPath = ffmpegInstaller.path;
-          this.logger.log(`FFmpeg path for Python: ${ffmpegPath}`);
+
+      // In packaged apps, FFmpeg is in extraResources, not in asar
+      if (isPackaged && (process as any).resourcesPath) {
+        const platform = process.platform;
+        const arch = process.arch;
+        let platformFolder = '';
+        if (platform === 'darwin') {
+          platformFolder = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+        } else if (platform === 'win32') {
+          platformFolder = 'win32-x64';
+        } else if (platform === 'linux') {
+          platformFolder = 'linux-x64';
         }
-      } catch (e) {
-        this.logger.warn('Could not load FFmpeg installer for Python environment');
+
+        const binaryName = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+        ffmpegPath = path.join(
+          (process as any).resourcesPath,
+          'node_modules',
+          '@ffmpeg-installer',
+          platformFolder,
+          binaryName
+        );
+        this.logger.log(`FFmpeg path for Python (packaged): ${ffmpegPath}`);
+      } else {
+        // In development, use the npm package
+        try {
+          const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+          if (ffmpegInstaller && ffmpegInstaller.path) {
+            ffmpegPath = ffmpegInstaller.path;
+            this.logger.log(`FFmpeg path for Python (dev): ${ffmpegPath}`);
+          }
+        } catch (e) {
+          this.logger.warn('Could not load FFmpeg installer for Python environment');
+        }
       }
 
       // Spawn Python process with EXPLICIT path (no shell, no PATH lookup)
