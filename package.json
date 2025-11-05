@@ -131,7 +131,7 @@
     ],
     "asarUnpack": [
       "backend/node_modules/**",
-      "backend/python/**",
+      "backend/dist/python/**",
       "utilities/**"
     ],
     "mac": {
