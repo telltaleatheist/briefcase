@@ -19,18 +19,22 @@
     "build:frontend": "tsc -p frontend/tsconfig.json && cd frontend && npm run build",
     "build:electron": "tsc -p electron/tsconfig.electron.json",
     "build:preload": "tsc -p electron/tsconfig.preload.json",
-    "package:python": "node scripts/package-python-windows.js",
+    "package:python:mac-arm64": "node scripts/package-python-mac.js arm64",
+    "package:python:mac-x64": "node scripts/package-python-mac.js x64",
+    "package:python:win-x64": "node scripts/package-python-windows.js x64",
+    "package:python:win-arm64": "node scripts/package-python-windows.js arm64",
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "cd backend && npm run test",
     "test:frontend": "cd frontend && npm run test",
     "electron:dev": "npm run build:all && cross-env NODE_ENV=development electron .",
+    "electron:dev:bundled": "npm run build:all && cross-env NODE_ENV=development USE_BUNDLED_PYTHON=true electron .",
     "electron:test-packaged": "npm run build:all && cross-env NODE_ENV=production electron .",
     "electron": "npm run build:all && electron .",
-    "package": "npm run build:all && electron-builder build",
-    "package:win": "npm run clean:win && npm run build:all && npm run package:python && electron-builder build --win --publish never",
-    "package:linux": "npm run clean:linux && npm run build:all && electron-builder build --linux --publish never",
-    "package:mac": "npm run clean:mac && npm run build:all && electron-builder --mac",
-    "package:mac-intel": "npm run clean:mac && npm run build:all && electron-builder --mac --x64"
+    "package:mac-arm64": "npm run clean:mac && npm run build:all && npm run package:python:mac-arm64 && electron-builder --mac --arm64 --publish never",
+    "package:mac-x64": "npm run clean:mac && npm run build:all && npm run package:python:mac-x64 && electron-builder --mac --x64 --config.mac.extraResources.0.from=dist-python/python-x64 --publish never",
+    "package:win-x64": "npm run clean:win && npm run build:all && npm run package:python:win-x64 && electron-builder --win --x64 --publish never",
+    "package:win-arm64": "npm run clean:win && npm run build:all && npm run package:python:win-arm64 && electron-builder --win --arm64 --config.win.extraResources.0.from=dist-python/python-arm64 --publish never",
+    "package:linux": "npm run clean:linux && npm run build:all && electron-builder --linux --publish never"
   },
   "keywords": [
     "video",
@@ -91,9 +95,12 @@
         "to": "utilities"
       },
       {
-        "from": "dist-python/python",
-        "to": "python",
-        "filter": ["**/*"]
+        "from": "node_modules/@ffmpeg-installer",
+        "to": "node_modules/@ffmpeg-installer"
+      },
+      {
+        "from": "node_modules/@ffprobe-installer",
+        "to": "node_modules/@ffprobe-installer"
       }
     ],
     "files": [
@@ -124,23 +131,28 @@
     ],
     "asarUnpack": [
       "backend/node_modules/**",
-      "utilities/**",
-      "node_modules/@ffmpeg-installer/**",
-      "node_modules/@ffprobe-installer/**"
+      "backend/python/**",
+      "utilities/**"
     ],
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
+          "arch": ["arm64"]
         }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "extraResources": [
+        {
+          "from": "dist-python/python-arm64",
+          "to": "python",
+          "filter": ["**/*"]
+        }
+      ],
       "extendInfo": {
         "LSUIElement": false
       }
@@ -164,10 +176,17 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "arm64"]
+          "arch": ["x64"]
         }
       ],
-      "artifactName": "${productName} Setup ${version}.${ext}"
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "extraResources": [
+        {
+          "from": "dist-python/python-x64",
+          "to": "python",
+          "filter": ["**/*"]
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,

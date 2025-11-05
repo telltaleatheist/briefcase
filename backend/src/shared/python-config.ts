@@ -47,26 +47,82 @@ export function getPythonConfig(): PythonConfig {
                       (process as any).resourcesPath !== undefined ||
                       (process as any).defaultApp === false);
 
-  // If packaged, try to use bundled Python first
-  if (isPackaged) {
-    // Get resources path - prioritize environment variable set by electron
-    const resourcesPath = process.env.RESOURCES_PATH ||
-                          (process as any).resourcesPath ||
-                          path.join(process.cwd(), 'resources');
+  // Check for bundled Python in both production AND development (if USE_BUNDLED_PYTHON is set)
+  const useBundledPython = isPackaged || process.env.USE_BUNDLED_PYTHON === 'true';
 
-    // Path to packaged Python
+  // If packaged or explicitly using bundled Python, try to use bundled Python first
+  if (useBundledPython) {
+    let resourcesPath: string;
+
+    if (isPackaged) {
+      // Production: Use resources path from packaged app
+      resourcesPath = process.env.RESOURCES_PATH ||
+                      (process as any).resourcesPath ||
+                      path.join(process.cwd(), 'resources');
+    } else {
+      // Development: Use dist-python directory
+      resourcesPath = path.join(process.cwd(), 'dist-python', `python-${process.arch}`);
+    }
+
+    // Path to packaged Python (architecture-independent - always in 'python' folder in prod, direct path in dev)
     let packagedPythonPath: string;
 
-    if (platform === 'win32') {
-      packagedPythonPath = path.join(resourcesPath, 'python', 'python.exe');
-    } else if (platform === 'darwin') {
-      packagedPythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+    if (isPackaged) {
+      // Production: Python is in resources/python/
+      if (platform === 'win32') {
+        packagedPythonPath = path.join(resourcesPath, 'python', 'python.exe');
+      } else if (platform === 'darwin' || platform === 'linux') {
+        packagedPythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+      } else {
+        packagedPythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+      }
     } else {
-      packagedPythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+      // Development: Python is in dist-python/python-{arch}/
+      if (platform === 'win32') {
+        packagedPythonPath = path.join(resourcesPath, 'python.exe');
+      } else if (platform === 'darwin' || platform === 'linux') {
+        packagedPythonPath = path.join(resourcesPath, 'bin', 'python3');
+      } else {
+        packagedPythonPath = path.join(resourcesPath, 'bin', 'python3');
+      }
     }
+
+    console.log(`[Python Config] Checking for bundled Python at: ${packagedPythonPath}`);
 
     // Check if packaged Python exists
     if (fs.existsSync(packagedPythonPath)) {
+      console.log(`[Python Config] Found bundled Python: ${packagedPythonPath}`);
+
+      // Set up environment for bundled Python
+      if (platform === 'darwin' || platform === 'linux') {
+        // Ensure Python can find its libraries
+        const pythonHome = isPackaged
+          ? path.join(resourcesPath, 'python')
+          : resourcesPath; // In dev, resourcesPath IS the python dir
+
+        process.env.PYTHONHOME = pythonHome;
+        process.env.PYTHONPATH = path.join(pythonHome, 'lib', 'python3.11', 'site-packages');
+
+        // Set cache directory for Whisper
+        const cacheDir = path.join(pythonHome, 'cache');
+        if (fs.existsSync(cacheDir)) {
+          process.env.XDG_CACHE_HOME = cacheDir;
+        }
+      } else if (platform === 'win32') {
+        // Windows: Set Python user base
+        const pythonHome = isPackaged
+          ? path.join(resourcesPath, 'python')
+          : resourcesPath; // In dev, resourcesPath IS the python dir
+
+        process.env.PYTHONHOME = pythonHome;
+
+        // Set cache directory for Whisper
+        const cacheDir = path.join(pythonHome, 'cache');
+        if (fs.existsSync(cacheDir)) {
+          process.env.XDG_CACHE_HOME = cacheDir;
+        }
+      }
+
       return {
         command: packagedPythonPath,
         isConda: false,
@@ -74,12 +130,15 @@ export function getPythonConfig(): PythonConfig {
       };
     }
 
-    // If we're packaged but Python is missing, throw an error
-    throw new Error(
-      'CRITICAL: Packaged app missing bundled Python! ' +
-      `Expected to find Python at: ${packagedPythonPath}. ` +
-      'Check electron-builder configuration and packaging script.'
+    // Python should be bundled for all platforms in production
+    // If missing, log a warning but fall back to system Python
+    console.warn(
+      `[Python Config] WARNING: Packaged Python not found at: ${packagedPythonPath}. ` +
+      'Falling back to system Python. This may cause issues if dependencies are missing.'
     );
+
+    // For Mac/Linux, fall back to system Python if bundled Python not found
+    // This provides a graceful degradation during development/testing
   }
 
   // Development mode: use system Python

@@ -246,23 +246,34 @@ export class ExecutablesUtil {
 
     try {
       // Try to get ffmpeg from @ffmpeg-installer/ffmpeg
-      const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-      if (ffmpegInstaller && ffmpegInstaller.path) {
-        let ffmpegPath = ffmpegInstaller.path;
+      // First check extraResources (production), then fall back to npm package location (development)
+      const platform = process.platform;
+      const arch = process.arch;
 
-        // If the path contains 'app.asar', replace with unpacked version
-        // This MUST happen before checking existence because files in .asar can't be executed
-        if (ffmpegPath.includes('app.asar') && !ffmpegPath.includes('app.asar.unpacked')) {
-          ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
-          log.info(`Converted asar path to unpacked: ${ffmpegPath}`);
-        }
+      let platformFolder = '';
+      if (platform === 'win32') {
+        platformFolder = 'win32-x64';
+      } else if (platform === 'darwin') {
+        platformFolder = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+      } else if (platform === 'linux') {
+        platformFolder = 'linux-x64';
+      }
 
-        // Verify the path actually exists
-        if (fs.existsSync(ffmpegPath)) {
-          log.info(`Found bundled ffmpeg at: ${ffmpegPath}`);
-          bundledPaths.ffmpegPath = ffmpegPath;
-        } else {
-          log.warn(`ffmpeg-installer path does not exist: ${ffmpegPath}`);
+      const binaryName = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+
+      // Try extraResources first (production)
+      const resourcesPath = process.resourcesPath || app.getAppPath();
+      const extraResourcesPath = path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, binaryName);
+
+      if (fs.existsSync(extraResourcesPath)) {
+        log.info(`Found bundled ffmpeg in extraResources: ${extraResourcesPath}`);
+        bundledPaths.ffmpegPath = extraResourcesPath;
+      } else {
+        // Fall back to npm package (development)
+        const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+        if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
+          log.info(`Found bundled ffmpeg at: ${ffmpegInstaller.path}`);
+          bundledPaths.ffmpegPath = ffmpegInstaller.path;
         }
       }
     } catch (error) {
@@ -271,23 +282,34 @@ export class ExecutablesUtil {
 
     try {
       // Try to get ffprobe from @ffprobe-installer/ffprobe
-      const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
-      if (ffprobeInstaller && ffprobeInstaller.path) {
-        let ffprobePath = ffprobeInstaller.path;
+      // First check extraResources (production), then fall back to npm package location (development)
+      const platform = process.platform;
+      const arch = process.arch;
 
-        // If the path contains 'app.asar', replace with unpacked version
-        // This MUST happen before checking existence because files in .asar can't be executed
-        if (ffprobePath.includes('app.asar') && !ffprobePath.includes('app.asar.unpacked')) {
-          ffprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
-          log.info(`Converted asar path to unpacked: ${ffprobePath}`);
-        }
+      let platformFolder = '';
+      if (platform === 'win32') {
+        platformFolder = 'win32-x64';
+      } else if (platform === 'darwin') {
+        platformFolder = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+      } else if (platform === 'linux') {
+        platformFolder = 'linux-x64';
+      }
 
-        // Verify the path actually exists
-        if (fs.existsSync(ffprobePath)) {
-          log.info(`Found bundled ffprobe at: ${ffprobePath}`);
-          bundledPaths.ffprobePath = ffprobePath;
-        } else {
-          log.warn(`ffprobe-installer path does not exist: ${ffprobePath}`);
+      const binaryName = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+
+      // Try extraResources first (production)
+      const resourcesPath = process.resourcesPath || app.getAppPath();
+      const extraResourcesPath = path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, binaryName);
+
+      if (fs.existsSync(extraResourcesPath)) {
+        log.info(`Found bundled ffprobe in extraResources: ${extraResourcesPath}`);
+        bundledPaths.ffprobePath = extraResourcesPath;
+      } else {
+        // Fall back to npm package (development)
+        const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
+        if (ffprobeInstaller && ffprobeInstaller.path && fs.existsSync(ffprobeInstaller.path)) {
+          log.info(`Found bundled ffprobe at: ${ffprobeInstaller.path}`);
+          bundledPaths.ffprobePath = ffprobeInstaller.path;
         }
       }
     } catch (error) {

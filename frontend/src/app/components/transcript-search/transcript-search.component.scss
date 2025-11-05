@@ -3,7 +3,7 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  overflow: hidden;
+  min-height: 0; // Critical for flex scrolling
 }
 
 .search-input-wrapper {
