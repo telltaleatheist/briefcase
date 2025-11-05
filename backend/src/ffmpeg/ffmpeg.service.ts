@@ -35,8 +35,17 @@ export class FfmpegService {
         const resourcesPath = (process as any).resourcesPath || path.join(process.cwd(), 'resources');
 
         if (!ffmpegExecutablePath) {
-          // Try to find packaged ffmpeg
-          const packagedFfmpegPath = path.join(resourcesPath, 'binaries', 'ffmpeg', 'ffmpeg',
+          // Try to find packaged ffmpeg in backend/node_modules
+          let platformFolder = '';
+          if (process.platform === 'win32') {
+            platformFolder = 'win32-x64';
+          } else if (process.platform === 'darwin') {
+            platformFolder = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+          } else if (process.platform === 'linux') {
+            platformFolder = 'linux-x64';
+          }
+
+          const packagedFfmpegPath = path.join(resourcesPath, 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
             process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
           if (fs.existsSync(packagedFfmpegPath)) {
             ffmpegExecutablePath = packagedFfmpegPath;
@@ -44,8 +53,17 @@ export class FfmpegService {
         }
 
         if (!ffprobeExecutablePath) {
-          // Try to find packaged ffprobe
-          const packagedFfprobePath = path.join(resourcesPath, 'binaries', 'ffprobe', 'ffprobe',
+          // Try to find packaged ffprobe in backend/node_modules
+          let platformFolder = '';
+          if (process.platform === 'win32') {
+            platformFolder = 'win32-x64';
+          } else if (process.platform === 'darwin') {
+            platformFolder = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+          } else if (process.platform === 'linux') {
+            platformFolder = 'linux-x64';
+          }
+
+          const packagedFfprobePath = path.join(resourcesPath, 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
             process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
           if (fs.existsSync(packagedFfprobePath)) {
             ffprobeExecutablePath = packagedFfprobePath;

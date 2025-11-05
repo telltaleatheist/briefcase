@@ -93,16 +93,6 @@
         "from": "dist-python/python",
         "to": "python",
         "filter": ["**/*"]
-      },
-      {
-        "from": "node_modules/@ffmpeg-installer",
-        "to": "binaries/ffmpeg",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "node_modules/@ffprobe-installer",
-        "to": "binaries/ffprobe",
-        "filter": ["**/*"]
       }
     ],
     "files": [
