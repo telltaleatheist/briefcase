@@ -30,22 +30,20 @@ const DIST_DIR = path.join(__dirname, '..', 'dist-python');
 const PYTHON_DIR = path.join(DIST_DIR, `python-${TARGET_ARCH}`);
 
 /**
- * Download a file from URL
+ * Download a file from URL using Node.js https module
  */
-async function downloadFile(url, destPath) {
-  console.log(`Downloading ${url}...`);
-
+async function downloadFileWithHttps(url, destPath) {
   return new Promise((resolve, reject) => {
-    https.get(url, (response) => {
+    const request = https.get(url, { timeout: 30000 }, (response) => {
       if (response.statusCode === 302 || response.statusCode === 301) {
         // Follow redirect
-        return downloadFile(response.headers.location, destPath)
+        return downloadFileWithHttps(response.headers.location, destPath)
           .then(resolve)
           .catch(reject);
       }
 
       if (response.statusCode !== 200) {
-        reject(new Error(`Failed to download: ${response.statusCode}`));
+        reject(new Error(`Failed to download: HTTP ${response.statusCode} - ${response.statusMessage}`));
         return;
       }
 
@@ -54,16 +52,68 @@ async function downloadFile(url, destPath) {
 
       file.on('finish', () => {
         file.close();
-        console.log(`Downloaded to ${destPath}`);
         resolve();
       });
 
       file.on('error', (err) => {
-        fs.unlinkSync(destPath);
+        try {
+          if (fs.existsSync(destPath)) {
+            fs.unlinkSync(destPath);
+          }
+        } catch (e) {
+          // Ignore cleanup errors
+        }
         reject(err);
       });
-    }).on('error', reject);
+    });
+
+    request.on('error', (err) => {
+      reject(new Error(`Download failed: ${err.message}`));
+    });
+
+    request.on('timeout', () => {
+      request.destroy();
+      reject(new Error('Download timed out after 30 seconds'));
+    });
   });
+}
+
+/**
+ * Download a file using curl as fallback
+ */
+async function downloadFileWithCurl(url, destPath) {
+  return new Promise((resolve, reject) => {
+    try {
+      execSync(`curl -L -o "${destPath}" "${url}"`, {
+        stdio: 'inherit',
+        timeout: 60000
+      });
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/**
+ * Download a file from URL with fallback to curl
+ */
+async function downloadFile(url, destPath) {
+  console.log(`Downloading ${url}...`);
+
+  try {
+    await downloadFileWithHttps(url, destPath);
+    console.log(`Downloaded to ${destPath}`);
+  } catch (httpsErr) {
+    console.log(`   HTTPS download failed: ${httpsErr.message}`);
+    console.log(`   Trying with curl...`);
+    try {
+      await downloadFileWithCurl(url, destPath);
+      console.log(`Downloaded to ${destPath}`);
+    } catch (curlErr) {
+      throw new Error(`Both HTTPS and curl downloads failed. HTTPS: ${httpsErr.message}, curl: ${curlErr.message}`);
+    }
+  }
 }
 
 /**
