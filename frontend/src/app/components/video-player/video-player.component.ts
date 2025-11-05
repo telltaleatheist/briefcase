@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTabsModule } from '@angular/material/tabs';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
@@ -24,6 +25,7 @@ import Player from 'video.js/dist/types/player';
     MatProgressSpinnerModule,
     MatTooltipModule,
     MatSnackBarModule,
+    MatTabsModule,
     VideoTimelineComponent,
     TranscriptSearchComponent,
   ],

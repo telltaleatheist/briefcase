@@ -35,32 +35,35 @@
   <!-- Loading Spinner -->
   <div *ngIf="isSearching" class="search-loading">
     <mat-spinner diameter="20"></mat-spinner>
+    <p>Searching...</p>
   </div>
 
-  <!-- Search Results Dropdown -->
-  <div *ngIf="showResults && matches.length > 0" class="search-results">
-    <div class="results-header">
-      <span class="results-count">{{ matches.length }} result{{ matches.length !== 1 ? 's' : '' }}</span>
-    </div>
-    <div class="results-list">
+  <!-- Search Results as Section Items -->
+  <div *ngIf="!isSearching && matches.length > 0" class="search-results-container">
+    <p class="results-hint">{{ matches.length }} result{{ matches.length !== 1 ? 's' : '' }} found - Click to jump to timestamp</p>
+    <div class="search-results-list">
       <div
         *ngFor="let match of matches"
-        class="result-item"
+        class="search-result-item"
         [class.selected]="selectedMatchIndex === match.index"
         (click)="onMatchClick(match)">
-        <div class="result-timestamp" *ngIf="match.timestamp !== undefined">
-          {{ formatTime(match.timestamp) }}
-        </div>
-        <div class="result-context">
-          {{ match.context }}
+        <div class="result-marker"></div>
+        <div class="result-content">
+          <div class="result-header">
+            <span class="result-time" *ngIf="match.timestamp !== undefined">
+              {{ formatTime(match.timestamp) }}
+            </span>
+            <span class="result-match-label">Match</span>
+          </div>
+          <p class="result-text">{{ match.context }}</p>
         </div>
       </div>
     </div>
   </div>
 
   <!-- No Results Message -->
-  <div *ngIf="showResults && matches.length === 0 && searchQuery" class="no-results">
+  <div *ngIf="!isSearching && matches.length === 0 && searchQuery" class="no-results">
     <mat-icon>search_off</mat-icon>
-    <span>No matches found for "{{ searchQuery }}"</span>
+    <p>No matches found for "{{ searchQuery }}"</p>
   </div>
 </div>

@@ -40,7 +40,6 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   searchQuery = '';
   matches: TranscriptMatch[] = [];
   isSearching = false;
-  showResults = false;
   selectedMatchIndex = -1;
 
   private searchSubject = new Subject<string>();
@@ -68,7 +67,6 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   performSearch(query: string) {
     if (!query || !this.transcriptText) {
       this.matches = [];
-      this.showResults = false;
       return;
     }
 
@@ -96,8 +94,6 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
           });
         }
       });
-
-      this.showResults = this.matches.length > 0;
     } catch (error) {
       console.error('Search error:', error);
     } finally {
@@ -128,14 +124,12 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
     this.selectedMatchIndex = match.index;
     if (match.timestamp !== undefined) {
       this.seekToTime.emit(match.timestamp);
-      this.showResults = false;
     }
   }
 
   clearSearch() {
     this.searchQuery = '';
     this.matches = [];
-    this.showResults = false;
     this.selectedMatchIndex = -1;
   }
 

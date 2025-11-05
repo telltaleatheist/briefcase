@@ -69,6 +69,14 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   panStartX = 0;
   panStartOffset = 0;
 
+  // Scrollbar state
+  isDraggingScrollbar = false;
+  isDraggingLeftZoomHandle = false;
+  isDraggingRightZoomHandle = false;
+  scrollbarDragStartX = 0;
+  scrollbarDragStartOffset = 0;
+  scrollbarDragStartZoom = 1;
+
   ngOnInit() {
     // Initialize selection based on sections
     if (this.sections && this.sections.length > 0) {
@@ -187,10 +195,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       const x = event.clientX - rect.left;
       const time = this.pixelsToTime(x);
 
-      // CURSOR TOOL: Click to seek, drag to scrub
+      // CURSOR TOOL: Click to seek, drag to pan viewport
       if (this.selectedTool === 'cursor') {
-        this.seek.emit(Math.max(0, Math.min(this.duration, time)));
-        this.isScrubbing = true;
+        // If zoomed in, dragging pans the viewport
+        if (this.zoomLevel > 1) {
+          this.isPanning = true;
+          this.panStartX = event.clientX;
+          this.panStartOffset = this.zoomOffset;
+        } else {
+          // If not zoomed, clicking seeks
+          this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+        }
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -272,6 +287,74 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
    * Handle mouse move for dragging, scrubbing, and panning
    */
   handleMouseMove = (event: MouseEvent) => {
+    // Handle scrollbar middle dragging (panning)
+    if (this.isDraggingScrollbar) {
+      const deltaX = event.clientX - this.scrollbarDragStartX;
+      // Assuming scrollbar is same width as timeline
+      const scrollbarWidth = this.timelineElement?.nativeElement?.clientWidth || 1;
+      const deltaTime = (deltaX / scrollbarWidth) * this.duration;
+
+      this.zoomOffset = this.scrollbarDragStartOffset + deltaTime;
+
+      // Clamp offset to valid range
+      const visibleDuration = this.getVisibleDuration();
+      this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      return;
+    }
+
+    // Handle left zoom handle dragging
+    if (this.isDraggingLeftZoomHandle) {
+      const deltaX = event.clientX - this.scrollbarDragStartX;
+      const scrollbarWidth = this.timelineElement?.nativeElement?.clientWidth || 1;
+
+      // Convert pixel delta to time delta
+      const deltaTime = (deltaX / scrollbarWidth) * this.duration;
+
+      // Moving left handle to the right zooms in (increases visible start, decreases visible duration)
+      // New visible start = old offset + deltaTime
+      const newVisibleStart = Math.max(0, this.scrollbarDragStartOffset + deltaTime);
+      const oldVisibleEnd = this.scrollbarDragStartOffset + (this.duration / this.scrollbarDragStartZoom);
+      const newVisibleDuration = oldVisibleEnd - newVisibleStart;
+
+      // Calculate new zoom level
+      if (newVisibleDuration > 0 && newVisibleDuration <= this.duration) {
+        this.zoomLevel = this.duration / newVisibleDuration;
+        this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
+        this.zoomOffset = newVisibleStart;
+
+        // Clamp offset
+        const visibleDuration = this.getVisibleDuration();
+        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      }
+      return;
+    }
+
+    // Handle right zoom handle dragging
+    if (this.isDraggingRightZoomHandle) {
+      const deltaX = event.clientX - this.scrollbarDragStartX;
+      const scrollbarWidth = this.timelineElement?.nativeElement?.clientWidth || 1;
+
+      // Convert pixel delta to time delta
+      const deltaTime = (deltaX / scrollbarWidth) * this.duration;
+
+      // Moving right handle to the left zooms in (decreases visible end, decreases visible duration)
+      const visibleStart = this.scrollbarDragStartOffset;
+      const oldVisibleEnd = this.scrollbarDragStartOffset + (this.duration / this.scrollbarDragStartZoom);
+      const newVisibleEnd = Math.min(this.duration, oldVisibleEnd + deltaTime);
+      const newVisibleDuration = newVisibleEnd - visibleStart;
+
+      // Calculate new zoom level
+      if (newVisibleDuration > 0 && newVisibleDuration <= this.duration) {
+        this.zoomLevel = this.duration / newVisibleDuration;
+        this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
+
+        // Keep the left side fixed, only adjust based on new zoom
+        const actualVisibleDuration = this.getVisibleDuration();
+        this.zoomOffset = Math.max(0, Math.min(this.duration - actualVisibleDuration, this.zoomOffset));
+      }
+      return;
+    }
+
     // Handle panning
     if (this.isPanning) {
       const deltaX = event.clientX - this.panStartX;
@@ -377,6 +460,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     this.isDraggingWindow = false;
     this.isDraggingLeftHandle = false;
     this.isDraggingRightHandle = false;
+    this.isDraggingScrollbar = false;
+    this.isDraggingLeftZoomHandle = false;
+    this.isDraggingRightZoomHandle = false;
   };
 
   /**
@@ -852,5 +938,58 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     // Clamp the offset
     const visibleDuration = this.getVisibleDuration();
     this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+  }
+
+  /**
+   * Start dragging scrollbar middle section
+   */
+  onScrollbarMouseDown(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingScrollbar = true;
+    this.scrollbarDragStartX = event.clientX;
+    this.scrollbarDragStartOffset = this.zoomOffset;
+  }
+
+  /**
+   * Start dragging left zoom handle
+   */
+  onLeftZoomHandleMouseDown(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingLeftZoomHandle = true;
+    this.scrollbarDragStartX = event.clientX;
+    this.scrollbarDragStartZoom = this.zoomLevel;
+    this.scrollbarDragStartOffset = this.zoomOffset;
+  }
+
+  /**
+   * Start dragging right zoom handle
+   */
+  onRightZoomHandleMouseDown(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingRightZoomHandle = true;
+    this.scrollbarDragStartX = event.clientX;
+    this.scrollbarDragStartZoom = this.zoomLevel;
+    this.scrollbarDragStartOffset = this.zoomOffset;
+  }
+
+  /**
+   * Get CSS styles for the custom scrollbar viewport window
+   */
+  getScrollbarViewportStyle() {
+    const visibleDuration = this.getVisibleDuration();
+    const startPercentage = (this.zoomOffset / this.duration) * 100;
+    const widthPercentage = (visibleDuration / this.duration) * 100;
+
+    // Ensure minimum width for handles to be visible and clickable
+    const minWidthPercentage = 3; // Minimum 3% width
+    const actualWidthPercentage = Math.max(widthPercentage, minWidthPercentage);
+
+    return {
+      left: `${startPercentage}%`,
+      width: `${actualWidthPercentage}%`
+    };
   }
 }
