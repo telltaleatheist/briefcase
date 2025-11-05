@@ -17,7 +17,7 @@ const https = require('https');
 const { execSync } = require('child_process');
 const extract = require('extract-zip');
 
-const PYTHON_VERSION = '3.11.11'; // Using 3.11 for compatibility with torch 2.1.2
+const PYTHON_VERSION = '3.11.9'; // Using 3.11.9 for compatibility with torch 2.1.2 and Windows embeddable package
 
 // Determine target architecture from command line argument or default to x64
 const TARGET_ARCH = process.argv[2] || 'x64';

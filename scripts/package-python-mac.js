@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const PYTHON_VERSION = '3.11.11'; // Using 3.11 for compatibility with torch 2.1.2
+const PYTHON_VERSION = '3.11.9'; // Using 3.11.9 for compatibility with torch 2.1.2 and Windows embeddable package
 
 // Determine target architecture from command line argument or system architecture
 const TARGET_ARCH = process.argv[2] || process.arch;

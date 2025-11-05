@@ -91,6 +91,11 @@
         "to": "backend/node_modules"
       },
       {
+        "from": "backend/dist/python",
+        "to": "backend/python",
+        "filter": ["**/*"]
+      },
+      {
         "from": "utilities",
         "to": "utilities"
       },
@@ -110,6 +115,7 @@
       "!dist-electron/**/*.map",
       "backend/dist/**/*",
       "!backend/dist/**/*.map",
+      "!backend/dist/python/**",
       "backend/package.json",
       "frontend/dist/clippy-frontend/**/*",
       "backend/node_modules/**/*",
@@ -131,7 +137,6 @@
     ],
     "asarUnpack": [
       "backend/node_modules/**",
-      "backend/dist/python/**",
       "utilities/**"
     ],
     "mac": {

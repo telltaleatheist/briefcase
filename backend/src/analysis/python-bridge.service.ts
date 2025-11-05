@@ -36,12 +36,10 @@ export class PythonBridgeService {
                        (process as any).defaultApp === false;
 
     if (isPackaged && (process as any).resourcesPath) {
-      // In production, use the unpacked location
+      // In production, use the extraResources location (outside asar)
       this.pythonScriptPath = path.join(
         (process as any).resourcesPath,
-        'app.asar.unpacked',
         'backend',
-        'dist',
         'python',
         'video_analysis_service.py',
       );
