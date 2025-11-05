@@ -31,6 +31,31 @@
           [disabled]="isCreating">
         <mat-icon matPrefix>title</mat-icon>
       </mat-form-field>
+
+      <!-- Save Location -->
+      <div class="save-location">
+        <div class="location-header">
+          <mat-icon>folder</mat-icon>
+          <span class="label">Save Location:</span>
+        </div>
+        <div class="location-content">
+          <div class="path-display" *ngIf="!isLoadingSavePath">
+            <span class="path-text" [title]="savePath">{{ savePath }}</span>
+          </div>
+          <div class="path-loading" *ngIf="isLoadingSavePath">
+            <mat-spinner diameter="20"></mat-spinner>
+            <span>Loading save path...</span>
+          </div>
+          <button
+            mat-stroked-button
+            class="browse-btn"
+            (click)="browseDirectory()"
+            [disabled]="isCreating || isLoadingSavePath">
+            <mat-icon>folder_open</mat-icon>
+            Change Location
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Creating State -->

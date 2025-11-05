@@ -232,6 +232,7 @@ export class LibraryService {
       title?: string;
       description?: string;
       category?: string;
+      customDirectory?: string;
     }
   ): Promise<any> {
     return firstValueFrom(

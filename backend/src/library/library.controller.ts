@@ -27,6 +27,7 @@ import {
 } from './interfaces/library.interface';
 import { parseAnalysisReport, extractCategories, saveAnalysisMetadata } from './parsers/analysis-parser';
 import * as path from 'path';
+import * as os from 'os';
 
 @Controller('library')
 export class LibraryController {
@@ -500,6 +501,75 @@ export class LibraryController {
   }
 
   /**
+   * Get the default save path for a clip
+   */
+  @Post('analyses/:id/clip-save-path')
+  async getClipSavePath(
+    @Param('id') id: string,
+    @Body() body: {
+      startTime: number;
+      endTime: number;
+      category?: string;
+      customDirectory?: string;
+    }
+  ) {
+    try {
+      const analysis = await this.libraryService.getAnalysis(id);
+
+      if (!analysis) {
+        throw new HttpException('Analysis not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Generate clip filename
+      const originalFilename = path.basename(analysis.video.currentPath);
+      const clipFilename = this.clipExtractor.generateClipFilename(
+        originalFilename,
+        body.startTime,
+        body.endTime,
+        body.category
+      );
+
+      // Calculate week folder (Sunday-based)
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0 = Sunday
+      const daysToSubtract = dayOfWeek; // Days since last Sunday
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - daysToSubtract);
+      weekStart.setHours(0, 0, 0, 0);
+      const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
+
+      // Determine output path using custom directory or configured output directory
+      // If custom directory is provided, use it directly. Otherwise use configured directory or default Downloads
+      const baseDir = body.customDirectory ||
+                      this.configService.getOutputDir() ||
+                      path.join(os.homedir(), 'Downloads');
+
+      // Always use: baseDir/clippy/clips/weekFolder/filename structure
+      const clippyDir = path.join(baseDir, 'clippy');
+      const clipsBasePath = path.join(clippyDir, 'clips');
+      const outputDir = path.join(clipsBasePath, weekFolder);
+      const outputPath = path.join(outputDir, clipFilename);
+
+      return {
+        success: true,
+        outputPath,
+        outputDir,
+        filename: clipFilename,
+        baseDir,
+        clippyDir,
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get clip save path: ${(error as Error).message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Extract a clip from an analysis video
    */
   @Post('analyses/:id/extract-clip')
@@ -511,6 +581,7 @@ export class LibraryController {
       title?: string;
       description?: string;
       category?: string;
+      customDirectory?: string;
     }
   ) {
     try {
@@ -550,9 +621,15 @@ export class LibraryController {
       weekStart.setHours(0, 0, 0, 0);
       const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Determine output path using configured output directory
-      const baseOutputDir = this.configService.getOutputDir() || '/Volumes/Callisto/clippy';
-      const clipsBasePath = path.join(baseOutputDir, 'clips');
+      // Determine output path using custom directory or configured output directory
+      // If custom directory is provided, use it directly. Otherwise use configured directory or default Downloads
+      const baseDir = body.customDirectory ||
+                      this.configService.getOutputDir() ||
+                      path.join(os.homedir(), 'Downloads');
+
+      // Always use: baseDir/clippy/clips/weekFolder/filename structure
+      const clippyDir = path.join(baseDir, 'clippy');
+      const clipsBasePath = path.join(clippyDir, 'clips');
       const outputDir = path.join(clipsBasePath, weekFolder);
       const outputPath = path.join(outputDir, clipFilename);
 

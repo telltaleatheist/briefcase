@@ -35,6 +35,10 @@ export class CreateClipDialogComponent {
   title = '';
   isCreating = false;
   error: string | null = null;
+  savePath = '';
+  saveDirectory = '';
+  isLoadingSavePath = true;
+  customDirectory: string | null = null;
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: CreateClipDialogData,
@@ -43,6 +47,9 @@ export class CreateClipDialogComponent {
   ) {
     // Set default title
     this.title = `Clip from ${this.data.analysis.title}`;
+
+    // Load the default save path
+    this.loadSavePath();
   }
 
   get duration(): number {
@@ -58,6 +65,45 @@ export class CreateClipDialogComponent {
       return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  async loadSavePath() {
+    try {
+      this.isLoadingSavePath = true;
+      const response = await fetch(`/api/library/analyses/${this.data.analysis.id}/clip-save-path`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startTime: this.data.startTime,
+          endTime: this.data.endTime,
+          customDirectory: this.customDirectory || undefined,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.savePath = data.outputPath;
+        this.saveDirectory = data.outputDir;
+      } else {
+        console.error('Failed to load save path');
+      }
+    } catch (error) {
+      console.error('Error loading save path:', error);
+    } finally {
+      this.isLoadingSavePath = false;
+    }
+  }
+
+  async browseDirectory() {
+    try {
+      const result = await (window as any).electron?.pickDirectory();
+      if (result) {
+        this.customDirectory = result;
+        await this.loadSavePath(); // Reload the path with new custom directory
+      }
+    } catch (error) {
+      console.error('Error browsing directory:', error);
+    }
   }
 
   async createClip() {
@@ -78,6 +124,7 @@ export class CreateClipDialogComponent {
           title: this.title,
           description: '',
           category: undefined,
+          customDirectory: this.customDirectory || undefined,
         }
       );
 
