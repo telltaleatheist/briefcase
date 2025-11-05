@@ -177,15 +177,19 @@ export class BackendService {
       const nodePath = process.execPath;
       const frontendPath = AppConfig.frontendPath;
       
+      // Use environment variable if already set (for test mode), otherwise use process.resourcesPath
+      const resourcesPath = process.env.RESOURCES_PATH || process.resourcesPath;
+
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         CLIPPY_BACKEND: 'true',
         FRONTEND_PATH: frontendPath,
-        NODE_PATH: path.join(process.resourcesPath, 'backend/node_modules'),
+        NODE_PATH: path.join(resourcesPath, 'backend/node_modules'),
+        RESOURCES_PATH: resourcesPath,
         PORT: this.actualBackendPort.toString(),
-        NODE_ENV: 'production',
-        APP_ROOT: process.resourcesPath,
+        NODE_ENV: process.env.NODE_ENV || 'production',
+        APP_ROOT: resourcesPath,
         VERBOSE: 'true'
       };
       

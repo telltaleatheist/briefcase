@@ -510,7 +510,11 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   private async checkForActiveJobs(): Promise<void> {
     try {
       const response = await fetch('/api/api/analysis/jobs');
-      if (!response.ok) return;
+      if (!response.ok) {
+        // Backend may not be ready yet during startup - silently ignore
+        console.log('[Video Analysis] Backend not ready yet, skipping active job check');
+        return;
+      }
 
       const data = await response.json();
       if (data.success && data.jobs && data.jobs.length > 0) {
@@ -527,7 +531,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
         }
       }
     } catch (error) {
-      console.error('[Video Analysis] Error checking for active jobs:', error);
+      // Backend may not be ready yet during startup - silently ignore
+      console.log('[Video Analysis] Backend not ready yet, skipping active job check');
     }
   }
 

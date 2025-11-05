@@ -12,7 +12,8 @@ import { EnvironmentUtil } from '../environment.util';
 export class AppConfig {
   // Path configurations
   static get resourcesPath(): string {
-    return process.resourcesPath || app.getAppPath();
+    // In test mode, use the environment variable if set
+    return process.env.RESOURCES_PATH || process.resourcesPath || app.getAppPath();
   }
 
   static get appPath(): string {

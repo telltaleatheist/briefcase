@@ -1,6 +1,7 @@
 // clippy/electron/main.ts
 import { app } from 'electron';
 import * as log from 'electron-log';
+import * as path from 'path';
 import { AppConfig } from './config/app-config';
 import { ExecutablesUtil } from './utilities/executables';
 import { WindowService } from './services/window-service';
@@ -14,6 +15,31 @@ import { LogUtil } from './utilities/log-util';
  * Main application entry point
  * Responsible for coordinating the app startup process
  */
+
+// TEST MODE: Simulate packaged environment for testing
+// Set this BEFORE anything else runs
+// Use: npm run electron:test-packaged
+console.log('[Main] NODE_ENV:', process.env.NODE_ENV);
+console.log('[Main] process.resourcesPath:', (process as any).resourcesPath);
+console.log('[Main] __dirname:', __dirname);
+
+if (process.env.NODE_ENV === 'production') {
+  // Check if we're in test mode (not actually packaged)
+  const isActuallyPackaged = (process as any).resourcesPath &&
+                              ((process as any).resourcesPath.includes('win-unpacked') ||
+                               (process as any).resourcesPath.includes('mac') ||
+                               (process as any).resourcesPath.includes('.app'));
+
+  console.log('[Main] isActuallyPackaged:', isActuallyPackaged);
+
+  if (!isActuallyPackaged) {
+    // __dirname when built is 'dist-electron/electron', so go up twice to project root
+    const testResourcesPath = path.join(__dirname, '..', '..', 'dist-electron', 'win-unpacked', 'resources');
+    const absolutePath = path.resolve(testResourcesPath);
+    console.log(`TEST PACKAGED MODE: Setting RESOURCES_PATH to ${absolutePath}`);
+    process.env.RESOURCES_PATH = absolutePath;
+  }
+}
 
 let windowService: WindowService;
 let backendService: BackendService;

@@ -27,12 +27,20 @@ export class FfmpegService {
       let ffprobeExecutablePath = configFfprobePath || process.env.FFPROBE_PATH;
 
       // If not configured, try packaged binaries in production
-      const isPackaged = process.env.NODE_ENV === 'production' ||
-                         (process as any).resourcesPath !== undefined ||
-                         (process as any).defaultApp === false;
+      // In production: Check if RESOURCES_PATH env var is set OR resourcesPath property exists
+      const isPackaged = process.env.NODE_ENV === 'production' &&
+                         (process.env.RESOURCES_PATH !== undefined ||
+                          (process as any).resourcesPath !== undefined ||
+                          (process as any).defaultApp === false);
+
+      this.logger.log(`isPackaged: ${isPackaged}, NODE_ENV: ${process.env.NODE_ENV}`);
 
       if (isPackaged && (!ffmpegExecutablePath || !ffprobeExecutablePath)) {
-        const resourcesPath = (process as any).resourcesPath || path.join(process.cwd(), 'resources');
+        const resourcesPath = process.env.RESOURCES_PATH || (process as any).resourcesPath || path.join(process.cwd(), 'resources');
+        this.logger.log(`RESOURCES_PATH env: ${process.env.RESOURCES_PATH}`);
+        this.logger.log(`process.resourcesPath: ${(process as any).resourcesPath}`);
+        this.logger.log(`process.cwd(): ${process.cwd()}`);
+        this.logger.log(`Final resources path for ffmpeg lookup: ${resourcesPath}`);
 
         if (!ffmpegExecutablePath) {
           // Try to find packaged ffmpeg in backend/node_modules
@@ -45,10 +53,23 @@ export class FfmpegService {
             platformFolder = 'linux-x64';
           }
 
-          const packagedFfmpegPath = path.join(resourcesPath, 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
-            process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-          if (fs.existsSync(packagedFfmpegPath)) {
-            ffmpegExecutablePath = packagedFfmpegPath;
+          // Try multiple possible locations for ffmpeg
+          const possibleFfmpegPaths = [
+            // app.asar.unpacked location
+            path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
+              process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+            // extraResources location
+            path.join(resourcesPath, 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
+              process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+          ];
+
+          for (const packagedFfmpegPath of possibleFfmpegPaths) {
+            this.logger.log(`Looking for packaged ffmpeg at: ${packagedFfmpegPath}`);
+            this.logger.log(`ffmpeg exists: ${fs.existsSync(packagedFfmpegPath)}`);
+            if (fs.existsSync(packagedFfmpegPath)) {
+              ffmpegExecutablePath = packagedFfmpegPath;
+              break;
+            }
           }
         }
 
@@ -63,10 +84,23 @@ export class FfmpegService {
             platformFolder = 'linux-x64';
           }
 
-          const packagedFfprobePath = path.join(resourcesPath, 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
-            process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
-          if (fs.existsSync(packagedFfprobePath)) {
-            ffprobeExecutablePath = packagedFfprobePath;
+          // Try multiple possible locations for ffprobe
+          const possibleFfprobePaths = [
+            // app.asar.unpacked location
+            path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
+              process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
+            // extraResources location
+            path.join(resourcesPath, 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
+              process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
+          ];
+
+          for (const packagedFfprobePath of possibleFfprobePaths) {
+            this.logger.log(`Looking for packaged ffprobe at: ${packagedFfprobePath}`);
+            this.logger.log(`ffprobe exists: ${fs.existsSync(packagedFfprobePath)}`);
+            if (fs.existsSync(packagedFfprobePath)) {
+              ffprobeExecutablePath = packagedFfprobePath;
+              break;
+            }
           }
         }
       }

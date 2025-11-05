@@ -41,14 +41,17 @@ export function getPythonConfig(): PythonConfig {
   const platform = process.platform;
 
   // Check if we're running in a packaged app
-  const isPackaged = process.env.NODE_ENV === 'production' ||
-                     (process as any).resourcesPath !== undefined ||
-                     (process as any).defaultApp === false;
+  // In production: Check if RESOURCES_PATH env var is set OR resourcesPath property exists
+  const isPackaged = process.env.NODE_ENV === 'production' &&
+                     (process.env.RESOURCES_PATH !== undefined ||
+                      (process as any).resourcesPath !== undefined ||
+                      (process as any).defaultApp === false);
 
-  // If packaged, use bundled Python
+  // If packaged, try to use bundled Python first
   if (isPackaged) {
-    // Get resources path
-    const resourcesPath = (process as any).resourcesPath ||
+    // Get resources path - prioritize environment variable set by electron
+    const resourcesPath = process.env.RESOURCES_PATH ||
+                          (process as any).resourcesPath ||
                           path.join(process.cwd(), 'resources');
 
     // Path to packaged Python
@@ -70,6 +73,13 @@ export function getPythonConfig(): PythonConfig {
         fullPath: packagedPythonPath,
       };
     }
+
+    // If we're packaged but Python is missing, throw an error
+    throw new Error(
+      'CRITICAL: Packaged app missing bundled Python! ' +
+      `Expected to find Python at: ${packagedPythonPath}. ` +
+      'Check electron-builder configuration and packaging script.'
+    );
   }
 
   // Development mode: use system Python
@@ -92,33 +102,15 @@ export function getPythonConfig(): PythonConfig {
     };
   }
 
-  // Windows: Use 'python' command (development only)
+  // Windows: Use 'python' command
   if (platform === 'win32') {
-    // CRITICAL: In production, we must have found bundled Python above
-    // If we reach here in production, something is wrong
-    if (isPackaged) {
-      throw new Error(
-        'CRITICAL: Packaged app missing bundled Python! ' +
-        'Expected to find python.exe in resources/python/. ' +
-        'Check electron-builder configuration and packaging script.'
-      );
-    }
-
     return {
       command: 'python',
       isConda: false,
     };
   }
 
-  // Linux/other: Use 'python3' command (development only)
-  if (isPackaged) {
-    throw new Error(
-      'CRITICAL: Packaged app missing bundled Python! ' +
-      'Expected to find python3 in resources/python/bin/. ' +
-      'Check electron-builder configuration and packaging script.'
-    );
-  }
-
+  // Linux/other: Use 'python3' command
   return {
     command: 'python3',
     isConda: false,

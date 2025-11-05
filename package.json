@@ -24,6 +24,7 @@
     "test:backend": "cd backend && npm run test",
     "test:frontend": "cd frontend && npm run test",
     "electron:dev": "npm run build:all && cross-env NODE_ENV=development electron .",
+    "electron:test-packaged": "npm run build:all && cross-env NODE_ENV=production electron .",
     "electron": "npm run build:all && electron .",
     "package": "npm run build:all && electron-builder build",
     "package:win": "npm run clean:win && npm run build:all && npm run package:python && electron-builder build --win --publish never",

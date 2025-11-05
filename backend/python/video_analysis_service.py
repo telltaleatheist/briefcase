@@ -1220,7 +1220,12 @@ def write_section_to_file(output_file: str, section: Dict, is_first: bool = Fals
 def main():
     """Main entry point for video analysis service"""
     try:
-        # Read command from stdin
+        # Read command from stdin with UTF-8 encoding
+        # On Windows, stdin defaults to cp1252 which mangles Unicode characters
+        if sys.platform == 'win32':
+            import io
+            sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+
         command_data = json.loads(sys.stdin.read())
 
         command = command_data.get('command')
