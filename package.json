@@ -124,7 +124,9 @@
     ],
     "asarUnpack": [
       "backend/node_modules/**",
-      "utilities/**"
+      "utilities/**",
+      "node_modules/@ffmpeg-installer/**",
+      "node_modules/@ffprobe-installer/**"
     ],
     "mac": {
       "category": "public.app-category.utilities",

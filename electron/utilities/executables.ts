@@ -242,13 +242,26 @@ export class ExecutablesUtil {
    */
   private getBundledBinaryPaths(): Partial<PathConfig> {
     const bundledPaths: Partial<PathConfig> = {};
+    const { app } = require('electron');
 
     try {
       // Try to get ffmpeg from @ffmpeg-installer/ffmpeg
       const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
       if (ffmpegInstaller && ffmpegInstaller.path) {
-        log.info(`Found bundled ffmpeg at: ${ffmpegInstaller.path}`);
-        bundledPaths.ffmpegPath = ffmpegInstaller.path;
+        let ffmpegPath = ffmpegInstaller.path;
+
+        // If the path contains 'app.asar' and doesn't exist, try the unpacked version
+        if (ffmpegPath.includes('app.asar') && !fs.existsSync(ffmpegPath)) {
+          ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+        }
+
+        // Verify the path actually exists
+        if (fs.existsSync(ffmpegPath)) {
+          log.info(`Found bundled ffmpeg at: ${ffmpegPath}`);
+          bundledPaths.ffmpegPath = ffmpegPath;
+        } else {
+          log.warn(`ffmpeg-installer path does not exist: ${ffmpegPath}`);
+        }
       }
     } catch (error) {
       log.warn('Could not load @ffmpeg-installer/ffmpeg:', error);
@@ -258,8 +271,20 @@ export class ExecutablesUtil {
       // Try to get ffprobe from @ffprobe-installer/ffprobe
       const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
       if (ffprobeInstaller && ffprobeInstaller.path) {
-        log.info(`Found bundled ffprobe at: ${ffprobeInstaller.path}`);
-        bundledPaths.ffprobePath = ffprobeInstaller.path;
+        let ffprobePath = ffprobeInstaller.path;
+
+        // If the path contains 'app.asar' and doesn't exist, try the unpacked version
+        if (ffprobePath.includes('app.asar') && !fs.existsSync(ffprobePath)) {
+          ffprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
+        }
+
+        // Verify the path actually exists
+        if (fs.existsSync(ffprobePath)) {
+          log.info(`Found bundled ffprobe at: ${ffprobePath}`);
+          bundledPaths.ffprobePath = ffprobePath;
+        } else {
+          log.warn(`ffprobe-installer path does not exist: ${ffprobePath}`);
+        }
       }
     } catch (error) {
       log.warn('Could not load @ffprobe-installer/ffprobe:', error);
@@ -280,15 +305,29 @@ export class ExecutablesUtil {
         ytDlpBinaryName = 'yt-dlp_linux';
       }
 
-      // Check in resources path (production) and project root (development)
-      const resourcesPath = process.resourcesPath || path.join(__dirname, '../../..');
-      const ytDlpPath = path.join(resourcesPath, 'utilities', 'bin', ytDlpBinaryName);
+      // Try multiple possible locations for bundled yt-dlp
+      const possiblePaths = [
+        // Production: extraResources location
+        path.join(process.resourcesPath || app.getAppPath(), 'utilities', 'bin', ytDlpBinaryName),
+        // Production: app.asar.unpacked location
+        path.join(process.resourcesPath || app.getAppPath(), 'app.asar.unpacked', 'utilities', 'bin', ytDlpBinaryName),
+        // Development: project root
+        path.join(__dirname, '../../..', 'utilities', 'bin', ytDlpBinaryName),
+        path.join(__dirname, '../..', 'utilities', 'bin', ytDlpBinaryName),
+        path.join(app.getAppPath(), 'utilities', 'bin', ytDlpBinaryName)
+      ];
 
-      if (fs.existsSync(ytDlpPath) && this.isExecutable(ytDlpPath)) {
-        log.info(`Found bundled yt-dlp at: ${ytDlpPath}`);
-        bundledPaths.ytDlpPath = ytDlpPath;
-      } else {
-        log.info(`Bundled yt-dlp not found at: ${ytDlpPath}`);
+      for (const ytDlpPath of possiblePaths) {
+        log.info(`Checking for yt-dlp at: ${ytDlpPath}`);
+        if (fs.existsSync(ytDlpPath) && this.isExecutable(ytDlpPath)) {
+          log.info(`Found bundled yt-dlp at: ${ytDlpPath}`);
+          bundledPaths.ytDlpPath = ytDlpPath;
+          break;
+        }
+      }
+
+      if (!bundledPaths.ytDlpPath) {
+        log.info(`Bundled yt-dlp not found in any of the checked locations`);
       }
     } catch (error) {
       log.warn('Could not load bundled yt-dlp:', error);
