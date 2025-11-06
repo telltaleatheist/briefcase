@@ -23,6 +23,10 @@
     "package:python:mac-x64": "node scripts/package-python-mac.js x64",
     "package:python:win-x64": "node scripts/package-python-windows.js x64",
     "package:python:win-arm64": "node scripts/package-python-windows.js arm64",
+    "clean:python:mac-arm64": "rimraf dist-python/python-arm64",
+    "clean:python:mac-x64": "rimraf dist-python/python-x64",
+    "clean:python:win-x64": "rimraf dist-python/python-x64",
+    "clean:python:win-arm64": "rimraf dist-python/python-arm64",
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "cd backend && npm run test",
     "test:frontend": "cd frontend && npm run test",
@@ -34,7 +38,11 @@
     "package:mac-x64": "npm run clean:mac && npm run build:all && npm run package:python:mac-x64 && electron-builder --mac --x64 --config.mac.extraResources.0.from=dist-python/python-x64 --publish never",
     "package:win-x64": "npm run clean:win && npm run build:all && npm run package:python:win-x64 && electron-builder --win --x64 --publish never",
     "package:win-arm64": "npm run clean:win && npm run build:all && npm run package:python:win-arm64 && electron-builder --win --arm64 --config.win.extraResources.0.from=dist-python/python-arm64 --publish never",
-    "package:linux": "npm run clean:linux && npm run build:all && electron-builder --linux --publish never"
+    "package:linux": "npm run clean:linux && npm run build:all && electron-builder --linux --publish never",
+    "clean:package:mac-arm64": "npm run clean:python:mac-arm64 && npm run package:mac-arm64",
+    "clean:package:mac-x64": "npm run clean:python:mac-x64 && npm run package:mac-x64",
+    "clean:package:win-x64": "npm run clean:python:win-x64 && npm run package:win-x64",
+    "clean:package:win-arm64": "npm run clean:python:win-arm64 && npm run package:win-arm64"
   },
   "keywords": [
     "video",
@@ -49,6 +57,7 @@
   "license": "MIT",
   "devDependencies": {
     "@electron/typescript-definitions": "^9.1.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/electron": "^1.6.12",
     "@types/fluent-ffmpeg": "^2.1.27",
     "@types/node": "^22.15.3",
@@ -66,6 +75,7 @@
     "@angular/core": "^19.2.9",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
+    "better-sqlite3": "^12.4.1",
     "electron-log": "^5.3.3",
     "electron-store": "^11.0.2",
     "electron-updater": "^6.6.2",
@@ -143,7 +153,9 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "hardenedRuntime": true,
@@ -154,7 +166,9 @@
         {
           "from": "dist-python/python-arm64",
           "to": "python",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         }
       ],
       "extendInfo": {
@@ -180,7 +194,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName} Setup ${version}.${ext}",
@@ -188,7 +204,9 @@
         {
           "from": "dist-python/python-x64",
           "to": "python",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         }
       ]
     },

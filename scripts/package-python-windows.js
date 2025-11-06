@@ -126,6 +126,53 @@ async function extractZip(zipPath, destDir) {
 }
 
 /**
+ * Check if existing Python environment is valid and up-to-date
+ */
+function checkExistingEnvironment() {
+  if (!fs.existsSync(PYTHON_DIR)) {
+    return { valid: false, reason: 'Directory does not exist' };
+  }
+
+  const markerPath = path.join(PYTHON_DIR, 'PACKAGED_VERSION.txt');
+  if (!fs.existsSync(markerPath)) {
+    return { valid: false, reason: 'Missing version marker file' };
+  }
+
+  // Check if marker file indicates correct version and architecture
+  const markerContent = fs.readFileSync(markerPath, 'utf8');
+  if (!markerContent.includes(`Python ${PYTHON_VERSION}`) || !markerContent.includes(`Architecture: ${TARGET_ARCH}`)) {
+    return { valid: false, reason: 'Version or architecture mismatch' };
+  }
+
+  // Check if python.exe exists
+  const pythonPath = path.join(PYTHON_DIR, 'python.exe');
+  if (!fs.existsSync(pythonPath)) {
+    return { valid: false, reason: 'Python binary not found' };
+  }
+
+  // Check if Lib/site-packages exists
+  const sitePackagesDir = path.join(PYTHON_DIR, 'Lib', 'site-packages');
+  if (!fs.existsSync(sitePackagesDir)) {
+    return { valid: false, reason: 'site-packages directory not found' };
+  }
+
+  // Check for key packages
+  try {
+    const requiredPackages = ['whisper', 'torch', 'numpy'];
+    for (const pkg of requiredPackages) {
+      const pkgExists = fs.readdirSync(sitePackagesDir).some(f => f.toLowerCase().includes(pkg.toLowerCase()));
+      if (!pkgExists) {
+        return { valid: false, reason: `Required package '${pkg}' not found` };
+      }
+    }
+  } catch (err) {
+    return { valid: false, reason: `Error checking packages: ${err.message}` };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Main packaging function
  */
 async function packagePython() {
@@ -143,10 +190,33 @@ async function packagePython() {
       fs.mkdirSync(DIST_DIR, { recursive: true });
     }
 
-    // Remove existing Python directory if it exists
+    // Check if existing environment is valid
+    const envCheck = checkExistingEnvironment();
+    if (envCheck.valid) {
+      console.log('✅ Found valid existing Python environment');
+      console.log('   Skipping recreation - using cached environment');
+      console.log('   (This saves time by preserving Whisper models and dependencies)\n');
+      console.log('   To force recreation, delete the directory:');
+      console.log(`   rmdir /s /q "${PYTHON_DIR}" (Windows)`);
+      console.log(`   rm -rf "${PYTHON_DIR}" (Mac/Linux)\n`);
+
+      console.log('╔═══════════════════════════════════════════════════════════╗');
+      console.log('║         Using Existing Python Environment ✅              ║');
+      console.log('╚═══════════════════════════════════════════════════════════╝\n');
+      console.log(`📁 Directory: ${PYTHON_DIR}`);
+      console.log(`🏗️  Architecture: ${TARGET_ARCH}`);
+      console.log(`🐍 Python: ${PYTHON_VERSION}`);
+      console.log('\nReady for electron-builder packaging.\n');
+      return;
+    }
+
+    // Environment is not valid, recreate it
+    console.log(`⚠️  Existing environment is not valid: ${envCheck.reason}`);
     if (fs.existsSync(PYTHON_DIR)) {
-      console.log('⚠️  Removing existing Python directory...');
+      console.log('   Removing and recreating Python directory...');
       fs.rmSync(PYTHON_DIR, { recursive: true, force: true });
+    } else {
+      console.log('   Creating new Python directory...');
     }
 
     fs.mkdirSync(PYTHON_DIR, { recursive: true });
