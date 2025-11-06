@@ -13,6 +13,7 @@ export interface ClipExtractionRequest {
     description?: string;
     category?: string;
   };
+  onProgress?: (progress: number) => void;
 }
 
 export interface ClipExtractionResult {
@@ -55,7 +56,8 @@ export class ClipExtractorService {
         request.videoPath,
         request.startTime,
         duration,
-        request.outputPath
+        request.outputPath,
+        request.onProgress
       );
 
       // Get file stats
@@ -87,20 +89,19 @@ export class ClipExtractorService {
     inputPath: string,
     startTime: number,
     duration: number,
-    outputPath: string
+    outputPath: string,
+    onProgress?: (progress: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
-        // Seek to start time BEFORE reading input (more accurate)
+        // Seek to start time BEFORE reading input (faster and more accurate)
         .inputOptions([`-ss ${startTime}`])
         .setDuration(duration)
         // Use copy codec for fast extraction without re-encoding
-        // Use accurate seeking and avoid negative timestamps
+        // Reset timestamps to start at zero for proper playback
         .outputOptions([
           '-c copy',
           '-avoid_negative_ts make_zero',
-          '-copyts',  // Copy timestamps to maintain accuracy
-          '-start_at_zero',  // Start at zero timestamp
         ])
         .output(outputPath)
         .on('start', (commandLine) => {
@@ -109,13 +110,19 @@ export class ClipExtractorService {
         .on('progress', (progress) => {
           if (progress.percent) {
             this.logger.log(`Progress: ${progress.percent.toFixed(1)}%`);
+            if (onProgress) {
+              onProgress(progress.percent);
+            }
           }
         })
         .on('end', () => {
           this.logger.log('FFmpeg extraction completed');
+          if (onProgress) {
+            onProgress(100);
+          }
           resolve();
         })
-        .on('error', (error, stdout, stderr) => {
+        .on('error', (error, _stdout, stderr) => {
           this.logger.error('FFmpeg error:', error.message);
           this.logger.error('FFmpeg stderr:', stderr);
           reject(error);

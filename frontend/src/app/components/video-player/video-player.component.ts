@@ -448,7 +448,16 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     const result = await dialogRef.afterClosed().toPromise();
 
     if (result?.created) {
-      this.notificationService.toastOnly('success', 'Clip Created', 'Clip created successfully!');
+      const outputPath = result.extraction?.outputPath || result.clip?.outputPath;
+      this.notificationService.toastOnly(
+        'success',
+        'Clip Created',
+        'Click to open clip location',
+        outputPath ? {
+          type: 'open-folder',
+          path: outputPath
+        } : undefined
+      );
     }
   }
 

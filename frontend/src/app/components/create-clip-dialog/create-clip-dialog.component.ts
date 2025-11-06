@@ -129,7 +129,7 @@ export class CreateClipDialogComponent {
       );
 
       if (result.success) {
-        this.dialogRef.close({ created: true, clip: result.clip });
+        this.dialogRef.close({ created: true, clip: result.clip, extraction: result.extraction });
       } else {
         this.error = result.error || 'Failed to create clip';
         this.isCreating = false;

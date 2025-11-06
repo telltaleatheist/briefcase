@@ -59,10 +59,37 @@ export class NotificationToastComponent implements OnInit, OnDestroy {
   }
 
   clickToast(notification: Notification): void {
-    // Show modal with full details
-    this.notificationService.showModal(notification);
-    // Remove toast
-    this.removeToast(notification.id);
+    // Handle action if present
+    if (notification.action) {
+      this.handleAction(notification.action);
+      // Remove toast after action
+      this.removeToast(notification.id);
+    } else {
+      // Show modal with full details
+      this.notificationService.showModal(notification);
+      // Remove toast
+      this.removeToast(notification.id);
+    }
+  }
+
+  private handleAction(action: any): void {
+    switch (action.type) {
+      case 'open-folder':
+        if (action.path && (window as any).electron?.showInFolder) {
+          (window as any).electron.showInFolder(action.path);
+        }
+        break;
+      case 'open-file':
+        if (action.path && (window as any).electron?.openFile) {
+          (window as any).electron.openFile(action.path);
+        }
+        break;
+      case 'custom':
+        if (action.customHandler) {
+          action.customHandler();
+        }
+        break;
+    }
   }
 
   getIcon(type: string): string {

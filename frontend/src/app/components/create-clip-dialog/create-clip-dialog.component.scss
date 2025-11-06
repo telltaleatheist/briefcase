@@ -153,6 +153,12 @@ mat-dialog-content {
       font-size: 13px;
       color: var(--text-secondary);
     }
+
+    &.status {
+      font-size: 14px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
   }
 }
 
