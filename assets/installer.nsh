@@ -2,11 +2,7 @@
 ; Provides detailed progress information during installation
 
 !macro customHeader
-  ; Show detailed status messages
-  !define MUI_INSTFILESPAGE_COLORS "FFFFFF 000000"
-  !define MUI_INSTFILESPAGE_PROGRESSBAR "smooth"
-
-  ; Add custom page for showing extraction progress
+  ; Add custom includes
   !include "LogicLib.nsh"
   !include "FileFunc.nsh"
 !macroend
