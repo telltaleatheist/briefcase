@@ -11,7 +11,7 @@
 
   <div class="page-content">
     <!-- Tabs for Active and Archived -->
-    <mat-tab-group [(selectedIndex)]="currentTab" (selectedIndexChange)="currentTab = $event === 0 ? 'active' : 'archived'" animationDuration="200ms">
+    <mat-tab-group [(selectedIndex)]="selectedTabIndex" animationDuration="200ms">
 
       <!-- Active Tab -->
       <mat-tab label="Active">
@@ -148,8 +148,7 @@
             <mat-icon matListItemIcon>movie</mat-icon>
 
             <!-- Editable Title -->
-            <div matListItemTitle *ngIf="!isEditing(analysis)">{{ analysis.title }}</div>
-            <div matListItemLine *ngIf="!isEditing(analysis)">{{ formatDate(analysis.createdAt) }}</div>
+            <div matListItemTitle *ngIf="!isEditing(analysis)" class="list-item-title">{{ analysis.title }}</div>
 
             <!-- Edit Title Input -->
             <div *ngIf="isEditing(analysis)" class="list-edit-container" (click)="$event.stopPropagation()">

@@ -10,7 +10,8 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { LibraryService, LibraryAnalysis } from '../../services/library.service';
 
 export interface CreateClipDialogData {
-  analysis: LibraryAnalysis;
+  analysis?: LibraryAnalysis;
+  customVideo?: any;
   startTime: number;
   endTime: number;
 }
@@ -45,11 +46,22 @@ export class CreateClipDialogComponent {
     private dialogRef: MatDialogRef<CreateClipDialogComponent>,
     private libraryService: LibraryService
   ) {
-    // Set default title
-    this.title = `Clip from ${this.data.analysis.title}`;
+    // Set default title based on whether it's an analyzed video or custom video
+    if (this.data.analysis) {
+      this.title = `Clip from ${this.data.analysis.title}`;
+    } else if (this.data.customVideo) {
+      this.title = `Clip from ${this.data.customVideo.title}`;
+    } else {
+      this.title = 'New Clip';
+    }
 
-    // Load the default save path
-    this.loadSavePath();
+    // Load the default save path (only for analyzed videos)
+    if (this.data.analysis) {
+      this.loadSavePath();
+    } else {
+      // For custom videos, we'll need a different approach
+      this.loadCustomVideoSavePath();
+    }
   }
 
   get duration(): number {
@@ -68,6 +80,8 @@ export class CreateClipDialogComponent {
   }
 
   async loadSavePath() {
+    if (!this.data.analysis) return;
+
     try {
       this.isLoadingSavePath = true;
       const response = await fetch(`/api/library/analyses/${this.data.analysis.id}/clip-save-path`, {
@@ -89,6 +103,28 @@ export class CreateClipDialogComponent {
       }
     } catch (error) {
       console.error('Error loading save path:', error);
+    } finally {
+      this.isLoadingSavePath = false;
+    }
+  }
+
+  async loadCustomVideoSavePath() {
+    try {
+      this.isLoadingSavePath = true;
+      // For custom videos, generate a simple save path
+      const filename = this.data.customVideo?.title || 'custom_video';
+      const safeFilename = filename.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const timestamp = `${Math.floor(this.data.startTime)}-${Math.floor(this.data.endTime)}`;
+      const clipFilename = `${safeFilename}_${timestamp}.mp4`;
+
+      // Use default Downloads/clippy/clips directory
+      const homedir = await (window as any).electron?.getPath('downloads') || 'Downloads';
+      this.saveDirectory = `${homedir}/clippy/clips`;
+      this.savePath = `${this.saveDirectory}/${clipFilename}`;
+    } catch (error) {
+      console.error('Error generating custom video save path:', error);
+      this.savePath = 'clip.mp4';
+      this.saveDirectory = 'Downloads';
     } finally {
       this.isLoadingSavePath = false;
     }
@@ -116,17 +152,47 @@ export class CreateClipDialogComponent {
       this.isCreating = true;
       this.error = null;
 
-      const result = await this.libraryService.extractClip(
-        this.data.analysis.id,
-        {
-          startTime: this.data.startTime,
-          endTime: this.data.endTime,
-          title: this.title,
-          description: '',
-          category: undefined,
-          customDirectory: this.customDirectory || undefined,
+      let result: any;
+
+      if (this.data.analysis) {
+        // Extract clip from analyzed video
+        result = await this.libraryService.extractClip(
+          this.data.analysis.id,
+          {
+            startTime: this.data.startTime,
+            endTime: this.data.endTime,
+            title: this.title,
+            description: '',
+            category: undefined,
+            customDirectory: this.customDirectory || undefined,
+          }
+        );
+      } else if (this.data.customVideo) {
+        // Extract clip from custom video
+        const response = await fetch('/api/library/videos/custom/extract-clip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoPath: this.data.customVideo.videoPath,
+            startTime: this.data.startTime,
+            endTime: this.data.endTime,
+            title: this.title,
+            description: '',
+            category: undefined,
+            customDirectory: this.customDirectory || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to extract clip from custom video');
         }
-      );
+
+        result = await response.json();
+      } else {
+        this.error = 'No video source available';
+        this.isCreating = false;
+        return;
+      }
 
       if (result.success) {
         this.dialogRef.close({ created: true, clip: result.clip, extraction: result.extraction });

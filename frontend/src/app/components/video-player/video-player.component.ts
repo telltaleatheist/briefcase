@@ -11,8 +11,6 @@ import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../s
 import { NotificationService } from '../../services/notification.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
-import videojs from 'video.js';
-import Player from 'video.js/dist/types/player';
 
 @Component({
   selector: 'app-video-player',
@@ -34,9 +32,9 @@ import Player from 'video.js/dist/types/player';
 })
 export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
-  @ViewChild('tabGroup', { static: false }) tabGroup!: MatTabGroup;
+  @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
 
-  player: Player | null = null;
+  videoEl: HTMLVideoElement | null = null;
   isLoading = true;
   error: string | null = null;
   metadata: ParsedAnalysisMetadata | null = null;
@@ -55,7 +53,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   transcriptExists = false;
 
   constructor(
-    @Inject(MAT_DIALOG_DATA) public data: { analysis: LibraryAnalysis },
+    @Inject(MAT_DIALOG_DATA) public data: { analysis?: LibraryAnalysis; customVideo?: any },
     private dialogRef: MatDialogRef<VideoPlayerComponent>,
     private libraryService: LibraryService,
     private dialog: MatDialog,
@@ -64,30 +62,34 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   async ngOnInit() {
     try {
-      // Load analysis metadata
-      this.metadata = await this.libraryService.getAnalysisMetadata(this.data.analysis.id);
+      // Only load metadata if this is an analyzed video (not a custom video)
+      if (this.data.analysis) {
+        // Load analysis metadata
+        this.metadata = await this.libraryService.getAnalysisMetadata(this.data.analysis.id);
 
-      // Convert sections to timeline format
-      if (this.metadata?.sections) {
-        this.timelineSections = this.metadata.sections.map(section => ({
-          startTime: section.startSeconds,
-          endTime: section.endSeconds || (section.startSeconds + 30), // Use endSeconds or default 30-second duration
-          category: section.category,
-          description: section.description,
-          color: this.getCategoryColor(section.category) // Match AI analysis box colors
-        }));
-      }
+        // Convert sections to timeline format
+        if (this.metadata?.sections) {
+          this.timelineSections = this.metadata.sections.map(section => ({
+            startTime: section.startSeconds,
+            endTime: section.endSeconds || (section.startSeconds + 30), // Use endSeconds or default 30-second duration
+            category: section.category,
+            description: section.description,
+            color: this.getCategoryColor(section.category) // Match AI analysis box colors
+          }));
+        }
 
-      // Load transcript
-      try {
-        const transcriptResult = await this.libraryService.getAnalysisTranscript(this.data.analysis.id);
-        this.transcriptExists = transcriptResult.exists;
-        this.transcriptText = transcriptResult.text;
-      } catch (error) {
-        console.error('Failed to load transcript:', error);
-        this.transcriptExists = false;
-        this.transcriptText = null;
+        // Load transcript
+        try {
+          const transcriptResult = await this.libraryService.getAnalysisTranscript(this.data.analysis.id);
+          this.transcriptExists = transcriptResult.exists;
+          this.transcriptText = transcriptResult.text;
+        } catch (error) {
+          console.error('Failed to load transcript:', error);
+          this.transcriptExists = false;
+          this.transcriptText = null;
+        }
       }
+      // For custom videos, we don't have metadata or transcript
     } catch (error) {
       console.error('Failed to load metadata:', error);
       this.error = 'Failed to load analysis metadata';
@@ -102,10 +104,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    // Clean up player on component destroy
-    if (this.player) {
-      this.player.dispose();
-      this.player = null;
+    // Clean up video element event listeners
+    if (this.videoEl) {
+      this.videoEl.pause();
+      this.videoEl.src = '';
+      this.videoEl.load();
     }
 
     // Remove keyboard event listener
@@ -120,93 +123,73 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         return;
       }
 
-      const videoUrl = `/api/library/videos/${this.data.analysis.id}`;
+      // Get native video element
+      this.videoEl = this.videoElement.nativeElement;
 
-      this.player = videojs(this.videoElement.nativeElement, {
-        controls: false, // Disable default controls (we have custom timeline)
-        fill: true, // Fill container while maintaining aspect ratio
-        preload: 'metadata',
-        playbackRates: [0.5, 1, 1.5, 2],
-        controlBar: false, // Explicitly disable control bar
-        bigPlayButton: false, // Disable big play button
-        textTrackDisplay: false, // Disable text track display
-        errorDisplay: false, // Disable error display overlay
-        loadingSpinner: false, // Disable loading spinner overlay
-        sources: [{
-          src: videoUrl,
-          type: 'video/mp4'
-        }]
-      });
+      // Determine video source based on whether it's an analyzed video or custom video
+      let videoUrl: string;
 
-      // Handle player ready
-      this.player.ready(() => {
+      if (this.data.customVideo) {
+        // For custom videos, encode the file path in base64 and pass it as a query parameter
+        const encodedPath = btoa(this.data.customVideo.videoPath);
+        videoUrl = `/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+        console.log('Loading custom video from path:', this.data.customVideo.videoPath);
+        console.log('Video URL:', videoUrl);
+      } else if (this.data.analysis) {
+        videoUrl = `/api/library/videos/${this.data.analysis.id}`;
+      } else {
+        this.error = 'No video source provided';
         this.isLoading = false;
-        console.log('Video player ready');
+        return;
+      }
 
-        // Get duration
-        const dur = this.player?.duration();
-        if (dur && typeof dur === 'number') {
-          this.duration = dur;
-          this.currentSelection = { startTime: 0, endTime: dur };
-        }
+      // Set video source
+      this.videoEl.src = videoUrl;
 
-        // Disable context menu and any UI overlays
-        if (this.player) {
-          const playerEl = this.player.el();
-          if (playerEl) {
-            // Prevent right-click context menu
-            playerEl.addEventListener('contextmenu', (e: Event) => {
-              e.preventDefault();
-              e.stopPropagation();
-              return false;
-            });
-
-            // Remove all child elements except the video element itself
-            const videoTag = playerEl.querySelector('video');
-            if (videoTag) {
-              // Remove all Video.js UI elements
-              const uiElements = playerEl.querySelectorAll('.vjs-control-bar, .vjs-big-play-button, .vjs-loading-spinner, .vjs-modal-dialog, .vjs-text-track-display, .vjs-poster, .vjs-error-display');
-              uiElements.forEach(el => el.remove());
-            }
-          }
-        }
+      // Handle loadedmetadata event
+      this.videoEl.addEventListener('loadedmetadata', () => {
+        this.isLoading = false;
+        this.duration = this.videoEl!.duration;
+        this.currentSelection = { startTime: 0, endTime: this.duration };
+        console.log('Video loaded, duration:', this.duration);
       });
 
-      // Handle time update
-      this.player.on('timeupdate', () => {
-        const time = this.player?.currentTime();
-        if (time && typeof time === 'number') {
-          this.currentTime = time;
-          this.updateActiveSection();
-        }
+      // Handle timeupdate event
+      this.videoEl.addEventListener('timeupdate', () => {
+        this.currentTime = this.videoEl!.currentTime;
+        this.updateActiveSection();
       });
 
-      // Handle duration change
-      this.player.on('loadedmetadata', () => {
-        const dur = this.player?.duration();
-        if (dur && typeof dur === 'number') {
-          this.duration = dur;
-          if (this.currentSelection.endTime === 0) {
-            this.currentSelection = { startTime: 0, endTime: dur };
-          }
-        }
-      });
-
-      // Handle play/pause events
-      this.player.on('play', () => {
+      // Handle play event
+      this.videoEl.addEventListener('play', () => {
         this.isPlaying = true;
       });
 
-      this.player.on('pause', () => {
+      // Handle pause event
+      this.videoEl.addEventListener('pause', () => {
         this.isPlaying = false;
       });
 
-      // Handle errors
-      this.player.on('error', () => {
-        const error = this.player?.error();
-        this.error = error?.message || 'Failed to load video';
+      // Handle error event
+      this.videoEl.addEventListener('error', (e) => {
+        const videoError = this.videoEl?.error;
+        console.error('Video error:', videoError);
+
+        // Provide helpful error messages
+        if (this.data.customVideo) {
+          const ext = this.data.customVideo.videoPath.split('.').pop()?.toLowerCase();
+          this.error = `Unable to play ${ext?.toUpperCase()} file. The video codec may not be supported. Try using a different video file or convert it to a web-compatible format.`;
+        } else {
+          this.error = videoError?.message || 'Failed to load video';
+        }
+
         this.isLoading = false;
-        console.error('Video player error:', error);
+      });
+
+      // Prevent context menu
+      this.videoEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        return false;
       });
 
       // Handle keyboard shortcuts
@@ -225,7 +208,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   handleKeyPress = (event: KeyboardEvent) => {
-    if (!this.player) return;
+    if (!this.videoEl) return;
 
     // Only handle if not typing in an input
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
@@ -236,40 +219,30 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'Space':
         event.preventDefault();
         // Spacebar always resets to 1x speed and toggles play/pause
-        this.player.playbackRate(1);
-        if (this.player.paused()) {
-          this.player.play();
+        this.videoEl.playbackRate = 1;
+        if (this.videoEl.paused) {
+          this.videoEl.play();
         } else {
-          this.player.pause();
+          this.videoEl.pause();
         }
         break;
 
       case 'ArrowLeft':
         event.preventDefault();
-        if (this.player) {
-          const currentTime = this.player.currentTime();
-          if (typeof currentTime === 'number') {
-            this.player.currentTime(currentTime - 5);
-          }
-        }
+        this.videoEl.currentTime = Math.max(0, this.videoEl.currentTime - 5);
         break;
 
       case 'ArrowRight':
         event.preventDefault();
-        if (this.player) {
-          const currentTime = this.player.currentTime();
-          if (typeof currentTime === 'number') {
-            this.player.currentTime(currentTime + 5);
-          }
-        }
+        this.videoEl.currentTime = Math.min(this.duration, this.videoEl.currentTime + 5);
         break;
 
       case 'KeyF':
         event.preventDefault();
-        if (this.player.isFullscreen()) {
-          this.player.exitFullscreen();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
         } else {
-          this.player.requestFullscreen();
+          this.videoEl.requestFullscreen();
         }
         break;
 
@@ -294,9 +267,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   };
 
   seekToTime(seconds: number, sectionIndex?: number) {
-    if (this.player) {
-      this.player.currentTime(seconds);
-      this.player.play();
+    if (this.videoEl) {
+      this.videoEl.currentTime = seconds;
+      this.videoEl.play();
     }
     // Set active section if index provided
     if (sectionIndex !== undefined) {
@@ -371,8 +344,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle timeline seek event
    */
   onTimelineSeek(time: number) {
-    if (this.player) {
-      this.player.currentTime(time);
+    if (this.videoEl) {
+      this.videoEl.currentTime = time;
     }
   }
 
@@ -388,11 +361,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle play/pause toggle from timeline
    */
   onPlayPause() {
-    if (this.player) {
-      if (this.player.paused()) {
-        this.player.play();
+    if (this.videoEl) {
+      if (this.videoEl.paused) {
+        this.videoEl.play();
       } else {
-        this.player.pause();
+        this.videoEl.pause();
       }
     }
   }
@@ -401,28 +374,24 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle playback speed change from timeline (J/K/L keys)
    */
   onPlaybackSpeed(speed: number) {
-    if (!this.player) return;
+    if (!this.videoEl) return;
 
     if (speed < 0) {
-      // Backwards playback - Video.js doesn't support this natively
-      // Simulate by jumping backwards repeatedly
+      // Backwards playback - simulate by jumping backwards repeatedly
       const absSpeed = Math.abs(speed);
-      this.player.pause();
-      const currentTime = this.player.currentTime();
-      if (typeof currentTime === 'number') {
-        // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
-        const jumpAmount = 0.5 * absSpeed;
-        this.player.currentTime(Math.max(0, currentTime - jumpAmount));
-      }
+      this.videoEl.pause();
+      // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
+      const jumpAmount = 0.5 * absSpeed;
+      this.videoEl.currentTime = Math.max(0, this.videoEl.currentTime - jumpAmount);
     } else if (speed === 0) {
       // Pause (K key)
-      this.player.pause();
-      this.player.playbackRate(1); // Reset to normal speed
+      this.videoEl.pause();
+      this.videoEl.playbackRate = 1; // Reset to normal speed
     } else {
       // Forward playback at specified speed (L key)
-      this.player.playbackRate(speed);
-      if (this.player.paused()) {
-        this.player.play();
+      this.videoEl.playbackRate = speed;
+      if (this.videoEl.paused) {
+        this.videoEl.play();
       }
     }
   }
@@ -440,6 +409,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       disableClose: false,
       data: {
         analysis: this.data.analysis,
+        customVideo: this.data.customVideo,
         startTime: this.currentSelection.startTime,
         endTime: this.currentSelection.endTime
       }
@@ -539,10 +509,10 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.error = null;
       this.isLoading = true;
 
-      // Dispose of old player if it exists
-      if (this.player) {
-        this.player.dispose();
-        this.player = null;
+      // Clear old video element
+      if (this.videoEl) {
+        this.videoEl.pause();
+        this.videoEl.src = '';
       }
 
       // Reinitialize the player with new video path

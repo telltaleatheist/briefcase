@@ -166,8 +166,8 @@
     font-size: 64px;
     width: 64px;
     height: 64px;
-    color: var(--text-tertiary);
-    opacity: 0.5;
+    color: var(--text-secondary);
+    opacity: 0.6;
     margin-bottom: 1rem;
   }
 
@@ -319,6 +319,17 @@
       top: 0.5rem;
       right: 0.5rem;
 
+      mat-icon {
+        color: var(--text-primary);
+        opacity: 0.7;
+        transition: all 0.2s ease;
+      }
+
+      &:hover mat-icon {
+        color: var(--primary-orange);
+        opacity: 1;
+      }
+
       &::before {
         display: none !important;
       }
@@ -434,6 +445,25 @@
       background-color: var(--bg-secondary);
     }
 
+    // List item icon (movie icon)
+    ::ng-deep [matListItemIcon] {
+      color: var(--primary-orange);
+      opacity: 0.9;
+    }
+
+    // List item title
+    ::ng-deep [matListItemTitle] {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .list-item-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+
     .list-actions {
       display: flex;
       gap: 0.5rem;
@@ -442,13 +472,25 @@
       button {
         transition: all 0.2s ease;
 
+        mat-icon {
+          color: var(--text-primary);
+        }
+
         &:hover {
           transform: scale(1.1);
+
+          mat-icon {
+            color: var(--primary-orange);
+          }
         }
 
         &.delete-button {
           mat-icon {
             color: #ef4444;
+          }
+
+          &:hover mat-icon {
+            color: #dc2626;
           }
         }
       }
@@ -458,6 +500,15 @@
 
 // Menu styles
 ::ng-deep .mat-mdc-menu-panel {
+  // Ensure all menu icons are visible
+  mat-icon {
+    color: var(--text-primary);
+  }
+
+  button:hover mat-icon {
+    color: var(--primary-orange);
+  }
+
   .delete-option {
     mat-icon {
       color: #ef4444;
@@ -465,6 +516,10 @@
 
     span {
       color: #ef4444;
+    }
+
+    &:hover mat-icon {
+      color: #dc2626;
     }
   }
 }

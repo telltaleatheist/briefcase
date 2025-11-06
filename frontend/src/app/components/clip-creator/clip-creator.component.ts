@@ -41,9 +41,10 @@ export class ClipCreatorComponent implements OnInit {
   activeAnalyses: LibraryAnalysis[] = [];
   archivedAnalyses: LibraryAnalysis[] = [];
   selectedAnalysis: LibraryAnalysis | null = null;
-  currentTab: 'active' | 'archived' = 'active';
+  selectedTabIndex: number = 0; // 0 = active, 1 = archived
   editingItemId: string | null = null;
   editingTitle: string = '';
+  isElectron = false;
 
   constructor(
     private libraryService: LibraryService,
@@ -53,6 +54,7 @@ export class ClipCreatorComponent implements OnInit {
 
   async ngOnInit() {
     console.log('ClipCreatorComponent initialized!');
+    this.isElectron = !!(window as any).electron;
     await this.loadAnalyses();
   }
 
@@ -84,7 +86,7 @@ export class ClipCreatorComponent implements OnInit {
   }
 
   get currentAnalyses(): LibraryAnalysis[] {
-    return this.currentTab === 'active' ? this.activeAnalyses : this.archivedAnalyses;
+    return this.selectedTabIndex === 0 ? this.activeAnalyses : this.archivedAnalyses;
   }
 
   async selectVideo(analysis: LibraryAnalysis) {
@@ -109,8 +111,57 @@ export class ClipCreatorComponent implements OnInit {
   }
 
   async selectCustomVideo() {
-    // TODO: Implement custom video file picker
-    this.notificationService.toastOnly('info', 'Coming Soon', 'Custom video selection will be available soon');
+    if (!this.isElectron) {
+      this.notificationService.toastOnly('info', 'Electron Required', 'File selection is only available in Electron');
+      return;
+    }
+
+    try {
+      const result = await (window as any).electron.showOpenDialog({
+        properties: ['openFile'],
+        filters: [
+          { name: 'Video Files', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v', 'mpg', 'mpeg'] }
+        ],
+        title: 'Select Video File'
+      });
+
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return;
+      }
+
+      const videoPath = result.filePaths[0];
+
+      // Create a temporary analysis-like object for custom videos
+      const customVideoData = {
+        id: `custom-${Date.now()}`,
+        title: videoPath.split('/').pop() || 'Custom Video',
+        videoPath: videoPath,
+        isCustom: true
+      };
+
+      // Open video player with custom video
+      await this.openVideoPlayerForCustomVideo(customVideoData);
+
+    } catch (error) {
+      console.error('Error selecting custom video:', error);
+      this.notificationService.toastOnly('error', 'Error', 'Failed to select video file');
+    }
+  }
+
+  async openVideoPlayerForCustomVideo(customVideoData: any) {
+    const { VideoPlayerComponent } = await import('../video-player/video-player.component');
+
+    this.dialog.open(VideoPlayerComponent, {
+      data: { customVideo: customVideoData },
+      width: '100vw',
+      height: '100vh',
+      maxWidth: '100vw',
+      maxHeight: '100vh',
+      panelClass: 'video-player-dialog-container',
+      hasBackdrop: true,
+      backdropClass: 'dialog-backdrop',
+      disableClose: false
+    });
   }
 
   async relinkVideo(analysis: LibraryAnalysis) {

@@ -427,6 +427,91 @@ export class LibraryController {
   }
 
   /**
+   * Stream video file by direct file path (encoded in query param)
+   * Supports range requests for seeking
+   * Allows loading videos without requiring AI analysis
+   * NOTE: This must be defined BEFORE videos/:id to avoid route conflicts
+   */
+  @Get('videos/custom')
+  async streamCustomVideo(
+    @Query('path') encodedPath: string,
+    @Req() req: Request,
+    @Res() res: Response
+  ) {
+    try {
+      if (!encodedPath) {
+        throw new HttpException('path parameter is required', HttpStatus.BAD_REQUEST);
+      }
+
+      // Decode the base64-encoded path
+      const videoPath = Buffer.from(encodedPath, 'base64').toString('utf-8');
+      console.log('Streaming custom video from path:', videoPath);
+
+      // Check if file exists
+      try {
+        const stat = statSync(videoPath);
+        const fileSize = stat.size;
+        const range = req.headers.range;
+
+        // Determine content type from file extension
+        const ext = path.extname(videoPath).toLowerCase();
+        const contentTypeMap: Record<string, string> = {
+          '.mp4': 'video/mp4',
+          '.webm': 'video/webm',
+          '.ogg': 'video/ogg',
+          '.mov': 'video/quicktime', // Use proper QuickTime MIME type
+          '.avi': 'video/x-msvideo',
+          '.mkv': 'video/x-matroska',
+        };
+        const contentType = contentTypeMap[ext] || 'video/mp4';
+        console.log('Serving video with content type:', contentType);
+
+        if (range) {
+          // Handle range request for seeking
+          const parts = range.replace(/bytes=/, '').split('-');
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          const chunkSize = end - start + 1;
+
+          const stream = createReadStream(videoPath, { start, end });
+
+          res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunkSize,
+            'Content-Type': contentType,
+          });
+
+          stream.pipe(res);
+        } else {
+          // No range request, stream entire file
+          const stream = createReadStream(videoPath);
+
+          res.writeHead(200, {
+            'Content-Length': fileSize,
+            'Content-Type': contentType,
+          });
+
+          stream.pipe(res);
+        }
+      } catch (fileError) {
+        throw new HttpException(
+          'Video file not found on disk',
+          HttpStatus.NOT_FOUND
+        );
+      }
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to stream video: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Stream video file for an analysis
    * Supports range requests for seeking
    */
@@ -495,6 +580,117 @@ export class LibraryController {
       }
       throw new HttpException(
         `Failed to stream video: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Extract a clip from a custom video (not in library)
+   */
+  @Post('videos/custom/extract-clip')
+  async extractClipFromCustomVideo(
+    @Body() body: {
+      videoPath: string;
+      startTime: number;
+      endTime: number;
+      title?: string;
+      description?: string;
+      category?: string;
+      customDirectory?: string;
+      progressId?: string;
+    }
+  ) {
+    try {
+      if (!body.videoPath) {
+        throw new HttpException('videoPath is required', HttpStatus.BAD_REQUEST);
+      }
+
+      // Validate time range
+      if (body.startTime < 0 || body.endTime <= body.startTime) {
+        throw new HttpException(
+          'Invalid time range',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Check if file exists
+      const fsSync = require('fs');
+      if (!fsSync.existsSync(body.videoPath)) {
+        throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Generate clip filename
+      const originalFilename = path.basename(body.videoPath);
+      const clipFilename = this.clipExtractor.generateClipFilename(
+        originalFilename,
+        body.startTime,
+        body.endTime,
+        body.category
+      );
+
+      // Determine output path
+      let outputDir: string;
+
+      if (body.customDirectory) {
+        // If custom directory is provided, use it directly with just /clips subfolder
+        const baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        outputDir = path.join(baseDir, 'clips');
+      } else {
+        // Otherwise use configured directory or default Downloads with clippy/clips structure
+        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
+        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
+
+        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
+        outputDir = path.join(clippyDir, 'clips');
+      }
+
+      const outputPath = path.join(outputDir, clipFilename);
+
+      // Progress tracking map (stored in memory)
+      const progressMap = new Map<string, number>();
+      const progressId = body.progressId || 'default';
+
+      // Extract the clip with progress callback
+      const extractionResult = await this.clipExtractor.extractClip({
+        videoPath: body.videoPath,
+        startTime: body.startTime,
+        endTime: body.endTime,
+        outputPath,
+        metadata: {
+          title: body.title,
+          description: body.description,
+          category: body.category,
+        },
+        onProgress: (progress: number) => {
+          progressMap.set(progressId, progress);
+        },
+      });
+
+      if (!extractionResult.success) {
+        throw new HttpException(
+          extractionResult.error || 'Failed to extract clip',
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      return {
+        success: true,
+        extraction: {
+          duration: extractionResult.duration,
+          fileSize: extractionResult.fileSize,
+          outputPath: extractionResult.outputPath,
+        },
+      };
+
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to create clip: ${(error as Error).message}`,
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }

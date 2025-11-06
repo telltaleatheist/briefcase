@@ -1,5 +1,4 @@
-// Import Video.js styles
-@import 'video.js/dist/video-js.css';
+// Native video player styles (Video.js removed)
 
 :host {
   display: flex;
@@ -124,62 +123,11 @@
     display: none;
   }
 
-  .video-js {
+  .native-video-player {
     width: 100%;
     height: 100%;
-
-    video {
-      object-fit: contain; // Letterbox the video to fit container
-    }
-
-    // Hide ALL Video.js controls and UI elements - use visibility and opacity for more aggressive hiding
-    .vjs-control-bar,
-    .vjs-big-play-button,
-    .vjs-loading-spinner,
-    .vjs-button,
-    .vjs-menu,
-    .vjs-menu-button,
-    .vjs-control,
-    .vjs-text-track-display,
-    .vjs-modal-dialog,
-    .vjs-poster {
-      display: none !important;
-      visibility: hidden !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-
-    // Hide all interactive elements and buttons
-    button,
-    .vjs-play-control,
-    .vjs-volume-panel,
-    .vjs-current-time,
-    .vjs-time-divider,
-    .vjs-duration,
-    .vjs-progress-control,
-    .vjs-fullscreen-control,
-    .vjs-remaining-time,
-    .vjs-playback-rate,
-    .vjs-chapters-button,
-    .vjs-descriptions-button,
-    .vjs-captions-button,
-    .vjs-subs-caps-button,
-    .vjs-audio-button,
-    .vjs-picture-in-picture-control,
-    .vjs-menu-content,
-    .vjs-menu-item {
-      display: none !important;
-      visibility: hidden !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-
-    // Hide text overlays
-    .vjs-text-track-cue,
-    .vjs-text-track-display > div {
-      display: none !important;
-      visibility: hidden !important;
-    }
+    object-fit: contain;
+    background-color: #000;
   }
 }
 

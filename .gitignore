@@ -66,3 +66,5 @@ electron/._.DS_Store
 utilities/bin/yt-dlp_macos
 utilities/bin/yt-dlp.exe
 utilities/bin/yt-dlp_linux
+BULK_ANALYSIS_VISION.md
+BULK_ANALYSIS_START_PROMPT.md

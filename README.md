@@ -139,6 +139,210 @@ async processMedia(
 }
 ```
 
+### Video Player and Clip Creation System
+
+Clippy includes a comprehensive video player and clip creation system that allows users to:
+- Play any video file (analyzed or custom)
+- Create clips from specific time ranges
+- View AI analysis sections and transcripts
+- Use professional keyboard shortcuts for video editing
+
+#### Video Player Architecture
+
+The video player system uses **native HTML5 video** (as of the latest update) for maximum compatibility with various video formats, especially MOV and MP4 files in Electron/Chromium.
+
+**Key Components:**
+- `VideoPlayerComponent`: Main video player with native HTML5 `<video>` element
+- `VideoTimelineComponent`: Timeline scrubber with range selection for clip creation
+- `ClipCreatorComponent`: Interface for selecting videos from the library or custom files
+- `CreateClipDialogComponent`: Dialog for configuring clip export settings
+- `TranscriptSearchComponent`: Search and navigate through video transcripts
+
+**Video Streaming Endpoints:**
+
+The backend provides two video streaming endpoints with HTTP range request support:
+
+```typescript
+// 1. Stream analyzed videos by analysis ID
+@Get('videos/:id')
+async streamVideo(@Param('id') id: string, @Req() req, @Res() res) {
+  // Looks up video path from analysis record
+  // Streams video with range request support for seeking
+}
+
+// 2. Stream custom videos by file path (NEW)
+@Get('videos/custom')
+async streamCustomVideo(@Query('path') encodedPath: string, @Req() req, @Res() res) {
+  // Accepts base64-encoded file path
+  // Streams any video file directly without requiring analysis
+  // IMPORTANT: Must be defined BEFORE videos/:id to avoid route conflicts
+}
+```
+
+**Route Ordering:** The `/videos/custom` route **must** be defined before `/videos/:id` in the controller because NestJS matches routes in order. If the generic `:id` route comes first, it will match "custom" as an ID parameter, causing 404 errors.
+
+**Video Format Support:**
+
+The native HTML5 video player in Electron/Chromium supports:
+- `.mp4` (H.264/AAC, HEVC)
+- `.mov` (H.264/AAC in QuickTime container)
+- `.webm` (VP8/VP9/AV1)
+- `.ogg` (Theora)
+- `.avi` (limited codec support)
+- `.mkv` (limited support, depends on codecs)
+
+**Proper MIME types** are set based on file extension:
+- `.mov` → `video/quicktime`
+- `.mp4` → `video/mp4`
+- `.webm` → `video/webm`
+
+#### Video Player Features
+
+**Keyboard Shortcuts:**
+- `Space`: Play/Pause (resets speed to 1x)
+- `Arrow Left/Right`: Seek backward/forward 5 seconds
+- `J/K/L`: Shuttle controls (backward/pause/forward with speed ramping)
+- `I`: Set In point (clip start)
+- `O`: Set Out point (clip end)
+- `F`: Toggle fullscreen
+
+**Timeline Features:**
+- Visual timeline with colored sections for AI analysis categories
+- Draggable in/out handles for precise clip selection
+- Hover scrubbing to preview different timestamps
+- Click to seek to specific time
+- Synchronized with video playback
+
+**AI Analysis Integration:**
+- Sidebar displays AI-detected sections with timestamps
+- Click section to jump to that timestamp
+- Auto-scrolls to active section during playback
+- Color-coded by category (extremism, conspiracy, routine, etc.)
+- Displays key quotes from each section
+
+**Transcript Search:**
+- Full-text search through video transcript
+- Click search results to jump to that timestamp
+- Highlights matched terms
+- Synchronized scrolling with video playback
+
+#### Clip Extraction System
+
+**Backend Clip Extraction:**
+
+The system provides two clip extraction endpoints:
+
+```typescript
+// 1. Extract clip from analyzed video
+@Post('analyses/:id/extract-clip')
+async extractClip(@Param('id') id: string, @Body() body: ClipOptions) {
+  // Looks up video from analysis record
+  // Uses FFmpeg to extract clip
+  // Returns output path
+}
+
+// 2. Extract clip from custom video (NEW)
+@Post('videos/custom/extract-clip')
+async extractClipFromCustomVideo(@Body() body: CustomClipOptions) {
+  // Accepts video path directly
+  // No analysis required
+  // Uses FFmpeg to extract clip with optional re-encoding
+}
+```
+
+**Clip Creation Flow:**
+
+1. User selects time range on timeline using I/O keys or dragging
+2. Click "Create Clip" button opens `CreateClipDialogComponent`
+3. User configures:
+   - Output filename
+   - Save location (custom or default)
+   - Category label (optional)
+   - Title/description metadata
+4. Backend uses FFmpeg to extract the exact time range
+5. Clip filename includes timestamp range: `[START-END] Title.mp4`
+6. Notification allows user to open clip location
+
+**FFmpeg Clip Extraction:**
+
+```typescript
+// Example FFmpeg command for clip extraction
+ffmpeg -i input.mp4 -ss START_TIME -to END_TIME \
+  -c:v libx264 -c:a aac \
+  -movflags +faststart \
+  output.mp4
+```
+
+#### Custom Video Support
+
+Users can now load **any video file** for clip creation, not just AI-analyzed videos:
+
+**Frontend Flow:**
+```typescript
+// In ClipCreatorComponent
+async selectCustomVideo() {
+  // Open Electron file picker
+  const result = await electron.showOpenDialog({
+    filters: [{ name: 'Video Files', extensions: ['mp4', 'mov', ...] }]
+  });
+
+  // Create temporary video object
+  const customVideoData = {
+    id: `custom-${Date.now()}`,
+    title: filename,
+    videoPath: absolutePath,
+    isCustom: true
+  };
+
+  // Open video player
+  openVideoPlayerForCustomVideo(customVideoData);
+}
+```
+
+**Backend Streaming:**
+```typescript
+// Decode base64-encoded path
+const videoPath = Buffer.from(encodedPath, 'base64').toString('utf-8');
+
+// Stream with range request support
+if (range) {
+  const stream = createReadStream(videoPath, { start, end });
+  res.writeHead(206, {
+    'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+    'Content-Type': contentType
+  });
+  stream.pipe(res);
+}
+```
+
+#### Migration from Video.js to Native HTML5
+
+**Previous Implementation (Video.js):**
+- Used Video.js library for video playback
+- Had limited codec support, especially for MOV files
+- Required complex setup and styling overrides
+- Heavier bundle size
+
+**Current Implementation (Native HTML5):**
+- Uses native `<video>` element
+- Better codec support through Electron/Chromium
+- Simpler implementation and maintenance
+- Lighter bundle size
+- Direct access to video element properties
+
+**Key Changes:**
+```typescript
+// OLD (Video.js):
+player: Player | null = null;
+this.player = videojs('video-element');
+this.player.play();
+
+// NEW (Native HTML5):
+videoEl: HTMLVideoElement | null = null;
+this.videoEl = this.videoElement.nativeElement;
+this.videoEl.play();
+```
+
 ### Frontend Components
 
 #### Download Form Component

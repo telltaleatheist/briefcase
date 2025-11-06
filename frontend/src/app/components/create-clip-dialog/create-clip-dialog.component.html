@@ -8,7 +8,7 @@
     <div class="clip-info">
       <div class="info-row">
         <span class="label">Source:</span>
-        <span class="value">{{ data.analysis.title }}</span>
+        <span class="value">{{ data.analysis?.title || data.customVideo?.title || 'Custom Video' }}</span>
       </div>
       <div class="info-row">
         <span class="label">Time Range:</span>

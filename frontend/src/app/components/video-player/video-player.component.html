@@ -5,12 +5,12 @@
     </button>
     <h2>
       <mat-icon>movie</mat-icon>
-      {{ data.analysis.title }}
+      {{ data.analysis?.title || data.customVideo?.title || 'Video Player' }}
     </h2>
 
     <div style="flex: 1"></div>
 
-    <button mat-icon-button (click)="relinkVideo()" class="relink-button" matTooltip="Relink Video">
+    <button *ngIf="data.analysis" mat-icon-button (click)="relinkVideo()" class="relink-button" matTooltip="Relink Video">
       <mat-icon>link</mat-icon>
     </button>
 
@@ -44,8 +44,9 @@
     <div class="video-container" [class.hidden]="isLoading || error">
       <video
         #videoElement
-        class="video-js vjs-default-skin vjs-big-play-centered"
-        playsinline>
+        class="native-video-player"
+        playsinline
+        preload="metadata">
       </video>
     </div>
 
