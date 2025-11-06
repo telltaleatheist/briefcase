@@ -538,20 +538,28 @@ export class LibraryController {
       weekStart.setHours(0, 0, 0, 0);
       const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Determine output path using custom directory or configured output directory
-      // If custom directory is provided, use it directly. Otherwise use configured directory or default Downloads
-      const baseDir = body.customDirectory ||
-                      this.configService.getOutputDir() ||
-                      path.join(os.homedir(), 'Downloads');
+      // Determine output path
+      let outputDir: string;
+      let baseDir: string;
+      let clippyDir: string;
 
-      // Check if baseDir already ends with 'clippy' to avoid duplication
-      const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
-      const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
+      if (body.customDirectory) {
+        // If custom directory is provided, use it directly (save in week folder within custom dir)
+        baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        clippyDir = baseDir;
+        outputDir = path.join(baseDir, weekFolder);
+      } else {
+        // Otherwise use configured directory or default Downloads with clippy/clips structure
+        baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
+        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
 
-      // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
-      const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
-      const clipsBasePath = path.join(clippyDir, 'clips');
-      const outputDir = path.join(clipsBasePath, weekFolder);
+        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+        clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
+        const clipsBasePath = path.join(clippyDir, 'clips');
+        outputDir = path.join(clipsBasePath, weekFolder);
+      }
+
       const outputPath = path.join(outputDir, clipFilename);
 
       return {
@@ -625,20 +633,25 @@ export class LibraryController {
       weekStart.setHours(0, 0, 0, 0);
       const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
 
-      // Determine output path using custom directory or configured output directory
-      // If custom directory is provided, use it directly. Otherwise use configured directory or default Downloads
-      const baseDir = body.customDirectory ||
-                      this.configService.getOutputDir() ||
-                      path.join(os.homedir(), 'Downloads');
+      // Determine output path
+      let outputDir: string;
 
-      // Check if baseDir already ends with 'clippy' to avoid duplication
-      const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
-      const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
+      if (body.customDirectory) {
+        // If custom directory is provided, use it directly (save in week folder within custom dir)
+        const baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        outputDir = path.join(baseDir, weekFolder);
+      } else {
+        // Otherwise use configured directory or default Downloads with clippy/clips structure
+        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
+        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
 
-      // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
-      const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
-      const clipsBasePath = path.join(clippyDir, 'clips');
-      const outputDir = path.join(clipsBasePath, weekFolder);
+        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
+        const clipsBasePath = path.join(clippyDir, 'clips');
+        outputDir = path.join(clipsBasePath, weekFolder);
+      }
+
       const outputPath = path.join(outputDir, clipFilename);
 
       // Extract the clip
