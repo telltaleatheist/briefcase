@@ -55,6 +55,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
   // Scrubbing state
   isScrubbing = false;
+  isScrubbingTimeMarker = false;
 
   // Zoom state
   zoomLevel = 1; // 1 = 100%, 2 = 200%, etc.
@@ -151,6 +152,25 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     const visibleStart = this.getVisibleStartTime();
     const visibleDuration = this.getVisibleDuration();
     return visibleStart + (pixels / width) * visibleDuration;
+  }
+
+  /**
+   * Handle time marker mouse down to start scrubbing - works regardless of selected tool
+   */
+  onTimeMarkerMouseDown(event: MouseEvent) {
+    if (!this.timelineElement?.nativeElement) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Start scrubbing immediately
+    this.isScrubbingTimeMarker = true;
+
+    // Seek to the clicked position
+    const rect = this.timelineElement.nativeElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const time = this.pixelsToTime(x);
+    this.seek.emit(Math.max(0, Math.min(this.duration, time)));
   }
 
   /**
@@ -302,6 +322,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
    * Handle mouse move for dragging, scrubbing, and panning
    */
   handleMouseMove = (event: MouseEvent) => {
+    // Handle time marker scrubbing
+    if (this.isScrubbingTimeMarker) {
+      const rect = this.timelineElement.nativeElement.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const time = this.pixelsToTime(x);
+      this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+      return;
+    }
+
     // Handle scrollbar middle dragging (panning)
     if (this.isDraggingScrollbar) {
       const deltaX = event.clientX - this.scrollbarDragStartX;
@@ -495,6 +524,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     this.isPanning = false;
     this.hasDraggedSincePanStart = false;
     this.isScrubbing = false;
+    this.isScrubbingTimeMarker = false;
     this.isDraggingWindow = false;
     this.isDraggingLeftHandle = false;
     this.isDraggingRightHandle = false;

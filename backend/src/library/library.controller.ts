@@ -544,8 +544,12 @@ export class LibraryController {
                       this.configService.getOutputDir() ||
                       path.join(os.homedir(), 'Downloads');
 
-      // Always use: baseDir/clippy/clips/weekFolder/filename structure
-      const clippyDir = path.join(baseDir, 'clippy');
+      // Check if baseDir already ends with 'clippy' to avoid duplication
+      const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+      const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
+
+      // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+      const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
       const clipsBasePath = path.join(clippyDir, 'clips');
       const outputDir = path.join(clipsBasePath, weekFolder);
       const outputPath = path.join(outputDir, clipFilename);
@@ -627,8 +631,12 @@ export class LibraryController {
                       this.configService.getOutputDir() ||
                       path.join(os.homedir(), 'Downloads');
 
-      // Always use: baseDir/clippy/clips/weekFolder/filename structure
-      const clippyDir = path.join(baseDir, 'clippy');
+      // Check if baseDir already ends with 'clippy' to avoid duplication
+      const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+      const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
+
+      // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+      const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
       const clipsBasePath = path.join(clippyDir, 'clips');
       const outputDir = path.join(clipsBasePath, weekFolder);
       const outputPath = path.join(outputDir, clipFilename);

@@ -136,7 +136,8 @@ export class SettingsComponent implements OnInit {
       this.settingsService.resetSettings();
       // Get the default path from the backend
       this.getDefaultPath();
-      this.notificationService.success('Settings Reset', 'All settings have been reset to defaults');
+      // Badge only - user explicitly reset, result is obvious
+      this.notificationService.success('Settings Reset', 'All settings have been reset to defaults', false);
     }
   }
 
@@ -188,7 +189,8 @@ export class SettingsComponent implements OnInit {
               if (saveAfter) {
                 this.saveSettings();
               } else {
-                this.notificationService.success('Path Valid', 'Directory is valid and writable');
+                // Badge only - intermediate validation feedback
+                this.notificationService.success('Path Valid', 'Directory is valid and writable', false);
               }
             } else {
               this.notificationService.warning('Path Not Writable', 'Directory is not writable. Please choose another location.');
@@ -204,7 +206,8 @@ export class SettingsComponent implements OnInit {
 
   saveSettings(): void {
     this.settingsService.updateSettings(this.settingsForm.value);
-    this.notificationService.success('Settings Saved', 'Your preferences have been updated successfully');
+    // Badge only - no toast for expected save action
+    this.notificationService.success('Settings Saved', 'Your preferences have been updated successfully', false);
   }
 
   goBack(): void {

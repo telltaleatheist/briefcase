@@ -288,6 +288,10 @@ export class LibraryService {
       const analysis = library.analyses[analysisIndex];
 
       // Apply updates
+      if (update.title !== undefined) {
+        analysis.title = update.title;
+      }
+
       if (update.archived !== undefined) {
         analysis.archived = update.archived;
       }

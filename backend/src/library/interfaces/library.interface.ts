@@ -134,6 +134,7 @@ export interface CreateLibraryAnalysisRequest {
  * Request to update an analysis
  */
 export interface UpdateLibraryAnalysisRequest {
+  title?: string;
   archived?: boolean;
   videoCurrentPath?: string;
   videoIsLinked?: boolean;

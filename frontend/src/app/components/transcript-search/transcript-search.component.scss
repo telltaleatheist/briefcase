@@ -4,6 +4,7 @@
   height: 100%;
   width: 100%;
   min-height: 0; // Critical for flex scrolling
+  box-sizing: border-box;
 }
 
 .search-input-wrapper {
@@ -107,6 +108,8 @@
   flex: 1;
   overflow: hidden;
   min-height: 0; // Critical for flex scrolling
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .results-hint {
@@ -121,6 +124,8 @@
   flex: 1;
   overflow-y: auto;
   padding-top: 12px;
+  width: 100%;
+  box-sizing: border-box;
 
   &::-webkit-scrollbar {
     width: 8px;

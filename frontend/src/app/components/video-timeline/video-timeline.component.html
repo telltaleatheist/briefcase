@@ -75,6 +75,20 @@
 
   <!-- Timeline track -->
   <div class="timeline-wrapper">
+    <!-- Time markers with detailed ticks -->
+    <div class="time-markers" (mousedown)="onTimeMarkerMouseDown($event)">
+      <ng-container *ngFor="let marker of getTimeMarkers()">
+        <div
+          class="time-marker"
+          [class.major]="marker.isMajor"
+          [class.minor]="!marker.isMajor"
+          [style.left.%]="marker.position">
+          <span *ngIf="marker.showLabel" class="time-label">{{ marker.label }}</span>
+          <div class="time-tick"></div>
+        </div>
+      </ng-container>
+    </div>
+
     <div
       #timeline
       class="timeline"
@@ -122,20 +136,6 @@
         <div class="playhead-line"></div>
         <div class="playhead-handle"></div>
       </div>
-    </div>
-
-    <!-- Time markers with detailed ticks -->
-    <div class="time-markers">
-      <ng-container *ngFor="let marker of getTimeMarkers()">
-        <div
-          class="time-marker"
-          [class.major]="marker.isMajor"
-          [class.minor]="!marker.isMajor"
-          [style.left.%]="marker.position">
-          <div class="time-tick"></div>
-          <span *ngIf="marker.showLabel" class="time-label">{{ marker.label }}</span>
-        </div>
-      </ng-container>
     </div>
 
     <!-- Custom horizontal scrollbar with zoom handles -->

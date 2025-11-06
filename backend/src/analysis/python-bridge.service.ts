@@ -31,9 +31,14 @@ export class PythonBridgeService {
   constructor() {
     // Path to the Python service script
     // In packaged apps, Python files are unpacked from the asar archive
-    const isPackaged = process.env.NODE_ENV === 'production' ||
-                       (process as any).resourcesPath !== undefined ||
-                       (process as any).defaultApp === false;
+    // IMPORTANT: Check if we're truly packaged or just running in development
+    // In development, resourcesPath will point to node_modules/electron/dist/...
+    const resourcesPath = (process as any).resourcesPath || '';
+    const isDevElectron = resourcesPath.includes('node_modules/electron');
+    const isPackaged = !isDevElectron && (
+      process.env.NODE_ENV === 'production' ||
+      process.env.RESOURCES_PATH !== undefined
+    );
 
     if (isPackaged && (process as any).resourcesPath) {
       // In production, use the extraResources location (outside asar)
@@ -45,9 +50,9 @@ export class PythonBridgeService {
       );
     } else {
       // In development, use relative path from dist folder
+      // __dirname will be backend/dist/analysis, so we go up one level to dist, then to python
       this.pythonScriptPath = path.join(
         __dirname,
-        '..',
         '..',
         'python',
         'video_analysis_service.py',
@@ -55,6 +60,7 @@ export class PythonBridgeService {
     }
 
     this.logger.log(`Python script path: ${this.pythonScriptPath}`);
+    this.logger.log(`Python script exists: ${require('fs').existsSync(this.pythonScriptPath)}`);
   }
 
   /**
@@ -76,9 +82,13 @@ export class PythonBridgeService {
 
       // CRITICAL: Verify we're using an absolute path in production
       // This prevents accidentally using system Python from PATH
-      const isPackaged = process.env.NODE_ENV === 'production' ||
-                         (process as any).resourcesPath !== undefined ||
-                         (process as any).defaultApp === false;
+      // IMPORTANT: Check if we're truly packaged or just running in development
+      const resourcesPath = (process as any).resourcesPath || '';
+      const isDevElectron = resourcesPath.includes('node_modules/electron');
+      const isPackaged = !isDevElectron && (
+        process.env.NODE_ENV === 'production' ||
+        process.env.RESOURCES_PATH !== undefined
+      );
 
       if (isPackaged && !path.isAbsolute(pythonPath)) {
         throw new Error(
@@ -89,6 +99,7 @@ export class PythonBridgeService {
 
       this.logger.log(`Using Python: ${pythonPath}`);
       this.logger.log(`Python config: packaged=${isPackaged}, absolute=${path.isAbsolute(pythonPath)}`);
+      this.logger.log(`About to execute: ${pythonPath} ${this.pythonScriptPath}`);
 
       // Get FFmpeg path for Whisper (it needs FFmpeg for audio extraction)
       let ffmpegPath: string | undefined;

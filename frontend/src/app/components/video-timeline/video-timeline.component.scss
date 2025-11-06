@@ -115,9 +115,9 @@
 .timeline-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 100px; // Add padding to accommodate the extended playhead
-  margin-top: -100px; // Negative margin to maintain layout
+  gap: 0; // Remove gap between markers and timeline
+  padding-top: 65px; // Reduced padding for shorter playhead extension
+  margin-top: -65px; // Negative margin to maintain layout
 }
 
 .timeline {
@@ -245,8 +245,8 @@
 
 .playhead {
   position: absolute;
-  top: -100px; // Extend higher above timeline (was -50px)
-  height: calc(100% + 100px); // Make taller to extend upward (was +50px)
+  top: -65px; // Extend above timeline but not too far
+  height: calc(100% + 65px); // Make taller to extend upward
   pointer-events: none;
   z-index: 3;
 }
@@ -289,31 +289,38 @@
 .time-markers {
   position: relative;
   height: 40px;
-  margin-top: 8px;
-  padding-top: 8px;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, transparent 100%);
-  border-top: 2px solid #444;
+  margin-bottom: 8px; // Space between markers and timeline
+  padding-bottom: 8px;
+  background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 100%);
+  border-bottom: 2px solid #444;
+  cursor: pointer; // Make it clear the area is clickable
+  user-select: none; // Prevent text selection
+
+  &:hover {
+    background: linear-gradient(to bottom, transparent 0%, rgba(255, 102, 0, 0.05) 100%);
+  }
 }
 
 .time-marker {
   position: absolute;
-  top: 0;
+  bottom: 0; // Anchor to bottom instead of top
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse; // Reverse direction: tick at bottom, label at top
   align-items: center;
   transform: translateX(-50%);
+  pointer-events: none; // Let clicks pass through to time-markers container
 
   .time-tick {
     width: 1px;
     background-color: #666;
-    margin-bottom: 6px;
+    margin-top: 6px; // Changed from margin-bottom
     box-shadow: 0 0 2px rgba(255, 255, 255, 0.1);
   }
 
   &.major {
     .time-tick {
       height: 16px;
-      background: linear-gradient(to bottom, #ff6600, #cc5200);
+      background: linear-gradient(to top, #ff6600, #cc5200); // Reversed gradient
       width: 2px;
       box-shadow: 0 0 4px rgba(255, 102, 0, 0.5);
     }
@@ -329,6 +336,10 @@
       padding: 2px 6px;
       border-radius: 3px;
       border: 1px solid rgba(255, 102, 0, 0.3);
+      cursor: default; // Not individually clickable
+      pointer-events: none; // Let clicks pass through
+      user-select: none; // Prevent text selection
+      transition: all 0.2s;
     }
   }
 

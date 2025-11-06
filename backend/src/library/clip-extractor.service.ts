@@ -91,12 +91,16 @@ export class ClipExtractorService {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
-        .setStartTime(startTime)
+        // Seek to start time BEFORE reading input (more accurate)
+        .inputOptions([`-ss ${startTime}`])
         .setDuration(duration)
         // Use copy codec for fast extraction without re-encoding
+        // Use accurate seeking and avoid negative timestamps
         .outputOptions([
           '-c copy',
           '-avoid_negative_ts make_zero',
+          '-copyts',  // Copy timestamps to maintain accuracy
+          '-start_at_zero',  // Start at zero timestamp
         ])
         .output(outputPath)
         .on('start', (commandLine) => {
