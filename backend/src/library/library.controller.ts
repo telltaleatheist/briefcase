@@ -529,27 +529,27 @@ export class LibraryController {
         body.category
       );
 
-      // Calculate week folder (Sunday-based)
-      const now = new Date();
-      const dayOfWeek = now.getDay(); // 0 = Sunday
-      const daysToSubtract = dayOfWeek; // Days since last Sunday
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - daysToSubtract);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
-
       // Determine output path
       let outputDir: string;
       let baseDir: string;
       let clippyDir: string;
 
       if (body.customDirectory) {
-        // If custom directory is provided, use it directly (save in week folder within custom dir)
+        // If custom directory is provided, use it directly without any subdirectories
         baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
         clippyDir = baseDir;
-        outputDir = path.join(baseDir, weekFolder);
+        outputDir = baseDir;
       } else {
         // Otherwise use configured directory or default Downloads with clippy/clips structure
+        // Calculate week folder (Sunday-based)
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0 = Sunday
+        const daysToSubtract = dayOfWeek; // Days since last Sunday
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - daysToSubtract);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
+
         baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
         const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
         const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
@@ -624,24 +624,24 @@ export class LibraryController {
         body.category
       );
 
-      // Calculate week folder (Sunday-based)
-      const now = new Date();
-      const dayOfWeek = now.getDay(); // 0 = Sunday
-      const daysToSubtract = dayOfWeek; // Days since last Sunday
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - daysToSubtract);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
-
       // Determine output path
       let outputDir: string;
 
       if (body.customDirectory) {
-        // If custom directory is provided, use it directly (save in week folder within custom dir)
+        // If custom directory is provided, use it directly without any subdirectories
         const baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        outputDir = path.join(baseDir, weekFolder);
+        outputDir = baseDir;
       } else {
         // Otherwise use configured directory or default Downloads with clippy/clips structure
+        // Calculate week folder (Sunday-based)
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0 = Sunday
+        const daysToSubtract = dayOfWeek; // Days since last Sunday
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - daysToSubtract);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
+
         const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
         const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
         const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
