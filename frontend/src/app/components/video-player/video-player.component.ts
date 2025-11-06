@@ -6,7 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBarModule } from '@angular/material/snack-bar';
-import { MatTabsModule } from '@angular/material/tabs';
+import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
@@ -34,6 +34,7 @@ import Player from 'video.js/dist/types/player';
 })
 export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
+  @ViewChild('tabGroup', { static: false }) tabGroup!: MatTabGroup;
 
   player: Player | null = null;
   isLoading = true;
@@ -47,6 +48,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   timelineSections: TimelineSection[] = [];
   currentSelection: TimelineSelection = { startTime: 0, endTime: 0 };
   activeSectionIndex: number | null = null;
+  previousActiveSectionIndex: number | null = null;
 
   // Transcript state
   transcriptText: string | null = null;
@@ -72,7 +74,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
           endTime: section.endSeconds || (section.startSeconds + 30), // Use endSeconds or default 30-second duration
           category: section.category,
           description: section.description,
-          color: '#ff6600' // Use orange for all sections in dark mode
+          color: this.getCategoryColor(section.category) // Match AI analysis box colors
         }));
       }
 
@@ -327,9 +329,30 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       return this.currentTime >= startTime && this.currentTime < endTime;
     });
 
-    if (currentSection !== -1) {
+    if (currentSection !== -1 && currentSection !== this.previousActiveSectionIndex) {
       this.activeSectionIndex = currentSection;
+      this.previousActiveSectionIndex = currentSection;
+
+      // Auto-scroll to section in AI Analysis tab if it's currently open and video is playing
+      if (this.isPlaying && this.tabGroup && this.tabGroup.selectedIndex === 0) {
+        this.scrollToActiveSection();
+      }
+    } else if (currentSection === -1) {
+      this.previousActiveSectionIndex = null;
     }
+  }
+
+  /**
+   * Scroll to the active section in the sections list
+   */
+  private scrollToActiveSection() {
+    // Wait for next tick to ensure DOM is updated
+    setTimeout(() => {
+      const activeElement = document.querySelector('.section-item.active');
+      if (activeElement) {
+        activeElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 100);
   }
 
   /**
@@ -425,7 +448,16 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     const result = await dialogRef.afterClosed().toPromise();
 
     if (result?.created) {
-      this.notificationService.toastOnly('success', 'Clip Created', 'Clip created successfully!');
+      const outputPath = result.extraction?.outputPath || result.clip?.outputPath;
+      this.notificationService.toastOnly(
+        'success',
+        'Clip Created',
+        'Click to open clip location',
+        outputPath ? {
+          type: 'open-folder',
+          path: outputPath
+        } : undefined
+      );
     }
   }
 
@@ -438,6 +470,29 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   getCategoryColor(category: string): string {
     if (!category) return '#757575';
 
+    // Normalize category name for consistent matching
+    const normalizedCategory = category.toLowerCase().trim();
+
+    // Define specific colors for known categories
+    const categoryColors: { [key: string]: string } = {
+      'routine': '#a855f7',      // Purple
+      'extremism': '#ef4444',    // Red
+      'hate': '#f97316',         // Orange
+      'violence': '#dc2626',     // Dark red
+      'conspiracy': '#eab308',   // Yellow
+      'misinformation': '#f59e0b', // Amber
+      'interesting': '#3b82f6',  // Blue
+      'notable': '#06b6d4',      // Cyan
+      'important': '#10b981',    // Green
+      'controversial': '#ec4899', // Pink
+    };
+
+    // Check if we have a specific color for this category
+    if (categoryColors[normalizedCategory]) {
+      return categoryColors[normalizedCategory];
+    }
+
+    // Fall back to hash-based color for unknown categories
     const colors = [
       '#ef4444', '#f97316', '#eab308', '#22c55e',
       '#3b82f6', '#a855f7', '#ec4899',

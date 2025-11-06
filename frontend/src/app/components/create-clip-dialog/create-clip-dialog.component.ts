@@ -96,9 +96,9 @@ export class CreateClipDialogComponent {
 
   async browseDirectory() {
     try {
-      const result = await (window as any).electron?.pickDirectory();
-      if (result) {
-        this.customDirectory = result;
+      const result = await (window as any).electron?.openDirectoryPicker();
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
+        this.customDirectory = result.filePaths[0];
         await this.loadSavePath(); // Reload the path with new custom directory
       }
     } catch (error) {
@@ -129,7 +129,7 @@ export class CreateClipDialogComponent {
       );
 
       if (result.success) {
-        this.dialogRef.close({ created: true, clip: result.clip });
+        this.dialogRef.close({ created: true, clip: result.clip, extraction: result.extraction });
       } else {
         this.error = result.error || 'Failed to create clip';
         this.isCreating = false;

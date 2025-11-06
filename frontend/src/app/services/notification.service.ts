@@ -12,6 +12,13 @@ export interface Notification {
   timestamp: Date;
   read: boolean;
   trackingKey?: string; // Optional key to track and update notifications
+  action?: NotificationAction; // Optional action data for clickable notifications
+}
+
+export interface NotificationAction {
+  type: 'open-folder' | 'open-file' | 'custom';
+  path?: string; // File or folder path for open-folder/open-file actions
+  customHandler?: () => void; // Custom handler function
 }
 
 @Injectable({
@@ -57,7 +64,7 @@ export class NotificationService {
     }
   }
 
-  private addNotification(type: NotificationType, title: string, message: string, trackingKey?: string): Notification {
+  private addNotification(type: NotificationType, title: string, message: string, trackingKey?: string, action?: NotificationAction): Notification {
     const notification: Notification = {
       id: `${Date.now()}-${Math.random()}`,
       type,
@@ -65,7 +72,8 @@ export class NotificationService {
       message,
       timestamp: new Date(),
       read: false,
-      trackingKey
+      trackingKey,
+      action
     };
 
     console.log('addNotification() - Adding to array:', notification);
@@ -191,14 +199,15 @@ export class NotificationService {
   }
 
   // Toast-only notification (doesn't add to history)
-  toastOnly(type: NotificationType, title: string, message: string): void {
+  toastOnly(type: NotificationType, title: string, message: string, action?: NotificationAction): void {
     const notification: Notification = {
       id: `${Date.now()}-${Math.random()}`,
       type,
       title,
       message,
       timestamp: new Date(),
-      read: true // Mark as read so it doesn't affect unread count
+      read: true, // Mark as read so it doesn't affect unread count
+      action
     };
     this.toastSubject.next(notification);
   }

@@ -5,6 +5,32 @@
  * interpreter, preventing version mismatch issues between setup, checks, and runtime.
  *
  * IMPORTANT: Any changes to Python path detection MUST be made here and nowhere else.
+ *
+ * CONFIGURATION MODES:
+ *
+ * 1. DEVELOPMENT MODE (npm run electron:dev):
+ *    - NODE_ENV=development
+ *    - Uses SYSTEM Python (e.g., conda environment or system python3)
+ *    - This allows developers to use their local Python with dependencies already installed
+ *    - Dependencies must be installed manually: pip install -r backend/python/requirements.txt
+ *
+ * 2. DEVELOPMENT WITH BUNDLED PYTHON (npm run electron:dev:bundled):
+ *    - NODE_ENV=development USE_BUNDLED_PYTHON=true
+ *    - Uses bundled Python from dist-python/python-{arch}/
+ *    - Useful for testing the packaged Python environment without building the full app
+ *    - Requires: npm run package:python:mac-arm64 (or appropriate platform script)
+ *
+ * 3. PRODUCTION/PACKAGED MODE (npm run package:mac-arm64):
+ *    - NODE_ENV=production (or RESOURCES_PATH is set)
+ *    - Uses bundled Python from resources/python/
+ *    - Python and all dependencies are packaged with the app
+ *    - Self-contained, no system dependencies required
+ *
+ * ENVIRONMENT VARIABLES:
+ * - NODE_ENV: 'development' or 'production'
+ * - USE_BUNDLED_PYTHON: Set to 'true' to use bundled Python even in dev mode
+ * - USE_SYSTEM_PYTHON: Set to 'true' to force system Python even in production (useful for debugging)
+ * - RESOURCES_PATH: Path to resources directory (set by Electron in packaged apps)
  */
 
 import * as fs from 'fs';
@@ -42,13 +68,15 @@ export function getPythonConfig(): PythonConfig {
 
   // Check if we're running in a packaged app
   // In production: Check if RESOURCES_PATH env var is set OR resourcesPath property exists
-  const isPackaged = process.env.NODE_ENV === 'production' &&
-                     (process.env.RESOURCES_PATH !== undefined ||
-                      (process as any).resourcesPath !== undefined ||
-                      (process as any).defaultApp === false);
+  // IMPORTANT: In dev mode (NODE_ENV=development), this will be false, so we use system Python
+  const isPackaged = process.env.NODE_ENV === 'production' ||
+                     process.env.RESOURCES_PATH !== undefined ||
+                     (process as any).resourcesPath !== undefined ||
+                     (process as any).defaultApp === false;
 
-  // Check for bundled Python in both production AND development (if USE_BUNDLED_PYTHON is set)
-  const useBundledPython = isPackaged || process.env.USE_BUNDLED_PYTHON === 'true';
+  // Check for bundled Python ONLY if explicitly requested in dev OR if packaged
+  const useBundledPython = (isPackaged || process.env.USE_BUNDLED_PYTHON === 'true') &&
+                           process.env.USE_SYSTEM_PYTHON !== 'true';
 
   // If packaged or explicitly using bundled Python, try to use bundled Python first
   if (useBundledPython) {

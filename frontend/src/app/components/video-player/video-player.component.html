@@ -51,7 +51,7 @@
 
     <!-- Analysis Sections Sidebar with Tabs -->
     <div class="sections-sidebar" *ngIf="metadata && !error">
-      <mat-tab-group class="sidebar-tabs" animationDuration="200ms">
+      <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms">
         <!-- AI Analysis Tab -->
         <mat-tab label="AI Analysis">
           <div class="tab-content">

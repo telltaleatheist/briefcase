@@ -529,25 +529,27 @@ export class LibraryController {
         body.category
       );
 
-      // Calculate week folder (Sunday-based)
-      const now = new Date();
-      const dayOfWeek = now.getDay(); // 0 = Sunday
-      const daysToSubtract = dayOfWeek; // Days since last Sunday
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - daysToSubtract);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
+      // Determine output path
+      let outputDir: string;
+      let baseDir: string;
+      let clippyDir: string;
 
-      // Determine output path using custom directory or configured output directory
-      // If custom directory is provided, use it directly. Otherwise use configured directory or default Downloads
-      const baseDir = body.customDirectory ||
-                      this.configService.getOutputDir() ||
-                      path.join(os.homedir(), 'Downloads');
+      if (body.customDirectory) {
+        // If custom directory is provided, use it directly with just /clips subfolder
+        baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        clippyDir = baseDir;
+        outputDir = path.join(baseDir, 'clips');
+      } else {
+        // Otherwise use configured directory or default Downloads with clippy/clips structure
+        baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
+        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
 
-      // Always use: baseDir/clippy/clips/weekFolder/filename structure
-      const clippyDir = path.join(baseDir, 'clippy');
-      const clipsBasePath = path.join(clippyDir, 'clips');
-      const outputDir = path.join(clipsBasePath, weekFolder);
+        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+        clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
+        outputDir = path.join(clippyDir, 'clips');
+      }
+
       const outputPath = path.join(outputDir, clipFilename);
 
       return {
@@ -582,6 +584,7 @@ export class LibraryController {
       description?: string;
       category?: string;
       customDirectory?: string;
+      progressId?: string;
     }
   ) {
     try {
@@ -612,28 +615,31 @@ export class LibraryController {
         body.category
       );
 
-      // Calculate week folder (Sunday-based)
-      const now = new Date();
-      const dayOfWeek = now.getDay(); // 0 = Sunday
-      const daysToSubtract = dayOfWeek; // Days since last Sunday
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - daysToSubtract);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekFolder = weekStart.toISOString().split('T')[0]; // YYYY-MM-DD
+      // Determine output path
+      let outputDir: string;
 
-      // Determine output path using custom directory or configured output directory
-      // If custom directory is provided, use it directly. Otherwise use configured directory or default Downloads
-      const baseDir = body.customDirectory ||
-                      this.configService.getOutputDir() ||
-                      path.join(os.homedir(), 'Downloads');
+      if (body.customDirectory) {
+        // If custom directory is provided, use it directly with just /clips subfolder
+        const baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        outputDir = path.join(baseDir, 'clips');
+      } else {
+        // Otherwise use configured directory or default Downloads with clippy/clips structure
+        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
+        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
+        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
 
-      // Always use: baseDir/clippy/clips/weekFolder/filename structure
-      const clippyDir = path.join(baseDir, 'clippy');
-      const clipsBasePath = path.join(clippyDir, 'clips');
-      const outputDir = path.join(clipsBasePath, weekFolder);
+        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
+        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
+        outputDir = path.join(clippyDir, 'clips');
+      }
+
       const outputPath = path.join(outputDir, clipFilename);
 
-      // Extract the clip
+      // Progress tracking map (stored in memory)
+      const progressMap = new Map<string, number>();
+      const progressId = body.progressId || 'default';
+
+      // Extract the clip with progress callback
       const extractionResult = await this.clipExtractor.extractClip({
         videoPath: analysis.video.currentPath,
         startTime: body.startTime,
@@ -643,6 +649,9 @@ export class LibraryController {
           title: body.title,
           description: body.description,
           category: body.category,
+        },
+        onProgress: (progress: number) => {
+          progressMap.set(progressId, progress);
         },
       });
 

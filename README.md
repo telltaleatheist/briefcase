@@ -509,6 +509,54 @@ try {
 - npm or yarn
 - FFmpeg (binary in path or included in project)
 - yt-dlp (binary in path or included in project)
+- **Python 3.11+** (for video analysis features)
+  - Required packages: `whisper`, `requests`, `openai` (optional), `anthropic` (optional)
+  - Install via: `pip install -r backend/python/requirements.txt`
+
+#### Python Configuration
+
+Clippy supports multiple Python configuration modes:
+
+**1. Development Mode (Recommended for Development):**
+```bash
+npm run electron:dev
+```
+- Uses your **system Python** (e.g., conda environment, system python3)
+- Allows you to use your local Python with dependencies already installed
+- **Setup:** Install dependencies manually:
+  ```bash
+  pip install -r backend/python/requirements.txt
+  # OR if using conda:
+  conda create -n metadata-generator python=3.11
+  conda activate metadata-generator
+  pip install -r backend/python/requirements.txt
+  ```
+
+**2. Development with Bundled Python (For Testing Packaging):**
+```bash
+npm run electron:dev:bundled
+```
+- Uses **bundled Python** from `dist-python/python-{arch}/`
+- Useful for testing the packaged Python environment without building the full app
+- **Setup:** Run the Python packaging script first:
+  ```bash
+  npm run package:python:mac-arm64  # or appropriate platform
+  ```
+
+**3. Production Mode (Packaged App):**
+```bash
+npm run package:mac-arm64  # or other platform
+```
+- Uses **bundled Python** from `resources/python/`
+- Python and all dependencies are packaged with the app
+- Self-contained, no system dependencies required
+
+**Environment Variables:**
+- `NODE_ENV`: Set to `development` or `production`
+- `USE_BUNDLED_PYTHON`: Set to `true` to use bundled Python in dev mode
+- `USE_SYSTEM_PYTHON`: Set to `true` to force system Python even in production (for debugging)
+
+**Python Configuration File:** See [backend/src/shared/python-config.ts](backend/src/shared/python-config.ts) for implementation details.
 
 #### Installation Steps:
 

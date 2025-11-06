@@ -130,9 +130,10 @@ export class LibraryService {
   }
 
   /**
-   * Update an analysis (archive, relink, etc.)
+   * Update an analysis (archive, relink, rename, etc.)
    */
   async updateAnalysis(id: string, update: {
+    title?: string;
     archived?: boolean;
     videoCurrentPath?: string;
     videoIsLinked?: boolean;
