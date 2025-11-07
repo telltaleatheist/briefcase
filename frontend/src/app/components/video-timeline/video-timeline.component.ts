@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, ViewChild, ElementRef } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, ViewChild, ElementRef, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -83,6 +83,18 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   private currentPlaybackSpeed = 1;
   private lastKeyPressed: 'j' | 'k' | 'l' | null = null;
 
+  // Store bound event listeners for cleanup
+  private boundMouseMove?: (e: MouseEvent) => void;
+  private boundMouseUp?: (e: MouseEvent) => void;
+  private boundWheel?: (e: WheelEvent) => void;
+  private boundKeyDown?: (e: KeyboardEvent) => void;
+
+  // Cache time markers to avoid recalculating on every change detection
+  cachedTimeMarkers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
+  private lastMarkerCacheKey = '';
+
+  constructor(private ngZone: NgZone) {}
+
   ngOnInit() {
     // Initialize selection based on sections
     if (this.sections && this.sections.length > 0) {
@@ -98,17 +110,26 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     this.emitSelection();
 
     // Add global mouse event listeners for dragging
-    document.addEventListener('mousemove', this.handleMouseMove);
-    document.addEventListener('mouseup', this.handleMouseUp);
-    document.addEventListener('wheel', this.handleWheel, { passive: false });
-    document.addEventListener('keydown', this.handleKeyDown);
+    // Run handlers OUTSIDE Angular zone for performance
+    // Change detection is triggered manually inside the handlers when needed
+    this.ngZone.runOutsideAngular(() => {
+      this.boundMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
+      this.boundMouseUp = (e: MouseEvent) => this.handleMouseUp(e);
+      this.boundWheel = (e: WheelEvent) => this.handleWheel(e);
+      this.boundKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
+
+      document.addEventListener('mousemove', this.boundMouseMove);
+      document.addEventListener('mouseup', this.boundMouseUp);
+      document.addEventListener('wheel', this.boundWheel, { passive: false });
+      document.addEventListener('keydown', this.boundKeyDown);
+    });
   }
 
   ngOnDestroy() {
-    document.removeEventListener('mousemove', this.handleMouseMove);
-    document.removeEventListener('mouseup', this.handleMouseUp);
-    document.removeEventListener('wheel', this.handleWheel);
-    document.removeEventListener('keydown', this.handleKeyDown);
+    if (this.boundMouseMove) document.removeEventListener('mousemove', this.boundMouseMove);
+    if (this.boundMouseUp) document.removeEventListener('mouseup', this.boundMouseUp);
+    if (this.boundWheel) document.removeEventListener('wheel', this.boundWheel);
+    if (this.boundKeyDown) document.removeEventListener('keydown', this.boundKeyDown);
   }
 
   /**
@@ -170,7 +191,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     const rect = this.timelineElement.nativeElement.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const time = this.pixelsToTime(x);
-    this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+    this.emitSeek(time);
   }
 
   /**
@@ -194,7 +215,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     const rect = this.timelineElement.nativeElement.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const time = this.pixelsToTime(x);
-    this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+    this.emitSeek(time);
   }
 
   /**
@@ -338,11 +359,13 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       const scrollbarWidth = this.timelineElement?.nativeElement?.clientWidth || 1;
       const deltaTime = (deltaX / scrollbarWidth) * this.duration;
 
-      this.zoomOffset = this.scrollbarDragStartOffset + deltaTime;
+      this.ngZone.run(() => {
+        this.zoomOffset = this.scrollbarDragStartOffset + deltaTime;
 
-      // Clamp offset to valid range
-      const visibleDuration = this.getVisibleDuration();
-      this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        // Clamp offset to valid range
+        const visibleDuration = this.getVisibleDuration();
+        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      });
       return;
     }
 
@@ -362,13 +385,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
       // Calculate new zoom level
       if (newVisibleDuration > 0 && newVisibleDuration <= this.duration) {
-        this.zoomLevel = this.duration / newVisibleDuration;
-        this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
-        this.zoomOffset = newVisibleStart;
+        this.ngZone.run(() => {
+          this.zoomLevel = this.duration / newVisibleDuration;
+          this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
+          this.zoomOffset = newVisibleStart;
 
-        // Clamp offset
-        const visibleDuration = this.getVisibleDuration();
-        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+          // Clamp offset
+          const visibleDuration = this.getVisibleDuration();
+          this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        });
       }
       return;
     }
@@ -389,12 +414,14 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
       // Calculate new zoom level
       if (newVisibleDuration > 0 && newVisibleDuration <= this.duration) {
-        this.zoomLevel = this.duration / newVisibleDuration;
-        this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
+        this.ngZone.run(() => {
+          this.zoomLevel = this.duration / newVisibleDuration;
+          this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
 
-        // Keep the left side fixed, only adjust based on new zoom
-        const actualVisibleDuration = this.getVisibleDuration();
-        this.zoomOffset = Math.max(0, Math.min(this.duration - actualVisibleDuration, this.zoomOffset));
+          // Keep the left side fixed, only adjust based on new zoom
+          const actualVisibleDuration = this.getVisibleDuration();
+          this.zoomOffset = Math.max(0, Math.min(this.duration - actualVisibleDuration, this.zoomOffset));
+        });
       }
       return;
     }
@@ -414,11 +441,13 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
         const visibleDuration = this.getVisibleDuration();
         const deltaTime = (deltaX / rect.width) * visibleDuration;
 
-        // Pan in opposite direction of mouse movement
-        this.zoomOffset = this.panStartOffset - deltaTime;
+        this.ngZone.run(() => {
+          // Pan in opposite direction of mouse movement
+          this.zoomOffset = this.panStartOffset - deltaTime;
 
-        // Clamp offset to valid range
-        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+          // Clamp offset to valid range
+          this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        });
       }
       return;
     }
@@ -428,15 +457,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       const x = event.clientX - rect.left;
       const time = Math.max(0, Math.min(this.duration, this.pixelsToTime(x)));
 
-      // Update selection range
-      if (time < this.rangeStartTime) {
-        this.selectionStart = time;
-        this.selectionEnd = this.rangeStartTime;
-      } else {
-        this.selectionStart = this.rangeStartTime;
-        this.selectionEnd = time;
-      }
-      this.emitSelection();
+      this.ngZone.run(() => {
+        // Update selection range
+        if (time < this.rangeStartTime) {
+          this.selectionStart = time;
+          this.selectionEnd = this.rangeStartTime;
+        } else {
+          this.selectionStart = this.rangeStartTime;
+          this.selectionEnd = time;
+        }
+        this.emitSelection();
+      });
       return;
     }
 
@@ -469,9 +500,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
         newStart = this.duration - windowDuration;
       }
 
-      this.selectionStart = newStart;
-      this.selectionEnd = newEnd;
-      this.emitSelection();
+      this.ngZone.run(() => {
+        this.selectionStart = newStart;
+        this.selectionEnd = newEnd;
+        this.emitSelection();
+      });
       return;
     }
 
@@ -482,8 +515,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
       // Minimum selection duration: 1 second
       const minDuration = 1;
-      this.selectionStart = Math.max(0, Math.min(time, this.selectionEnd - minDuration));
-      this.emitSelection();
+      this.ngZone.run(() => {
+        this.selectionStart = Math.max(0, Math.min(time, this.selectionEnd - minDuration));
+        this.emitSelection();
+      });
       return;
     }
 
@@ -494,8 +529,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
       // Minimum selection duration: 1 second
       const minDuration = 1;
-      this.selectionEnd = Math.min(this.duration, Math.max(time, this.selectionStart + minDuration));
-      this.emitSelection();
+      this.ngZone.run(() => {
+        this.selectionEnd = Math.min(this.duration, Math.max(time, this.selectionStart + minDuration));
+        this.emitSelection();
+      });
       return;
     }
   };
@@ -510,27 +547,31 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       if (rect) {
         const x = event.clientX - rect.left;
         const time = this.pixelsToTime(x);
-        this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+        this.emitSeek(time);
       }
     }
 
     // Clear range dragging flag after a short delay to prevent immediate seek
     if (this.isDraggingRange) {
       setTimeout(() => {
-        this.isDraggingRange = false;
+        this.ngZone.run(() => {
+          this.isDraggingRange = false;
+        });
       }, 50);
     }
 
-    this.isPanning = false;
-    this.hasDraggedSincePanStart = false;
-    this.isScrubbing = false;
-    this.isScrubbingTimeMarker = false;
-    this.isDraggingWindow = false;
-    this.isDraggingLeftHandle = false;
-    this.isDraggingRightHandle = false;
-    this.isDraggingScrollbar = false;
-    this.isDraggingLeftZoomHandle = false;
-    this.isDraggingRightZoomHandle = false;
+    this.ngZone.run(() => {
+      this.isPanning = false;
+      this.hasDraggedSincePanStart = false;
+      this.isScrubbing = false;
+      this.isScrubbingTimeMarker = false;
+      this.isDraggingWindow = false;
+      this.isDraggingLeftHandle = false;
+      this.isDraggingRightHandle = false;
+      this.isDraggingScrollbar = false;
+      this.isDraggingLeftZoomHandle = false;
+      this.isDraggingRightZoomHandle = false;
+    });
   };
 
   /**
@@ -553,13 +594,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     // If shift key is held, do horizontal panning instead of zooming
     if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       if (this.zoomLevel > 1) {
-        const visibleDuration = this.getVisibleDuration();
-        // Pan by 10% of visible duration per scroll tick
-        const panAmount = (visibleDuration * 0.1) * (event.deltaY > 0 || event.deltaX > 0 ? 1 : -1);
-        this.zoomOffset += panAmount;
+        this.ngZone.run(() => {
+          const visibleDuration = this.getVisibleDuration();
+          // Pan by 10% of visible duration per scroll tick
+          const panAmount = (visibleDuration * 0.1) * (event.deltaY > 0 || event.deltaX > 0 ? 1 : -1);
+          this.zoomOffset += panAmount;
 
-        // Clamp offset to valid range
-        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+          // Clamp offset to valid range
+          this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        });
       }
       return;
     }
@@ -580,19 +623,21 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       const mouseRatio = mouseX / rect.width;  // 0 to 1, where mouse is in the timeline
       const timeAtMouse = oldVisibleStart + (mouseRatio * oldVisibleDuration);
 
-      // Update zoom level
-      this.zoomLevel = newZoomLevel;
+      this.ngZone.run(() => {
+        // Update zoom level
+        this.zoomLevel = newZoomLevel;
 
-      // Calculate new visible duration after zoom
-      const newVisibleDuration = this.getVisibleDuration();
+        // Calculate new visible duration after zoom
+        const newVisibleDuration = this.getVisibleDuration();
 
-      // Keep the same time under the mouse cursor at the same pixel position
-      // We want: newVisibleStart + (mouseRatio * newVisibleDuration) = timeAtMouse
-      // So: newVisibleStart = timeAtMouse - (mouseRatio * newVisibleDuration)
-      this.zoomOffset = timeAtMouse - (mouseRatio * newVisibleDuration);
+        // Keep the same time under the mouse cursor at the same pixel position
+        // We want: newVisibleStart + (mouseRatio * newVisibleDuration) = timeAtMouse
+        // So: newVisibleStart = timeAtMouse - (mouseRatio * newVisibleDuration)
+        this.zoomOffset = timeAtMouse - (mouseRatio * newVisibleDuration);
 
-      // Clamp offset to valid range
-      this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
+        // Clamp offset to valid range
+        this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
+      });
     }
   };
 
@@ -608,67 +653,79 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
     // Tool selection shortcuts
     if (event.key === 'a' || event.key === 'A') {
       event.preventDefault();
-      this.selectedTool = 'cursor';
+      this.ngZone.run(() => {
+        this.selectedTool = 'cursor';
+      });
       return;
     }
 
     if (event.key === 'r' || event.key === 'R') {
       event.preventDefault();
-      this.selectedTool = 'highlight';
+      this.ngZone.run(() => {
+        this.selectedTool = 'highlight';
+      });
       return;
     }
 
     // Playback control shortcuts (J/K/L) - Final Cut Pro X style
     if (event.key === 'j' || event.key === 'J') {
       event.preventDefault();
-      // J key: Reverse playback, increase speed with each press
-      if (this.lastKeyPressed === 'j' && this.currentPlaybackSpeed < 0) {
-        // Already going backwards, increase reverse speed (cycle: -1x → -2x → -4x → -8x → -1x)
-        const absSpeed = Math.abs(this.currentPlaybackSpeed);
-        this.currentPlaybackSpeed = absSpeed >= 8 ? -1 : -(absSpeed * 2);
-      } else {
-        // Start reverse playback at 1x
-        this.currentPlaybackSpeed = -1;
-      }
-      this.lastKeyPressed = 'j';
-      this.playbackSpeed.emit(this.currentPlaybackSpeed);
+      this.ngZone.run(() => {
+        // J key: Reverse playback, increase speed with each press
+        if (this.lastKeyPressed === 'j' && this.currentPlaybackSpeed < 0) {
+          // Already going backwards, increase reverse speed (cycle: -1x → -2x → -4x → -8x → -1x)
+          const absSpeed = Math.abs(this.currentPlaybackSpeed);
+          this.currentPlaybackSpeed = absSpeed >= 8 ? -1 : -(absSpeed * 2);
+        } else {
+          // Start reverse playback at 1x
+          this.currentPlaybackSpeed = -1;
+        }
+        this.lastKeyPressed = 'j';
+        this.emitPlaybackSpeed(this.currentPlaybackSpeed);
+      });
       return;
     }
 
     if (event.key === 'k' || event.key === 'K') {
       event.preventDefault();
-      // K key: Pause and reset speed to 1x
-      this.currentPlaybackSpeed = 1;
-      this.lastKeyPressed = 'k';
-      this.playbackSpeed.emit(0); // 0 means pause
+      this.ngZone.run(() => {
+        // K key: Pause and reset speed to 1x
+        this.currentPlaybackSpeed = 1;
+        this.lastKeyPressed = 'k';
+        this.emitPlaybackSpeed(0); // 0 means pause
+      });
       return;
     }
 
     if (event.key === 'l' || event.key === 'L') {
       event.preventDefault();
-      // L key: Forward playback, increase speed with each press
-      if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0) {
-        // Already going forward, increase forward speed (cycle: 1x → 2x → 4x → 8x → 1x)
-        this.currentPlaybackSpeed = this.currentPlaybackSpeed >= 8 ? 1 : this.currentPlaybackSpeed * 2;
-      } else {
-        // Start forward playback at 1x
-        this.currentPlaybackSpeed = 1;
-      }
-      this.lastKeyPressed = 'l';
-      this.playbackSpeed.emit(this.currentPlaybackSpeed);
+      this.ngZone.run(() => {
+        // L key: Forward playback, increase speed with each press
+        if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0) {
+          // Already going forward, increase forward speed (cycle: 1x → 2x → 4x → 8x → 1x)
+          this.currentPlaybackSpeed = this.currentPlaybackSpeed >= 8 ? 1 : this.currentPlaybackSpeed * 2;
+        } else {
+          // Start forward playback at 1x
+          this.currentPlaybackSpeed = 1;
+        }
+        this.lastKeyPressed = 'l';
+        this.emitPlaybackSpeed(this.currentPlaybackSpeed);
+      });
       return;
     }
 
     // Arrow keys for panning when zoomed
     if (this.zoomLevel > 1 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault();
-      const visibleDuration = this.getVisibleDuration();
-      // Pan by 10% of visible duration
-      const panAmount = visibleDuration * 0.1 * (event.key === 'ArrowRight' ? 1 : -1);
-      this.zoomOffset += panAmount;
+      this.ngZone.run(() => {
+        const visibleDuration = this.getVisibleDuration();
+        // Pan by 10% of visible duration
+        const panAmount = visibleDuration * 0.1 * (event.key === 'ArrowRight' ? 1 : -1);
+        this.zoomOffset += panAmount;
 
-      // Clamp offset to valid range
-      this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        // Clamp offset to valid range
+        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      });
       return;
     }
 
@@ -682,15 +739,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       const newZoomLevel = Math.max(1, Math.min(200, this.zoomLevel + zoomDelta));
 
       if (newZoomLevel !== this.zoomLevel) {
-        // Zoom centered on current playhead or middle of visible range
-        const centerTime = this.currentTime || (this.getVisibleStartTime() + this.getVisibleDuration() / 2);
-        this.zoomLevel = newZoomLevel;
+        this.ngZone.run(() => {
+          // Zoom centered on current playhead or middle of visible range
+          const centerTime = this.currentTime || (this.getVisibleStartTime() + this.getVisibleDuration() / 2);
+          this.zoomLevel = newZoomLevel;
 
-        const newVisibleDuration = this.getVisibleDuration();
-        this.zoomOffset = centerTime - (newVisibleDuration / 2);
+          const newVisibleDuration = this.getVisibleDuration();
+          this.zoomOffset = centerTime - (newVisibleDuration / 2);
 
-        // Clamp offset to valid range
-        this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
+          // Clamp offset to valid range
+          this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
+        });
       }
     }
   };
@@ -699,9 +758,38 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
    * Emit selection change event
    */
   emitSelection() {
-    this.selectionChange.emit({
-      startTime: this.selectionStart,
-      endTime: this.selectionEnd
+    this.ngZone.run(() => {
+      this.selectionChange.emit({
+        startTime: this.selectionStart,
+        endTime: this.selectionEnd
+      });
+    });
+  }
+
+  /**
+   * Emit seek event
+   */
+  emitSeek(time: number) {
+    this.ngZone.run(() => {
+      this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+    });
+  }
+
+  /**
+   * Emit playback speed event
+   */
+  emitPlaybackSpeed(speed: number) {
+    this.ngZone.run(() => {
+      this.playbackSpeed.emit(speed);
+    });
+  }
+
+  /**
+   * Emit play/pause event
+   */
+  emitPlayPause() {
+    this.ngZone.run(() => {
+      this.playPause.emit();
     });
   }
 
@@ -860,16 +948,26 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
    * Toggle play/pause
    */
   togglePlayPause() {
-    this.playPause.emit();
+    this.emitPlayPause();
   }
 
   /**
-   * Get time markers with major and minor ticks - optimized for performance
+   * Get time markers with major and minor ticks - optimized for performance with caching
    */
   getTimeMarkers(): Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> {
-    const markers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
     const visibleStart = this.getVisibleStartTime();
     const visibleDuration = this.getVisibleDuration();
+
+    // Create a cache key based on values that affect marker calculation
+    const cacheKey = `${visibleStart.toFixed(2)}_${visibleDuration.toFixed(2)}_${this.duration}`;
+
+    // Return cached markers if the view hasn't changed
+    if (cacheKey === this.lastMarkerCacheKey && this.cachedTimeMarkers.length > 0) {
+      return this.cachedTimeMarkers;
+    }
+
+    this.lastMarkerCacheKey = cacheKey;
+    const markers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
 
     // Calculate optimal intervals based on visible duration, not just zoom level
     // This ensures we don't create too many markers regardless of video length
@@ -920,6 +1018,8 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
       }
     }
 
+    // Cache the markers and return
+    this.cachedTimeMarkers = markers;
     return markers;
   }
 

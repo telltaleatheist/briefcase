@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject, Optional, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
@@ -11,6 +11,7 @@ import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { DatabaseLibraryService } from '../../services/database-library.service';
+import { BackendUrlService } from '../../services/backend-url.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 
@@ -76,25 +77,51 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   transcriptText: string | null = null;
   transcriptExists = false;
 
+  // Track if opened as dialog or route
+  isDialogMode = false;
+
+  public data: {
+    analysis?: LibraryAnalysis;
+    customVideo?: any;
+    videoId?: string;
+    videoPath?: string;
+    videoTitle?: string;
+    hasAnalysis?: boolean;
+    hasTranscript?: boolean;
+  } = {};
+
   constructor(
-    @Inject(MAT_DIALOG_DATA) public data: {
-      analysis?: LibraryAnalysis;
-      customVideo?: any;
-      videoId?: string;
-      videoPath?: string;
-      videoTitle?: string;
-      hasAnalysis?: boolean;
-      hasTranscript?: boolean;
-    },
-    private dialogRef: MatDialogRef<VideoPlayerComponent>,
+    @Inject(MAT_DIALOG_DATA) @Optional() dialogData: any,
+    @Optional() private dialogRef: MatDialogRef<VideoPlayerComponent>,
     private libraryService: LibraryService,
     private databaseLibraryService: DatabaseLibraryService,
     private dialog: MatDialog,
     private notificationService: NotificationService,
     private router: Router,
     private ngZone: NgZone,
-    private cdr: ChangeDetectorRef
-  ) {}
+    private cdr: ChangeDetectorRef,
+    private backendUrlService: BackendUrlService
+  ) {
+    // If opened as dialog, use dialog data; otherwise use router state
+    if (dialogData) {
+      this.data = dialogData;
+      this.isDialogMode = true;
+    } else {
+      this.isDialogMode = false;
+      // Get data from router navigation state
+      const navigation = this.router.getCurrentNavigation();
+      const state = navigation?.extras?.state || (history.state?.navigationId ? history.state : null);
+
+      if (state && state['videoEditorData']) {
+        const routeData = state['videoEditorData'];
+        this.data = {
+          videoId: routeData.videoId,
+          videoPath: routeData.videoPath,
+          videoTitle: routeData.videoTitle
+        };
+      }
+    }
+  }
 
   async ngOnInit() {
     try {
@@ -293,7 +320,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  initializePlayer() {
+  async initializePlayer() {
     console.log('[initializePlayer] Starting initialization');
 
     // Clean up any existing listeners and timers from previous video
@@ -310,25 +337,29 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.videoEl = this.videoElement.nativeElement;
       console.log('[initializePlayer] Video element obtained');
 
+      // Get backend URL first
+      const backendUrl = await this.backendUrlService.getBackendUrl();
+      console.log('[initializePlayer] Backend URL:', backendUrl);
+
       // Determine video source based on whether it's an analyzed video, custom video, or library video
       let videoUrl: string;
 
       if (this.data.customVideo) {
         // For custom videos, encode the file path in base64 and pass it as a query parameter
-        const encodedPath = btoa(this.data.customVideo.videoPath);
-        videoUrl = `/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+        const encodedPath = btoa(unescape(encodeURIComponent(this.data.customVideo.videoPath)));
+        videoUrl = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
         console.log('Loading custom video from path:', this.data.customVideo.videoPath);
         console.log('Video URL:', videoUrl);
       } else if (this.data.videoPath) {
         // For library videos, encode the file path in base64 and pass it as a query parameter
-        const encodedPath = btoa(this.data.videoPath);
-        videoUrl = `/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+        const encodedPath = btoa(unescape(encodeURIComponent(this.data.videoPath)));
+        videoUrl = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
         console.log('Loading library video from path:', this.data.videoPath);
         console.log('Video URL:', videoUrl);
       } else if (this.data.analysis) {
-        videoUrl = `/api/library/videos/${this.data.analysis.id}`;
+        videoUrl = `${backendUrl}/api/library/videos/${this.data.analysis.id}`;
       } else if (this.data.videoId) {
-        videoUrl = `/api/library/videos/${this.data.videoId}`;
+        videoUrl = `${backendUrl}/api/library/videos/${this.data.videoId}`;
       } else {
         this.error = 'No video source provided';
         this.isLoading = false;
@@ -386,10 +417,13 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
           clearTimeout(this.loadingTimeoutTimer);
           this.timers.delete(this.loadingTimeoutTimer);
         }
-        this.isLoading = false;
-        this.duration = this.videoEl!.duration;
-        this.currentSelection = { startTime: 0, endTime: this.duration };
-        console.log('Video loaded, duration:', this.duration);
+        // Run in NgZone to trigger change detection
+        this.ngZone.run(() => {
+          this.isLoading = false;
+          this.duration = this.videoEl!.duration;
+          this.currentSelection = { startTime: 0, endTime: this.duration };
+          console.log('Video loaded, duration:', this.duration);
+        });
       });
 
       // Handle loadeddata event (fires earlier than loadedmetadata)
@@ -401,10 +435,13 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
             clearTimeout(this.loadingTimeoutTimer);
             this.timers.delete(this.loadingTimeoutTimer);
           }
-          this.isLoading = false;
-          this.duration = this.videoEl!.duration;
-          this.currentSelection = { startTime: 0, endTime: this.duration };
-          console.log('Using duration from loadeddata event:', this.duration);
+          // Run in NgZone to trigger change detection
+          this.ngZone.run(() => {
+            this.isLoading = false;
+            this.duration = this.videoEl!.duration;
+            this.currentSelection = { startTime: 0, endTime: this.duration };
+            console.log('Using duration from loadeddata event:', this.duration);
+          });
         }
       });
 
@@ -635,7 +672,13 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   close() {
-    this.dialogRef.close();
+    if (this.dialogRef) {
+      // Opened as dialog - close it
+      this.dialogRef.close();
+    } else {
+      // Opened as route - navigate back to library
+      this.router.navigate(['/library']);
+    }
   }
 
 
@@ -723,8 +766,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     });
 
-    // Close the video player dialog
-    this.dialogRef.close();
+    // Close the video player (dialog or route)
+    this.close();
   }
 
   formatTime(seconds: number): string {

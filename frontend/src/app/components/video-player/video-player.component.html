@@ -1,5 +1,6 @@
-<div class="video-player-dialog">
-  <div class="dialog-header">
+<div class="video-player-dialog" [class.route-mode]="!isDialogMode">
+  <!-- Only show header in dialog mode -->
+  <div class="dialog-header" *ngIf="isDialogMode">
     <button mat-icon-button (click)="close()" class="back-button" matTooltip="Back to Clip Creator">
       <mat-icon>arrow_back</mat-icon>
     </button>
