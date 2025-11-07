@@ -1,0 +1,370 @@
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable, firstValueFrom } from 'rxjs';
+import { environment } from '../../environment/environment';
+import { BackendUrlService } from './backend-url.service';
+
+/**
+ * Database Library Service - Communicates with the new SQLite-based library API
+ *
+ * This service provides access to the batch analysis library system built in Phase 1-2.
+ * It queries the database for analyzed videos, transcripts, and analysis sections.
+ */
+
+export interface DatabaseVideo {
+  id: string;
+  filename: string;
+  file_hash: string;
+  current_path: string;
+  date_folder: string | null;
+  duration_seconds: number | null;
+  file_size_bytes: number | null;
+  created_at: string;
+  last_verified: string;
+  is_linked: number; // 0 or 1 (SQLite boolean)
+}
+
+export interface DatabaseTranscript {
+  video_id: string;
+  plain_text: string;
+  srt_format: string;
+  whisper_model: string | null;
+  language: string | null;
+  transcribed_at: string;
+}
+
+export interface DatabaseAnalysis {
+  video_id: string;
+  ai_analysis: string;
+  summary: string | null;
+  sections_count: number | null;
+  ai_model: string;
+  ai_provider: string | null;
+  analyzed_at: string;
+}
+
+export interface DatabaseAnalysisSection {
+  id: string;
+  video_id: string;
+  start_seconds: number;
+  end_seconds: number;
+  timestamp_text: string | null;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+}
+
+export interface DatabaseTag {
+  id: string;
+  video_id: string;
+  tag_name: string;
+  tag_type: string | null;
+  confidence: number | null;
+  source: string | null;
+  created_at: string;
+}
+
+export interface DatabaseStats {
+  totalVideos: number;
+  linkedVideos: number;
+  unlinkedVideos: number;
+  withTranscripts: number;
+  withAnalyses: number;
+  totalTags: number;
+}
+
+export interface ScanResult {
+  success: boolean;
+  totalFiles: number;
+  newVideos: number;
+  updatedPaths: number;
+  markedMissing: number;
+  errorCount: number;
+  duration: number;
+  newVideoIds: string[];
+  errors: string[];
+}
+
+export interface BatchProgress {
+  running: boolean;
+  jobId?: string;
+  status?: string;
+  totalVideos?: number;
+  processedVideos?: number;
+  failedVideos?: number;
+  currentVideoFilename?: string;
+  progress?: number;
+  estimatedTimeRemaining?: number;
+  errors?: Array<{
+    videoId: string;
+    filename: string;
+    error: string;
+    timestamp: string;
+  }>;
+  message?: string;
+}
+
+export interface LibraryVideoWithDetails extends DatabaseVideo {
+  hasTranscript: boolean;
+  hasAnalysis: boolean;
+  sectionsCount?: number;
+  tags?: DatabaseTag[];
+  transcriptSnippet?: string;
+  analysisSnippet?: string;
+}
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DatabaseLibraryService {
+  private baseUrl: string | null = null;
+
+  constructor(
+    private http: HttpClient,
+    private backendUrlService: BackendUrlService
+  ) {}
+
+  /**
+   * Get the base URL for database API calls
+   */
+  private async getBaseUrl(): Promise<string> {
+    if (!this.baseUrl) {
+      this.baseUrl = await this.backendUrlService.getApiUrl('/database');
+    }
+    return this.baseUrl;
+  }
+
+  /**
+   * Get database statistics
+   */
+  async getStats(): Promise<DatabaseStats> {
+    const baseUrl = await this.getBaseUrl();
+    return firstValueFrom(
+      this.http.get<DatabaseStats>(`${baseUrl}/stats`)
+    );
+  }
+
+  /**
+   * Trigger a full library scan
+   */
+  async scanLibrary(clipsFolder?: string): Promise<ScanResult> {
+    const body = clipsFolder ? { clipsFolder } : {};
+    return firstValueFrom(
+      this.http.post<ScanResult>(const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/scan`, body)
+    );
+  }
+
+  /**
+   * Get videos that need analysis
+   */
+  async getVideosNeedingAnalysis(): Promise<{ count: number; videos: any[] }> {
+    return firstValueFrom(
+      this.http.get<{ count: number; videos: any[] }>(const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/needs-analysis`)
+    );
+  }
+
+  /**
+   * Get all videos (paginated)
+   */
+  async getVideos(limit = 100, offset = 0): Promise<{ videos: DatabaseVideo[]; count: number }> {
+    return firstValueFrom(
+      this.http.get<{ videos: DatabaseVideo[]; count: number }>(
+        const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/videos?limit=${limit}&offset=${offset}`
+      )
+    );
+  }
+
+  /**
+   * Start batch analysis
+   */
+  async startBatchAnalysis(options?: {
+    aiModel?: string;
+    aiProvider?: 'ollama' | 'claude' | 'openai';
+    whisperModel?: string;
+    ollamaEndpoint?: string;
+    limit?: number;
+  }): Promise<{ success: boolean; jobId: string; message: string }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; jobId: string; message: string }>(
+        const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/batch/start`,
+        options || {}
+      )
+    );
+  }
+
+  /**
+   * Get batch analysis progress
+   */
+  async getBatchProgress(): Promise<BatchProgress> {
+    return firstValueFrom(
+      this.http.get<BatchProgress>(const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/batch/progress`)
+    );
+  }
+
+  /**
+   * Pause batch analysis
+   */
+  async pauseBatch(): Promise<{ success: boolean; message: string }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; message: string }>(
+        const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/batch/pause`,
+        {}
+      )
+    );
+  }
+
+  /**
+   * Resume batch analysis
+   */
+  async resumeBatch(): Promise<{ success: boolean; message: string }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; message: string }>(
+        const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/batch/resume`,
+        {}
+      )
+    );
+  }
+
+  /**
+   * Stop batch analysis
+   */
+  async stopBatch(): Promise<{ success: boolean; message: string }> {
+    return firstValueFrom(
+      this.http.post<{ success: boolean; message: string }>(
+        const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/batch/stop`,
+        {}
+      )
+    );
+  }
+
+  /**
+   * Get all tags with counts (grouped by type: people, topic, other)
+   */
+  async getTags(): Promise<{ people: Array<{ name: string; count: number }>; topic: Array<{ name: string; count: number }>; other: Array<{ name: string; count: number }> }> {
+    return firstValueFrom(
+      this.http.get<any>(const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/tags`)
+    );
+  }
+
+  /**
+   * Get videos filtered by tags
+   */
+  async getVideosByTags(tagNames: string[]): Promise<{ videos: DatabaseVideo[]; count: number }> {
+    const tagsParam = tagNames.join(',');
+    return firstValueFrom(
+      this.http.get<{ videos: DatabaseVideo[]; count: number }>(
+        const baseUrl = await this.getBaseUrl(); return firstValueFrom(this.http.METHOD(`${baseUrl}/videos?tags=${encodeURIComponent(tagsParam)}`
+      )
+    );
+  }
+
+  /**
+   * Search videos by keyword (searches filenames, transcripts, analyses)
+   * This is a client-side search for Phase 3 - will be enhanced with backend search in Phase 4
+   */
+  async searchVideos(query: string, videos: DatabaseVideo[]): Promise<DatabaseVideo[]> {
+    if (!query || query.trim() === '') {
+      return videos;
+    }
+
+    const lowerQuery = query.toLowerCase();
+    return videos.filter(video =>
+      video.filename.toLowerCase().includes(lowerQuery) ||
+      (video.date_folder && video.date_folder.toLowerCase().includes(lowerQuery))
+    );
+  }
+
+  /**
+   * Filter videos by date range
+   */
+  filterByDateRange(
+    videos: DatabaseVideo[],
+    startDate?: Date,
+    endDate?: Date
+  ): DatabaseVideo[] {
+    if (!startDate && !endDate) {
+      return videos;
+    }
+
+    return videos.filter(video => {
+      if (!video.date_folder) return false;
+
+      const videoDate = new Date(video.date_folder);
+
+      if (startDate && videoDate < startDate) return false;
+      if (endDate && videoDate > endDate) return false;
+
+      return true;
+    });
+  }
+
+  /**
+   * Sort videos by various criteria
+   */
+  sortVideos(
+    videos: DatabaseVideo[],
+    sortBy: 'date' | 'filename' | 'size' = 'date',
+    order: 'asc' | 'desc' = 'desc'
+  ): DatabaseVideo[] {
+    const sorted = [...videos].sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortBy) {
+        case 'date':
+          const dateA = a.date_folder ? new Date(a.date_folder).getTime() : 0;
+          const dateB = b.date_folder ? new Date(b.date_folder).getTime() : 0;
+          comparison = dateA - dateB;
+          break;
+
+        case 'filename':
+          comparison = a.filename.localeCompare(b.filename);
+          break;
+
+        case 'size':
+          const sizeA = a.file_size_bytes || 0;
+          const sizeB = b.file_size_bytes || 0;
+          comparison = sizeA - sizeB;
+          break;
+      }
+
+      return order === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }
+
+  /**
+   * Format file size for display
+   */
+  formatFileSize(bytes: number | null): string {
+    if (!bytes) return 'Unknown';
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+  }
+
+  /**
+   * Format duration for display
+   */
+  formatDuration(seconds: number | null): string {
+    if (!seconds) return 'Unknown';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+}

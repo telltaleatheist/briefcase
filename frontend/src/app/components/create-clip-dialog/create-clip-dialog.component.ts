@@ -8,6 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { LibraryService, LibraryAnalysis } from '../../services/library.service';
+import { BackendUrlService } from '../../services/backend-url.service';
 
 export interface CreateClipDialogData {
   analysis?: LibraryAnalysis;
@@ -44,7 +45,8 @@ export class CreateClipDialogComponent {
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: CreateClipDialogData,
     private dialogRef: MatDialogRef<CreateClipDialogComponent>,
-    private libraryService: LibraryService
+    private libraryService: LibraryService,
+    private backendUrlService: BackendUrlService
   ) {
     // Set default title based on whether it's an analyzed video or custom video
     if (this.data.analysis) {
@@ -84,7 +86,8 @@ export class CreateClipDialogComponent {
 
     try {
       this.isLoadingSavePath = true;
-      const response = await fetch(`/api/library/analyses/${this.data.analysis.id}/clip-save-path`, {
+      const savePathUrl = await this.backendUrlService.getApiUrl(`/library/analyses/${this.data.analysis.id}/clip-save-path`);
+      const response = await fetch(savePathUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -169,7 +172,8 @@ export class CreateClipDialogComponent {
         );
       } else if (this.data.customVideo) {
         // Extract clip from custom video
-        const response = await fetch('/api/library/videos/custom/extract-clip', {
+        const extractUrl = await this.backendUrlService.getApiUrl('/library/videos/custom/extract-clip');
+        const response = await fetch(extractUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

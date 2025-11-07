@@ -19,6 +19,7 @@ export class SettingsService {
     browser: "auto",
     theme: "light",
     outputDir: "",
+    clipsFolder: "",
     batchProcessingEnabled: true,
     maxConcurrentDownloads: 2
   };

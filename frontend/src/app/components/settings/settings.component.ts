@@ -91,6 +91,7 @@ export class SettingsComponent implements OnInit {
   createForm(): FormGroup {
     return this.fb.group({
       outputDir: [''],
+      clipsFolder: [''],
       quality: ['720'],
       convertToMp4: [true],
       useCookies: [false],
@@ -106,6 +107,7 @@ export class SettingsComponent implements OnInit {
   updateForm(settings: Settings): void {
     this.settingsForm.patchValue({
       outputDir: settings.outputDir,
+      clipsFolder: settings.clipsFolder || '',
       quality: settings.quality,
       convertToMp4: settings.convertToMp4,
       useCookies: settings.useCookies,
@@ -147,6 +149,25 @@ export class SettingsComponent implements OnInit {
         next: (path) => {
           if (path) {
             this.settingsForm.patchValue({ outputDir: path });
+            this.validatePath(path);
+          }
+        },
+        error: (error) => {
+          console.error('Error picking directory:', error);
+          this.notificationService.error('Directory Selection Failed', error.message || 'Could not select directory');
+        }
+      });
+    } else {
+      this.notificationService.info('Not Available', 'Directory selection is only available in the desktop version');
+    }
+  }
+
+  browseClipsFolder(): void {
+    if (this.isElectron) {
+      this.pathService.openDirectoryPicker().subscribe({
+        next: (path) => {
+          if (path) {
+            this.settingsForm.patchValue({ clipsFolder: path });
             this.validatePath(path);
           }
         },

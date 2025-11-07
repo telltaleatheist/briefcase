@@ -7,7 +7,7 @@ import { VideoMetadata } from '../common/interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
 import * as ffmpegPath from '@ffmpeg-installer/ffmpeg';
 import * as ffprobePath from '@ffprobe-installer/ffprobe';
-import { SharedConfigService } from '@/config/shared-config.service';
+import { SharedConfigService } from '../config/shared-config.service';
 
 @Injectable()
 export class FfmpegService {

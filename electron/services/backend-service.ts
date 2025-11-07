@@ -27,6 +27,38 @@ export class BackendService {
   }
   
   /**
+   * Kill any stale backend processes from previous runs
+   */
+  private async killStaleBackends(): Promise<void> {
+    try {
+      const { exec } = require('child_process');
+      const util = require('util');
+      const execPromise = util.promisify(exec);
+
+      if (process.platform === 'win32') {
+        // Windows: Kill node processes running dist/main.js
+        try {
+          await execPromise('taskkill /F /IM node.exe /FI "WINDOWTITLE eq dist/main.js*"');
+        } catch (err) {
+          // Ignore errors - might not find any processes
+        }
+      } else {
+        // Unix-like: Kill node/electron processes running dist/main.js
+        try {
+          await execPromise('pkill -9 -f "node.*dist/main.js" || true');
+          await execPromise('pkill -9 -f "Electron.*dist/main.js" || true');
+        } catch (err) {
+          // Ignore errors - might not find any processes
+        }
+      }
+
+      log.info('Cleaned up any stale backend processes');
+    } catch (err) {
+      log.warn(`Error cleaning up stale backends: ${err}`);
+    }
+  }
+
+  /**
    * Start the backend server and HTTP server
    */
   async startBackendServer(): Promise<boolean> {
@@ -35,6 +67,9 @@ export class BackendService {
     if (this.backendStarted) {
       return true;
     }
+
+    // Kill any stale backend processes from previous runs
+    await this.killStaleBackends();
 
     // Check if lock file exists and is recent (less than 10 seconds old)
     if (fs.existsSync(this.lockFilePath)) {
@@ -86,31 +121,40 @@ export class BackendService {
     }
 
     try {
-      const success = await this.startNodeBackend();
+      await this.startNodeBackend();
       await this.startHttpServer();
 
-      this.backendStarted = true;
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for backend to be ready with retries
+      const maxRetries = 30; // 30 retries
+      const retryDelay = 1000; // 1 second between retries
+      let isRunning = false;
 
-      const isRunning = await this.checkBackendRunning();
+      for (let i = 0; i < maxRetries; i++) {
+        log.info(`Checking backend health (attempt ${i + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
 
-      if (isRunning) {
-        log.info(`Backend successfully started on port ${this.actualBackendPort}`);
-        log.info(`Frontend server successfully started on port ${this.actualFrontendPort}`);
+        isRunning = await this.checkBackendRunning();
+
+        if (isRunning) {
+          log.info(`✓ Backend successfully started on port ${this.actualBackendPort} (took ${i + 1} seconds)`);
+          log.info(`✓ Frontend server successfully started on port ${this.actualFrontendPort}`);
+          this.backendStarted = true;
+          break;
+        } else {
+          log.warn(`Backend not ready yet (attempt ${i + 1}/${maxRetries})`);
+        }
+      }
+
+      if (!isRunning) {
+        log.error(`Backend failed to start after ${maxRetries} attempts - cleaning up processes`);
+        this.cleanup();
       }
 
       return isRunning;
 
     } catch (error) {
       log.error('Error starting backend servers:', error);
-      // Clean up lock file on failure
-      if (fs.existsSync(this.lockFilePath)) {
-        try {
-          fs.unlinkSync(this.lockFilePath);
-        } catch (err) {
-          // Ignore
-        }
-      }
+      this.cleanup();
       return false;
     }
   }
@@ -125,7 +169,7 @@ export class BackendService {
         port: this.actualBackendPort,
         path: '/api',
         method: 'GET',
-        timeout: 2000
+        timeout: 5000 // Increased from 2000ms to 5000ms to allow backend time to initialize
       }, (res) => {
         log.info(`Backend check response status: ${res.statusCode}`);
         resolve(res.statusCode === 200);
@@ -158,6 +202,13 @@ export class BackendService {
    */
   getFrontendPort(): number {
     return this.actualFrontendPort;
+  }
+
+  /**
+   * Get the full backend URL with the actual port
+   */
+  getBackendUrl(): string {
+    return `http://${ServerConfig.config.nestBackend.host}:${this.actualBackendPort}`;
   }
   
   /**
@@ -411,11 +462,14 @@ export class BackendService {
   isRunning(): boolean {
     return this.backendStarted;
   }
-  
+
   /**
-   * Shutdown the backend server
+   * Clean up backend resources (processes, servers, lock files)
    */
-  shutdown(): void {
+  private cleanup(): void {
+    log.info('Cleaning up backend resources...');
+
+    // Remove lock file
     if (fs.existsSync(this.lockFilePath)) {
       try {
         fs.unlinkSync(this.lockFilePath);
@@ -423,32 +477,66 @@ export class BackendService {
         log.warn(`Error removing lock file: ${err}`);
       }
     }
-    
+
     // Stop HTTP server
     if (this.server) {
       try {
         this.server.close();
+        this.server = null;
       } catch (err) {
         log.warn(`Error closing HTTP server: ${err}`);
       }
     }
-    
+
     // Kill backend process
     if (this.backendProcess && !this.backendProcess.killed) {
-      // On Windows, we need to kill the process group since it's detached
-      if (process.platform === 'win32' && this.backendProcess.pid) {
-        try {
-          process.kill(-this.backendProcess.pid, 'SIGTERM');
-        } catch (err) {
-          log.warn(`Error killing process group: ${err}`);
-        }
-      }
-      
       try {
-        this.backendProcess.kill();
+        // Try graceful shutdown first
+        this.backendProcess.kill('SIGTERM');
+
+        // Force kill after 2 seconds if still alive
+        setTimeout(() => {
+          if (this.backendProcess && !this.backendProcess.killed) {
+            log.warn('Backend process did not exit gracefully, forcing kill...');
+            this.backendProcess.kill('SIGKILL');
+          }
+        }, 2000);
       } catch (err) {
         log.warn(`Error killing backend process: ${err}`);
       }
     }
+
+    this.backendStarted = false;
+  }
+  
+  /**
+   * Shutdown the backend server
+   */
+  shutdown(): void {
+    log.info('Shutting down backend service...');
+    this.cleanup();
+
+    // Additional force kill for the specific PID if we have it
+    if (this.backendProcess && this.backendProcess.pid) {
+      const pid = this.backendProcess.pid;
+
+      // On Windows, kill the process group
+      if (process.platform === 'win32') {
+        try {
+          process.kill(-pid, 'SIGKILL');
+        } catch (err) {
+          log.warn(`Error killing process group: ${err}`);
+        }
+      } else {
+        // On Unix-like systems, try to force kill the specific PID
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch (err) {
+          log.warn(`Error force killing backend process ${pid}: ${err}`);
+        }
+      }
+    }
+
+    this.backendProcess = null;
   }
 }

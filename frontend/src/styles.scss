@@ -42,12 +42,18 @@ body {
     max-width: 100vw !important;
     max-height: 100vh !important;
     overflow: hidden;
+    position: relative;
   }
 
   .mdc-dialog__surface {
     max-width: 100vw !important;
     max-height: 100vh !important;
     overflow: hidden;
+  }
+
+  // Add close button styling at the dialog container level
+  .mat-mdc-dialog-content {
+    position: relative;
   }
 }
 
@@ -103,3 +109,5 @@ body {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+/* Batch progress card positioning - handled by app.component.ts JavaScript */

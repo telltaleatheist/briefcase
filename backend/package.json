@@ -47,6 +47,7 @@
     "proper-lockfile": "^4.1.2",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
+    "sql.js": "^1.13.0",
     "uuid": "^13.0.0",
     "youtube-dl-exec": "^2.5.5",
     "yt-dlp-wrap": "^2.3.12"
@@ -61,6 +62,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^20.17.31",
     "@types/proper-lockfile": "^4.1.4",
+    "@types/sql.js": "^1.4.9",
     "@types/supertest": "^2.0.16",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",

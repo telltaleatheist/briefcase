@@ -195,7 +195,8 @@ export class WindowService {
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
             "font-src 'self' https://fonts.gstatic.com; " +
-            "connect-src 'self' http://localhost:* ws://localhost:*;"
+            "connect-src 'self' http://localhost:* ws://localhost:*; " +
+            "media-src 'self' http://localhost:* blob:;"
         }
       });
     });

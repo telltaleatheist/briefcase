@@ -3,32 +3,58 @@ import { Injectable } from '@angular/core';
 import { Socket } from 'ngx-socket-io';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { DownloadProgress, HistoryItem, BatchQueueStatus, JobStatus } from '../models/download.model';
+import { BackendUrlService } from './backend-url.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class SocketService {
   private connectionStatus = new BehaviorSubject<boolean>(false);
-  
+
   // Cache for last known progress to restore state if needed
   private progressCache = new Map<string, DownloadProgress>();
-  
-  constructor(private socket: Socket) {
+
+  constructor(
+    private socket: Socket,
+    private backendUrlService: BackendUrlService
+  ) {
     // Set up connection monitoring
     this.setupConnectionListeners();
+    // Connect to the dynamic backend URL
+    this.connectToDynamicBackend();
   }
-  
+
+  /**
+   * Connect socket to the backend URL from Electron
+   */
+  private async connectToDynamicBackend(): Promise<void> {
+    try {
+      const backendUrl = await this.backendUrlService.getBackendUrl();
+      console.log('[SocketService] Connecting to backend:', backendUrl);
+
+      // Update socket ioSocket's URL
+      (this.socket.ioSocket as any).io.uri = backendUrl;
+
+      // Connect manually
+      this.socket.connect();
+    } catch (error) {
+      console.error('[SocketService] Failed to get backend URL:', error);
+    }
+  }
+
   private setupConnectionListeners(): void {
     this.socket.on('connect', () => {
       this.connectionStatus.next(true);
+      console.log('[SocketService] Connected to backend');
     });
-    
+
     this.socket.on('disconnect', () => {
       this.connectionStatus.next(false);
+      console.log('[SocketService] Disconnected from backend');
     });
-    
+
     this.socket.on('error', (error) => {
-      console.error('Socket error:', error);
+      console.error('[SocketService] Socket error:', error);
     });
   }
   

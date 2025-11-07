@@ -25,6 +25,21 @@
             <p class="field-hint">Files will be organized in: <code>videos/</code>, <code>analysis/transcripts/</code>, <code>analysis/reports/</code></p>
           </div>
 
+          <!-- Clips Folder -->
+          <div class="settings-section">
+            <label class="section-label">Clips Folder (Library)</label>
+            <div class="directory-picker">
+              <mat-form-field appearance="outline" class="dir-input">
+                <input matInput formControlName="clipsFolder" placeholder="/path/to/clips">
+              </mat-form-field>
+              <button mat-raised-button color="primary" type="button" (click)="browseClipsFolder()" *ngIf="isElectron">
+                <mat-icon>folder_open</mat-icon>
+                Browse
+              </button>
+            </div>
+            <p class="field-hint">Location where video clips are stored. Library will scan this folder for videos to import.</p>
+          </div>
+
           <!-- Download Settings -->
           <div class="settings-section">
             <label class="section-label">Download Settings</label>

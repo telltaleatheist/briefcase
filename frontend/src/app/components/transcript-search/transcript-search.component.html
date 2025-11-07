@@ -18,16 +18,20 @@
       </button>
       <mat-icon matPrefix>search</mat-icon>
     </mat-form-field>
+  </div>
 
-    <!-- Run Analysis Button (shown when transcript doesn't exist) -->
+  <!-- Run Transcription Button (shown when transcript doesn't exist) -->
+  <div *ngIf="!transcriptExists" class="no-transcript-container">
+    <mat-icon class="no-transcript-icon">transcribe</mat-icon>
+    <h3>No Transcript</h3>
+    <p>This video hasn't been transcribed yet. Generate a transcript to search through the spoken content.</p>
     <button
-      *ngIf="!transcriptExists"
       mat-raised-button
       color="primary"
-      class="run-analysis-btn"
+      class="run-transcription-btn"
       (click)="onRunAnalysis()">
-      <mat-icon>transcribe</mat-icon>
-      Run Transcription
+      <mat-icon>play_arrow</mat-icon>
+      Generate Transcript
     </button>
   </div>
 

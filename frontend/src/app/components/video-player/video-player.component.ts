@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -9,6 +10,7 @@ import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
+import { DatabaseLibraryService } from '../../services/database-library.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 
@@ -29,6 +31,7 @@ import { TranscriptSearchComponent } from '../transcript-search/transcript-searc
   ],
   templateUrl: './video-player.component.html',
   styleUrls: ['./video-player.component.scss']
+  // Removed ChangeDetectionStrategy.OnPush - was causing dialog to reinitialize and clear video src
 })
 export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
@@ -38,6 +41,10 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   isLoading = true;
   error: string | null = null;
   metadata: ParsedAnalysisMetadata | null = null;
+  loadingMessage = 'Loading video...';
+  loadingTime = 0;
+  private loadingStartTime = 0;
+  private loadingProgressInterval: any = null;
 
   // Timeline state
   currentTime = 0;
@@ -48,51 +55,128 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   activeSectionIndex: number | null = null;
   previousActiveSectionIndex: number | null = null;
 
+  // Throttle timer for performance optimization
+  private updateThrottleTimer: any = null;
+  private readonly UPDATE_THROTTLE_MS = 200; // Update at most every 200ms (5 times per second)
+  private seekDebounceTimer: any = null;
+  private readonly SEEK_DEBOUNCE_MS = 50; // Debounce seek operations quickly
+  private loadingTimeoutTimer: any = null;
+
+  // Event listener references for cleanup
+  private eventListeners: Array<{
+    element: HTMLVideoElement;
+    event: string;
+    handler: EventListener;
+  }> = [];
+
+  // Track all timers for cleanup
+  private timers: Set<any> = new Set();
+
   // Transcript state
   transcriptText: string | null = null;
   transcriptExists = false;
 
   constructor(
-    @Inject(MAT_DIALOG_DATA) public data: { analysis?: LibraryAnalysis; customVideo?: any },
+    @Inject(MAT_DIALOG_DATA) public data: {
+      analysis?: LibraryAnalysis;
+      customVideo?: any;
+      videoId?: string;
+      videoPath?: string;
+      videoTitle?: string;
+      hasAnalysis?: boolean;
+      hasTranscript?: boolean;
+    },
     private dialogRef: MatDialogRef<VideoPlayerComponent>,
     private libraryService: LibraryService,
+    private databaseLibraryService: DatabaseLibraryService,
     private dialog: MatDialog,
-    private notificationService: NotificationService
+    private notificationService: NotificationService,
+    private router: Router,
+    private ngZone: NgZone,
+    private cdr: ChangeDetectorRef
   ) {}
 
   async ngOnInit() {
     try {
-      // Only load metadata if this is an analyzed video (not a custom video)
-      if (this.data.analysis) {
-        // Load analysis metadata
-        this.metadata = await this.libraryService.getAnalysisMetadata(this.data.analysis.id);
+      // Determine the video ID to use for loading metadata
+      const videoId = this.data.videoId || this.data.analysis?.id;
 
-        // Convert sections to timeline format
-        if (this.metadata?.sections) {
-          this.timelineSections = this.metadata.sections.map(section => ({
-            startTime: section.startSeconds,
-            endTime: section.endSeconds || (section.startSeconds + 30), // Use endSeconds or default 30-second duration
-            category: section.category,
-            description: section.description,
-            color: this.getCategoryColor(section.category) // Match AI analysis box colors
-          }));
-        }
+      // If hasAnalysis/hasTranscript not provided, check them asynchronously
+      let hasAnalysis = this.data.hasAnalysis;
+      let hasTranscript = this.data.hasTranscript;
 
-        // Load transcript
+      if (videoId && (hasAnalysis === undefined || hasTranscript === undefined)) {
+        // Check in parallel without blocking the rest of the component initialization
+        const [analysisCheck, transcriptCheck] = await Promise.all([
+          hasAnalysis !== undefined ? Promise.resolve(hasAnalysis) : this.databaseLibraryService.hasAnalysis(videoId),
+          hasTranscript !== undefined ? Promise.resolve(hasTranscript) : this.databaseLibraryService.hasTranscript(videoId)
+        ]);
+
+        hasAnalysis = analysisCheck;
+        hasTranscript = transcriptCheck;
+      }
+
+      // Load analysis metadata from database if this video has been analyzed
+      if (videoId && hasAnalysis) {
         try {
-          const transcriptResult = await this.libraryService.getAnalysisTranscript(this.data.analysis.id);
-          this.transcriptExists = transcriptResult.exists;
-          this.transcriptText = transcriptResult.text;
+          const dbAnalysis = await this.databaseLibraryService.getAnalysis(videoId);
+          if (dbAnalysis) {
+            // Parse analysis sections from the database
+            const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+            // Convert database sections to timeline format
+            if (sections && sections.length > 0) {
+              this.timelineSections = sections.map(section => ({
+                startTime: section.start_seconds,
+                endTime: section.end_seconds || (section.start_seconds + 30),
+                category: section.category || 'General',
+                description: section.description || section.title || '',
+                color: this.getCategoryColor(section.category || 'General')
+              }));
+
+              // Build metadata object for display
+              this.metadata = {
+                sections: sections.map(s => ({
+                  startSeconds: s.start_seconds,
+                  endSeconds: s.end_seconds,
+                  timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
+                  category: s.category || 'General',
+                  description: s.description || s.title || '',
+                  quotes: [] // Database doesn't store quotes separately
+                }))
+              } as any;
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to load analysis metadata (video may only have transcript):', error);
+          this.metadata = null;
+        }
+      }
+
+      // Load transcript from database if available
+      if (videoId && hasTranscript) {
+        try {
+          const dbTranscript = await this.databaseLibraryService.getTranscript(videoId);
+          if (dbTranscript && dbTranscript.srt_format) {
+            // Use SRT format from database (includes timestamps for seeking)
+            // The transcript search component needs timestamps to enable jump-to-time functionality
+            this.transcriptText = dbTranscript.srt_format;
+            this.transcriptExists = !!(this.transcriptText && this.transcriptText.trim().length > 0);
+          } else {
+            this.transcriptExists = false;
+            this.transcriptText = null;
+          }
         } catch (error) {
           console.error('Failed to load transcript:', error);
           this.transcriptExists = false;
           this.transcriptText = null;
         }
       }
-      // For custom videos, we don't have metadata or transcript
+      // For custom videos or videos without analysis/transcript, we don't have metadata or transcript
     } catch (error) {
-      console.error('Failed to load metadata:', error);
-      this.error = 'Failed to load analysis metadata';
+      console.error('Failed to initialize video player:', error);
+      // Don't set this.error here - let the video try to load anyway
+      // Only critical errors should prevent video playback
     }
   }
 
@@ -104,18 +188,117 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    // Clean up video element event listeners
+    console.log('[ngOnDestroy] Cleaning up video player');
+
+    // Remove all video event listeners
+    this.eventListeners.forEach(({ element, event, handler }) => {
+      element.removeEventListener(event, handler);
+    });
+    this.eventListeners = [];
+
+    // Clean up video element
     if (this.videoEl) {
       this.videoEl.pause();
       this.videoEl.src = '';
       this.videoEl.load();
+      this.videoEl = null;
     }
 
     // Remove keyboard event listener
     document.removeEventListener('keydown', this.handleKeyPress);
+
+    // Clear ALL tracked timers
+    this.timers.forEach(timer => {
+      clearTimeout(timer);
+      clearInterval(timer);
+    });
+    this.timers.clear();
+
+    // Clear specific timers
+    if (this.updateThrottleTimer) {
+      clearTimeout(this.updateThrottleTimer);
+      this.updateThrottleTimer = null;
+    }
+
+    if (this.seekDebounceTimer) {
+      clearTimeout(this.seekDebounceTimer);
+      this.seekDebounceTimer = null;
+    }
+
+    if (this.loadingTimeoutTimer) {
+      clearTimeout(this.loadingTimeoutTimer);
+      this.loadingTimeoutTimer = null;
+    }
+
+    if (this.loadingProgressInterval) {
+      clearInterval(this.loadingProgressInterval);
+      this.loadingProgressInterval = null;
+    }
+  }
+
+  /**
+   * Add event listener and track it for cleanup
+   */
+  private addVideoEventListener(event: string, handler: EventListener) {
+    if (this.videoEl) {
+      this.videoEl.addEventListener(event, handler);
+      this.eventListeners.push({ element: this.videoEl, event, handler });
+    }
+  }
+
+  /**
+   * Clean up video resources (listeners and timers) but keep the component alive
+   */
+  private cleanupVideoResources() {
+    console.log('[cleanupVideoResources] Cleaning up old resources');
+
+    // Remove all video event listeners
+    this.eventListeners.forEach(({ element, event, handler }) => {
+      element.removeEventListener(event, handler);
+    });
+    this.eventListeners = [];
+
+    // Clear all tracked timers
+    this.timers.forEach(timer => {
+      clearTimeout(timer);
+      clearInterval(timer);
+    });
+    this.timers.clear();
+
+    // Clear specific timers
+    if (this.updateThrottleTimer) {
+      clearTimeout(this.updateThrottleTimer);
+      this.updateThrottleTimer = null;
+    }
+
+    if (this.seekDebounceTimer) {
+      clearTimeout(this.seekDebounceTimer);
+      this.seekDebounceTimer = null;
+    }
+
+    if (this.loadingTimeoutTimer) {
+      clearTimeout(this.loadingTimeoutTimer);
+      this.loadingTimeoutTimer = null;
+    }
+
+    if (this.loadingProgressInterval) {
+      clearInterval(this.loadingProgressInterval);
+      this.loadingProgressInterval = null;
+    }
+
+    // Pause and reset video element if it exists
+    if (this.videoEl) {
+      this.videoEl.pause();
+      // Don't clear src or set to null - we'll reuse the element
+    }
   }
 
   initializePlayer() {
+    console.log('[initializePlayer] Starting initialization');
+
+    // Clean up any existing listeners and timers from previous video
+    this.cleanupVideoResources();
+
     try {
       if (!this.videoElement) {
         this.error = 'Video element not found';
@@ -125,8 +308,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
       // Get native video element
       this.videoEl = this.videoElement.nativeElement;
+      console.log('[initializePlayer] Video element obtained');
 
-      // Determine video source based on whether it's an analyzed video or custom video
+      // Determine video source based on whether it's an analyzed video, custom video, or library video
       let videoUrl: string;
 
       if (this.data.customVideo) {
@@ -135,8 +319,16 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         videoUrl = `/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
         console.log('Loading custom video from path:', this.data.customVideo.videoPath);
         console.log('Video URL:', videoUrl);
+      } else if (this.data.videoPath) {
+        // For library videos, encode the file path in base64 and pass it as a query parameter
+        const encodedPath = btoa(this.data.videoPath);
+        videoUrl = `/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+        console.log('Loading library video from path:', this.data.videoPath);
+        console.log('Video URL:', videoUrl);
       } else if (this.data.analysis) {
         videoUrl = `/api/library/videos/${this.data.analysis.id}`;
+      } else if (this.data.videoId) {
+        videoUrl = `/api/library/videos/${this.data.videoId}`;
       } else {
         this.error = 'No video source provided';
         this.isLoading = false;
@@ -145,49 +337,134 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
       // Set video source
       this.videoEl.src = videoUrl;
+      console.log('Video source set to:', videoUrl);
+
+      // Start loading timer
+      this.loadingStartTime = Date.now();
+      this.loadingTime = 0;
+      this.loadingMessage = 'Loading video...';
+      this.cdr.markForCheck();
+
+      // Update loading message every second
+      this.loadingProgressInterval = setInterval(() => {
+        if (this.isLoading) {
+          this.loadingTime = Math.floor((Date.now() - this.loadingStartTime) / 1000);
+          this.loadingMessage = `Loading video... (${this.loadingTime}s)`;
+          this.cdr.markForCheck();
+        } else {
+          if (this.loadingProgressInterval) {
+            clearInterval(this.loadingProgressInterval);
+            this.timers.delete(this.loadingProgressInterval);
+          }
+        }
+      }, 1000);
+      this.timers.add(this.loadingProgressInterval);
+
+      // Add loading timeout (30 seconds)
+      this.loadingTimeoutTimer = setTimeout(() => {
+        if (this.isLoading) {
+          console.error('Video loading timeout after 30 seconds');
+          this.isLoading = false;
+
+          // Check if video is actually playable despite slow metadata loading
+          if (this.videoEl && this.videoEl.readyState >= 2) {
+            console.log('Video data loaded, forcing playback despite slow metadata');
+            this.duration = this.videoEl.duration || 0;
+            this.currentSelection = { startTime: 0, endTime: this.duration };
+            this.cdr.markForCheck();
+          } else {
+            this.error = 'Video loading timeout. The video file may use an unsupported codec. Try converting to MP4.';
+            this.cdr.markForCheck();
+          }
+        }
+      }, 30000);
+      this.timers.add(this.loadingTimeoutTimer);
 
       // Handle loadedmetadata event
-      this.videoEl.addEventListener('loadedmetadata', () => {
+      this.addVideoEventListener('loadedmetadata', () => {
+        if (this.loadingTimeoutTimer) {
+          clearTimeout(this.loadingTimeoutTimer);
+          this.timers.delete(this.loadingTimeoutTimer);
+        }
         this.isLoading = false;
         this.duration = this.videoEl!.duration;
         this.currentSelection = { startTime: 0, endTime: this.duration };
         console.log('Video loaded, duration:', this.duration);
       });
 
-      // Handle timeupdate event
-      this.videoEl.addEventListener('timeupdate', () => {
+      // Handle loadeddata event (fires earlier than loadedmetadata)
+      this.addVideoEventListener('loadeddata', () => {
+        console.log('Video data loaded (readyState:', this.videoEl!.readyState, ')');
+        // If metadata still not loaded after data is available, try to force it
+        if (this.isLoading && this.videoEl!.duration) {
+          if (this.loadingTimeoutTimer) {
+            clearTimeout(this.loadingTimeoutTimer);
+            this.timers.delete(this.loadingTimeoutTimer);
+          }
+          this.isLoading = false;
+          this.duration = this.videoEl!.duration;
+          this.currentSelection = { startTime: 0, endTime: this.duration };
+          console.log('Using duration from loadeddata event:', this.duration);
+        }
+      });
+
+      // Handle timeupdate event with throttling for performance
+      this.addVideoEventListener('timeupdate', () => {
         this.currentTime = this.videoEl!.currentTime;
-        this.updateActiveSection();
+
+        // Throttle updateActiveSection to avoid excessive DOM operations
+        if (!this.updateThrottleTimer) {
+          this.updateThrottleTimer = setTimeout(() => {
+            this.updateActiveSection();
+            this.updateThrottleTimer = null;
+          }, this.UPDATE_THROTTLE_MS);
+        }
       });
 
       // Handle play event
-      this.videoEl.addEventListener('play', () => {
+      this.addVideoEventListener('play', () => {
         this.isPlaying = true;
       });
 
       // Handle pause event
-      this.videoEl.addEventListener('pause', () => {
+      this.addVideoEventListener('pause', () => {
         this.isPlaying = false;
       });
 
       // Handle error event
-      this.videoEl.addEventListener('error', (e) => {
+      this.addVideoEventListener('error', (e) => {
         const videoError = this.videoEl?.error;
         console.error('Video error:', videoError);
+        console.error('Error code:', videoError?.code);
+        console.error('Error message:', videoError?.message);
+        console.error('Video src:', this.videoEl?.src);
+        console.error('Video readyState:', this.videoEl?.readyState);
+        console.error('Video networkState:', this.videoEl?.networkState);
 
-        // Provide helpful error messages
-        if (this.data.customVideo) {
-          const ext = this.data.customVideo.videoPath.split('.').pop()?.toLowerCase();
-          this.error = `Unable to play ${ext?.toUpperCase()} file. The video codec may not be supported. Try using a different video file or convert it to a web-compatible format.`;
-        } else {
-          this.error = videoError?.message || 'Failed to load video';
+        // MediaError codes:
+        // 1 = MEDIA_ERR_ABORTED - fetching process aborted by user
+        // 2 = MEDIA_ERR_NETWORK - error occurred when downloading
+        // 3 = MEDIA_ERR_DECODE - error occurred when decoding
+        // 4 = MEDIA_ERR_SRC_NOT_SUPPORTED - video format not supported
+
+        let errorMessage = 'Failed to load video';
+        if (videoError?.code === 3) {
+          errorMessage = 'Video codec not supported by browser. The .MOV file may use a codec (like ProRes or H.265) that HTML5 video cannot decode. Try converting to H.264 MP4.';
+        } else if (videoError?.code === 4) {
+          errorMessage = 'Video format not supported. Try converting to MP4 with H.264 codec.';
+        } else if (videoError?.code === 2) {
+          errorMessage = 'Network error while loading video. Please check the file path and try again.';
+        } else if (videoError?.code === 1) {
+          errorMessage = 'Video loading was aborted.';
         }
 
+        this.error = errorMessage;
         this.isLoading = false;
+        this.cdr.markForCheck();
       });
 
       // Prevent context menu
-      this.videoEl.addEventListener('contextmenu', (e) => {
+      this.addVideoEventListener('contextmenu', (e) => {
         e.preventDefault();
         return false;
       });
@@ -229,12 +506,30 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
       case 'ArrowLeft':
         event.preventDefault();
-        this.videoEl.currentTime = Math.max(0, this.videoEl.currentTime - 5);
+        // Debounce seeking to prevent freezing during rapid key presses
+        if (this.seekDebounceTimer) {
+          clearTimeout(this.seekDebounceTimer);
+        }
+        const newTimeLeft = Math.max(0, this.videoEl.currentTime - 5);
+        this.seekDebounceTimer = setTimeout(() => {
+          if (this.videoEl) {
+            this.videoEl.currentTime = newTimeLeft;
+          }
+        }, this.SEEK_DEBOUNCE_MS);
         break;
 
       case 'ArrowRight':
         event.preventDefault();
-        this.videoEl.currentTime = Math.min(this.duration, this.videoEl.currentTime + 5);
+        // Debounce seeking to prevent freezing during rapid key presses
+        if (this.seekDebounceTimer) {
+          clearTimeout(this.seekDebounceTimer);
+        }
+        const newTimeRight = Math.min(this.duration, this.videoEl.currentTime + 5);
+        this.seekDebounceTimer = setTimeout(() => {
+          if (this.videoEl) {
+            this.videoEl.currentTime = newTimeRight;
+          }
+        }, this.SEEK_DEBOUNCE_MS);
         break;
 
       case 'KeyF':
@@ -272,18 +567,21 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.videoEl.play();
     }
     // Set active section if index provided
-    if (sectionIndex !== undefined) {
-      this.activeSectionIndex = sectionIndex;
+    if (sectionIndex !== undefined && this.metadata?.sections) {
+      // Verify the index is within bounds
+      if (sectionIndex >= 0 && sectionIndex < this.metadata.sections.length) {
+        this.activeSectionIndex = sectionIndex;
 
-      // Auto-select the section's time range
-      const section = this.metadata?.sections[sectionIndex];
-      if (section) {
-        const endTime = section.endSeconds ||
-          (this.metadata!.sections[sectionIndex + 1]?.startSeconds || this.duration);
-        this.currentSelection = {
-          startTime: section.startSeconds,
-          endTime: endTime
-        };
+        // Auto-select the section's time range
+        const section = this.metadata.sections[sectionIndex];
+        if (section) {
+          const endTime = section.endSeconds ||
+            (this.metadata.sections[sectionIndex + 1]?.startSeconds || this.duration);
+          this.currentSelection = {
+            startTime: section.startSeconds,
+            endTime: endTime
+          };
+        }
       }
     }
   }
@@ -323,7 +621,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     setTimeout(() => {
       const activeElement = document.querySelector('.section-item.active');
       if (activeElement) {
-        activeElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Use instant scrolling instead of smooth to reduce performance impact
+        activeElement.scrollIntoView({ behavior: 'instant', block: 'nearest' });
       }
     }, 100);
   }
@@ -397,44 +696,45 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
-   * Open create clip dialog
+   * Open video editor (navigate to dedicated page instead of modal)
    */
   async openCreateClipDialog() {
-    const { CreateClipDialogComponent } = await import('../create-clip-dialog/create-clip-dialog.component');
+    // If we have a videoPath but no analysis or customVideo, create a customVideo object
+    let customVideoData = this.data.customVideo;
+    if (!this.data.analysis && !this.data.customVideo && this.data.videoPath) {
+      customVideoData = {
+        videoPath: this.data.videoPath,
+        title: this.data.videoTitle || 'Video'
+      };
+    }
 
-    const dialogRef = this.dialog.open(CreateClipDialogComponent, {
-      width: '600px',
-      hasBackdrop: true,
-      backdropClass: 'dialog-backdrop',
-      disableClose: false,
-      data: {
-        analysis: this.data.analysis,
-        customVideo: this.data.customVideo,
-        startTime: this.currentSelection.startTime,
-        endTime: this.currentSelection.endTime
+    // Navigate to the video editor page with state
+    this.router.navigate(['/video-editor'], {
+      state: {
+        videoEditorData: {
+          analysis: this.data.analysis,
+          customVideo: customVideoData,
+          videoId: this.data.videoId,
+          videoPath: this.data.videoPath,
+          videoTitle: this.data.videoTitle,
+          startTime: this.currentSelection.startTime,
+          endTime: this.currentSelection.endTime
+        }
       }
     });
 
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (result?.created) {
-      const outputPath = result.extraction?.outputPath || result.clip?.outputPath;
-      this.notificationService.toastOnly(
-        'success',
-        'Clip Created',
-        'Click to open clip location',
-        outputPath ? {
-          type: 'open-folder',
-          path: outputPath
-        } : undefined
-      );
-    }
+    // Close the video player dialog
+    this.dialogRef.close();
   }
 
   formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  formatTimeRange(startSeconds: number, endSeconds: number): string {
+    return `${this.formatTime(startSeconds)} - ${this.formatTime(endSeconds)}`;
   }
 
   getCategoryColor(category: string): string {
@@ -485,10 +785,125 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /**
    * Handle run analysis request from transcript search
+   * This directly starts transcription without prompting for AI analysis
    */
-  onRunTranscriptAnalysis() {
-    this.notificationService.toastOnly('info', 'Run Analysis', 'Transcription feature coming soon!');
-    // TODO: Implement transcription-only analysis trigger
+  async onRunTranscriptAnalysis() {
+    // Get the video ID
+    const videoId = this.data.videoId || this.data.analysis?.id;
+
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available for transcription');
+      return;
+    }
+
+    // Start transcription directly
+    try {
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [videoId],
+        limit: 1,
+        transcribeOnly: true
+      });
+
+      this.notificationService.toastOnly(
+        'success',
+        'Transcription Started',
+        'Video transcription has been queued. You will be notified when it completes.'
+      );
+    } catch (error: any) {
+      console.error('Failed to start transcription:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Error',
+        error.error?.message || 'Failed to start transcription'
+      );
+    }
+  }
+
+  /**
+   * Generate AI analysis and/or transcript for this video
+   */
+  async generateAnalysis() {
+    // Get the video ID
+    const videoId = this.data.videoId || this.data.analysis?.id;
+
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available for analysis');
+      return;
+    }
+
+    // Check if transcript already exists
+    const hasTranscript = await this.databaseLibraryService.hasTranscript(videoId);
+
+    if (hasTranscript) {
+      // Transcript exists, just run AI analysis without asking
+      this.notificationService.toastOnly(
+        'info',
+        'Starting Analysis',
+        'Running AI analysis on existing transcript...'
+      );
+
+      try {
+        await this.databaseLibraryService.startBatchAnalysis({
+          videoIds: [videoId],
+          limit: 1,
+          transcribeOnly: false // Full analysis (will use existing transcript)
+        });
+
+        this.notificationService.toastOnly(
+          'success',
+          'Analysis Started',
+          'AI analysis has been queued. You will be notified when it completes.'
+        );
+      } catch (error: any) {
+        console.error('Failed to start analysis:', error);
+        this.notificationService.toastOnly(
+          'error',
+          'Error',
+          error.error?.message || 'Failed to start analysis'
+        );
+      }
+      return;
+    }
+
+    // No transcript exists, ask user what they want to do
+    const { AnalyzeSelectedDialogComponent } = await import('../library/analyze-selected-dialog.component');
+
+    const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
+      width: '500px',
+      data: { selectedCount: 1 }
+    });
+
+    const option = await dialogRef.afterClosed().toPromise();
+
+    if (!option || option === 'skip') {
+      return; // User cancelled
+    }
+
+    // Start analysis based on user choice
+    try {
+      const transcribeOnly = option === 'transcribe-only';
+
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [videoId],
+        limit: 1,
+        transcribeOnly
+      });
+
+      this.notificationService.toastOnly(
+        'success',
+        transcribeOnly ? 'Transcription Started' : 'Analysis Started',
+        transcribeOnly
+          ? 'Transcription has been queued. You will be notified when it completes.'
+          : 'AI analysis has been queued. You will be notified when it completes.'
+      );
+    } catch (error: any) {
+      console.error('Failed to start analysis:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Error',
+        error.error?.message || 'Failed to start analysis'
+      );
+    }
   }
 
   /**

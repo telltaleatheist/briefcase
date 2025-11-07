@@ -445,7 +445,6 @@ export class LibraryController {
 
       // Decode the base64-encoded path
       const videoPath = Buffer.from(encodedPath, 'base64').toString('utf-8');
-      console.log('Streaming custom video from path:', videoPath);
 
       // Check if file exists
       try {
@@ -464,32 +463,35 @@ export class LibraryController {
           '.mkv': 'video/x-matroska',
         };
         const contentType = contentTypeMap[ext] || 'video/mp4';
-        console.log('Serving video with content type:', contentType);
 
         if (range) {
           // Handle range request for seeking
           const parts = range.replace(/bytes=/, '').split('-');
           const start = parseInt(parts[0], 10);
-          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          // Honor the browser's requested end byte, or provide 10MB chunks for smooth playback
+          const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 10 * 1024 * 1024, fileSize - 1);
           const chunkSize = end - start + 1;
 
-          const stream = createReadStream(videoPath, { start, end });
+          const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 }); // 256KB buffer for faster streaming
 
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': chunkSize,
             'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=3600',
           });
 
           stream.pipe(res);
         } else {
-          // No range request, stream entire file
-          const stream = createReadStream(videoPath);
+          // No range request, stream entire file with optimized buffer
+          const stream = createReadStream(videoPath, { highWaterMark: 256 * 1024 }); // 256KB buffer
 
           res.writeHead(200, {
             'Content-Length': fileSize,
             'Content-Type': contentType,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=3600',
           });
 
           stream.pipe(res);
@@ -544,26 +546,30 @@ export class LibraryController {
           // Handle range request for seeking
           const parts = range.replace(/bytes=/, '').split('-');
           const start = parseInt(parts[0], 10);
-          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          // Honor the browser's requested end byte, or provide 10MB chunks for smooth playback
+          const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 10 * 1024 * 1024, fileSize - 1);
           const chunkSize = end - start + 1;
 
-          const stream = createReadStream(videoPath, { start, end });
+          const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 }); // 256KB buffer for faster streaming
 
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': chunkSize,
             'Content-Type': 'video/mp4',
+            'Cache-Control': 'public, max-age=3600',
           });
 
           stream.pipe(res);
         } else {
-          // No range request, stream entire file
-          const stream = createReadStream(videoPath);
+          // No range request, stream entire file with optimized buffer
+          const stream = createReadStream(videoPath, { highWaterMark: 256 * 1024 }); // 256KB buffer
 
           res.writeHead(200, {
             'Content-Length': fileSize,
             'Content-Type': 'video/mp4',
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=3600',
           });
 
           stream.pipe(res);
@@ -633,9 +639,8 @@ export class LibraryController {
       let outputDir: string;
 
       if (body.customDirectory) {
-        // If custom directory is provided, use it directly with just /clips subfolder
-        const baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        outputDir = path.join(baseDir, 'clips');
+        // If custom directory is provided, use it directly without adding /clips subfolder
+        outputDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
       } else {
         // Otherwise use configured directory or default Downloads with clippy/clips structure
         const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
@@ -731,10 +736,10 @@ export class LibraryController {
       let clippyDir: string;
 
       if (body.customDirectory) {
-        // If custom directory is provided, use it directly with just /clips subfolder
+        // If custom directory is provided, use it directly without adding /clips subfolder
         baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
         clippyDir = baseDir;
-        outputDir = path.join(baseDir, 'clips');
+        outputDir = baseDir;
       } else {
         // Otherwise use configured directory or default Downloads with clippy/clips structure
         baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
@@ -815,9 +820,8 @@ export class LibraryController {
       let outputDir: string;
 
       if (body.customDirectory) {
-        // If custom directory is provided, use it directly with just /clips subfolder
-        const baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        outputDir = path.join(baseDir, 'clips');
+        // If custom directory is provided, use it directly without adding /clips subfolder
+        outputDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
       } else {
         // Otherwise use configured directory or default Downloads with clippy/clips structure
         const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');

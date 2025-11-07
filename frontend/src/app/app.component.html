@@ -19,17 +19,17 @@
             <mat-icon matListItemIcon>download</mat-icon>
             <span matListItemTitle>Download Videos</span>
           </a>
+          <a mat-list-item routerLink="/library" routerLinkActive="active-link" (click)="onLibraryClick()">
+            <mat-icon matListItemIcon>video_library</mat-icon>
+            <span matListItemTitle>Video Library</span>
+          </a>
           <a mat-list-item routerLink="/analysis" routerLinkActive="active-link">
             <mat-icon matListItemIcon>psychology</mat-icon>
             <span matListItemTitle>Video Analysis</span>
           </a>
-          <a mat-list-item routerLink="/reports" routerLinkActive="active-link">
-            <mat-icon matListItemIcon>description</mat-icon>
-            <span matListItemTitle>Analysis Reports</span>
-          </a>
-          <a mat-list-item routerLink="/clips" routerLinkActive="active-link" class="clip-creator-nav">
-            <mat-icon matListItemIcon>content_cut</mat-icon>
-            <span matListItemTitle>Clip Creator</span>
+          <a mat-list-item routerLink="/video-editor" routerLinkActive="active-link">
+            <mat-icon matListItemIcon>movie_edit</mat-icon>
+            <span matListItemTitle>Video Editor</span>
           </a>
           <a mat-list-item routerLink="/normalize" routerLinkActive="active-link">
             <mat-icon matListItemIcon>equalizer</mat-icon>

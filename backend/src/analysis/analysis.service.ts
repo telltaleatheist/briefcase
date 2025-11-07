@@ -22,6 +22,7 @@ export interface AnalysisJob {
   audioPath?: string;
   transcriptPath?: string;
   analysisPath?: string;
+  tags?: { people: string[]; topics: string[] }; // Extracted tags from analysis
   createdAt: Date;
   completedAt?: Date;
   timing?: {
@@ -40,7 +41,7 @@ export interface AnalysisJob {
 export interface AnalysisRequest {
   input: string; // URL or file path
   inputType: 'url' | 'file';
-  mode?: 'full' | 'transcribe-only'; // Analysis mode: full analysis or transcription only
+  mode?: 'full' | 'transcribe-only' | 'analysis-only'; // Analysis mode: full, transcription only, or analysis only (using existing transcript)
   aiModel: string;
   aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
   apiKey?: string; // API key for Claude/OpenAI
@@ -50,6 +51,8 @@ export interface AnalysisRequest {
   outputPath?: string;
   customReportName?: string; // Custom name for the report file
   customInstructions?: string; // Custom instructions for AI analysis
+  existingTranscriptText?: string; // For 'analysis-only' mode: plain text transcript
+  existingTranscriptSrt?: string; // For 'analysis-only' mode: SRT format transcript
 }
 
 @Injectable()
@@ -194,78 +197,103 @@ export class AnalysisService {
         this.updateJob(jobId, { progress: 20 });
       }
 
-      // Phase 2: Extract audio (20-30%)
-      const job2 = this.jobs.get(jobId);
-      this.updateJob(jobId, {
-        status: 'extracting',
-        progress: 20,
-        currentPhase: 'Extracting audio...',
-        timing: { ...job2?.timing, extractionStart: new Date() },
-      });
-
-      const audioPath = await this.extractAudio(videoPath, jobId);
-
-      const job3 = this.jobs.get(jobId);
-      this.updateJob(jobId, {
-        progress: 30,
-        audioPath,
-        timing: { ...job3?.timing, extractionEnd: new Date() },
-      });
-
-      // Phase 3: Transcribe (30-60%)
-      const job4 = this.jobs.get(jobId);
-      this.updateJob(jobId, {
-        status: 'transcribing',
-        progress: 30,
-        currentPhase: 'Transcribing audio (this may take a few minutes)...',
-        timing: { ...job4?.timing, transcriptionStart: new Date() },
-      });
-
-      const transcriptResult = await this.pythonBridge.transcribe(
-        audioPath,
-        request.whisperModel || 'base',
-        request.language || 'en',
-        (progress) => {
-          this.updateJob(jobId, {
-            progress: progress.progress,
-            currentPhase: progress.message,
-          });
-        },
-      );
-
-      // Save transcript files
-      const sanitizedTitle = this.sanitizeFilename(videoTitle);
-      const transcriptPath = path.join(
-        transcriptsPath,
-        `${sanitizedTitle}.srt`,
-      );
-      const txtTranscriptPath = path.join(
-        transcriptsPath,
-        `${sanitizedTitle}.txt`,
-      );
-
-      await fs.writeFile(transcriptPath, transcriptResult.srt, 'utf-8');
-      await fs.writeFile(txtTranscriptPath, transcriptResult.text, 'utf-8');
-
-      const job5 = this.jobs.get(jobId);
-      this.updateJob(jobId, {
-        progress: 60,
-        transcriptPath,
-        timing: { ...job5?.timing, transcriptionEnd: new Date() },
-      });
-
-      // Check if we should skip AI analysis (transcribe-only mode)
+      // Determine mode
       const mode = request.mode || 'full';
+      this.logger.log(`Analysis mode: ${mode} (request.mode=${request.mode})`);
+
+      let transcriptPath: string | undefined;
+      let txtTranscriptPath: string | undefined;
+      let transcriptText: string = '';
+      let transcriptSrt: string = '';
+      let audioPath: string | undefined;
+
+      // Phase 2 & 3: Extract audio and transcribe (only if not analysis-only mode)
+      if (mode === 'analysis-only') {
+        // Use existing transcript from request
+        this.logger.log('Using existing transcript from database for analysis-only mode');
+        transcriptText = request.existingTranscriptText!;
+        transcriptSrt = request.existingTranscriptSrt!;
+
+        this.updateJob(jobId, {
+          progress: 60,
+          currentPhase: 'Using existing transcript...',
+        });
+      } else {
+        // Extract audio (20-30%)
+        const job2 = this.jobs.get(jobId);
+        this.updateJob(jobId, {
+          status: 'extracting',
+          progress: 20,
+          currentPhase: 'Extracting audio...',
+          timing: { ...job2?.timing, extractionStart: new Date() },
+        });
+
+        audioPath = await this.extractAudio(videoPath, jobId);
+
+        const job3 = this.jobs.get(jobId);
+        this.updateJob(jobId, {
+          progress: 30,
+          audioPath,
+          timing: { ...job3?.timing, extractionEnd: new Date() },
+        });
+
+        // Transcribe (30-60%)
+        const job4 = this.jobs.get(jobId);
+        this.updateJob(jobId, {
+          status: 'transcribing',
+          progress: 30,
+          currentPhase: 'Transcribing audio (this may take a few minutes)...',
+          timing: { ...job4?.timing, transcriptionStart: new Date() },
+        });
+
+        const transcriptResult = await this.pythonBridge.transcribe(
+          audioPath,
+          request.whisperModel || 'base',
+          request.language || 'en',
+          (progress) => {
+            this.updateJob(jobId, {
+              progress: progress.progress,
+              currentPhase: progress.message,
+            });
+          },
+        );
+
+        transcriptText = transcriptResult.text;
+        transcriptSrt = transcriptResult.srt;
+
+        // Save transcript files
+        const sanitizedTitle = this.sanitizeFilename(videoTitle);
+        transcriptPath = path.join(
+          transcriptsPath,
+          `${sanitizedTitle}.srt`,
+        );
+        txtTranscriptPath = path.join(
+          transcriptsPath,
+          `${sanitizedTitle}.txt`,
+        );
+
+        await fs.writeFile(transcriptPath, transcriptSrt, 'utf-8');
+        await fs.writeFile(txtTranscriptPath, transcriptText, 'utf-8');
+
+        const job5 = this.jobs.get(jobId);
+        this.updateJob(jobId, {
+          progress: 60,
+          transcriptPath,
+          timing: { ...job5?.timing, transcriptionEnd: new Date() },
+        });
+      }
       let analysisOutputPath: string | undefined;
       let analysisResult: any;
 
       if (mode === 'transcribe-only') {
         // Skip AI analysis, jump to finalization
+        this.logger.log('Skipping AI analysis in transcribe-only mode');
         this.updateJob(jobId, {
           progress: 95,
           currentPhase: 'Transcription complete...',
         });
       } else {
+        this.logger.log('Starting AI analysis phase');
         // Phase 4: AI Analysis (60-95%)
         const job6 = this.jobs.get(jobId);
         this.updateJob(jobId, {
@@ -276,17 +304,21 @@ export class AnalysisService {
         });
 
         // Use custom report name if provided, otherwise use sanitized title
+        const sanitizedTitle = this.sanitizeFilename(videoTitle);
         const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
         analysisOutputPath = path.join(
           reportsPath,
           reportFileName,
         );
 
+        // Parse SRT to get segments (needed for timestamp correlation)
+        const segments = this.parseSrtToSegments(transcriptSrt);
+
         analysisResult = await this.pythonBridge.analyze(
           request.ollamaEndpoint,
           request.aiModel,
-          transcriptResult.text,
-          transcriptResult.segments,
+          transcriptText,
+          segments,
           analysisOutputPath,
           (progress) => {
             this.updateJob(jobId, {
@@ -303,6 +335,7 @@ export class AnalysisService {
         this.updateJob(jobId, {
           progress: 95,
           analysisPath: analysisOutputPath,
+          tags: analysisResult?.tags || { people: [], topics: [] },
           timing: { ...job7?.timing, analysisEnd: new Date() },
         });
       }
@@ -345,8 +378,10 @@ export class AnalysisService {
         }
       }
 
-      // Clean up temporary audio file
-      await fs.unlink(audioPath).catch(() => {});
+      // Clean up temporary audio file (only if we extracted it)
+      if (audioPath) {
+        await fs.unlink(audioPath).catch(() => {});
+      }
 
       // Complete
       const completionMessage = mode === 'transcribe-only'
@@ -361,51 +396,11 @@ export class AnalysisService {
         timing: { ...timing, totalDuration },
       });
 
-      // Add to library (only if full analysis or if we have transcript)
-      if (mode === 'full' && analysisOutputPath) {
-        try {
-          const analysis = await this.libraryService.createAnalysis({
-            title: videoTitle,
-            videoPath: videoPath,
-            transcriptSrtPath: transcriptPath,
-            transcriptTxtPath: txtTranscriptPath,
-            analysisReportPath: analysisOutputPath,
-            analysisModel: request.aiModel,
-            transcriptionModel: request.whisperModel || 'base',
-          });
-          this.logger.log(`Added analysis to library for job ${jobId}`);
-
-          // Parse analysis report and generate metadata JSON
-          try {
-            const { parseAnalysisReport, extractCategories, saveAnalysisMetadata } =
-              await import('../library/parsers/analysis-parser');
-
-            const parsedMetadata = await parseAnalysisReport(
-              analysis.files.analysis,
-              analysis.id,
-              analysis.title,
-              analysis.createdAt
-            );
-
-            // Save parsed metadata to JSON file
-            await saveAnalysisMetadata(analysis.files.analysisMetadata, parsedMetadata);
-
-            // Extract and update categories
-            const categories = extractCategories(parsedMetadata);
-            if (categories.length > 0) {
-              analysis.metadata.categories = categories;
-              await this.libraryService.updateAnalysis(analysis.id, {});
-            }
-
-            this.logger.log(`Generated metadata JSON for analysis ${analysis.id}`);
-          } catch (parseError) {
-            this.logger.warn(`Failed to generate metadata JSON: ${(parseError as Error).message}`);
-            // Don't fail the job if metadata generation fails
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to add analysis to library: ${(error as Error).message}`);
-          // Don't fail the job if library addition fails
-        }
+      // Add to library (only if full analysis mode AND we created the analysis report)
+      // Note: In analysis-only mode, the batch analysis service handles database insertion
+      if ((mode === 'full' || mode === 'analysis-only') && analysisOutputPath) {
+        // Skip library.json creation - we only use the database now
+        this.logger.log(`Skipping legacy library.json creation - using database-only mode`);
       } else if (mode === 'transcribe-only') {
         this.logger.log(`Transcription-only mode: Skipped library creation for job ${jobId}`);
       }
@@ -449,12 +444,17 @@ export class AnalysisService {
 
   /**
    * Extract audio from video using FFmpeg
+   * IMPORTANT: Creates temporary WAV file in system tmp directory, NOT in library location
    */
   private async extractAudio(videoPath: string, jobId: string): Promise<string> {
-    const audioPath = videoPath.replace(
-      path.extname(videoPath),
-      '_audio.wav',
-    );
+    const os = require('os');
+    const tmpDir = os.tmpdir();
+
+    // Create unique filename in tmp directory to avoid conflicts
+    const audioFilename = `${jobId}_${Date.now()}_audio.wav`;
+    const audioPath = path.join(tmpDir, audioFilename);
+
+    this.logger.log(`Extracting audio to temporary file: ${audioPath}`);
 
     // Use FFmpeg to extract audio
     return new Promise((resolve, reject) => {
@@ -466,8 +466,14 @@ export class AnalysisService {
         .audioFrequency(16000)
         .audioChannels(1)
         .format('wav')
-        .on('end', () => resolve(audioPath))
-        .on('error', (err: Error) => reject(err))
+        .on('end', () => {
+          this.logger.log(`Audio extraction complete: ${audioPath}`);
+          resolve(audioPath);
+        })
+        .on('error', (err: Error) => {
+          this.logger.error(`Audio extraction failed: ${err.message}`);
+          reject(err);
+        })
         .save(audioPath);
     });
   }
@@ -544,6 +550,49 @@ export class AnalysisService {
     }
 
     return sanitized;
+  }
+
+  /**
+   * Parse SRT format to segments array (for AI analysis timestamp correlation)
+   */
+  private parseSrtToSegments(srtContent: string): any[] {
+    const segments: any[] = [];
+    const blocks = srtContent.split('\n\n').filter(b => b.trim());
+
+    for (const block of blocks) {
+      const lines = block.split('\n');
+      if (lines.length < 3) continue;
+
+      // Line 0: sequence number
+      // Line 1: timestamp (00:00:01,500 --> 00:00:04,200)
+      // Line 2+: text
+      const timestampLine = lines[1];
+      const textLines = lines.slice(2);
+
+      const match = timestampLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+      if (match) {
+        const startHours = parseInt(match[1]);
+        const startMinutes = parseInt(match[2]);
+        const startSeconds = parseInt(match[3]);
+        const startMs = parseInt(match[4]);
+
+        const endHours = parseInt(match[5]);
+        const endMinutes = parseInt(match[6]);
+        const endSeconds = parseInt(match[7]);
+        const endMs = parseInt(match[8]);
+
+        const start = startHours * 3600 + startMinutes * 60 + startSeconds + startMs / 1000;
+        const end = endHours * 3600 + endMinutes * 60 + endSeconds + endMs / 1000;
+
+        segments.push({
+          start,
+          end,
+          text: textLines.join(' ')
+        });
+      }
+    }
+
+    return segments;
   }
 
   /**

@@ -4,6 +4,90 @@ All notable changes to the Clippy project will be documented in this file.
 
 ---
 
+## [Hotfix] - 2025-11-06 (23:00)
+
+### ✅ Fixed
+
+#### Video Player Memory Leak (CRITICAL)
+- **Issue**: App becomes increasingly laggy when switching between videos, eventually freezing
+- **Root Cause**: Event listeners not cleaned up when closing video player dialog
+- **Symptoms**:
+  - First video loads fine
+  - Each subsequent video gets slower
+  - App becomes unresponsive after viewing multiple videos
+- **Fix**:
+  - Track all video event listeners for proper cleanup
+  - Remove `ngZone.runOutsideAngular()` calls (unnecessary complexity)
+  - Clear all timers and intervals in `ngOnDestroy`
+  - Set references to `null` after cleanup
+- **File**: [video-player.component.ts:157-202](frontend/src/app/components/video-player/video-player.component.ts#L157-L202)
+
+#### Video Player OnPush Detection Issue
+- **Issue**: Video loads successfully then immediately errors with "Empty src attribute"
+- **Root Cause**: `ChangeDetectionStrategy.OnPush` caused component to reinitialize, clearing video src
+- **Fix**: Removed `ChangeDetectionStrategy.OnPush` from VideoPlayerComponent
+- **File**: [video-player.component.ts:32-33](frontend/src/app/components/video-player/video-player.component.ts#L32-L33)
+- **Impact**: Videos now load instantly without reinitializing
+
+#### Transcript Search UI
+- **Issue**: "Run Transcription" button covered search box even when transcript existed
+- **Root Cause**: `transcriptExists` flag based on API response instead of actual text content
+- **Fix**: Check for actual transcript text content: `transcriptExists = !!(transcriptText && transcriptText.trim().length > 0)`
+- **File**: [video-player.component.ts:118-120](frontend/src/app/components/video-player/video-player.component.ts#L118-L120)
+
+#### Database Schema Migration
+- **Issue**: Missing `added_at` column in existing databases caused errors
+- **Solution**: Added automatic schema migration to add missing columns
+- **Implementation**: `runSchemaMigrations()` method checks and adds `added_at` column if missing
+- **File**: [database.service.ts:219-245](backend/src/database/database.service.ts#L219-L245)
+- **Note**: Users can also delete `~/Library/Application Support/clippy/clippy.db` to recreate with fresh schema
+
+#### Build System
+- **Issue**: Backend build incomplete - missing app.controller.js and other files
+- **Root Cause**: Running `npm run build` from backend folder only ran NestJS CLI
+- **Fix**: Use `npm run build:backend` from project root (runs tsc + nest build)
+- **Alternative**: Delete and recreate database for clean schema
+
+---
+
+## [Phase 5.1] - 2025-11-06 (Late Update)
+
+### ✅ Completed
+
+#### Critical Fixes
+- **Import Manager**: Complete rewrite with direct file picker approach
+  - User feedback: "import videos should open a system picker, not a list"
+  - Fixed: Removed folder scanning (too slow for large libraries)
+  - Implementation: Direct Electron file picker via IPC
+  - Files: [library.component.ts:515](frontend/src/app/components/library/library.component.ts#L515), [ipc-handlers.ts:188](electron/ipc/ipc-handlers.ts#L188)
+  - Testing: Requires Electron restart to verify
+
+- **Notification Spam Fix**: Eliminated "Refresh Failed" toast notifications
+  - Error: "Failed to refresh batch status. Will try again later."
+  - Root cause: Frontend polling before backend ready
+  - Fix: Silent error handling with console logging only
+  - File: [batch-download.component.ts:1737](frontend/src/app/components/batch-download/batch-download.component.ts#L1737)
+
+- **Backend Startup Reliability**: Fixed race condition causing first-attempt failures
+  - Error: "Backend failed to start on first attempt, retrying in 2 seconds..."
+  - Root cause: Health check timeout (2s) < backend startup time (3s)
+  - Fix: Increased timeout from 2s to 5s, reduced initial delay from 3s to 2s
+  - Impact: Eliminates 2-second retry delay, faster startup
+  - File: [backend-service.ts:93-128](electron/services/backend-service.ts#L93-L128)
+
+- **IPC Preload Script**: Exposed ipcRenderer for file picker functionality
+  - Error: "File picker only works in Electron app"
+  - Fix: Added `ipcRenderer.invoke` to contextBridge
+  - File: [preload.ts:51-53](electron/preload.ts#L51-L53)
+
+### 📝 Documentation Updates
+- **TODO.md**: Added "Critical Fixes (In Progress)" section with current work
+- **TODO.md**: Documented backend startup timing fix
+- **TODO.md**: Added multi-library system architecture request
+- **TESTING_CHECKLIST.md**: Existing from Phase 5
+
+---
+
 ## [Phase 5] - 2025-11-06
 
 ### ✅ Completed

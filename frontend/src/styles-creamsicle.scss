@@ -89,8 +89,22 @@
     color: var(--text-primary) !important;
   }
 
+  // Dropdown panel background
+  .mat-mdc-select-panel {
+    background-color: var(--bg-card) !important;
+  }
+
   .mat-mdc-option {
     color: var(--text-primary) !important;
+    background-color: var(--bg-card) !important;
+
+    &:hover:not(.mdc-list-item--disabled) {
+      background-color: var(--bg-secondary) !important;
+    }
+
+    &.mdc-list-item--selected:not(.mdc-list-item--disabled) {
+      background-color: var(--bg-tertiary) !important;
+    }
   }
 
   .mat-mdc-dialog-container {
@@ -189,6 +203,29 @@
 
   .mat-mdc-dialog-content {
     color: var(--text-primary) !important;
+
+    // Force all text elements in dialogs to use proper dark mode colors
+    p, div, span, li, ul, ol, strong, em, label {
+      color: var(--text-primary) !important;
+    }
+
+    // Status/alert boxes in dialogs
+    .error-section,
+    .warning-section,
+    .info-section,
+    .success-section {
+      color: var(--text-primary) !important;
+      background-color: var(--bg-secondary) !important;
+      border-color: var(--border-color) !important;
+    }
+
+    // Error messages specifically
+    .error-list,
+    .error-item,
+    .error-message {
+      color: var(--text-primary) !important;
+      background-color: var(--bg-secondary) !important;
+    }
   }
 
   .mat-mdc-dialog-actions {
@@ -229,6 +266,30 @@
 
   h1, h2, h3, h4, h5, h6 {
     color: var(--text-primary) !important;
+  }
+
+  p, div:not(.mat-mdc-progress-bar):not(.mdc-linear-progress):not([class*="mdc-"]):not([class*="mat-"]) {
+    color: var(--text-primary) !important;
+  }
+
+  // Force all Material cards and their content to use dark mode colors
+  .mat-mdc-card,
+  .mat-card {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+
+    * {
+      color: var(--text-primary) !important;
+    }
+
+    // Exception for icons and buttons - let them keep their own colors
+    .mat-icon,
+    button,
+    .mat-mdc-button,
+    .mat-mdc-raised-button,
+    .mat-mdc-icon-button {
+      color: inherit !important;
+    }
   }
 
   // Disabled buttons in dark mode - make them visible but clearly disabled

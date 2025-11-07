@@ -3,6 +3,7 @@ import { BrowserType, QualityOption } from './download.model';
 
 export interface Settings {
   outputDir: string;
+  clipsFolder: string; // NEW: Folder where video clips are stored for library
   quality: QualityOption;
   convertToMp4: boolean;
   useCookies: boolean;

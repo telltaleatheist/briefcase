@@ -1,0 +1,958 @@
+:host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.library-container {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  width: 100%;
+  position: relative; // For drop zone overlay positioning
+  padding-bottom: 0; // Remove bottom padding since progress bar is pinned
+}
+
+// Drag and drop overlay
+.drop-zone-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 143, 71, 0.95);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 4px dashed rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+
+  .drop-zone-content {
+    text-align: center;
+    color: white;
+
+    mat-icon {
+      font-size: 96px;
+      width: 96px;
+      height: 96px;
+      margin-bottom: 16px;
+      animation: bounce 1s infinite;
+    }
+
+    h2 {
+      margin: 0 0 8px 0;
+      font-size: 32px;
+      font-weight: 600;
+    }
+
+    p {
+      margin: 0;
+      font-size: 18px;
+      opacity: 0.9;
+    }
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+// Tabs styling
+.library-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  margin-bottom: 0; // Default: no extra margin
+  padding-bottom: 0;
+  transition: padding-bottom 0.3s ease;
+
+  // Add padding when progress bar is visible to prevent content from being hidden
+  &.with-progress-bar {
+    padding-bottom: 24px;
+  }
+
+  ::ng-deep {
+    .mat-mdc-tab-group {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .mat-mdc-tab-header {
+      flex-shrink: 0;
+    }
+
+    .mat-mdc-tab-body-wrapper {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mat-mdc-tab-body {
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+
+    .mat-mdc-tab-body-content {
+      height: 100%;
+      overflow: auto;
+    }
+  }
+
+  .tab-content {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+}
+
+.library-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+
+  .header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .title-and-selector {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+
+      h1 {
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 28px;
+        font-weight: 500;
+
+        mat-icon {
+          font-size: 32px;
+          width: 32px;
+          height: 32px;
+        }
+      }
+
+      .library-selector {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .library-loading {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          color: #666;
+          font-size: 14px;
+        }
+
+        .library-dropdown {
+          min-width: 200px;
+          margin-bottom: 0;
+
+          ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+            display: none;
+          }
+        }
+      }
+    }
+
+    .stats-chips {
+      mat-chip-set {
+        display: flex;
+        gap: 8px;
+      }
+
+      mat-chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+  }
+}
+
+.batch-progress-card {
+  position: fixed;
+  bottom: 0;
+  z-index: 100;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+  cursor: pointer;
+  border-top: 3px solid var(--primary-orange);
+  transition: left 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+
+  // left and width are dynamically controlled by app.component.ts updateSidenavClass() method
+  // When sidenav open: left=250px, width=calc(100vw - 250px)
+  // When sidenav closed: left=0px, width=100vw
+
+  &:hover {
+    box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.2);
+  }
+
+  mat-card-header {
+    padding: 12px 24px 8px 24px;
+
+    mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      color: var(--primary-orange);
+
+      mat-icon {
+        color: var(--primary-orange);
+      }
+
+      .click-hint {
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--text-secondary);
+        margin-left: auto;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+      }
+    }
+
+    &:hover .click-hint {
+      opacity: 1;
+    }
+  }
+
+  mat-card-content {
+    padding: 0 24px 16px 24px !important;
+  }
+
+  .progress-info {
+    margin-bottom: 12px;
+
+    .progress-stats {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+      font-size: 14px;
+    }
+
+    .progress-current {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+      }
+
+      span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+
+  mat-progress-bar {
+    height: 8px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+
+    ::ng-deep .mdc-linear-progress__bar-inner {
+      border-color: var(--primary-orange) !important;
+    }
+
+    ::ng-deep .mdc-linear-progress__buffer-bar {
+      background-color: rgba(255, 143, 71, 0.2) !important;
+    }
+  }
+
+  .progress-actions {
+    display: flex;
+    gap: 8px;
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+
+      // Prevent button clicks from triggering the card click
+      position: relative;
+      z-index: 1;
+    }
+  }
+}
+
+.search-bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 16px;
+  margin-top: 8px;
+
+  .search-field {
+    flex: 1;
+    min-width: 300px;
+  }
+
+  .sort-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+  }
+}
+
+.tag-filters {
+  padding: 16px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  background: var(--surface, #fafafa);
+
+  .toggle-filters-btn {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 8px 16px;
+
+    .selected-count {
+      margin-left: 8px;
+      font-weight: 600;
+      color: var(--primary-color, #1976d2);
+    }
+  }
+
+  .tag-filter-content {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .selected-tags {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px;
+    background: var(--background, #fff);
+    border-radius: 4px;
+    border: 2px dashed var(--primary-color, #1976d2);
+
+    strong {
+      font-size: 14px;
+    }
+
+    mat-chip-set {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+
+  .tag-section {
+    h3 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    mat-chip-set {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .clickable-chip {
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        transform: scale(1.05);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      }
+
+      &.selected {
+        font-weight: 600;
+      }
+    }
+
+    .people-chip {
+      background-color: #e3f2fd;
+      color: #1565c0;
+
+      &.selected {
+        background-color: #1976d2;
+        color: white;
+      }
+    }
+
+    .topic-chip {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+
+      &.selected {
+        background-color: #43a047;
+        color: white;
+      }
+    }
+  }
+}
+
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 0 4px;
+
+  .results-count {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    color: var(--text-secondary);
+
+    .count-text {
+      .selected-info {
+        font-weight: 600;
+        color: var(--primary-color, #1976d2);
+      }
+    }
+  }
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  gap: 16px;
+
+  p {
+    color: var(--text-secondary);
+    margin: 0;
+  }
+}
+
+.video-list-viewport {
+  flex: 1;
+  height: 600px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  margin-bottom: 24px; // Add padding between video list and bottom
+  transition: margin-bottom 0.3s ease;
+
+  // Add margin when progress bar is visible
+  &.with-progress-bar {
+    margin-bottom: 180px;
+  }
+
+  .video-card-wrapper {
+    padding: 4px 8px;
+  }
+
+  .video-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background-color 0.15s;
+    padding: 8px 12px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--bg-card);
+
+    &:hover {
+      background-color: var(--bg-secondary);
+    }
+
+    &.long-video {
+      border-left: 3px solid #ff9800;
+      padding-left: 9px;
+    }
+
+    // Checkbox - minimal space
+    .card-checkbox {
+      flex-shrink: 0;
+      line-height: 0;
+    }
+
+    // Icon - small and compact
+    .card-icon {
+      flex-shrink: 0;
+      line-height: 0;
+
+      mat-icon {
+        width: 20px;
+        height: 20px;
+        font-size: 20px;
+        color: var(--primary-orange);
+      }
+    }
+
+    // Content - compact single line
+    .card-content {
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+
+      .video-title {
+        flex: 1;
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 400;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-primary);
+
+        .long-video-badge {
+          font-size: 14px;
+          width: 14px;
+          height: 14px;
+          color: #ff9800;
+          margin-left: 4px;
+          vertical-align: text-bottom;
+        }
+      }
+
+      .video-subtitle {
+        flex-shrink: 0;
+        font-size: 12px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+    }
+
+    // Actions - compact and vertically centered
+    .card-actions {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+
+      button {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
+
+    &:hover .card-actions {
+      opacity: 1;
+    }
+  }
+}
+
+// Tab styling - use orange theme color
+.library-tabs {
+  ::ng-deep {
+    .mat-mdc-tab-labels {
+      .mat-mdc-tab {
+        .mdc-tab__text-label {
+          color: var(--text-secondary) !important;
+        }
+
+        &.mdc-tab--active {
+          .mdc-tab__text-label {
+            color: var(--primary-orange) !important;
+          }
+        }
+      }
+    }
+
+    .mat-mdc-tab-header {
+      .mdc-tab-indicator__content--underline {
+        border-color: var(--primary-orange) !important;
+      }
+    }
+  }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+
+  mat-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    opacity: 0.3;
+    margin-bottom: 16px;
+  }
+
+  h2 {
+    margin: 0 0 8px 0;
+    font-weight: 500;
+  }
+
+  p {
+    margin: 4px 0;
+    font-size: 14px;
+  }
+}
+
+// Unimported tab styles
+.unimported-tab {
+  padding: 24px;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+
+  .unimported-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding: 16px;
+    background: rgba(var(--accent-color-rgb, 63, 81, 181), 0.05);
+    border-radius: 8px;
+
+    .selection-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+
+      .selection-count {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--primary-color, #1976d2);
+      }
+    }
+  }
+
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 64px;
+    color: rgba(var(--text-color-rgb, 255, 255, 255), 0.7);
+  }
+
+  .unimported-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .unimported-video-card {
+      padding: 16px;
+      transition: all 0.2s;
+
+      &:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      }
+
+      .unimported-video-content {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+
+        .video-info {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+
+          .video-filename {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 16px;
+            font-weight: 500;
+
+            mat-icon {
+              font-size: 20px;
+              width: 20px;
+              height: 20px;
+            }
+          }
+
+          .video-details {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 13px;
+            color: rgba(var(--text-color-rgb, 255, 255, 255), 0.7);
+
+            .date-folder {
+              display: flex;
+              align-items: center;
+              gap: 4px;
+
+              mat-icon {
+                font-size: 16px;
+                width: 16px;
+                height: 16px;
+              }
+            }
+
+            .file-path {
+              font-family: monospace;
+              font-size: 12px;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 64px 24px;
+    color: rgba(var(--text-color-rgb, 255, 255, 255), 0.7);
+
+    mat-icon {
+      font-size: 64px;
+      width: 64px;
+      height: 64px;
+      color: #4caf50;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      margin: 8px 0;
+      font-size: 20px;
+      color: inherit;
+    }
+
+    p {
+      margin: 4px 0;
+      font-size: 14px;
+    }
+
+    .help-text {
+      margin-top: 16px;
+      font-size: 13px;
+      font-style: italic;
+    }
+  }
+}
+
+// Dark theme support - using both .dark-theme and .theme-dark for compatibility
+:host-context(.dark-theme),
+:host-context(.theme-dark) {
+  .batch-progress-card {
+    background-color: #1e1e1e;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+
+    .progress-actions {
+      button {
+        color: rgba(255, 255, 255, 0.87);
+
+        mat-icon {
+          color: rgba(255, 255, 255, 0.87);
+        }
+
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.08);
+        }
+      }
+    }
+  }
+
+  .library-dropdown {
+    ::ng-deep {
+      .mat-mdc-text-field-wrapper {
+        background-color: #424242;
+      }
+
+      .mat-mdc-form-field-focus-overlay {
+        background-color: rgba(255, 255, 255, 0.05);
+      }
+
+      .mdc-notched-outline__leading,
+      .mdc-notched-outline__notch,
+      .mdc-notched-outline__trailing {
+        border-color: rgba(255, 255, 255, 0.3) !important;
+      }
+
+      &.mat-focused {
+        .mdc-notched-outline__leading,
+        .mdc-notched-outline__notch,
+        .mdc-notched-outline__trailing {
+          border-color: rgba(255, 255, 255, 0.7) !important;
+        }
+      }
+
+      .mat-mdc-select-value,
+      .mat-mdc-select-arrow,
+      .mat-mdc-floating-label {
+        color: rgba(255, 255, 255, 0.87) !important;
+      }
+    }
+  }
+
+  .tag-filters {
+    background: #2a2a2a;
+    border-color: #424242;
+
+    .toggle-filters-btn {
+      color: rgba(255, 255, 255, 0.87);
+
+      .selected-count {
+        color: #ff8f47;
+      }
+    }
+
+    .selected-tags {
+      background: #1e1e1e;
+      border-color: #ff8f47;
+
+      strong {
+        color: rgba(255, 255, 255, 0.87);
+      }
+    }
+
+    .tag-section {
+      h3 {
+        color: rgba(255, 255, 255, 0.87);
+      }
+
+      .people-chip {
+        background-color: #1e3a5f;
+        color: #90caf9;
+
+        &.selected {
+          background-color: #1976d2;
+          color: white;
+        }
+
+        &:hover {
+          background-color: #2b5080;
+        }
+      }
+
+      .topic-chip {
+        background-color: #1e4620;
+        color: #81c784;
+
+        &.selected {
+          background-color: #43a047;
+          color: white;
+        }
+
+        &:hover {
+          background-color: #2d5e31;
+        }
+      }
+    }
+  }
+
+  .video-list-viewport {
+    border-color: #424242;
+  }
+
+  .video-card {
+    &:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+  }
+}
+
+// Dark theme dropdown panel (applies globally since panel is rendered at root)
+// Using both classes for compatibility
+.dark-theme,
+.theme-dark {
+  .mat-mdc-select-panel {
+    background-color: #424242 !important;
+
+    .mat-mdc-option {
+      color: rgba(255, 255, 255, 0.87) !important;
+
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.08) !important;
+      }
+
+      &.mat-mdc-option-active {
+        background-color: rgba(255, 255, 255, 0.12) !important;
+      }
+
+      &.mdc-list-item--selected {
+        background-color: rgba(255, 255, 255, 0.16) !important;
+      }
+
+      .mdc-list-item__primary-text {
+        color: rgba(255, 255, 255, 0.87) !important;
+      }
+    }
+  }
+}
+
+// Note: Batch progress card positioning is handled globally in styles.scss
+// because :host-context doesn't always work reliably with Material sidenav classes

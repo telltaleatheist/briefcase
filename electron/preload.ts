@@ -1,5 +1,5 @@
 // electron/preload.ts
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import * as path from 'path';
 
 // Define types for our exposed API
@@ -15,6 +15,7 @@ interface ElectronAPI {
     resourcesPath: string;
     isDevelopment: boolean;
   }>;
+  getBackendUrl: () => Promise<string>;
   environment: {
     isDevelopment: boolean;
     resourcesPath: string;
@@ -31,6 +32,7 @@ interface ElectronAPI {
   }>;
   selectDirectory: () => Promise<string | null>;
   selectVideoFile: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+  getFilePathFromFile: (file: File) => string;
   // Settings API
   getSettings: () => Promise<any>;
   updateSettings: (settings: any) => Promise<{ success: boolean; error?: string }>;
@@ -48,11 +50,15 @@ const resourcesPath = process.resourcesPath || '';
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electron', {
+  ipcRenderer: {
+    invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  },
   openDirectoryPicker: () => ipcRenderer.invoke('open-directory-picker'),
   showOpenDialog: (options: any) => ipcRenderer.invoke('show-open-dialog', options),
   isDirectory: (filePath: string) => ipcRenderer.invoke('is-directory', filePath),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getBinaryPaths: () => ipcRenderer.invoke('get-binary-paths'),
+  getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
   environment: {
     isDevelopment,
     resourcesPath,
@@ -94,6 +100,7 @@ contextBridge.exposeInMainWorld('electron', {
   downloadVideo: (options: any) => ipcRenderer.invoke('download-video', options),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
+  getFilePathFromFile: (file: File) => webUtils.getPathForFile(file),
   // Settings API
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (settings: any) => ipcRenderer.invoke('update-settings', settings),

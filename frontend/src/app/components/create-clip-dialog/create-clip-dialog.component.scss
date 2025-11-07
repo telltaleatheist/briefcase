@@ -10,12 +10,31 @@
     gap: 12px;
     margin: 0;
     color: var(--text-color);
+    position: relative;
 
     mat-icon {
       font-size: 28px;
       width: 28px;
       height: 28px;
       color: #1976d2;
+    }
+
+    .close-btn {
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+
+      mat-icon {
+        font-size: 24px;
+        width: 24px;
+        height: 24px;
+        color: var(--text-secondary);
+      }
+
+      &:hover:not(:disabled) mat-icon {
+        color: var(--text-color);
+      }
     }
   }
 }

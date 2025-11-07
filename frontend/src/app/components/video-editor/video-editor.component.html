@@ -1,0 +1,223 @@
+<div class="video-editor-container" [class.dragging]="isDragging">
+  <!-- Drag and drop overlay -->
+  <div class="drop-overlay" *ngIf="isDragging">
+    <div class="drop-message">
+      <mat-icon>video_file</mat-icon>
+      <h2>Drop Video Here</h2>
+      <p>Release to open in editor</p>
+    </div>
+  </div>
+
+  <!-- Main content layout -->
+  <div class="editor-layout">
+    <!-- Left side - Video player -->
+    <div class="video-section">
+      <!-- Video container -->
+      <div class="video-container">
+        <!-- No video loaded state -->
+        <div *ngIf="!hasVideoSelected()" class="no-video-state">
+          <mat-icon>movie_edit</mat-icon>
+          <h2>No Video Loaded</h2>
+          <p>Select a video from the picker or drag & drop a video file</p>
+          <button mat-raised-button color="primary" (click)="openFilePicker()">
+            <mat-icon>folder_open</mat-icon>
+            Open Video File
+          </button>
+        </div>
+
+        <!-- Loading state -->
+        <div *ngIf="hasVideoSelected() && isLoadingVideo" class="video-loading">
+          <mat-spinner diameter="60"></mat-spinner>
+          <p>Loading video...</p>
+        </div>
+
+        <!-- Error state -->
+        <div *ngIf="hasVideoSelected() && !isLoadingVideo && error" class="error-state">
+          <mat-icon>error</mat-icon>
+          <h2>Failed to Load Video</h2>
+          <p>{{ error }}</p>
+          <button mat-raised-button color="primary" (click)="openFilePicker()">
+            <mat-icon>folder_open</mat-icon>
+            Try Another Video
+          </button>
+        </div>
+
+        <!-- Video player -->
+        <video
+          #videoElement
+          [hidden]="!hasVideoSelected() || isLoadingVideo || error"
+          class="video-player">
+        </video>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-container" *ngIf="hasVideoLoaded() && !isLoadingVideo">
+        <app-video-timeline
+          [duration]="duration"
+          [currentTime]="currentTime"
+          [sections]="timelineSections"
+          [isPlaying]="isPlaying"
+          (seek)="onTimelineSeek($event)"
+          (selectionChange)="onSelectionChange($event)"
+          (playPause)="onPlayPause()"
+          (playbackSpeed)="onPlaybackSpeed($event)">
+        </app-video-timeline>
+      </div>
+
+      <!-- Clip details form -->
+      <div class="clip-form" *ngIf="hasVideoLoaded() && !isLoadingVideo && !isCreating">
+        <div class="form-header">
+          <mat-icon>content_cut</mat-icon>
+          <h3>Clip Details</h3>
+        </div>
+
+        <!-- Clip info -->
+        <div class="clip-info-row">
+          <div class="info-item">
+            <span class="label">Start:</span>
+            <span class="value">{{ formatTime(currentSelection.startTime) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">End:</span>
+            <span class="value">{{ formatTime(currentSelection.endTime) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">Duration:</span>
+            <span class="value">{{ formatTime(selectionDuration) }}</span>
+          </div>
+        </div>
+
+        <!-- Title input -->
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Clip Title</mat-label>
+          <input
+            matInput
+            [(ngModel)]="title"
+            placeholder="Enter clip title"
+            required>
+          <mat-icon matPrefix>title</mat-icon>
+        </mat-form-field>
+
+        <!-- Save location -->
+        <div class="save-location">
+          <div class="location-header">
+            <mat-icon>folder</mat-icon>
+            <span class="label">Save Location</span>
+          </div>
+          <div class="location-content">
+            <div class="path-display" *ngIf="!isLoadingSavePath">
+              <span class="path-text" [title]="savePath">{{ savePath }}</span>
+            </div>
+            <div class="path-loading" *ngIf="isLoadingSavePath">
+              <mat-spinner diameter="20"></mat-spinner>
+              <span>Loading save path...</span>
+            </div>
+            <button
+              mat-stroked-button
+              class="browse-btn"
+              (click)="browseDirectory()"
+              [disabled]="isLoadingSavePath">
+              <mat-icon>folder_open</mat-icon>
+              Change Location
+            </button>
+          </div>
+        </div>
+
+        <!-- Create button -->
+        <button
+          mat-raised-button
+          color="primary"
+          (click)="createClip()"
+          [disabled]="!title.trim() || isLoadingSavePath"
+          class="create-btn">
+          <mat-icon>content_cut</mat-icon>
+          Create Clip
+        </button>
+
+        <!-- Error message -->
+        <div *ngIf="error" class="error-message">
+          <mat-icon>error</mat-icon>
+          <p>{{ error }}</p>
+        </div>
+      </div>
+
+      <!-- Creating state -->
+      <div *ngIf="isCreating" class="creating-container">
+        <mat-spinner diameter="60"></mat-spinner>
+        <h3>Creating Clip...</h3>
+        <p>Extracting clip from video. This may take a few moments.</p>
+      </div>
+    </div>
+
+    <!-- Right side - Tabs -->
+    <div class="sidebar-section">
+      <mat-tab-group #tabGroup class="video-tabs">
+        <!-- Video Picker Tab -->
+        <mat-tab label="Video Picker">
+          <ng-template mat-tab-label>
+            <mat-icon class="tab-icon">video_library</mat-icon>
+            <span>Video Picker</span>
+          </ng-template>
+
+          <div class="tab-content">
+            <!-- Open button -->
+            <div class="open-button-container">
+              <button
+                mat-raised-button
+                color="primary"
+                (click)="openFilePicker()"
+                class="open-video-btn">
+                <mat-icon>folder_open</mat-icon>
+                Open Video File
+              </button>
+            </div>
+
+            <!-- Current video indicator -->
+            <div class="current-video-indicator" *ngIf="hasVideoSelected()">
+              <mat-icon>play_circle</mat-icon>
+              <div class="video-info">
+                <span class="label">Current:</span>
+                <span class="title">{{ currentVideoTitle }}</span>
+              </div>
+            </div>
+
+            <!-- Recent videos list -->
+            <div class="videos-list-header">
+              <h3>Recent Videos</h3>
+              <span class="count">{{ videoList.length }} videos</span>
+            </div>
+
+            <!-- Loading state -->
+            <div *ngIf="isLoadingVideos" class="loading-state">
+              <mat-spinner diameter="40"></mat-spinner>
+              <p>Loading videos...</p>
+            </div>
+
+            <!-- Videos list -->
+            <mat-nav-list class="videos-list" *ngIf="!isLoadingVideos">
+              <mat-list-item
+                *ngFor="let video of videoList"
+                (click)="selectVideo(video)"
+                [class.active]="currentVideoId === video.id"
+                class="video-item">
+                <mat-icon matListItemIcon>video_file</mat-icon>
+                <div matListItemTitle class="video-title">{{ video.title }}</div>
+                <div matListItemLine class="video-duration" *ngIf="video.duration">
+                  {{ formatTime(video.duration) }}
+                </div>
+              </mat-list-item>
+
+              <mat-list-item *ngIf="videoList.length === 0" class="empty-state">
+                <mat-icon matListItemIcon>info</mat-icon>
+                <div matListItemTitle>No recent videos</div>
+                <div matListItemLine>Videos you open will appear here</div>
+              </mat-list-item>
+            </mat-nav-list>
+          </div>
+        </mat-tab>
+
+        <!-- Additional tabs can be added here if needed -->
+      </mat-tab-group>
+    </div>
+  </div>
+</div>

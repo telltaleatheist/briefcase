@@ -8,6 +8,7 @@ import { PathModule } from './path/path.module';
 import { MediaModule } from './media/media.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { LibraryModule } from './library/library.module';
+import { DatabaseModule } from './database/database.module';
 import { ConfigModule } from '@nestjs/config';
 import { SharedConfigModule } from './config/shared-config.module';
 import { environment } from './config/environment';
@@ -25,6 +26,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       global: true,
     }),
     SharedConfigModule,
+    DatabaseModule,
     DownloaderModule,
     FfmpegModule,
     PathModule,

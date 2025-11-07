@@ -34,6 +34,9 @@ const store = new Store<Settings>({
   }
 });
 
+// Store backend service reference for IPC handlers
+let backendServiceRef: BackendService;
+
 /**
  * Set up all IPC handlers
  */
@@ -41,6 +44,9 @@ export function setupIpcHandlers(
   windowService: WindowService,
   backendService: BackendService
 ): void {
+  // Store reference for use in handlers
+  backendServiceRef = backendService;
+
   // Create services
   downloadService = new DownloadService(windowService);
   updateService = new UpdateService(windowService);
@@ -58,7 +64,12 @@ export function setupIpcHandlers(
  */
 function setupConfigHandlers(): void {
   const configManager = ConfigManager.getInstance();
-  
+
+  // Get backend URL
+  ipcMain.handle('get-backend-url', () => {
+    return backendServiceRef.getBackendUrl();
+  });
+
   // Check path configuration
   ipcMain.handle('check-path-config', async () => {
     const validation = await PathValidator.validateAllPaths(configManager.getConfig());
@@ -179,6 +190,20 @@ function setupFileSystemHandlers(): void {
         { name: 'Audio Files', extensions: ['mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg', 'wma', 'opus'] },
         { name: 'All Files', extensions: ['*'] }
       ]
+    });
+
+    return result;
+  });
+
+  // Select multiple video files dialog
+  ipcMain.handle('dialog:openFiles', async (event, options) => {
+    const window = event.sender ? require('electron').BrowserWindow.fromWebContents(event.sender) : null;
+
+    if (!window) return { canceled: true, filePaths: [] };
+
+    const result = await dialog.showOpenDialog(window, {
+      ...options,
+      title: options?.title || 'Select Video Files to Import'
     });
 
     return result;

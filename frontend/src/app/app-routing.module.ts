@@ -1,11 +1,11 @@
 // clippy/frontend/src/app/app-routing.module.ts
 import { NgModule } from '@angular/core';
-import { RouterModule, Routes } from '@angular/router';
+import { RouterModule, Routes, PreloadAllModules } from '@angular/router';
 
 const routes: Routes = [
   {
     path: '',
-    redirectTo: 'batch',
+    redirectTo: 'library',
     pathMatch: 'full'
   },
   {
@@ -21,8 +21,8 @@ const routes: Routes = [
     loadComponent: () => import('./components/analysis-reports/analysis-reports.component').then(m => m.AnalysisReportsComponent)
   },
   {
-    path: 'clips',
-    loadComponent: () => import('./components/clip-creator/clip-creator.component').then(m => m.ClipCreatorComponent)
+    path: 'library',
+    loadComponent: () => import('./components/library/library.component').then(m => m.LibraryComponent)
   },
   {
     path: 'normalize',
@@ -33,13 +33,20 @@ const routes: Routes = [
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
   },
   {
+    path: 'video-editor',
+    loadComponent: () => import('./components/video-editor/video-editor.component').then(m => m.VideoEditorComponent)
+  },
+  {
     path: '**',
-    redirectTo: 'batch'
+    redirectTo: 'library'
   }
 ];
 
 @NgModule({
-  imports: [RouterModule.forRoot(routes, { useHash: true })],
+  imports: [RouterModule.forRoot(routes, {
+    useHash: true,
+    preloadingStrategy: PreloadAllModules  // Preload all lazy-loaded modules
+  })],
   exports: [RouterModule]
 })
 export class AppRoutingModule { }

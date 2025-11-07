@@ -1715,7 +1715,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error getting batch status:', error);
-        
+
         // If we encounter an error but have a previous status, keep it
         if (!this.batchQueueStatus) {
           // Create an empty status as fallback
@@ -1731,11 +1731,11 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             maxConcurrentDownloads: 2,
             isProcessing: false
           };
-        }        
-        
-        // Show error notification to user
-        this.notificationService.toastOnly('error', 'Refresh Failed', 'Failed to refresh batch status. Will try again later.');
-        
+        }
+
+        // Don't show error notification - backend might not be ready yet
+        // Just silently handle and retry later
+
         this.cdr.detectChanges();
       }
     });

@@ -7,18 +7,29 @@ import * as log from 'electron-log';
  */
 export class PortUtil {
   /**
-   * Check if a port is available
+   * Check if a port is available on both IPv4 and IPv6
    */
   static async isPortAvailable(port: number, host: string = 'localhost'): Promise<boolean> {
+    // Check IPv4
+    const ipv4Available = await this.checkPortOnHost(port, host);
+    if (!ipv4Available) {
+      return false;
+    }
+
+    // Check IPv6 (backend binds to :: which is IPv6 all interfaces)
+    const ipv6Available = await this.checkPortOnHost(port, '::');
+    return ipv6Available;
+  }
+
+  /**
+   * Check if a port is available on a specific host
+   */
+  private static async checkPortOnHost(port: number, host: string): Promise<boolean> {
     return new Promise((resolve) => {
       const server = net.createServer();
 
       server.once('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
-          resolve(false);
-        } else {
-          resolve(false);
-        }
+        resolve(false);
       });
 
       server.once('listening', () => {
@@ -66,7 +77,8 @@ export class PortUtil {
         command = `FOR /F "tokens=5" %P IN ('netstat -a -n -o ^| findstr :${port}') DO TaskKill.exe /PID %P /F`;
       } else {
         // Unix-like (macOS, Linux): Find and kill process using port
-        command = `lsof -ti:${port} | xargs kill -9 2>/dev/null || true`;
+        // Use -9 to force kill, and loop to make sure we get all processes
+        command = `lsof -ti:${port} | while read pid; do kill -9 $pid 2>/dev/null; done; exit 0`;
       }
 
       exec(command, (error: Error | null) => {
@@ -74,7 +86,7 @@ export class PortUtil {
           log.warn(`Could not kill process on port ${port}: ${error.message}`);
           resolve(false);
         } else {
-          log.info(`Successfully killed process on port ${port}`);
+          log.info(`Successfully attempted to kill process on port ${port}`);
           resolve(true);
         }
       });
@@ -86,7 +98,7 @@ export class PortUtil {
    * @param port - The port to free
    * @param timeout - Time to wait after killing process (ms)
    */
-  static async attemptToFreePort(port: number, timeout: number = 1000): Promise<boolean> {
+  static async attemptToFreePort(port: number, timeout: number = 2000): Promise<boolean> {
     const wasAvailable = await this.isPortAvailable(port);
     if (wasAvailable) {
       return true;
@@ -96,9 +108,17 @@ export class PortUtil {
     const killed = await this.killProcessOnPort(port);
 
     if (killed) {
-      // Wait for the port to be released
+      // Wait for the port to be released - increased from 1s to 2s for zombie processes
       await new Promise(resolve => setTimeout(resolve, timeout));
-      return await this.isPortAvailable(port);
+
+      // Check if port is now available
+      const isNowAvailable = await this.isPortAvailable(port);
+      if (isNowAvailable) {
+        log.info(`Successfully freed port ${port}`);
+      } else {
+        log.warn(`Port ${port} still in use after kill attempt`);
+      }
+      return isNowAvailable;
     }
 
     return false;

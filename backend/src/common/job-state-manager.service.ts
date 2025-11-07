@@ -2,7 +2,7 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { Job, JobStatus } from './interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
-import { MediaProcessingService } from '@/media/media-processing.service';
+import { MediaProcessingService } from '../media/media-processing.service';
 
 export interface JobStateTransitions {
   [fromState: string]: JobStatus[];

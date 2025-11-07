@@ -45,8 +45,19 @@ async function bootstrap() {
     );
 
     // Add this block to enable CORS for HTTP requests
+    // Build CORS origins dynamically based on actual running ports
+    const port = environment.port || process.env.PORT || 3000;
+    const corsOrigins = [
+      `http://localhost:${port}`,  // Backend port (self)
+      'http://localhost:8080',     // Default Electron frontend port
+      'http://localhost:3000',     // Fallback backend port
+      'http://localhost:3001',     // Alternative backend port
+      'http://localhost:4200',     // Angular dev server
+      '*'                          // Allow all origins as fallback
+    ];
+
     app.enableCors({
-      origin: ['http://localhost:3001', 'http://localhost:3000', '*'],
+      origin: corsOrigins,
       methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
       credentials: true,
       allowedHeaders: 'Content-Type, Accept, Authorization'
@@ -65,12 +76,12 @@ async function bootstrap() {
       })
     );
 
-    const port = environment.port || process.env.PORT || 3000;
-    
+    // Port was already declared above for CORS configuration
     await app.listen(port);
     log.info(`=== APPLICATION STARTED ===`);
     log.info(`Server running on port ${port}`);
     log.info(`API endpoint: http://localhost:${port}/${environment.apiPrefix}`);
+    log.info('Note: Library initialization happens automatically via onModuleInit');
   } catch (error) {
     log.error('=== BOOTSTRAP ERROR ===');
     log.error('Error during application startup:', error);

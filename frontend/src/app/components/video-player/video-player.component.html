@@ -5,7 +5,7 @@
     </button>
     <h2>
       <mat-icon>movie</mat-icon>
-      {{ data.analysis?.title || data.customVideo?.title || 'Video Player' }}
+      {{ data.analysis?.title || data.customVideo?.title || data.videoTitle || 'Video Player' }}
     </h2>
 
     <div style="flex: 1"></div>
@@ -23,7 +23,8 @@
     <!-- Loading State -->
     <div *ngIf="isLoading" class="loading-overlay">
       <mat-spinner diameter="60"></mat-spinner>
-      <p>Loading video...</p>
+      <p>{{ loadingMessage }}</p>
+      <p class="loading-hint" *ngIf="loadingTime > 10">This video may use a codec that's slow to decode in the browser. Consider converting to MP4 for better performance.</p>
     </div>
 
     <!-- Error State -->
@@ -46,41 +47,56 @@
         #videoElement
         class="native-video-player"
         playsinline
-        preload="metadata">
+        preload="metadata"
+        crossorigin="anonymous">
       </video>
     </div>
 
     <!-- Analysis Sections Sidebar with Tabs -->
-    <div class="sections-sidebar" *ngIf="metadata && !error">
+    <div class="sections-sidebar" *ngIf="!error">
       <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms">
         <!-- AI Analysis Tab -->
         <mat-tab label="AI Analysis">
           <div class="tab-content">
-            <p class="sections-hint">Click a section to jump to that timestamp</p>
-            <div class="sections-list">
-              <div
-                *ngFor="let section of metadata.sections; let i = index"
-                class="section-item"
-                [class.active]="isSectionActive(i)"
-                (click)="seekToTime(section.startSeconds, i)"
-                [matTooltip]="section.description">
-                <div class="section-marker" [style.background-color]="getCategoryColor(section.category)"></div>
-                <div class="section-content">
-                  <div class="section-header">
-                    <span class="section-time">{{ section.timeRange }}</span>
-                    <span class="section-category" [style.color]="getCategoryColor(section.category)">
-                      {{ section.category }}
-                    </span>
-                  </div>
-                  <p class="section-description">{{ section.description }}</p>
-                  <div class="section-quotes" *ngIf="section.quotes.length > 0">
-                    <div *ngFor="let quote of section.quotes" class="quote-item">
-                      <span class="quote-timestamp">{{ quote.timestamp }}</span>
-                      <span class="quote-text">"{{ quote.text }}"</span>
+            <!-- Show analysis sections if available -->
+            <div *ngIf="metadata && metadata.sections && metadata.sections.length > 0" class="sections-container">
+              <p class="sections-hint">Click a section to jump to that timestamp</p>
+              <div class="sections-list">
+                <div
+                  *ngFor="let section of metadata.sections; let i = index"
+                  class="section-item"
+                  [class.active]="isSectionActive(i)"
+                  (click)="seekToTime(section.startSeconds, i)"
+                  [matTooltip]="section.description">
+                  <div class="section-marker" [style.background-color]="getCategoryColor(section.category)"></div>
+                  <div class="section-content">
+                    <div class="section-header">
+                      <span class="section-time">{{ section.timeRange }}</span>
+                      <span class="section-category" [style.color]="getCategoryColor(section.category)">
+                        {{ section.category }}
+                      </span>
+                    </div>
+                    <p class="section-description">{{ section.description }}</p>
+                    <div class="section-quotes" *ngIf="section.quotes.length > 0">
+                      <div *ngFor="let quote of section.quotes" class="quote-item">
+                        <span class="quote-timestamp">{{ quote.timestamp }}</span>
+                        <span class="quote-text">"{{ quote.text }}"</span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
+
+            <!-- Show generate button if no analysis -->
+            <div *ngIf="!metadata || !metadata.sections || metadata.sections.length === 0" class="no-analysis-container">
+              <mat-icon class="no-analysis-icon">analytics</mat-icon>
+              <h3>No AI Analysis</h3>
+              <p>This video hasn't been analyzed yet. Generate an AI analysis to identify key moments and insights.</p>
+              <button mat-raised-button color="primary" (click)="generateAnalysis()">
+                <mat-icon>play_arrow</mat-icon>
+                Generate AI Analysis
+              </button>
             </div>
           </div>
         </mat-tab>

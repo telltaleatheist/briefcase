@@ -15,6 +15,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatDialog, MatDialogModule, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { NotificationService } from '../../services/notification.service';
+import { BackendUrlService } from '../../services/backend-url.service';
 
 interface AnalysisJob {
   id: string;
@@ -69,6 +70,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
     private notificationService: NotificationService,
+    private backendUrlService: BackendUrlService,
   ) {
     this.analysisForm = this.createForm();
   }
@@ -166,7 +168,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     try {
       // First, check if a report already exists
-      const existingCheck = await fetch('/api/api/analysis/check-existing-report', {
+      const checkUrl = await this.backendUrlService.getApiUrl('/analysis/check-existing-report');
+      const existingCheck = await fetch(checkUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -229,7 +232,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       };
 
       // Start analysis via API (backend will check model availability)
-      const response = await fetch('/api/api/analysis/start', {
+      const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
+      const response = await fetch(startUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestData),
@@ -297,7 +301,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       }
 
       try {
-        const response = await fetch(`/api/api/analysis/job/${this.currentJob.id}`);
+        const jobUrl = await this.backendUrlService.getApiUrl(`/analysis/job/${this.currentJob.id}`);
+        const response = await fetch(jobUrl);
 
         if (!response.ok) {
           console.error('[Video Analysis] Failed to fetch job status:', response.status);
@@ -408,7 +413,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   private async loadAvailableOllamaModels(): Promise<void> {
     try {
       console.log('[Video Analysis] Loading available Ollama models...');
-      const response = await fetch('/api/api/analysis/models');
+      const modelsUrl = await this.backendUrlService.getApiUrl('/analysis/models');
+      const response = await fetch(modelsUrl);
 
       if (!response.ok) {
         console.warn('[Video Analysis] Failed to fetch Ollama models, using defaults');
@@ -561,7 +567,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
    */
   private async checkForActiveJobs(): Promise<void> {
     try {
-      const response = await fetch('/api/api/analysis/jobs');
+      const jobsUrl = await this.backendUrlService.getApiUrl('/analysis/jobs');
+      const response = await fetch(jobsUrl);
       if (!response.ok) {
         // Backend may not be ready yet during startup - silently ignore
         console.log('[Video Analysis] Backend not ready yet, skipping active job check');
