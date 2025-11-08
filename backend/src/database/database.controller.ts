@@ -357,6 +357,9 @@ export class DatabaseController {
       limit?: number;
       videoIds?: string[];
       transcribeOnly?: boolean;
+      forceReanalyze?: boolean;
+      claudeApiKey?: string;
+      openaiApiKey?: string;
     },
   ) {
     this.logger.log(`Starting batch ${options?.transcribeOnly ? 'transcription' : 'analysis'}`);

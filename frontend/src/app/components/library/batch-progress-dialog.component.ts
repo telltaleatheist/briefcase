@@ -12,8 +12,9 @@ interface CompletedVideo {
   filename: string;
   videoId: string;
   completedAt: Date;
-  status: 'success' | 'failed' | 'skipped';
+  status: 'success' | 'failed' | 'skipped' | 'processing';
   error?: string;
+  stage?: 'transcribing' | 'analyzing';
 }
 
 @Component({
@@ -67,62 +68,32 @@ interface CompletedVideo {
         <div class="current-video-info">
           <span class="label">Currently Processing:</span>
           <span class="filename">{{ batchProgress?.currentVideoFilename }}</span>
+          <span class="stage">{{ getCurrentStage() }}</span>
         </div>
       </div>
 
-      <!-- Tabs for different lists -->
-      <mat-tab-group class="videos-tabs">
-        <!-- Completed Videos -->
-        <mat-tab label="Completed ({{ successfulVideos.length }})">
-          <div class="videos-list" *ngIf="successfulVideos.length > 0">
-            <mat-list>
-              <mat-list-item *ngFor="let video of successfulVideos">
-                <mat-icon matListItemIcon class="status-icon success">check_circle</mat-icon>
-                <div matListItemTitle>{{ video.filename }}</div>
-                <div matListItemLine>{{ video.completedAt | date:'short' }}</div>
-              </mat-list-item>
-            </mat-list>
-          </div>
-          <div class="empty-state" *ngIf="successfulVideos.length === 0">
-            <mat-icon>info</mat-icon>
-            <p>No videos completed yet</p>
-          </div>
-        </mat-tab>
-
-        <!-- Failed Videos -->
-        <mat-tab label="Failed ({{ failedVideos.length }})" *ngIf="failedVideos.length > 0">
-          <div class="videos-list">
-            <mat-list>
-              <mat-list-item *ngFor="let video of failedVideos">
-                <mat-icon matListItemIcon class="status-icon failed">error</mat-icon>
-                <div matListItemTitle>{{ video.filename }}</div>
-                <div matListItemLine class="error-message">{{ video.error || 'Unknown error' }}</div>
-                <div matListItemLine>{{ video.completedAt | date:'short' }}</div>
-              </mat-list-item>
-            </mat-list>
-          </div>
-        </mat-tab>
-
-        <!-- All Videos -->
-        <mat-tab label="All ({{ completedVideos.length }})">
-          <div class="videos-list" *ngIf="completedVideos.length > 0">
-            <mat-list>
-              <mat-list-item *ngFor="let video of sortedVideos">
-                <mat-icon matListItemIcon [class]="'status-icon ' + video.status">
-                  {{ video.status === 'success' ? 'check_circle' : 'error' }}
-                </mat-icon>
-                <div matListItemTitle>{{ video.filename }}</div>
-                <div matListItemLine *ngIf="video.error" class="error-message">{{ video.error }}</div>
-                <div matListItemLine>{{ video.completedAt | date:'short' }}</div>
-              </mat-list-item>
-            </mat-list>
-          </div>
-          <div class="empty-state" *ngIf="completedVideos.length === 0">
-            <mat-icon>info</mat-icon>
-            <p>No videos processed yet</p>
-          </div>
-        </mat-tab>
-      </mat-tab-group>
+      <!-- All Videos List -->
+      <div class="videos-list" *ngIf="sortedVideos.length > 0">
+        <mat-list>
+          <mat-list-item *ngFor="let video of sortedVideos">
+            <mat-icon matListItemIcon [class]="'status-icon ' + video.status">
+              {{ getStatusIcon(video.status) }}
+            </mat-icon>
+            <div matListItemTitle>{{ video.filename }}</div>
+            <div matListItemLine class="video-meta">
+              <span class="status-badge" [class.processing]="video.status === 'processing'" [class.success]="video.status === 'success'" [class.failed]="video.status === 'failed'">
+                {{ getStatusText(video) }}
+              </span>
+              <span class="timestamp">{{ video.completedAt | date:'short' }}</span>
+            </div>
+            <div matListItemLine *ngIf="video.error" class="error-message">{{ video.error }}</div>
+          </mat-list-item>
+        </mat-list>
+      </div>
+      <div class="empty-state" *ngIf="sortedVideos.length === 0">
+        <mat-icon>info</mat-icon>
+        <p>No videos processed yet</p>
+      </div>
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
@@ -139,6 +110,8 @@ interface CompletedVideo {
       align-items: center;
       gap: 12px;
       color: var(--primary-orange);
+      padding-top: 24px !important;
+      margin-top: 0;
 
       mat-icon {
         color: var(--primary-orange);
@@ -150,7 +123,7 @@ interface CompletedVideo {
 
     mat-dialog-content {
       padding: 16px 24px;
-      min-height: 400px;
+      overflow-y: visible !important;
     }
 
     .progress-summary {
@@ -234,34 +207,18 @@ interface CompletedVideo {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-      }
-    }
 
-    .videos-tabs {
-      ::ng-deep .mat-mdc-tab-labels {
-        .mat-mdc-tab {
-          .mdc-tab__text-label {
-            color: var(--text-secondary) !important;
-          }
-
-          &.mdc-tab--active {
-            .mdc-tab__text-label {
-              color: var(--primary-orange) !important;
-            }
-          }
-        }
-      }
-
-      ::ng-deep .mat-mdc-tab-header {
-        .mdc-tab-indicator__content--underline {
-          border-color: var(--primary-orange) !important;
+        .stage {
+          font-size: 12px;
+          color: var(--primary-orange);
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
         }
       }
     }
 
     .videos-list {
-      max-height: 400px;
-      overflow-y: auto;
       margin-top: 16px;
 
       mat-list {
@@ -287,6 +244,45 @@ interface CompletedVideo {
           &.skipped {
             color: #ff9800;
           }
+
+          &.processing {
+            color: var(--primary-orange);
+          }
+        }
+
+        .video-meta {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .status-badge {
+          font-size: 11px;
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+
+          &.processing {
+            background: rgba(255, 143, 71, 0.2);
+            color: var(--primary-orange);
+          }
+
+          &.success {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+          }
+
+          &.failed {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+          }
+        }
+
+        .timestamp {
+          font-size: 12px;
+          color: var(--text-secondary);
         }
 
         .error-message {
@@ -366,5 +362,39 @@ export class BatchProgressDialogComponent {
     } else {
       return `<1m remaining`;
     }
+  }
+
+  getCurrentStage(): string {
+    // This would be determined by backend data
+    // For now, showing a placeholder
+    return 'Transcribing...';
+  }
+
+  getStatusIcon(status: string): string {
+    switch (status) {
+      case 'success':
+        return 'check_circle';
+      case 'failed':
+        return 'error';
+      case 'skipped':
+        return 'skip_next';
+      case 'processing':
+        return 'pending';
+      default:
+        return 'help';
+    }
+  }
+
+  getStatusText(video: CompletedVideo): string {
+    if (video.status === 'processing') {
+      return video.stage === 'transcribing' ? 'Transcribing' : 'AI Analysis';
+    } else if (video.status === 'success') {
+      return 'Completed';
+    } else if (video.status === 'failed') {
+      return 'Failed';
+    } else if (video.status === 'skipped') {
+      return 'Skipped';
+    }
+    return 'Unknown';
   }
 }

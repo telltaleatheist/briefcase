@@ -97,6 +97,8 @@ export class BatchAnalysisService implements OnModuleInit {
     videoIds?: string[]; // Specific video IDs to process
     transcribeOnly?: boolean; // Only transcribe, skip AI analysis
     forceReanalyze?: boolean; // Force re-analysis even if analysis exists (default: false)
+    claudeApiKey?: string; // Claude API key (if provided, overrides saved key)
+    openaiApiKey?: string; // OpenAI API key (if provided, overrides saved key)
   }): Promise<string> {
     if (this.currentBatchJob && this.currentBatchJob.status === 'running') {
       throw new Error('A batch job is already running. Please pause or stop it first.');
@@ -110,6 +112,8 @@ export class BatchAnalysisService implements OnModuleInit {
     const aiProvider = options?.aiProvider || 'ollama';
     const whisperModel = options?.whisperModel || 'base';
     const ollamaEndpoint = options?.ollamaEndpoint || config.ollamaEndpoint || 'http://localhost:11434';
+    const claudeApiKey = options?.claudeApiKey;
+    const openaiApiKey = options?.openaiApiKey;
 
     // Get videos to process
     let videosToProcess: Array<{ id: string; filename: string; current_path: string; date_folder?: string | null; duration_seconds?: number | null }>;
@@ -171,6 +175,8 @@ export class BatchAnalysisService implements OnModuleInit {
       ollamaEndpoint,
       transcribeOnly,
       forceReanalyze,
+      claudeApiKey,
+      openaiApiKey,
     }).catch((error) => {
       const err = error as Error;
       this.logger.error(`Batch job failed: ${err.message}`, err.stack);
@@ -200,6 +206,8 @@ export class BatchAnalysisService implements OnModuleInit {
       ollamaEndpoint: string;
       transcribeOnly?: boolean;
       forceReanalyze?: boolean;
+      claudeApiKey?: string;
+      openaiApiKey?: string;
     },
   ): Promise<void> {
     if (!this.currentBatchJob) return;
@@ -308,6 +316,8 @@ export class BatchAnalysisService implements OnModuleInit {
       ollamaEndpoint: string;
       transcribeOnly?: boolean;
       forceReanalyze?: boolean;
+      claudeApiKey?: string;
+      openaiApiKey?: string;
     },
   ): Promise<void> {
     // Check if transcript and analysis already exist
@@ -354,6 +364,7 @@ export class BatchAnalysisService implements OnModuleInit {
       mode: mode as any, // Add 'analysis-only' to AnalysisRequest type
       aiModel: config.aiModel,
       aiProvider: config.aiProvider,
+      apiKey: config.aiProvider === 'claude' ? config.claudeApiKey : config.aiProvider === 'openai' ? config.openaiApiKey : undefined,
       whisperModel: config.whisperModel,
       ollamaEndpoint: config.ollamaEndpoint,
       customReportName: `${video.id}.txt`, // Use video ID for report name

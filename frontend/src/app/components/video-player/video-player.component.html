@@ -28,17 +28,31 @@
       <p class="loading-hint" *ngIf="loadingTime > 10">This video may use a codec that's slow to decode in the browser. Consider converting to MP4 for better performance.</p>
     </div>
 
-    <!-- Error State -->
-    <div *ngIf="error && !isLoading" class="error-container">
-      <mat-icon>error</mat-icon>
-      <h3>Failed to Load Video</h3>
-      <p>{{ error }}</p>
-      <div class="error-actions">
-        <button mat-raised-button color="accent" (click)="relinkVideo()">
-          <mat-icon>link</mat-icon>
-          Relink Video
-        </button>
-        <button mat-button (click)="close()">Close</button>
+    <!-- Error State / Drop Zone -->
+    <div *ngIf="error && !isLoading" class="error-container"
+         [class.drag-over]="isDragOver"
+         (drop)="onDrop($event)"
+         (dragover)="onDragOver($event)"
+         (dragleave)="onDragLeave($event)">
+      <input #fileInput type="file" accept="video/*" (change)="onFileSelected($event)" style="display: none">
+
+      <div class="drop-zone-content">
+        <mat-icon class="drop-icon">{{ isDragOver ? 'file_download' : 'video_library' }}</mat-icon>
+        <h3>{{ isDragOver ? 'Drop Video Here' : 'No Video Loaded' }}</h3>
+        <p *ngIf="!isDragOver">{{ error }}</p>
+        <p class="drop-hint" *ngIf="!isDragOver">Drag and drop a video file here, or click the button below</p>
+
+        <div class="error-actions" *ngIf="!isDragOver">
+          <button mat-raised-button color="primary" (click)="fileInput.click()">
+            <mat-icon>folder_open</mat-icon>
+            Open Video File
+          </button>
+          <button mat-raised-button color="accent" (click)="relinkVideo()" *ngIf="data.analysis">
+            <mat-icon>link</mat-icon>
+            Relink Video
+          </button>
+          <button mat-button (click)="close()" *ngIf="isDialogMode">Close</button>
+        </div>
       </div>
     </div>
 
@@ -54,7 +68,7 @@
     </div>
 
     <!-- Analysis Sections Sidebar with Tabs -->
-    <div class="sections-sidebar" *ngIf="!error">
+    <div class="sections-sidebar" *ngIf="!error && !isLoading && duration > 0">
       <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms">
         <!-- AI Analysis Tab -->
         <mat-tab label="AI Analysis">

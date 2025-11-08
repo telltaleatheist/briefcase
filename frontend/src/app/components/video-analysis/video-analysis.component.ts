@@ -414,14 +414,18 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     try {
       console.log('[Video Analysis] Loading available Ollama models...');
       const modelsUrl = await this.backendUrlService.getApiUrl('/analysis/models');
+      console.log('[Video Analysis] Fetching from URL:', modelsUrl);
+
       const response = await fetch(modelsUrl);
+      console.log('[Video Analysis] Response status:', response.status, response.statusText);
 
       if (!response.ok) {
-        console.warn('[Video Analysis] Failed to fetch Ollama models, using defaults');
+        console.warn('[Video Analysis] Failed to fetch Ollama models, response not OK:', response.status);
         return;
       }
 
       const data = await response.json();
+      console.log('[Video Analysis] Response data:', data);
 
       if (data.success && data.connected && data.models) {
         // Extract model names from the response
@@ -443,7 +447,11 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
           }
         }
       } else {
-        console.warn('[Video Analysis] Ollama not connected or no models available');
+        console.warn('[Video Analysis] Ollama not connected or no models available. Response:', {
+          success: data.success,
+          connected: data.connected,
+          models: data.models
+        });
         // If Ollama not connected and current model is Ollama, switch to Claude
         const currentModel = this.analysisForm.get('aiModel')?.value || '';
         if (currentModel.startsWith('ollama:')) {

@@ -66,6 +66,47 @@ body {
   opacity: 1 !important;
 }
 
+/* Remove backdrop for mat-select dropdowns */
+.cdk-overlay-backdrop.cdk-overlay-transparent-backdrop {
+  background-color: transparent !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Batch Progress Dialog - Large with no scrollbars */
+.batch-progress-large-dialog {
+  max-height: none !important;
+
+  .mat-mdc-dialog-container,
+  .mdc-dialog__container {
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  .mat-mdc-dialog-surface,
+  .mdc-dialog__surface {
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  .mat-mdc-dialog-content,
+  .mdc-dialog__content,
+  mat-dialog-content {
+    max-height: none !important;
+    overflow-y: visible !important;
+  }
+}
+
+/* Also target the overlay pane directly */
+.cdk-overlay-pane.batch-progress-large-dialog {
+  max-height: 90vh !important;
+
+  .mat-mdc-dialog-container {
+    max-height: 90vh !important;
+    height: auto !important;
+  }
+}
+
 /* Custom backdrop for dialogs that need to fully block content */
 .dialog-backdrop {
   background-color: rgba(0, 0, 0, 0.95) !important;

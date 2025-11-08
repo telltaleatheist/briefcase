@@ -222,17 +222,12 @@
   border-radius: 0 !important;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
-  cursor: pointer;
   border-top: 3px solid var(--primary-orange);
   transition: left 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
 
   // left and width are dynamically controlled by app.component.ts updateSidenavClass() method
   // When sidenav open: left=250px, width=calc(100vw - 250px)
   // When sidenav closed: left=0px, width=100vw
-
-  &:hover {
-    box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.2);
-  }
 
   mat-card-header {
     padding: 12px 24px 8px 24px;
@@ -247,19 +242,6 @@
       mat-icon {
         color: var(--primary-orange);
       }
-
-      .click-hint {
-        font-size: 12px;
-        font-weight: 400;
-        color: var(--text-secondary);
-        margin-left: auto;
-        opacity: 0.7;
-        transition: opacity 0.2s;
-      }
-    }
-
-    &:hover .click-hint {
-      opacity: 1;
     }
   }
 
@@ -315,16 +297,35 @@
 
   .progress-actions {
     display: flex;
-    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+
+    .view-details-btn {
+      background-color: var(--primary-orange) !important;
+      color: white !important;
+      font-weight: 600;
+      padding: 0 24px;
+      height: 40px;
+
+      mat-icon {
+        margin-right: 4px;
+      }
+
+      &:hover {
+        background-color: rgba(255, 143, 71, 0.9) !important;
+      }
+    }
+
+    .control-buttons {
+      display: flex;
+      gap: 8px;
+    }
 
     button {
       display: flex;
       align-items: center;
       gap: 6px;
-
-      // Prevent button clicks from triggering the card click
-      position: relative;
-      z-index: 1;
     }
   }
 }
@@ -457,7 +458,10 @@
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 0 4px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: var(--surface, rgba(0, 0, 0, 0.02));
+  border-radius: 8px;
 
   .results-count {
     display: flex;
@@ -472,6 +476,13 @@
         color: var(--primary-color, #1976d2);
       }
     }
+  }
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
   }
 }
 

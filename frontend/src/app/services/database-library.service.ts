@@ -299,6 +299,8 @@ export class DatabaseLibraryService {
     videoIds?: string[];
     transcribeOnly?: boolean;
     forceReanalyze?: boolean;
+    claudeApiKey?: string;
+    openaiApiKey?: string;
   }): Promise<{ success: boolean; jobId: string; message: string }> {
     const baseUrl = await this.getBaseUrl();
     return firstValueFrom(

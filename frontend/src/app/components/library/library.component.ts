@@ -676,14 +676,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const { AnalyzeSelectedDialogComponent } = await import('./analyze-selected-dialog.component');
 
     const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
-      width: '500px',
+      width: '800px',
+      maxHeight: '90vh',
       data: {
         selectedCount: this.selectedVideos.size,
         videosWithExistingAnalysis
       }
     });
 
-    dialogRef.afterClosed().subscribe(async (result: { option: 'transcribe-only' | 'transcribe-analyze' | 'skip'; forceReanalyze: boolean } | null) => {
+    dialogRef.afterClosed().subscribe(async (result: {
+      option: 'transcribe-only' | 'transcribe-analyze' | 'skip';
+      forceReanalyze: boolean;
+      aiProvider?: 'ollama' | 'claude' | 'openai';
+      aiModel?: string;
+      claudeApiKey?: string;
+      openaiApiKey?: string;
+    } | null) => {
       if (!result) {
         return; // User cancelled
       }
@@ -701,7 +709,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
         await this.databaseLibraryService.startBatchAnalysis({
           videoIds: videoIds,
           transcribeOnly: result.option === 'transcribe-only',
-          forceReanalyze: result.forceReanalyze
+          forceReanalyze: result.forceReanalyze,
+          aiProvider: result.aiProvider,
+          aiModel: result.aiModel,
+          claudeApiKey: result.claudeApiKey,
+          openaiApiKey: result.openaiApiKey
         });
 
         const actionText = result.option === 'transcribe-only' ? 'Transcription' : 'Analysis';
@@ -1206,8 +1218,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const { BatchProgressDialogComponent } = await import('./batch-progress-dialog.component');
 
     this.dialog.open(BatchProgressDialogComponent, {
-      width: '800px',
-      maxHeight: '80vh',
+      width: '1400px',
+      maxWidth: '95vw',
+      maxHeight: 'none',
+      autoFocus: false,
+      panelClass: 'batch-progress-large-dialog',
       data: {
         batchProgress: this.batchProgress,
         completedVideos: this.completedVideos

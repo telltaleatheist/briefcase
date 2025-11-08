@@ -2,7 +2,7 @@
 import { Controller, Get, Post, Body, Logger } from '@nestjs/common';
 import { ApiKeysService, ApiKeysConfig } from './api-keys.service';
 
-@Controller('api/config/api-keys')
+@Controller('config/api-keys')
 export class ApiKeysController {
   private readonly logger = new Logger(ApiKeysController.name);
 

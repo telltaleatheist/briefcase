@@ -112,11 +112,16 @@
 .dialog-content {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 350px;
+  grid-template-columns: 1fr;
   gap: 0;
   overflow: hidden;
   position: relative;
   min-height: 0; // Important for proper flex/grid sizing
+
+  // When sidebar is visible, create the two-column layout
+  &:has(.sections-sidebar) {
+    grid-template-columns: 1fr 350px;
+  }
 }
 
 .video-container {
@@ -144,7 +149,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  right: 350px;
+  right: 0;
   bottom: 0;
   background-color: #000;
   display: flex;
@@ -174,7 +179,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  right: 350px;
+  right: 0;
   bottom: 0;
   background-color: #0a0a0a;
   display: flex;
@@ -184,6 +189,38 @@
   gap: 16px;
   padding: 40px;
   text-align: center;
+  border: 3px dashed transparent;
+  transition: all 0.3s ease;
+
+  &.drag-over {
+    background-color: rgba(255, 102, 0, 0.1);
+    border-color: #ff6600;
+
+    .drop-icon {
+      transform: scale(1.2);
+      animation: bounce 0.6s ease-in-out infinite;
+    }
+  }
+
+  .drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    pointer-events: none; // Allow drag events to pass through
+
+    > * {
+      pointer-events: auto; // Re-enable for children
+    }
+  }
+
+  .drop-icon {
+    font-size: 80px;
+    width: 80px;
+    height: 80px;
+    color: #ff6600;
+    transition: all 0.3s ease;
+  }
 
   mat-icon {
     font-size: 64px;
@@ -204,10 +241,16 @@
     font-size: 14px;
   }
 
+  .drop-hint {
+    color: #bbb;
+    font-size: 16px;
+    margin-top: 8px;
+  }
+
   .error-actions {
     display: flex;
     gap: 12px;
-    margin-top: 8px;
+    margin-top: 16px;
 
     button {
       mat-icon {
@@ -217,6 +260,15 @@
         margin-right: 8px;
       }
     }
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: scale(1.2) translateY(0);
+  }
+  50% {
+    transform: scale(1.2) translateY(-10px);
   }
 }
 
@@ -542,12 +594,20 @@
   }
 }
 
+// Timeline should span full width of available space
+app-video-timeline {
+  width: 100%;
+  position: relative;
+}
+
 .clip-actions {
   display: flex;
   justify-content: center;
   padding: 16px 24px;
   background-color: #000;
   border-top: 1px solid #333;
+  width: 100%;
+  position: relative;
 
   button {
     mat-icon {

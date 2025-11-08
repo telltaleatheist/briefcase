@@ -80,6 +80,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   // Track if opened as dialog or route
   isDialogMode = false;
 
+  // Drag and drop state
+  isDragOver = false;
+
   public data: {
     analysis?: LibraryAnalysis;
     customVideo?: any;
@@ -739,7 +742,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
-   * Open video editor (navigate to dedicated page instead of modal)
+   * Open create clip dialog
    */
   async openCreateClipDialog() {
     // If we have a videoPath but no analysis or customVideo, create a customVideo object
@@ -751,23 +754,28 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       };
     }
 
-    // Navigate to the video editor page with state
-    this.router.navigate(['/video-editor'], {
-      state: {
-        videoEditorData: {
-          analysis: this.data.analysis,
-          customVideo: customVideoData,
-          videoId: this.data.videoId,
-          videoPath: this.data.videoPath,
-          videoTitle: this.data.videoTitle,
-          startTime: this.currentSelection.startTime,
-          endTime: this.currentSelection.endTime
-        }
+    // Import and open the CreateClipDialogComponent as a modal
+    const { CreateClipDialogComponent } = await import('../create-clip-dialog/create-clip-dialog.component');
+
+    const dialogRef = this.dialog.open(CreateClipDialogComponent, {
+      width: '600px',
+      data: {
+        analysis: this.data.analysis,
+        customVideo: customVideoData,
+        startTime: this.currentSelection.startTime,
+        endTime: this.currentSelection.endTime
       }
     });
 
-    // Close the video player (dialog or route)
-    this.close();
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.created) {
+      this.notificationService.toastOnly(
+        'success',
+        'Clip Created',
+        `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`
+      );
+    }
   }
 
   formatTime(seconds: number): string {
@@ -877,38 +885,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     // Check if transcript already exists
     const hasTranscript = await this.databaseLibraryService.hasTranscript(videoId);
 
-    if (hasTranscript) {
-      // Transcript exists, just run AI analysis without asking
-      this.notificationService.toastOnly(
-        'info',
-        'Starting Analysis',
-        'Running AI analysis on existing transcript...'
-      );
-
-      try {
-        await this.databaseLibraryService.startBatchAnalysis({
-          videoIds: [videoId],
-          limit: 1,
-          transcribeOnly: false // Full analysis (will use existing transcript)
-        });
-
-        this.notificationService.toastOnly(
-          'success',
-          'Analysis Started',
-          'AI analysis has been queued. You will be notified when it completes.'
-        );
-      } catch (error: any) {
-        console.error('Failed to start analysis:', error);
-        this.notificationService.toastOnly(
-          'error',
-          'Error',
-          error.error?.message || 'Failed to start analysis'
-        );
-      }
-      return;
-    }
-
-    // No transcript exists, ask user what they want to do
+    // Always show the dialog to let user choose AI provider
     const { AnalyzeSelectedDialogComponent } = await import('../library/analyze-selected-dialog.component');
 
     const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
@@ -916,20 +893,24 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       data: { selectedCount: 1 }
     });
 
-    const option = await dialogRef.afterClosed().toPromise();
+    const result = await dialogRef.afterClosed().toPromise();
 
-    if (!option || option === 'skip') {
+    if (!result || result.option === 'skip') {
       return; // User cancelled
     }
 
     // Start analysis based on user choice
     try {
-      const transcribeOnly = option === 'transcribe-only';
+      const transcribeOnly = result.option === 'transcribe-only';
 
       await this.databaseLibraryService.startBatchAnalysis({
         videoIds: [videoId],
         limit: 1,
-        transcribeOnly
+        transcribeOnly,
+        aiProvider: result.aiProvider,
+        aiModel: result.aiModel,
+        claudeApiKey: result.claudeApiKey,
+        openaiApiKey: result.openaiApiKey
       });
 
       this.notificationService.toastOnly(
@@ -979,6 +960,210 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       }, 100);
 
       this.notificationService.toastOnly('success', 'Video Relinked', 'Video has been successfully relinked!');
+    }
+  }
+
+  /**
+   * Handle drag over event
+   */
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = true;
+  }
+
+  /**
+   * Handle drag leave event
+   */
+  onDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = false;
+  }
+
+  /**
+   * Handle drop event
+   */
+  onDrop(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = false;
+
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      this.loadVideoFile(files[0]);
+    }
+  }
+
+  /**
+   * Handle file selection from input
+   */
+  onFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      this.loadVideoFile(input.files[0]);
+    }
+  }
+
+  /**
+   * Load a video file from disk
+   */
+  private loadVideoFile(file: File): void {
+    // Validate file type
+    if (!file.type.startsWith('video/')) {
+      this.notificationService.toastOnly('error', 'Invalid File', 'Please select a valid video file');
+      return;
+    }
+
+    // Clear any existing errors
+    this.error = null;
+    this.isLoading = true;
+    this.loadingMessage = 'Loading video...';
+
+    // Create object URL for the file
+    const videoUrl = URL.createObjectURL(file);
+
+    // Update data to reflect custom video
+    this.data = {
+      ...this.data,
+      customVideo: {
+        title: file.name,
+        videoPath: videoUrl,
+        isLocalFile: true
+      },
+      videoTitle: file.name
+    };
+
+    // Clean up any existing listeners and timers from previous video
+    this.cleanupVideoResources();
+
+    // Initialize video element if not already done
+    if (!this.videoEl && this.videoElement) {
+      this.videoEl = this.videoElement.nativeElement;
+    }
+
+    if (this.videoEl) {
+      // Set video source
+      this.videoEl.src = videoUrl;
+
+      // Start loading timer
+      this.loadingStartTime = Date.now();
+      this.loadingTime = 0;
+      this.loadingMessage = 'Loading video...';
+
+      // Update loading message every second
+      this.loadingProgressInterval = setInterval(() => {
+        if (this.isLoading) {
+          this.loadingTime = Math.floor((Date.now() - this.loadingStartTime) / 1000);
+          this.loadingMessage = `Loading video... (${this.loadingTime}s)`;
+          this.cdr.markForCheck();
+        } else {
+          this.cleanupLoadingTimers();
+        }
+      }, 1000);
+      this.timers.add(this.loadingProgressInterval);
+
+      // Add loading timeout (30 seconds)
+      this.loadingTimeoutTimer = setTimeout(() => {
+        if (this.isLoading) {
+          this.error = 'Video loading timed out. The file may be corrupted or use an unsupported codec.';
+          this.isLoading = false;
+          this.cleanupLoadingTimers();
+          this.cdr.markForCheck();
+        }
+      }, 30000);
+      this.timers.add(this.loadingTimeoutTimer);
+
+      // Handle loadedmetadata event
+      this.addVideoEventListener('loadedmetadata', () => {
+        this.cleanupLoadingTimers();
+        // Run in NgZone to trigger change detection
+        this.ngZone.run(() => {
+          this.isLoading = false;
+          this.duration = this.videoEl!.duration;
+          this.currentSelection = { startTime: 0, endTime: this.duration };
+          console.log('Local video loaded, duration:', this.duration);
+        });
+      });
+
+      // Handle loadeddata event (fires earlier than loadedmetadata)
+      this.addVideoEventListener('loadeddata', () => {
+        console.log('Local video data loaded (readyState:', this.videoEl!.readyState, ')');
+        // If metadata still not loaded after data is available, try to force it
+        if (this.isLoading && this.videoEl!.duration) {
+          this.cleanupLoadingTimers();
+          // Run in NgZone to trigger change detection
+          this.ngZone.run(() => {
+            this.isLoading = false;
+            this.duration = this.videoEl!.duration;
+            this.currentSelection = { startTime: 0, endTime: this.duration };
+            console.log('Using duration from loadeddata event:', this.duration);
+          });
+        }
+      });
+
+      // Handle timeupdate event with throttling for performance
+      this.addVideoEventListener('timeupdate', () => {
+        this.currentTime = this.videoEl!.currentTime;
+
+        // Throttle updateActiveSection to avoid excessive DOM operations
+        if (!this.updateThrottleTimer) {
+          this.updateThrottleTimer = setTimeout(() => {
+            this.updateActiveSection();
+            this.updateThrottleTimer = null;
+          }, this.UPDATE_THROTTLE_MS);
+        }
+      });
+
+      // Handle play event
+      this.addVideoEventListener('play', () => {
+        this.isPlaying = true;
+      });
+
+      // Handle pause event
+      this.addVideoEventListener('pause', () => {
+        this.isPlaying = false;
+      });
+
+      // Handle error event
+      this.addVideoEventListener('error', (e) => {
+        const videoError = this.videoEl?.error;
+        console.error('Local video error:', videoError);
+
+        let errorMessage = 'Failed to load video';
+        if (videoError?.code === 3) {
+          errorMessage = 'Video codec not supported by browser. Try converting to H.264 MP4.';
+        } else if (videoError?.code === 4) {
+          errorMessage = 'Video format not supported. Try converting to MP4 with H.264 codec.';
+        }
+
+        this.error = errorMessage;
+        this.isLoading = false;
+        this.cleanupLoadingTimers();
+        this.cdr.markForCheck();
+      });
+
+      // Prevent context menu
+      this.addVideoEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        return false;
+      });
+    }
+  }
+
+  /**
+   * Cleanup loading timers
+   */
+  private cleanupLoadingTimers(): void {
+    if (this.loadingProgressInterval) {
+      clearInterval(this.loadingProgressInterval);
+      this.timers.delete(this.loadingProgressInterval);
+      this.loadingProgressInterval = null;
+    }
+    if (this.loadingTimeoutTimer) {
+      clearTimeout(this.loadingTimeoutTimer);
+      this.timers.delete(this.loadingTimeoutTimer);
+      this.loadingTimeoutTimer = null;
     }
   }
 }

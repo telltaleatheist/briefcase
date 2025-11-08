@@ -346,12 +346,11 @@
   </mat-tab-group>
 
   <!-- Batch Progress Card - Pinned to bottom -->
-  <mat-card class="batch-progress-card" *ngIf="batchProgress?.running" (click)="showCompletedJobs()">
+  <mat-card class="batch-progress-card" *ngIf="batchProgress?.running">
     <mat-card-header>
       <mat-card-title>
         <mat-icon>{{ batchProgress?.status === 'running' ? 'play_circle' : 'pause_circle' }}</mat-icon>
         Batch Analysis {{ batchProgress?.status === 'running' ? 'In Progress' : 'Paused' }}
-        <span class="click-hint">(click to view details)</span>
       </mat-card-title>
     </mat-card-header>
     <mat-card-content>
@@ -373,18 +372,24 @@
 
       <!-- Control buttons -->
       <div class="progress-actions">
-        <button mat-button (click)="pauseBatch(); $event.stopPropagation()" *ngIf="batchProgress?.status === 'running'">
-          <mat-icon>pause</mat-icon>
-          Pause
+        <button mat-raised-button color="primary" class="view-details-btn" (click)="showCompletedJobs()">
+          <mat-icon>list</mat-icon>
+          View Details
         </button>
-        <button mat-button (click)="resumeBatch(); $event.stopPropagation()" *ngIf="batchProgress?.status === 'paused'">
-          <mat-icon>play_arrow</mat-icon>
-          Resume
-        </button>
-        <button mat-button color="warn" (click)="stopBatch(); $event.stopPropagation()">
-          <mat-icon>stop</mat-icon>
-          Stop
-        </button>
+        <div class="control-buttons">
+          <button mat-button (click)="pauseBatch()" *ngIf="batchProgress?.status === 'running'">
+            <mat-icon>pause</mat-icon>
+            Pause
+          </button>
+          <button mat-button (click)="resumeBatch()" *ngIf="batchProgress?.status === 'paused'">
+            <mat-icon>play_arrow</mat-icon>
+            Resume
+          </button>
+          <button mat-button color="warn" (click)="stopBatch()">
+            <mat-icon>stop</mat-icon>
+            Stop
+          </button>
+        </div>
       </div>
     </mat-card-content>
   </mat-card>

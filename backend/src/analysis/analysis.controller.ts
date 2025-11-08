@@ -21,7 +21,7 @@ import { SharedConfigService } from '../config/shared-config.service';
 import * as path from 'path';
 import * as os from 'os';
 
-@Controller('api/analysis')
+@Controller('analysis')
 @WebSocketGateway({ cors: true })
 export class AnalysisController implements OnGatewayInit {
   @WebSocketServer()
@@ -140,10 +140,9 @@ export class AnalysisController implements OnGatewayInit {
    * Check Ollama connection and list available models
    */
   @Get('models')
-  async getModels(@Body() body?: { endpoint?: string }) {
+  async getModels() {
     try {
-      const endpoint = body?.endpoint;
-      const connected = await this.ollamaService.checkConnection(endpoint);
+      const connected = await this.ollamaService.checkConnection();
 
       if (!connected) {
         return {
@@ -154,7 +153,7 @@ export class AnalysisController implements OnGatewayInit {
         };
       }
 
-      const models = await this.ollamaService.listModels(endpoint);
+      const models = await this.ollamaService.listModels();
 
       return {
         success: true,
