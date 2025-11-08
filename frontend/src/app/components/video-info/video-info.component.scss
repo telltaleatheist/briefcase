@@ -64,29 +64,40 @@
       min-width: 0;
     }
 
+    .title-display {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
     .video-title {
       margin: 0;
       font-size: 20px;
       font-weight: 500;
       color: var(--text-primary);
-      word-break: break-word;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
 
-      .edit-title-button {
-        opacity: 0.7;
-        transition: opacity 0.2s ease;
+    .edit-title-button {
+      flex-shrink: 0;
+      opacity: 1;
+      transition: opacity 0.2s ease;
 
-        &:hover {
-          opacity: 1;
-        }
+      &:hover {
+        opacity: 0.8;
+        background-color: rgba(255, 107, 53, 0.1);
+      }
 
-        mat-icon {
-          font-size: 20px;
-          width: 20px;
-          height: 20px;
-        }
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+        color: var(--primary-color);
       }
     }
 

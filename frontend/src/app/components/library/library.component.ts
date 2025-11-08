@@ -1286,94 +1286,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Download and transcribe video
+   * Transcribe video (no download, just transcribe existing file)
    */
   async downloadAndTranscribe(video: DatabaseVideo) {
-    const videoUrl = await this.getVideoUrl(video);
-
-    if (!videoUrl) {
-      this.notificationService.toastOnly(
-        'warning',
-        'No URL Found',
-        'This video does not have a source URL. You can add one in the metadata editor.'
-      );
-      return;
-    }
-
     try {
-      // Start download
-      this.notificationService.toastOnly('info', 'Download Started', `Downloading ${video.filename}`);
+      this.notificationService.toastOnly('info', 'Transcription Started', `Transcribing ${video.filename}`);
 
-      this.apiService.downloadVideo({
-        url: videoUrl,
-        quality: '1080',  // Valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
-        convertToMp4: true,
-        fixAspectRatio: false,
-        useCookies: false,
-        browser: 'auto',
-        outputDir: this.activeLibrary?.clipsFolderPath || '',
-        displayName: video.filename,
-        transcribeVideo: true  // Enable transcription in downloader
-      }).subscribe({
-        next: async (_result) => {
-          // Download complete, now start transcription
-          this.notificationService.toastOnly(
-            'success',
-            'Download Complete',
-            'Starting transcription...'
-          );
-
-          try {
-            await this.databaseLibraryService.startBatchAnalysis({
-              videoIds: [video.id],
-              transcribeOnly: true
-            });
-
-            this.notificationService.toastOnly(
-              'success',
-              'Transcription Started',
-              `Transcribing ${video.filename}`
-            );
-            this.startProgressPolling();
-          } catch (error: any) {
-            console.error('Transcription failed:', error);
-            this.notificationService.toastOnly(
-              'error',
-              'Transcription Failed',
-              error.error?.message || 'Failed to start transcription'
-            );
-          }
-        },
-        error: (error) => {
-          console.error('Download failed:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Download Failed',
-            error.error?.message || 'Failed to download video'
-          );
-        }
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [video.id],
+        transcribeOnly: true
       });
-    } catch (error) {
-      console.error('Error:', error);
-      this.notificationService.toastOnly('error', 'Error', 'Failed to start process');
+
+      this.startProgressPolling();
+    } catch (error: any) {
+      console.error('Transcription failed:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Transcription Failed',
+        error.error?.message || 'Failed to start transcription'
+      );
     }
   }
 
   /**
-   * Download and AI analyze video
+   * AI analyze video (no download, just analyze existing file)
    */
   async downloadAndAnalyze(video: DatabaseVideo) {
-    const videoUrl = await this.getVideoUrl(video);
-
-    if (!videoUrl) {
-      this.notificationService.toastOnly(
-        'warning',
-        'No URL Found',
-        'This video does not have a source URL. You can add one in the metadata editor.'
-      );
-      return;
-    }
-
     // Open dialog to select AI provider and options
     const { AnalyzeSelectedDialogComponent } = await import('./analyze-selected-dialog.component');
 
@@ -1383,8 +1321,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       data: {
         selectedCount: 1,
         videosWithExistingAnalysis: await this.databaseLibraryService.hasAnalysis(video.id) ? 1 : 0,
-        isDownloadMode: true,
-        videoUrl: videoUrl
+        isDownloadMode: false  // Changed to false since we're not downloading
       }
     });
 
@@ -1395,67 +1332,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
 
     try {
-      // Start download
-      this.notificationService.toastOnly('info', 'Download Started', `Downloading ${video.filename}`);
+      this.notificationService.toastOnly('info', 'Analysis Started', `Analyzing ${video.filename}`);
 
-      this.apiService.downloadVideo({
-        url: videoUrl,
-        quality: '1080',  // Valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
-        convertToMp4: true,
-        fixAspectRatio: false,
-        useCookies: false,
-        browser: 'auto',
-        outputDir: this.activeLibrary?.clipsFolderPath || '',
-        displayName: video.filename,
-        transcribeVideo: result.option !== 'skip'  // Enable transcription unless skipped
-      }).subscribe({
-        next: async (_downloadResult) => {
-          // Download complete, now start analysis
-          this.notificationService.toastOnly(
-            'success',
-            'Download Complete',
-            'Starting AI analysis...'
-          );
-
-          try {
-            await this.databaseLibraryService.startBatchAnalysis({
-              videoIds: [video.id],
-              transcribeOnly: result.option === 'transcribe-only',
-              forceReanalyze: result.forceReanalyze,
-              aiProvider: result.aiProvider,
-              aiModel: result.aiModel,
-              claudeApiKey: result.claudeApiKey,
-              openaiApiKey: result.openaiApiKey
-            });
-
-            const actionText = result.option === 'transcribe-only' ? 'Transcription' : 'Analysis';
-            this.notificationService.toastOnly(
-              'success',
-              `${actionText} Started`,
-              `Processing ${video.filename}`
-            );
-            this.startProgressPolling();
-          } catch (error: any) {
-            console.error('Analysis failed:', error);
-            this.notificationService.toastOnly(
-              'error',
-              'Analysis Failed',
-              error.error?.message || 'Failed to start analysis'
-            );
-          }
-        },
-        error: (error) => {
-          console.error('Download failed:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Download Failed',
-            error.error?.message || 'Failed to download video'
-          );
-        }
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [video.id],
+        transcribeOnly: result.option === 'transcribe-only',
+        forceReanalyze: result.forceReanalyze,
+        aiProvider: result.aiProvider,
+        aiModel: result.aiModel,
+        claudeApiKey: result.claudeApiKey,
+        openaiApiKey: result.openaiApiKey
       });
-    } catch (error) {
-      console.error('Error:', error);
-      this.notificationService.toastOnly('error', 'Error', 'Failed to start process');
+
+      const actionText = result.option === 'transcribe-only' ? 'Transcription' : 'Analysis';
+      this.notificationService.toastOnly(
+        'success',
+        `${actionText} Started`,
+        `Processing ${video.filename}`
+      );
+      this.startProgressPolling();
+    } catch (error: any) {
+      console.error('Analysis failed:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Analysis Failed',
+        error.error?.message || 'Failed to start analysis'
+      );
     }
   }
 

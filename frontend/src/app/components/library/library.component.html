@@ -267,22 +267,13 @@
 
           <!-- Actions Menu -->
           <mat-menu #videoActionsMenu="matMenu">
-            <div class="menu-section-header" *ngIf="video.source_url">
-              <mat-icon class="source-url-icon">link</mat-icon>
-              <span>Source URL Available</span>
-            </div>
             <button mat-menu-item (click)="downloadAndTranscribe(video)">
-              <mat-icon>download</mat-icon>
-              <span>{{ video.source_url ? 'Re-download & Transcribe' : 'Download & Transcribe' }}</span>
+              <mat-icon>transcribe</mat-icon>
+              <span>Transcribe</span>
             </button>
             <button mat-menu-item (click)="downloadAndAnalyze(video)">
               <mat-icon>auto_awesome</mat-icon>
-              <span>{{ video.source_url ? 'Re-download & AI Analyze' : 'Download & AI Analyze' }}</span>
-            </button>
-            <mat-divider></mat-divider>
-            <button mat-menu-item (click)="downloadOnly(video)">
-              <mat-icon>file_download</mat-icon>
-              <span>{{ video.source_url ? 'Re-download Only' : 'Download Only' }}</span>
+              <span>AI Analyze</span>
             </button>
           </mat-menu>
         </div>

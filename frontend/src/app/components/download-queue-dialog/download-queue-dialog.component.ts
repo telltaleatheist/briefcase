@@ -282,4 +282,29 @@ export class DownloadQueueDialogComponent implements OnInit, OnDestroy {
     if (this.batchProgress.status === 'paused') return 'Paused';
     return 'Idle';
   }
+
+  clearCompleted() {
+    // Clear completed jobs from the download progress service
+    this.downloadProgressService.clearCompletedJobs();
+    // Clear the local completed videos list
+    this.completedVideos = [];
+  }
+
+  getRelativeTime(date: Date): string {
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - new Date(date).getTime()) / 1000); // difference in seconds
+
+    if (diff < 60) {
+      return 'just now';
+    } else if (diff < 3600) {
+      const mins = Math.floor(diff / 60);
+      return `${mins}m ago`;
+    } else if (diff < 86400) {
+      const hours = Math.floor(diff / 3600);
+      return `${hours}h ago`;
+    } else {
+      const days = Math.floor(diff / 86400);
+      return `${days}d ago`;
+    }
+  }
 }

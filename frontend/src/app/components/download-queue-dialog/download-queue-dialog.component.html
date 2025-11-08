@@ -48,16 +48,20 @@
           <div class="notification-item" *ngFor="let job of getActiveJobs()">
             <div class="notification-content">
               <div class="notification-header">
-                <span class="notification-icon">🎬</span>
+                <div class="notification-icon" [class.completed]="job.stage === 'completed'" [class.failed]="job.stage === 'failed'">
+                  <span *ngIf="job.stage === 'completed'">✓</span>
+                  <span *ngIf="job.stage === 'failed'">✕</span>
+                  <span *ngIf="job.stage !== 'completed' && job.stage !== 'failed'">🎬</span>
+                </div>
                 <div class="notification-text">
                   <div class="notification-title">{{ job.filename }}</div>
                   <div class="notification-status">
                     {{ getStatusText(job) }}
-                    <span class="progress-percent">{{ job.progress }}%</span>
+                    <span class="progress-percent" *ngIf="job.progress < 100">{{ job.progress }}%</span>
                   </div>
                 </div>
               </div>
-              <div class="progress-container">
+              <div class="progress-container" *ngIf="job.progress < 100">
                 <div class="progress-bar small">
                   <div class="progress-fill" [style.width.%]="job.progress"></div>
                 </div>
@@ -83,40 +87,45 @@
           <div class="section-header">
             <span class="section-icon">📜</span>
             <h3>Recently Processed</h3>
+            <button class="clear-btn" (click)="clearCompleted(); $event.stopPropagation()">Clear All</button>
           </div>
           <div class="video-list">
             <!-- Show completed processing jobs -->
-            <div class="video-item" *ngFor="let job of getCompletedJobs()">
-              <span class="status-icon" [class]="job.stage">{{ getStatusIcon(job.stage) }}</span>
-              <div class="video-info">
-                <div class="video-name">{{ job.filename }}</div>
-                <div class="video-meta">
-                  <span class="status-badge"
-                        [class.processing]="job.stage === 'downloading' || job.stage === 'importing' || job.stage === 'transcribing' || job.stage === 'analyzing'"
-                        [class.success]="job.stage === 'completed'"
-                        [class.failed]="job.stage === 'failed'">
-                    {{ getStatusText(job) }}
-                  </span>
-                  <span class="timestamp" *ngIf="job.completedAt">{{ job.completedAt | date:'short' }}</span>
+            <div class="notification-item completed-item" *ngFor="let job of getCompletedJobs()">
+              <div class="notification-content">
+                <div class="notification-header">
+                  <div class="notification-icon" [class.completed]="job.stage === 'completed'" [class.failed]="job.stage === 'failed'">
+                    <span *ngIf="job.stage === 'completed'">✓</span>
+                    <span *ngIf="job.stage === 'failed'">✕</span>
+                  </div>
+                  <div class="notification-text">
+                    <div class="notification-title">{{ getStatusText(job) }}</div>
+                    <div class="notification-subtitle">{{ job.filename }}</div>
+                    <div *ngIf="job.error" class="error-message">{{ job.error }}</div>
+                  </div>
+                  <div class="notification-time" *ngIf="job.completedAt">
+                    {{ getRelativeTime(job.completedAt) }}
+                  </div>
                 </div>
-                <div *ngIf="job.error" class="error-message">{{ job.error }}</div>
               </div>
             </div>
             <!-- Show batch analysis completed videos -->
-            <div class="video-item" *ngFor="let video of sortedVideos">
-              <span class="status-icon" [class]="video.status">{{ getStatusIcon(video.status) }}</span>
-              <div class="video-info">
-                <div class="video-name">{{ video.filename }}</div>
-                <div class="video-meta">
-                  <span class="status-badge"
-                        [class.processing]="video.status === 'processing'"
-                        [class.success]="video.status === 'success'"
-                        [class.failed]="video.status === 'failed'">
-                    {{ getStatusText(video) }}
-                  </span>
-                  <span class="timestamp">{{ video.completedAt | date:'short' }}</span>
+            <div class="notification-item completed-item" *ngFor="let video of sortedVideos">
+              <div class="notification-content">
+                <div class="notification-header">
+                  <div class="notification-icon" [class.completed]="video.status === 'success'" [class.failed]="video.status === 'failed'">
+                    <span *ngIf="video.status === 'success'">✓</span>
+                    <span *ngIf="video.status === 'failed'">✕</span>
+                  </div>
+                  <div class="notification-text">
+                    <div class="notification-title">{{ getStatusText(video) }}</div>
+                    <div class="notification-subtitle">{{ video.filename }}</div>
+                    <div *ngIf="video.error" class="error-message">{{ video.error }}</div>
+                  </div>
+                  <div class="notification-time">
+                    {{ getRelativeTime(video.completedAt) }}
+                  </div>
                 </div>
-                <div *ngIf="video.error" class="error-message">{{ video.error }}</div>
               </div>
             </div>
           </div>

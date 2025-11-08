@@ -194,8 +194,15 @@ export class LibraryDownloadService {
     const importResult = await this.fileScannerService.importVideos([job.outputFile]);
 
     // Get the video from database (whether newly imported or already existing)
+    // First try by path, then by hash if not found
     const videos = await this.databaseService.getAllVideos();
-    const importedVideo = videos.find((v: any) => v.file_path === job.outputFile || v.current_path === job.outputFile);
+    let importedVideo = videos.find((v: any) => v.file_path === job.outputFile || v.current_path === job.outputFile);
+
+    // If not found by path, try by hash (in case video was moved or has different path)
+    if (!importedVideo && importResult.errors.some(err => err.includes('Already imported'))) {
+      const fileHash = await this.databaseService.hashFile(job.outputFile);
+      importedVideo = this.databaseService.findVideoByHash(fileHash);
+    }
 
     if (importResult.imported.length === 0) {
       // Check if it failed because it already exists
@@ -223,10 +230,9 @@ export class LibraryDownloadService {
           // User chose to cancel - fail the job
           throw new Error('User cancelled: Video already exists in library');
         } else if (userAction === 'replace') {
-          // User chose to replace - delete existing data and continue
-          this.logger.log(`[${job.id}] User chose to replace existing video. Deleting old data...`);
+          // User chose to replace - delete entire database entry and all associated files
+          this.logger.log(`[${job.id}] User chose to replace existing video. Deleting database entry and all data...`);
 
-          // Delete existing transcripts and analysis
           const appDataPath = path.join(require('os').homedir(), 'Library', 'Application Support', 'clippy');
           const transcriptsDir = path.join(appDataPath, 'transcripts');
           const analysesDir = path.join(appDataPath, 'analyses');
@@ -241,8 +247,27 @@ export class LibraryDownloadService {
           const analysisFile = path.join(analysesDir, `${importedVideo.id}.txt`);
           if (fs.existsSync(analysisFile)) fs.unlinkSync(analysisFile);
 
-          this.logger.log(`[${job.id}] Deleted old data. Continuing with existing video ID: ${importedVideo.id}`);
-          job.videoId = importedVideo.id;
+          // Delete the database entry completely
+          await this.databaseService.deleteVideo(importedVideo.id);
+          this.logger.log(`[${job.id}] Deleted database entry for video ID: ${importedVideo.id}`);
+
+          // Now re-import as a fresh video
+          const reimportResult = await this.fileScannerService.importVideos([job.outputFile]);
+
+          if (reimportResult.imported.length > 0) {
+            // Get the newly imported video
+            const videos = await this.databaseService.getAllVideos();
+            const newVideo = videos.find((v: any) => v.file_path === job.outputFile || v.current_path === job.outputFile);
+
+            if (newVideo) {
+              job.videoId = newVideo.id;
+              this.logger.log(`[${job.id}] Re-imported video with new ID: ${job.videoId}`);
+            } else {
+              throw new Error('Failed to find re-imported video in database');
+            }
+          } else {
+            throw new Error('Failed to re-import video: ' + (reimportResult.errors.join(', ') || 'Unknown error'));
+          }
         }
       } else {
         // Actual error - fail the import
