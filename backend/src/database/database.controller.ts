@@ -291,6 +291,34 @@ export class DatabaseController {
   }
 
   /**
+   * DELETE /api/database/videos/:videoId/sections/:sectionId
+   * Delete a specific analysis section
+   */
+  @Delete('videos/:videoId/sections/:sectionId')
+  async deleteAnalysisSection(
+    @Param('videoId') videoId: string,
+    @Param('sectionId') sectionId: string
+  ) {
+    try {
+      // Delete the section
+      this.databaseService.deleteAnalysisSection(sectionId);
+
+      this.logger.log(`Deleted analysis section ${sectionId} from video ${videoId}`);
+
+      return {
+        success: true,
+        message: 'Analysis section deleted successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to delete analysis section ${sectionId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to delete analysis section'
+      };
+    }
+  }
+
+  /**
    * GET /api/database/videos/:id/tags
    * Get all tags for a video
    */

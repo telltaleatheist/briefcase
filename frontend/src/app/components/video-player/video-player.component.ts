@@ -828,12 +828,6 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     const result = await dialogRef.afterClosed().toPromise();
 
     if (result?.created) {
-      this.notificationService.toastOnly(
-        'success',
-        'Marker Added',
-        `Custom marker added to video`
-      );
-
       // Reload timeline sections to show the new marker
       await this.reloadAnalysisSections();
     }
@@ -857,9 +851,69 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
           description: section.description || section.title || '',
           color: this.getCategoryColor(section.category || 'General')
         }));
+
+        // Also update metadata for sidebar display
+        this.metadata = {
+          sections: sections.map(s => ({
+            startSeconds: s.start_seconds,
+            endSeconds: s.end_seconds,
+            timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds || s.start_seconds),
+            category: s.category || 'General',
+            description: s.description || s.title || '',
+            quotes: []
+          }))
+        } as any;
+      } else {
+        // No sections left
+        this.timelineSections = [];
+        if (this.metadata) {
+          this.metadata.sections = [];
+        }
       }
+
+      this.cdr.detectChanges();
     } catch (error) {
       console.error('Failed to reload analysis sections:', error);
+    }
+  }
+
+  /**
+   * Delete an analysis section
+   */
+  async deleteSection(section: any, index: number) {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      return;
+    }
+
+    // Find the actual database section ID
+    // We need to get all sections from the database to find the matching one
+    try {
+      const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+      const matchingSection = dbSections.find(s =>
+        s.start_seconds === section.startSeconds &&
+        s.category === section.category &&
+        s.description === section.description
+      );
+
+      if (!matchingSection) {
+        this.notificationService.toastOnly('error', 'Error', 'Could not find section to delete');
+        return;
+      }
+
+      // Delete the section from the database
+      const result = await this.databaseLibraryService.deleteAnalysisSection(videoId, matchingSection.id);
+
+      if (result.success) {
+        // Reload all sections to refresh the UI
+        await this.reloadAnalysisSections();
+      } else {
+        this.notificationService.toastOnly('error', 'Delete Failed', result.error || 'Failed to delete section');
+      }
+    } catch (error) {
+      console.error('Error deleting section:', error);
+      this.notificationService.toastOnly('error', 'Delete Failed', 'An error occurred while deleting');
     }
   }
 

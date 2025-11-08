@@ -624,6 +624,23 @@ export class DatabaseLibraryService {
   }
 
   /**
+   * Delete an analysis section
+   */
+  async deleteAnalysisSection(videoId: string, sectionId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      return await firstValueFrom(
+        this.http.delete<{ success: boolean; error?: string }>(
+          `${baseUrl}/videos/${videoId}/sections/${sectionId}`
+        )
+      );
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error deleting analysis section:', error);
+      return { success: false, error: 'Failed to delete section' };
+    }
+  }
+
+  /**
    * Delete a video from the library
    */
   async deleteVideo(videoId: string): Promise<{ success: boolean; message: string }> {

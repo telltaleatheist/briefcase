@@ -1067,8 +1067,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       inputType: 'file',
       input: video.current_path
     });
-
-    this.notificationService.success('Video Selected', video.filename);
   }
 
   /**

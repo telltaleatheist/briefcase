@@ -774,6 +774,15 @@ export class DatabaseService {
   }
 
   /**
+   * Delete a specific analysis section by ID
+   */
+  deleteAnalysisSection(sectionId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM analysis_sections WHERE id = ?', [sectionId]);
+    this.logger.log(`Deleted analysis section ${sectionId}`);
+  }
+
+  /**
    * Delete all tags for a video
    */
   deleteTagsForVideo(videoId: string) {

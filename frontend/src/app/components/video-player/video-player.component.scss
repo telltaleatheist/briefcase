@@ -559,18 +559,22 @@
 
 .section-item {
   display: flex;
-  gap: 10px;
-  padding: 10px;
+  align-items: stretch;
+  gap: 0;
   margin-bottom: 6px;
   background-color: #1a1a1a;
   border: 1px solid #2a2a2a;
   border-radius: 6px;
-  cursor: pointer;
   transition: all 0.2s;
+  position: relative;
 
   &:hover {
     background-color: #222;
     border-color: #333;
+
+    .delete-section-button {
+      opacity: 1;
+    }
   }
 
   &.active {
@@ -584,6 +588,15 @@
 
   &:last-child {
     margin-bottom: 0;
+  }
+
+  .section-clickable {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    flex: 1;
+    cursor: pointer;
+    min-width: 0;
   }
 
   .section-marker {
@@ -658,6 +671,34 @@
           white-space: nowrap;
         }
       }
+    }
+  }
+
+  .delete-section-button {
+    flex-shrink: 0;
+    width: 32px;
+    height: auto;
+    opacity: 0;
+    transition: all 0.2s ease;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 8px;
+    margin: 4px;
+    align-self: flex-start;
+
+    &:hover {
+      color: #ff4444;
+      background-color: rgba(255, 68, 68, 0.1);
+      opacity: 1 !important;
+    }
+
+    &:active {
+      transform: scale(0.9);
+    }
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
     }
   }
 }
