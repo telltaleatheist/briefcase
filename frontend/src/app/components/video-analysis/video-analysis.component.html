@@ -342,8 +342,8 @@
                         *ngIf="job.status === 'pending'"
                         (click)="removePendingJob(job.id); $event.stopPropagation()"
                         matTooltip="Remove from queue"
-                        color="warn">
-                  <mat-icon>delete</mat-icon>
+                        class="remove-job-button">
+                  <mat-icon>close</mat-icon>
                 </button>
                 <button mat-icon-button
                         *ngIf="isJobActive(job)"

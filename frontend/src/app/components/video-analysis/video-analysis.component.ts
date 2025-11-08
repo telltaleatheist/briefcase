@@ -123,8 +123,12 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     // Subscribe to pending jobs from the queue service
     this.pendingJobsSubscription = this.analysisQueueService.getPendingJobs().subscribe(jobs => {
-      this.pendingJobs = jobs;
-      this.cdr.detectChanges();
+      this.ngZone.run(() => {
+        console.log('[VideoAnalysis] Pending jobs updated:', jobs.length);
+        this.pendingJobs = jobs;
+        this.cdr.markForCheck();
+        this.cdr.detectChanges();
+      });
     });
 
     // Check for navigation state with video path or selected videos
@@ -312,7 +316,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     }
 
     // Add to pending queue
-    this.analysisQueueService.addPendingJob({
+    const jobId = this.analysisQueueService.addPendingJob({
       input: formValue.input,
       inputType: formValue.inputType,
       mode: formValue.mode,
@@ -326,13 +330,20 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       loading: false
     });
 
+    console.log('[VideoAnalysis] Added job to queue:', jobId);
+
     // Clear form input fields
     this.analysisForm.patchValue({
       input: '',
       customInstructions: ''
     });
 
-    this.cdr.detectChanges();
+    // Force immediate update
+    this.ngZone.run(() => {
+      this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
+      this.cdr.markForCheck();
+      this.cdr.detectChanges();
+    });
   }
 
   /**
@@ -910,6 +921,13 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   removePendingJob(jobId: string): void {
     this.analysisQueueService.removePendingJob(jobId);
     this.notificationService.toastOnly('success', 'Job Removed', 'Removed from pending queue');
+
+    // Force immediate update
+    this.ngZone.run(() => {
+      this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
+      this.cdr.markForCheck();
+      this.cdr.detectChanges();
+    });
   }
 
   /**
