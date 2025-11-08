@@ -329,6 +329,7 @@ export class AnalysisService {
           request.customInstructions,
           request.aiProvider,
           request.apiKey,
+          videoTitle,
         );
 
         const job7 = this.jobs.get(jobId);

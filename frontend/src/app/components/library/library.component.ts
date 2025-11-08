@@ -1212,9 +1212,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Show completed jobs dialog
+   * Show batch progress modal
    */
-  async showCompletedJobs() {
+  async showBatchProgress() {
     const { BatchProgressDialogComponent } = await import('./batch-progress-dialog.component');
 
     this.dialog.open(BatchProgressDialogComponent, {

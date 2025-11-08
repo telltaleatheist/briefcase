@@ -615,12 +615,24 @@ export class DatabaseService {
   }
 
   /**
-   * Delete analysis for a video (cascades to sections via FK)
+   * Delete analysis for a video (also deletes associated sections)
    */
   deleteAnalysis(videoId: string) {
     const db = this.ensureInitialized();
+    // Delete sections first (they reference the video)
+    this.deleteAnalysisSections(videoId);
+    // Then delete the analysis record
     db.run('DELETE FROM analyses WHERE video_id = ?', [videoId]);
     this.logger.log(`Deleted analysis for video ${videoId}`);
+  }
+
+  /**
+   * Delete all analysis sections for a video
+   */
+  deleteAnalysisSections(videoId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM analysis_sections WHERE video_id = ?', [videoId]);
+    this.logger.log(`Deleted analysis sections for video ${videoId}`);
   }
 
   /**
@@ -630,6 +642,15 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     db.run('DELETE FROM tags WHERE video_id = ?', [videoId]);
     this.logger.log(`Deleted tags for video ${videoId}`);
+  }
+
+  /**
+   * Delete transcript for a video
+   */
+  deleteTranscript(videoId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM transcripts WHERE video_id = ?', [videoId]);
+    this.logger.log(`Deleted transcript for video ${videoId}`);
   }
 
   /**

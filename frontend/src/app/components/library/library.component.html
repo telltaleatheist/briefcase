@@ -85,7 +85,7 @@
   </div>
 
   <!-- Tabs -->
-  <mat-tab-group [(selectedIndex)]="selectedTabIndex" (selectedIndexChange)="onTabChange($event)" [dynamicHeight]="false" class="library-tabs" [class.with-progress-bar]="batchProgress?.running">
+  <mat-tab-group [(selectedIndex)]="selectedTabIndex" (selectedIndexChange)="onTabChange($event)" [dynamicHeight]="false" class="library-tabs">
     <!-- Videos Tab -->
     <mat-tab label="Videos">
       <ng-template matTabContent>
@@ -216,8 +216,7 @@
   <cdk-virtual-scroll-viewport
     *ngIf="filteredVideos.length > 0"
     [itemSize]="itemSize"
-    class="video-list-viewport"
-    [class.with-progress-bar]="batchProgress?.running">
+    class="video-list-viewport">
 
     <div *cdkVirtualFor="let video of filteredVideos" class="video-card-wrapper">
       <div class="video-card" [class.long-video]="isLongVideo(video)">
@@ -345,52 +344,16 @@
     </mat-tab>
   </mat-tab-group>
 
-  <!-- Batch Progress Card - Pinned to bottom -->
-  <mat-card class="batch-progress-card" *ngIf="batchProgress?.running">
-    <mat-card-header>
-      <mat-card-title>
-        <mat-icon>{{ batchProgress?.status === 'running' ? 'play_circle' : 'pause_circle' }}</mat-icon>
-        Batch Analysis {{ batchProgress?.status === 'running' ? 'In Progress' : 'Paused' }}
-      </mat-card-title>
-    </mat-card-header>
-    <mat-card-content>
-      <div class="progress-info">
-        <div class="progress-stats">
-          <span><strong>Progress:</strong> {{ batchProgress?.processedVideos }} / {{ batchProgress?.totalVideos }} videos</span>
-          <span *ngIf="batchProgress && batchProgress.skippedVideos != null && batchProgress.skippedVideos > 0"><strong>Skipped:</strong> {{ batchProgress.skippedVideos }}</span>
-          <span *ngIf="batchProgress && batchProgress.failedVideos != null && batchProgress.failedVideos > 0"><strong>Failed:</strong> {{ batchProgress.failedVideos }}</span>
-          <span *ngIf="batchProgress?.estimatedTimeRemaining">
-            <strong>ETA:</strong> {{ formatTimeRemaining(batchProgress?.estimatedTimeRemaining) }}
-          </span>
-        </div>
-        <div class="progress-current" *ngIf="batchProgress?.currentVideoFilename">
-          <mat-icon>movie</mat-icon>
-          <span>{{ batchProgress?.currentVideoFilename }}</span>
-        </div>
-      </div>
-      <mat-progress-bar mode="determinate" [value]="batchProgress?.progress || 0"></mat-progress-bar>
-
-      <!-- Control buttons -->
-      <div class="progress-actions">
-        <button mat-raised-button color="primary" class="view-details-btn" (click)="showCompletedJobs()">
-          <mat-icon>list</mat-icon>
-          View Details
-        </button>
-        <div class="control-buttons">
-          <button mat-button (click)="pauseBatch()" *ngIf="batchProgress?.status === 'running'">
-            <mat-icon>pause</mat-icon>
-            Pause
-          </button>
-          <button mat-button (click)="resumeBatch()" *ngIf="batchProgress?.status === 'paused'">
-            <mat-icon>play_arrow</mat-icon>
-            Resume
-          </button>
-          <button mat-button color="warn" (click)="stopBatch()">
-            <mat-icon>stop</mat-icon>
-            Stop
-          </button>
-        </div>
-      </div>
-    </mat-card-content>
-  </mat-card>
+  <!-- Batch Progress Button - Opens modal -->
+  <button
+    mat-fab
+    extended
+    color="primary"
+    class="batch-progress-fab"
+    *ngIf="batchProgress?.running"
+    (click)="showBatchProgress()"
+    matTooltip="View batch analysis progress">
+    <mat-icon>{{ batchProgress?.status === 'running' ? 'play_circle' : 'pause_circle' }}</mat-icon>
+    Batch Analysis ({{ batchProgress?.processedVideos || 0 }}/{{ batchProgress?.totalVideos || 0 }})
+  </button>
 </div>

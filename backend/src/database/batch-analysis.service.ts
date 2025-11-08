@@ -442,20 +442,24 @@ export class BatchAnalysisService implements OnModuleInit {
         const srtContent = await fs.readFile(srtPath, 'utf-8');
         const txtContent = await fs.readFile(txtPath, 'utf-8');
 
-        // Store transcript (only if it doesn't already exist)
+        // Check if transcript already exists
         const existingTranscript = this.databaseService.getTranscript(videoId);
-        if (!existingTranscript) {
-          this.databaseService.insertTranscript({
-            videoId,
-            plainText: txtContent,
-            srtFormat: srtContent,
-            whisperModel: 'base', // Get from job if available
-            language: 'en',
-          });
-          this.logger.log(`Stored transcript for video ${videoId}`);
-        } else {
-          this.logger.log(`Transcript already exists for video ${videoId}, skipping insertion`);
+
+        if (existingTranscript) {
+          // Delete existing transcript before inserting new one
+          this.logger.log(`Deleting existing transcript for video ${videoId} before inserting new one`);
+          this.databaseService.deleteTranscript(videoId);
         }
+
+        // Store new transcript
+        this.databaseService.insertTranscript({
+          videoId,
+          plainText: txtContent,
+          srtFormat: srtContent,
+          whisperModel: 'base', // Get from job if available
+          language: 'en',
+        });
+        this.logger.log(`Stored transcript for video ${videoId}`);
       }
 
       // Read and store analysis

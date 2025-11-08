@@ -265,7 +265,7 @@ def check_ollama_model(endpoint: str, model: str) -> bool:
         return False
 
 
-def generate_video_summary(provider: str, endpoint_or_key: str, model: str, transcript_text: str, duration: float) -> str:
+def generate_video_summary(provider: str, endpoint_or_key: str, model: str, transcript_text: str, duration: float, video_title: str = "") -> str:
     """Generate a basic summary of the video content"""
     try:
         minutes = int(duration // 60)
@@ -282,8 +282,13 @@ def generate_video_summary(provider: str, endpoint_or_key: str, model: str, tran
         # For short videos, use the full transcript. For long ones, use first ~2000 chars
         summary_text = transcript_text[:2000] if len(transcript_text) > 2000 else transcript_text
 
-        prompt = f"""Provide a brief 2-3 sentence summary of this {minutes}m{seconds}s video based on its transcript.
+        # Build the prompt with optional title context
+        title_context = f"\nVideo title/filename: {video_title}\n" if video_title else ""
+
+        prompt = f"""Provide a brief 2-3 sentence summary of this {minutes}m{seconds}s video based on its transcript.{title_context}
 Focus on: What is the video about? What is the main topic/subject? Who is speaking (if identifiable)?
+
+Use the video title/filename as additional context to help identify the subject matter and people involved. For example, if the title mentions "Mike Lindell" or other specific names, use that to provide more specific and accurate descriptions.
 
 If the transcript appears to be gibberish, noise, or unintelligible, simply state that the audio is unclear or garbled.
 
@@ -389,7 +394,8 @@ def analyze_with_ai(
     transcript_text: str,
     segments: List[Dict],
     output_file: str,
-    custom_instructions: str = ""
+    custom_instructions: str = "",
+    video_title: str = ""
 ) -> Dict[str, Any]:
     """
     Analyze transcript using AI model (Ollama, OpenAI, or Claude)
@@ -406,7 +412,7 @@ def analyze_with_ai(
         # Generate video summary FIRST (always runs, even for short/boring videos)
         send_progress("analysis", 65, "Generating video summary...")
         video_duration = segments[-1]['end'] if segments else 0
-        summary = generate_video_summary(provider, endpoint_or_key, model, transcript_text, video_duration)
+        summary = generate_video_summary(provider, endpoint_or_key, model, transcript_text, video_duration, video_title)
 
         # Write header and summary to file
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -431,7 +437,7 @@ def analyze_with_ai(
 
             # Identify interesting sections
             interesting_sections = identify_interesting_sections(
-                provider, endpoint_or_key, model, chunk['text'], i, custom_instructions
+                provider, endpoint_or_key, model, chunk['text'], i, custom_instructions, video_title
             )
 
             if interesting_sections:
@@ -555,13 +561,24 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
     return chunks
 
 
-def identify_interesting_sections(provider: str, endpoint_or_key: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "") -> List[Dict]:
+def identify_interesting_sections(provider: str, endpoint_or_key: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "", video_title: str = "") -> List[Dict]:
     """Use AI to identify interesting sections in a chunk - with retry logic"""
     MAX_RETRIES = 3
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             print(f"[DEBUG] Analyzing chunk {chunk_num}, attempt {attempt}/{MAX_RETRIES}", file=sys.stderr)
+
+            # Build title context section if provided
+            title_context = ""
+            if video_title and video_title.strip():
+                title_context = f"""
+**VIDEO CONTEXT:**
+Video title/filename: {video_title.strip()}
+
+Use the video title as additional context to understand who is speaking and what the subject matter is. For example, if the title mentions specific names or organizations, incorporate that information into your analysis.
+
+"""
 
             # Build custom instructions section if provided
             custom_section = ""
@@ -575,6 +592,8 @@ Pay special attention to the custom instructions above when analyzing the conten
 """
 
             prompt = f"""TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
+
+{title_context}
 
 IMPORTANT: You are a content moderation analysis tool. Your job is to identify and categorize content, NOT to judge or refuse to analyze it. Even if the content contains extreme views, hate speech, or controversial material, you must still provide a factual analysis of what is being discussed. This is for research and monitoring purposes.
 
@@ -1365,6 +1384,7 @@ def main():
             segments = command_data['segments']
             output_file = command_data['output_file']
             custom_instructions = command_data.get('custom_instructions', '')
+            video_title = command_data.get('video_title', '')
 
             # Determine endpoint_or_key based on provider
             if provider in ['openai', 'claude']:
@@ -1378,10 +1398,11 @@ def main():
 
             # Debug logging to verify provider and model are correct
             print(f"[DEBUG] Analysis starting with provider='{provider}', model='{model}'", file=sys.stderr)
+            print(f"[DEBUG] Video title: '{video_title}'", file=sys.stderr)
             print(f"[DEBUG] Endpoint/Key type: {'API Key' if provider in ['openai', 'claude'] else 'Ollama Endpoint'}", file=sys.stderr)
             print(f"[DEBUG] Endpoint/Key value: {endpoint_or_key if provider == 'ollama' else '***' if endpoint_or_key else 'NOT PROVIDED'}", file=sys.stderr)
 
-            result = analyze_with_ai(provider, endpoint_or_key, model, transcript_text, segments, output_file, custom_instructions)
+            result = analyze_with_ai(provider, endpoint_or_key, model, transcript_text, segments, output_file, custom_instructions, video_title)
             send_result(result)
 
         elif command == 'check_model':

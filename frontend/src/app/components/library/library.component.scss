@@ -12,8 +12,7 @@
   height: 100%;
   box-sizing: border-box;
   width: 100%;
-  position: relative; // For drop zone overlay positioning
-  padding-bottom: 0; // Remove bottom padding since progress bar is pinned
+  position: relative; // For drop zone overlay and FAB positioning
 }
 
 // Drag and drop overlay
@@ -74,14 +73,8 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  margin-bottom: 0; // Default: no extra margin
+  margin-bottom: 0;
   padding-bottom: 0;
-  transition: padding-bottom 0.3s ease;
-
-  // Add padding when progress bar is visible to prevent content from being hidden
-  &.with-progress-bar {
-    padding-bottom: 24px;
-  }
 
   ::ng-deep {
     .mat-mdc-tab-group {
@@ -214,119 +207,31 @@
   }
 }
 
-.batch-progress-card {
+// Floating FAB button for batch progress
+.batch-progress-fab {
   position: fixed;
-  bottom: 0;
+  bottom: 24px;
+  right: 24px;
   z-index: 100;
-  margin: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
-  box-sizing: border-box;
-  border-top: 3px solid var(--primary-orange);
-  transition: left 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+  background-color: var(--primary-orange) !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(255, 143, 71, 0.4);
+  transition: all 0.3s ease;
+  padding: 0 24px;
+  height: 56px;
+  border-radius: 28px;
 
-  // left and width are dynamically controlled by app.component.ts updateSidenavClass() method
-  // When sidenav open: left=250px, width=calc(100vw - 250px)
-  // When sidenav closed: left=0px, width=100vw
-
-  mat-card-header {
-    padding: 12px 24px 8px 24px;
-
-    mat-card-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 16px;
-      color: var(--primary-orange);
-
-      mat-icon {
-        color: var(--primary-orange);
-      }
-    }
+  mat-icon {
+    margin-right: 8px;
   }
 
-  mat-card-content {
-    padding: 0 24px 16px 24px !important;
+  &:hover {
+    box-shadow: 0 6px 16px rgba(255, 143, 71, 0.6);
+    transform: translateY(-2px);
   }
 
-  .progress-info {
-    margin-bottom: 12px;
-
-    .progress-stats {
-      display: flex;
-      gap: 24px;
-      margin-bottom: 8px;
-      flex-wrap: wrap;
-      font-size: 14px;
-    }
-
-    .progress-current {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      color: var(--text-secondary);
-
-      mat-icon {
-        font-size: 16px;
-        width: 16px;
-        height: 16px;
-      }
-
-      span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    }
-  }
-
-  mat-progress-bar {
-    height: 8px;
-    border-radius: 4px;
-    margin-bottom: 12px;
-
-    ::ng-deep .mdc-linear-progress__bar-inner {
-      border-color: var(--primary-orange) !important;
-    }
-
-    ::ng-deep .mdc-linear-progress__buffer-bar {
-      background-color: rgba(255, 143, 71, 0.2) !important;
-    }
-  }
-
-  .progress-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-
-    .view-details-btn {
-      background-color: var(--primary-orange) !important;
-      color: white !important;
-      font-weight: 600;
-      padding: 0 24px;
-      height: 40px;
-
-      mat-icon {
-        margin-right: 4px;
-      }
-
-      &:hover {
-        background-color: rgba(255, 143, 71, 0.9) !important;
-      }
-    }
-
-    .control-buttons {
-      display: flex;
-      gap: 8px;
-    }
-
-    button {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+  &:active {
+    transform: translateY(0);
   }
 }
 
@@ -505,13 +410,7 @@
   height: 600px;
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
-  margin-bottom: 24px; // Add padding between video list and bottom
-  transition: margin-bottom 0.3s ease;
-
-  // Add margin when progress bar is visible
-  &.with-progress-bar {
-    margin-bottom: 180px;
-  }
+  margin-bottom: 24px;
 
   .video-card-wrapper {
     padding: 4px 8px;
@@ -563,6 +462,7 @@
       display: flex;
       align-items: baseline;
       gap: 12px;
+      overflow: hidden;
 
       .video-title {
         flex: 1;
@@ -585,10 +485,13 @@
       }
 
       .video-subtitle {
-        flex-shrink: 0;
+        flex-shrink: 1;
+        min-width: 0;
         font-size: 12px;
         color: var(--text-secondary);
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
     }
 
@@ -818,22 +721,11 @@
 // Dark theme support - using both .dark-theme and .theme-dark for compatibility
 :host-context(.dark-theme),
 :host-context(.theme-dark) {
-  .batch-progress-card {
-    background-color: #1e1e1e;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+  .batch-progress-fab {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
 
-    .progress-actions {
-      button {
-        color: rgba(255, 255, 255, 0.87);
-
-        mat-icon {
-          color: rgba(255, 255, 255, 0.87);
-        }
-
-        &:hover {
-          background-color: rgba(255, 255, 255, 0.08);
-        }
-      }
+    &:hover {
+      box-shadow: 0 6px 16px rgba(255, 143, 71, 0.8);
     }
   }
 
@@ -964,6 +856,3 @@
     }
   }
 }
-
-// Note: Batch progress card positioning is handled globally in styles.scss
-// because :host-context doesn't always work reliably with Material sidenav classes

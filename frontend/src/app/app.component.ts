@@ -52,7 +52,6 @@ export class AppComponent implements OnInit, OnDestroy {
   currentYear = new Date().getFullYear();
 
   @ViewChild('sidenav') sidenav!: MatSidenav;
-  private mutationObserver?: MutationObserver;
 
   private socketService = inject(SocketService);
   private settingsService = inject(SettingsService);
@@ -79,45 +78,6 @@ export class AppComponent implements OnInit, OnDestroy {
 
     // Dialog tracking removed - was causing freezing issues
     // Users can press ESC to close dialogs or use the close button in the dialog header
-
-    // Subscribe to sidenav open/close events and add class to document body
-    setTimeout(() => {
-      if (this.sidenav) {
-        // Set initial state
-        this.updateSidenavClass(this.sidenav.opened);
-
-        // Subscribe to changes
-        this.sidenav.openedChange.subscribe((opened: boolean) => {
-          this.updateSidenavClass(opened);
-        });
-      }
-    });
-
-    // Watch for progress cards being added to the DOM and apply positioning
-    this.mutationObserver = new MutationObserver(() => {
-      // Get actual sidenav width dynamically
-      const sidenavEl = document.querySelector('.mat-drawer.mat-drawer-side') as HTMLElement;
-      const sidenavWidth = sidenavEl ? sidenavEl.offsetWidth : 0;
-      const leftPosition = (this.sidenav?.opened && sidenavWidth > 0) ? `${sidenavWidth}px` : '0px';
-      const rightPosition = '0px';
-      const selectors = ['.batch-progress-card', 'mat-card.batch-progress-card', '.mat-mdc-card.batch-progress-card'];
-
-      selectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach((el: Element) => {
-          const htmlEl = el as HTMLElement;
-          htmlEl.style.left = leftPosition;
-          htmlEl.style.right = rightPosition;
-          htmlEl.style.width = 'auto';
-        });
-      });
-    });
-
-    // Start observing
-    this.mutationObserver.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
 
     this.socketService.onConnect().subscribe(() => {
       // No notification needed - connection is expected
@@ -150,11 +110,6 @@ export class AppComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     // Clean up event listener
     window.removeEventListener('beforeunload', this.handleBeforeUnload.bind(this));
-
-    // Clean up mutation observer
-    if (this.mutationObserver) {
-      this.mutationObserver.disconnect();
-    }
   }
 
   private handleBeforeUnload(): void {
@@ -177,26 +132,5 @@ export class AppComponent implements OnInit, OnDestroy {
 
   onLibraryClick(): void {
     console.log('[AppComponent] Library link clicked at', new Date().toISOString(), performance.now());
-  }
-
-  private updateSidenavClass(opened: boolean): void {
-    // Get actual sidenav width dynamically
-    const sidenavEl = document.querySelector('.mat-drawer.mat-drawer-side') as HTMLElement;
-    const sidenavWidth = sidenavEl ? sidenavEl.offsetWidth : 0;
-    const leftPosition = (opened && sidenavWidth > 0) ? `${sidenavWidth}px` : '0px';
-    const rightPosition = '0px';
-
-    // Directly update any existing progress cards
-    const selectors = ['.batch-progress-card', 'mat-card.batch-progress-card', '.mat-mdc-card.batch-progress-card'];
-
-    selectors.forEach(selector => {
-      const elements = document.querySelectorAll(selector);
-      elements.forEach((el: Element) => {
-        const htmlEl = el as HTMLElement;
-        htmlEl.style.left = leftPosition;
-        htmlEl.style.right = rightPosition;
-        htmlEl.style.width = 'auto';
-      });
-    });
   }
 }

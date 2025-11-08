@@ -1,4 +1,4 @@
-import { Component, Inject } from '@angular/core';
+import { Component, Inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -6,7 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatListModule } from '@angular/material/list';
 import { MatTabsModule } from '@angular/material/tabs';
-import { BatchProgress } from '../../services/database-library.service';
+import { BatchProgress, DatabaseLibraryService } from '../../services/database-library.service';
 
 interface CompletedVideo {
   filename: string;
@@ -97,7 +97,19 @@ interface CompletedVideo {
     </mat-dialog-content>
 
     <mat-dialog-actions align="end">
-      <button mat-button mat-dialog-close>Close</button>
+      <button mat-button (click)="pauseBatch()" *ngIf="batchProgress?.status === 'running'">
+        <mat-icon>pause</mat-icon>
+        Pause
+      </button>
+      <button mat-button (click)="resumeBatch()" *ngIf="batchProgress?.status === 'paused'">
+        <mat-icon>play_arrow</mat-icon>
+        Resume
+      </button>
+      <button mat-button color="warn" (click)="stopBatch()" *ngIf="batchProgress?.running">
+        <mat-icon>stop</mat-icon>
+        Stop
+      </button>
+      <button mat-raised-button mat-dialog-close color="primary">Close</button>
     </mat-dialog-actions>
   `,
   styles: [`
@@ -320,19 +332,118 @@ interface CompletedVideo {
     }
   `]
 })
-export class BatchProgressDialogComponent {
+export class BatchProgressDialogComponent implements OnInit, OnDestroy {
   batchProgress: BatchProgress | null = null;
   completedVideos: CompletedVideo[] = [];
+  private progressInterval: any;
+  private lastProcessedCount = 0;
 
   constructor(
     public dialogRef: MatDialogRef<BatchProgressDialogComponent>,
     @Inject(MAT_DIALOG_DATA) public data: {
       batchProgress: BatchProgress | null;
       completedVideos: CompletedVideo[];
-    }
+    },
+    private databaseLibraryService: DatabaseLibraryService
   ) {
     this.batchProgress = data.batchProgress;
     this.completedVideos = data.completedVideos || [];
+    this.lastProcessedCount = this.batchProgress?.processedVideos || 0;
+  }
+
+  ngOnInit() {
+    // Start polling for progress updates
+    this.startProgressPolling();
+  }
+
+  ngOnDestroy() {
+    // Clean up interval on dialog close
+    if (this.progressInterval) {
+      clearInterval(this.progressInterval);
+    }
+  }
+
+  private startProgressPolling() {
+    // Poll every 2 seconds while dialog is open
+    this.progressInterval = setInterval(async () => {
+      try {
+        const newProgress = await this.databaseLibraryService.getBatchProgress();
+
+        // Track newly completed videos
+        if (newProgress.processedVideos && newProgress.processedVideos > this.lastProcessedCount) {
+          // A video was just completed - add it to the list
+          if (this.batchProgress?.currentVideoFilename) {
+            this.completedVideos.push({
+              filename: this.batchProgress.currentVideoFilename,
+              videoId: '',
+              completedAt: new Date(),
+              status: 'success'
+            });
+          }
+          this.lastProcessedCount = newProgress.processedVideos;
+        }
+
+        // Track errors
+        if (newProgress.errors && newProgress.errors.length > 0) {
+          newProgress.errors.forEach(error => {
+            const existingError = this.completedVideos.find(v => v.filename === error.filename);
+            if (!existingError) {
+              this.completedVideos.push({
+                filename: error.filename,
+                videoId: error.videoId,
+                completedAt: new Date(error.timestamp),
+                status: 'failed',
+                error: error.error
+              });
+            }
+          });
+        }
+
+        this.batchProgress = newProgress;
+
+        // Auto-close dialog if batch is completed or stopped
+        if (!this.batchProgress.running) {
+          clearInterval(this.progressInterval);
+        }
+      } catch (error) {
+        console.error('Failed to fetch batch progress:', error);
+      }
+    }, 2000);
+
+    // Also fetch immediately
+    this.databaseLibraryService.getBatchProgress().then(progress => {
+      this.batchProgress = progress;
+      this.lastProcessedCount = progress.processedVideos || 0;
+    });
+  }
+
+  async pauseBatch() {
+    try {
+      await this.databaseLibraryService.pauseBatch();
+      this.batchProgress = await this.databaseLibraryService.getBatchProgress();
+    } catch (error) {
+      console.error('Failed to pause:', error);
+    }
+  }
+
+  async resumeBatch() {
+    try {
+      await this.databaseLibraryService.resumeBatch();
+      this.batchProgress = await this.databaseLibraryService.getBatchProgress();
+    } catch (error) {
+      console.error('Failed to resume:', error);
+    }
+  }
+
+  async stopBatch() {
+    try {
+      await this.databaseLibraryService.stopBatch();
+      this.batchProgress = await this.databaseLibraryService.getBatchProgress();
+      // Close dialog after stopping
+      this.dialogRef.close();
+    } catch (error) {
+      console.error('Failed to stop:', error);
+    }
   }
 
   get successfulVideos(): CompletedVideo[] {

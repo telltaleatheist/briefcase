@@ -101,6 +101,9 @@ interface OllamaModel {
         <mat-form-field appearance="outline" class="full-width">
           <mat-label>Select AI Model</mat-label>
           <mat-select [(ngModel)]="selectedModelFull" (selectionChange)="onModelChange()">
+            <mat-select-trigger>
+              {{ getDisplayName(selectedModelFull) }}
+            </mat-select-trigger>
             <mat-optgroup label="Claude (API - Requires Key)">
               <mat-option value="claude:claude-sonnet-4-20250514">
                 <div class="model-option">
@@ -551,6 +554,33 @@ export class AnalyzeSelectedDialogComponent implements OnInit {
       provider: this.selectedProvider,
       model: this.selectedModel
     });
+  }
+
+  /**
+   * Get display name for selected model (without provider prefix)
+   */
+  getDisplayName(modelFull: string): string {
+    if (!modelFull) return '';
+
+    // Map of model values to their display names
+    const displayNames: Record<string, string> = {
+      'claude:claude-sonnet-4-20250514': 'Claude Sonnet 4.5 (Newest)',
+      'claude:claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet (Recommended)',
+      'claude:claude-3-5-haiku-20241022': 'Claude 3.5 Haiku (Faster)',
+      'openai:gpt-4o': 'GPT-4o (Best)',
+      'openai:gpt-4o-mini': 'GPT-4o Mini (Faster)',
+      'openai:gpt-4-turbo': 'GPT-4 Turbo',
+      'openai:gpt-3.5-turbo': 'GPT-3.5 Turbo (Faster, Cheaper)'
+    };
+
+    // Check if it's a predefined model
+    if (displayNames[modelFull]) {
+      return displayNames[modelFull];
+    }
+
+    // For Ollama models, just return the model name without the "ollama:" prefix
+    const [, ...modelParts] = modelFull.split(':');
+    return modelParts.join(':'); // Just the model name
   }
 
   /**
