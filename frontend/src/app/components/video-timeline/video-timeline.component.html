@@ -70,12 +70,42 @@
 
       <button
         mat-icon-button
+        (click)="toggleCategoryFilters()"
+        [matTooltip]="'Filter categories (' + categoryFilters.length + ' types)'"
+        class="timeline-button"
+        [class.active]="showCategoryFilters"
+        *ngIf="categoryFilters.length > 0">
+        <mat-icon>filter_list</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
         (click)="resetZoom()"
         [matTooltip]="zoomLevel > 1 ? 'Reset zoom (' + zoomLevel.toFixed(1) + 'x)' : 'Scroll to zoom, Shift+Scroll to pan'"
         class="timeline-button"
         [class.active]="zoomLevel > 1">
         <mat-icon>{{ zoomLevel > 1 ? 'zoom_in' : 'zoom_out_map' }}</mat-icon>
       </button>
+    </div>
+  </div>
+
+  <!-- Category Filters Panel -->
+  <div class="category-filters-panel" *ngIf="showCategoryFilters && categoryFilters.length > 0">
+    <div class="filters-header">
+      <span class="filters-title">
+        <mat-icon>filter_list</mat-icon>
+        Show Categories
+      </span>
+    </div>
+    <div class="filters-grid">
+      <label *ngFor="let filter of categoryFilters" class="filter-checkbox">
+        <input
+          type="checkbox"
+          [checked]="filter.enabled"
+          (change)="toggleCategoryFilter(filter.category)">
+        <span class="filter-indicator" [style.background-color]="filter.color"></span>
+        <span class="filter-label">{{ filter.label }}</span>
+      </label>
     </div>
   </div>
 
@@ -105,7 +135,7 @@
       <!-- Section markers (background) -->
       <div class="sections-layer">
         <div
-          *ngFor="let section of sections"
+          *ngFor="let section of filteredSections"
           class="section-marker"
           [style]="getSectionStyle(section)"
           [matTooltip]="section.description">

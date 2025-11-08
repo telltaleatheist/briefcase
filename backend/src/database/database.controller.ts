@@ -224,6 +224,73 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/analysis-sections
+   * Add a custom analysis section (marker) to a video
+   */
+  @Post('analysis-sections')
+  async addAnalysisSection(
+    @Body() body: {
+      videoId: string;
+      startSeconds: number;
+      endSeconds: number;
+      title?: string;
+      description?: string;
+      category?: string;
+      source?: string;
+    }
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(body.videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Generate unique ID for the section
+      const { v4: uuidv4 } = require('uuid');
+      const sectionId = uuidv4();
+
+      // Format timestamp text
+      const formatTimestamp = (seconds: number): string => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+      };
+
+      const timestampText = `${formatTimestamp(body.startSeconds)} - ${formatTimestamp(body.endSeconds)}`;
+
+      // Insert the section
+      this.databaseService.insertAnalysisSection({
+        id: sectionId,
+        videoId: body.videoId,
+        startSeconds: body.startSeconds,
+        endSeconds: body.endSeconds,
+        timestampText,
+        title: body.title || undefined,
+        description: body.description || undefined,
+        category: body.category || 'custom',
+        source: body.source || 'user'
+      });
+
+      this.logger.log(`Added custom analysis section to video ${body.videoId}: ${timestampText}`);
+
+      return {
+        success: true,
+        sectionId
+      };
+    } catch (error: any) {
+      this.logger.error(`Error adding analysis section: ${error?.message || 'Unknown error'}`);
+      return {
+        success: false,
+        error: error?.message || 'Failed to add analysis section'
+      };
+    }
+  }
+
+  /**
    * GET /api/database/videos/:id/tags
    * Get all tags for a video
    */

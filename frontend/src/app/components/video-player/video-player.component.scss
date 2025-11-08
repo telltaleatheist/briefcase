@@ -418,6 +418,72 @@
     flex-shrink: 0; // Don't let hint shrink
   }
 
+  .category-filters {
+    flex-shrink: 0;
+    padding: 12px;
+    background-color: #0f0f0f;
+    border-bottom: 1px solid #1a1a1a;
+
+    .filters-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #999;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: #ff6600;
+      }
+    }
+
+    .filters-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .filter-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 4px;
+      transition: background-color 0.2s ease;
+      user-select: none;
+
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        accent-color: #ff6600;
+        flex-shrink: 0;
+      }
+
+      .filter-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+
+      .filter-label {
+        font-size: 13px;
+        color: #ccc;
+        flex: 1;
+      }
+    }
+  }
+
   .no-analysis-container {
     display: flex;
     flex-direction: column;
@@ -605,6 +671,7 @@ app-video-timeline {
 .clip-actions {
   display: flex;
   justify-content: center;
+  gap: 16px; // Add spacing between buttons
   padding: 16px 24px;
   background-color: #000;
   border-top: 1px solid #333;

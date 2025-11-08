@@ -147,7 +147,7 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
-      -- Analyses table: AI-generated analysis reports
+      -- Analyses table: Analysis reports (AI-generated and user notes)
       CREATE TABLE IF NOT EXISTS analyses (
         video_id TEXT PRIMARY KEY,
         ai_analysis TEXT NOT NULL,
@@ -159,7 +159,7 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
-      -- Analysis sections: Interesting moments identified by AI
+      -- Analysis sections: Interesting moments (AI-identified or user-created)
       CREATE TABLE IF NOT EXISTS analysis_sections (
         id TEXT PRIMARY KEY,
         video_id TEXT NOT NULL,
@@ -169,6 +169,7 @@ export class DatabaseService {
         title TEXT,
         description TEXT,
         category TEXT,
+        source TEXT DEFAULT 'ai',
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -277,6 +278,26 @@ export class DatabaseService {
           `);
           this.saveDatabase();
           this.logger.log('Migration complete: source_url column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 4: Add source column to analysis_sections table if it doesn't exist
+      db.exec("SELECT source FROM analysis_sections LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: source')) {
+        this.logger.log('Running migration: Adding source column to analysis_sections table');
+        try {
+          db.exec(`
+            ALTER TABLE analysis_sections ADD COLUMN source TEXT DEFAULT 'ai';
+            UPDATE analysis_sections SET source = 'ai' WHERE source IS NULL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: source column added to analysis_sections');
         } catch (migrationError: any) {
           this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
         }
@@ -722,24 +743,34 @@ export class DatabaseService {
   }
 
   /**
-   * Delete analysis for a video (also deletes associated sections)
+   * Delete analysis for a video (only deletes AI-generated sections, preserves user markers)
    */
   deleteAnalysis(videoId: string) {
     const db = this.ensureInitialized();
-    // Delete sections first (they reference the video)
-    this.deleteAnalysisSections(videoId);
+    // Delete only AI-generated sections (preserve user-created custom markers)
+    this.deleteAIAnalysisSections(videoId);
     // Then delete the analysis record
     db.run('DELETE FROM analyses WHERE video_id = ?', [videoId]);
-    this.logger.log(`Deleted analysis for video ${videoId}`);
+    this.logger.log(`Deleted AI analysis for video ${videoId}`);
   }
 
   /**
-   * Delete all analysis sections for a video
+   * Delete only AI-generated analysis sections for a video (preserves user markers)
+   */
+  deleteAIAnalysisSections(videoId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM analysis_sections WHERE video_id = ? AND source = ?', [videoId, 'ai']);
+    this.logger.log(`Deleted AI analysis sections for video ${videoId} (preserving user markers)`);
+  }
+
+  /**
+   * Delete all analysis sections for a video (including user markers)
+   * WARNING: This deletes everything. Use deleteAIAnalysisSections to preserve user markers.
    */
   deleteAnalysisSections(videoId: string) {
     const db = this.ensureInitialized();
     db.run('DELETE FROM analysis_sections WHERE video_id = ?', [videoId]);
-    this.logger.log(`Deleted analysis sections for video ${videoId}`);
+    this.logger.log(`Deleted ALL analysis sections for video ${videoId}`);
   }
 
   /**
@@ -782,13 +813,14 @@ export class DatabaseService {
     title?: string;
     description?: string;
     category?: string;
+    source?: string;
   }) {
     const db = this.ensureInitialized();
 
     db.run(
       `INSERT INTO analysis_sections (
-        id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         section.id,
         section.videoId,
@@ -798,6 +830,7 @@ export class DatabaseService {
         section.title || null,
         section.description || null,
         section.category || null,
+        section.source || 'ai',
       ]
     );
 

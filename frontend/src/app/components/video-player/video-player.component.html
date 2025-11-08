@@ -75,10 +75,28 @@
           <div class="tab-content">
             <!-- Show analysis sections if available -->
             <div *ngIf="metadata && metadata.sections && metadata.sections.length > 0" class="sections-container">
+              <!-- Category Filters -->
+              <div class="category-filters" *ngIf="categoryFilters.length > 0">
+                <div class="filters-header">
+                  <mat-icon>filter_list</mat-icon>
+                  <span>Filter Categories</span>
+                </div>
+                <div class="filters-list">
+                  <label *ngFor="let filter of categoryFilters" class="filter-checkbox">
+                    <input
+                      type="checkbox"
+                      [checked]="filter.enabled"
+                      (change)="toggleCategoryFilter(filter.category)">
+                    <span class="filter-indicator" [style.background-color]="filter.color"></span>
+                    <span class="filter-label">{{ filter.label }}</span>
+                  </label>
+                </div>
+              </div>
+
               <p class="sections-hint">Click a section to jump to that timestamp</p>
               <div class="sections-list">
                 <div
-                  *ngFor="let section of metadata.sections; let i = index"
+                  *ngFor="let section of filteredMetadataSections; let i = index"
                   class="section-item"
                   [class.active]="isSectionActive(i)"
                   (click)="seekToTime(section.startSeconds, i)"
@@ -154,6 +172,15 @@
       matTooltip="Keyboard: A (Cursor) • R (Range) • J/K/L (Playback) • Space (Play/Pause) • I/O (In/Out)">
       <mat-icon>content_cut</mat-icon>
       Create Clip ({{ formatTime(currentSelection.startTime) }} - {{ formatTime(currentSelection.endTime) }})
+    </button>
+    <button
+      mat-raised-button
+      color="accent"
+      (click)="openAddMarkerDialog()"
+      [disabled]="currentSelection.endTime - currentSelection.startTime < 1"
+      matTooltip="Add a custom marker/note to this time range">
+      <mat-icon>bookmark_add</mat-icon>
+      Add Marker ({{ formatTime(currentSelection.startTime) }} - {{ formatTime(currentSelection.endTime) }})
     </button>
   </div>
 </div>

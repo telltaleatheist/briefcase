@@ -652,6 +652,35 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Analyze selected videos
    */
   async analyzeSelected() {
+    console.log('analyzeSelected called, selected count:', this.selectedVideos.size);
+
+    if (this.selectedVideos.size === 0) {
+      this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to analyze');
+      return;
+    }
+
+    // Convert Set to array of video IDs
+    const videoIds = Array.from(this.selectedVideos);
+    console.log('Selected video IDs:', videoIds);
+
+    // Get video details for selected videos
+    const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
+    console.log('Selected video details:', selectedVideoDetails);
+
+    // Navigate to video-analysis page with selected videos
+    console.log('Navigating to /video-analysis with state');
+    this.router.navigate(['/video-analysis'], {
+      state: {
+        selectedVideos: selectedVideoDetails
+      }
+    }).then(success => {
+      console.log('Navigation result:', success);
+    }).catch(error => {
+      console.error('Navigation error:', error);
+    });
+  }
+
+  async analyzeSelectedOld() {
     if (this.selectedVideos.size === 0) {
       return;
     }
@@ -1090,6 +1119,77 @@ export class LibraryComponent implements OnInit, OnDestroy {
         'error',
         'Delete Failed',
         error.error?.message || 'Failed to delete video'
+      );
+    }
+  }
+
+  /**
+   * Delete selected videos in bulk
+   */
+  async deleteSelected() {
+    const selectedCount = this.selectedVideos.size;
+    if (selectedCount === 0) {
+      return;
+    }
+
+    // Confirm bulk deletion
+    const confirmed = confirm(
+      `Are you sure you want to delete ${selectedCount} video${selectedCount > 1 ? 's' : ''} from the library?\n\n` +
+      `This will permanently delete:\n` +
+      `- Video files from library folder\n` +
+      `- Video metadata\n` +
+      `- Transcripts (if exist)\n` +
+      `- Analyses (if exist)\n` +
+      `- All tags\n\n` +
+      `THIS CANNOT BE UNDONE!`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const videoIds = Array.from(this.selectedVideos);
+
+      // Delete videos one by one
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const videoId of videoIds) {
+        try {
+          await this.databaseLibraryService.deleteVideo(videoId);
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to delete video ${videoId}:`, error);
+          errorCount++;
+        }
+      }
+
+      // Clear selection
+      this.selectedVideos.clear();
+      this.isAllSelected = false;
+
+      // Show result notification
+      if (successCount > 0) {
+        this.notificationService.toastOnly(
+          errorCount > 0 ? 'warning' : 'success',
+          'Bulk Delete Complete',
+          `Deleted ${successCount} video${successCount > 1 ? 's' : ''}` +
+          (errorCount > 0 ? `. ${errorCount} failed.` : '')
+        );
+      }
+
+      // Clear cache and reload
+      this.databaseLibraryService.clearCache();
+      await this.loadVideos();
+      await this.loadStats();
+      await this.loadTags();
+    } catch (error: any) {
+      console.error('Bulk delete failed:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Delete Failed',
+        error.error?.message || 'Failed to delete videos'
       );
     }
   }

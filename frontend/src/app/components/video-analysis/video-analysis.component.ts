@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, Inject, ViewChild, ChangeDetectorRef, ElementRef, HostListener } from '@angular/core';
+import { Component, OnInit, OnDestroy, Inject, ViewChild, ChangeDetectorRef, ElementRef, HostListener, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -108,11 +108,14 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     private analysisQueueService: AnalysisQueueService,
     private cdr: ChangeDetectorRef,
     private router: Router,
+    private ngZone: NgZone,
   ) {
     this.analysisForm = this.createForm();
   }
 
   async ngOnInit(): Promise<void> {
+    console.log('[VideoAnalysis] ngOnInit called');
+
     // Subscribe to download/processing jobs from the unified service
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
       this.processingJobs = Array.from(jobsMap.values());
@@ -124,11 +127,40 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       this.cdr.detectChanges();
     });
 
-    // Check for navigation state with video path
-    const navigation = this.router.getCurrentNavigation();
-    const state = navigation?.extras?.state || (history.state?.navigationId ? history.state : null);
+    // Check for navigation state with video path or selected videos
+    // Use window.history.state directly since getCurrentNavigation() returns null in ngOnInit
+    const state = window.history.state;
+    console.log('[VideoAnalysis] Router state:', state);
 
-    if (state && state['videoPath']) {
+    // Handle multiple selected videos from library
+    if (state && state['selectedVideos']) {
+      const selectedVideos: DatabaseVideo[] = state['selectedVideos'];
+      console.log('[VideoAnalysis] Found selected videos in state:', selectedVideos.length);
+
+      // Add all selected videos to the pending queue
+      for (const video of selectedVideos) {
+        console.log('[VideoAnalysis] Adding video to queue:', video.filename);
+        this.analysisQueueService.addToPendingQueue({
+          videoId: video.id,
+          videoPath: video.current_path,
+          filename: video.filename,
+          mode: 'full', // Default to full analysis
+          aiProvider: 'ollama',
+          aiModel: 'ollama:qwen2.5:7b',
+          customInstructions: ''
+        });
+      }
+
+      // Show notification
+      this.notificationService.toastOnly(
+        'success',
+        'Videos Added to Queue',
+        `Added ${selectedVideos.length} video${selectedVideos.length > 1 ? 's' : ''} to the processing queue. Configure options for each video below.`
+      );
+    }
+    // Handle single video path
+    else if (state && state['videoPath']) {
+      console.log('[VideoAnalysis] Found single video path in state');
       // Pre-populate the form with the video path from navigation
       const formUpdate: any = {
         inputType: 'file',
@@ -147,6 +179,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
         const modeText = state['mode'] === 'transcribe-only' ? 'transcribe' : 'analyze';
         this.notificationService.toastOnly('info', 'Video Ready', `Ready to ${modeText}: ${state['videoTitle']}`);
       }
+    } else {
+      console.log('[VideoAnalysis] No navigation state found');
     }
 
     // Load available Ollama models

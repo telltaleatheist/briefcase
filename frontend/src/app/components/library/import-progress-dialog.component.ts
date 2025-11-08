@@ -154,9 +154,15 @@ interface ImportResult {
       gap: 8px;
       margin-top: 16px;
       padding: 16px;
-      background: #fff3e0;
+      background: rgba(255, 152, 0, 0.15);
+      border: 1px solid rgba(255, 152, 0, 0.3);
       border-radius: 4px;
       width: 100%;
+    }
+
+    .error-summary p {
+      color: inherit;
+      margin: 0;
     }
 
     .error-list {
@@ -170,7 +176,7 @@ interface ImportResult {
       font-size: 12px;
       padding: 4px 0;
       border-top: 1px solid rgba(255, 152, 0, 0.2);
-      color: rgba(var(--text-color-rgb, 255, 255, 255), 0.7);
+      color: inherit;
     }
 
     .error-message {

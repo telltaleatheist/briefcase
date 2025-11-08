@@ -16,7 +16,9 @@ import {
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { createReadStream, statSync } from 'fs';
+import * as fs from 'fs';
 import { LibraryService } from './library.service';
+import { Logger } from '@nestjs/common';
 import { RelinkService } from './relink.service';
 import { ClipExtractorService } from './clip-extractor.service';
 import { SharedConfigService } from '../config/shared-config.service';
@@ -31,6 +33,8 @@ import * as os from 'os';
 
 @Controller('library')
 export class LibraryController {
+  private readonly logger = new Logger(LibraryController.name);
+
   constructor(
     private libraryService: LibraryService,
     private relinkService: RelinkService,
@@ -767,6 +771,99 @@ export class LibraryController {
       }
       throw new HttpException(
         `Failed to get clip save path: ${(error as Error).message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Extract a clip from any video by path
+   */
+  @Post('extract-clip')
+  async extractClipFromPath(
+    @Body() body: {
+      videoPath: string;
+      startTime: number;
+      endTime: number;
+      title?: string;
+      description?: string;
+      category?: string;
+      customDirectory?: string;
+    }
+  ) {
+    try {
+      // Validate time range
+      if (body.startTime < 0 || body.endTime <= body.startTime) {
+        throw new HttpException(
+          'Invalid time range',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Check if video file exists
+      if (!fs.existsSync(body.videoPath)) {
+        throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Generate clip filename
+      const originalFilename = path.basename(body.videoPath);
+      const clipFilename = this.clipExtractor.generateClipFilename(
+        originalFilename,
+        body.startTime,
+        body.endTime,
+        body.category
+      );
+
+      // Determine output path
+      let outputDir: string;
+
+      if (body.customDirectory) {
+        outputDir = body.customDirectory.replace(/[\\/]+$/, '');
+      } else {
+        // Use default [library folder]/clips
+        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
+        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, '');
+        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
+        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
+        outputDir = path.join(clippyDir, 'clips');
+      }
+
+      const outputPath = path.join(outputDir, clipFilename);
+
+      // Extract the clip
+      const extractionResult = await this.clipExtractor.extractClip({
+        videoPath: body.videoPath,
+        startTime: body.startTime,
+        endTime: body.endTime,
+        outputPath,
+        metadata: {
+          title: body.title,
+          description: body.description,
+          category: body.category,
+        },
+      });
+
+      if (!extractionResult.success) {
+        throw new HttpException(
+          extractionResult.error || 'Failed to extract clip',
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      return {
+        success: true,
+        extraction: extractionResult,
+        message: 'Clip extracted successfully',
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to extract clip: ${error?.message}`);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        error?.message || 'Failed to extract clip',
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }

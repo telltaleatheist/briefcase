@@ -135,9 +135,10 @@ export class VideoInfoComponent implements OnInit {
       const hasAnalysis = await this.databaseLibraryService.hasAnalysis(this.video.id);
       if (hasAnalysis) {
         this.analysis = await this.databaseLibraryService.getAnalysis(this.video.id);
-        // Load analysis sections
-        this.analysisSections = await this.databaseLibraryService.getAnalysisSections(this.video.id);
       }
+
+      // Always load analysis sections (includes both AI sections and user markers)
+      this.analysisSections = await this.databaseLibraryService.getAnalysisSections(this.video.id);
 
       // Load tags
       this.tags = await this.databaseLibraryService.getVideoTags(this.video.id);
@@ -220,6 +221,7 @@ export class VideoInfoComponent implements OnInit {
       'notable': '#06b6d4',
       'important': '#10b981',
       'controversial': '#ec4899',
+      'custom': '#22c55e', // Bright green for user-created markers
     };
 
     return categoryColors[normalizedCategory] || '#ff6b35';
@@ -296,13 +298,13 @@ export class VideoInfoComponent implements OnInit {
         })
       );
 
-      this.notificationService.success('Analysis Started', 'AI analysis has been queued');
+      this.notificationService.success('Analysis Started', 'Analysis has been queued');
 
       // Poll for completion
       await this.pollForAnalysis();
     } catch (error) {
       console.error('Error starting analysis:', error);
-      this.notificationService.error('Analysis Error', 'Failed to start AI analysis');
+      this.notificationService.error('Analysis Error', 'Failed to start analysis');
     } finally {
       this.isProcessing = false;
       this.processingType = null;
@@ -343,7 +345,7 @@ export class VideoInfoComponent implements OnInit {
       if (hasAnalysis) {
         this.analysis = await this.databaseLibraryService.getAnalysis(this.video.id);
         this.analysisSections = await this.databaseLibraryService.getAnalysisSections(this.video.id);
-        this.notificationService.success('Analysis Complete', 'AI analysis has been completed successfully');
+        this.notificationService.success('Analysis Complete', 'Analysis has been completed successfully');
         return;
       }
     }
@@ -365,6 +367,27 @@ export class VideoInfoComponent implements OnInit {
         }
       }
     });
+  }
+
+  async openBulkExportDialog() {
+    if (!this.video || this.analysisSections.length === 0) return;
+
+    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
+
+    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: this.video.id,
+        videoPath: this.video.current_path,
+        sections: this.analysisSections
+      }
+    });
+
+    const result = await firstValueFrom(dialogRef.afterClosed());
+
+    if (result?.exported) {
+      this.notificationService.success('Export Complete', 'Clips have been exported successfully');
+    }
   }
 
   goBack() {
@@ -392,7 +415,7 @@ export class VideoInfoComponent implements OnInit {
   }
 
   /**
-   * Format AI analysis text to HTML with better formatting
+   * Format analysis text to HTML with better formatting
    */
   formatAnalysisText(text: string): string {
     if (!text) return '';

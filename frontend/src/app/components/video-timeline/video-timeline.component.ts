@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, ViewChild, ElementRef, NgZone } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, ViewChild, ElementRef, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -20,6 +20,13 @@ export interface TimelineSelection {
 
 export type TimelineTool = 'cursor' | 'highlight';
 
+export interface CategoryFilter {
+  category: string;
+  label: string;
+  color: string;
+  enabled: boolean;
+}
+
 @Component({
   selector: 'app-video-timeline',
   standalone: true,
@@ -27,7 +34,7 @@ export type TimelineTool = 'cursor' | 'highlight';
   templateUrl: './video-timeline.component.html',
   styleUrls: ['./video-timeline.component.scss']
 })
-export class VideoTimelineComponent implements OnInit, OnDestroy {
+export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   @Input() duration = 0; // Total video duration in seconds
   @Input() currentTime = 0; // Current playback time
   @Input() sections: TimelineSection[] = [];
@@ -42,6 +49,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
   // Tool selection state
   selectedTool: TimelineTool = 'cursor';
+
+  // Category filter state
+  categoryFilters: CategoryFilter[] = [];
+  showCategoryFilters = false;
 
   // Selection state
   selectionStart = 0;
@@ -95,7 +106,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
 
   constructor(private ngZone: NgZone) {}
 
+  ngOnChanges(changes: SimpleChanges) {
+    // When sections change, update category filters
+    if (changes['sections'] && !changes['sections'].firstChange) {
+      this.updateCategoryFilters();
+    }
+  }
+
   ngOnInit() {
+    // Initialize category filters from sections
+    this.updateCategoryFilters();
+
     // Initialize selection based on sections
     if (this.sections && this.sections.length > 0) {
       // Set selection to first section
@@ -829,6 +850,85 @@ export class VideoTimelineComponent implements OnInit, OnDestroy {
   resetZoom() {
     this.zoomLevel = 1;
     this.zoomOffset = 0;
+  }
+
+  /**
+   * Update category filters based on unique categories in sections
+   */
+  updateCategoryFilters() {
+    const categoryMap = new Map<string, CategoryFilter>();
+
+    // Define standard category labels and colors
+    const categoryInfo: { [key: string]: { label: string; color: string } } = {
+      'routine': { label: 'Routine', color: '#a855f7' },
+      'extremism': { label: 'Extremism', color: '#ef4444' },
+      'hate': { label: 'Hate', color: '#f97316' },
+      'violence': { label: 'Violence', color: '#dc2626' },
+      'conspiracy': { label: 'Conspiracy', color: '#eab308' },
+      'misinformation': { label: 'Misinformation', color: '#f59e0b' },
+      'interesting': { label: 'Interesting', color: '#3b82f6' },
+      'notable': { label: 'Notable', color: '#06b6d4' },
+      'important': { label: 'Important', color: '#10b981' },
+      'controversial': { label: 'Controversial', color: '#ec4899' },
+      'custom': { label: 'Custom Markers', color: '#22c55e' },
+    };
+
+    // Extract unique categories from sections
+    this.sections.forEach(section => {
+      const category = section.category?.toLowerCase() || 'other';
+      if (!categoryMap.has(category)) {
+        const info = categoryInfo[category] || {
+          label: category.charAt(0).toUpperCase() + category.slice(1),
+          color: section.color || '#757575'
+        };
+
+        categoryMap.set(category, {
+          category: category,
+          label: info.label,
+          color: info.color,
+          enabled: true // All categories enabled by default
+        });
+      }
+    });
+
+    this.categoryFilters = Array.from(categoryMap.values());
+  }
+
+  /**
+   * Toggle visibility of a category
+   */
+  toggleCategoryFilter(category: string) {
+    const filter = this.categoryFilters.find(f => f.category === category);
+    if (filter) {
+      filter.enabled = !filter.enabled;
+    }
+  }
+
+  /**
+   * Toggle category filter panel visibility
+   */
+  toggleCategoryFilters() {
+    this.showCategoryFilters = !this.showCategoryFilters;
+  }
+
+  /**
+   * Get filtered sections based on category filters
+   */
+  get filteredSections(): TimelineSection[] {
+    if (this.categoryFilters.length === 0) {
+      return this.sections;
+    }
+
+    const enabledCategories = new Set(
+      this.categoryFilters
+        .filter(f => f.enabled)
+        .map(f => f.category)
+    );
+
+    return this.sections.filter(section => {
+      const category = section.category?.toLowerCase() || 'other';
+      return enabledCategories.has(category);
+    });
   }
 
   /**

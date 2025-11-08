@@ -246,13 +246,14 @@
     </div>
 
     <!-- Analysis Section -->
-    <div class="analysis-section" *ngIf="analysis && analysisSections.length > 0">
+    <div class="analysis-section" *ngIf="analysisSections.length > 0">
       <div class="analysis-header">
         <h2>
           <mat-icon>analytics</mat-icon>
-          AI Analysis
+          Analysis Sections ({{ analysisSections.length }})
         </h2>
-        <mat-chip-set class="analysis-meta">
+      </div>
+      <mat-chip-set class="analysis-meta" *ngIf="analysis">
           <mat-chip>
             <mat-icon>psychology</mat-icon>
             {{ analysis.ai_model }}
@@ -338,7 +339,6 @@
           </div>
         </div>
       </mat-card>
-    </div>
     </div>
   </div>
 </div>

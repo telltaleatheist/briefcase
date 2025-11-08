@@ -201,13 +201,27 @@
   <!-- Results count and master checkbox -->
   <div class="results-header" *ngIf="filteredVideos.length > 0 || (!isLoading && filteredVideos.length === 0)">
     <div class="results-count">
-      <mat-checkbox
-        [checked]="isAllSelected"
-        [indeterminate]="getSelectedCount() > 0 && !isAllSelected"
-        (change)="toggleAllSelection()"
-        matTooltip="Select all visible videos"
-        *ngIf="filteredVideos.length > 0">
-      </mat-checkbox>
+      <div class="selection-checkboxes" *ngIf="filteredVideos.length > 0">
+        <mat-checkbox
+          [checked]="isAllSelected"
+          [indeterminate]="getSelectedCount() > 0 && !isAllSelected"
+          (change)="toggleAllSelection()"
+          matTooltip="Select all visible videos">
+          All
+        </mat-checkbox>
+        <mat-checkbox
+          (change)="selectAllMissingTranscript()"
+          matTooltip="Select all videos missing transcription">
+          <mat-icon class="checkbox-icon">subtitles_off</mat-icon>
+          No Transcript
+        </mat-checkbox>
+        <mat-checkbox
+          (change)="selectAllMissingAnalysis()"
+          matTooltip="Select all videos missing AI analysis">
+          <mat-icon class="checkbox-icon">psychology</mat-icon>
+          No Analysis
+        </mat-checkbox>
+      </div>
       <span class="count-text">
         Showing {{ filteredVideos.length }} of {{ videos.length }} videos
         <span *ngIf="selectedTags.length > 0"> (filtered by {{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }})</span>
@@ -220,22 +234,6 @@
     </div>
     <div class="selection-actions">
       <button
-        mat-stroked-button
-        (click)="selectAllMissingTranscript()"
-        matTooltip="Select all videos missing transcription"
-        *ngIf="filteredVideos.length > 0">
-        <mat-icon>subtitles_off</mat-icon>
-        Select Missing Transcript
-      </button>
-      <button
-        mat-stroked-button
-        (click)="selectAllMissingAnalysis()"
-        matTooltip="Select all videos missing AI analysis"
-        *ngIf="filteredVideos.length > 0">
-        <mat-icon>psychology</mat-icon>
-        Select Missing Analysis
-      </button>
-      <button
         mat-raised-button
         color="primary"
         *ngIf="getSelectedCount() > 0"
@@ -243,6 +241,15 @@
         matTooltip="Analyze selected videos">
         <mat-icon>analytics</mat-icon>
         Analyze Selected ({{ getSelectedCount() }})
+      </button>
+      <button
+        mat-raised-button
+        color="warn"
+        *ngIf="getSelectedCount() > 0"
+        (click)="deleteSelected()"
+        matTooltip="Delete selected videos">
+        <mat-icon>delete</mat-icon>
+        Delete Selected ({{ getSelectedCount() }})
       </button>
     </div>
   </div>

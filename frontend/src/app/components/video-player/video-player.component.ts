@@ -38,6 +38,7 @@ import { TranscriptSearchComponent } from '../transcript-search/transcript-searc
 export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
   @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
+  @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
 
   videoEl: HTMLVideoElement | null = null;
   isLoading = true;
@@ -83,6 +84,28 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Drag and drop state
   isDragOver = false;
+
+  // Category filter state (exposed from timeline component)
+  get categoryFilters() {
+    return this.timelineComponent?.categoryFilters || [];
+  }
+
+  get filteredMetadataSections() {
+    if (!this.metadata?.sections || this.categoryFilters.length === 0) {
+      return this.metadata?.sections || [];
+    }
+
+    const enabledCategories = new Set(
+      this.categoryFilters
+        .filter(f => f.enabled)
+        .map(f => f.category)
+    );
+
+    return this.metadata.sections.filter(section => {
+      const category = section.category?.toLowerCase() || 'other';
+      return enabledCategories.has(category);
+    });
+  }
 
   public data: {
     analysis?: LibraryAnalysis;
@@ -781,6 +804,65 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
+  async openAddMarkerDialog() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available for marker creation');
+      return;
+    }
+
+    // Import and open the AddMarkerDialogComponent as a modal
+    const { AddMarkerDialogComponent } = await import('../add-marker-dialog/add-marker-dialog.component');
+
+    const dialogRef = this.dialog.open(AddMarkerDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: videoId,
+        videoTitle: this.data.videoTitle || 'Video',
+        startTime: this.currentSelection.startTime,
+        endTime: this.currentSelection.endTime
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.created) {
+      this.notificationService.toastOnly(
+        'success',
+        'Marker Added',
+        `Custom marker added to video`
+      );
+
+      // Reload timeline sections to show the new marker
+      await this.reloadAnalysisSections();
+    }
+  }
+
+  /**
+   * Reload analysis sections from database
+   */
+  private async reloadAnalysisSections() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) return;
+
+    try {
+      const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+      if (sections && sections.length > 0) {
+        this.timelineSections = sections.map(section => ({
+          startTime: section.start_seconds,
+          endTime: section.end_seconds || (section.start_seconds + 30),
+          category: section.category || 'General',
+          description: section.description || section.title || '',
+          color: this.getCategoryColor(section.category || 'General')
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to reload analysis sections:', error);
+    }
+  }
+
   formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -789,6 +871,15 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   formatTimeRange(startSeconds: number, endSeconds: number): string {
     return `${this.formatTime(startSeconds)} - ${this.formatTime(endSeconds)}`;
+  }
+
+  /**
+   * Toggle category filter
+   */
+  toggleCategoryFilter(category: string) {
+    if (this.timelineComponent) {
+      this.timelineComponent.toggleCategoryFilter(category);
+    }
   }
 
   getCategoryColor(category: string): string {
@@ -809,6 +900,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       'notable': '#06b6d4',      // Cyan
       'important': '#10b981',    // Green
       'controversial': '#ec4899', // Pink
+      'custom': '#22c55e',       // Bright green - User-created markers
     };
 
     // Check if we have a specific color for this category

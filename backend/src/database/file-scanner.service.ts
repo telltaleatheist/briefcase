@@ -387,13 +387,6 @@ export class FileScannerService {
         // Hash the file
         const fileHash = await this.databaseService.hashFile(fullPath);
 
-        // Check if already in database
-        const existing = this.databaseService.findVideoByHash(fileHash);
-        if (existing) {
-          errors.push(`Already imported: ${filename}`);
-          continue;
-        }
-
         // Check if file is already in the clips folder structure
         let destinationPath: string;
         let dateFolder: string | null = null;
@@ -430,7 +423,18 @@ export class FileScannerService {
           dateFolder = weekFolder;
         }
 
-        // Create video ID
+        // Check if video already exists in database (by hash)
+        const existing = this.databaseService.findVideoByHash(fileHash);
+        if (existing && existing.id) {
+          // Re-link the existing video instead of creating a new entry
+          const videoId = String(existing.id);
+          this.logger.log(`Video already in database, re-linking: ${filename} (${videoId})`);
+          this.databaseService.updateVideoPath(videoId, destinationPath, dateFolder || undefined);
+          imported.push(videoId);
+          continue;
+        }
+
+        // Create new video entry
         const videoId = uuidv4();
 
         // Insert into database

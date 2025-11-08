@@ -87,4 +87,28 @@ export class AnalysisQueueService {
   getCurrentPendingJobs(): PendingAnalysisJob[] {
     return this.pendingJobs.value;
   }
+
+  /**
+   * Add a video to the pending queue with simplified parameters
+   */
+  addToPendingQueue(params: {
+    videoId?: string;
+    videoPath: string;
+    filename: string;
+    mode?: 'full' | 'transcribe-only';
+    aiProvider?: 'ollama' | 'claude' | 'openai';
+    aiModel?: string;
+    customInstructions?: string;
+  }): string {
+    return this.addPendingJob({
+      input: params.videoPath,
+      inputType: 'file',
+      mode: params.mode || 'full',
+      aiModel: params.aiModel || 'qwen2.5:7b',
+      whisperModel: 'base',
+      language: 'en',
+      customInstructions: params.customInstructions || '',
+      displayName: params.filename
+    });
+  }
 }
