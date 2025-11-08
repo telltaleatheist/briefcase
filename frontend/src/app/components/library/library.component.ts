@@ -667,14 +667,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
     console.log('Selected video details:', selectedVideoDetails);
 
-    // Navigate to video-analysis page with selected videos
-    console.log('Navigating to /video-analysis with state');
-    this.router.navigate(['/video-analysis'], {
+    // Navigate to analysis page with selected videos
+    console.log('Navigating to /analysis with state');
+    this.router.navigate(['/analysis'], {
       state: {
         selectedVideos: selectedVideoDetails
       }
     }).then(success => {
       console.log('Navigation result:', success);
+      if (success) {
+        // Clear selection after successful navigation
+        this.selectedVideos.clear();
+        this.updateAllSelectedState();
+      }
     }).catch(error => {
       console.error('Navigation error:', error);
     });

@@ -306,76 +306,151 @@
 
       <!-- Queue List -->
       <div class="queue-list-container">
-        <div class="queue-list" *ngIf="getAllQueueJobs().length > 0">
-          <div *ngFor="let job of getAllQueueJobs()" class="queue-job-wrapper">
-            <div class="queue-job-card"
-                 [class.job-pending]="job.status === 'pending'"
-                 [class.job-active]="isJobActive(job)"
-                 [class.job-failed]="job.stage === 'failed'">
+        <!-- Pending Jobs -->
+        <div class="queue-list" *ngIf="pendingJobs.length > 0">
+          <div *ngFor="let job of pendingJobs" class="queue-job-wrapper">
+            <div class="queue-job-card job-pending"
+                 [class.expanded]="isPendingJobExpanded(job.id)">
 
               <!-- Icon -->
               <div class="job-icon">
-                <mat-spinner *ngIf="job.loading" diameter="24"></mat-spinner>
-                <mat-icon *ngIf="!job.loading && job.status === 'pending'">hourglass_empty</mat-icon>
-                <mat-icon *ngIf="!job.loading && isJobActive(job)" class="spinning">sync</mat-icon>
-                <mat-icon *ngIf="job.stage === 'failed'">error</mat-icon>
+                <mat-icon>hourglass_empty</mat-icon>
               </div>
 
               <!-- Content -->
-              <div class="job-content" (click)="toggleJobDetails(job.id)">
-                <span class="job-title">{{ getQueueJobDisplayName(job) }}</span>
+              <div class="job-content" (click)="togglePendingJobExpansion(job.id)">
+                <span class="job-title">{{ job.displayName || 'Unknown' }}</span>
                 <span class="job-subtitle">{{ getQueueJobSubtitle(job) }}</span>
               </div>
 
-              <!-- Progress bar (for active jobs) -->
-              <div class="job-progress-bar" *ngIf="isJobActive(job) && job.progress !== undefined">
-                <mat-progress-bar
-                  mode="determinate"
-                  [value]="job.progress || 0"
-                  color="primary">
-                </mat-progress-bar>
-              </div>
+              <!-- Expand/Collapse Icon -->
+              <button mat-icon-button
+                      (click)="togglePendingJobExpansion(job.id); $event.stopPropagation()"
+                      matTooltip="Configure settings"
+                      class="expand-button">
+                <mat-icon>{{ isPendingJobExpanded(job.id) ? 'expand_less' : 'expand_more' }}</mat-icon>
+              </button>
 
               <!-- Actions -->
               <div class="job-actions">
                 <button mat-icon-button
-                        *ngIf="job.status === 'pending'"
                         (click)="removePendingJob(job.id); $event.stopPropagation()"
                         matTooltip="Remove from queue"
                         class="remove-job-button">
                   <mat-icon>close</mat-icon>
                 </button>
-                <button mat-icon-button
-                        *ngIf="isJobActive(job)"
-                        matTooltip="Processing"
-                        disabled>
-                  <mat-icon>sync</mat-icon>
-                </button>
               </div>
             </div>
 
-            <!-- Expandable details -->
-            <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
-              <div class="details-content">
-                <div class="detail-row" *ngIf="job.input">
-                  <span class="detail-label">Source:</span>
-                  <span class="detail-value">{{ job.input }}</span>
+            <!-- Expandable Settings Panel -->
+            <div class="job-settings-panel" *ngIf="isPendingJobExpanded(job.id)">
+              <div class="settings-content">
+                <!-- Mode Selection -->
+                <div class="setting-group">
+                  <label class="setting-label">
+                    <mat-icon>psychology</mat-icon>
+                    Processing Mode
+                  </label>
+                  <div class="mode-toggle-compact">
+                    <button type="button"
+                            class="mode-btn"
+                            [class.active]="job.mode === 'full'"
+                            (click)="updatePendingJobMode(job.id, 'full')">
+                      <mat-icon>psychology</mat-icon>
+                      <span>Full Analysis</span>
+                    </button>
+                    <button type="button"
+                            class="mode-btn"
+                            [class.active]="job.mode === 'transcribe-only'"
+                            (click)="updatePendingJobMode(job.id, 'transcribe-only')">
+                      <mat-icon>subtitles</mat-icon>
+                      <span>Transcribe Only</span>
+                    </button>
+                  </div>
                 </div>
-                <div class="detail-row" *ngIf="job.customInstructions">
-                  <span class="detail-label">Instructions:</span>
-                  <span class="detail-value">{{ job.customInstructions }}</span>
+
+                <!-- AI Model Selection (only if full analysis) -->
+                <div class="setting-group" *ngIf="job.mode === 'full'">
+                  <label class="setting-label">
+                    <mat-icon>smart_toy</mat-icon>
+                    AI Model
+                  </label>
+                  <select class="compact-select"
+                          [value]="job.aiModel"
+                          (change)="updatePendingJobModel(job.id, $any($event.target).value)">
+                    <optgroup label="Claude (API Key Required)">
+                      <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
+                      <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                      <option value="claude:claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                    </optgroup>
+                    <optgroup label="ChatGPT / OpenAI (API Key Required)">
+                      <option value="openai:gpt-4o">GPT-4o</option>
+                      <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
+                      <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    </optgroup>
+                    <optgroup label="Ollama (Local - Free)">
+                      <option *ngIf="availableOllamaModels.length === 0" value="" disabled>No Ollama models installed</option>
+                      <option *ngFor="let model of availableOllamaModels" [value]="'ollama:' + model">{{ model }}</option>
+                    </optgroup>
+                  </select>
                 </div>
-                <div class="detail-row" *ngIf="job.stage">
-                  <span class="detail-label">Status:</span>
-                  <span class="detail-value">{{ getJobStatusText(job) }}</span>
+
+                <!-- Custom Instructions (only if full analysis) -->
+                <div class="setting-group" *ngIf="job.mode === 'full'">
+                  <label class="setting-label">
+                    <mat-icon>edit_note</mat-icon>
+                    Custom Instructions
+                    <span class="optional-text">(Optional)</span>
+                  </label>
+                  <textarea class="compact-textarea"
+                            [value]="job.customInstructions || ''"
+                            (input)="updatePendingJobInstructions(job.id, $any($event.target).value)"
+                            rows="3"
+                            placeholder="Add specific instructions for the AI analysis..."></textarea>
+                </div>
+
+                <!-- Video Path -->
+                <div class="setting-group">
+                  <label class="setting-label">
+                    <mat-icon>video_file</mat-icon>
+                    Video Path
+                  </label>
+                  <div class="path-display">{{ job.input }}</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
+        <!-- Active Jobs -->
+        <div class="queue-list" *ngIf="getActiveJobs().length > 0">
+          <div *ngFor="let job of getActiveJobs()" class="queue-job-wrapper">
+            <div class="queue-job-card job-active">
+              <!-- Icon -->
+              <div class="job-icon">
+                <mat-icon class="spinning">sync</mat-icon>
+              </div>
+
+              <!-- Content -->
+              <div class="job-content">
+                <span class="job-title">{{ job.filename || job.url || 'Unknown' }}</span>
+                <span class="job-subtitle">{{ getJobStatusText(job) }}</span>
+              </div>
+
+              <!-- Progress bar -->
+              <div class="job-progress-bar" *ngIf="job.progress !== undefined">
+                <mat-progress-bar
+                  mode="determinate"
+                  [value]="job.progress || 0"
+                  color="primary">
+                </mat-progress-bar>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Empty state -->
-        <div class="queue-empty" *ngIf="getAllQueueJobs().length === 0">
+        <div class="queue-empty" *ngIf="pendingJobs.length === 0 && getActiveJobs().length === 0">
           <mat-icon>inbox</mat-icon>
           <h3>No jobs in queue</h3>
           <p>Add videos using the form on the left to start processing</p>

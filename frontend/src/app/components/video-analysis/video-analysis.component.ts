@@ -131,20 +131,28 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       });
     });
 
+    // Load available Ollama models first
+    await this.loadAvailableOllamaModels();
+
+    // Load saved settings (AI model, etc.)
+    await this.loadSettings();
+
     // Check for navigation state with video path or selected videos
     // Use window.history.state directly since getCurrentNavigation() returns null in ngOnInit
     const state = window.history.state;
     console.log('[VideoAnalysis] Router state:', state);
+    console.log('[VideoAnalysis] Full history state:', JSON.stringify(state, null, 2));
 
     // Handle multiple selected videos from library
     if (state && state['selectedVideos']) {
       const selectedVideos: DatabaseVideo[] = state['selectedVideos'];
       console.log('[VideoAnalysis] Found selected videos in state:', selectedVideos.length);
+      console.log('[VideoAnalysis] Video details:', selectedVideos);
 
       // Add all selected videos to the pending queue
       for (const video of selectedVideos) {
-        console.log('[VideoAnalysis] Adding video to queue:', video.filename);
-        this.analysisQueueService.addToPendingQueue({
+        console.log('[VideoAnalysis] Adding video to queue:', video.filename, video.current_path);
+        const jobId = this.analysisQueueService.addToPendingQueue({
           videoId: video.id,
           videoPath: video.current_path,
           filename: video.filename,
@@ -153,14 +161,16 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
           aiModel: 'ollama:qwen2.5:7b',
           customInstructions: ''
         });
+        console.log('[VideoAnalysis] Job added with ID:', jobId);
       }
 
-      // Show notification
-      this.notificationService.toastOnly(
-        'success',
-        'Videos Added to Queue',
-        `Added ${selectedVideos.length} video${selectedVideos.length > 1 ? 's' : ''} to the processing queue. Configure options for each video below.`
-      );
+      // Force immediate UI update
+      this.ngZone.run(() => {
+        this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
+        console.log('[VideoAnalysis] Updated pendingJobs array:', this.pendingJobs.length);
+        this.cdr.markForCheck();
+        this.cdr.detectChanges();
+      });
     }
     // Handle single video path
     else if (state && state['videoPath']) {
@@ -186,12 +196,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     } else {
       console.log('[VideoAnalysis] No navigation state found');
     }
-
-    // Load available Ollama models
-    await this.loadAvailableOllamaModels();
-
-    // Load saved settings (AI model, etc.)
-    await this.loadSettings();
 
     // Check for any active jobs and restore state
     await this.checkForActiveJobs();
@@ -971,7 +975,22 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Toggle job details expansion
+   * Toggle job details expansion for pending jobs
+   */
+  togglePendingJobExpansion(jobId: string): void {
+    this.analysisQueueService.toggleJobExpansion(jobId);
+  }
+
+  /**
+   * Check if pending job is expanded
+   */
+  isPendingJobExpanded(jobId: string): boolean {
+    const job = this.pendingJobs.find(j => j.id === jobId);
+    return job?.expanded || false;
+  }
+
+  /**
+   * Toggle job details expansion (for active jobs)
    */
   toggleJobDetails(jobId: string): void {
     if (this.expandedJobIds.has(jobId)) {
@@ -986,6 +1005,27 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
    */
   isJobDetailsExpanded(jobId: string): boolean {
     return this.expandedJobIds.has(jobId);
+  }
+
+  /**
+   * Update pending job AI model
+   */
+  updatePendingJobModel(jobId: string, aiModel: string): void {
+    this.analysisQueueService.updatePendingJob(jobId, { aiModel });
+  }
+
+  /**
+   * Update pending job custom instructions
+   */
+  updatePendingJobInstructions(jobId: string, customInstructions: string): void {
+    this.analysisQueueService.updatePendingJob(jobId, { customInstructions });
+  }
+
+  /**
+   * Update pending job mode
+   */
+  updatePendingJobMode(jobId: string, mode: 'full' | 'transcribe-only'): void {
+    this.analysisQueueService.updatePendingJob(jobId, { mode });
   }
 
   /**
@@ -1026,6 +1066,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   /**
    * Load videos from library for quick selection
+   * Only loads videos that need transcription and/or analysis
    */
   async loadLibraryVideos() {
     try {
@@ -1033,7 +1074,11 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       // Load first 50 videos sorted by date (most recent first)
       const response = await this.databaseLibraryService.getVideos(50, 0);
       this.libraryVideos = response.videos;
-      this.filteredLibraryVideos = response.videos;
+
+      // Filter to only show videos missing transcript and/or analysis
+      this.filteredLibraryVideos = response.videos.filter(video =>
+        video.has_transcript === 0 || video.has_analysis === 0
+      );
     } catch (error) {
       console.error('Failed to load library videos:', error);
       // Silently fail - library might not be initialized yet
@@ -1044,15 +1089,22 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   /**
    * Filter library videos based on search query
+   * Also filters to only show videos missing transcript and/or analysis
    */
   onLibrarySearchChange() {
+    // First filter: only show videos that don't have transcript AND/OR analysis
+    const videosNeedingAnalysis = this.libraryVideos.filter(video =>
+      video.has_transcript === 0 || video.has_analysis === 0
+    );
+
     if (!this.librarySearchQuery.trim()) {
-      this.filteredLibraryVideos = this.libraryVideos;
+      this.filteredLibraryVideos = videosNeedingAnalysis;
       return;
     }
 
+    // Second filter: apply search query
     const query = this.librarySearchQuery.toLowerCase();
-    this.filteredLibraryVideos = this.libraryVideos.filter(video =>
+    this.filteredLibraryVideos = videosNeedingAnalysis.filter(video =>
       video.filename.toLowerCase().includes(query) ||
       (video.date_folder && video.date_folder.toLowerCase().includes(query))
     );

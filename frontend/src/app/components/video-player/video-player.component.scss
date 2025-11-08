@@ -873,6 +873,25 @@ app-video-timeline {
     }
   }
 
+  .category-filters {
+    background-color: var(--bg-card);
+    border-bottom-color: var(--border-color);
+
+    .filters-header {
+      color: var(--text-secondary);
+    }
+
+    .filter-checkbox {
+      &:hover {
+        background-color: rgba(255, 143, 71, 0.05);
+      }
+
+      .filter-label {
+        color: var(--text-primary);
+      }
+    }
+  }
+
   .section-item {
     background-color: var(--bg-card);
     border-color: var(--border-color);

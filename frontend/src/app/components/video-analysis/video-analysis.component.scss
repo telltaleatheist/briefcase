@@ -105,8 +105,8 @@
 }
 
 .queue-column {
-  width: 320px;
-  min-width: 320px;
+  width: 420px;
+  min-width: 420px;
   max-width: 600px;
   background: var(--bg-secondary);
   overflow-y: auto;
@@ -115,6 +115,8 @@
   padding: 10px;
   gap: 8px;
   flex-shrink: 0;
+  min-height: 0;
+  flex: 1;
 }
 
 // ========================================
@@ -1151,7 +1153,7 @@
 
 .queue-list-container {
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
   display: flex;
   flex-direction: column;
 }
@@ -1172,7 +1174,7 @@
 .queue-job-card {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 6px 8px;
   background: var(--bg-card);
   border-radius: 4px;
@@ -1182,7 +1184,7 @@
   max-height: 56px;
   position: relative;
   cursor: pointer;
-  overflow: hidden;
+  overflow: visible;
 
   &:hover {
     background: var(--bg-secondary);
@@ -1294,28 +1296,22 @@
   .job-actions {
     flex-shrink: 0;
     display: flex;
-    gap: 2px;
+    gap: 0;
     align-items: center;
 
-    button {
-      width: 26px;
-      height: 26px;
-
-      mat-icon {
-        font-size: 16px;
-        width: 16px;
-        height: 16px;
-      }
-    }
-
     .remove-job-button {
-      color: rgba(255, 255, 255, 0.6);
+      width: 26px !important;
+      height: 26px !important;
+      padding: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      color: var(--text-secondary);
       transition: all 0.2s ease;
 
       &:hover {
         color: #ff4444;
         background-color: rgba(255, 68, 68, 0.1);
-        transform: scale(1.1);
       }
 
       &:active {
@@ -1513,6 +1509,219 @@
   .library-section {
     padding: 20px;
   }
+}
+
+// ========================================
+// Accordion Settings Panel
+// ========================================
+.expand-button {
+  flex-shrink: 0;
+  width: 26px !important;
+  height: 26px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--primary-orange);
+    background-color: rgba(255, 143, 71, 0.1);
+  }
+
+  mat-icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+  }
+}
+
+.job-settings-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  margin-top: -1px;
+  animation: slideDown 0.2s ease-out;
+  overflow: hidden;
+
+  .settings-content {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .setting-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+
+      .setting-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-primary);
+
+        mat-icon {
+          font-size: 14px;
+          width: 14px;
+          height: 14px;
+          color: var(--primary-orange);
+        }
+
+        .optional-text {
+          color: var(--text-muted);
+          font-weight: 400;
+          font-size: 10px;
+          margin-left: 4px;
+        }
+      }
+    }
+  }
+}
+
+// Mode toggle (compact version for accordion)
+.mode-toggle-compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+
+  .mode-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-secondary);
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      color: var(--text-muted);
+    }
+
+    &:hover:not(.active) {
+      border-color: rgba(255, 143, 71, 0.3);
+      background: var(--bg-primary);
+    }
+
+    &.active {
+      border-color: var(--primary-orange);
+      background: rgba(255, 143, 71, 0.1);
+      color: var(--primary-orange);
+
+      mat-icon {
+        color: var(--primary-orange);
+      }
+    }
+  }
+}
+
+// Compact select
+.compact-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  appearance: none;
+  background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path fill="%23999" d="M0 0l5 6 5-6z"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 2px rgba(255, 143, 71, 0.1);
+  }
+
+  optgroup {
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    padding: 8px;
+  }
+
+  option {
+    padding: 8px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+  }
+}
+
+// Compact textarea
+.compact-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+  transition: all 0.2s ease;
+  line-height: 1.4;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 2px rgba(255, 143, 71, 0.1);
+  }
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+// Path display
+.path-display {
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  word-break: break-all;
+  font-family: 'Courier New', monospace;
+  line-height: 1.4;
+}
+
+// Slide down animation for accordion
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+  }
+}
+
+// Update queue job card with expanded state
+.queue-job-card.expanded {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: none;
 }
 
 // ========================================

@@ -67,12 +67,11 @@ export function getPythonConfig(): PythonConfig {
   const platform = process.platform;
 
   // Check if we're running in a packaged app
-  // In production: Check if RESOURCES_PATH env var is set OR resourcesPath property exists
-  // IMPORTANT: In dev mode (NODE_ENV=development), this will be false, so we use system Python
-  const isPackaged = process.env.NODE_ENV === 'production' ||
-                     process.env.RESOURCES_PATH !== undefined ||
-                     (process as any).resourcesPath !== undefined ||
-                     (process as any).defaultApp === false;
+  // IMPORTANT: In dev mode (NODE_ENV=development), always use system Python
+  // Only use bundled Python when explicitly in production mode
+  const isPackaged = process.env.NODE_ENV === 'production' &&
+                     ((process as any).resourcesPath !== undefined ||
+                      (process as any).defaultApp === false);
 
   // Check for bundled Python ONLY if explicitly requested in dev OR if packaged
   const useBundledPython = (isPackaged || process.env.USE_BUNDLED_PYTHON === 'true') &&

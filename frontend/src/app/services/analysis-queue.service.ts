@@ -14,6 +14,8 @@ export interface PendingAnalysisJob {
   customInstructions?: string;
   displayName: string;
   loading?: boolean;
+  expanded?: boolean; // Track accordion expansion state
+  videoId?: string; // Optional video ID for library videos
 }
 
 @Injectable({
@@ -104,11 +106,30 @@ export class AnalysisQueueService {
       input: params.videoPath,
       inputType: 'file',
       mode: params.mode || 'full',
-      aiModel: params.aiModel || 'qwen2.5:7b',
+      aiModel: params.aiModel || 'ollama:qwen2.5:7b',
       whisperModel: 'base',
       language: 'en',
       customInstructions: params.customInstructions || '',
-      displayName: params.filename
+      displayName: params.filename,
+      videoId: params.videoId,
+      expanded: false
     });
+  }
+
+  /**
+   * Toggle expansion state for a job
+   */
+  toggleJobExpansion(jobId: string): void {
+    const currentJobs = this.pendingJobs.value;
+    const jobIndex = currentJobs.findIndex(j => j.id === jobId);
+
+    if (jobIndex !== -1) {
+      const updatedJobs = [...currentJobs];
+      updatedJobs[jobIndex] = {
+        ...updatedJobs[jobIndex],
+        expanded: !updatedJobs[jobIndex].expanded
+      };
+      this.pendingJobs.next(updatedJobs);
+    }
   }
 }
