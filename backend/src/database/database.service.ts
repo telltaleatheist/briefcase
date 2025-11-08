@@ -547,14 +547,22 @@ export class DatabaseService {
    */
   getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number }) {
     const db = this.ensureInitialized();
-    let query = 'SELECT * FROM videos';
+    let query = `
+      SELECT
+        v.*,
+        CASE WHEN t.video_id IS NOT NULL THEN 1 ELSE 0 END as has_transcript,
+        CASE WHEN a.video_id IS NOT NULL THEN 1 ELSE 0 END as has_analysis
+      FROM videos v
+      LEFT JOIN transcripts t ON v.id = t.video_id
+      LEFT JOIN analyses a ON v.id = a.video_id
+    `;
     const params: any[] = [];
 
     if (options?.linkedOnly) {
-      query += ' WHERE is_linked = 1';
+      query += ' WHERE v.is_linked = 1';
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += ' ORDER BY v.created_at DESC';
 
     if (options?.limit) {
       query += ' LIMIT ?';
@@ -709,6 +717,16 @@ export class DatabaseService {
   }
 
   /**
+   * Delete a specific tag by ID
+   */
+  deleteTag(tagId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM tags WHERE id = ?', [tagId]);
+    this.saveDatabase();
+    this.logger.log(`Deleted tag ${tagId}`);
+  }
+
+  /**
    * Delete transcript for a video
    */
   deleteTranscript(videoId: string) {
@@ -773,15 +791,45 @@ export class DatabaseService {
   /**
    * Insert a tag
    */
-  insertTag(tag: {
-    id: string;
-    videoId: string;
-    tagName: string;
-    tagType?: string;
-    confidence?: number;
-    source?: string;
-  }) {
+  insertTag(
+    videoIdOrTag: string | {
+      id: string;
+      videoId: string;
+      tagName: string;
+      tagType?: string;
+      confidence?: number;
+      source?: string;
+    },
+    tagName?: string,
+    tagType?: string,
+    confidence?: number,
+    source?: string
+  ): string {
     const db = this.ensureInitialized();
+
+    let tag: {
+      id: string;
+      videoId: string;
+      tagName: string;
+      tagType?: string;
+      confidence?: number;
+      source?: string;
+    };
+
+    // Support both object and individual parameters
+    if (typeof videoIdOrTag === 'string') {
+      const { v4: uuidv4 } = require('uuid');
+      tag = {
+        id: uuidv4(),
+        videoId: videoIdOrTag,
+        tagName: tagName!,
+        tagType,
+        confidence,
+        source
+      };
+    } else {
+      tag = videoIdOrTag;
+    }
 
     db.run(
       `INSERT INTO tags (id, video_id, tag_name, tag_type, confidence, source, created_at)
@@ -798,6 +846,7 @@ export class DatabaseService {
     );
 
     this.saveDatabase();
+    return tag.id;
   }
 
   /**

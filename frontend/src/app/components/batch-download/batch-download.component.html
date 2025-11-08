@@ -1,129 +1,223 @@
-<!-- Batch Download - Creamsicle Theme -->
 <div class="batch-container">
-  <div class="page-content">
-    <!-- Job Queue -->
-    <div class="panel full-height-panel">
-      <div class="panel-header">
-        <h4 class="panel-title">📥 Download Queue</h4>
+  <!-- Header with stats and actions -->
+  <div class="batch-header">
+    <div class="header-content">
+      <h1>
+        <mat-icon>cloud_download</mat-icon>
+        Batch Downloads
+      </h1>
+
+      <!-- Stats chips -->
+      <div class="stats-chips" *ngIf="batchQueueStatus">
+        <mat-chip-set>
+          <mat-chip *ngIf="getActiveJobsForDisplay().length > 0">
+            <mat-icon>downloading</mat-icon>
+            {{ getActiveJobsForDisplay().length }} Active
+          </mat-chip>
+          <mat-chip *ngIf="batchQueueStatus.completedJobs && batchQueueStatus.completedJobs.length > 0">
+            <mat-icon>check_circle</mat-icon>
+            {{ batchQueueStatus.completedJobs.length }} Completed
+          </mat-chip>
+          <mat-chip *ngIf="batchQueueStatus.failedJobs && batchQueueStatus.failedJobs.length > 0">
+            <mat-icon>error</mat-icon>
+            {{ batchQueueStatus.failedJobs.length }} Failed
+          </mat-chip>
+        </mat-chip-set>
       </div>
+    </div>
 
-      <div class="panel-content">
-        <!-- Active Jobs List -->
-        <div class="jobs-list">
-          <div *ngFor="let job of getActiveJobsForDisplay()"
-               class="job-card"
-               [ngClass]="'job-' + (job.status || 'unknown')">
+    <!-- Action buttons -->
+    <div class="header-actions">
+      <button mat-raised-button color="primary" (click)="openPasteUrlsDialog()">
+        <mat-icon>add</mat-icon>
+        Paste URLs
+      </button>
+      <button mat-raised-button
+              [color]="isWaitingToStartQueue() ? 'warn' : 'primary'"
+              (click)="startQueue()"
+              [disabled]="!canStartQueue()">
+        <mat-spinner *ngIf="isLoadingPendingJobs() && !isWaitingToStartQueue()" diameter="20" style="display: inline-block;"></mat-spinner>
+        <mat-icon *ngIf="!isLoadingPendingJobs() && !isWaitingToStartQueue()">play_arrow</mat-icon>
+        <mat-icon *ngIf="isWaitingToStartQueue()">cancel</mat-icon>
+        <span *ngIf="!isWaitingToStartQueue()">Start Queue</span>
+        <span *ngIf="isWaitingToStartQueue()">Cancel Start</span>
+      </button>
+      <button mat-stroked-button color="warn" (click)="clearQueue()" [disabled]="!hasActiveJobs()">
+        <mat-icon>clear_all</mat-icon>
+        Clear All
+      </button>
+      <button mat-icon-button (click)="openDownloadOptionsDialog()" matTooltip="Download Options">
+        <mat-icon>settings</mat-icon>
+      </button>
+    </div>
+  </div>
 
-            <div class="job-content" (click)="toggleJobDetails(job.id)">
-              <span class="job-title">{{ getDisplayName(job) }}</span>
-              <div class="job-right">
-                <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
-                  {{ isProcessingJob(job) ? 'Processing' : job.status }}
-                </span>
-                <button type="button"
-                        *ngIf="job.status === 'downloaded' || job.status === 'processing' || job.status === 'transcribing'"
-                        class="skip-button"
-                        (click)="skipJob(job.id); $event.stopPropagation()"
-                        title="Skip processing - keep original download"
-                        matTooltip="Skip re-encoding and processing. Keep the original downloaded file.">
-                  <mat-icon>skip_next</mat-icon>
-                </button>
-                <button type="button"
-                        class="remove-button"
-                        (click)="removeJob(job); $event.stopPropagation()"
-                        title="Remove from queue">
-                  <mat-icon>close</mat-icon>
-                </button>
-              </div>
-            </div>
+  <!-- Jobs List with Virtual Scrolling -->
+  <div class="jobs-viewport" *ngIf="getActiveJobsForDisplay().length > 0">
+    <div class="jobs-list">
+      <div *ngFor="let job of getActiveJobsForDisplay()" class="job-card-wrapper">
+        <div class="job-card" [ngClass]="getJobStatusClassWithQueueType(job)">
+          <!-- Icon -->
+          <div class="card-icon">
+            <mat-spinner *ngIf="job.loading" diameter="24"></mat-spinner>
+            <mat-icon *ngIf="!job.loading">{{ job.status === 'failed' ? 'error' : 'cloud_download' }}</mat-icon>
+          </div>
 
-            <!-- Expandable URL section -->
-            <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
-              <div class="url-container">
-                <span class="url-label">URL:</span>
+          <!-- Content (clickable) -->
+          <div class="card-content" (click)="toggleJobDetails(job.id)">
+            <span class="job-title">
+              {{ getDisplayName(job) }}
+            </span>
+            <span class="job-subtitle">
+              <span class="status-text">{{ job.currentTask || getDefaultTaskForStatus(job.status) }}</span>
+              <span *ngIf="job.progress && job.progress > 0"> • {{ job.progress }}%</span>
+            </span>
+          </div>
+
+          <!-- Progress indicator -->
+          <div class="progress-indicator" *ngIf="job.status !== 'completed' && job.status !== 'failed'">
+            <mat-progress-bar
+              mode="determinate"
+              [value]="job.progress || 0"
+              [color]="getProgressBarColor(job.status)">
+            </mat-progress-bar>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="card-actions">
+            <button mat-icon-button
+                    *ngIf="job.status === 'failed'"
+                    (click)="showJobError(job); $event.stopPropagation()"
+                    matTooltip="View error details"
+                    color="warn">
+              <mat-icon>info</mat-icon>
+            </button>
+            <button mat-icon-button
+                    *ngIf="job.status === 'downloaded' || job.status === 'processing' || job.status === 'transcribing'"
+                    (click)="skipJob(job.id); $event.stopPropagation()"
+                    matTooltip="Skip processing">
+              <mat-icon>skip_next</mat-icon>
+            </button>
+            <button mat-icon-button
+                    *ngIf="job.status === 'failed'"
+                    (click)="retryJob(job.id); $event.stopPropagation()"
+                    matTooltip="Retry job">
+              <mat-icon>refresh</mat-icon>
+            </button>
+            <button mat-icon-button
+                    color="warn"
+                    (click)="removeJob(job); $event.stopPropagation()"
+                    matTooltip="Remove from queue">
+              <mat-icon>delete</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        <!-- Expandable details section -->
+        <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
+          <div class="details-content">
+            <div class="detail-row">
+              <span class="detail-label">URL:</span>
+              <div class="detail-value url-value">
                 <input class="url-input" [value]="job.url" readonly (click)="($any($event.target)).select()">
                 <button mat-icon-button
-                        class="copy-button"
                         (click)="copyUrl(job.url)"
-                        title="Copy URL">
+                        matTooltip="Copy URL">
                   <mat-icon>content_copy</mat-icon>
                 </button>
               </div>
             </div>
-
-            <div class="progress-bar" [style.width.%]="job.progress || 0"></div>
-          </div>
-
-          <div class="empty-state" *ngIf="getActiveJobsForDisplay().length === 0">
-            <mat-icon class="empty-icon">inbox</mat-icon>
-            <p>No active jobs</p>
-            <p class="empty-hint">Click "Paste URLs" to add videos to the queue</p>
-          </div>
-        </div>
-
-        <!-- Completed Jobs Accordion -->
-        <mat-accordion *ngIf="hasCompletedJobs()" class="completed-accordion">
-          <mat-expansion-panel [expanded]="isCompletedAccordionExpanded">
-            <mat-expansion-panel-header>
-              <mat-panel-title>
-                <mat-icon>history</mat-icon>
-                History ({{ getCompletedJobsForDisplay().length }})
-              </mat-panel-title>
-            </mat-expansion-panel-header>
-
-            <div class="completed-jobs-list">
-              <div *ngFor="let job of getCompletedJobsForDisplay()"
-                   class="job-card job-completed"
-                   [ngClass]="'job-' + (job.status || 'unknown')">
-
-                <div class="job-content" (click)="toggleJobDetails(job.id)">
-                  <span class="job-title">{{ getDisplayName(job) }}</span>
-                  <div class="job-right">
-                    <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(job.status || '')">
-                      {{ job.status }}
-                    </span>
-                    <button type="button"
-                            class="remove-button"
-                            (click)="removeJob(job); $event.stopPropagation()"
-                            title="Remove from list">
-                      <mat-icon>close</mat-icon>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Expandable URL section -->
-                <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
-                  <div class="url-container">
-                    <span class="url-label">URL:</span>
-                    <input class="url-input" [value]="job.url" readonly (click)="($any($event.target)).select()">
-                    <button mat-icon-button
-                            class="copy-button"
-                            (click)="copyUrl(job.url)"
-                            title="Copy URL">
-                      <mat-icon>content_copy</mat-icon>
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <div class="detail-row" *ngIf="job.uploadDate">
+              <span class="detail-label">Upload Date:</span>
+              <span class="detail-value">{{ job.uploadDate }}</span>
             </div>
-          </mat-expansion-panel>
-        </mat-accordion>
-
-        <div class="panel-actions">
-          <button mat-raised-button color="primary" (click)="openPasteUrlsDialog()">
-            <mat-icon>add</mat-icon> Paste URLs
-          </button>
-
-          <button mat-raised-button color="primary" (click)="startQueue()" [disabled]="!hasPendingJobs()">
-            <mat-icon>play_arrow</mat-icon> Start Queue
-          </button>
-
-          <button mat-stroked-button color="warn" (click)="clearQueue()"
-                [disabled]="!hasActiveJobs()">
-            <mat-icon>clear_all</mat-icon> Clear Queue
-          </button>
+            <div class="detail-row" *ngIf="job.error">
+              <span class="detail-label">Error:</span>
+              <span class="detail-value error-text">{{ job.error }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Completed Jobs Section -->
+  <mat-accordion *ngIf="hasCompletedJobs()" class="completed-section">
+    <mat-expansion-panel [expanded]="isCompletedAccordionExpanded">
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>history</mat-icon>
+          Completed & Failed ({{ getCompletedJobsForDisplay().length }})
+        </mat-panel-title>
+      </mat-expansion-panel-header>
+
+      <div class="completed-jobs-list">
+        <div *ngFor="let job of getCompletedJobsForDisplay()" class="job-card-wrapper">
+          <div class="job-card" [ngClass]="getJobStatusClassWithQueueType(job)">
+            <!-- Icon -->
+            <div class="card-icon">
+              <mat-icon>{{ job.status === 'completed' ? 'check_circle' : 'error' }}</mat-icon>
+            </div>
+
+            <!-- Content -->
+            <div class="card-content" (click)="toggleJobDetails(job.id)">
+              <span class="job-title">
+                {{ getDisplayName(job) }}
+              </span>
+              <span class="job-subtitle">
+                {{ job.currentTask || getDefaultTaskForStatus(job.status) }}
+              </span>
+            </div>
+
+            <!-- Actions -->
+            <div class="card-actions">
+              <button mat-icon-button
+                      *ngIf="job.status === 'failed'"
+                      (click)="showJobError(job); $event.stopPropagation()"
+                      matTooltip="View error details"
+                      color="warn">
+                <mat-icon>info</mat-icon>
+              </button>
+              <button mat-icon-button
+                      *ngIf="job.status === 'failed'"
+                      (click)="retryJob(job.id); $event.stopPropagation()"
+                      matTooltip="Retry job">
+                <mat-icon>refresh</mat-icon>
+              </button>
+              <button mat-icon-button
+                      color="warn"
+                      (click)="removeJob(job); $event.stopPropagation()"
+                      matTooltip="Remove from list">
+                <mat-icon>delete</mat-icon>
+              </button>
+            </div>
+          </div>
+
+          <!-- Expandable details -->
+          <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
+            <div class="details-content">
+              <div class="detail-row">
+                <span class="detail-label">URL:</span>
+                <div class="detail-value url-value">
+                  <input class="url-input" [value]="job.url" readonly (click)="($any($event.target)).select()">
+                  <button mat-icon-button
+                          (click)="copyUrl(job.url)"
+                          matTooltip="Copy URL">
+                    <mat-icon>content_copy</mat-icon>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </mat-expansion-panel>
+  </mat-accordion>
+
+  <!-- Empty state -->
+  <div class="empty-state" *ngIf="getActiveJobsForDisplay().length === 0 && !hasCompletedJobs()">
+    <mat-icon>cloud_download</mat-icon>
+    <h2>No downloads in queue</h2>
+    <p>Click "Paste URLs" to add videos to download</p>
   </div>
 </div>

@@ -25,6 +25,8 @@ export interface DatabaseVideo {
   last_verified: string;
   added_at: string;
   is_linked: number; // 0 or 1 (SQLite boolean)
+  has_transcript: number; // 0 or 1
+  has_analysis: number; // 0 or 1
 }
 
 export interface DatabaseTranscript {
@@ -439,7 +441,7 @@ export class DatabaseLibraryService {
    */
   sortVideos(
     videos: DatabaseVideo[],
-    sortBy: 'date' | 'filename' | 'size' = 'date',
+    sortBy: 'date' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date',
     order: 'asc' | 'desc' = 'desc'
   ): DatabaseVideo[] {
     const sorted = [...videos].sort((a, b) => {
@@ -460,6 +462,16 @@ export class DatabaseLibraryService {
           const sizeA = a.file_size_bytes || 0;
           const sizeB = b.file_size_bytes || 0;
           comparison = sizeA - sizeB;
+          break;
+
+        case 'no-transcript':
+          // Sort by has_transcript (0 = no transcript = higher priority when desc)
+          comparison = (a.has_transcript || 0) - (b.has_transcript || 0);
+          break;
+
+        case 'no-analysis':
+          // Sort by has_analysis (0 = no analysis = higher priority when desc)
+          comparison = (a.has_analysis || 0) - (b.has_analysis || 0);
           break;
       }
 
@@ -634,5 +646,67 @@ export class DatabaseLibraryService {
         `${baseUrl}/videos/${videoId}/analysis`
       )
     );
+  }
+
+  /**
+   * Get tags for a specific video
+   */
+  async getVideoTags(videoId: string): Promise<DatabaseTag[]> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const result = await firstValueFrom(
+        this.http.get<{ tags: DatabaseTag[]; count: number }>(
+          `${baseUrl}/videos/${videoId}/tags`
+        )
+      );
+      return result.tags;
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error getting video tags:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Add a tag to a video
+   */
+  async addVideoTag(
+    videoId: string,
+    tagName: string,
+    tagType?: string,
+    confidence?: number,
+    source?: string
+  ): Promise<{ success: boolean; tagId?: string; message?: string; error?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      return await firstValueFrom(
+        this.http.post<{ success: boolean; tagId?: string; message?: string; error?: string }>(
+          `${baseUrl}/videos/${videoId}/tags`,
+          { tagName, tagType, confidence, source }
+        )
+      );
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error adding tag:', error);
+      return { success: false, error: 'Failed to add tag' };
+    }
+  }
+
+  /**
+   * Delete a tag from a video
+   */
+  async deleteVideoTag(
+    videoId: string,
+    tagId: string
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      return await firstValueFrom(
+        this.http.delete<{ success: boolean; message?: string; error?: string }>(
+          `${baseUrl}/videos/${videoId}/tags/${tagId}`
+        )
+      );
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error deleting tag:', error);
+      return { success: false, error: 'Failed to delete tag' };
+    }
   }
 }

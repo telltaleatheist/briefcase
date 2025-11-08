@@ -19,13 +19,15 @@ export class WhisperService {
     console.log(`[WHISPER SERVICE] Transcription started`);
     console.log(`[WHISPER SERVICE] Video file: ${videoFile}`);
     console.log(`[WHISPER SERVICE] Job ID: ${jobId}`);
-  
+
     try {
       if (!fs.existsSync(videoFile)) {
         throw new Error(`Video file not found: ${videoFile}`);
       }
-  
-      const outputDir = path.dirname(videoFile);
+
+      // Use system temp directory for transcript files
+      const os = require('os');
+      const outputDir = os.tmpdir();
       const whisperManager = new WhisperManager(this.sharedConfigService);
   
       // Set up progress tracking

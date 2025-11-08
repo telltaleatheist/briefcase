@@ -9,8 +9,8 @@
   </div>
 
   <!-- Main Layout - Two Column -->
-  <div class="main-layout">
-    <!-- Left Column: Configuration -->
+  <div class="main-layout" [class.resizing]="isResizing">
+    <!-- Left Column: Configuration (30%) -->
     <div class="config-column">
       <form [formGroup]="analysisForm" (ngSubmit)="onSubmit()" class="analysis-form">
 
@@ -243,7 +243,7 @@
             <div class="setting-group">
               <textarea class="modern-textarea"
                         formControlName="customInstructions"
-                        rows="6"
+                        rows="4"
                         placeholder="Add specific instructions for the AI analysis...&#10;&#10;Examples:&#10;• Focus on technical discussions&#10;• Identify key quotes and timestamps&#10;• Look for mentions of specific topics"></textarea>
               <span class="hint-text">
                 <mat-icon>info</mat-icon>
@@ -265,154 +265,174 @@
           <button type="submit"
                   mat-raised-button
                   class="primary-btn"
-                  [disabled]="isProcessing || analysisForm.invalid">
-            <mat-icon>play_circle</mat-icon>
-            <span>{{ isProcessing ? 'Processing...' : 'Start Analysis' }}</span>
+                  [disabled]="analysisForm.invalid">
+            <mat-icon>add</mat-icon>
+            <span>Add to Queue</span>
           </button>
         </div>
       </form>
     </div>
 
-    <!-- Right Column: Activity & Library -->
-    <div class="activity-column">
+    <!-- Resize Handle -->
+    <div class="resize-handle"
+         [class.dragging]="isResizing"
+         (mousedown)="startResize($event)"></div>
 
-      <!-- Processing Queue -->
-      <div class="activity-section" *ngIf="processingJobs.length > 0 || currentJob">
-        <div class="section-header">
-          <h3>
-            <mat-icon>hourglass_empty</mat-icon>
-            Processing Queue
-          </h3>
-          <div class="queue-badges">
-            <span class="badge active" *ngIf="getActiveJobs().length > 0">
-              {{ getActiveJobs().length }} active
-            </span>
-            <span class="badge complete" *ngIf="getCompletedJobs().length > 0">
-              {{ getCompletedJobs().length }} done
-            </span>
-          </div>
+    <!-- Right Column: Queue Zone -->
+    <div class="queue-column" #queueColumn>
+      <!-- Queue Header -->
+      <div class="queue-header">
+        <h3>
+          <mat-icon>queue</mat-icon>
+          Analysis Queue
+        </h3>
+        <div class="queue-actions">
+          <button mat-raised-button
+                  color="primary"
+                  (click)="startQueue()"
+                  [disabled]="!hasPendingJobs()">
+            <mat-icon>play_arrow</mat-icon>
+            Start Queue
+          </button>
+          <button mat-stroked-button
+                  color="warn"
+                  (click)="clearQueue()"
+                  [disabled]="!hasPendingJobs()">
+            <mat-icon>clear_all</mat-icon>
+            Clear
+          </button>
         </div>
-
-        <!-- Active Jobs -->
-        <div class="jobs-container">
-          <div class="job-card active"
-               *ngFor="let job of getActiveJobs()">
-            <div class="job-status-indicator"></div>
-            <div class="job-icon">
-              <mat-icon [class.spinning]="job.stage !== 'completed' && job.stage !== 'failed'">
-                {{ getJobStatusIcon(job.stage) }}
-              </mat-icon>
-            </div>
-            <div class="job-info">
-              <div class="job-name">{{ job.filename || job.url || 'Processing...' }}</div>
-              <div class="job-status">{{ getJobStatusText(job) }}</div>
-              <div class="job-progress" *ngIf="job.progress !== undefined && job.stage !== 'completed' && job.stage !== 'failed'">
-                <div class="progress-track">
-                  <div class="progress-fill" [style.width.%]="job.progress || 0"></div>
-                </div>
-                <span class="progress-text">{{ job.progress }}%</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Current Job (legacy) -->
-          <div class="job-card active" *ngIf="currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed'">
-            <div class="job-status-indicator"></div>
-            <div class="job-icon">
-              <mat-icon [class.spinning]="currentJob.status !== 'completed' && currentJob.status !== 'failed'">
-                {{ getStatusIcon() }}
-              </mat-icon>
-            </div>
-            <div class="job-info">
-              <div class="job-name">{{ currentJob.input ? (currentJob.input.length > 40 ? '...' + currentJob.input.slice(-40) : currentJob.input) : 'Video Analysis' }}</div>
-              <div class="job-status">{{ currentJob.currentPhase || currentJob.status }}</div>
-              <div class="job-progress" *ngIf="currentJob.progress !== undefined">
-                <div class="progress-track">
-                  <div class="progress-fill" [style.width.%]="currentJob.progress || 0"></div>
-                </div>
-                <span class="progress-text">{{ currentJob.progress }}%</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Completed Job with Actions -->
-          <div class="job-card completed" *ngIf="currentJob && currentJob.status === 'completed'">
-            <div class="job-status-indicator success"></div>
-            <div class="job-icon">
-              <mat-icon>check_circle</mat-icon>
-            </div>
-            <div class="job-info">
-              <div class="job-name">{{ currentJob.input ? (currentJob.input.length > 40 ? '...' + currentJob.input.slice(-40) : currentJob.input) : 'Video Analysis' }}</div>
-              <div class="job-status success">Completed successfully</div>
-              <div class="job-actions">
-                <button mat-button
-                        *ngIf="currentJob.analysisPath"
-                        (click)="openAnalysisFile()"
-                        class="action-btn">
-                  <mat-icon>description</mat-icon>
-                  View Analysis
-                </button>
-                <button mat-button
-                        *ngIf="currentJob.transcriptPath"
-                        (click)="openTranscriptFile()"
-                        class="action-btn">
-                  <mat-icon>subtitles</mat-icon>
-                  View Transcript
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Failed Job -->
-          <div class="job-card failed" *ngIf="currentJob && currentJob.status === 'failed'">
-            <div class="job-status-indicator error"></div>
-            <div class="job-icon">
-              <mat-icon>error</mat-icon>
-            </div>
-            <div class="job-info">
-              <div class="job-name">{{ currentJob.input ? (currentJob.input.length > 40 ? '...' + currentJob.input.slice(-40) : currentJob.input) : 'Video Analysis' }}</div>
-              <div class="job-status error">Failed</div>
-              <div class="error-message" *ngIf="currentJob.error">
-                <mat-icon>warning</mat-icon>
-                {{ currentJob.error }}
-              </div>
-            </div>
-          </div>
-
-          <!-- Completed Jobs from Queue -->
-          <div class="job-card"
-               *ngFor="let job of getCompletedJobs()"
-               [class.completed]="job.stage === 'completed'"
-               [class.failed]="job.stage === 'failed'">
-            <div class="job-status-indicator" [class.success]="job.stage === 'completed'" [class.error]="job.stage === 'failed'"></div>
-            <div class="job-icon">
-              <mat-icon>{{ getJobStatusIcon(job.stage) }}</mat-icon>
-            </div>
-            <div class="job-info">
-              <div class="job-name">{{ job.filename || job.url || 'Unknown' }}</div>
-              <div class="job-status" [class.success]="job.stage === 'completed'" [class.error]="job.stage === 'failed'">
-                {{ getJobStatusText(job) }}
-                <span *ngIf="job.completedAt"> • {{ getRelativeTime(job.completedAt) }}</span>
-              </div>
-              <div class="error-message" *ngIf="job.error">
-                <mat-icon>warning</mat-icon>
-                {{ job.error }}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Clear Completed Button -->
-        <button mat-stroked-button
-                *ngIf="getCompletedJobs().length > 0"
-                (click)="clearCompleted()"
-                class="clear-completed-btn">
-          <mat-icon>clear_all</mat-icon>
-          Clear Completed ({{ getCompletedJobs().length }})
-        </button>
       </div>
 
-      <!-- Video Library Section -->
+      <!-- Queue List -->
+      <div class="queue-list-container">
+        <div class="queue-list" *ngIf="getAllQueueJobs().length > 0">
+          <div *ngFor="let job of getAllQueueJobs()" class="queue-job-wrapper">
+            <div class="queue-job-card"
+                 [class.job-pending]="job.status === 'pending'"
+                 [class.job-active]="isJobActive(job)"
+                 [class.job-failed]="job.stage === 'failed'">
+
+              <!-- Icon -->
+              <div class="job-icon">
+                <mat-spinner *ngIf="job.loading" diameter="24"></mat-spinner>
+                <mat-icon *ngIf="!job.loading && job.status === 'pending'">hourglass_empty</mat-icon>
+                <mat-icon *ngIf="!job.loading && isJobActive(job)" class="spinning">sync</mat-icon>
+                <mat-icon *ngIf="job.stage === 'failed'">error</mat-icon>
+              </div>
+
+              <!-- Content -->
+              <div class="job-content" (click)="toggleJobDetails(job.id)">
+                <span class="job-title">{{ getQueueJobDisplayName(job) }}</span>
+                <span class="job-subtitle">{{ getQueueJobSubtitle(job) }}</span>
+              </div>
+
+              <!-- Progress bar (for active jobs) -->
+              <div class="job-progress-bar" *ngIf="isJobActive(job) && job.progress !== undefined">
+                <mat-progress-bar
+                  mode="determinate"
+                  [value]="job.progress || 0"
+                  color="primary">
+                </mat-progress-bar>
+              </div>
+
+              <!-- Actions -->
+              <div class="job-actions">
+                <button mat-icon-button
+                        *ngIf="job.status === 'pending'"
+                        (click)="removePendingJob(job.id); $event.stopPropagation()"
+                        matTooltip="Remove from queue"
+                        color="warn">
+                  <mat-icon>delete</mat-icon>
+                </button>
+                <button mat-icon-button
+                        *ngIf="isJobActive(job)"
+                        matTooltip="Processing"
+                        disabled>
+                  <mat-icon>sync</mat-icon>
+                </button>
+              </div>
+            </div>
+
+            <!-- Expandable details -->
+            <div class="job-details" *ngIf="isJobDetailsExpanded(job.id)">
+              <div class="details-content">
+                <div class="detail-row" *ngIf="job.input">
+                  <span class="detail-label">Source:</span>
+                  <span class="detail-value">{{ job.input }}</span>
+                </div>
+                <div class="detail-row" *ngIf="job.customInstructions">
+                  <span class="detail-label">Instructions:</span>
+                  <span class="detail-value">{{ job.customInstructions }}</span>
+                </div>
+                <div class="detail-row" *ngIf="job.stage">
+                  <span class="detail-label">Status:</span>
+                  <span class="detail-value">{{ getJobStatusText(job) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div class="queue-empty" *ngIf="getAllQueueJobs().length === 0">
+          <mat-icon>inbox</mat-icon>
+          <h3>No jobs in queue</h3>
+          <p>Add videos using the form on the left to start processing</p>
+        </div>
+      </div>
+
+      <!-- Completed Jobs Accordion -->
+      <mat-accordion *ngIf="getCompletedJobs().length > 0" class="completed-accordion">
+        <mat-expansion-panel [expanded]="isCompletedAccordionExpanded">
+          <mat-expansion-panel-header>
+            <mat-panel-title>
+              <mat-icon>history</mat-icon>
+              Completed ({{ getCompletedJobs().length }})
+            </mat-panel-title>
+          </mat-expansion-panel-header>
+
+          <div class="completed-jobs-list">
+            <div *ngFor="let job of getCompletedJobs()" class="queue-job-wrapper">
+              <div class="queue-job-card job-completed"
+                   [class.job-failed]="job.stage === 'failed'">
+
+                <!-- Icon -->
+                <div class="job-icon">
+                  <mat-icon>{{ job.stage === 'completed' ? 'check_circle' : 'error' }}</mat-icon>
+                </div>
+
+                <!-- Content -->
+                <div class="job-content">
+                  <span class="job-title">{{ job.filename || job.url || 'Unknown' }}</span>
+                  <span class="job-subtitle">
+                    {{ getJobStatusText(job) }}
+                    <span *ngIf="job.completedAt"> • {{ getRelativeTime(job.completedAt) }}</span>
+                  </span>
+                </div>
+
+                <!-- Actions -->
+                <div class="job-actions">
+                  <button mat-icon-button
+                          matTooltip="Remove"
+                          color="warn">
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button mat-stroked-button
+                  class="clear-completed-btn"
+                  (click)="clearCompleted()">
+            <mat-icon>clear_all</mat-icon>
+            Clear Completed ({{ getCompletedJobs().length }})
+          </button>
+        </mat-expansion-panel>
+      </mat-accordion>
+
+      <!-- Quick Select Section -->
       <div class="library-section">
         <div class="section-header">
           <h3>

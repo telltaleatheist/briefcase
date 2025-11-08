@@ -127,10 +127,16 @@ export class LibraryDownloadService {
         await this.transcribeStep(job);
       }
 
-      // Step 4: AI Analysis (if requested and transcription is available)
-      if (shouldAnalyze && job.videoId && job.transcriptFile) {
-        this.logger.log(`[${job.id}] Step 4: AI Analysis`);
-        await this.analyzeStep(job);
+      // Step 4: AI Analysis (if requested and transcription was done or exists)
+      if (shouldAnalyze && job.videoId) {
+        // Check if transcript exists in database
+        const transcript = this.databaseService.getTranscript(job.videoId);
+        if (transcript) {
+          this.logger.log(`[${job.id}] Step 4: AI Analysis`);
+          await this.analyzeStep(job);
+        } else {
+          this.logger.warn(`[${job.id}] Skipping analysis - no transcript found in database`);
+        }
       }
 
       // Mark as completed
@@ -230,24 +236,10 @@ export class LibraryDownloadService {
           // User chose to cancel - fail the job
           throw new Error('User cancelled: Video already exists in library');
         } else if (userAction === 'replace') {
-          // User chose to replace - delete entire database entry and all associated files
+          // User chose to replace - delete entire database entry (transcript/analysis are in DB, will be cascade deleted)
           this.logger.log(`[${job.id}] User chose to replace existing video. Deleting database entry and all data...`);
 
-          const appDataPath = path.join(require('os').homedir(), 'Library', 'Application Support', 'clippy');
-          const transcriptsDir = path.join(appDataPath, 'transcripts');
-          const analysesDir = path.join(appDataPath, 'analyses');
-
-          // Delete transcript files
-          const transcriptSrt = path.join(transcriptsDir, `${importedVideo.id}.srt`);
-          const transcriptTxt = path.join(transcriptsDir, `${importedVideo.id}.txt`);
-          if (fs.existsSync(transcriptSrt)) fs.unlinkSync(transcriptSrt);
-          if (fs.existsSync(transcriptTxt)) fs.unlinkSync(transcriptTxt);
-
-          // Delete analysis file
-          const analysisFile = path.join(analysesDir, `${importedVideo.id}.txt`);
-          if (fs.existsSync(analysisFile)) fs.unlinkSync(analysisFile);
-
-          // Delete the database entry completely
+          // Delete the database entry completely (cascade deletes transcript/analysis)
           await this.databaseService.deleteVideo(importedVideo.id);
           this.logger.log(`[${job.id}] Deleted database entry for video ID: ${importedVideo.id}`);
 
@@ -302,20 +294,42 @@ export class LibraryDownloadService {
     job.currentTask = 'Transcribing audio...';
     this.emitJobUpdate(job);
 
-    if (!job.outputFile) {
-      throw new Error('No output file available for transcription');
+    if (!job.outputFile || !job.videoId) {
+      throw new Error('No output file or video ID available for transcription');
     }
 
-    // Transcribe the video using WhisperService
+    // Transcribe the video using WhisperService (creates temp files)
     const transcriptFile = await this.whisperService.transcribeVideo(job.outputFile, job.id);
 
     if (!transcriptFile) {
       throw new Error('Transcription failed');
     }
 
-    job.transcriptFile = transcriptFile;
+    // Read transcript files
+    const fs = require('fs');
+    const transcriptSrt = fs.readFileSync(transcriptFile, 'utf8');
+    const transcriptTxtFile = transcriptFile.replace('.srt', '.txt');
+    const transcriptText = fs.existsSync(transcriptTxtFile)
+      ? fs.readFileSync(transcriptTxtFile, 'utf8')
+      : transcriptSrt; // Fallback to SRT if .txt doesn't exist
+
+    // Save transcript to database
+    this.logger.log(`[${job.id}] Saving transcript to database for video ${job.videoId}`);
+    this.databaseService.insertTranscript({
+      videoId: job.videoId,
+      plainText: transcriptText,
+      srtFormat: transcriptSrt,
+      whisperModel: 'base', // TODO: Make this configurable
+      language: 'en', // TODO: Make this configurable
+    });
+
+    // Clean up temp transcript files
+    if (fs.existsSync(transcriptFile)) fs.unlinkSync(transcriptFile);
+    if (fs.existsSync(transcriptTxtFile)) fs.unlinkSync(transcriptTxtFile);
+
+    job.transcriptFile = undefined; // No longer storing file path
     job.progress = 100;
-    this.logger.log(`[${job.id}] Transcription completed: ${transcriptFile}`);
+    this.logger.log(`[${job.id}] Transcription saved to database and temp files deleted`);
   }
 
   /**
@@ -327,43 +341,34 @@ export class LibraryDownloadService {
     job.currentTask = 'Running AI analysis...';
     this.emitJobUpdate(job);
 
-    if (!job.videoId || !job.transcriptFile) {
-      throw new Error('No video ID or transcript file available for analysis');
+    if (!job.videoId) {
+      throw new Error('No video ID available for analysis');
     }
 
-    // Run AI analysis using PythonBridgeService
-    // Get the video from database to get its title
+    // Get the video from database
     const video = await this.databaseService.getVideoById(job.videoId);
     if (!video) {
       throw new Error('Video not found in database');
     }
 
-    // Read transcript file (SRT format)
-    const fs = require('fs');
-    const path = require('path');
-    const os = require('os');
-    const transcriptSrt = fs.readFileSync(job.transcriptFile, 'utf8');
+    // Get transcript from database
+    const transcript = this.databaseService.getTranscript(job.videoId);
+    if (!transcript) {
+      throw new Error('Transcript not found in database');
+    }
 
-    // Also read the plain text transcript (same path but .txt extension)
-    const transcriptTxtFile = job.transcriptFile.replace('.srt', '.txt');
-    const transcriptText = fs.existsSync(transcriptTxtFile)
-      ? fs.readFileSync(transcriptTxtFile, 'utf8')
-      : transcriptSrt; // Fallback to SRT if .txt doesn't exist
+    const transcriptText = transcript.plain_text as string;
+    const transcriptSrt = transcript.srt_format as string;
 
     // Parse SRT to segments (needed for timestamp correlation)
     const segments = this.parseSrtToSegments(transcriptSrt);
 
-    // Determine output path for analysis file
-    // Store in ~/Library/Application Support/clippy/analyses/
-    const appDataPath = path.join(os.homedir(), 'Library', 'Application Support', 'clippy');
-    const analysesDir = path.join(appDataPath, 'analyses');
-
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(analysesDir)) {
-      fs.mkdirSync(analysesDir, { recursive: true });
-    }
-
-    const analysisOutputPath = path.join(analysesDir, `${job.videoId}.txt`);
+    // Create temp file for analysis output
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const tmpDir = os.tmpdir();
+    const analysisOutputPath = path.join(tmpDir, `${job.id}_analysis.txt`);
 
     // Get AI config (model and endpoint)
     // For now, we'll use defaults - this should be configurable
@@ -388,10 +393,25 @@ export class LibraryDownloadService {
       String(video.title || job.displayName)  // videoTitle (10th parameter)
     );
 
-    // The result has sections_count and sections properties
-    job.analysisFile = analysisOutputPath;
+    // Read the analysis file
+    const analysisText = fs.readFileSync(analysisOutputPath, 'utf8');
+
+    // Save analysis to database
+    this.logger.log(`[${job.id}] Saving analysis to database for video ${job.videoId}`);
+    this.databaseService.insertAnalysis({
+      videoId: job.videoId,
+      aiAnalysis: analysisText,
+      sectionsCount: analysisResult.sections_count || 0,
+      aiModel: aiModel,
+      aiProvider: 'ollama',
+    });
+
+    // Clean up temp analysis file
+    if (fs.existsSync(analysisOutputPath)) fs.unlinkSync(analysisOutputPath);
+
+    job.analysisFile = undefined; // No longer storing file path
     job.progress = 100;
-    this.logger.log(`[${job.id}] AI analysis completed: ${analysisOutputPath} (${analysisResult.sections_count} sections)`);
+    this.logger.log(`[${job.id}] AI analysis saved to database and temp file deleted (${analysisResult.sections_count} sections)`);
   }
 
   /**

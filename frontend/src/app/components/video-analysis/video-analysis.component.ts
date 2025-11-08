@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, Inject, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, Inject, ViewChild, ChangeDetectorRef, ElementRef, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -10,6 +10,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatExpansionModule, MatExpansionPanel } from '@angular/material/expansion';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
@@ -20,6 +21,7 @@ import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
 import { DatabaseLibraryService, DatabaseVideo } from '../../services/database-library.service';
+import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysis-queue.service';
 import { Subscription } from 'rxjs';
 
 interface AnalysisJob {
@@ -52,6 +54,7 @@ interface AnalysisJob {
     MatSelectModule,
     MatRadioModule,
     MatProgressBarModule,
+    MatProgressSpinnerModule,
     MatExpansionModule,
     MatDividerModule,
     MatTabsModule,
@@ -69,6 +72,12 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   processingJobs: VideoProcessingJob[] = [];
   private jobsSubscription?: Subscription;
 
+  // Pending queue integration
+  pendingJobs: PendingAnalysisJob[] = [];
+  private pendingJobsSubscription?: Subscription;
+  isCompletedAccordionExpanded = false;
+  private expandedJobIds = new Set<string>();
+
   // Video library integration
   libraryVideos: DatabaseVideo[] = [];
   filteredLibraryVideos: DatabaseVideo[] = [];
@@ -77,6 +86,12 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   // Drag and drop
   isDraggingFile = false;
+
+  // Resize functionality
+  @ViewChild('queueColumn') queueColumn?: ElementRef;
+  isResizing = false;
+  private resizeStartX = 0;
+  private resizeStartWidth = 0;
 
   @ViewChild(MatExpansionPanel) advancedPanel!: MatExpansionPanel;
 
@@ -90,6 +105,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     private backendUrlService: BackendUrlService,
     private downloadProgressService: DownloadProgressService,
     private databaseLibraryService: DatabaseLibraryService,
+    private analysisQueueService: AnalysisQueueService,
+    private cdr: ChangeDetectorRef,
     private router: Router,
   ) {
     this.analysisForm = this.createForm();
@@ -99,6 +116,12 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     // Subscribe to download/processing jobs from the unified service
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
       this.processingJobs = Array.from(jobsMap.values());
+    });
+
+    // Subscribe to pending jobs from the queue service
+    this.pendingJobsSubscription = this.analysisQueueService.getPendingJobs().subscribe(jobs => {
+      this.pendingJobs = jobs;
+      this.cdr.detectChanges();
     });
 
     // Check for navigation state with video path
@@ -143,6 +166,9 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     this.stopPolling();
     if (this.jobsSubscription) {
       this.jobsSubscription.unsubscribe();
+    }
+    if (this.pendingJobsSubscription) {
+      this.pendingJobsSubscription.unsubscribe();
     }
   }
 
@@ -222,6 +248,9 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Add job to queue (new behavior - doesn't start immediately)
+   */
   async onSubmit(): Promise<void> {
     if (this.analysisForm.invalid) {
       this.notificationService.warning('Form Incomplete', 'Please fill in all required fields');
@@ -230,125 +259,46 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     const formValue = this.analysisForm.value;
 
-    try {
-      // First, check if a report already exists
-      const checkUrl = await this.backendUrlService.getApiUrl('/analysis/check-existing-report');
-      const existingCheck = await fetch(checkUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: formValue.input,
-          inputType: formValue.inputType,
-          outputPath: formValue.outputPath
-        }),
-      });
+    // Auto-save settings when adding to queue
+    await this.saveSettings();
 
-      if (!existingCheck.ok) {
-        throw new Error('Failed to check for existing report');
+    // Generate display name for the job
+    let displayName = 'Video Analysis';
+    if (formValue.inputType === 'url') {
+      try {
+        const url = new URL(formValue.input);
+        displayName = url.hostname.replace('www.', '') + ' video';
+      } catch {
+        displayName = formValue.input.substring(0, 30) + '...';
       }
-
-      const existingData = await existingCheck.json();
-
-      // If report exists, show dialog
-      if (existingData.exists) {
-        const action = await this.showExistingReportDialog(existingData.reportName, existingData.stats);
-
-        if (action === 'cancel') {
-          return; // User cancelled
-        }
-
-        if (action === 'new') {
-          // Generate new filename with timestamp
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-          const baseName = existingData.reportName.replace('.txt', '');
-          formValue.customReportName = `${baseName}_${timestamp}_${Date.now()}.txt`;
-        }
-
-        // For 'overwrite', we don't need to do anything special - just proceed
-      }
-
-      this.isProcessing = true;
-
-      // Auto-save settings when starting analysis
-      await this.saveSettings();
-
-      // Parse provider and model from combined format (provider:model)
-      const fullModel = formValue.aiModel || '';
-      let provider = 'ollama';
-      let modelName = fullModel;
-
-      if (fullModel.startsWith('claude:')) {
-        provider = 'claude';
-        modelName = fullModel.replace('claude:', '');
-      } else if (fullModel.startsWith('openai:')) {
-        provider = 'openai';
-        modelName = fullModel.replace('openai:', '');
-      } else if (fullModel.startsWith('ollama:')) {
-        provider = 'ollama';
-        modelName = fullModel.replace('ollama:', '');
-      }
-
-      // Prepare request with separated provider and model
-      const requestData = {
-        ...formValue,
-        aiProvider: provider,
-        aiModel: modelName,
-      };
-
-      // Start analysis via API (backend will check model availability)
-      const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
-      const response = await fetch(startUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestData),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-
-        // Check if it's a model unavailability error (HTTP 412)
-        if (response.status === 412 && errorData.instructions) {
-          this.showModelUnavailableDialog(formValue.aiModel, errorData.instructions);
-          this.isProcessing = false;
-          return;
-        }
-
-        throw new Error(errorData.message || 'Failed to start analysis');
-      }
-
-      const result = await response.json();
-
-      // Save job details including form data for display in accordion
-      this.currentJob = {
-        id: result.jobId,
-        status: 'pending',
-        progress: 0,
-        currentPhase: 'Starting analysis...',
-        input: formValue.input,
-        customInstructions: formValue.customInstructions,
-        aiModel: formValue.aiModel,
-        expanded: false
-      };
-
-      // Report to download progress service for unified queue
-      this.downloadProgressService.addOrUpdateAnalysisJob(this.currentJob);
-
-      this.notificationService.success('Analysis Started', 'Video analysis has been queued');
-
-      // Clear form fields
-      this.analysisForm.patchValue({
-        input: '',
-        customInstructions: ''
-      });
-
-      // Start polling for progress updates
-      this.startPolling();
-
-    } catch (error: any) {
-      // Use notification service for detailed error reporting
-      this.notificationService.error('Analysis Start Failed', error.message || 'Failed to start video analysis');
-      this.isProcessing = false;
+    } else {
+      // Extract filename from path
+      const parts = formValue.input.split(/[/\\]/);
+      displayName = parts[parts.length - 1] || 'Local video';
     }
+
+    // Add to pending queue
+    this.analysisQueueService.addPendingJob({
+      input: formValue.input,
+      inputType: formValue.inputType,
+      mode: formValue.mode,
+      aiModel: formValue.aiModel,
+      apiKey: formValue.apiKey,
+      ollamaEndpoint: formValue.ollamaEndpoint,
+      whisperModel: formValue.whisperModel,
+      language: formValue.language,
+      customInstructions: formValue.customInstructions,
+      displayName: displayName,
+      loading: false
+    });
+
+    // Clear form input fields
+    this.analysisForm.patchValue({
+      input: '',
+      customInstructions: ''
+    });
+
+    this.cdr.detectChanges();
   }
 
   /**
@@ -752,12 +702,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     return descriptions[phase] || phase || 'Processing...';
   }
 
-  toggleJobDetails(): void {
-    if (this.currentJob) {
-      this.currentJob.expanded = !this.currentJob.expanded;
-    }
-  }
-
   // Helper methods for unified job queue
   getActiveJobs(): VideoProcessingJob[] {
     return this.processingJobs.filter(job =>
@@ -832,6 +776,203 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Queue management methods
+   */
+
+  /**
+   * Start processing the queue - submit all pending jobs to backend
+   */
+  async startQueue(): Promise<void> {
+    if (!this.hasPendingJobs()) {
+      this.notificationService.toastOnly('info', 'No Jobs', 'No pending jobs to start');
+      return;
+    }
+
+    const jobs = this.analysisQueueService.getCurrentPendingJobs();
+
+    // Start each job sequentially
+    for (const job of jobs) {
+      try {
+        // Parse provider and model from combined format (provider:model)
+        const fullModel = job.aiModel || '';
+        let provider = 'ollama';
+        let modelName = fullModel;
+
+        if (fullModel.startsWith('claude:')) {
+          provider = 'claude';
+          modelName = fullModel.replace('claude:', '');
+        } else if (fullModel.startsWith('openai:')) {
+          provider = 'openai';
+          modelName = fullModel.replace('openai:', '');
+        } else if (fullModel.startsWith('ollama:')) {
+          provider = 'ollama';
+          modelName = fullModel.replace('ollama:', '');
+        }
+
+        // Prepare request with separated provider and model
+        const requestData = {
+          inputType: job.inputType,
+          input: job.input,
+          mode: job.mode,
+          customInstructions: job.customInstructions,
+          aiProvider: provider,
+          aiModel: modelName,
+          apiKey: job.apiKey,
+          ollamaEndpoint: job.ollamaEndpoint,
+          whisperModel: job.whisperModel,
+          language: job.language,
+        };
+
+        // Start analysis via API
+        const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
+        const response = await fetch(startUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestData),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to start analysis');
+        }
+
+        const result = await response.json();
+
+        // Remove from pending queue
+        this.analysisQueueService.removePendingJob(job.id);
+
+        // Add to processing queue
+        const analysisJob: AnalysisJob = {
+          id: result.jobId,
+          status: 'pending',
+          progress: 0,
+          currentPhase: 'Starting analysis...',
+          input: job.input,
+          customInstructions: job.customInstructions,
+          aiModel: job.aiModel,
+          expanded: false
+        };
+
+        this.downloadProgressService.addOrUpdateAnalysisJob(analysisJob);
+
+        // Start polling if not already polling
+        if (!this.pollingInterval) {
+          this.currentJob = analysisJob;
+          this.startPolling();
+        }
+
+      } catch (error: any) {
+        this.notificationService.error('Failed to Start Job', error.message || `Failed to start analysis for ${job.displayName}`);
+      }
+    }
+
+    this.notificationService.toastOnly('success', 'Queue Started', `Started processing ${jobs.length} job(s)`);
+    this.cdr.detectChanges();
+  }
+
+  /**
+   * Remove a pending job from the queue
+   */
+  removePendingJob(jobId: string): void {
+    this.analysisQueueService.removePendingJob(jobId);
+    this.notificationService.toastOnly('success', 'Job Removed', 'Removed from pending queue');
+  }
+
+  /**
+   * Clear all queues (pending and active)
+   */
+  clearQueue(): void {
+    this.analysisQueueService.clearPendingJobs();
+    this.notificationService.toastOnly('success', 'Queue Cleared', 'All pending jobs cleared');
+  }
+
+  /**
+   * Check if there are pending jobs
+   */
+  hasPendingJobs(): boolean {
+    return this.pendingJobs.length > 0;
+  }
+
+  /**
+   * Get all jobs for display (pending + active)
+   */
+  getAllQueueJobs(): any[] {
+    // Combine pending jobs with active processing jobs
+    const pending = this.pendingJobs.map(job => ({
+      ...job,
+      status: 'pending',
+      progress: 0
+    }));
+
+    const active = this.processingJobs.filter(job =>
+      job.stage !== 'completed' && job.stage !== 'failed'
+    );
+
+    return [...pending, ...active];
+  }
+
+  /**
+   * Check if a job is active (currently processing)
+   */
+  isJobActive(job: any): boolean {
+    return job.stage && job.stage !== 'pending' && job.stage !== 'completed' && job.stage !== 'failed';
+  }
+
+  /**
+   * Toggle job details expansion
+   */
+  toggleJobDetails(jobId: string): void {
+    if (this.expandedJobIds.has(jobId)) {
+      this.expandedJobIds.delete(jobId);
+    } else {
+      this.expandedJobIds.add(jobId);
+    }
+  }
+
+  /**
+   * Check if job details are expanded
+   */
+  isJobDetailsExpanded(jobId: string): boolean {
+    return this.expandedJobIds.has(jobId);
+  }
+
+  /**
+   * Get display name for queue job
+   */
+  getQueueJobDisplayName(job: any): string {
+    if (job.displayName) {
+      return job.displayName;
+    }
+    if (job.filename) {
+      return job.filename;
+    }
+    if (job.url) {
+      return job.url.substring(0, 40) + '...';
+    }
+    if (job.input) {
+      const parts = job.input.split(/[/\\]/);
+      return parts[parts.length - 1] || job.input.substring(0, 40);
+    }
+    return 'Unknown';
+  }
+
+  /**
+   * Get subtitle for queue job (mode + model info)
+   */
+  getQueueJobSubtitle(job: any): string {
+    const mode = job.mode === 'transcribe-only' ? 'Transcribe Only' : 'Full Analysis';
+
+    if (job.aiModel) {
+      // Extract model name from format "provider:model"
+      const modelParts = job.aiModel.split(':');
+      const modelName = modelParts.length > 1 ? modelParts[1] : job.aiModel;
+      return `${mode} • ${modelName}`;
+    }
+
+    return mode;
+  }
+
+  /**
    * Load videos from library for quick selection
    */
   async loadLibraryVideos() {
@@ -901,6 +1042,46 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       return new Date(dateString).toLocaleDateString();
     } catch {
       return dateString;
+    }
+  }
+
+  /**
+   * Resize functionality for queue column
+   */
+  startResize(event: MouseEvent): void {
+    event.preventDefault();
+    this.isResizing = true;
+    this.resizeStartX = event.clientX;
+
+    if (this.queueColumn) {
+      this.resizeStartWidth = this.queueColumn.nativeElement.offsetWidth;
+    }
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onMouseMove(event: MouseEvent): void {
+    if (!this.isResizing || !this.queueColumn) {
+      return;
+    }
+
+    event.preventDefault();
+
+    // Calculate the new width (dragging left increases width, dragging right decreases)
+    const deltaX = this.resizeStartX - event.clientX;
+    const newWidth = this.resizeStartWidth + deltaX;
+
+    // Apply min/max constraints
+    const minWidth = 320;
+    const maxWidth = 600;
+    const constrainedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+
+    this.queueColumn.nativeElement.style.width = `${constrainedWidth}px`;
+  }
+
+  @HostListener('document:mouseup')
+  onMouseUp(): void {
+    if (this.isResizing) {
+      this.isResizing = false;
     }
   }
 }

@@ -19,7 +19,8 @@ import {
   DatabaseVideo,
   DatabaseTranscript,
   DatabaseAnalysis,
-  DatabaseAnalysisSection
+  DatabaseAnalysisSection,
+  DatabaseTag
 } from '../../services/database-library.service';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
@@ -56,6 +57,7 @@ export class VideoInfoComponent implements OnInit {
   transcript: DatabaseTranscript | null = null;
   analysis: DatabaseAnalysis | null = null;
   analysisSections: DatabaseAnalysisSection[] = [];
+  tags: DatabaseTag[] = [];
   isLoading = true;
   isProcessing = false;
   processingType: 'transcript' | 'analysis' | null = null;
@@ -64,6 +66,9 @@ export class VideoInfoComponent implements OnInit {
   parsedTranscript: TranscriptEntry[] = [];
   isEditingTitle = false;
   editedTitle = '';
+  isAddingTag = false;
+  newTagName = '';
+  newTagType = 'manual';
 
   constructor(
     private router: Router,
@@ -133,6 +138,9 @@ export class VideoInfoComponent implements OnInit {
         // Load analysis sections
         this.analysisSections = await this.databaseLibraryService.getAnalysisSections(this.video.id);
       }
+
+      // Load tags
+      this.tags = await this.databaseLibraryService.getVideoTags(this.video.id);
 
       // Generate video URL
       this.videoUrl = await this.getVideoUrl();
@@ -546,5 +554,108 @@ export class VideoInfoComponent implements OnInit {
       event.preventDefault();
       this.cancelEditingTitle();
     }
+  }
+
+  /**
+   * Start adding a new tag
+   */
+  startAddingTag() {
+    this.isAddingTag = true;
+    this.newTagName = '';
+    this.newTagType = 'manual';
+  }
+
+  /**
+   * Cancel adding a tag
+   */
+  cancelAddingTag() {
+    this.isAddingTag = false;
+    this.newTagName = '';
+    this.newTagType = 'manual';
+  }
+
+  /**
+   * Save a new tag
+   */
+  async saveTag() {
+    if (!this.video || !this.newTagName.trim()) {
+      this.cancelAddingTag();
+      return;
+    }
+
+    const tagName = this.newTagName.trim();
+
+    try {
+      const result = await this.databaseLibraryService.addVideoTag(
+        this.video.id,
+        tagName,
+        this.newTagType,
+        undefined,
+        'user'
+      );
+
+      if (result.success) {
+        // Reload tags
+        this.tags = await this.databaseLibraryService.getVideoTags(this.video.id);
+        this.notificationService.success('Tag Added', `Tag "${tagName}" has been added`);
+        this.cancelAddingTag();
+      } else {
+        this.notificationService.error('Failed to Add Tag', result.error || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error adding tag:', error);
+      this.notificationService.error('Failed to Add Tag', 'An error occurred');
+    }
+  }
+
+  /**
+   * Delete a tag
+   */
+  async deleteTag(tag: DatabaseTag) {
+    if (!this.video) return;
+
+    try {
+      const result = await this.databaseLibraryService.deleteVideoTag(this.video.id, tag.id);
+
+      if (result.success) {
+        // Remove from local array
+        this.tags = this.tags.filter(t => t.id !== tag.id);
+        this.notificationService.success('Tag Removed', `Tag "${tag.tag_name}" has been removed`);
+      } else {
+        this.notificationService.error('Failed to Remove Tag', result.error || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('Error deleting tag:', error);
+      this.notificationService.error('Failed to Remove Tag', 'An error occurred');
+    }
+  }
+
+  /**
+   * Handle Enter key in tag input
+   */
+  onTagKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.saveTag();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelAddingTag();
+    }
+  }
+
+  /**
+   * Get color for tag type
+   */
+  getTagTypeColor(tagType: string | null): string {
+    const type = tagType?.toLowerCase() || 'manual';
+    const colors: { [key: string]: string } = {
+      'person': '#3b82f6',
+      'people': '#3b82f6',
+      'topic': '#10b981',
+      'manual': '#6b7280',
+      'ai': '#a855f7',
+      'other': '#6b7280'
+    };
+    return colors[type] || colors['manual'];
   }
 }

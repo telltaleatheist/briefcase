@@ -372,16 +372,6 @@ export class FileScannerService {
 
     const clipsRoot = activeLibrary.clipsFolderPath;
 
-    // Calculate current week folder
-    const weekFolder = this.getWeekStartDate();
-    const weekFolderPath = path.join(clipsRoot, weekFolder);
-
-    // Create week folder if it doesn't exist
-    if (!fs.existsSync(weekFolderPath)) {
-      fs.mkdirSync(weekFolderPath, { recursive: true });
-      this.logger.log(`Created weekly folder: ${weekFolderPath}`);
-    }
-
     for (const fullPath of videoPaths) {
       try {
         // Check if file exists
@@ -422,10 +412,21 @@ export class FileScannerService {
             this.logger.log(`Extracted date folder from path: ${dateFolder}`);
           }
         } else {
-          // File is outside clips folder - copy to weekly folder
+          // File is outside clips folder - copy to weekly folder based on file creation date
+          // Use the earlier of birthtime (creation) or mtime (modification)
+          const fileDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+          const weekFolder = this.getWeekStartDate(fileDate);
+          const weekFolderPath = path.join(clipsRoot, weekFolder);
+
+          // Create week folder if it doesn't exist
+          if (!fs.existsSync(weekFolderPath)) {
+            fs.mkdirSync(weekFolderPath, { recursive: true });
+            this.logger.log(`Created weekly folder: ${weekFolderPath}`);
+          }
+
           destinationPath = path.join(weekFolderPath, filename);
           fs.copyFileSync(fullPath, destinationPath);
-          this.logger.log(`Copied ${filename} to ${weekFolder}/`);
+          this.logger.log(`Copied ${filename} to ${weekFolder}/ (based on file date: ${fileDate.toISOString()})`);
           dateFolder = weekFolder;
         }
 

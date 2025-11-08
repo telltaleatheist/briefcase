@@ -12,6 +12,7 @@ import { SharedConfigService } from '../config/shared-config.service';
 import { LibraryService } from '../library/library.service';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { FileScannerService } from '../database/file-scanner.service';
+import { DatabaseService } from '../database/database.service';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -74,6 +75,7 @@ export class AnalysisService {
     private libraryService: LibraryService,
     private libraryManagerService: LibraryManagerService,
     private fileScannerService: FileScannerService,
+    private databaseService: DatabaseService,
   ) {}
 
   /**
@@ -148,31 +150,23 @@ export class AnalysisService {
     if (!job) throw new Error('Job not found');
 
     try {
-      // Determine output paths - use library clips folder if available
-      let baseOutputPath: string;
+      // Determine output paths - use library clips folder for videos only
       let videosPath: string;
       const activeLibrary = this.libraryManagerService.getActiveLibrary();
 
       if (activeLibrary) {
-        // Save to library clips folder
+        // Save videos to library clips folder
         this.logger.log(`Using active library clips folder: ${activeLibrary.clipsFolderPath}`);
-        baseOutputPath = activeLibrary.clipsFolderPath;
-        videosPath = baseOutputPath; // Videos go directly in clips folder
+        videosPath = activeLibrary.clipsFolderPath;
       } else {
         // Fallback to default output path if no library is active
         this.logger.warn('No active library found, using default output path');
-        baseOutputPath = request.outputPath || this.getDefaultOutputPath();
+        const baseOutputPath = request.outputPath || this.getDefaultOutputPath();
         videosPath = path.join(baseOutputPath, 'videos');
       }
 
-      const analysisPath = path.join(baseOutputPath, 'analysis');
-      const transcriptsPath = path.join(analysisPath, 'transcripts');
-      const reportsPath = path.join(analysisPath, 'reports');
-
-      // Create directories
+      // Create videos directory
       await fs.mkdir(videosPath, { recursive: true });
-      await fs.mkdir(transcriptsPath, { recursive: true });
-      await fs.mkdir(reportsPath, { recursive: true });
 
       let videoPath: string;
       let videoTitle: string;
@@ -279,24 +273,9 @@ export class AnalysisService {
         transcriptText = transcriptResult.text;
         transcriptSrt = transcriptResult.srt;
 
-        // Save transcript files
-        const sanitizedTitle = this.sanitizeFilename(videoTitle);
-        transcriptPath = path.join(
-          transcriptsPath,
-          `${sanitizedTitle}.srt`,
-        );
-        txtTranscriptPath = path.join(
-          transcriptsPath,
-          `${sanitizedTitle}.txt`,
-        );
-
-        await fs.writeFile(transcriptPath, transcriptSrt, 'utf-8');
-        await fs.writeFile(txtTranscriptPath, transcriptText, 'utf-8');
-
         const job5 = this.jobs.get(jobId);
         this.updateJob(jobId, {
           progress: 60,
-          transcriptPath,
           timing: { ...job5?.timing, transcriptionEnd: new Date() },
         });
       }
@@ -321,13 +300,12 @@ export class AnalysisService {
           timing: { ...job6?.timing, analysisStart: new Date() },
         });
 
-        // Use custom report name if provided, otherwise use sanitized title
+        // Create temp directory for analysis output
+        const os = require('os');
+        const tmpDir = os.tmpdir();
         const sanitizedTitle = this.sanitizeFilename(videoTitle);
         const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
-        analysisOutputPath = path.join(
-          reportsPath,
-          reportFileName,
-        );
+        analysisOutputPath = path.join(tmpDir, `${jobId}_${reportFileName}`);
 
         // Parse SRT to get segments (needed for timestamp correlation)
         const segments = this.parseSrtToSegments(transcriptSrt);
@@ -353,7 +331,6 @@ export class AnalysisService {
         const job7 = this.jobs.get(jobId);
         this.updateJob(jobId, {
           progress: 95,
-          analysisPath: analysisOutputPath,
           tags: analysisResult?.tags || { people: [], topics: [] },
           timing: { ...job7?.timing, analysisEnd: new Date() },
         });
@@ -397,9 +374,80 @@ export class AnalysisService {
         }
       }
 
-      // Clean up temporary audio file (only if we extracted it)
+      // Auto-import to library if we have an active library and downloaded a video
+      let videoId: string | undefined;
+      if (activeLibrary && request.inputType === 'url' && videoPath) {
+        try {
+          this.logger.log(`Auto-importing video to library: ${videoPath}`);
+          const importResult = await this.fileScannerService.importVideos([videoPath]);
+
+          if (importResult.imported.length > 0) {
+            videoId = importResult.imported[0];
+            this.logger.log(`Successfully imported video to library with ID: ${videoId}`);
+          } else if (importResult.errors.length > 0) {
+            this.logger.warn(`Failed to import video to library: ${importResult.errors.join(', ')}`);
+          }
+        } catch (error) {
+          this.logger.error(`Error during auto-import: ${(error as Error).message}`);
+          // Don't fail the entire job if import fails
+        }
+      } else if (request.inputType === 'file') {
+        // For file input, try to find video in database by path
+        try {
+          const videos = await this.databaseService.getAllVideos();
+          const video = videos.find((v: any) => v.current_path === videoPath || v.file_path === videoPath);
+          if (video) {
+            videoId = video.id;
+            this.logger.log(`Found existing video in database with ID: ${videoId}`);
+          }
+        } catch (error) {
+          this.logger.warn(`Could not find video in database: ${(error as Error).message}`);
+        }
+      }
+
+      // Save transcript and analysis to database if video is in library
+      if (videoId) {
+        try {
+          // Save transcript if we have one (not in analysis-only mode)
+          if (mode !== 'analysis-only' && transcriptText && transcriptSrt) {
+            this.logger.log(`Saving transcript to database for video ${videoId}`);
+            this.databaseService.insertTranscript({
+              videoId,
+              plainText: transcriptText,
+              srtFormat: transcriptSrt,
+              whisperModel: request.whisperModel || 'base',
+              language: request.language || 'en',
+            });
+          }
+
+          // Save analysis if we have one (not in transcribe-only mode)
+          if (mode !== 'transcribe-only' && analysisOutputPath) {
+            const analysisText = await fs.readFile(analysisOutputPath, 'utf-8');
+            this.logger.log(`Saving analysis to database for video ${videoId}`);
+            this.databaseService.insertAnalysis({
+              videoId,
+              aiAnalysis: analysisText,
+              sectionsCount: analysisResult?.sections_count || 0,
+              aiModel: request.aiModel,
+              aiProvider: request.aiProvider || 'ollama',
+            });
+          }
+
+          this.logger.log(`Successfully saved transcript/analysis to database for video ${videoId}`);
+        } catch (error) {
+          this.logger.error(`Failed to save transcript/analysis to database: ${(error as Error).message}`);
+          // Don't fail the entire job if database save fails
+        }
+      } else {
+        this.logger.warn('Video not found in database - transcript/analysis not saved');
+      }
+
+      // Clean up temporary files
       if (audioPath) {
         await fs.unlink(audioPath).catch(() => {});
+      }
+      if (analysisOutputPath) {
+        await fs.unlink(analysisOutputPath).catch(() => {});
       }
 
       // Complete
@@ -414,23 +462,6 @@ export class AnalysisService {
         completedAt: new Date(),
         timing: { ...timing, totalDuration },
       });
-
-      // Auto-import to library if we have an active library and downloaded a video
-      if (activeLibrary && request.inputType === 'url' && videoPath) {
-        try {
-          this.logger.log(`Auto-importing video to library: ${videoPath}`);
-          const importResult = await this.fileScannerService.importVideos([videoPath]);
-
-          if (importResult.imported.length > 0) {
-            this.logger.log(`Successfully imported video to library: ${importResult.imported[0]}`);
-          } else if (importResult.errors.length > 0) {
-            this.logger.warn(`Failed to import video to library: ${importResult.errors.join(', ')}`);
-          }
-        } catch (error) {
-          this.logger.error(`Error during auto-import: ${(error as Error).message}`);
-          // Don't fail the entire job if import fails
-        }
-      }
 
       this.logger.log(`Analysis job ${jobId} completed successfully`);
     } catch (error: any) {

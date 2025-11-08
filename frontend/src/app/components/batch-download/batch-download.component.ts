@@ -16,6 +16,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 
 import { BatchApiService } from '../../services/batch-api.service';
@@ -26,7 +27,7 @@ import { NotificationService } from '../../services/notification.service';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
-import { Subscription, catchError, of, interval } from 'rxjs';
+import { Subscription, catchError, of, interval, forkJoin } from 'rxjs';
 import { ErrorDialogComponent } from '../error-dialog/error-dialog.component';
 
 @Component({
@@ -49,7 +50,9 @@ import { ErrorDialogComponent } from '../error-dialog/error-dialog.component';
     MatListModule,
     MatChipsModule,
     MatDividerModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatDialogModule,
+    MatProgressSpinnerModule
   ],
   templateUrl: './batch-download.component.html',
   styleUrls: ['./batch-download.component.scss']
@@ -91,6 +94,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   pendingJobs: PendingJob[] = [];
   private pendingJobsSubscription: Subscription | null = null;
   private pendingJobIdCounter = 0;
+
+  // Track if we're waiting to start the queue
+  private isWaitingToStart = false;
+  private startQueueSubscription: Subscription | null = null;
 
   constructor(
     private fb: FormBuilder,
@@ -363,6 +370,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
     if (this.pendingJobsSubscription) {
       this.pendingJobsSubscription.unsubscribe();
+    }
+
+    if (this.startQueueSubscription) {
+      this.startQueueSubscription.unsubscribe();
     }
   }
   
@@ -1021,7 +1032,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Add each URL to pending jobs and fetch metadata
+    // Add all URLs to pending jobs immediately (no metadata fetching)
     urls.forEach(url => {
       const downloadOptions: DownloadOptions = {
         url,
@@ -1037,47 +1048,20 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         useCompression: this.batchForm.get('useCompression')?.value,
         compressionLevel: this.batchForm.get('compressionLevel')?.value,
         transcribeVideo: this.batchForm.get('transcribeVideo')?.value,
-        displayName: this.getShortUrl(url)
+        displayName: this.getShortUrl(url) // Will be updated by backend during download
       };
 
-      // Add job to the service with temporary display name
-      const jobId = this.batchStateService.addPendingJob({
+      // Add job to the service with URL as temporary display name
+      this.batchStateService.addPendingJob({
         url,
         displayName: this.getShortUrl(url),
         uploadDate: '',
         options: downloadOptions,
-        loading: true
+        loading: false // No loading state needed since we're not fetching
       });
-
-      // Fetch video info to get title and upload date
-      this.batchApiService.getVideoInfo(url)
-        .pipe(
-          catchError(err => {
-            console.error('Error fetching video info:', err);
-            // Keep the short URL as display name if fetch fails
-            this.batchStateService.updatePendingJob(jobId, { loading: false });
-            return of(null);
-          })
-        )
-        .subscribe((info: VideoInfo | null) => {
-          if (info && info.title) {
-            const sanitizedTitle = this.generateSanitizedFilename(info.title);
-            this.batchStateService.updatePendingJob(jobId, {
-              loading: false,
-              displayName: sanitizedTitle,
-              uploadDate: info.uploadDate || '',
-              options: {
-                ...downloadOptions,
-                displayName: sanitizedTitle
-              }
-            });
-          } else {
-            this.batchStateService.updatePendingJob(jobId, { loading: false });
-          }
-        });
     });
 
-    this.notificationService.toastOnly('success', 'URLs Added', `Added ${urls.length} video(s) to pending queue`);
+    // Don't show notification when adding URLs to pending queue - only notify when queue starts
     this.multiUrlText = ''; // Clear the textarea
     this.cdr.detectChanges(); // Update the UI to show pending jobs
   }
@@ -1086,16 +1070,41 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    * Start processing the queue - submit all pending jobs to backend
    */
   startQueue(): void {
+    // If already waiting to start, cancel the operation
+    if (this.isWaitingToStart) {
+      this.cancelStartQueue();
+      return;
+    }
+
     if (!this.hasPendingJobs()) {
       this.notificationService.toastOnly('info', 'No Jobs', 'No pending jobs to start');
       return;
     }
 
+    // Check if any jobs are still loading metadata
+    if (this.isLoadingPendingJobs()) {
+      // Set waiting flag and let the user know
+      this.isWaitingToStart = true;
+      this.notificationService.toastOnly('info', 'Waiting', 'Waiting for video metadata to load. Click again to cancel.');
+      this.cdr.detectChanges();
+      return;
+    }
+
+    // All metadata is loaded, start immediately
+    this.executeStartQueue();
+  }
+
+  /**
+   * Execute the actual queue start operation
+   */
+  private executeStartQueue(): void {
+    this.isWaitingToStart = false;
+
     // Extract download options from pending jobs
     const downloadOptions: DownloadOptions[] = this.pendingJobs.map(job => job.options);
 
     // Submit all pending jobs to backend
-    this.batchApiService.addMultipleToBatchQueue(downloadOptions).subscribe({
+    this.startQueueSubscription = this.batchApiService.addMultipleToBatchQueue(downloadOptions).subscribe({
       next: (response) => {
         this.notificationService.toastOnly('success', 'Queue Started', `Started processing ${response.jobIds.length} job(s)`);
 
@@ -1105,12 +1114,30 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         // Refresh to show jobs in the actual queue
         this.refreshBatchStatus();
         this.cdr.detectChanges();
+        this.startQueueSubscription = null;
       },
       error: (error) => {
         console.error('Error starting queue:', error);
         this.notificationService.error('Queue Error', 'Failed to start processing queue');
+        this.isWaitingToStart = false;
+        this.startQueueSubscription = null;
       }
     });
+  }
+
+  /**
+   * Cancel the start queue operation
+   */
+  private cancelStartQueue(): void {
+    this.isWaitingToStart = false;
+
+    if (this.startQueueSubscription) {
+      this.startQueueSubscription.unsubscribe();
+      this.startQueueSubscription = null;
+    }
+
+    this.notificationService.toastOnly('info', 'Cancelled', 'Queue start cancelled');
+    this.cdr.detectChanges();
   }
 
   /**
@@ -1118,6 +1145,27 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    */
   hasPendingJobs(): boolean {
     return this.pendingJobs.length > 0;
+  }
+
+  /**
+   * Check if any pending jobs are currently loading metadata
+   */
+  isLoadingPendingJobs(): boolean {
+    return this.pendingJobs.some(job => job.loading);
+  }
+
+  /**
+   * Check if the queue can be started (has pending jobs)
+   */
+  canStartQueue(): boolean {
+    return this.hasPendingJobs();
+  }
+
+  /**
+   * Check if we're waiting to start the queue
+   */
+  isWaitingToStartQueue(): boolean {
+    return this.isWaitingToStart;
   }
 
   /**
@@ -1150,7 +1198,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
               // Remove from order tracking
               this.originalJobOrder = this.originalJobOrder.filter(id => id !== job.id);
               this.cdr.detectChanges();
-              this.notificationService.toastOnly('success', 'Job Removed', 'Removed from queue');
+              // Don't show notification when removing completed/failed jobs
             }
           } else {
             this.notificationService.toastOnly('error', 'Remove Failed', 'Failed to remove job');

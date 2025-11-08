@@ -868,11 +868,20 @@ export class DownloaderService implements OnModuleInit {
         .input(url)
         .addOption('--dump-json')
         .addOption('--no-playlist')
-        .addOption('--flat-playlist');
+        .addOption('--skip-download')
+        .addOption('--no-warnings')
+        .addOption('--no-check-certificates')
+        .addOption('--extractor-retries', '1')
+        .addOption('--socket-timeout', '10');
 
       // For YouTube URLs, use android client for better reliability
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
         ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+      }
+
+      // For Twitter/X, use faster syndication API
+      if (url.includes('twitter.com') || url.includes('x.com')) {
+        ytDlpManager.addOption('--extractor-args', 'twitter:api=syndication');
       }
 
       // Execute the command and get output
@@ -884,7 +893,29 @@ export class DownloaderService implements OnModuleInit {
 
       try {
         // Parse the JSON output
-        const videoInfo = JSON.parse(output.trim());
+        // yt-dlp may output multiple JSON objects (one per line), so we need to handle this
+        const trimmedOutput = output.trim();
+
+        // Split by newlines and get the first valid JSON object
+        const lines = trimmedOutput.split('\n');
+        let videoInfo = null;
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith('{')) {
+            try {
+              videoInfo = JSON.parse(trimmedLine);
+              break; // Use the first valid JSON object
+            } catch (e) {
+              // Try next line
+              continue;
+            }
+          }
+        }
+
+        if (!videoInfo) {
+          throw new Error('No valid JSON found in yt-dlp output');
+        }
         
         // Format the upload date if available
         let formattedDate = '';

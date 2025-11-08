@@ -121,6 +121,20 @@
         <mat-icon>data_usage</mat-icon>
         Size {{ sortBy === 'size' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
       </button>
+      <button mat-stroked-button
+              (click)="changeSortBy('no-transcript')"
+              [color]="sortBy === 'no-transcript' ? 'primary' : undefined"
+              matTooltip="Sort by missing transcription">
+        <mat-icon>subtitles_off</mat-icon>
+        No Transcript {{ sortBy === 'no-transcript' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+      </button>
+      <button mat-stroked-button
+              (click)="changeSortBy('no-analysis')"
+              [color]="sortBy === 'no-analysis' ? 'primary' : undefined"
+              matTooltip="Sort by missing analysis">
+        <mat-icon>psychology</mat-icon>
+        No Analysis {{ sortBy === 'no-analysis' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+      </button>
     </div>
   </div>
 
@@ -195,15 +209,33 @@
         </span>
       </span>
     </div>
-    <button
-      mat-raised-button
-      color="primary"
-      *ngIf="getSelectedCount() > 0"
-      (click)="analyzeSelected()"
-      matTooltip="Analyze selected videos">
-      <mat-icon>analytics</mat-icon>
-      Analyze Selected ({{ getSelectedCount() }})
-    </button>
+    <div class="selection-actions">
+      <button
+        mat-stroked-button
+        (click)="selectAllMissingTranscript()"
+        matTooltip="Select all videos missing transcription"
+        *ngIf="filteredVideos.length > 0">
+        <mat-icon>subtitles_off</mat-icon>
+        Select Missing Transcript
+      </button>
+      <button
+        mat-stroked-button
+        (click)="selectAllMissingAnalysis()"
+        matTooltip="Select all videos missing AI analysis"
+        *ngIf="filteredVideos.length > 0">
+        <mat-icon>psychology</mat-icon>
+        Select Missing Analysis
+      </button>
+      <button
+        mat-raised-button
+        color="primary"
+        *ngIf="getSelectedCount() > 0"
+        (click)="analyzeSelected()"
+        matTooltip="Analyze selected videos">
+        <mat-icon>analytics</mat-icon>
+        Analyze Selected ({{ getSelectedCount() }})
+      </button>
+    </div>
   </div>
 
   <!-- Loading spinner (only show when truly loading with no videos yet) -->
@@ -219,7 +251,11 @@
     class="video-list-viewport">
 
     <div *cdkVirtualFor="let video of filteredVideos" class="video-card-wrapper">
-      <div class="video-card" [class.long-video]="isLongVideo(video)">
+      <div class="video-card"
+           [class.long-video]="isLongVideo(video)"
+           [class.missing-transcript]="!video.has_transcript"
+           [class.missing-analysis]="!video.has_analysis"
+           [class.missing-both]="!video.has_transcript && !video.has_analysis">
         <!-- Checkbox on the left -->
         <div class="card-checkbox" (click)="$event.stopPropagation()">
           <mat-checkbox

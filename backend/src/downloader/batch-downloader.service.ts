@@ -209,6 +209,9 @@ export class BatchDownloaderService {
     this.jobStateManager.updateJobStatus(job, 'downloading', 'Initializing download...');
 
     try {
+      // Start fetching metadata in the background (non-blocking)
+      this.fetchMetadataInBackground(job);
+
       // Start download with downloaderService
       this.logger.log(`Starting download for job ${job.id}: ${job.url}`);
 
@@ -630,5 +633,119 @@ export class BatchDownloaderService {
   // Emit queue update event
   private emitQueueUpdate(): void {
     this.eventService.emitBatchQueueUpdated(this.getBatchStatus());
+  }
+
+  /**
+   * Fetch metadata in the background with a 30-second timeout
+   * Updates the job's displayName when metadata is retrieved
+   */
+  private async fetchMetadataInBackground(job: Job): Promise<void> {
+    const METADATA_TIMEOUT = 30000; // 30 seconds
+
+    this.logger.log(`Starting background metadata fetch for job ${job.id}`);
+
+    // Create a timeout promise
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        this.logger.warn(`Metadata fetch timeout for job ${job.id} after 30 seconds`);
+        resolve(null);
+      }, METADATA_TIMEOUT);
+    });
+
+    // Create metadata fetch promise
+    const metadataPromise = this.downloaderService.getVideoInfo(job.url)
+      .then(info => {
+        this.logger.log(`Metadata fetched successfully for job ${job.id}: ${info.title}`);
+        return info;
+      })
+      .catch(error => {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(`Error fetching metadata for job ${job.id}: ${errorMessage}`);
+        return null;
+      });
+
+    // Race between timeout and metadata fetch
+    const result = await Promise.race([metadataPromise, timeoutPromise]);
+
+    // Update job displayName if we got metadata
+    if (result && result.title) {
+      const oldDisplayName = job.displayName;
+
+      // Create a display name with upload date if available
+      if (result.uploadDate) {
+        job.displayName = `${result.uploadDate} ${result.title}`;
+      } else {
+        job.displayName = result.title;
+      }
+
+      this.logger.log(`Updated job ${job.id} displayName from "${oldDisplayName}" to "${job.displayName}"`);
+
+      // Update the options displayName as well
+      job.options.displayName = job.displayName;
+
+      // If download is complete and we have an output file, rename it
+      if (job.outputFile && job.status !== 'downloading') {
+        await this.renameDownloadedFile(job, result);
+      }
+
+      // Emit queue update to notify frontend
+      this.emitQueueUpdate();
+    } else {
+      this.logger.log(`No metadata retrieved for job ${job.id}, keeping temporary name`);
+    }
+  }
+
+  /**
+   * Rename the downloaded file based on metadata
+   */
+  private async renameDownloadedFile(job: Job, metadata: any): Promise<void> {
+    if (!job.outputFile) {
+      this.logger.warn(`Cannot rename file for job ${job.id}: no output file`);
+      return;
+    }
+
+    try {
+      const fs = require('fs');
+      const path = require('path');
+
+      // Check if file still exists
+      if (!fs.existsSync(job.outputFile)) {
+        this.logger.warn(`Cannot rename file for job ${job.id}: file does not exist at ${job.outputFile}`);
+        return;
+      }
+
+      // Create new filename based on metadata
+      const dir = path.dirname(job.outputFile);
+      const ext = path.extname(job.outputFile);
+
+      let newFilename: string;
+      if (metadata.uploadDate) {
+        newFilename = `${metadata.uploadDate} ${metadata.title}${ext}`;
+      } else {
+        newFilename = `${metadata.title}${ext}`;
+      }
+
+      // Sanitize filename (remove invalid characters)
+      newFilename = newFilename.replace(/[<>:"/\\|?*]/g, '_');
+
+      const newPath = path.join(dir, newFilename);
+
+      // Only rename if the new path is different
+      if (job.outputFile !== newPath) {
+        this.logger.log(`Renaming file for job ${job.id}:`);
+        this.logger.log(`  From: ${job.outputFile}`);
+        this.logger.log(`  To: ${newPath}`);
+
+        fs.renameSync(job.outputFile, newPath);
+        job.outputFile = newPath;
+
+        this.logger.log(`File renamed successfully for job ${job.id}`);
+        this.emitQueueUpdate();
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Error renaming file for job ${job.id}: ${errorMessage}`);
+      // Don't throw - the download is still successful even if rename fails
+    }
   }
 }

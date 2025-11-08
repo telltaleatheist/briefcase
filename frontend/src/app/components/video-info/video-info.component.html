@@ -173,6 +173,75 @@
             </div>
           </div>
         </mat-card>
+
+        <!-- Tags Section -->
+        <h2 class="tags-header">
+          Tags
+          <button mat-icon-button
+                  (click)="startAddingTag()"
+                  class="add-tag-button"
+                  matTooltip="Add tag">
+            <mat-icon>add</mat-icon>
+          </button>
+        </h2>
+        <mat-card class="tags-card">
+          <!-- Tag Input -->
+          <div *ngIf="isAddingTag" class="tag-input-container">
+            <mat-form-field appearance="outline" class="tag-name-input">
+              <mat-label>Tag Name</mat-label>
+              <input matInput
+                     [(ngModel)]="newTagName"
+                     (keydown)="onTagKeydown($event)"
+                     placeholder="Enter tag name"
+                     autofocus>
+            </mat-form-field>
+            <mat-form-field appearance="outline" class="tag-type-select">
+              <mat-label>Type</mat-label>
+              <select matNativeControl [(ngModel)]="newTagType">
+                <option value="manual">Manual</option>
+                <option value="person">Person</option>
+                <option value="topic">Topic</option>
+                <option value="other">Other</option>
+              </select>
+            </mat-form-field>
+            <button mat-icon-button
+                    (click)="saveTag()"
+                    color="primary"
+                    matTooltip="Save tag">
+              <mat-icon>check</mat-icon>
+            </button>
+            <button mat-icon-button
+                    (click)="cancelAddingTag()"
+                    matTooltip="Cancel">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+
+          <!-- Tags Display -->
+          <div class="tags-list" *ngIf="tags.length > 0">
+            <div class="tag-chip" *ngFor="let tag of tags"
+                 [style.border-color]="getTagTypeColor(tag.tag_type)">
+              <div class="tag-info">
+                <span class="tag-name">{{ tag.tag_name }}</span>
+                <span class="tag-type" [style.color]="getTagTypeColor(tag.tag_type)">
+                  {{ tag.tag_type || 'manual' }}
+                </span>
+              </div>
+              <button mat-icon-button
+                      (click)="deleteTag(tag)"
+                      class="delete-tag-button"
+                      matTooltip="Remove tag">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div class="tags-empty" *ngIf="tags.length === 0 && !isAddingTag">
+            <mat-icon>label</mat-icon>
+            <p>No tags yet. Click the + button to add tags.</p>
+          </div>
+        </mat-card>
       </div>
     </div>
 

@@ -101,7 +101,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Search and filter
   searchQuery = '';
-  sortBy: 'date' | 'filename' | 'size' = 'date';
+  sortBy: 'date' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date';
   sortOrder: 'asc' | 'desc' = 'desc';
 
   // Track open video player dialog to prevent multiple instances
@@ -608,13 +608,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Change sort criteria
    */
-  changeSortBy(sortBy: 'date' | 'filename' | 'size') {
+  changeSortBy(sortBy: 'date' | 'filename' | 'size' | 'no-transcript' | 'no-analysis') {
     if (this.sortBy === sortBy) {
       // Toggle order if same criteria
       this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
     } else {
       this.sortBy = sortBy;
-      this.sortOrder = 'desc';
+      // For missing transcript/analysis, default to showing missing first (desc)
+      this.sortOrder = (sortBy === 'no-transcript' || sortBy === 'no-analysis') ? 'desc' : 'desc';
     }
     this.applyFiltersAndSort();
   }
@@ -960,6 +961,40 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.filteredVideos.forEach(video => this.selectedVideos.add(video.id));
       this.isAllSelected = true;
     }
+  }
+
+  /**
+   * Select all videos missing transcription
+   */
+  selectAllMissingTranscript() {
+    // Clear current selection
+    this.selectedVideos.clear();
+
+    // Select all videos without transcription
+    this.filteredVideos.forEach(video => {
+      if (!video.has_transcript) {
+        this.selectedVideos.add(video.id);
+      }
+    });
+
+    this.updateAllSelectedState();
+  }
+
+  /**
+   * Select all videos missing AI analysis
+   */
+  selectAllMissingAnalysis() {
+    // Clear current selection
+    this.selectedVideos.clear();
+
+    // Select all videos without analysis
+    this.filteredVideos.forEach(video => {
+      if (!video.has_analysis) {
+        this.selectedVideos.add(video.id);
+      }
+    });
+
+    this.updateAllSelectedState();
   }
 
   private updateAllSelectedState() {

@@ -224,6 +224,104 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/videos/:id/tags
+   * Get all tags for a video
+   */
+  @Get('videos/:id/tags')
+  getVideoTags(@Param('id') videoId: string) {
+    const tags = this.databaseService.getTags(videoId);
+    return {
+      tags,
+      count: tags.length
+    };
+  }
+
+  /**
+   * POST /api/database/videos/:id/tags
+   * Add a tag to a video
+   */
+  @Post('videos/:id/tags')
+  async addVideoTag(
+    @Param('id') videoId: string,
+    @Body() body: {
+      tagName: string;
+      tagType?: string;
+      confidence?: number;
+      source?: string
+    }
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Validate tag name
+      if (!body.tagName || typeof body.tagName !== 'string' || body.tagName.trim() === '') {
+        return {
+          success: false,
+          error: 'Valid tag name is required'
+        };
+      }
+
+      // Insert tag
+      const tagId = this.databaseService.insertTag(
+        videoId,
+        body.tagName.trim(),
+        body.tagType || 'manual',
+        body.confidence,
+        body.source || 'user'
+      );
+
+      this.logger.log(`Added tag "${body.tagName}" to video ${videoId}`);
+
+      return {
+        success: true,
+        tagId,
+        message: 'Tag added successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to add tag to video ${videoId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to add tag'
+      };
+    }
+  }
+
+  /**
+   * DELETE /api/database/videos/:id/tags/:tagId
+   * Delete a specific tag from a video
+   */
+  @Delete('videos/:id/tags/:tagId')
+  async deleteVideoTag(
+    @Param('id') videoId: string,
+    @Param('tagId') tagId: string
+  ) {
+    try {
+      // Delete the tag
+      this.databaseService.deleteTag(tagId);
+
+      this.logger.log(`Deleted tag ${tagId} from video ${videoId}`);
+
+      return {
+        success: true,
+        message: 'Tag deleted successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to delete tag ${tagId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to delete tag'
+      };
+    }
+  }
+
+  /**
    * DELETE /api/database/videos/:id/transcript
    * Delete transcript for a video
    */

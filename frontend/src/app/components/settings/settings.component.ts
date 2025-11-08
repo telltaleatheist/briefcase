@@ -98,8 +98,7 @@ export class SettingsComponent implements OnInit {
       fixAspectRatio: [true],
       browser: ['auto'],
       theme: ['light'],
-      // Batch processing settings
-      batchProcessingEnabled: [true],
+      // Batch processing settings (batch downloads always enabled)
       maxConcurrentDownloads: [2, [Validators.required, Validators.min(1), Validators.max(10)]]
     });
   }
@@ -115,7 +114,6 @@ export class SettingsComponent implements OnInit {
       browser: settings.browser,
       theme: settings.theme,
       // Batch processing settings
-      batchProcessingEnabled: settings.batchProcessingEnabled !== undefined ? settings.batchProcessingEnabled : true,
       maxConcurrentDownloads: settings.maxConcurrentDownloads || 2
     });
   }
@@ -226,7 +224,12 @@ export class SettingsComponent implements OnInit {
   }
 
   saveSettings(): void {
-    this.settingsService.updateSettings(this.settingsForm.value);
+    // Always enable batch processing (it's a core feature)
+    const settings = {
+      ...this.settingsForm.value,
+      batchProcessingEnabled: true
+    };
+    this.settingsService.updateSettings(settings);
     // Badge only - no toast for expected save action
     this.notificationService.success('Settings Saved', 'Your preferences have been updated successfully', false);
   }
