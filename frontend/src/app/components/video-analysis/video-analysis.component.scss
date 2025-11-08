@@ -132,9 +132,10 @@
 }
 
 // ========================================
-// Source Toggle
+// Source Toggle & Mode Toggle
 // ========================================
-.source-toggle {
+.source-toggle,
+.mode-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
@@ -479,6 +480,7 @@
 
 .modern-textarea {
   width: 100%;
+  max-width: 600px;
   padding: 14px 16px;
   background: var(--bg-card);
   border: 2px solid var(--border-color);

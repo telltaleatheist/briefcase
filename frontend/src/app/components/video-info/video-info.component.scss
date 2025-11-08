@@ -791,8 +791,8 @@
 }
 
 // Explicit dark theme class support (in addition to prefers-color-scheme)
-:host-context(.dark-theme),
-:host-context(.theme-dark) {
+:host-context([data-theme="dark"]),
+:host-context(.dark-theme) {
   .video-info-container {
     --background: #0f0f0f;
     --surface: #1e1e1e;
@@ -872,8 +872,8 @@
 }
 
 // Explicit light theme class support
-:host-context(.light-theme),
-:host-context(.theme-light) {
+:host-context([data-theme="light"]),
+:host-context(.light-theme) {
   .video-info-container {
     --background: #ffffff;
     --surface: #ffffff;

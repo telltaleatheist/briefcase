@@ -294,7 +294,13 @@
   }
 }
 
-[data-theme="dark"] .panel-title, .dark-theme .panel-title {color: var(--primary-orange) !important;}
+:host-context([data-theme="dark"]),
+:host-context(.dark-theme) {
+  .panel-title {
+    color: var(--primary-orange) !important;
+  }
+}
+
 @media (max-width: 768px) {
   .panel-content {padding: 0.75rem;}
 }

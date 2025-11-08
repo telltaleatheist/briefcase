@@ -1,1 +1,90 @@
-<p>download-queue works!</p>
+<div class="download-queue-container">
+  <button class="queue-button" (click)="togglePanel()" [class.has-active]="hasActiveItems">
+    <svg class="download-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor"/>
+    </svg>
+    <span class="badge" *ngIf="activeItemsCount > 0">{{ activeItemsCount > 99 ? '99+' : activeItemsCount }}</span>
+  </button>
+
+  <div class="queue-panel" *ngIf="isOpen">
+    <div class="panel-header">
+      <h3>Processing Queue</h3>
+      <div class="queue-badges">
+        <span class="badge-small active" *ngIf="getActiveJobs().length > 0">
+          {{ getActiveJobs().length }} active
+        </span>
+        <span class="badge-small complete" *ngIf="getCompletedJobs().length > 0">
+          {{ getCompletedJobs().length }} done
+        </span>
+      </div>
+    </div>
+
+    <div class="jobs-list" *ngIf="processingJobs.length > 0">
+      <!-- Active Jobs -->
+      <div
+        class="job-item active"
+        *ngFor="let job of getActiveJobs()"
+      >
+        <div class="job-status-indicator"></div>
+        <div class="job-icon">
+          <mat-icon [class.spinning]="job.stage !== 'completed' && job.stage !== 'failed'">
+            {{ getJobStatusIcon(job.stage) }}
+          </mat-icon>
+        </div>
+        <div class="job-content">
+          <div class="job-header">
+            <span class="job-name">{{ job.filename || job.url || 'Processing...' }}</span>
+            <span class="job-time" *ngIf="job.startedAt">{{ getRelativeTime(job.startedAt) }}</span>
+          </div>
+          <p class="job-status-text">{{ getJobStatusText(job) }}</p>
+          <div class="job-progress" *ngIf="job.progress !== undefined && job.stage !== 'completed' && job.stage !== 'failed'">
+            <div class="progress-track">
+              <div class="progress-fill" [style.width.%]="job.progress || 0"></div>
+            </div>
+            <span class="progress-text">{{ job.progress }}%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Completed Jobs -->
+      <div
+        class="job-item"
+        *ngFor="let job of getCompletedJobs()"
+        [class.completed]="job.stage === 'completed'"
+        [class.failed]="job.stage === 'failed'"
+      >
+        <div class="job-status-indicator" [class.success]="job.stage === 'completed'" [class.error]="job.stage === 'failed'"></div>
+        <div class="job-icon">
+          <mat-icon>{{ getJobStatusIcon(job.stage) }}</mat-icon>
+        </div>
+        <div class="job-content">
+          <div class="job-header">
+            <span class="job-name">{{ job.filename || job.url || 'Unknown' }}</span>
+            <span class="job-time" *ngIf="job.completedAt">{{ getRelativeTime(job.completedAt) }}</span>
+          </div>
+          <p class="job-status-text" [class.success]="job.stage === 'completed'" [class.error]="job.stage === 'failed'">
+            {{ getJobStatusText(job) }}
+          </p>
+          <div class="error-message" *ngIf="job.error">
+            <mat-icon>warning</mat-icon>
+            {{ job.error }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty-state" *ngIf="processingJobs.length === 0">
+      <svg class="empty-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor" opacity="0.3"/>
+      </svg>
+      <p>No processing jobs</p>
+    </div>
+
+    <div class="panel-footer" *ngIf="getCompletedJobs().length > 0">
+      <button class="clear-completed-btn" (click)="clearCompleted()">
+        <mat-icon>clear_all</mat-icon>
+        Clear Completed ({{ getCompletedJobs().length }})
+      </button>
+    </div>
+  </div>
+</div>

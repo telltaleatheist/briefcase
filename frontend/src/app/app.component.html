@@ -16,10 +16,6 @@
     <mat-sidenav #sidenav mode="side" opened class="app-sidenav">
       <div class="sidenav-content">
         <mat-nav-list class="nav-list">
-          <a mat-list-item routerLink="/batch" routerLinkActive="active-link">
-            <mat-icon matListItemIcon>download</mat-icon>
-            <span matListItemTitle>Batch Downloads</span>
-          </a>
           <a mat-list-item routerLink="/library" routerLinkActive="active-link" (click)="onLibraryClick()">
             <mat-icon matListItemIcon>video_library</mat-icon>
             <span matListItemTitle>Video Library</span>
@@ -27,6 +23,10 @@
           <a mat-list-item routerLink="/analysis" routerLinkActive="active-link">
             <mat-icon matListItemIcon>psychology</mat-icon>
             <span matListItemTitle>Video Analysis</span>
+          </a>
+          <a mat-list-item routerLink="/batch" routerLinkActive="active-link">
+            <mat-icon matListItemIcon>download</mat-icon>
+            <span matListItemTitle>Batch Downloads</span>
           </a>
           <a mat-list-item routerLink="/video-editor" routerLinkActive="active-link">
             <mat-icon matListItemIcon>movie_edit</mat-icon>

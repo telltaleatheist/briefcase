@@ -214,6 +214,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
+    // Set up keyboard shortcuts immediately so spacebar works from the start
+    this.setupKeyboardShortcuts();
+
     // Initialize Video.js player after view is ready
     setTimeout(() => {
       this.initializePlayer();
@@ -511,9 +514,6 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         e.preventDefault();
         return false;
       });
-
-      // Handle keyboard shortcuts
-      this.setupKeyboardShortcuts();
 
     } catch (error) {
       console.error('Failed to initialize player:', error);

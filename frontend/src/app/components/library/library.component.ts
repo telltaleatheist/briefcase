@@ -1284,76 +1284,28 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Transcribe video (no download, just transcribe existing file)
    */
   async downloadAndTranscribe(video: DatabaseVideo) {
-    try {
-      this.notificationService.toastOnly('info', 'Transcription Started', `Transcribing ${video.filename}`);
-
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [video.id],
-        transcribeOnly: true
-      });
-
-      this.startProgressPolling();
-    } catch (error: any) {
-      console.error('Transcription failed:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Transcription Failed',
-        error.error?.message || 'Failed to start transcription'
-      );
-    }
+    // Navigate to video analysis page with video pre-filled and transcribe-only mode
+    this.router.navigate(['/analysis'], {
+      state: {
+        videoPath: video.current_path,
+        videoTitle: video.filename,
+        mode: 'transcribe-only'
+      }
+    });
   }
 
   /**
    * AI analyze video (no download, just analyze existing file)
    */
   async downloadAndAnalyze(video: DatabaseVideo) {
-    // Open dialog to select AI provider and options
-    const { AnalyzeSelectedDialogComponent } = await import('./analyze-selected-dialog.component');
-
-    const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
-      width: '800px',
-      maxHeight: '90vh',
-      data: {
-        selectedCount: 1,
-        videosWithExistingAnalysis: await this.databaseLibraryService.hasAnalysis(video.id) ? 1 : 0,
-        isDownloadMode: false  // Changed to false since we're not downloading
+    // Navigate to video analysis page with video pre-filled and full analysis mode
+    this.router.navigate(['/analysis'], {
+      state: {
+        videoPath: video.current_path,
+        videoTitle: video.filename,
+        mode: 'full'
       }
     });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (!result || result.option === 'skip') {
-      return;
-    }
-
-    try {
-      this.notificationService.toastOnly('info', 'Analysis Started', `Analyzing ${video.filename}`);
-
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [video.id],
-        transcribeOnly: result.option === 'transcribe-only',
-        forceReanalyze: result.forceReanalyze,
-        aiProvider: result.aiProvider,
-        aiModel: result.aiModel,
-        claudeApiKey: result.claudeApiKey,
-        openaiApiKey: result.openaiApiKey
-      });
-
-      const actionText = result.option === 'transcribe-only' ? 'Transcription' : 'Analysis';
-      this.notificationService.toastOnly(
-        'success',
-        `${actionText} Started`,
-        `Processing ${video.filename}`
-      );
-      this.startProgressPolling();
-    } catch (error: any) {
-      console.error('Analysis failed:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Analysis Failed',
-        error.error?.message || 'Failed to start analysis'
-      );
-    }
   }
 
   /**

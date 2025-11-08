@@ -199,8 +199,11 @@
   }
 }
 
-[data-theme="dark"] .notification-item.unread {
-  background: rgba(255, 107, 53, 0.1);
+:host-context([data-theme="dark"]),
+:host-context(.dark-theme) {
+  .notification-item.unread {
+    background: rgba(255, 107, 53, 0.1);
+  }
 }
 
 .notification-icon {

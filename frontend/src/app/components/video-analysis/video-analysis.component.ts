@@ -107,14 +107,22 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     if (state && state['videoPath']) {
       // Pre-populate the form with the video path from navigation
-      this.analysisForm.patchValue({
+      const formUpdate: any = {
         inputType: 'file',
         input: state['videoPath']
-      });
+      };
+
+      // Set mode if provided (transcribe-only or full)
+      if (state['mode']) {
+        formUpdate.mode = state['mode'];
+      }
+
+      this.analysisForm.patchValue(formUpdate);
 
       // Show a notification
       if (state['videoTitle']) {
-        this.notificationService.toastOnly('info', 'Video Ready', `Ready to analyze: ${state['videoTitle']}`);
+        const modeText = state['mode'] === 'transcribe-only' ? 'transcribe' : 'analyze';
+        this.notificationService.toastOnly('info', 'Video Ready', `Ready to ${modeText}: ${state['videoTitle']}`);
       }
     }
 
@@ -142,6 +150,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     return this.fb.group({
       inputType: ['url', Validators.required],
       input: ['', Validators.required],
+      mode: ['full', Validators.required], // Analysis mode: 'full' or 'transcribe-only'
       customInstructions: [''], // Custom instructions for AI analysis
       aiModel: ['ollama:qwen2.5:7b', Validators.required], // Format: provider:model
       apiKey: [''], // API key for Claude/OpenAI
@@ -149,6 +158,13 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
       whisperModel: ['base'],
       language: ['en'],
     });
+  }
+
+  /**
+   * Check if AI analysis is enabled (mode is 'full')
+   */
+  isAIAnalysisEnabled(): boolean {
+    return this.analysisForm.get('mode')?.value === 'full';
   }
 
   /**
@@ -314,6 +330,9 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
         expanded: false
       };
 
+      // Report to download progress service for unified queue
+      this.downloadProgressService.addOrUpdateAnalysisJob(this.currentJob);
+
       this.notificationService.success('Analysis Started', 'Video analysis has been queued');
 
       // Clear form fields
@@ -367,6 +386,9 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
             ...this.currentJob,
             ...data.job
           };
+
+          // Also report to download progress service for unified queue
+          this.downloadProgressService.addOrUpdateAnalysisJob(this.currentJob);
 
           // Check if job is complete
           if (data.job.status === 'completed') {
@@ -701,6 +723,10 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
           console.log('[Video Analysis] Found active job on init:', activeJob.id);
           this.currentJob = activeJob;
           this.isProcessing = true;
+
+          // Report to download progress service for unified queue
+          this.downloadProgressService.addOrUpdateAnalysisJob(this.currentJob);
+
           this.startPolling();
         }
       }

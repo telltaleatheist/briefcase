@@ -106,8 +106,39 @@
           </div>
         </div>
 
-        <!-- Step 2: AI Configuration -->
+        <!-- Step 2: Processing Mode Selection -->
         <div class="form-step">
+          <div class="step-content">
+            <h3 class="step-title">Choose Processing Mode</h3>
+
+            <!-- Mode Toggle -->
+            <div class="mode-toggle">
+              <button type="button"
+                      class="toggle-option"
+                      [class.active]="analysisForm.get('mode')?.value === 'full'"
+                      (click)="analysisForm.patchValue({mode: 'full'})">
+                <mat-icon>psychology</mat-icon>
+                <div class="option-text">
+                  <span class="option-title">Transcribe + AI Analysis</span>
+                  <span class="option-subtitle">Full processing with AI insights</span>
+                </div>
+              </button>
+              <button type="button"
+                      class="toggle-option"
+                      [class.active]="analysisForm.get('mode')?.value === 'transcribe-only'"
+                      (click)="analysisForm.patchValue({mode: 'transcribe-only'})">
+                <mat-icon>subtitles</mat-icon>
+                <div class="option-text">
+                  <span class="option-title">Transcribe Only</span>
+                  <span class="option-subtitle">Generate transcript without AI</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: AI Configuration (Only shown if mode is 'full') -->
+        <div class="form-step" *ngIf="isAIAnalysisEnabled()">
           <div class="step-content">
             <h3 class="step-title">Configure AI Settings</h3>
 
@@ -167,7 +198,7 @@
           </div>
         </div>
 
-        <!-- Step 3: Transcription Settings -->
+        <!-- Step 4: Transcription Settings -->
         <div class="form-step">
           <div class="step-content">
             <h3 class="step-title">Transcription Settings</h3>
@@ -201,8 +232,8 @@
           </div>
         </div>
 
-        <!-- Step 4: Custom Instructions (Optional) -->
-        <div class="form-step optional-step">
+        <!-- Step 5: Custom Instructions (Optional, only for AI analysis) -->
+        <div class="form-step optional-step" *ngIf="isAIAnalysisEnabled()">
           <div class="step-content">
             <div class="step-title-row">
               <h3 class="step-title">Custom Instructions</h3>

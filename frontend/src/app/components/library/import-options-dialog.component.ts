@@ -84,11 +84,11 @@ export type ImportAction = 'import-only' | 'import-and-transcribe' | 'import-and
     .dialog-message {
       margin: 0 0 20px 0;
       font-size: 14px;
-      color: #aaa;
+      color: var(--text-secondary);
       line-height: 1.5;
 
       strong {
-        color: #ff6600;
+        color: var(--primary-orange);
         font-weight: 600;
       }
     }
@@ -105,14 +105,14 @@ export type ImportAction = 'import-only' | 'import-and-transcribe' | 'import-and
 
     .radio-option {
       padding: 16px;
-      border: 1px solid #2a2a2a;
+      border: 1px solid var(--border-color);
       border-radius: 8px;
-      background-color: #1a1a1a;
+      background-color: var(--bg-secondary);
       transition: all 0.2s;
 
       &:hover {
-        background-color: #222;
-        border-color: #333;
+        background-color: var(--bg-tertiary);
+        border-color: var(--primary-orange);
       }
 
       ::ng-deep .mdc-radio {
@@ -128,18 +128,18 @@ export type ImportAction = 'import-only' | 'import-and-transcribe' | 'import-and
       ::ng-deep .mdc-radio__background {
         .mdc-radio__outer-circle,
         .mdc-radio__inner-circle {
-          border-color: #666 !important;
+          border-color: var(--text-secondary) !important;
         }
       }
 
       ::ng-deep .mdc-radio--checked .mdc-radio__background {
         .mdc-radio__outer-circle {
-          border-color: #ff6600 !important;
+          border-color: var(--primary-orange) !important;
         }
 
         .mdc-radio__inner-circle {
-          border-color: #ff6600 !important;
-          background-color: #ff6600 !important;
+          border-color: var(--primary-orange) !important;
+          background-color: var(--primary-orange) !important;
         }
       }
     }
@@ -154,21 +154,21 @@ export type ImportAction = 'import-only' | 'import-and-transcribe' | 'import-and
       display: flex;
       align-items: center;
       gap: 8px;
-      color: #fff;
+      color: var(--text-primary);
       font-size: 15px;
 
       mat-icon {
         font-size: 20px;
         width: 20px;
         height: 20px;
-        color: #ff6600;
+        color: var(--primary-orange);
       }
     }
 
     .option-description {
       margin: 0;
       font-size: 13px;
-      color: #999;
+      color: var(--text-secondary);
       line-height: 1.4;
     }
 

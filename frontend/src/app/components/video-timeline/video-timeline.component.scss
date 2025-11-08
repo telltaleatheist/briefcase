@@ -845,3 +845,98 @@
     }
   }
 }
+
+// ========================================
+// Global Dark Theme Override (for dialogs/overlays)
+// ========================================
+::ng-deep {
+  [data-theme="dark"],
+  .dark-theme {
+    app-video-timeline {
+      .timeline-container {
+        background-color: #000 !important;
+        border-top: 1px solid #333 !important;
+      }
+
+      .timeline-tools {
+        .tool-button {
+          color: #999 !important;
+        }
+
+        .tool-divider {
+          background-color: #444 !important;
+        }
+
+        .playback-button {
+          color: #fff !important;
+          background-color: rgba(255, 102, 0, 0.2) !important;
+        }
+      }
+
+      .selection-info,
+      .playhead-info {
+        color: #fff !important;
+
+        .selection-label,
+        .playhead-label {
+          color: #999 !important;
+        }
+      }
+
+      .timeline-buttons .timeline-button {
+        color: #fff !important;
+      }
+
+      .timeline {
+        background: linear-gradient(to bottom, #0a0a0a 0%, #111 50%, #0a0a0a 100%) !important;
+        border: 1px solid #333 !important;
+      }
+
+      .time-markers {
+        background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 100%) !important;
+        border-bottom: 2px solid #444 !important;
+      }
+
+      .time-marker {
+        .time-tick {
+          background-color: #666 !important;
+        }
+
+        &.major {
+          .time-tick {
+            background: linear-gradient(to top, #ff6600, #cc5200) !important;
+          }
+
+          .time-label {
+            color: #ddd !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+            background: rgba(0, 0, 0, 0.6) !important;
+          }
+        }
+      }
+
+      .playhead-line {
+        background-color: #fff !important;
+      }
+
+      .timeline-scrollbar {
+        background: rgba(0, 0, 0, 0.3) !important;
+        border: 1px solid #333 !important;
+
+        .scrollbar-track {
+          background: linear-gradient(to bottom, #1a1a1a, #2a2a2a) !important;
+          border: 1px solid #555 !important;
+        }
+      }
+
+      .timeline-hint {
+        color: #777 !important;
+
+        kbd {
+          background-color: #1a1a1a !important;
+          border: 1px solid #444 !important;
+        }
+      }
+    }
+  }
+}

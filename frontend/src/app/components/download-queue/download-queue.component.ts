@@ -1,11 +1,10 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { Router } from '@angular/router';
 import { BatchProgress, DatabaseLibraryService } from '../../services/database-library.service';
 import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
 import { Subscription } from 'rxjs';
@@ -21,65 +20,30 @@ import { Subscription } from 'rxjs';
     MatMenuModule,
     MatProgressBarModule
   ],
-  template: `
-    <button
-      mat-icon-button
-      [matBadge]="activeItemsCount"
-      [matBadgeHidden]="activeItemsCount === 0"
-      matBadgeColor="warn"
-      (click)="openQueueDialog()"
-      class="download-queue-button"
-      [class.has-active]="hasActiveItems">
-      <mat-icon>download</mat-icon>
-    </button>
-  `,
-  styles: [`
-    .download-queue-button {
-      position: relative;
-
-      ::ng-deep .mat-badge-content {
-        background-color: var(--primary-orange) !important;
-        color: white !important;
-        font-size: 10px;
-        font-weight: 600;
-      }
-
-      &.has-active mat-icon {
-        color: var(--primary-orange);
-        animation: pulse 2s ease-in-out infinite;
-      }
-    }
-
-    @keyframes pulse {
-      0%, 100% {
-        opacity: 1;
-      }
-      50% {
-        opacity: 0.6;
-      }
-    }
-  `]
+  templateUrl: './download-queue.component.html',
+  styleUrls: ['./download-queue.component.scss']
 })
 export class DownloadQueueComponent implements OnInit, OnDestroy {
   batchProgress: BatchProgress | null = null;
   processingJobs: VideoProcessingJob[] = [];
+  isOpen = false;
   private progressInterval: any;
   private jobsSubscription?: Subscription;
 
   constructor(
     private databaseLibraryService: DatabaseLibraryService,
-    private downloadProgressService: DownloadProgressService,
-    private router: Router
+    private downloadProgressService: DownloadProgressService
   ) {}
 
   ngOnInit() {
-    // Subscribe to processing jobs
+    // Subscribe to processing jobs (analysis jobs only, NOT batch downloads)
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
       this.processingJobs = Array.from(jobsMap.values());
+      console.log('[DownloadQueueComponent] Jobs updated, count:', this.processingJobs.length, 'jobs:', this.processingJobs);
     });
 
-    // Start polling for batch progress (for transcription/analysis)
-    this.startProgressPolling();
+    // NOTE: Batch progress polling is for batch downloads, not analysis jobs
+    // this.startProgressPolling();
   }
 
   ngOnDestroy() {
@@ -88,6 +52,15 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     }
     if (this.jobsSubscription) {
       this.jobsSubscription.unsubscribe();
+    }
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    const clickedInside = target.closest('.download-queue-container');
+    if (!clickedInside && this.isOpen) {
+      this.isOpen = false;
     }
   }
 
@@ -108,24 +81,83 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   get activeItemsCount(): number {
-    // Count active processing jobs (download/transcribe/analyze)
+    // Count active analysis jobs only
     const activeJobs = this.processingJobs.filter(job =>
       job.stage !== 'completed' && job.stage !== 'failed'
     ).length;
 
-    // Also include remaining videos in batch analysis
-    const remainingInBatch = this.batchProgress?.running ?
-      (this.batchProgress.totalVideos || 0) - (this.batchProgress.processedVideos || 0) : 0;
-
-    return activeJobs + remainingInBatch;
+    return activeJobs;
   }
 
   get hasActiveItems(): boolean {
     return this.activeItemsCount > 0;
   }
 
-  openQueueDialog() {
-    // Navigate to the video analysis page where the unified processing queue is displayed
-    this.router.navigate(['/analysis']);
+  togglePanel() {
+    this.isOpen = !this.isOpen;
+  }
+
+  getActiveJobs(): VideoProcessingJob[] {
+    return this.processingJobs.filter(job =>
+      job.stage !== 'completed' && job.stage !== 'failed'
+    );
+  }
+
+  getCompletedJobs(): VideoProcessingJob[] {
+    return this.processingJobs.filter(job =>
+      job.stage === 'completed' || job.stage === 'failed'
+    );
+  }
+
+  clearCompleted() {
+    this.downloadProgressService.clearCompletedJobs();
+  }
+
+  getJobStatusIcon(stage: string): string {
+    switch (stage) {
+      case 'completed':
+        return 'check_circle';
+      case 'failed':
+        return 'error';
+      case 'downloading':
+        return 'download';
+      case 'importing':
+        return 'input';
+      case 'transcribing':
+        return 'subtitles';
+      case 'analyzing':
+        return 'psychology';
+      default:
+        return 'pending';
+    }
+  }
+
+  getJobStatusText(job: VideoProcessingJob): string {
+    switch (job.stage) {
+      case 'downloading':
+        return 'Downloading';
+      case 'importing':
+        return 'Importing';
+      case 'transcribing':
+        return 'Transcribing';
+      case 'analyzing':
+        return 'AI Analysis';
+      case 'completed':
+        return 'Completed';
+      case 'failed':
+        return job.error || 'Failed';
+      default:
+        return 'Processing';
+    }
+  }
+
+  getRelativeTime(date: Date): string {
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - new Date(date).getTime()) / 1000);
+
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
   }
 }

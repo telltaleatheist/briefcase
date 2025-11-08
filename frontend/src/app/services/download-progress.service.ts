@@ -34,88 +34,88 @@ export class DownloadProgressService {
   private setupListeners() {
     console.log('[DownloadProgressService] Setting up WebSocket listeners');
 
-    // Listen for download start
-    this.socketService.onDownloadStarted().subscribe(data => {
-      console.log('[DownloadProgressService] Download started event received:', data);
-      const jobId = data.jobId || this.generateJobId();
-      const job = {
-        id: jobId,
-        filename: this.extractFilename(data.url),
-        url: data.url,
-        stage: 'downloading' as const,
-        progress: 0,
-        startedAt: new Date()
-      };
-      console.log('[DownloadProgressService] Adding job to queue:', job);
-      this.addJob(job);
-    });
+    // NOTE: Download events are for batch downloads, not analysis jobs
+    // Analysis jobs are tracked via addOrUpdateAnalysisJob() method
 
-    // Listen for download progress
-    this.socketService.onDownloadProgress().subscribe((data: DownloadProgress) => {
-      console.log('[DownloadProgressService] Download progress event received:', data);
-      if (data.jobId) {
-        this.updateJobProgress(data.jobId, data.progress, data.task);
-      } else {
-        console.warn('[DownloadProgressService] Progress event missing jobId:', data);
-      }
-    });
+    // this.socketService.onDownloadStarted().subscribe(data => {
+    //   console.log('[DownloadProgressService] Download started event received:', data);
+    //   const jobId = data.jobId || this.generateJobId();
+    //   const job = {
+    //     id: jobId,
+    //     filename: this.extractFilename(data.url),
+    //     url: data.url,
+    //     stage: 'downloading' as const,
+    //     progress: 0,
+    //     startedAt: new Date()
+    //   };
+    //   console.log('[DownloadProgressService] Adding job to queue:', job);
+    //   this.addJob(job);
+    // });
 
-    // Listen for download completion
-    this.socketService.onDownloadCompleted().subscribe(data => {
-      console.log('[DownloadProgressService] Download completed event received:', data);
-      if (data.jobId) {
-        const job = this.getJob(data.jobId);
-        if (job) {
-          job.filename = this.extractFilename(data.outputFile);
-          job.stage = 'completed';
-          job.progress = 100;
-          job.completedAt = new Date();
-          console.log('[DownloadProgressService] Marking job as completed:', job);
-          this.updateJob(job);
-        } else {
-          console.warn('[DownloadProgressService] Job not found for completion event:', data.jobId);
-        }
-      } else {
-        console.warn('[DownloadProgressService] Completion event missing jobId:', data);
-      }
-    });
+    // this.socketService.onDownloadProgress().subscribe((data: DownloadProgress) => {
+    //   console.log('[DownloadProgressService] Download progress event received:', data);
+    //   if (data.jobId) {
+    //     this.updateJobProgress(data.jobId, data.progress, data.task);
+    //   } else {
+    //     console.warn('[DownloadProgressService] Progress event missing jobId:', data);
+    //   }
+    // });
 
-    // Listen for download failures
-    this.socketService.onDownloadFailed().subscribe(data => {
-      console.log('[DownloadProgressService] Download failed event received:', data);
-      if (data.jobId) {
-        const job = this.getJob(data.jobId);
-        if (job) {
-          job.stage = 'failed';
-          job.error = data.error;
-          job.completedAt = new Date();
-          console.log('[DownloadProgressService] Marking job as failed:', job);
-          this.updateJob(job);
-        } else {
-          console.warn('[DownloadProgressService] Job not found for failure event:', data.jobId);
-        }
-      } else {
-        console.warn('[DownloadProgressService] Failure event missing jobId:', data);
-      }
-    });
+    // this.socketService.onDownloadCompleted().subscribe(data => {
+    //   console.log('[DownloadProgressService] Download completed event received:', data);
+    //   if (data.jobId) {
+    //     const job = this.getJob(data.jobId);
+    //     if (job) {
+    //       job.filename = this.extractFilename(data.outputFile);
+    //       job.stage = 'completed';
+    //       job.progress = 100;
+    //       job.completedAt = new Date();
+    //       console.log('[DownloadProgressService] Marking job as completed:', job);
+    //       this.updateJob(job);
+    //     } else {
+    //       console.warn('[DownloadProgressService] Job not found for completion event:', data.jobId);
+    //     }
+    //   } else {
+    //     console.warn('[DownloadProgressService] Completion event missing jobId:', data);
+    //   }
+    // });
 
-    // Listen for batch queue updates (for library downloads routed through batch system)
-    this.socketService.onBatchQueueUpdated().subscribe(data => {
-      console.log('[DownloadProgressService] Batch queue updated event received:', data);
-      this.handleBatchQueueUpdate(data);
-    });
+    // this.socketService.onDownloadFailed().subscribe(data => {
+    //   console.log('[DownloadProgressService] Download failed event received:', data);
+    //   if (data.jobId) {
+    //     const job = this.getJob(data.jobId);
+    //     if (job) {
+    //       job.stage = 'failed';
+    //       job.error = data.error;
+    //       job.completedAt = new Date();
+    //       console.log('[DownloadProgressService] Marking job as failed:', job);
+    //       this.updateJob(job);
+    //     } else {
+    //       console.warn('[DownloadProgressService] Job not found for failure event:', data.jobId);
+    //     }
+    //   } else {
+    //     console.warn('[DownloadProgressService] Failure event missing jobId:', data);
+    //   }
+    // });
 
-    // Listen for individual job status updates
-    this.socketService.onJobStatusUpdated().subscribe(data => {
-      console.log('[DownloadProgressService] Job status update event received:', data);
-      this.handleJobStatusUpdate(data);
-    });
+    // NOTE: Batch queue updates are NOT tracked here
+    // The batch download system is separate and has its own UI
+    // this.socketService.onBatchQueueUpdated().subscribe(data => {
+    //   console.log('[DownloadProgressService] Batch queue updated event received:', data);
+    //   this.handleBatchQueueUpdate(data);
+    // });
 
-    // Listen for library download duplicate detection
-    this.socketService.onLibraryDownloadDuplicate().subscribe(data => {
-      console.log('[DownloadProgressService] Duplicate video detected:', data);
-      this.handleDuplicateDetection(data);
-    });
+    // NOTE: Individual job status updates are for batch downloads, not analysis jobs
+    // this.socketService.onJobStatusUpdated().subscribe(data => {
+    //   console.log('[DownloadProgressService] Job status update event received:', data);
+    //   this.handleJobStatusUpdate(data);
+    // });
+
+    // NOTE: Library download duplicate detection is for batch downloads, not analysis jobs
+    // this.socketService.onLibraryDownloadDuplicate().subscribe(data => {
+    //   console.log('[DownloadProgressService] Duplicate video detected:', data);
+    //   this.handleDuplicateDetection(data);
+    // });
 
     console.log('[DownloadProgressService] All WebSocket listeners registered');
   }
@@ -198,6 +198,20 @@ export class DownloadProgressService {
           if (stage === 'completed' || stage === 'failed') {
             existingJob.completedAt = new Date();
           }
+        } else {
+          // Create new job if it doesn't exist
+          const newJob: VideoProcessingJob = {
+            id: batchJob.id,
+            filename: batchJob.displayName || batchJob.url || 'Downloading...',
+            url: batchJob.url,
+            stage: stage,
+            progress: batchJob.progress || 0,
+            error: batchJob.error,
+            startedAt: new Date(),
+            completedAt: (stage === 'completed' || stage === 'failed') ? new Date() : undefined
+          };
+          currentJobs.set(batchJob.id, newJob);
+          console.log('[DownloadProgressService] Created new job from batch queue:', newJob);
         }
       }
     });
@@ -307,6 +321,47 @@ export class DownloadProgressService {
       )
     );
     this.jobs.next(activeJobs);
+  }
+
+  /**
+   * Add or update an analysis job (from video-analysis component)
+   */
+  addOrUpdateAnalysisJob(analysisJob: any) {
+    const jobId = `analysis-${analysisJob.id}`;
+    const currentJobs = this.jobs.value;
+
+    // Map analysis job status to our stages
+    let stage: VideoProcessingJob['stage'] = 'analyzing';
+    const status = analysisJob.status?.toLowerCase() || '';
+
+    if (status === 'downloading') stage = 'downloading';
+    else if (status === 'extracting' || status === 'importing') stage = 'importing';
+    else if (status === 'transcribing') stage = 'transcribing';
+    else if (status === 'analyzing' || status === 'processing') stage = 'analyzing';
+    else if (status === 'completed') stage = 'completed';
+    else if (status === 'failed') stage = 'failed';
+
+    const job: VideoProcessingJob = {
+      id: jobId,
+      filename: analysisJob.input || 'Video Analysis',
+      stage: stage,
+      progress: analysisJob.progress || 0,
+      error: analysisJob.error,
+      startedAt: new Date(),
+      completedAt: (stage === 'completed' || stage === 'failed') ? new Date() : undefined
+    };
+
+    currentJobs.set(jobId, job);
+    this.jobs.next(new Map(currentJobs));
+    console.log('[DownloadProgressService] Added/updated analysis job:', job);
+  }
+
+  /**
+   * Remove an analysis job
+   */
+  removeAnalysisJob(analysisJobId: string) {
+    const jobId = `analysis-${analysisJobId}`;
+    this.removeJob(jobId);
   }
 
   private extractFilename(pathOrUrl: string): string {
