@@ -1252,7 +1252,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // Trigger download via API
       this.apiService.downloadVideo({
         url: videoUrl,
-        quality: 'best',
+        quality: '1080',  // Valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
         convertToMp4: true,
         fixAspectRatio: false,
         useCookies: false,
@@ -1306,7 +1306,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
       this.apiService.downloadVideo({
         url: videoUrl,
-        quality: 'best',
+        quality: '1080',  // Valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
         convertToMp4: true,
         fixAspectRatio: false,
         useCookies: false,
@@ -1400,7 +1400,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
       this.apiService.downloadVideo({
         url: videoUrl,
-        quality: 'best',
+        quality: '1080',  // Valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
         convertToMp4: true,
         fixAspectRatio: false,
         useCookies: false,
@@ -1511,10 +1511,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const result = await dialogRef.afterClosed().toPromise();
 
     if (result?.success) {
+      // Show initial download success notification
       this.notificationService.toastOnly(
         'success',
         'Download Complete',
-        `Video downloaded successfully`
+        `Video downloaded and importing into library...`
       );
 
       // Scan library to import the new video
@@ -1535,13 +1536,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
               openaiApiKey: result.openaiApiKey
             });
 
-            const actionText = result.analyze ? 'Analysis' : 'Transcription';
+            const actionText = result.analyze ? 'AI analysis' : 'transcription';
             this.notificationService.toastOnly(
               'success',
-              `${actionText} Started`,
-              `Processing downloaded video`
+              'Processing Started',
+              `Video downloaded and added to ${actionText} queue. Check the download icon in the top right to monitor progress.`
             );
             this.startProgressPolling();
+          } else {
+            // Just downloaded without processing
+            this.notificationService.toastOnly(
+              'success',
+              'Video Added',
+              `Video has been added to your library`
+            );
           }
         }
 

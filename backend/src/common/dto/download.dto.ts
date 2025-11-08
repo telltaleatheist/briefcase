@@ -51,6 +51,14 @@ export class DownloadVideoDto {
 
   @IsOptional()
   @IsString()
+  jobId?: string;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
   outputDir?: string;
 
   @IsOptional()
@@ -66,6 +74,10 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsBoolean()
   transcribeVideo?: boolean = false;
+
+  @IsOptional()
+  @IsBoolean()
+  analyzeVideo?: boolean = false;
 
   @IsOptional()
   @IsBoolean()
@@ -115,6 +127,10 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsIn(['ebur128', 'rms', 'peak'])
   audioNormalizationMethod?: 'ebur128' | 'rms' | 'peak' = 'ebur128';  // Default to broadcast standard
+
+  @IsOptional()
+  @IsBoolean()
+  shouldImport?: boolean = false;  // Auto-import to library after download (only for library downloads)
 }
 
 export class DownloadProgressDto {

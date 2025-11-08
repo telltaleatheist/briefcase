@@ -252,6 +252,13 @@ export class SocketService {
   }
 
   /**
+   * Listen for library download duplicate detection
+   */
+  onLibraryDownloadDuplicate(): Observable<{jobId: string, videoId: string, filename: string}> {
+    return this.listenTo<{jobId: string, videoId: string, filename: string}>('library-download-duplicate');
+  }
+
+  /**
    * Send an event to the server
    */
   emitEvent(eventName: string, data: any): void {
@@ -260,5 +267,12 @@ export class SocketService {
       callStack: new Error().stack?.split('\n').slice(1, 5).join('\n')
     });
     this.socket.emit(eventName, data);
+  }
+
+  /**
+   * Send user action for duplicate video handling
+   */
+  sendLibraryDownloadUserAction(jobId: string, action: 'replace' | 'cancel'): void {
+    this.emitEvent('library-download-user-action', { jobId, action });
   }
 }

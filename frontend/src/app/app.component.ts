@@ -22,6 +22,8 @@ import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.com
 import { NotificationToastComponent } from './components/notification-toast/notification-toast.component';
 import { NotificationBellComponent } from './components/notification-bell/notification-bell.component';
 import { NotificationModalComponent } from './components/notification-modal/notification-modal.component';
+import { DownloadQueueComponent } from './components/download-queue/download-queue.component';
+import { DownloadProgressService } from './services/download-progress.service';
 
 @Component({
   selector: 'app-root',
@@ -43,7 +45,8 @@ import { NotificationModalComponent } from './components/notification-modal/noti
     ThemeToggleComponent,  // Import the ThemeToggleComponent
     NotificationToastComponent,
     NotificationBellComponent,
-    NotificationModalComponent
+    NotificationModalComponent,
+    DownloadQueueComponent
   ]
 })
 export class AppComponent implements OnInit, OnDestroy {
@@ -59,6 +62,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private themeService = inject(ThemeService);  // Inject the ThemeService
   private notificationService = inject(NotificationService);  // Inject the NotificationService
   private databaseLibraryService = inject(DatabaseLibraryService);  // Inject the DatabaseLibraryService
+  private downloadProgressService = inject(DownloadProgressService);  // CRITICAL: Inject to instantiate on app start
   public router = inject(Router);
   private renderer = inject(Renderer2);
 

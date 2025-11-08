@@ -396,6 +396,51 @@ export class DatabaseController {
   }
 
   /**
+   * PATCH /api/database/videos/:id/filename
+   * Update video filename/title
+   */
+  @Patch('videos/:id/filename')
+  async updateVideoFilename(
+    @Param('id') videoId: string,
+    @Body() body: { filename: string }
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Validate filename
+      if (!body.filename || typeof body.filename !== 'string' || body.filename.trim() === '') {
+        return {
+          success: false,
+          error: 'Valid filename is required'
+        };
+      }
+
+      // Update filename
+      this.databaseService.updateVideoFilename(videoId, body.filename.trim());
+
+      this.logger.log(`Updated filename for video ${videoId}: ${body.filename}`);
+
+      return {
+        success: true,
+        message: 'Video filename updated successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to update video filename: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Failed to update video filename'
+      };
+    }
+  }
+
+  /**
    * DELETE /api/database/videos/:id
    * Delete a video from the library (both database record AND physical file)
    */

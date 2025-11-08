@@ -1,0 +1,148 @@
+<div class="modal-overlay" (click)="close()">
+  <div class="modal-container" (click)="$event.stopPropagation()">
+    <div class="modal-content">
+      <!-- Header Icon Section -->
+      <div class="modal-icon">
+        <span class="icon">{{ hasActiveJobs ? '▶' : '↓' }}</span>
+      </div>
+
+      <!-- Title -->
+      <div class="modal-header">
+        <h2 class="modal-title">Download & Processing Queue</h2>
+      </div>
+
+      <!-- Body Content -->
+      <div class="modal-body">
+        <!-- Overall Status Summary -->
+        <div class="queue-summary" *ngIf="hasActiveJobs">
+          <div class="summary-header">
+            <div class="status-indicator" [class.active]="hasActiveJobs">
+              <span class="status-icon">{{ batchProgress?.status === 'running' ? '⟳' : '⏸' }}</span>
+              <span>{{ statusText }}</span>
+            </div>
+            <div class="queue-stats">
+              <span class="stat">{{ completedCount }} / {{ totalCount }} completed</span>
+              <span class="stat" *ngIf="remainingInQueue > 0">{{ remainingInQueue }} in queue</span>
+            </div>
+          </div>
+
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div class="progress-fill" [style.width.%]="getProgressPercentage()"></div>
+            </div>
+            <span class="progress-text">{{ getProgressPercentage() }}%</span>
+          </div>
+
+          <div class="eta" *ngIf="batchProgress?.estimatedTimeRemaining">
+            <span class="eta-icon">⏱</span>
+            <span>{{ formatTimeRemaining(batchProgress?.estimatedTimeRemaining) }}</span>
+          </div>
+        </div>
+
+        <!-- Active Processing Jobs -->
+        <div class="current-processing" *ngIf="getActiveJobs().length > 0">
+          <div class="section-header">
+            <span class="section-icon">▶</span>
+            <h3>Currently Processing</h3>
+          </div>
+          <div class="notification-item" *ngFor="let job of getActiveJobs()">
+            <div class="notification-content">
+              <div class="notification-header">
+                <span class="notification-icon">🎬</span>
+                <div class="notification-text">
+                  <div class="notification-title">{{ job.filename }}</div>
+                  <div class="notification-status">
+                    {{ getStatusText(job) }}
+                    <span class="progress-percent">{{ job.progress }}%</span>
+                  </div>
+                </div>
+              </div>
+              <div class="progress-container">
+                <div class="progress-bar small">
+                  <div class="progress-fill" [style.width.%]="job.progress"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Queue List -->
+        <div class="queue-section" *ngIf="remainingInQueue > 0">
+          <div class="section-header">
+            <span class="section-icon">⏳</span>
+            <h3>Queued ({{ remainingInQueue }})</h3>
+          </div>
+          <div class="empty-queue-message">
+            <span class="info-icon">ℹ</span>
+            <p>{{ remainingInQueue }} video{{ remainingInQueue !== 1 ? 's' : '' }} waiting to be processed</p>
+          </div>
+        </div>
+
+        <!-- Completed & Failed Videos -->
+        <div class="completed-section" *ngIf="getCompletedJobs().length > 0 || sortedVideos.length > 0">
+          <div class="section-header">
+            <span class="section-icon">📜</span>
+            <h3>Recently Processed</h3>
+          </div>
+          <div class="video-list">
+            <!-- Show completed processing jobs -->
+            <div class="video-item" *ngFor="let job of getCompletedJobs()">
+              <span class="status-icon" [class]="job.stage">{{ getStatusIcon(job.stage) }}</span>
+              <div class="video-info">
+                <div class="video-name">{{ job.filename }}</div>
+                <div class="video-meta">
+                  <span class="status-badge"
+                        [class.processing]="job.stage === 'downloading' || job.stage === 'importing' || job.stage === 'transcribing' || job.stage === 'analyzing'"
+                        [class.success]="job.stage === 'completed'"
+                        [class.failed]="job.stage === 'failed'">
+                    {{ getStatusText(job) }}
+                  </span>
+                  <span class="timestamp" *ngIf="job.completedAt">{{ job.completedAt | date:'short' }}</span>
+                </div>
+                <div *ngIf="job.error" class="error-message">{{ job.error }}</div>
+              </div>
+            </div>
+            <!-- Show batch analysis completed videos -->
+            <div class="video-item" *ngFor="let video of sortedVideos">
+              <span class="status-icon" [class]="video.status">{{ getStatusIcon(video.status) }}</span>
+              <div class="video-info">
+                <div class="video-name">{{ video.filename }}</div>
+                <div class="video-meta">
+                  <span class="status-badge"
+                        [class.processing]="video.status === 'processing'"
+                        [class.success]="video.status === 'success'"
+                        [class.failed]="video.status === 'failed'">
+                    {{ getStatusText(video) }}
+                  </span>
+                  <span class="timestamp">{{ video.completedAt | date:'short' }}</span>
+                </div>
+                <div *ngIf="video.error" class="error-message">{{ video.error }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" *ngIf="getActiveJobs().length === 0 && getCompletedJobs().length === 0 && sortedVideos.length === 0">
+          <span class="empty-icon">☁↓</span>
+          <h3>No Active Downloads</h3>
+          <p>Videos you download or analyze will appear here</p>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="modal-footer">
+        <button class="btn-action" (click)="pauseBatch(); $event.stopPropagation()" *ngIf="batchProgress?.status === 'running'">
+          ⏸ Pause
+        </button>
+        <button class="btn-action" (click)="resumeBatch(); $event.stopPropagation()" *ngIf="batchProgress?.status === 'paused'">
+          ▶ Resume
+        </button>
+        <button class="btn-action warn" (click)="stopBatch(); $event.stopPropagation()" *ngIf="hasActiveJobs">
+          ⏹ Stop All
+        </button>
+        <button class="btn-okay" (click)="close()">Close</button>
+      </div>
+    </div>
+  </div>
+</div>

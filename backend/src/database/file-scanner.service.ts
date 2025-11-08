@@ -19,7 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class FileScannerService {
   private readonly logger = new Logger(FileScannerService.name);
-  private readonly DEFAULT_CLIPS_ROOT = '/Volumes/Callisto/clips';
+  // NO hardcoded paths - clips folder must come from active library
   private readonly VIDEO_EXTENSIONS = ['.mov', '.mp4', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
 
   constructor(
@@ -47,10 +47,20 @@ export class FileScannerService {
   /**
    * Scan entire clips folder and synchronize with database
    * Returns statistics about the scan
-   * @param clipsFolder - Optional clips folder path (defaults to DEFAULT_CLIPS_ROOT)
+   * @param clipsFolder - Optional clips folder path (if not provided, uses active library's clips folder)
    */
   async scanClipsFolder(clipsFolder?: string): Promise<ScanResult> {
-    const clipsRoot = clipsFolder || this.DEFAULT_CLIPS_ROOT;
+    // Get clips folder from parameter or active library
+    let clipsRoot = clipsFolder;
+
+    if (!clipsRoot) {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new Error('No active library found. Cannot scan without a clips folder path.');
+      }
+      clipsRoot = activeLibrary.clipsFolderPath;
+    }
+
     this.logger.log(`Starting full clips folder scan: ${clipsRoot}`);
     const startTime = Date.now();
 
@@ -188,10 +198,20 @@ export class FileScannerService {
 
   /**
    * Get list of videos in clips folder that are not yet in database
-   * @param clipsFolder - Optional clips folder path
+   * @param clipsFolder - Optional clips folder path (if not provided, uses active library's clips folder)
    */
   async getUnimportedVideos(clipsFolder?: string): Promise<VideoFileInfo[]> {
-    const clipsRoot = clipsFolder || this.DEFAULT_CLIPS_ROOT;
+    // Get clips folder from parameter or active library
+    let clipsRoot = clipsFolder;
+
+    if (!clipsRoot) {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new Error('No active library found. Cannot check for unimported videos without a clips folder path.');
+      }
+      clipsRoot = activeLibrary.clipsFolderPath;
+    }
+
     this.logger.log(`Checking for unimported videos in: ${clipsRoot}`);
 
     // Get all video files from filesystem
@@ -384,10 +404,30 @@ export class FileScannerService {
           continue;
         }
 
-        // Copy video to weekly folder
-        const destinationPath = path.join(weekFolderPath, filename);
-        fs.copyFileSync(fullPath, destinationPath);
-        this.logger.log(`Copied ${filename} to ${weekFolder}/`);
+        // Check if file is already in the clips folder structure
+        let destinationPath: string;
+        let dateFolder: string | null = null;
+
+        if (fullPath.startsWith(clipsRoot)) {
+          // File is already in the clips folder - don't copy, just use it
+          destinationPath = fullPath;
+          this.logger.log(`Video already in clips folder: ${fullPath}`);
+
+          // Try to extract date folder from path
+          const relativePath = path.relative(clipsRoot, fullPath);
+          const pathParts = relativePath.split(path.sep);
+          if (pathParts.length > 1) {
+            // File is in a subfolder - use that as the date folder
+            dateFolder = pathParts[0];
+            this.logger.log(`Extracted date folder from path: ${dateFolder}`);
+          }
+        } else {
+          // File is outside clips folder - copy to weekly folder
+          destinationPath = path.join(weekFolderPath, filename);
+          fs.copyFileSync(fullPath, destinationPath);
+          this.logger.log(`Copied ${filename} to ${weekFolder}/`);
+          dateFolder = weekFolder;
+        }
 
         // Create video ID
         const videoId = uuidv4();
@@ -398,13 +438,13 @@ export class FileScannerService {
           filename,
           fileHash,
           currentPath: destinationPath,
-          dateFolder: weekFolder,
+          dateFolder: dateFolder || undefined,
           durationSeconds: undefined, // Will be populated later
           fileSizeBytes: stats.size,
         });
 
         imported.push(videoId);
-        this.logger.log(`Imported: ${filename} (${videoId}) into week ${weekFolder}`);
+        this.logger.log(`Imported: ${filename} (${videoId})${dateFolder ? ` into ${dateFolder}` : ''}`);
       } catch (error: any) {
         this.logger.error(`Failed to import ${fullPath}: ${error.message}`);
         errors.push(`${path.basename(fullPath)}: ${error.message}`);

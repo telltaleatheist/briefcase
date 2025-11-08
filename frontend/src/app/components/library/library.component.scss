@@ -221,34 +221,6 @@
   }
 }
 
-// Floating FAB button for batch progress
-.batch-progress-fab {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 100;
-  background-color: var(--primary-orange) !important;
-  color: white !important;
-  box-shadow: 0 4px 12px rgba(255, 143, 71, 0.4);
-  transition: all 0.3s ease;
-  padding: 0 24px;
-  height: 56px;
-  border-radius: 28px;
-
-  mat-icon {
-    margin-right: 8px;
-  }
-
-  &:hover {
-    box-shadow: 0 6px 16px rgba(255, 143, 71, 0.6);
-    transform: translateY(-2px);
-  }
-
-  &:active {
-    transform: translateY(0);
-  }
-}
-
 .search-bar {
   display: flex;
   gap: 16px;
@@ -793,14 +765,6 @@
 // Dark theme support - using both .dark-theme and .theme-dark for compatibility
 :host-context(.dark-theme),
 :host-context(.theme-dark) {
-  .batch-progress-fab {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
-
-    &:hover {
-      box-shadow: 0 6px 16px rgba(255, 143, 71, 0.8);
-    }
-  }
-
   .library-dropdown {
     ::ng-deep {
       .mat-mdc-text-field-wrapper {

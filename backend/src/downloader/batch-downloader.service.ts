@@ -3,8 +3,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DownloaderService } from './downloader.service';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaProcessingService, ProcessingOptions } from '../media/media-processing.service';
-import { 
-  DownloadOptions, 
+import { FileScannerService } from '../database/file-scanner.service';
+import {
+  DownloadOptions,
   DownloadResult,
   Job,
   JobResponse,
@@ -30,8 +31,10 @@ export class BatchDownloaderService {
     private readonly downloaderService: DownloaderService,
     private readonly mediaProcessingService: MediaProcessingService,
     private readonly eventService: MediaEventService,
-    private readonly jobStateManager: JobStateManagerService
+    private readonly jobStateManager: JobStateManagerService,
+    private readonly fileScannerService: FileScannerService
   ) {
+    // Listen for job status updates
     this.eventService.server?.on('job-status-updated', (data: {jobId: string, status: string, task: string}) => {
       const job = this.jobs.get(data.jobId);
       if (job) {
@@ -40,6 +43,29 @@ export class BatchDownloaderService {
         this.logger.warn(`Job with ID ${data.jobId} not found for status update`);
       }
     });
+
+    // Listen for download progress updates
+    this.eventService.server?.on('download-progress', (data: {progress: number, task: string, jobId?: string}) => {
+      if (data.jobId) {
+        this.updateJobProgress(data.jobId, data.progress, data.task);
+      }
+    });
+
+    // Listen for transcription progress updates
+    this.eventService.server?.on('transcription-progress', (data: {progress: number, task: string, jobId?: string}) => {
+      if (data.jobId) {
+        this.updateJobProgress(data.jobId, data.progress, data.task || 'Transcribing');
+      }
+    });
+
+    // Listen for processing progress updates
+    this.eventService.server?.on('processing-progress', (data: {progress: number, task: string, jobId?: string}) => {
+      if (data.jobId) {
+        this.updateJobProgress(data.jobId, data.progress, data.task || 'Processing');
+      }
+    });
+
+    // Listen for transcription completion
     this.eventService.server?.on('transcription-completed', (data: {jobId?: string, outputFile: string}) => {
       if (data.jobId) {
         const job = this.jobs.get(data.jobId);
@@ -88,9 +114,10 @@ export class BatchDownloaderService {
   }
 
   // Add a new job to the system
-  addToBatchQueue(options: DownloadOptions): string {
-    const jobId = `batch-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    
+  addToBatchQueue(options: DownloadOptions, providedJobId?: string): string {
+    // Use provided jobId if available, otherwise generate one
+    const jobId = providedJobId || `batch-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
     // Use the displayName from options directly
     const displayName = options.displayName || options.url;
     
@@ -180,11 +207,11 @@ export class BatchDownloaderService {
   private async startDownload(job: Job): Promise<void> {
     // Update job state
     this.jobStateManager.updateJobStatus(job, 'downloading', 'Initializing download...');
-    
+
     try {
       // Start download with downloaderService
       this.logger.log(`Starting download for job ${job.id}: ${job.url}`);
-      
+
       const result = await this.downloaderService.downloadVideo(job.options, job.id);
       
       // Mark download end time
@@ -193,16 +220,49 @@ export class BatchDownloaderService {
       // Process download result
       if (result.success) {
         job.outputFile = result.outputFile;
-        
+
         if (result.isImage) {
           // Images don't need processing
           this.jobStateManager.updateJobStatus(job, 'completed', 'Image download completed');
           this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Image download completed');
           this.logger.log(`Image download completed for job ${job.id}`);
         } else {
-          // Mark videos as downloaded but not yet processed
-          this.jobStateManager.updateJobStatus(job, 'downloaded', 'Download complete, waiting for processing...');
-          this.logger.log(`Video download completed, waiting for processing: ${job.id}`);
+          // Check if this job should auto-import (only for library downloads)
+          const shouldImport = (job.options as any).shouldImport === true;
+
+          if (shouldImport) {
+            // Import the downloaded video to the database
+            try {
+              if (result.outputFile) {
+                this.logger.log(`Importing video to database: ${result.outputFile}`);
+                this.jobStateManager.updateJobStatus(job, 'downloaded', 'Importing to library...');
+
+                const importResult = await this.fileScannerService.importVideos([result.outputFile]);
+
+                if (importResult.imported.length > 0) {
+                  this.logger.log(`Video imported successfully: ${importResult.imported[0]}`);
+
+                  // Mark videos as downloaded and imported, waiting for processing
+                  this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import complete, waiting for processing...');
+                  this.logger.log(`Video download and import completed, waiting for processing: ${job.id}`);
+                } else {
+                  this.logger.warn(`Failed to import video: ${importResult.errors.join(', ')}`);
+                  this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import failed, waiting for processing...');
+                }
+              } else {
+                this.logger.error('Cannot import: output file path is missing');
+                this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import failed - no output file');
+              }
+            } catch (error) {
+              this.logger.error(`Error importing video: ${error}`);
+              // Continue anyway - the video is downloaded, processing can still work
+              this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import error, waiting for processing...');
+            }
+          } else {
+            // No import needed - mark as downloaded and ready for processing
+            this.jobStateManager.updateJobStatus(job, 'downloaded', 'Download complete, waiting for processing...');
+            this.logger.log(`Video download completed, waiting for processing: ${job.id}`);
+          }
         }
       } else {
         this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');

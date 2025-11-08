@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AnalysisController } from './analysis.controller';
 import { AnalysisService } from './analysis.service';
 import { OllamaService } from './ollama.service';
@@ -11,9 +11,15 @@ import { SharedConfigModule } from '../config/shared-config.module';
 import { LibraryModule } from '../library/library.module';
 
 @Module({
-  imports: [FfmpegModule, DownloaderModule, PathModule, SharedConfigModule, LibraryModule],
+  imports: [
+    FfmpegModule,
+    forwardRef(() => DownloaderModule),
+    PathModule,
+    SharedConfigModule,
+    LibraryModule
+  ],
   controllers: [AnalysisController],
   providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService],
-  exports: [AnalysisService, OllamaService, AIProviderService],
+  exports: [AnalysisService, OllamaService, AIProviderService, PythonBridgeService],
 })
 export class AnalysisModule {}

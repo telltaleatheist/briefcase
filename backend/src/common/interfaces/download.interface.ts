@@ -67,6 +67,7 @@ export interface DownloadOptions {
   useCompression?: boolean;
   compressionLevel?: number;
   transcribeVideo?: boolean;
+  shouldImport?: boolean; // For library downloads
 }
 
 export interface DownloadResult {

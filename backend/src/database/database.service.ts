@@ -263,6 +263,25 @@ export class DatabaseService {
         }
       }
     }
+
+    try {
+      // Migration 3: Add source_url column to videos table if it doesn't exist
+      db.exec("SELECT source_url FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: source_url')) {
+        this.logger.log('Running migration: Adding source_url column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN source_url TEXT;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: source_url column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
   }
 
   /**
@@ -453,6 +472,27 @@ export class DatabaseService {
       } else {
         throw error;
       }
+    }
+  }
+
+  /**
+   * Update video's filename
+   */
+  updateVideoFilename(id: string, filename: string) {
+    const db = this.ensureInitialized();
+
+    try {
+      db.run(
+        `UPDATE videos
+         SET filename = ?
+         WHERE id = ?`,
+        [filename, id]
+      );
+
+      this.saveDatabase();
+    } catch (error) {
+      this.logger.error(`Failed to update filename for video ${id}:`, error);
+      throw error;
     }
   }
 

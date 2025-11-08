@@ -197,4 +197,27 @@ export class MediaEventService {
       timestamp: this.getTimestamp()
     });
   }
+
+  /**
+   * Library download duplicate detection
+   */
+  emitLibraryDownloadDuplicate(jobId: string, videoId: string, filename: string): void {
+    this.emitEvent('library-download-duplicate', {
+      jobId,
+      videoId,
+      filename,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Library download action response (after user chooses to replace or cancel)
+   */
+  emitLibraryDownloadActionReceived(jobId: string, action: 'replace' | 'cancel'): void {
+    this.emitEvent('library-download-action-received', {
+      jobId,
+      action,
+      timestamp: this.getTimestamp()
+    });
+  }
 }

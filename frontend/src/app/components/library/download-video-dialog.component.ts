@@ -8,10 +8,11 @@ import { MatInputModule } from '@angular/material/input';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSelectModule } from '@angular/material/select';
 import { MatIconModule } from '@angular/material/icon';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+// MatProgressSpinnerModule removed - dialog closes immediately
 import { HttpClient } from '@angular/common/http';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
+import { DownloadProgressService } from '../../services/download-progress.service';
 import { firstValueFrom } from 'rxjs';
 
 interface DialogData {
@@ -42,8 +43,7 @@ interface ApiKeysConfig {
     MatInputModule,
     MatCheckboxModule,
     MatSelectModule,
-    MatIconModule,
-    MatProgressSpinnerModule
+    MatIconModule
   ],
   template: `
     <h2 mat-dialog-title>
@@ -205,10 +205,9 @@ interface ApiKeysConfig {
 
     <mat-dialog-actions align="end">
       <button mat-button (click)="cancel()">Cancel</button>
-      <button mat-raised-button color="primary" (click)="download()" [disabled]="!url || isDownloading">
-        <mat-icon *ngIf="!isDownloading">cloud_download</mat-icon>
-        <mat-spinner diameter="20" *ngIf="isDownloading"></mat-spinner>
-        {{ isDownloading ? 'Starting...' : 'Download' }}
+      <button mat-raised-button color="primary" (click)="download()" [disabled]="!url">
+        <mat-icon>cloud_download</mat-icon>
+        Download
       </button>
     </mat-dialog-actions>
   `,
@@ -360,14 +359,13 @@ export class DownloadVideoDialogComponent implements OnInit {
   showClaudeKey = false;
   showOpenAiKey = false;
 
-  isDownloading = false;
-
   constructor(
     private dialogRef: MatDialogRef<DownloadVideoDialogComponent>,
     @Inject(MAT_DIALOG_DATA) public data: DialogData,
     private apiService: ApiService,
     private http: HttpClient,
-    private backendUrlService: BackendUrlService
+    private backendUrlService: BackendUrlService,
+    private downloadProgressService: DownloadProgressService
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -407,47 +405,61 @@ export class DownloadVideoDialogComponent implements OnInit {
       return;
     }
 
-    this.isDownloading = true;
+    // Generate a jobId for tracking
+    const jobId = `download-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    console.log('[DownloadVideoDialog] Generated jobId:', jobId);
 
-    try {
-      // Start the download
-      const downloadResult = await this.apiService.downloadVideo({
-        url: this.url,
-        quality: 'best',
-        convertToMp4: true,
-        fixAspectRatio: false,
-        useCookies: false,
-        browser: 'auto',
-        outputDir: this.data.activeLibrary.clipsFolderPath,
-        displayName: '', // Let yt-dlp determine the name
-        transcribeVideo: this.transcribeAfterDownload
-      }).toPromise();
+    // Add job to download progress tracker
+    this.downloadProgressService.addJob({
+      id: jobId,
+      filename: this.url, // Will be updated when we get actual filename
+      url: this.url,
+      stage: 'downloading',
+      progress: 0,
+      startedAt: new Date()
+    });
 
-      if (downloadResult?.success) {
-        // Close dialog with success and return analysis options
-        this.dialogRef.close({
-          success: true,
-          transcribe: this.transcribeAfterDownload,
-          analyze: this.analyzeAfterDownload,
-          outputFile: downloadResult.outputFile,
-          aiProvider: this.selectedProvider,
-          aiModel: this.selectedModel,
-          claudeApiKey: this.claudeApiKey !== '***' ? this.claudeApiKey : undefined,
-          openaiApiKey: this.openaiApiKey !== '***' ? this.openaiApiKey : undefined
-        });
-      } else {
-        this.dialogRef.close({
-          success: false,
-          error: 'Download failed'
-        });
+    // Close dialog immediately - download will be tracked in the queue
+    this.dialogRef.close({
+      success: true,
+      downloadStarted: true,
+      transcribe: this.transcribeAfterDownload,
+      analyze: this.analyzeAfterDownload,
+      aiProvider: this.selectedProvider,
+      aiModel: this.selectedModel,
+      claudeApiKey: this.claudeApiKey !== '***' ? this.claudeApiKey : undefined,
+      openaiApiKey: this.openaiApiKey !== '***' ? this.openaiApiKey : undefined
+    });
+
+    // Start the download asynchronously - it will be tracked in the download queue
+    this.apiService.downloadVideo({
+      url: this.url,
+      jobId: jobId,  // Pass the jobId to backend
+      quality: '1080',  // Use valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
+      convertToMp4: true,
+      fixAspectRatio: false,
+      useCookies: false,
+      browser: 'auto',
+      outputDir: this.data.activeLibrary.clipsFolderPath,
+      displayName: '', // Let yt-dlp determine the name
+      transcribeVideo: this.transcribeAfterDownload,
+      analyzeVideo: this.analyzeAfterDownload,  // Add analyze flag
+      shouldImport: true  // Auto-import to library after download
+    }).subscribe({
+      next: (result) => {
+        console.log('[DownloadVideoDialog] Download completed:', result);
+      },
+      error: (error) => {
+        console.error('[DownloadVideoDialog] Download error:', error);
+        // Update job to failed status
+        const job = this.downloadProgressService.getJob(jobId);
+        if (job) {
+          job.stage = 'failed';
+          job.error = error.message || 'Download failed';
+          this.downloadProgressService.updateJob(job);
+        }
       }
-    } catch (error) {
-      console.error('Download error:', error);
-      this.dialogRef.close({
-        success: false,
-        error: 'Download failed'
-      });
-    }
+    });
   }
 
   cancel() {

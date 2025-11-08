@@ -21,7 +21,7 @@ export class JobStateManagerService {
     'downloading': ['downloaded', 'failed'],
     'downloaded': ['processing', 'transcribing', 'failed'],
     'processing': ['transcribing', 'completed', 'failed'],
-    'transcribing': ['completed', 'failed'],
+    'transcribing': ['processing', 'completed', 'failed'],  // Allow transcribing → processing for AI analysis
     'completed': ['failed'],
     'failed': ['queued']
   };

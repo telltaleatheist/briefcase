@@ -31,6 +31,7 @@ export interface QualityOption {
 // Keep all other existing interfaces
 export interface DownloadOptions {
   url: string;
+  jobId?: string;
   quality: string;
   convertToMp4: boolean;
   fixAspectRatio: boolean;
@@ -44,6 +45,8 @@ export interface DownloadOptions {
   useCompression?: boolean;
   compressionLevel?: number;
   transcribeVideo?: boolean;
+  analyzeVideo?: boolean;
+  shouldImport?: boolean;
 }
 
 export interface BatchDownloadOptions {

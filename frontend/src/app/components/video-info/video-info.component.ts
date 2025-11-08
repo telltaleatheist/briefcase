@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -8,6 +9,8 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatChipsModule } from '@angular/material/chips';
+import { MatInputModule } from '@angular/material/input';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatDialog } from '@angular/material/dialog';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
@@ -34,13 +37,16 @@ interface TranscriptEntry {
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     MatButtonModule,
     MatIconModule,
     MatCardModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
     MatDividerModule,
-    MatChipsModule
+    MatChipsModule,
+    MatInputModule,
+    MatFormFieldModule
   ],
   templateUrl: './video-info.component.html',
   styleUrl: './video-info.component.scss'
@@ -56,6 +62,8 @@ export class VideoInfoComponent implements OnInit {
   videoUrl: string = '';
   videoError: string = '';
   parsedTranscript: TranscriptEntry[] = [];
+  isEditingTitle = false;
+  editedTitle = '';
 
   constructor(
     private router: Router,
@@ -467,6 +475,76 @@ export class VideoInfoComponent implements OnInit {
     } catch (error) {
       console.error('Failed to copy transcript:', error);
       this.notificationService.error('Copy Failed', 'Failed to copy transcript to clipboard');
+    }
+  }
+
+  /**
+   * Start editing the video title
+   */
+  startEditingTitle() {
+    if (!this.video) return;
+    this.isEditingTitle = true;
+    this.editedTitle = this.video.filename;
+  }
+
+  /**
+   * Cancel editing the title
+   */
+  cancelEditingTitle() {
+    this.isEditingTitle = false;
+    this.editedTitle = '';
+  }
+
+  /**
+   * Save the edited title
+   */
+  async saveTitle() {
+    if (!this.video || !this.editedTitle.trim()) {
+      this.cancelEditingTitle();
+      return;
+    }
+
+    const newTitle = this.editedTitle.trim();
+
+    // If title hasn't changed, just cancel
+    if (newTitle === this.video.filename) {
+      this.cancelEditingTitle();
+      return;
+    }
+
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/filename`);
+      const result = await firstValueFrom(
+        this.http.patch<{ success: boolean; message?: string; error?: string }>(url, {
+          filename: newTitle
+        })
+      );
+
+      if (result.success) {
+        // Update local video object
+        this.video.filename = newTitle;
+        this.notificationService.success('Title Updated', 'Video title has been updated successfully');
+        this.isEditingTitle = false;
+        this.editedTitle = '';
+      } else {
+        this.notificationService.error('Update Failed', result.error || 'Failed to update video title');
+      }
+    } catch (error) {
+      console.error('Error updating title:', error);
+      this.notificationService.error('Update Failed', 'Failed to update video title');
+    }
+  }
+
+  /**
+   * Handle Enter key in title input
+   */
+  onTitleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.saveTitle();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelEditingTitle();
     }
   }
 }

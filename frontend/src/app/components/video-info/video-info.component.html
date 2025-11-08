@@ -13,7 +13,38 @@
         <button mat-icon-button (click)="goBack()" class="back-button">
           <mat-icon>arrow_back</mat-icon>
         </button>
-        <h1>{{ video.filename }}</h1>
+        <div class="title-container">
+          <h1 *ngIf="!isEditingTitle" class="video-title">
+            {{ video.filename }}
+            <button mat-icon-button
+                    (click)="startEditingTitle()"
+                    class="edit-title-button"
+                    matTooltip="Edit title">
+              <mat-icon>edit</mat-icon>
+            </button>
+          </h1>
+          <div *ngIf="isEditingTitle" class="title-edit-container">
+            <mat-form-field appearance="outline" class="title-input">
+              <input matInput
+                     [(ngModel)]="editedTitle"
+                     (keydown)="onTitleKeydown($event)"
+                     #titleInput
+                     placeholder="Enter video title"
+                     autofocus>
+            </mat-form-field>
+            <button mat-icon-button
+                    (click)="saveTitle()"
+                    color="primary"
+                    matTooltip="Save">
+              <mat-icon>check</mat-icon>
+            </button>
+            <button mat-icon-button
+                    (click)="cancelEditingTitle()"
+                    matTooltip="Cancel">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="header-actions">
         <button mat-raised-button color="primary" (click)="openClipCreator()" class="primary-action">

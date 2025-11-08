@@ -371,17 +371,4 @@
       </ng-template>
     </mat-tab>
   </mat-tab-group>
-
-  <!-- Batch Progress Button - Opens modal -->
-  <button
-    mat-fab
-    extended
-    color="primary"
-    class="batch-progress-fab"
-    *ngIf="batchProgress?.running"
-    (click)="showBatchProgress()"
-    matTooltip="View batch analysis progress">
-    <mat-icon>{{ batchProgress?.status === 'running' ? 'play_circle' : 'pause_circle' }}</mat-icon>
-    Batch Analysis ({{ batchProgress?.processedVideos || 0 }}/{{ batchProgress?.totalVideos || 0 }})
-  </button>
 </div>

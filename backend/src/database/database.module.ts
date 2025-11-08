@@ -1,4 +1,4 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, forwardRef } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
@@ -15,7 +15,7 @@ import { AnalysisModule } from '../analysis/analysis.module';
  */
 @Global()
 @Module({
-  imports: [AnalysisModule],
+  imports: [forwardRef(() => AnalysisModule)],
   controllers: [DatabaseController],
   providers: [
     DatabaseService,

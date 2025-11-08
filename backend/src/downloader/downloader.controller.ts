@@ -3,6 +3,7 @@ import { Body, Controller, Get, Param, Post, Delete, Res, Query, Patch } from '@
 import { Response } from 'express';
 import { DownloaderService } from './downloader.service';
 import { BatchDownloaderService } from './batch-downloader.service';
+import { LibraryDownloadService } from './library-download.service';
 import { DownloadVideoDto } from '../common/dto/download.dto';
 import * as fs from 'fs';
 import * as log from 'electron-log';
@@ -11,12 +12,52 @@ import * as log from 'electron-log';
 export class DownloaderController {
   constructor(
     private readonly downloaderService: DownloaderService,
-    private readonly batchDownloaderService: BatchDownloaderService
+    private readonly batchDownloaderService: BatchDownloaderService,
+    private readonly libraryDownloadService: LibraryDownloadService
   ) {}
-  
+
+  /**
+   * NEW: Pure download endpoint - just downloads video with progress reporting
+   * No pipeline logic, no auto-import, just YT-DLP download
+   * Progress is emitted via WebSocket events: 'download-progress', 'download-completed', 'download-failed'
+   */
+  @Post('download-only')
+  async downloadOnly(@Body() downloadOptions: DownloadVideoDto) {
+    const result = await this.downloaderService.downloadVideo(
+      {
+        url: downloadOptions.url,
+        outputDir: downloadOptions.outputDir,
+        quality: downloadOptions.quality || '720',
+        convertToMp4: downloadOptions.convertToMp4 !== false,
+        useCookies: downloadOptions.useCookies !== false,
+        browser: downloadOptions.browser || 'auto',
+        displayName: downloadOptions.displayName,
+        fixAspectRatio: downloadOptions.fixAspectRatio,
+        useRmsNormalization: downloadOptions.useRmsNormalization,
+        rmsNormalizationLevel: downloadOptions.rmsNormalizationLevel,
+        useCompression: downloadOptions.useCompression,
+        compressionLevel: downloadOptions.compressionLevel
+      },
+      downloadOptions.jobId
+    );
+    return result;
+  }
+
+  /**
+   * Library download with full pipeline: download → import → transcribe → analyze
+   * This uses LibraryDownloadService which orchestrates the entire pipeline
+   */
   @Post()
   async downloadVideo(@Body() downloadOptions: DownloadVideoDto) {
-    return this.downloaderService.downloadVideo(downloadOptions);
+    // Use the new library download service for single video downloads with full pipeline
+    // download → import → transcribe → analyze
+    const jobId = await this.libraryDownloadService.startLibraryDownload(
+      downloadOptions.url,
+      downloadOptions.displayName,
+      downloadOptions.transcribeVideo === true, // Only transcribe if explicitly requested
+      downloadOptions.analyzeVideo === true     // Only analyze if explicitly requested
+    );
+    return { success: true, jobId };
   }
 
   @Post('batch')
