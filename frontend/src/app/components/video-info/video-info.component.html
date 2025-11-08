@@ -1,0 +1,241 @@
+<div class="video-info-container">
+  <!-- Loading State -->
+  <div *ngIf="isLoading" class="loading-container">
+    <mat-spinner diameter="50"></mat-spinner>
+    <p>Loading video information...</p>
+  </div>
+
+  <!-- Main Content -->
+  <div *ngIf="!isLoading && video" class="content-wrapper">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-left">
+        <button mat-icon-button (click)="goBack()" class="back-button">
+          <mat-icon>arrow_back</mat-icon>
+        </button>
+        <h1>{{ video.filename }}</h1>
+      </div>
+      <div class="header-actions">
+        <button mat-raised-button color="primary" (click)="openClipCreator()" class="primary-action">
+          <mat-icon>movie_filter</mat-icon>
+          Clip Creator
+        </button>
+        <button mat-raised-button
+                (click)="runTranscription()"
+                [disabled]="isProcessing"
+                [class.processing]="processingType === 'transcript'">
+          <mat-spinner diameter="20" *ngIf="processingType === 'transcript'"></mat-spinner>
+          <mat-icon *ngIf="processingType !== 'transcript'">
+            {{ transcript ? 'refresh' : 'subtitles' }}
+          </mat-icon>
+          {{ transcript ? 'Re-transcribe' : 'Transcribe' }}
+        </button>
+        <button mat-raised-button
+                (click)="runAnalysis()"
+                [disabled]="isProcessing"
+                [class.processing]="processingType === 'analysis'">
+          <mat-spinner diameter="20" *ngIf="processingType === 'analysis'"></mat-spinner>
+          <mat-icon *ngIf="processingType !== 'analysis'">
+            {{ analysis ? 'check_circle' : 'analytics' }}
+          </mat-icon>
+          {{ analysis ? 'Re-analyze' : 'Analyze' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Two Column Layout: Video+Description on left, Metadata on right -->
+    <div class="video-metadata-grid">
+      <!-- Left Column: Video and AI Description -->
+      <div class="video-column">
+        <div class="video-preview">
+          <video #videoPlayer
+                 [src]="videoUrl"
+                 controls
+                 preload="metadata"
+                 class="video-player"
+                 (error)="onVideoError($event)"
+                 (loadedmetadata)="onVideoLoaded()"
+                 *ngIf="videoUrl">
+            Your browser does not support the video tag.
+          </video>
+          <div class="no-video" *ngIf="!videoUrl">
+            <mat-icon>movie</mat-icon>
+            <p>Loading video...</p>
+          </div>
+          <div class="video-error" *ngIf="videoError">
+            <mat-icon>error</mat-icon>
+            <p>{{ videoError }}</p>
+          </div>
+        </div>
+
+        <!-- AI Description (Under Video) -->
+        <div class="ai-description-main" *ngIf="video?.ai_description">
+          <mat-card class="ai-description-card">
+            <h3>
+              <mat-icon>description</mat-icon>
+              AI Description
+            </h3>
+            <p>{{ video.ai_description }}</p>
+          </mat-card>
+        </div>
+      </div>
+
+      <!-- Right Column: Metadata -->
+      <div class="metadata-column">
+        <h2>Metadata</h2>
+        <mat-card class="metadata-card">
+          <!-- Primary Info Grid (2 columns) -->
+          <div class="metadata-grid-primary">
+            <div class="metadata-item">
+              <mat-icon>schedule</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">Duration</span>
+                <span class="metadata-value">{{ formatDuration(video.duration_seconds) }}</span>
+              </div>
+            </div>
+
+            <div class="metadata-item">
+              <mat-icon>storage</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">File Size</span>
+                <span class="metadata-value">{{ formatFileSize(video.file_size_bytes) }}</span>
+              </div>
+            </div>
+
+            <div class="metadata-item">
+              <mat-icon>calendar_today</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">Created</span>
+                <span class="metadata-value">{{ formatDate(video.created_at) }}</span>
+              </div>
+            </div>
+
+            <div class="metadata-item">
+              <mat-icon>update</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">Added</span>
+                <span class="metadata-value">{{ formatDate(video.added_at) }}</span>
+              </div>
+            </div>
+
+            <div class="metadata-item metadata-item-full" *ngIf="video.date_folder">
+              <mat-icon>event</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">Date Folder</span>
+                <span class="metadata-value">{{ video.date_folder }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Path Section (Full Width) -->
+          <mat-divider></mat-divider>
+
+          <div class="metadata-path-section">
+            <div class="metadata-item">
+              <mat-icon>folder</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">File Path</span>
+                <span class="metadata-value path">{{ video.current_path }}</span>
+              </div>
+            </div>
+          </div>
+        </mat-card>
+      </div>
+    </div>
+
+    <!-- Analysis Section -->
+    <div class="analysis-section" *ngIf="analysis && analysisSections.length > 0">
+      <div class="analysis-header">
+        <h2>
+          <mat-icon>analytics</mat-icon>
+          AI Analysis
+        </h2>
+        <mat-chip-set class="analysis-meta">
+          <mat-chip>
+            <mat-icon>psychology</mat-icon>
+            {{ analysis.ai_model }}
+          </mat-chip>
+          <mat-chip *ngIf="analysis.ai_provider">
+            <mat-icon>cloud</mat-icon>
+            {{ analysis.ai_provider }}
+          </mat-chip>
+          <mat-chip>
+            <mat-icon>segment</mat-icon>
+            {{ analysisSections.length }} sections
+          </mat-chip>
+        </mat-chip-set>
+      </div>
+
+      <div class="analysis-sections-grid">
+        <mat-card class="section-card" *ngFor="let section of analysisSections">
+          <div class="section-card-header">
+            <div class="section-timestamp">
+              <mat-icon>schedule</mat-icon>
+              <span>{{ formatTimestamp(section.start_seconds) }}</span>
+              <span *ngIf="section.end_seconds"> - {{ formatTimestamp(section.end_seconds) }}</span>
+            </div>
+            <span class="section-category"
+                  [style.background-color]="getCategoryColor(section.category || 'General')"
+                  *ngIf="section.category">
+              {{ section.category }}
+            </span>
+          </div>
+          <!-- Only show title if there's no description, or if they're different -->
+          <h3 class="section-title" *ngIf="section.title && (!section.description || section.title !== section.description)">
+            {{ section.title }}
+          </h3>
+          <!-- Show description, or title if no description exists -->
+          <p class="section-description" *ngIf="section.description || section.title">
+            {{ section.description || section.title }}
+          </p>
+        </mat-card>
+      </div>
+    </div>
+
+    <!-- Transcript Section -->
+    <div class="transcript-section" *ngIf="transcript">
+      <div class="transcript-header">
+        <h2>
+          <mat-icon>subtitles</mat-icon>
+          Transcript
+        </h2>
+        <div class="transcript-actions">
+          <button mat-stroked-button (click)="copyTranscript(false)">
+            <mat-icon>content_copy</mat-icon>
+            Copy (No Timestamps)
+          </button>
+          <button mat-stroked-button (click)="copyTranscript(true)">
+            <mat-icon>content_copy</mat-icon>
+            Copy (With Timestamps)
+          </button>
+        </div>
+      </div>
+
+      <mat-card class="transcript-card">
+        <div class="transcript-info">
+          <mat-chip-set>
+            <mat-chip *ngIf="transcript.whisper_model">
+              <mat-icon>mic</mat-icon>
+              {{ transcript.whisper_model }}
+            </mat-chip>
+            <mat-chip *ngIf="transcript.language">
+              <mat-icon>language</mat-icon>
+              {{ transcript.language }}
+            </mat-chip>
+            <mat-chip>
+              <mat-icon>schedule</mat-icon>
+              {{ formatDate(transcript.transcribed_at) }}
+            </mat-chip>
+          </mat-chip-set>
+        </div>
+
+        <div class="transcript-content">
+          <div class="transcript-entry" *ngFor="let entry of parsedTranscript">
+            <span class="timestamp-badge">{{ entry.timestamp }}</span>
+            <p class="transcript-text">{{ entry.text }}</p>
+          </div>
+        </div>
+      </mat-card>
+    </div>
+  </div>
+</div>

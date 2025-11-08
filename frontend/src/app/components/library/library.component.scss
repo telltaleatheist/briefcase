@@ -191,6 +191,20 @@
           height: 18px;
         }
       }
+
+      // Fix visibility in dark mode
+      ::ng-deep mat-chip {
+        background-color: rgba(255, 143, 71, 0.15) !important;
+        color: var(--text-primary) !important;
+
+        .mdc-evolution-chip__text-label {
+          color: var(--text-primary) !important;
+        }
+
+        mat-icon {
+          color: var(--primary-orange) !important;
+        }
+      }
     }
   }
 
@@ -411,9 +425,19 @@
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   margin-bottom: 24px;
+  overflow-x: hidden !important;
+  overflow-y: auto;
+
+  ::ng-deep .cdk-virtual-scroll-content-wrapper {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
 
   .video-card-wrapper {
     padding: 4px 8px;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
   }
 
   .video-card {
@@ -425,6 +449,9 @@
     overflow: hidden;
     border-radius: 4px;
     background: var(--bg-card);
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
 
     &:hover {
       background-color: var(--bg-secondary);
@@ -463,10 +490,12 @@
       align-items: baseline;
       gap: 12px;
       overflow: hidden;
+      max-width: 100%;
 
       .video-title {
-        flex: 1;
+        flex: 1 1 auto;
         min-width: 0;
+        max-width: 100%;
         font-size: 14px;
         font-weight: 400;
         overflow: hidden;
@@ -485,8 +514,9 @@
       }
 
       .video-subtitle {
-        flex-shrink: 1;
+        flex: 0 1 auto;
         min-width: 0;
+        max-width: 50%;
         font-size: 12px;
         color: var(--text-secondary);
         white-space: nowrap;
@@ -522,6 +552,48 @@
 
     &:hover .card-actions {
       opacity: 1;
+    }
+
+    // Ensure menu button has hover effect
+    .card-actions {
+      button[mat-icon-button] {
+        &:hover {
+          background-color: rgba(0, 0, 0, 0.04);
+        }
+      }
+    }
+  }
+}
+
+// Menu styling for video actions
+::ng-deep .mat-mdc-menu-panel {
+  .mat-mdc-menu-content {
+    .menu-section-header {
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--primary-orange);
+      background-color: rgba(255, 143, 71, 0.1);
+      border-bottom: 1px solid rgba(255, 143, 71, 0.2);
+
+      .source-url-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+      }
+    }
+
+    .mat-mdc-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      mat-icon {
+        margin-right: 0;
+      }
     }
   }
 }
@@ -824,6 +896,34 @@
   .video-card {
     &:hover {
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    .card-actions {
+      button[mat-icon-button] {
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.08);
+        }
+      }
+    }
+  }
+
+  ::ng-deep .mat-mdc-menu-panel {
+    background-color: #424242;
+
+    .mat-mdc-menu-item {
+      color: rgba(255, 255, 255, 0.87);
+
+      mat-icon {
+        color: rgba(255, 255, 255, 0.7);
+      }
+
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.08);
+      }
+    }
+
+    .mat-divider {
+      border-top-color: rgba(255, 255, 255, 0.12);
     }
   }
 }

@@ -128,6 +128,7 @@ export class DatabaseService {
         duration_seconds REAL,
         file_size_bytes INTEGER,
         ai_description TEXT,
+        source_url TEXT,
         created_at TEXT NOT NULL,
         last_verified TEXT NOT NULL,
         added_at TEXT NOT NULL,
@@ -303,6 +304,7 @@ export class DatabaseService {
     dateFolder?: string;
     durationSeconds?: number;
     fileSizeBytes?: number;
+    sourceUrl?: string;
   }) {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
@@ -310,8 +312,8 @@ export class DatabaseService {
     db.run(
       `INSERT INTO videos (
         id, filename, file_hash, current_path, date_folder,
-        duration_seconds, file_size_bytes, created_at, last_verified, added_at, is_linked
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        duration_seconds, file_size_bytes, source_url, created_at, last_verified, added_at, is_linked
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         video.id,
         video.filename,
@@ -320,6 +322,7 @@ export class DatabaseService {
         video.dateFolder || null,
         video.durationSeconds || null,
         video.fileSizeBytes || null,
+        video.sourceUrl || null,
         now,
         now,
         now,
@@ -405,6 +408,27 @@ export class DatabaseService {
     );
 
     this.saveDatabase();
+  }
+
+  /**
+   * Update video's source URL
+   */
+  updateVideoSourceUrl(id: string, sourceUrl: string | null) {
+    const db = this.ensureInitialized();
+
+    try {
+      db.run(
+        `UPDATE videos
+         SET source_url = ?
+         WHERE id = ?`,
+        [sourceUrl, id]
+      );
+
+      this.saveDatabase();
+    } catch (error) {
+      this.logger.error(`Failed to update source URL for video ${id}:`, error);
+      throw error;
+    }
   }
 
   /**

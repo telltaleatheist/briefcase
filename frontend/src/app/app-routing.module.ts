@@ -33,6 +33,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
   },
   {
+    path: 'video-info/:id',
+    loadComponent: () => import('./components/video-info/video-info.component').then(m => m.VideoInfoComponent)
+  },
+  {
     path: 'video-editor',
     loadComponent: () => import('./components/video-player/video-player.component').then(m => m.VideoPlayerComponent)
   },

@@ -16,6 +16,8 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatDividerModule } from '@angular/material/divider';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import {
   DatabaseLibraryService,
@@ -25,6 +27,7 @@ import {
 } from '../../services/database-library.service';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { ApiService } from '../../services/api.service';
 
 interface ClipLibrary {
   id: string;
@@ -61,6 +64,8 @@ interface UnimportedVideo {
     MatCheckboxModule,
     MatSelectModule,
     MatTabsModule,
+    MatMenuModule,
+    MatDividerModule,
     ScrollingModule
   ],
   templateUrl: './library.component.html',
@@ -132,7 +137,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     private notificationService: NotificationService,
     private http: HttpClient,
     private backendUrlService: BackendUrlService,
-    private router: Router
+    private router: Router,
+    private apiService: ApiService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -617,16 +623,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Open video in player dialog
    */
   async openVideoPlayer(video: DatabaseVideo) {
-    // Navigate to video editor with video data
-    this.router.navigate(['/video-editor'], {
+    // Navigate to video info page with video data
+    this.router.navigate(['/video-info', video.id], {
       state: {
-        videoEditorData: {
-          videoId: video.id,
-          videoPath: video.current_path,
-          videoTitle: video.filename,
-          startTime: 0,
-          endTime: video.duration_seconds || 0
-        }
+        videoData: video
       }
     });
   }
@@ -1228,6 +1228,335 @@ export class LibraryComponent implements OnInit, OnDestroy {
         completedVideos: this.completedVideos
       }
     });
+  }
+
+  /**
+   * Download video only (no transcription or analysis)
+   */
+  async downloadOnly(video: DatabaseVideo) {
+    // Check if video has a URL stored in metadata or description
+    const videoUrl = await this.getVideoUrl(video);
+
+    if (!videoUrl) {
+      this.notificationService.toastOnly(
+        'warning',
+        'No URL Found',
+        'This video does not have a source URL. You can add one in the metadata editor.'
+      );
+      return;
+    }
+
+    try {
+      this.notificationService.toastOnly('info', 'Download Started', `Downloading ${video.filename}`);
+
+      // Trigger download via API
+      this.apiService.downloadVideo({
+        url: videoUrl,
+        quality: 'best',
+        convertToMp4: true,
+        fixAspectRatio: false,
+        useCookies: false,
+        browser: 'auto',
+        outputDir: this.activeLibrary?.clipsFolderPath || '',
+        displayName: video.filename,
+        transcribeVideo: false
+      }).subscribe({
+        next: (_result) => {
+          this.notificationService.toastOnly(
+            'success',
+            'Download Complete',
+            `${video.filename} downloaded successfully`
+          );
+          // Refresh library to show the updated video
+          this.loadVideos();
+        },
+        error: (error) => {
+          console.error('Download failed:', error);
+          this.notificationService.toastOnly(
+            'error',
+            'Download Failed',
+            error.error?.message || 'Failed to download video'
+          );
+        }
+      });
+    } catch (error) {
+      console.error('Download error:', error);
+      this.notificationService.toastOnly('error', 'Error', 'Failed to start download');
+    }
+  }
+
+  /**
+   * Download and transcribe video
+   */
+  async downloadAndTranscribe(video: DatabaseVideo) {
+    const videoUrl = await this.getVideoUrl(video);
+
+    if (!videoUrl) {
+      this.notificationService.toastOnly(
+        'warning',
+        'No URL Found',
+        'This video does not have a source URL. You can add one in the metadata editor.'
+      );
+      return;
+    }
+
+    try {
+      // Start download
+      this.notificationService.toastOnly('info', 'Download Started', `Downloading ${video.filename}`);
+
+      this.apiService.downloadVideo({
+        url: videoUrl,
+        quality: 'best',
+        convertToMp4: true,
+        fixAspectRatio: false,
+        useCookies: false,
+        browser: 'auto',
+        outputDir: this.activeLibrary?.clipsFolderPath || '',
+        displayName: video.filename,
+        transcribeVideo: true  // Enable transcription in downloader
+      }).subscribe({
+        next: async (_result) => {
+          // Download complete, now start transcription
+          this.notificationService.toastOnly(
+            'success',
+            'Download Complete',
+            'Starting transcription...'
+          );
+
+          try {
+            await this.databaseLibraryService.startBatchAnalysis({
+              videoIds: [video.id],
+              transcribeOnly: true
+            });
+
+            this.notificationService.toastOnly(
+              'success',
+              'Transcription Started',
+              `Transcribing ${video.filename}`
+            );
+            this.startProgressPolling();
+          } catch (error: any) {
+            console.error('Transcription failed:', error);
+            this.notificationService.toastOnly(
+              'error',
+              'Transcription Failed',
+              error.error?.message || 'Failed to start transcription'
+            );
+          }
+        },
+        error: (error) => {
+          console.error('Download failed:', error);
+          this.notificationService.toastOnly(
+            'error',
+            'Download Failed',
+            error.error?.message || 'Failed to download video'
+          );
+        }
+      });
+    } catch (error) {
+      console.error('Error:', error);
+      this.notificationService.toastOnly('error', 'Error', 'Failed to start process');
+    }
+  }
+
+  /**
+   * Download and AI analyze video
+   */
+  async downloadAndAnalyze(video: DatabaseVideo) {
+    const videoUrl = await this.getVideoUrl(video);
+
+    if (!videoUrl) {
+      this.notificationService.toastOnly(
+        'warning',
+        'No URL Found',
+        'This video does not have a source URL. You can add one in the metadata editor.'
+      );
+      return;
+    }
+
+    // Open dialog to select AI provider and options
+    const { AnalyzeSelectedDialogComponent } = await import('./analyze-selected-dialog.component');
+
+    const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
+      width: '800px',
+      maxHeight: '90vh',
+      data: {
+        selectedCount: 1,
+        videosWithExistingAnalysis: await this.databaseLibraryService.hasAnalysis(video.id) ? 1 : 0,
+        isDownloadMode: true,
+        videoUrl: videoUrl
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (!result || result.option === 'skip') {
+      return;
+    }
+
+    try {
+      // Start download
+      this.notificationService.toastOnly('info', 'Download Started', `Downloading ${video.filename}`);
+
+      this.apiService.downloadVideo({
+        url: videoUrl,
+        quality: 'best',
+        convertToMp4: true,
+        fixAspectRatio: false,
+        useCookies: false,
+        browser: 'auto',
+        outputDir: this.activeLibrary?.clipsFolderPath || '',
+        displayName: video.filename,
+        transcribeVideo: result.option !== 'skip'  // Enable transcription unless skipped
+      }).subscribe({
+        next: async (_downloadResult) => {
+          // Download complete, now start analysis
+          this.notificationService.toastOnly(
+            'success',
+            'Download Complete',
+            'Starting AI analysis...'
+          );
+
+          try {
+            await this.databaseLibraryService.startBatchAnalysis({
+              videoIds: [video.id],
+              transcribeOnly: result.option === 'transcribe-only',
+              forceReanalyze: result.forceReanalyze,
+              aiProvider: result.aiProvider,
+              aiModel: result.aiModel,
+              claudeApiKey: result.claudeApiKey,
+              openaiApiKey: result.openaiApiKey
+            });
+
+            const actionText = result.option === 'transcribe-only' ? 'Transcription' : 'Analysis';
+            this.notificationService.toastOnly(
+              'success',
+              `${actionText} Started`,
+              `Processing ${video.filename}`
+            );
+            this.startProgressPolling();
+          } catch (error: any) {
+            console.error('Analysis failed:', error);
+            this.notificationService.toastOnly(
+              'error',
+              'Analysis Failed',
+              error.error?.message || 'Failed to start analysis'
+            );
+          }
+        },
+        error: (error) => {
+          console.error('Download failed:', error);
+          this.notificationService.toastOnly(
+            'error',
+            'Download Failed',
+            error.error?.message || 'Failed to download video'
+          );
+        }
+      });
+    } catch (error) {
+      console.error('Error:', error);
+      this.notificationService.toastOnly('error', 'Error', 'Failed to start process');
+    }
+  }
+
+  /**
+   * Get video URL from database or prompt user
+   */
+  private async getVideoUrl(video: DatabaseVideo): Promise<string | null> {
+    // First, check if the video has a source URL stored in the database
+    if (video.source_url) {
+      return video.source_url;
+    }
+
+    // If not, prompt the user to enter a URL
+    const url = prompt(`Enter the source URL for "${video.filename}":`);
+
+    if (!url) {
+      return null;
+    }
+
+    // Basic URL validation
+    try {
+      new URL(url);
+
+      // Save the URL to the database for future use
+      const result = await this.databaseLibraryService.updateVideoSourceUrl(video.id, url);
+      if (result.success) {
+        // Update the local video object
+        video.source_url = url;
+        this.notificationService.toastOnly('success', 'URL Saved', 'Source URL has been saved for this video');
+      }
+
+      return url;
+    } catch {
+      this.notificationService.toastOnly('error', 'Invalid URL', 'Please enter a valid URL');
+      return null;
+    }
+  }
+
+  /**
+   * Open download video dialog
+   */
+  async openDownloadDialog() {
+    // Import dialog component
+    const { DownloadVideoDialogComponent } = await import('./download-video-dialog.component');
+
+    const dialogRef = this.dialog.open(DownloadVideoDialogComponent, {
+      width: '600px',
+      data: {
+        activeLibrary: this.activeLibrary
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.success) {
+      this.notificationService.toastOnly(
+        'success',
+        'Download Complete',
+        `Video downloaded successfully`
+      );
+
+      // Scan library to import the new video
+      try {
+        const scanResult = await this.databaseLibraryService.scanLibrary();
+
+        if (scanResult.newVideoIds && scanResult.newVideoIds.length > 0) {
+          const newVideoId = scanResult.newVideoIds[0];
+
+          // If transcription or analysis was requested, start batch analysis
+          if (result.transcribe || result.analyze) {
+            await this.databaseLibraryService.startBatchAnalysis({
+              videoIds: [newVideoId],
+              transcribeOnly: !result.analyze,
+              aiProvider: result.aiProvider,
+              aiModel: result.aiModel,
+              claudeApiKey: result.claudeApiKey,
+              openaiApiKey: result.openaiApiKey
+            });
+
+            const actionText = result.analyze ? 'Analysis' : 'Transcription';
+            this.notificationService.toastOnly(
+              'success',
+              `${actionText} Started`,
+              `Processing downloaded video`
+            );
+            this.startProgressPolling();
+          }
+        }
+
+        // Refresh library
+        await this.loadVideos();
+        await this.loadStats();
+      } catch (error) {
+        console.error('Failed to process downloaded video:', error);
+        this.notificationService.toastOnly(
+          'warning',
+          'Video Downloaded',
+          'Video was downloaded but may need to be manually imported'
+        );
+      }
+    }
   }
 
   /**

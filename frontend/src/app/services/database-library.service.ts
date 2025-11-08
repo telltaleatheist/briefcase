@@ -20,6 +20,7 @@ export interface DatabaseVideo {
   duration_seconds: number | null;
   file_size_bytes: number | null;
   ai_description: string | null;
+  source_url: string | null;
   created_at: string;
   last_verified: string;
   added_at: string;
@@ -536,6 +537,24 @@ export class DatabaseLibraryService {
   }
 
   /**
+   * Update video source URL
+   */
+  async updateVideoSourceUrl(videoId: string, sourceUrl: string | null): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      return await firstValueFrom(
+        this.http.patch<{ success: boolean; message?: string; error?: string }>(
+          `${baseUrl}/videos/${videoId}/source-url`,
+          { sourceUrl }
+        )
+      );
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error updating source URL:', error);
+      return { success: false, error: 'Failed to update source URL' };
+    }
+  }
+
+  /**
    * Get analysis for a video
    */
   async getAnalysis(videoId: string): Promise<DatabaseAnalysis | null> {
@@ -589,6 +608,30 @@ export class DatabaseLibraryService {
     return firstValueFrom(
       this.http.delete<{ success: boolean; message: string }>(
         `${baseUrl}/videos/${videoId}`
+      )
+    );
+  }
+
+  /**
+   * Delete transcript for a video
+   */
+  async deleteTranscript(videoId: string): Promise<{ success: boolean; message: string }> {
+    const baseUrl = await this.getBaseUrl();
+    return firstValueFrom(
+      this.http.delete<{ success: boolean; message: string }>(
+        `${baseUrl}/videos/${videoId}/transcript`
+      )
+    );
+  }
+
+  /**
+   * Delete analysis for a video (including sections)
+   */
+  async deleteAnalysis(videoId: string): Promise<{ success: boolean; message: string }> {
+    const baseUrl = await this.getBaseUrl();
+    return firstValueFrom(
+      this.http.delete<{ success: boolean; message: string }>(
+        `${baseUrl}/videos/${videoId}/analysis`
       )
     );
   }

@@ -18,6 +18,8 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AnalysisService, AnalysisRequest } from './analysis.service';
 import { OllamaService } from './ollama.service';
 import { SharedConfigService } from '../config/shared-config.service';
+import { DatabaseService } from '../database/database.service';
+import { BatchAnalysisService } from '../database/batch-analysis.service';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -31,6 +33,8 @@ export class AnalysisController implements OnGatewayInit {
     private analysisService: AnalysisService,
     private ollamaService: OllamaService,
     private configService: SharedConfigService,
+    private databaseService: DatabaseService,
+    private batchAnalysisService: BatchAnalysisService,
   ) {}
 
   afterInit(server: Server) {
@@ -374,6 +378,120 @@ export class AnalysisController implements OnGatewayInit {
       }
       throw new HttpException(
         `Failed to delete report: ${(error as Error).message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Transcribe a single video by ID
+   */
+  @Post('transcribe')
+  async transcribeVideo(@Body() body: { videoId: string; whisperModel?: string }) {
+    try {
+      if (!body.videoId) {
+        throw new HttpException(
+          'Missing required field: videoId',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Get video from database
+      const video = this.databaseService.getVideoById(body.videoId);
+      if (!video) {
+        throw new HttpException(
+          'Video not found',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Get config defaults
+      const config = await this.configService.getConfig();
+      const whisperModel = body.whisperModel || 'base';
+
+      // Start batch analysis with transcribe-only mode for this single video
+      const jobId = await this.batchAnalysisService.startBatchAnalysis({
+        videoIds: [body.videoId],
+        transcribeOnly: true,
+        whisperModel,
+      });
+
+      return {
+        success: true,
+        jobId,
+        message: 'Transcription started',
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to start transcription: ${(error as Error).message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Analyze a single video by ID (runs AI analysis, transcribes if needed)
+   */
+  @Post('analyze')
+  async analyzeVideo(@Body() body: {
+    videoId: string;
+    videoTitle?: string;
+    aiModel?: string;
+    aiProvider?: 'ollama' | 'claude' | 'openai';
+    whisperModel?: string;
+    forceReanalyze?: boolean;
+    claudeApiKey?: string;
+    openaiApiKey?: string;
+  }) {
+    try {
+      if (!body.videoId) {
+        throw new HttpException(
+          'Missing required field: videoId',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Get video from database
+      const video = this.databaseService.getVideoById(body.videoId);
+      if (!video) {
+        throw new HttpException(
+          'Video not found',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Get config defaults
+      const config = await this.configService.getConfig();
+      const aiModel = body.aiModel || config.aiModel || 'qwen2.5:7b';
+      const aiProvider = body.aiProvider || 'ollama';
+      const whisperModel = body.whisperModel || 'base';
+      const forceReanalyze = body.forceReanalyze || false;
+
+      // Start batch analysis for this single video
+      const jobId = await this.batchAnalysisService.startBatchAnalysis({
+        videoIds: [body.videoId],
+        aiModel,
+        aiProvider,
+        whisperModel,
+        forceReanalyze,
+        claudeApiKey: body.claudeApiKey,
+        openaiApiKey: body.openaiApiKey,
+      });
+
+      return {
+        success: true,
+        jobId,
+        message: 'Analysis started',
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to start analysis: ${(error as Error).message || 'Unknown error'}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

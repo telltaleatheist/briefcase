@@ -224,6 +224,141 @@ export class DatabaseController {
   }
 
   /**
+   * DELETE /api/database/videos/:id/transcript
+   * Delete transcript for a video
+   */
+  @Delete('videos/:id/transcript')
+  deleteTranscript(@Param('id') videoId: string) {
+    try {
+      this.databaseService.deleteTranscript(videoId);
+      return {
+        success: true,
+        message: 'Transcript deleted successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Failed to delete transcript for video ${videoId}:`, error);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * DELETE /api/database/videos/:id/analysis
+   * Delete analysis for a video (including sections)
+   */
+  @Delete('videos/:id/analysis')
+  deleteAnalysis(@Param('id') videoId: string) {
+    try {
+      this.databaseService.deleteAnalysis(videoId);
+      return {
+        success: true,
+        message: 'Analysis deleted successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Failed to delete analysis for video ${videoId}:`, error);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/lookup-by-file
+   * Lookup a video in the database by computing its hash
+   * Returns video data with analysis and transcript if they exist
+   */
+  @Post('videos/lookup-by-file')
+  async lookupVideoByFile(@Body() body: { filePath: string }) {
+    try {
+      if (!body.filePath) {
+        return {
+          success: false,
+          error: 'File path is required'
+        };
+      }
+
+      this.logger.log(`Looking up video by file: ${body.filePath}`);
+
+      // Compute hash of the file
+      const hash = await this.databaseService.hashFile(body.filePath);
+      this.logger.log(`Computed hash: ${hash}`);
+
+      // Look up video by hash
+      const video = this.databaseService.findVideoByHash(hash);
+
+      if (!video) {
+        this.logger.log('No matching video found in database');
+        return {
+          success: true,
+          found: false,
+          hash
+        };
+      }
+
+      const videoId = String(video.id);
+      this.logger.log(`Found video in database: ${videoId}`);
+
+      // Get analysis and transcript if they exist
+      const analysis = this.databaseService.getAnalysis(videoId);
+      const transcript = this.databaseService.getTranscript(videoId);
+      const sections = this.databaseService.getAnalysisSections(videoId);
+
+      return {
+        success: true,
+        found: true,
+        hash,
+        video,
+        analysis: analysis || null,
+        transcript: transcript || null,
+        sections: sections || []
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to lookup video by file: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Failed to lookup video'
+      };
+    }
+  }
+
+  /**
+   * PATCH /api/database/videos/:id/source-url
+   * Update video source URL
+   */
+  @Patch('videos/:id/source-url')
+  async updateVideoSourceUrl(
+    @Param('id') videoId: string,
+    @Body() body: { sourceUrl: string | null }
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      this.databaseService.updateVideoSourceUrl(videoId, body.sourceUrl);
+
+      return {
+        success: true,
+        message: 'Source URL updated successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to update source URL for video ${videoId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update source URL'
+      };
+    }
+  }
+
+  /**
    * PATCH /api/database/videos/:id/metadata
    * Update video metadata (date_folder and added_at)
    */

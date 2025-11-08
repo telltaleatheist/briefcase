@@ -73,6 +73,10 @@
 
     <!-- Action buttons -->
     <div class="header-actions">
+      <button mat-raised-button color="accent" (click)="openDownloadDialog()" matTooltip="Download a video from URL">
+        <mat-icon>cloud_download</mat-icon>
+        Download Video
+      </button>
       <button mat-raised-button color="primary" (click)="openImportManager()" matTooltip="Import specific videos from clips folder">
         <mat-icon>file_download</mat-icon>
         Import Videos
@@ -254,9 +258,33 @@
           <button mat-icon-button (click)="openVideoPlayer(video); $event.stopPropagation()" matTooltip="Open in video player">
             <mat-icon>play_circle_outline</mat-icon>
           </button>
+          <button mat-icon-button [matMenuTriggerFor]="videoActionsMenu" (click)="$event.stopPropagation()" matTooltip="More actions">
+            <mat-icon>more_vert</mat-icon>
+          </button>
           <button mat-icon-button color="warn" (click)="deleteVideo(video); $event.stopPropagation()" matTooltip="Delete video from library">
             <mat-icon>delete</mat-icon>
           </button>
+
+          <!-- Actions Menu -->
+          <mat-menu #videoActionsMenu="matMenu">
+            <div class="menu-section-header" *ngIf="video.source_url">
+              <mat-icon class="source-url-icon">link</mat-icon>
+              <span>Source URL Available</span>
+            </div>
+            <button mat-menu-item (click)="downloadAndTranscribe(video)">
+              <mat-icon>download</mat-icon>
+              <span>{{ video.source_url ? 'Re-download & Transcribe' : 'Download & Transcribe' }}</span>
+            </button>
+            <button mat-menu-item (click)="downloadAndAnalyze(video)">
+              <mat-icon>auto_awesome</mat-icon>
+              <span>{{ video.source_url ? 'Re-download & AI Analyze' : 'Download & AI Analyze' }}</span>
+            </button>
+            <mat-divider></mat-divider>
+            <button mat-menu-item (click)="downloadOnly(video)">
+              <mat-icon>file_download</mat-icon>
+              <span>{{ video.source_url ? 'Re-download Only' : 'Download Only' }}</span>
+            </button>
+          </mat-menu>
         </div>
       </div>
     </div>

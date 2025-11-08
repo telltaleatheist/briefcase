@@ -17,6 +17,26 @@ body {
   transition: var(--transition);
 }
 
+/* Fix Material chip text color in dark mode */
+@media (prefers-color-scheme: dark) {
+  mat-chip {
+    .mdc-evolution-chip__text-label,
+    .mat-mdc-chip-action-label {
+      color: #e5e7eb !important;
+    }
+  }
+}
+
+.dark-theme,
+.theme-dark {
+  mat-chip {
+    .mdc-evolution-chip__text-label,
+    .mat-mdc-chip-action-label {
+      color: #e5e7eb !important;
+    }
+  }
+}
+
 /* Common utility classes */
 .spacer {
   flex: 1 1 auto;

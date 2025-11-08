@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject, Optional, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -103,7 +104,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     private router: Router,
     private ngZone: NgZone,
     private cdr: ChangeDetectorRef,
-    private backendUrlService: BackendUrlService
+    private backendUrlService: BackendUrlService,
+    private http: HttpClient
   ) {
     // If opened as dialog, use dialog data; otherwise use router state
     if (dialogData) {
@@ -1006,9 +1008,172 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
+   * Load a video from the database with its analysis and transcript data
+   */
+  private async loadExistingVideoFromDatabase(response: any, filePath: string): Promise<void> {
+    const video = response.video;
+    const analysis = response.analysis;
+    const transcript = response.transcript;
+    const sections = response.sections;
+
+    console.log('Loading existing video from database:', {
+      videoId: video.id,
+      hasAnalysis: !!analysis,
+      hasTranscript: !!transcript,
+      sectionsCount: sections?.length || 0
+    });
+
+    // Update component data to use the database video
+    this.data = {
+      videoId: video.id,
+      videoPath: filePath,
+      videoTitle: video.filename,
+      hasAnalysis: !!analysis,
+      hasTranscript: !!transcript
+    };
+
+    // Parse and load analysis metadata if available
+    if (analysis) {
+      try {
+        // Convert database sections to timeline format
+        if (sections && sections.length > 0) {
+          this.timelineSections = sections.map((section: any) => ({
+            startTime: section.start_seconds,
+            endTime: section.end_seconds || (section.start_seconds + 30),
+            category: section.category || 'General',
+            description: section.description || section.title || '',
+            color: this.getCategoryColor(section.category || 'General')
+          }));
+
+          // Build metadata object for display
+          this.metadata = {
+            sections: sections.map((s: any) => ({
+              startSeconds: s.start_seconds,
+              endSeconds: s.end_seconds,
+              timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
+              category: s.category || 'General',
+              description: s.description || s.title || '',
+              quotes: [] // Database doesn't store quotes separately
+            }))
+          } as any;
+        }
+
+        console.log('Loaded analysis with', this.timelineSections.length, 'sections');
+      } catch (error) {
+        console.error('Failed to parse analysis metadata:', error);
+      }
+    }
+
+    // Load transcript if available
+    if (transcript) {
+      try {
+        // Use SRT format from database if available (includes timestamps for seeking)
+        // Otherwise fall back to plain text
+        this.transcriptText = transcript.srt_format || transcript.plain_text;
+        this.transcriptExists = !!(this.transcriptText && this.transcriptText.trim().length > 0);
+        console.log('Loaded transcript');
+      } catch (error) {
+        console.error('Failed to load transcript:', error);
+      }
+    }
+
+    // Now initialize the video player using the normal flow
+    // This will use the videoPath we set in this.data
+    this.initializePlayer();
+  }
+
+  /**
+   * Setup event listeners for video element
+   */
+  private setupVideoEventListeners(): void {
+    if (!this.videoEl) return;
+
+    // Handle loadedmetadata event
+    this.addVideoEventListener('loadedmetadata', () => {
+      this.cleanupLoadingTimers();
+      // Run in NgZone to trigger change detection
+      this.ngZone.run(() => {
+        this.isLoading = false;
+        this.duration = this.videoEl!.duration;
+        this.currentSelection = { startTime: 0, endTime: this.duration };
+        console.log('Video loaded, duration:', this.duration);
+      });
+    });
+
+    // Handle loadeddata event (fires earlier than loadedmetadata)
+    this.addVideoEventListener('loadeddata', () => {
+      console.log('Video data loaded (readyState:', this.videoEl!.readyState, ')');
+      // If metadata still not loaded after data is available, try to force it
+      if (this.isLoading && this.videoEl!.duration) {
+        this.cleanupLoadingTimers();
+        // Run in NgZone to trigger change detection
+        this.ngZone.run(() => {
+          this.isLoading = false;
+          this.duration = this.videoEl!.duration;
+          this.currentSelection = { startTime: 0, endTime: this.duration };
+          console.log('Using duration from loadeddata event:', this.duration);
+        });
+      }
+    });
+
+    // Handle timeupdate event with throttling for performance
+    this.addVideoEventListener('timeupdate', () => {
+      this.currentTime = this.videoEl!.currentTime;
+
+      // Throttle updateActiveSection to avoid excessive DOM operations
+      if (!this.updateThrottleTimer) {
+        this.updateThrottleTimer = setTimeout(() => {
+          this.updateActiveSection();
+          this.updateThrottleTimer = null;
+        }, this.UPDATE_THROTTLE_MS);
+      }
+    });
+
+    // Handle play event
+    this.addVideoEventListener('play', () => {
+      this.isPlaying = true;
+    });
+
+    // Handle pause event
+    this.addVideoEventListener('pause', () => {
+      this.isPlaying = false;
+    });
+
+    // Handle error event
+    this.addVideoEventListener('error', (e: any) => {
+      console.error('Video error event:', e, this.videoEl?.error);
+      this.cleanupLoadingTimers();
+
+      // Run in NgZone to trigger change detection
+      this.ngZone.run(() => {
+        this.isLoading = false;
+        const errorCode = this.videoEl?.error?.code;
+        const errorMessage = this.videoEl?.error?.message || 'Unknown error';
+
+        switch (errorCode) {
+          case 1: // MEDIA_ERR_ABORTED
+            this.error = 'Video loading was aborted';
+            break;
+          case 2: // MEDIA_ERR_NETWORK
+            this.error = 'Network error while loading video';
+            break;
+          case 3: // MEDIA_ERR_DECODE
+            this.error = 'Video decoding failed. The file may be corrupted or use an unsupported codec.';
+            break;
+          case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+            this.error = 'Video format not supported';
+            break;
+          default:
+            this.error = `Video error: ${errorMessage}`;
+        }
+      });
+    });
+  }
+
+  /**
    * Load a video file from disk
    */
-  private loadVideoFile(file: File): void {
+  private async loadVideoFile(file: File): Promise<void> {
     // Validate file type
     if (!file.type.startsWith('video/')) {
       this.notificationService.toastOnly('error', 'Invalid File', 'Please select a valid video file');
@@ -1018,6 +1183,50 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     // Clear any existing errors
     this.error = null;
     this.isLoading = true;
+    this.loadingMessage = 'Checking if video exists in database...';
+
+    // Try to get the real file path (only works in Electron)
+    const electron = (window as any).electron;
+    let filePath: string | null = null;
+
+    if (electron && electron.getFilePathFromFile) {
+      try {
+        filePath = electron.getFilePathFromFile(file);
+        console.log('Got file path from Electron:', filePath);
+      } catch (error) {
+        console.warn('Failed to get file path from Electron:', error);
+      }
+    }
+
+    // If we have a file path, check if this video exists in the database
+    if (filePath) {
+      try {
+        const url = await this.backendUrlService.getApiUrl('/database/videos/lookup-by-file');
+        const response = await this.http.post<any>(url, { filePath }).toPromise();
+
+        if (response?.success && response.found) {
+          // Video exists in database! Load it with its analysis and transcript
+          console.log('Video found in database:', response.video);
+
+          this.notificationService.toastOnly(
+            'info',
+            'Video Found in Library',
+            'Loading existing analysis and transcript data...'
+          );
+
+          // Load the video from the database with all its metadata
+          await this.loadExistingVideoFromDatabase(response, filePath);
+          return;
+        } else {
+          console.log('Video not found in database, loading as new video');
+        }
+      } catch (error) {
+        console.error('Error checking if video exists in database:', error);
+        // Continue loading as a new video if lookup fails
+      }
+    }
+
+    // Video not in database or no file path - load as custom video
     this.loadingMessage = 'Loading video...';
 
     // Create object URL for the file
@@ -1074,80 +1283,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       }, 30000);
       this.timers.add(this.loadingTimeoutTimer);
 
-      // Handle loadedmetadata event
-      this.addVideoEventListener('loadedmetadata', () => {
-        this.cleanupLoadingTimers();
-        // Run in NgZone to trigger change detection
-        this.ngZone.run(() => {
-          this.isLoading = false;
-          this.duration = this.videoEl!.duration;
-          this.currentSelection = { startTime: 0, endTime: this.duration };
-          console.log('Local video loaded, duration:', this.duration);
-        });
-      });
-
-      // Handle loadeddata event (fires earlier than loadedmetadata)
-      this.addVideoEventListener('loadeddata', () => {
-        console.log('Local video data loaded (readyState:', this.videoEl!.readyState, ')');
-        // If metadata still not loaded after data is available, try to force it
-        if (this.isLoading && this.videoEl!.duration) {
-          this.cleanupLoadingTimers();
-          // Run in NgZone to trigger change detection
-          this.ngZone.run(() => {
-            this.isLoading = false;
-            this.duration = this.videoEl!.duration;
-            this.currentSelection = { startTime: 0, endTime: this.duration };
-            console.log('Using duration from loadeddata event:', this.duration);
-          });
-        }
-      });
-
-      // Handle timeupdate event with throttling for performance
-      this.addVideoEventListener('timeupdate', () => {
-        this.currentTime = this.videoEl!.currentTime;
-
-        // Throttle updateActiveSection to avoid excessive DOM operations
-        if (!this.updateThrottleTimer) {
-          this.updateThrottleTimer = setTimeout(() => {
-            this.updateActiveSection();
-            this.updateThrottleTimer = null;
-          }, this.UPDATE_THROTTLE_MS);
-        }
-      });
-
-      // Handle play event
-      this.addVideoEventListener('play', () => {
-        this.isPlaying = true;
-      });
-
-      // Handle pause event
-      this.addVideoEventListener('pause', () => {
-        this.isPlaying = false;
-      });
-
-      // Handle error event
-      this.addVideoEventListener('error', (e) => {
-        const videoError = this.videoEl?.error;
-        console.error('Local video error:', videoError);
-
-        let errorMessage = 'Failed to load video';
-        if (videoError?.code === 3) {
-          errorMessage = 'Video codec not supported by browser. Try converting to H.264 MP4.';
-        } else if (videoError?.code === 4) {
-          errorMessage = 'Video format not supported. Try converting to MP4 with H.264 codec.';
-        }
-
-        this.error = errorMessage;
-        this.isLoading = false;
-        this.cleanupLoadingTimers();
-        this.cdr.markForCheck();
-      });
-
-      // Prevent context menu
-      this.addVideoEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        return false;
-      });
+      // Setup video event listeners
+      this.setupVideoEventListeners();
     }
   }
 
