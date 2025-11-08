@@ -708,6 +708,25 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/prune
+   * Prune orphaned videos from the database
+   * Deletes all videos marked as unlinked (is_linked = 0)
+   */
+  @Post('prune')
+  pruneOrphanedVideos() {
+    this.logger.log('Pruning orphaned videos from database');
+    const result = this.databaseService.pruneOrphanedVideos();
+    return {
+      success: true,
+      deletedCount: result.deletedCount,
+      deletedVideos: result.deletedVideos,
+      message: result.deletedCount > 0
+        ? `Pruned ${result.deletedCount} orphaned video${result.deletedCount > 1 ? 's' : ''} from database`
+        : 'No orphaned videos to prune'
+    };
+  }
+
+  /**
    * GET /api/database/libraries
    * Get all clip libraries
    */

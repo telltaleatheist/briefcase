@@ -764,6 +764,46 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Prune orphaned videos from database
+   */
+  async pruneOrphanedVideos() {
+    if (!this.stats || this.stats.unlinkedVideos === 0) {
+      this.notificationService.toastOnly('info', 'No Orphaned Videos', 'There are no orphaned videos to prune');
+      return;
+    }
+
+    // Confirm with user
+    const confirmed = confirm(
+      `This will permanently delete ${this.stats.unlinkedVideos} orphaned video${this.stats.unlinkedVideos > 1 ? 's' : ''} from the database.\n\n` +
+      `These are videos that were deleted from your clips folder but their metadata is still in the database.\n\n` +
+      `This action cannot be undone. Continue?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const result = await this.databaseLibraryService.pruneOrphanedVideos();
+
+      // Clear cache since data changed
+      this.databaseLibraryService.clearCache();
+
+      this.notificationService.toastOnly(
+        'success',
+        'Prune Complete',
+        result.message
+      );
+
+      await this.loadStats();
+      await this.loadVideos();
+    } catch (error) {
+      console.error('Prune failed:', error);
+      this.notificationService.toastOnly('error', 'Error', 'Failed to prune orphaned videos');
+    }
+  }
+
+  /**
    * Start batch analysis
    */
   async startBatchAnalysis(limit?: number) {

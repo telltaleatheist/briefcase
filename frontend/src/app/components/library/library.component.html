@@ -81,6 +81,15 @@
         <mat-icon>sync</mat-icon>
         Scan All
       </button>
+      <button
+        mat-raised-button
+        color="warn"
+        (click)="pruneOrphanedVideos()"
+        *ngIf="stats && stats.unlinkedVideos > 0"
+        [matTooltip]="'Delete ' + stats.unlinkedVideos + ' orphaned video' + (stats.unlinkedVideos > 1 ? 's' : '') + ' from database'">
+        <mat-icon>cleaning_services</mat-icon>
+        Prune ({{ stats.unlinkedVideos }})
+      </button>
     </div>
   </div>
 

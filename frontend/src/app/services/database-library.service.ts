@@ -250,6 +250,17 @@ export class DatabaseLibraryService {
   }
 
   /**
+   * Prune orphaned videos from the database
+   * Deletes all videos marked as unlinked (is_linked = 0)
+   */
+  async pruneOrphanedVideos(): Promise<{ success: boolean; deletedCount: number; deletedVideos: Array<{ id: string; filename: string }>; message: string }> {
+    const baseUrl = await this.getBaseUrl();
+    return firstValueFrom(
+      this.http.post<{ success: boolean; deletedCount: number; deletedVideos: Array<{ id: string; filename: string }>; message: string }>(`${baseUrl}/prune`, {})
+    );
+  }
+
+  /**
    * Get videos that need analysis
    */
   async getVideosNeedingAnalysis(): Promise<{ count: number; videos: any[] }> {

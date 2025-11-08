@@ -543,6 +543,41 @@ export class DatabaseService {
   }
 
   /**
+   * Prune/cleanup orphaned videos (videos marked as unlinked)
+   * Deletes all database records for videos where is_linked = 0
+   * Returns count of deleted videos
+   */
+  pruneOrphanedVideos(): { deletedCount: number; deletedVideos: Array<{ id: string; filename: string }> } {
+    const db = this.ensureInitialized();
+
+    // Get list of unlinked videos before deleting
+    const stmt = db.prepare('SELECT id, filename FROM videos WHERE is_linked = 0');
+    const unlinkedVideos: Array<{ id: string; filename: string }> = [];
+
+    while (stmt.step()) {
+      unlinkedVideos.push(stmt.getAsObject() as any);
+    }
+    stmt.free();
+
+    if (unlinkedVideos.length === 0) {
+      this.logger.log('No orphaned videos to prune');
+      return { deletedCount: 0, deletedVideos: [] };
+    }
+
+    this.logger.log(`Pruning ${unlinkedVideos.length} orphaned videos from database`);
+
+    // Delete all unlinked videos (CASCADE will handle related records)
+    db.run('DELETE FROM videos WHERE is_linked = 0');
+
+    this.saveDatabase();
+
+    return {
+      deletedCount: unlinkedVideos.length,
+      deletedVideos: unlinkedVideos
+    };
+  }
+
+  /**
    * Get all videos
    */
   getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number }) {
