@@ -132,4 +132,18 @@ export class AnalysisQueueService {
       this.pendingJobs.next(updatedJobs);
     }
   }
+
+  /**
+   * Update all pending jobs with the same AI model and credentials
+   */
+  updateAllJobsAISettings(aiModel: string, apiKey?: string, ollamaEndpoint?: string): void {
+    const currentJobs = this.pendingJobs.value;
+    const updatedJobs = currentJobs.map(job => ({
+      ...job,
+      aiModel,
+      apiKey: apiKey || job.apiKey,
+      ollamaEndpoint: ollamaEndpoint || job.ollamaEndpoint
+    }));
+    this.pendingJobs.next(updatedJobs);
+  }
 }

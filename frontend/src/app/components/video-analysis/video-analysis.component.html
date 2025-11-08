@@ -304,6 +304,80 @@
         </div>
       </div>
 
+      <!-- Bulk Settings Panel -->
+      <div class="bulk-settings-panel" *ngIf="hasPendingJobs()">
+        <div class="bulk-header">
+          <mat-icon>tune</mat-icon>
+          <span>Apply to All Queue Items</span>
+        </div>
+        <div class="bulk-controls">
+          <!-- AI Model Selection -->
+          <div class="bulk-control-group">
+            <label class="bulk-label">
+              <mat-icon>smart_toy</mat-icon>
+              AI Model
+            </label>
+            <select class="bulk-select"
+                    [(ngModel)]="bulkAIModel"
+                    (change)="onBulkModelChange()">
+              <option value="" disabled>Select model to apply...</option>
+              <optgroup label="Claude (API Key Required)">
+                <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
+                <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="claude:claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+              </optgroup>
+              <optgroup label="ChatGPT / OpenAI (API Key Required)">
+                <option value="openai:gpt-4o">GPT-4o</option>
+                <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
+                <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo</option>
+              </optgroup>
+              <optgroup label="Ollama (Local - Free)">
+                <option *ngIf="availableOllamaModels.length === 0" value="" disabled>No Ollama models installed</option>
+                <option *ngFor="let model of availableOllamaModels" [value]="'ollama:' + model">{{ model }}</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <!-- API Key (for Claude/OpenAI) -->
+          <div class="bulk-control-group" *ngIf="bulkNeedsApiKey()">
+            <label class="bulk-label">
+              <mat-icon>vpn_key</mat-icon>
+              {{ getBulkApiKeyLabel() }}
+            </label>
+            <div class="bulk-input-wrapper">
+              <input type="password"
+                     class="bulk-input"
+                     [(ngModel)]="bulkApiKey"
+                     [placeholder]="'Enter ' + getBulkApiKeyLabel()">
+            </div>
+          </div>
+
+          <!-- Ollama Endpoint (for local models) -->
+          <div class="bulk-control-group" *ngIf="!bulkNeedsApiKey() && bulkAIModel">
+            <label class="bulk-label">
+              <mat-icon>dns</mat-icon>
+              Ollama Endpoint
+            </label>
+            <div class="bulk-input-wrapper">
+              <input type="text"
+                     class="bulk-input"
+                     [(ngModel)]="bulkOllamaEndpoint"
+                     placeholder="http://localhost:11434">
+            </div>
+          </div>
+
+          <!-- Apply Button -->
+          <button mat-raised-button
+                  color="accent"
+                  class="bulk-apply-btn"
+                  (click)="applyBulkSettings()"
+                  [disabled]="!canApplyBulkSettings()">
+            <mat-icon>check_circle</mat-icon>
+            Apply to All ({{ pendingJobs.length }})
+          </button>
+        </div>
+      </div>
+
       <!-- Queue List -->
       <div class="queue-list-container">
         <!-- Pending Jobs -->

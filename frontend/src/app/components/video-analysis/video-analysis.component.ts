@@ -97,6 +97,11 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   private pollingInterval: any = null;
 
+  // Bulk update settings
+  bulkAIModel = '';
+  bulkApiKey = '';
+  bulkOllamaEndpoint = 'http://localhost:11434';
+
   constructor(
     private fb: FormBuilder,
     private snackBar: MatSnackBar,
@@ -1026,6 +1031,97 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
    */
   updatePendingJobMode(jobId: string, mode: 'full' | 'transcribe-only'): void {
     this.analysisQueueService.updatePendingJob(jobId, { mode });
+  }
+
+  /**
+   * Bulk update methods for all queue items
+   */
+
+  /**
+   * Check if bulk model needs an API key
+   */
+  bulkNeedsApiKey(): boolean {
+    return this.bulkAIModel.startsWith('claude:') || this.bulkAIModel.startsWith('openai:');
+  }
+
+  /**
+   * Get the appropriate API key label for bulk update
+   */
+  getBulkApiKeyLabel(): string {
+    if (this.bulkAIModel.startsWith('claude:')) {
+      return 'Claude API Key';
+    } else if (this.bulkAIModel.startsWith('openai:')) {
+      return 'OpenAI API Key';
+    }
+    return 'API Key';
+  }
+
+  /**
+   * Handle bulk model change - auto-load API key from settings
+   */
+  async onBulkModelChange(): Promise<void> {
+    const model = this.bulkAIModel;
+
+    // Extract provider from model string
+    let provider = 'ollama';
+    if (model.startsWith('claude:')) {
+      provider = 'claude';
+    } else if (model.startsWith('openai:')) {
+      provider = 'openai';
+    }
+
+    // Load the appropriate API key when switching models
+    try {
+      const settings = await (window as any).electron?.getSettings();
+      if (settings) {
+        if (provider === 'claude' && settings.claudeApiKey) {
+          this.bulkApiKey = settings.claudeApiKey;
+        } else if (provider === 'openai' && settings.openaiApiKey) {
+          this.bulkApiKey = settings.openaiApiKey;
+        } else if (provider === 'ollama') {
+          this.bulkApiKey = '';
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load API key for bulk update:', error);
+    }
+  }
+
+  /**
+   * Check if bulk settings can be applied
+   */
+  canApplyBulkSettings(): boolean {
+    if (!this.bulkAIModel) {
+      return false;
+    }
+
+    // If needs API key, make sure it's provided
+    if (this.bulkNeedsApiKey() && !this.bulkApiKey) {
+      return false;
+    }
+
+    return this.hasPendingJobs();
+  }
+
+  /**
+   * Apply bulk settings to all pending jobs
+   */
+  applyBulkSettings(): void {
+    if (!this.canApplyBulkSettings()) {
+      return;
+    }
+
+    // Apply the settings to all jobs
+    this.analysisQueueService.updateAllJobsAISettings(
+      this.bulkAIModel,
+      this.bulkApiKey,
+      this.bulkOllamaEndpoint
+    );
+
+    // Reset bulk settings after applying
+    this.bulkAIModel = '';
+    this.bulkApiKey = '';
+    this.bulkOllamaEndpoint = 'http://localhost:11434';
   }
 
   /**

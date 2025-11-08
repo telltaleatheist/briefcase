@@ -159,6 +159,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
     this.startProgressPolling();
 
     console.log(`[LibraryComponent] Total load time: ${(performance.now() - startTime).toFixed(0)}ms`);
+
+    // Check if there are no libraries and prompt user to create one
+    if (this.libraries.length === 0) {
+      console.log('[LibraryComponent] No libraries found, prompting user to create one');
+      this.notificationService.toastOnly(
+        'info',
+        'No Library Found',
+        'Please create a library to get started'
+      );
+      // Automatically open the manage libraries dialog
+      setTimeout(() => {
+        this.openManageLibraries();
+      }, 500); // Small delay to let the UI settle
+    }
   }
 
   ngOnDestroy() {
