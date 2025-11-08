@@ -5,8 +5,8 @@
   width: 100%;
   min-height: 0;
   flex: 1;
-  overflow-x: hidden; // Prevent horizontal scroll
-  overflow-y: hidden; // Let children handle vertical scroll
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 .transcript-search-container {
@@ -14,19 +14,22 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  min-height: 0; // Critical for flex scrolling
+  min-height: 0;
   flex: 1;
   box-sizing: border-box;
-  padding: 0; // Remove padding, will be added to children
-  overflow-x: hidden; // Prevent horizontal scroll
+  padding: 0;
+  overflow-x: hidden;
 }
 
 .search-input-wrapper {
-  width: calc(100% - 24px); // Account for left/right margins
-  margin: 12px 12px 12px 12px; // Add top margin to prevent cutoff
+  width: calc(100% - 24px);
+  margin: 12px 12px 12px 12px;
   box-sizing: border-box;
 }
 
+// ========================================
+// Search Field - Base (Light Theme Default)
+// ========================================
 .search-field {
   width: 100%;
   font-size: 14px;
@@ -45,36 +48,32 @@
     padding: 0;
   }
 
-  // Fix input text color for dark mode
   ::ng-deep input {
-    color: #fff !important;
+    color: #212529 !important; // Light theme default
     caret-color: #ff6600;
     padding-left: 8px !important;
   }
 
-  // Style placeholder text properly
   ::ng-deep .mat-mdc-input-element::placeholder {
-    color: #999 !important;
+    color: #6c757d !important; // Light theme default
     opacity: 1;
   }
 
-  // Ensure the prefix icon has proper spacing
   ::ng-deep .mat-mdc-form-field-icon-prefix {
     padding-left: 4px;
     padding-right: 8px;
   }
 
-  // Fix outline color
   ::ng-deep .mdc-notched-outline__leading,
   ::ng-deep .mdc-notched-outline__notch,
   ::ng-deep .mdc-notched-outline__trailing {
-    border-color: #444 !important;
+    border-color: #dee2e6 !important; // Light theme default
   }
 
   ::ng-deep .mat-mdc-form-field:hover .mdc-notched-outline__leading,
   ::ng-deep .mat-mdc-form-field:hover .mdc-notched-outline__notch,
   ::ng-deep .mat-mdc-form-field:hover .mdc-notched-outline__trailing {
-    border-color: #666 !important;
+    border-color: #adb5bd !important;
   }
 
   ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline__leading,
@@ -83,21 +82,23 @@
     border-color: #ff6600 !important;
   }
 
-  // Fix icon colors
   ::ng-deep .mat-icon {
-    color: #999 !important;
+    color: #6c757d !important; // Light theme default
   }
 }
 
+// ========================================
+// No Transcript Container - Base (Light Theme Default)
+// ========================================
 .no-transcript-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
-  padding: 0px 30px 60px 30px; // Reduced top padding to align with AI Analysis tab
+  padding: 0px 30px 60px 30px;
   text-align: center;
-  color: #999;
+  color: #6c757d; // Light theme default
 
   .no-transcript-icon {
     font-size: 64px;
@@ -111,7 +112,7 @@
     margin: 0;
     font-size: 18px;
     font-weight: 600;
-    color: #fff;
+    color: #212529; // Light theme default
   }
 
   p {
@@ -119,7 +120,7 @@
     font-size: 14px;
     line-height: 1.5;
     max-width: 400px;
-    color: #aaa;
+    color: #495057; // Light theme default
   }
 
   .run-transcription-btn {
@@ -131,6 +132,9 @@
   }
 }
 
+// ========================================
+// Search Loading - Base (Light Theme Default)
+// ========================================
 .search-loading {
   display: flex;
   flex-direction: column;
@@ -138,7 +142,7 @@
   justify-content: center;
   gap: 12px;
   padding: 40px 20px;
-  color: #999;
+  color: #6c757d; // Light theme default
 
   p {
     margin: 0;
@@ -146,31 +150,34 @@
   }
 }
 
+// ========================================
+// Search Results - Base (Light Theme Default)
+// ========================================
 .search-results-container {
   display: flex;
   flex-direction: column;
   flex: 1;
-  overflow-x: hidden; // Prevent horizontal scroll
-  overflow-y: hidden; // Let children handle vertical scroll
-  min-height: 0; // Critical for flex scrolling
+  overflow-x: hidden;
+  overflow-y: hidden;
+  min-height: 0;
   width: 100%;
   box-sizing: border-box;
 }
 
 .results-hint {
-  margin: 0 12px 0 12px; // Match sections-hint margin
-  padding: 8px 0; // Match sections-hint padding
+  margin: 0 12px 0 12px;
+  padding: 8px 0;
   font-size: 12px;
-  color: #999;
-  border-bottom: 1px solid #1a1a1a; // Match sections-hint border color
-  background-color: #0a0a0a; // Match sections-hint background
+  color: #6c757d; // Light theme default
+  border-bottom: 1px solid #dee2e6; // Light theme default
+  background-color: #f8f9fa; // Light theme default
 }
 
 .search-results-list {
   flex: 1;
-  overflow-x: hidden; // Prevent horizontal scroll
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 12px; // Match sections-list padding
+  padding: 12px;
   width: 100%;
   box-sizing: border-box;
 
@@ -179,26 +186,29 @@
   }
 
   &::-webkit-scrollbar-track {
-    background: #0a0a0a; // Match sections-list scrollbar track
+    background: #f8f9fa; // Light theme default
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #333;
+    background: #dee2e6; // Light theme default
     border-radius: 4px;
 
     &:hover {
-      background: #555;
+      background: #adb5bd; // Light theme default
     }
   }
 }
 
+// ========================================
+// Search Result Items - Base (Light Theme Default)
+// ========================================
 .search-result-item {
   display: flex;
   gap: 10px;
-  padding: 10px; // Match section-item padding
+  padding: 10px;
   margin-bottom: 6px;
-  background-color: #1a1a1a;
-  border: 1px solid #2a2a2a; // Match section-item border color
+  background-color: #ffffff; // Light theme default
+  border: 1px solid #dee2e6; // Light theme default
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
@@ -207,21 +217,21 @@
   overflow: hidden;
 
   &:hover {
-    background-color: #222;
-    border-color: #333; // Match section-item hover border color
+    background-color: #f8f9fa; // Light theme default
+    border-color: #adb5bd; // Light theme default
   }
 
   &.selected {
-    background-color: rgba(255, 102, 0, 0.12); // Match section-item active background
-    border-color: rgba(255, 102, 0, 0.4); // Match section-item active border
+    background-color: rgba(255, 102, 0, 0.08);
+    border-color: rgba(255, 102, 0, 0.3);
 
     .result-marker {
-      width: 5px; // Match section-item active marker width
+      width: 5px;
     }
   }
 
   .result-marker {
-    width: 3px; // Match section-marker width
+    width: 3px;
     border-radius: 2px;
     flex-shrink: 0;
     background-color: #ff6600;
@@ -245,7 +255,7 @@
       .result-time {
         font-size: 13px;
         font-weight: 600;
-        color: #fff;
+        color: #212529; // Light theme default
         font-family: monospace;
         flex-shrink: 0;
       }
@@ -263,7 +273,7 @@
     .result-text {
       margin: 0;
       font-size: 13px;
-      color: #aaa;
+      color: #495057; // Light theme default
       line-height: 1.35;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -277,6 +287,9 @@
   }
 }
 
+// ========================================
+// No Results - Base (Light Theme Default)
+// ========================================
 .no-results {
   display: flex;
   flex-direction: column;
@@ -285,18 +298,135 @@
   gap: 12px;
   padding: 40px 20px;
   text-align: center;
-  color: #999;
+  color: #6c757d; // Light theme default
 
   mat-icon {
     font-size: 48px;
     width: 48px;
     height: 48px;
-    color: #666;
+    color: #adb5bd; // Light theme default
     opacity: 0.5;
   }
 
   p {
     margin: 0;
     font-size: 13px;
+  }
+}
+
+// ========================================
+// Dark Theme Overrides
+// ========================================
+:host-context(.dark-theme),
+:host-context([data-theme="dark"]) {
+  // Search Field - Dark Mode
+  .search-field {
+    ::ng-deep input {
+      color: #fff !important;
+      caret-color: #ff6600;
+    }
+
+    ::ng-deep .mat-mdc-input-element::placeholder {
+      color: #999 !important;
+    }
+
+    ::ng-deep .mdc-notched-outline__leading,
+    ::ng-deep .mdc-notched-outline__notch,
+    ::ng-deep .mdc-notched-outline__trailing {
+      border-color: #444 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field:hover .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field:hover .mdc-notched-outline__notch,
+    ::ng-deep .mat-mdc-form-field:hover .mdc-notched-outline__trailing {
+      border-color: #666 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline__notch,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline__trailing {
+      border-color: #ff6600 !important;
+    }
+
+    ::ng-deep .mat-icon {
+      color: #999 !important;
+    }
+  }
+
+  // No Transcript Container - Dark Mode
+  .no-transcript-container {
+    color: #999;
+
+    h3 {
+      color: #fff;
+    }
+
+    p {
+      color: #aaa;
+    }
+  }
+
+  // Search Loading - Dark Mode
+  .search-loading {
+    color: #999;
+  }
+
+  // Results Hint - Dark Mode
+  .results-hint {
+    color: #999;
+    border-bottom: 1px solid #1a1a1a;
+    background-color: #0a0a0a;
+  }
+
+  // Scrollbar - Dark Mode
+  .search-results-list {
+    &::-webkit-scrollbar-track {
+      background: #0a0a0a;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: #333;
+
+      &:hover {
+        background: #555;
+      }
+    }
+  }
+
+  // Search Result Items - Dark Mode
+  .search-result-item {
+    background-color: #1a1a1a;
+    border: 1px solid #2a2a2a;
+
+    &:hover {
+      background-color: #222;
+      border-color: #333;
+    }
+
+    &.selected {
+      background-color: rgba(255, 102, 0, 0.12);
+      border-color: rgba(255, 102, 0, 0.4);
+    }
+
+    .result-content {
+      .result-header {
+        .result-time {
+          color: #fff;
+        }
+      }
+
+      .result-text {
+        color: #aaa;
+      }
+    }
+  }
+
+  // No Results - Dark Mode
+  .no-results {
+    color: #999;
+
+    mat-icon {
+      color: #666;
+    }
   }
 }

@@ -9,6 +9,7 @@ import { DownloaderModule } from '../downloader/downloader.module';
 import { PathModule } from '../path/path.module';
 import { SharedConfigModule } from '../config/shared-config.module';
 import { LibraryModule } from '../library/library.module';
+import { DatabaseModule } from '../database/database.module';
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { LibraryModule } from '../library/library.module';
     forwardRef(() => DownloaderModule),
     PathModule,
     SharedConfigModule,
-    LibraryModule
+    LibraryModule,
+    forwardRef(() => DatabaseModule),
   ],
   controllers: [AnalysisController],
   providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService],

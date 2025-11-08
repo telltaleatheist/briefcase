@@ -92,6 +92,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     videoTitle?: string;
     hasAnalysis?: boolean;
     hasTranscript?: boolean;
+    realFilePath?: string; // Real file path for custom videos (for backend processing)
   } = {};
 
   constructor(
@@ -876,6 +877,32 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Generate AI analysis and/or transcript for this video
    */
   async generateAnalysis() {
+    // If we have a custom video (dropped file), navigate to analysis page
+    if (this.data.customVideo?.videoPath || (this.data.videoPath && !this.data.videoId)) {
+      // Use the real file path if available, otherwise fall back to videoPath
+      // (realFilePath is the actual file system path, videoPath might be a blob URL)
+      const videoPath = this.data.realFilePath || this.data.videoPath;
+
+      // Check if we have a valid file path (not a blob URL)
+      if (!videoPath || videoPath.startsWith('blob:')) {
+        this.notificationService.toastOnly(
+          'error',
+          'Cannot Analyze',
+          'Unable to get file path for this video. Please import the video to the library first.'
+        );
+        return;
+      }
+
+      // Navigate to analysis page with video path pre-populated
+      this.router.navigate(['/analysis'], {
+        state: {
+          videoPath: videoPath,
+          videoTitle: this.data.videoTitle || this.data.customVideo?.title
+        }
+      });
+      return;
+    }
+
     // Get the video ID
     const videoId = this.data.videoId || this.data.analysis?.id;
 
@@ -1229,7 +1256,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     // Video not in database or no file path - load as custom video
     this.loadingMessage = 'Loading video...';
 
-    // Create object URL for the file
+    // Create object URL for the file (for browser playback)
     const videoUrl = URL.createObjectURL(file);
 
     // Update data to reflect custom video
@@ -1237,10 +1264,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       ...this.data,
       customVideo: {
         title: file.name,
-        videoPath: videoUrl,
+        videoPath: videoUrl, // Blob URL for browser playback
         isLocalFile: true
       },
-      videoTitle: file.name
+      videoTitle: file.name,
+      realFilePath: filePath || undefined // Real file path for backend processing (if available)
     };
 
     // Clean up any existing listeners and timers from previous video

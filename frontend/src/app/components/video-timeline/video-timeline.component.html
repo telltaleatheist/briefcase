@@ -31,10 +31,16 @@
       </button>
     </div>
 
-    <div class="selection-info">
-      <span class="selection-label">Selection:</span>
-      <span class="selection-time">{{ formatTime(selectionStart) }} - {{ formatTime(selectionEnd) }}</span>
-      <span class="selection-duration">({{ getSelectionDuration() }})</span>
+    <div class="time-display">
+      <div class="selection-info">
+        <span class="selection-label">Selection:</span>
+        <span class="selection-time">{{ formatTime(selectionStart) }} - {{ formatTime(selectionEnd) }}</span>
+        <span class="selection-duration">({{ getSelectionDuration() }})</span>
+      </div>
+      <div class="playhead-info">
+        <span class="playhead-label">Playhead:</span>
+        <span class="playhead-time">{{ formatTime(currentTime) }}</span>
+      </div>
     </div>
 
     <div class="timeline-buttons">

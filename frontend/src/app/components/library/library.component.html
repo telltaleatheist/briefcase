@@ -73,10 +73,6 @@
 
     <!-- Action buttons -->
     <div class="header-actions">
-      <button mat-raised-button color="accent" (click)="openDownloadDialog()" matTooltip="Download a video from URL">
-        <mat-icon>cloud_download</mat-icon>
-        Download Video
-      </button>
       <button mat-raised-button color="primary" (click)="openImportManager()" matTooltip="Import specific videos from clips folder">
         <mat-icon>file_download</mat-icon>
         Import Videos
@@ -246,17 +242,16 @@
           <span class="video-subtitle">
             <span *ngIf="video.date_folder">{{ formatDate(video.date_folder) }}</span>
             <span *ngIf="video.duration_seconds"> • {{ formatDuration(video.duration_seconds) }}</span>
-            <span> • {{ formatFileSize(video.file_size_bytes) }}</span>
           </span>
         </div>
 
         <!-- Action buttons on the right -->
         <div class="card-actions">
-          <button mat-icon-button (click)="openMetadataEditor(video); $event.stopPropagation()" matTooltip="View video info & metadata">
-            <mat-icon>info</mat-icon>
+          <button mat-mini-fab color="primary" (click)="openVideoPlayer(video); $event.stopPropagation()" matTooltip="Open in video editor" class="primary-action">
+            <mat-icon>play_arrow</mat-icon>
           </button>
-          <button mat-icon-button (click)="openVideoPlayer(video); $event.stopPropagation()" matTooltip="Open in video player">
-            <mat-icon>play_circle_outline</mat-icon>
+          <button mat-mini-fab (click)="openMetadataEditor(video); $event.stopPropagation()" matTooltip="View video info & metadata" class="primary-action info-button">
+            <mat-icon>info</mat-icon>
           </button>
           <button mat-icon-button [matMenuTriggerFor]="videoActionsMenu" (click)="$event.stopPropagation()" matTooltip="More actions">
             <mat-icon>more_vert</mat-icon>

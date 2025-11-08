@@ -460,6 +460,15 @@ export class BatchAnalysisService implements OnModuleInit {
           language: 'en',
         });
         this.logger.log(`Stored transcript for video ${videoId}`);
+
+        // Clean up transcript files after importing to database
+        try {
+          await fs.unlink(srtPath);
+          await fs.unlink(txtPath);
+          this.logger.log(`Deleted transcript files: ${srtPath}, ${txtPath}`);
+        } catch (error) {
+          this.logger.warn(`Failed to delete transcript files: ${error}`);
+        }
       }
 
       // Read and store analysis

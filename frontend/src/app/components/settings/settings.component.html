@@ -1,114 +1,189 @@
 <div class="settings-container">
-  <div class="page-content">
-    <div class="panel full-height-panel">
-      <div class="panel-header">
-        <h2 class="panel-title">
-          <mat-icon>settings</mat-icon>
-          Settings
-        </h2>
-      </div>
+  <!-- Header -->
+  <div class="page-header">
+    <h1>
+      <mat-icon>settings</mat-icon>
+      Settings
+    </h1>
+    <p class="header-subtitle">Configure your application preferences and download options</p>
+  </div>
 
-      <div class="panel-content">
-        <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="settings-form">
+  <!-- Main Layout -->
+  <div class="main-layout">
+    <div class="settings-content">
+      <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="settings-form">
           <!-- Output Directory -->
-          <div class="settings-section">
-            <label class="section-label">Output Directory</label>
-            <div class="directory-picker">
-              <mat-form-field appearance="outline" class="dir-input">
-                <input matInput formControlName="outputDir" placeholder="/path/to/folder">
-              </mat-form-field>
-              <button mat-raised-button color="primary" type="button" (click)="browseOutputDir()" *ngIf="isElectron">
-                <mat-icon>folder_open</mat-icon>
-                Browse
-              </button>
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">Output Directory</h3>
+              <div class="setting-group">
+                <div class="input-wrapper">
+                  <mat-icon class="input-icon">folder</mat-icon>
+                  <input type="text"
+                         class="modern-input"
+                         formControlName="outputDir"
+                         placeholder="/path/to/folder">
+                  <button mat-raised-button
+                          color="primary"
+                          type="button"
+                          (click)="browseOutputDir()"
+                          *ngIf="isElectron"
+                          class="browse-btn">
+                    <mat-icon>folder_open</mat-icon>
+                    Browse
+                  </button>
+                </div>
+                <span class="hint-text">
+                  <mat-icon>info</mat-icon>
+                  Files will be organized in: <code>videos/</code>, <code>analysis/transcripts/</code>, <code>analysis/reports/</code>
+                </span>
+              </div>
             </div>
-            <p class="field-hint">Files will be organized in: <code>videos/</code>, <code>analysis/transcripts/</code>, <code>analysis/reports/</code></p>
           </div>
 
           <!-- Clips Folder -->
-          <div class="settings-section">
-            <label class="section-label">Clips Folder (Library)</label>
-            <div class="directory-picker">
-              <mat-form-field appearance="outline" class="dir-input">
-                <input matInput formControlName="clipsFolder" placeholder="/path/to/clips">
-              </mat-form-field>
-              <button mat-raised-button color="primary" type="button" (click)="browseClipsFolder()" *ngIf="isElectron">
-                <mat-icon>folder_open</mat-icon>
-                Browse
-              </button>
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">Clips Folder (Library)</h3>
+              <div class="setting-group">
+                <div class="input-wrapper">
+                  <mat-icon class="input-icon">video_library</mat-icon>
+                  <input type="text"
+                         class="modern-input"
+                         formControlName="clipsFolder"
+                         placeholder="/path/to/clips">
+                  <button mat-raised-button
+                          color="primary"
+                          type="button"
+                          (click)="browseClipsFolder()"
+                          *ngIf="isElectron"
+                          class="browse-btn">
+                    <mat-icon>folder_open</mat-icon>
+                    Browse
+                  </button>
+                </div>
+                <span class="hint-text">
+                  <mat-icon>info</mat-icon>
+                  Location where video clips are stored. Library will scan this folder for videos to import.
+                </span>
+              </div>
             </div>
-            <p class="field-hint">Location where video clips are stored. Library will scan this folder for videos to import.</p>
           </div>
 
           <!-- Download Settings -->
-          <div class="settings-section">
-            <label class="section-label">Download Settings</label>
-            <div class="settings-row">
-              <mat-form-field appearance="outline">
-                <mat-label>Video Quality</mat-label>
-                <mat-select formControlName="quality">
-                  <mat-option *ngFor="let option of qualityOptions" [value]="option.value">
-                    {{option.label}}
-                  </mat-option>
-                </mat-select>
-              </mat-form-field>
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">Download Settings</h3>
 
-              <mat-form-field appearance="outline">
-                <mat-label>Browser</mat-label>
-                <mat-select formControlName="browser">
-                  <mat-option *ngFor="let browser of browserOptions" [value]="browser.value">
-                    {{browser.label}}
-                  </mat-option>
-                </mat-select>
-              </mat-form-field>
-            </div>
+              <div class="settings-row">
+                <div class="setting-group">
+                  <label class="setting-label">
+                    <mat-icon>high_quality</mat-icon>
+                    Video Quality
+                  </label>
+                  <select class="modern-select" formControlName="quality">
+                    <option *ngFor="let option of qualityOptions" [value]="option.value">
+                      {{option.label}}
+                    </option>
+                  </select>
+                </div>
 
-            <div class="checkbox-row">
-              <mat-checkbox formControlName="convertToMp4">Convert to MP4</mat-checkbox>
-              <mat-checkbox formControlName="fixAspectRatio">Fix Aspect Ratio</mat-checkbox>
-              <mat-checkbox formControlName="useCookies">Use Cookies</mat-checkbox>
+                <div class="setting-group">
+                  <label class="setting-label">
+                    <mat-icon>web</mat-icon>
+                    Browser
+                  </label>
+                  <select class="modern-select" formControlName="browser">
+                    <option *ngFor="let browser of browserOptions" [value]="browser.value">
+                      {{browser.label}}
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="checkbox-group">
+                <label class="checkbox-item">
+                  <mat-checkbox formControlName="convertToMp4"></mat-checkbox>
+                  <span>Convert to MP4</span>
+                </label>
+                <label class="checkbox-item">
+                  <mat-checkbox formControlName="fixAspectRatio"></mat-checkbox>
+                  <span>Fix Aspect Ratio</span>
+                </label>
+                <label class="checkbox-item">
+                  <mat-checkbox formControlName="useCookies"></mat-checkbox>
+                  <span>Use Cookies</span>
+                </label>
+              </div>
             </div>
           </div>
 
           <!-- Batch Processing -->
-          <div class="settings-section">
-            <label class="section-label">Batch Processing</label>
-            <div class="batch-controls">
-              <mat-checkbox formControlName="batchProcessingEnabled">
-                Enable Batch Downloads
-              </mat-checkbox>
-              <mat-form-field appearance="outline" class="concurrent-field">
-                <mat-label>Max Concurrent</mat-label>
-                <input matInput type="number" formControlName="maxConcurrentDownloads" min="1" max="10">
-              </mat-form-field>
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">Batch Processing</h3>
+
+              <div class="setting-group">
+                <label class="checkbox-item">
+                  <mat-checkbox formControlName="batchProcessingEnabled"></mat-checkbox>
+                  <span>Enable Batch Downloads</span>
+                </label>
+              </div>
+
+              <div class="setting-group">
+                <label class="setting-label">
+                  <mat-icon>list</mat-icon>
+                  Max Concurrent Downloads
+                </label>
+                <input type="number"
+                       class="modern-input"
+                       formControlName="maxConcurrentDownloads"
+                       min="1"
+                       max="10"
+                       placeholder="3">
+              </div>
             </div>
           </div>
 
           <!-- Theme -->
-          <div class="settings-section">
-            <label class="section-label">Appearance</label>
-            <div class="theme-row">
-              <span>Dark Mode</span>
-              <mat-slide-toggle
-                [checked]="isDarkTheme$ | async"
-                (change)="toggleTheme()">
-              </mat-slide-toggle>
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">Appearance</h3>
+
+              <div class="setting-group">
+                <div class="theme-toggle">
+                  <div class="theme-label">
+                    <mat-icon>dark_mode</mat-icon>
+                    <span>Dark Mode</span>
+                  </div>
+                  <mat-slide-toggle
+                    [checked]="isDarkTheme$ | async"
+                    (change)="toggleTheme()">
+                  </mat-slide-toggle>
+                </div>
+              </div>
             </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="action-buttons">
+            <button type="button"
+                    mat-stroked-button
+                    class="secondary-btn"
+                    (click)="goBack()">
+              <mat-icon>arrow_back</mat-icon>
+              Cancel
+            </button>
+            <button type="submit"
+                    mat-raised-button
+                    class="primary-btn"
+                    [disabled]="settingsForm.invalid"
+                    (click)="onSubmit()">
+              <mat-icon>save</mat-icon>
+              <span>Save Settings</span>
+            </button>
           </div>
         </form>
       </div>
-
-      <div class="action-buttons">
-        <button mat-raised-button type="button" (click)="goBack()">
-          <mat-icon>cancel</mat-icon>
-          Cancel
-        </button>
-        <button mat-raised-button color="primary" type="submit"
-                [disabled]="settingsForm.invalid" (click)="onSubmit()">
-          <mat-icon>save</mat-icon>
-          Save
-        </button>
-      </div>
     </div>
   </div>
-</div>

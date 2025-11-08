@@ -4,11 +4,10 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatMenuModule } from '@angular/material/menu';
-import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { Router } from '@angular/router';
 import { BatchProgress, DatabaseLibraryService } from '../../services/database-library.service';
 import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
-import { DownloadQueueDialogComponent } from '../download-queue-dialog/download-queue-dialog.component';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -20,7 +19,6 @@ import { Subscription } from 'rxjs';
     MatIconModule,
     MatBadgeModule,
     MatMenuModule,
-    MatDialogModule,
     MatProgressBarModule
   ],
   template: `
@@ -71,7 +69,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   constructor(
     private databaseLibraryService: DatabaseLibraryService,
     private downloadProgressService: DownloadProgressService,
-    private dialog: MatDialog
+    private router: Router
   ) {}
 
   ngOnInit() {
@@ -127,14 +125,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   openQueueDialog() {
-    this.dialog.open(DownloadQueueDialogComponent, {
-      width: '700px',
-      maxWidth: '90vw',
-      maxHeight: '90vh',
-      data: {
-        batchProgress: this.batchProgress,
-        processingJobs: this.processingJobs
-      }
-    });
+    // Navigate to the video analysis page where the unified processing queue is displayed
+    this.router.navigate(['/analysis']);
   }
 }

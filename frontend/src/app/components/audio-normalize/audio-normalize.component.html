@@ -1,60 +1,106 @@
-<!-- Audio Normalization - Creamsicle Theme -->
+<!-- Audio Normalization - Modern Design -->
 <div class="normalize-container">
-  <div class="page-content">
-    <!-- Audio Normalization Panel -->
-    <div class="panel full-height-panel">
-      <div class="panel-header">
-        <h4 class="panel-title">🎵 Audio Normalization</h4>
-        <div class="panel-header-actions">
-          <button mat-raised-button (click)="openSettingsDialog()" [disabled]="isProcessing">
-            <mat-icon>settings</mat-icon> Settings
+  <!-- Header -->
+  <div class="page-header">
+    <h1>
+      <mat-icon>graphic_eq</mat-icon>
+      Audio Normalization
+    </h1>
+    <p class="header-subtitle">Normalize audio levels across your media files for consistent playback</p>
+  </div>
+
+  <!-- Main Layout -->
+  <div class="main-layout">
+    <div class="content-column">
+      <!-- Controls Section -->
+      <div class="controls-section">
+        <div class="controls-row">
+          <button mat-raised-button
+                  class="action-btn"
+                  (click)="selectMedia()"
+                  [disabled]="isProcessing">
+            <mat-icon>add</mat-icon>
+            Select Media
           </button>
-          <button mat-raised-button color="primary" (click)="selectMedia()" [disabled]="isProcessing">
-            <mat-icon>add</mat-icon> Select Media
+          <button mat-stroked-button
+                  class="action-btn secondary"
+                  (click)="openSettingsDialog()"
+                  [disabled]="isProcessing">
+            <mat-icon>settings</mat-icon>
+            Settings
           </button>
-          <button mat-stroked-button color="warn" (click)="clearAll()" [disabled]="isProcessing || selectedFiles.length === 0">
-            <mat-icon>clear_all</mat-icon> Clear All
+          <button mat-stroked-button
+                  color="warn"
+                  (click)="clearAll()"
+                  [disabled]="isProcessing || selectedFiles.length === 0">
+            <mat-icon>clear_all</mat-icon>
+            Clear All
           </button>
         </div>
       </div>
 
-      <div class="panel-content">
+      <!-- Files List -->
+      <div class="files-section">
+        <div class="section-header" *ngIf="selectedFiles.length > 0">
+          <h3>
+            <mat-icon>queue_music</mat-icon>
+            Selected Files ({{ selectedFiles.length }})
+          </h3>
+        </div>
+
         <div class="files-list">
           <div *ngFor="let file of selectedFiles; let i = index"
                class="file-card"
-               [ngClass]="'file-' + (file.status || 'unknown')">
+               [class.processing]="file.status === 'processing'"
+               [class.completed]="file.status === 'completed'"
+               [class.failed]="file.status === 'failed'">
 
-            <div class="file-content">
-              <span class="file-title">{{ file.name }}</span>
-              <div class="file-right">
-                <span class="badge" [ngClass]="'badge-' + getStatusBadgeType(file.status || '')">
-                  {{ file.status }}
-                </span>
-                <button *ngIf="file.status !== 'processing'"
-                        type="button"
-                        class="remove-button"
-                        (click)="removeFile(i)"
-                        [disabled]="isProcessing"
-                        title="Remove file">
-                  <mat-icon>close</mat-icon>
-                </button>
-              </div>
+            <div class="file-status-indicator"
+                 [class.success]="file.status === 'completed'"
+                 [class.error]="file.status === 'failed'"
+                 [class.active]="file.status === 'processing'"></div>
+
+            <div class="file-icon">
+              <mat-icon *ngIf="file.status === 'processing'" class="spinning">sync</mat-icon>
+              <mat-icon *ngIf="file.status === 'completed'">check_circle</mat-icon>
+              <mat-icon *ngIf="file.status === 'failed'">error</mat-icon>
+              <mat-icon *ngIf="!file.status || file.status === 'pending'">audio_file</mat-icon>
             </div>
 
-            <div class="progress-bar processing-bar" *ngIf="file.status === 'processing'"></div>
+            <div class="file-info">
+              <div class="file-name">{{ file.name }}</div>
+              <div class="file-status-text">{{ file.status || 'pending' }}</div>
+            </div>
+
+            <button *ngIf="file.status !== 'processing'"
+                    mat-icon-button
+                    class="remove-btn"
+                    (click)="removeFile(i)"
+                    [disabled]="isProcessing"
+                    matTooltip="Remove file">
+              <mat-icon>close</mat-icon>
+            </button>
+
+            <div class="progress-bar" *ngIf="file.status === 'processing'">
+              <div class="progress-fill"></div>
+            </div>
           </div>
 
           <div class="empty-state" *ngIf="selectedFiles.length === 0">
-            <mat-icon class="empty-icon">music_note</mat-icon>
-            <p>No files selected</p>
-            <p class="empty-hint">Select individual files or choose a folder to normalize audio</p>
+            <mat-icon>music_note</mat-icon>
+            <h2>No files selected</h2>
+            <p>Select individual files or choose a folder to normalize audio</p>
           </div>
         </div>
 
-        <div class="panel-actions">
-          <button mat-raised-button color="primary" (click)="startNormalization()"
+        <!-- Action Button -->
+        <div class="action-buttons" *ngIf="selectedFiles.length > 0">
+          <button mat-raised-button
+                  class="primary-btn"
+                  (click)="startNormalization()"
                   [disabled]="isProcessing || selectedFiles.length === 0 || normalizeForm.invalid">
-            <mat-icon>equalizer</mat-icon> {{ isProcessing ? 'Processing...' : 'Normalize Audio' }}
+            <mat-icon>equalizer</mat-icon>
+            <span>{{ isProcessing ? 'Processing...' : 'Normalize Audio' }}</span>
           </button>
         </div>
       </div>

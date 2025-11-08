@@ -3,8 +3,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px 20px;
-  background-color: #000;
-  border-top: 1px solid #333;
+  // Default to light theme colors - will be overridden by dark theme if active
+  background-color: #ffffff;
+  border-top: 1px solid #dee2e6;
 }
 
 .timeline-controls {
@@ -20,7 +21,7 @@
   gap: 4px;
 
   .tool-button {
-    color: #999;
+    color: #6c757d; // Light theme default
     transition: all 0.2s;
 
     &:hover {
@@ -29,7 +30,7 @@
     }
 
     &.active {
-      background-color: rgba(255, 102, 0, 0.3);
+      background-color: rgba(255, 102, 0, 0.2); // Lighter for light theme
       color: #ff6600;
       box-shadow: 0 0 8px rgba(255, 102, 0, 0.4);
     }
@@ -44,16 +45,16 @@
   .tool-divider {
     width: 1px;
     height: 24px;
-    background-color: #444;
+    background-color: #dee2e6; // Light theme default
     margin: 0 8px;
   }
 
   .playback-button {
-    color: #fff;
-    background-color: rgba(255, 102, 0, 0.2);
+    color: #212529; // Light theme default
+    background-color: rgba(255, 102, 0, 0.15); // Light theme default
 
     &:hover {
-      background-color: rgba(255, 102, 0, 0.4);
+      background-color: rgba(255, 102, 0, 0.25);
       color: #ff6600;
     }
 
@@ -65,16 +66,23 @@
   }
 }
 
+.time-display {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+
 .selection-info {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #fff;
+  color: #212529; // Light theme default
   font-family: monospace;
 
   .selection-label {
-    color: #999;
+    color: #6c757d; // Light theme default
   }
 
   .selection-time {
@@ -83,7 +91,25 @@
   }
 
   .selection-duration {
-    color: #999;
+    color: #6c757d; // Light theme default
+  }
+}
+
+.playhead-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #212529; // Light theme default
+  font-family: monospace;
+
+  .playhead-label {
+    color: #6c757d; // Light theme default
+  }
+
+  .playhead-time {
+    color: #ff6600;
+    font-weight: 600;
   }
 }
 
@@ -92,15 +118,15 @@
   gap: 4px;
 
   .timeline-button {
-    color: #fff;
+    color: #212529; // Light theme default
 
     &:hover {
-      background-color: rgba(255, 102, 0, 0.2);
+      background-color: rgba(255, 102, 0, 0.1);
       color: #ff6600;
     }
 
     &.active {
-      background-color: rgba(255, 102, 0, 0.3);
+      background-color: rgba(255, 102, 0, 0.2);
       color: #ff6600;
     }
 
@@ -123,17 +149,18 @@
 .timeline {
   position: relative;
   height: 50px;
-  background: linear-gradient(to bottom, #0a0a0a 0%, #111 50%, #0a0a0a 100%);
+  // Light theme default
+  background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 50%, #f8f9fa 100%);
   border-radius: 6px;
-  border: 1px solid #333;
+  border: 1px solid #dee2e6;
   cursor: pointer;
   overflow: visible; // Changed from hidden to visible so playhead ball shows above
   user-select: none;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
 
   &:hover {
-    background: linear-gradient(to bottom, #111 0%, #1a1a1a 50%, #111 100%);
-    border-color: #444;
+    background: linear-gradient(to bottom, #e9ecef 0%, #dee2e6 50%, #e9ecef 100%);
+    border-color: #adb5bd;
   }
 
   &.zoomed {
@@ -257,9 +284,9 @@
   left: 50%;
   width: 2px;
   height: 100%;
-  background-color: #fff;
+  background-color: #212529; // Light theme default
   transform: translateX(-50%);
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
 }
 
 .playhead-handle {
@@ -268,13 +295,13 @@
   left: 50%;
   width: 16px; // Made slightly larger for easier clicking
   height: 16px;
-  background-color: #fff;
+  background-color: #ffffff;
   border: 2px solid #ff6600;
   border-radius: 50%;
   transform: translateX(-50%);
   pointer-events: auto;
   cursor: grab;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); // Light theme shadow
 
   &:active {
     cursor: grabbing;
@@ -282,7 +309,7 @@
 
   &:hover {
     transform: translateX(-50%) scale(1.2);
-    box-shadow: 0 0 8px rgba(255, 102, 0, 0.8);
+    box-shadow: 0 0 8px rgba(255, 102, 0, 0.6);
   }
 }
 
@@ -291,8 +318,9 @@
   height: 40px;
   margin-bottom: 8px; // Space between markers and timeline
   padding-bottom: 8px;
-  background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 100%);
-  border-bottom: 2px solid #444;
+  // Light theme default
+  background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.03) 100%);
+  border-bottom: 2px solid #dee2e6;
   cursor: pointer; // Make it clear the area is clickable
   user-select: none; // Prevent text selection
 
@@ -312,27 +340,27 @@
 
   .time-tick {
     width: 1px;
-    background-color: #666;
+    background-color: #adb5bd; // Light theme default
     margin-top: 6px; // Changed from margin-bottom
-    box-shadow: 0 0 2px rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.1);
   }
 
   &.major {
     .time-tick {
       height: 16px;
-      background: linear-gradient(to top, #ff6600, #cc5200); // Reversed gradient
+      background: linear-gradient(to top, #ff6600, #ff8833); // Light theme gradient
       width: 2px;
-      box-shadow: 0 0 4px rgba(255, 102, 0, 0.5);
+      box-shadow: 0 0 4px rgba(255, 102, 0, 0.3);
     }
 
     .time-label {
       font-size: 12px;
-      color: #ddd;
+      color: #212529; // Light theme default
       font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
       white-space: nowrap;
       font-weight: 600;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-      background: rgba(0, 0, 0, 0.6);
+      text-shadow: 0 1px 1px rgba(255, 255, 255, 0.8); // Light theme shadow
+      background: rgba(255, 255, 255, 0.9); // Light theme background
       padding: 2px 6px;
       border-radius: 3px;
       border: 1px solid rgba(255, 102, 0, 0.3);
@@ -346,7 +374,7 @@
   &.minor {
     .time-tick {
       height: 10px;
-      background-color: #666;
+      background-color: #adb5bd; // Light theme default
       width: 1px;
     }
   }
@@ -372,9 +400,9 @@
 .timeline-scrollbar {
   margin-top: 12px;
   padding: 12px 8px;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.05); // Light theme default
   border-radius: 6px;
-  border: 1px solid #333;
+  border: 1px solid #dee2e6; // Light theme default
   transition: opacity 0.2s ease;
 
   &.disabled {
@@ -386,10 +414,10 @@
     position: relative;
     width: 100%;
     height: 24px;
-    background: linear-gradient(to bottom, #1a1a1a, #2a2a2a);
-    border: 1px solid #555;
+    background: linear-gradient(to bottom, #f8f9fa, #e9ecef); // Light theme default
+    border: 1px solid #adb5bd; // Light theme default
     border-radius: 4px;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
   }
 
   .scrollbar-viewport {
@@ -465,19 +493,355 @@
 // Keyboard shortcut hint
 .timeline-hint {
   font-size: 11px;
-  color: #777;
+  color: #6c757d; // Light theme default
   text-align: center;
   margin-top: 8px;
 
   kbd {
     display: inline-block;
     padding: 2px 6px;
-    background-color: #1a1a1a;
-    border: 1px solid #444;
+    background-color: #f8f9fa; // Light theme default
+    border: 1px solid #dee2e6; // Light theme default
     border-radius: 3px;
     font-family: monospace;
     font-size: 10px;
     margin: 0 2px;
     color: #ff6600;
+  }
+}
+
+// ========================================
+// Light Theme Support
+// ========================================
+:root,
+:host:not([data-theme="dark"]):not(.dark-theme) {
+  .timeline-container {
+    background-color: #ffffff;
+    border-top: 1px solid #dee2e6;
+  }
+
+  .timeline-tools {
+    .tool-button {
+      color: #6c757d;
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.1);
+        color: #ff6600;
+      }
+
+      &.active {
+        background-color: rgba(255, 102, 0, 0.2);
+        color: #ff6600;
+      }
+    }
+
+    .tool-divider {
+      background-color: #dee2e6;
+    }
+
+    .playback-button {
+      color: #212529;
+      background-color: rgba(255, 102, 0, 0.15);
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.25);
+        color: #ff6600;
+      }
+    }
+  }
+
+  .selection-info {
+    color: #212529;
+
+    .selection-label {
+      color: #6c757d;
+    }
+
+    .selection-time {
+      color: #ff6600;
+    }
+
+    .selection-duration {
+      color: #6c757d;
+    }
+  }
+
+  .playhead-info {
+    color: #212529;
+
+    .playhead-label {
+      color: #6c757d;
+    }
+
+    .playhead-time {
+      color: #ff6600;
+    }
+  }
+
+  .timeline-buttons {
+    .timeline-button {
+      color: #212529;
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.1);
+        color: #ff6600;
+      }
+
+      &.active {
+        background-color: rgba(255, 102, 0, 0.2);
+        color: #ff6600;
+      }
+    }
+  }
+
+  .timeline {
+    background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 50%, #f8f9fa 100%);
+    border: 1px solid #dee2e6;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+
+    &:hover {
+      background: linear-gradient(to bottom, #e9ecef 0%, #dee2e6 50%, #e9ecef 100%);
+      border-color: #adb5bd;
+    }
+  }
+
+  .time-markers {
+    background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.03) 100%);
+    border-bottom: 2px solid #dee2e6;
+
+    &:hover {
+      background: linear-gradient(to bottom, transparent 0%, rgba(255, 102, 0, 0.05) 100%);
+    }
+  }
+
+  .time-marker {
+    .time-tick {
+      background-color: #adb5bd;
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.1);
+    }
+
+    &.major {
+      .time-tick {
+        background: linear-gradient(to top, #ff6600, #ff8833);
+        box-shadow: 0 0 4px rgba(255, 102, 0, 0.3);
+      }
+
+      .time-label {
+        color: #212529;
+        text-shadow: 0 1px 1px rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(255, 102, 0, 0.3);
+      }
+    }
+
+    &.minor {
+      .time-tick {
+        background-color: #adb5bd;
+      }
+    }
+  }
+
+  .playhead-line {
+    background-color: #212529;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .playhead-handle {
+    background-color: #ffffff;
+    border: 2px solid #ff6600;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+
+    &:hover {
+      box-shadow: 0 0 8px rgba(255, 102, 0, 0.6);
+    }
+  }
+
+  .timeline-scrollbar {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid #dee2e6;
+
+    .scrollbar-track {
+      background: linear-gradient(to bottom, #f8f9fa, #e9ecef);
+      border: 1px solid #adb5bd;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+  }
+
+  .timeline-hint {
+    color: #6c757d;
+
+    kbd {
+      background-color: #f8f9fa;
+      border: 1px solid #dee2e6;
+      color: #ff6600;
+    }
+  }
+}
+
+// ========================================
+// Dark Theme Support
+// ========================================
+:host-context([data-theme="dark"]),
+:host-context(.dark-theme) {
+  .timeline-container {
+    background-color: #000;
+    border-top: 1px solid #333;
+  }
+
+  .timeline-tools {
+    .tool-button {
+      color: #999;
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.1);
+        color: #ff6600;
+      }
+
+      &.active {
+        background-color: rgba(255, 102, 0, 0.3);
+        color: #ff6600;
+      }
+    }
+
+    .tool-divider {
+      background-color: #444;
+    }
+
+    .playback-button {
+      color: #fff;
+      background-color: rgba(255, 102, 0, 0.2);
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.4);
+        color: #ff6600;
+      }
+    }
+  }
+
+  .selection-info {
+    color: #fff;
+
+    .selection-label {
+      color: #999;
+    }
+
+    .selection-time {
+      color: #ff6600;
+    }
+
+    .selection-duration {
+      color: #999;
+    }
+  }
+
+  .playhead-info {
+    color: #fff;
+
+    .playhead-label {
+      color: #999;
+    }
+
+    .playhead-time {
+      color: #ff6600;
+    }
+  }
+
+  .timeline-buttons {
+    .timeline-button {
+      color: #fff;
+
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.2);
+        color: #ff6600;
+      }
+
+      &.active {
+        background-color: rgba(255, 102, 0, 0.3);
+        color: #ff6600;
+      }
+    }
+  }
+
+  .timeline {
+    background: linear-gradient(to bottom, #0a0a0a 0%, #111 50%, #0a0a0a 100%);
+    border: 1px solid #333;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+
+    &:hover {
+      background: linear-gradient(to bottom, #111 0%, #1a1a1a 50%, #111 100%);
+      border-color: #444;
+    }
+  }
+
+  .time-markers {
+    background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 100%);
+    border-bottom: 2px solid #444;
+
+    &:hover {
+      background: linear-gradient(to bottom, transparent 0%, rgba(255, 102, 0, 0.05) 100%);
+    }
+  }
+
+  .time-marker {
+    .time-tick {
+      background-color: #666;
+      box-shadow: 0 0 2px rgba(255, 255, 255, 0.1);
+    }
+
+    &.major {
+      .time-tick {
+        background: linear-gradient(to top, #ff6600, #cc5200);
+        box-shadow: 0 0 4px rgba(255, 102, 0, 0.5);
+      }
+
+      .time-label {
+        color: #ddd;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(255, 102, 0, 0.3);
+      }
+    }
+
+    &.minor {
+      .time-tick {
+        background-color: #666;
+      }
+    }
+  }
+
+  .playhead-line {
+    background-color: #fff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+  }
+
+  .playhead-handle {
+    background-color: #fff;
+    border: 2px solid #ff6600;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+
+    &:hover {
+      box-shadow: 0 0 8px rgba(255, 102, 0, 0.8);
+    }
+  }
+
+  .timeline-scrollbar {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #333;
+
+    .scrollbar-track {
+      background: linear-gradient(to bottom, #1a1a1a, #2a2a2a);
+      border: 1px solid #555;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+  }
+
+  .timeline-hint {
+    color: #777;
+
+    kbd {
+      background-color: #1a1a1a;
+      border: 1px solid #444;
+      color: #ff6600;
+    }
   }
 }

@@ -6,6 +6,8 @@
   height: 100%;
   width: 100%;
   overflow: hidden;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .video-player-dialog {
@@ -650,5 +652,327 @@ app-video-timeline {
   .error-container {
     right: 0;
     bottom: 300px;
+  }
+}
+
+// ========================================
+// Light Theme Support
+// ========================================
+:root,
+:host:not([data-theme="dark"]):not(.dark-theme) {
+  .dialog-header {
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+
+    h2 {
+      color: var(--text-primary);
+    }
+
+    .back-button mat-icon {
+      color: var(--text-secondary);
+
+      &:hover {
+        color: var(--text-primary);
+      }
+    }
+
+    .close-button {
+      background-color: rgba(0, 0, 0, 0.05);
+      border-color: var(--border-color);
+
+      mat-icon {
+        color: var(--text-primary);
+      }
+
+      &:hover {
+        background-color: rgba(255, 0, 0, 0.1);
+        border-color: rgba(255, 0, 0, 0.3);
+      }
+    }
+  }
+
+  .error-container {
+    background-color: var(--bg-primary);
+
+    h3 {
+      color: var(--text-primary);
+    }
+
+    p {
+      color: var(--text-secondary);
+    }
+
+    &.drag-over {
+      background-color: rgba(255, 143, 71, 0.08);
+    }
+  }
+
+  .sections-sidebar {
+    background-color: var(--bg-secondary);
+    border-left-color: var(--border-color);
+
+    ::ng-deep .mat-mdc-tab-header {
+      background-color: var(--bg-secondary);
+      border-bottom-color: var(--border-color);
+    }
+
+    ::ng-deep .mat-mdc-tab-labels {
+      background-color: var(--bg-secondary);
+    }
+
+    ::ng-deep .mat-mdc-tab {
+      .mdc-tab__text-label {
+        color: var(--text-secondary) !important;
+      }
+
+      &.mdc-tab--active .mdc-tab__text-label {
+        color: var(--primary-orange) !important;
+      }
+
+      &:hover .mdc-tab__text-label {
+        color: var(--text-primary) !important;
+      }
+    }
+
+    .sections-hint {
+      color: var(--text-secondary);
+      border-bottom-color: var(--border-color);
+      background-color: var(--bg-secondary);
+    }
+
+    .no-analysis-container {
+      h3 {
+        color: var(--text-primary);
+      }
+
+      p {
+        color: var(--text-secondary);
+      }
+    }
+  }
+
+  .sections-list {
+    &::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+
+      &:hover {
+        background: var(--text-muted);
+      }
+    }
+  }
+
+  .section-item {
+    background-color: var(--bg-card);
+    border-color: var(--border-color);
+
+    &:hover {
+      background-color: var(--bg-primary);
+      border-color: var(--text-muted);
+    }
+
+    &.active {
+      background-color: rgba(255, 143, 71, 0.08);
+      border-color: rgba(255, 143, 71, 0.4);
+    }
+
+    .section-content {
+      .section-header {
+        .section-time {
+          color: var(--text-primary);
+        }
+      }
+
+      .section-description {
+        color: var(--text-secondary);
+      }
+
+      .section-quotes {
+        border-top-color: var(--border-color);
+
+        .quote-text {
+          color: var(--text-secondary);
+        }
+      }
+    }
+  }
+
+  .clip-actions {
+    background-color: var(--bg-primary);
+    border-top-color: var(--border-color);
+  }
+
+  .loading-overlay {
+    background-color: var(--bg-primary);
+
+    p {
+      color: var(--text-primary);
+    }
+  }
+}
+
+// ========================================
+// Dark Theme (keep existing dark styles)
+// ========================================
+:host-context([data-theme="dark"]),
+:host-context(.dark-theme) {
+  .dialog-header {
+    background-color: #000;
+    border-bottom-color: #333;
+
+    h2 {
+      color: #fff;
+    }
+
+    .back-button mat-icon {
+      color: #999;
+
+      &:hover {
+        color: #fff;
+      }
+    }
+
+    .close-button {
+      background-color: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+
+      mat-icon {
+        color: #fff;
+      }
+
+      &:hover {
+        background-color: rgba(255, 0, 0, 0.3);
+        border-color: rgba(255, 0, 0, 0.5);
+
+        mat-icon {
+          color: #ff4444;
+        }
+      }
+    }
+  }
+
+  .error-container {
+    background-color: #0a0a0a;
+
+    h3 {
+      color: #fff;
+    }
+
+    p {
+      color: #999;
+    }
+
+    .drop-hint {
+      color: #bbb;
+    }
+  }
+
+  .sections-sidebar {
+    background-color: #0a0a0a;
+    border-left-color: #333;
+
+    ::ng-deep .mat-mdc-tab-header {
+      background-color: #0a0a0a;
+      border-bottom-color: #333;
+    }
+
+    ::ng-deep .mat-mdc-tab-labels {
+      background-color: #0a0a0a;
+    }
+
+    ::ng-deep .mat-mdc-tab {
+      .mdc-tab__text-label {
+        color: #999 !important;
+      }
+
+      &.mdc-tab--active .mdc-tab__text-label {
+        color: #ff6600 !important;
+      }
+
+      &:hover .mdc-tab__text-label {
+        color: #fff !important;
+      }
+    }
+
+    .sections-hint {
+      color: #999;
+      border-bottom-color: #1a1a1a;
+      background-color: #0a0a0a;
+    }
+
+    .no-analysis-container {
+      h3 {
+        color: #fff;
+      }
+
+      p {
+        color: #999;
+      }
+    }
+  }
+
+  .sections-list {
+    &::-webkit-scrollbar-track {
+      background: #0a0a0a;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: #333;
+
+      &:hover {
+        background: #555;
+      }
+    }
+  }
+
+  .section-item {
+    background-color: #1a1a1a;
+    border-color: #2a2a2a;
+
+    &:hover {
+      background-color: #222;
+      border-color: #333;
+    }
+
+    &.active {
+      background-color: rgba(255, 102, 0, 0.12);
+      border-color: rgba(255, 102, 0, 0.4);
+    }
+
+    .section-content {
+      .section-header {
+        .section-time {
+          color: #fff;
+        }
+      }
+
+      .section-description {
+        color: #aaa;
+      }
+
+      .section-quotes {
+        border-top-color: #333;
+
+        .quote-text {
+          color: #999;
+        }
+      }
+    }
+  }
+
+  .clip-actions {
+    background-color: #000;
+    border-top-color: #333;
+  }
+
+  .loading-overlay {
+    background-color: #000;
+
+    p {
+      color: white;
+    }
   }
 }

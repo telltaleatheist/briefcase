@@ -5,8 +5,10 @@
     <p>Loading video information...</p>
   </div>
 
-  <!-- Main Content -->
-  <div *ngIf="!isLoading && video" class="content-wrapper">
+  <!-- Main Content with Split View -->
+  <div *ngIf="!isLoading && video" class="split-container">
+    <!-- Top Section: Video Info -->
+    <div class="content-wrapper">
     <!-- Header -->
     <div class="header">
       <div class="header-left">
@@ -267,6 +269,7 @@
           </div>
         </div>
       </mat-card>
+    </div>
     </div>
   </div>
 </div>

@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, Inject, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -13,9 +14,13 @@ import { MatExpansionModule, MatExpansionPanel } from '@angular/material/expansi
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
+import { DatabaseLibraryService, DatabaseVideo } from '../../services/database-library.service';
+import { Subscription } from 'rxjs';
 
 interface AnalysisJob {
   id: string;
@@ -51,6 +56,7 @@ interface AnalysisJob {
     MatDividerModule,
     MatTabsModule,
     MatDialogModule,
+    MatTooltipModule,
   ],
   templateUrl: './video-analysis.component.html',
   styleUrls: ['./video-analysis.component.scss']
@@ -60,6 +66,17 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   currentJob: AnalysisJob | null = null;
   isProcessing = false;
   availableOllamaModels: string[] = [];
+  processingJobs: VideoProcessingJob[] = [];
+  private jobsSubscription?: Subscription;
+
+  // Video library integration
+  libraryVideos: DatabaseVideo[] = [];
+  filteredLibraryVideos: DatabaseVideo[] = [];
+  isLoadingLibrary = false;
+  librarySearchQuery = '';
+
+  // Drag and drop
+  isDraggingFile = false;
 
   @ViewChild(MatExpansionPanel) advancedPanel!: MatExpansionPanel;
 
@@ -71,11 +88,36 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     private dialog: MatDialog,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
+    private downloadProgressService: DownloadProgressService,
+    private databaseLibraryService: DatabaseLibraryService,
+    private router: Router,
   ) {
     this.analysisForm = this.createForm();
   }
 
   async ngOnInit(): Promise<void> {
+    // Subscribe to download/processing jobs from the unified service
+    this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
+      this.processingJobs = Array.from(jobsMap.values());
+    });
+
+    // Check for navigation state with video path
+    const navigation = this.router.getCurrentNavigation();
+    const state = navigation?.extras?.state || (history.state?.navigationId ? history.state : null);
+
+    if (state && state['videoPath']) {
+      // Pre-populate the form with the video path from navigation
+      this.analysisForm.patchValue({
+        inputType: 'file',
+        input: state['videoPath']
+      });
+
+      // Show a notification
+      if (state['videoTitle']) {
+        this.notificationService.toastOnly('info', 'Video Ready', `Ready to analyze: ${state['videoTitle']}`);
+      }
+    }
+
     // Load available Ollama models
     await this.loadAvailableOllamaModels();
 
@@ -84,10 +126,16 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     // Check for any active jobs and restore state
     await this.checkForActiveJobs();
+
+    // Load library videos when in file mode with no file selected
+    await this.loadLibraryVideos();
   }
 
   ngOnDestroy(): void {
     this.stopPolling();
+    if (this.jobsSubscription) {
+      this.jobsSubscription.unsubscribe();
+    }
   }
 
   createForm(): FormGroup {
@@ -366,12 +414,71 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     }
   }
 
-  async onLocalFileToggle(): Promise<void> {
-    // Switch to file mode
-    this.analysisForm.patchValue({ inputType: 'file' });
+  /**
+   * Handle file drag over event
+   */
+  onFileDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingFile = true;
+  }
 
-    // Immediately open file dialog
-    await this.browseFile();
+  /**
+   * Handle file drag leave event
+   */
+  onFileDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingFile = false;
+  }
+
+  /**
+   * Handle file drop event
+   */
+  async onFileDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingFile = false;
+
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    // Check for Electron API
+    const electron = (window as any).electron;
+    if (!electron || !electron.getFilePathFromFile) {
+      this.notificationService.error(
+        'Not Available',
+        'Drag and drop only works in Electron app'
+      );
+      return;
+    }
+
+    // Get the first file
+    const file = files[0];
+
+    // Validate file type
+    const validExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
+    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+
+    if (!validExtensions.includes(ext)) {
+      this.notificationService.error(
+        'Invalid File Type',
+        'Please drop a video file (.mp4, .mov, .avi, etc.)'
+      );
+      return;
+    }
+
+    try {
+      // Use Electron's webUtils to get the real file path
+      const filePath = electron.getFilePathFromFile(file);
+      this.analysisForm.patchValue({ input: filePath });
+      this.notificationService.toastOnly('success', 'File Selected', file.name);
+    } catch (error) {
+      console.error('Failed to get file path:', error);
+      this.notificationService.error('Error', 'Failed to process dropped file');
+    }
   }
 
   async pasteFromClipboard(): Promise<void> {
@@ -622,6 +729,152 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   toggleJobDetails(): void {
     if (this.currentJob) {
       this.currentJob.expanded = !this.currentJob.expanded;
+    }
+  }
+
+  // Helper methods for unified job queue
+  getActiveJobs(): VideoProcessingJob[] {
+    return this.processingJobs.filter(job =>
+      job.stage !== 'completed' && job.stage !== 'failed'
+    );
+  }
+
+  getCompletedJobs(): VideoProcessingJob[] {
+    return this.processingJobs.filter(job =>
+      job.stage === 'completed' || job.stage === 'failed'
+    );
+  }
+
+  clearCompleted() {
+    this.downloadProgressService.clearCompletedJobs();
+  }
+
+  getJobStatusIcon(stage: string): string {
+    switch (stage) {
+      case 'completed':
+        return 'check_circle';
+      case 'failed':
+        return 'error';
+      case 'downloading':
+        return 'cloud_download';
+      case 'importing':
+        return 'file_download';
+      case 'transcribing':
+        return 'mic';
+      case 'analyzing':
+        return 'psychology';
+      default:
+        return 'hourglass_empty';
+    }
+  }
+
+  getJobStatusText(job: VideoProcessingJob): string {
+    switch (job.stage) {
+      case 'downloading':
+        return 'Downloading';
+      case 'importing':
+        return 'Importing';
+      case 'transcribing':
+        return 'Transcribing';
+      case 'analyzing':
+        return 'AI Analysis';
+      case 'completed':
+        return 'Completed';
+      case 'failed':
+        return 'Failed';
+      default:
+        return 'Processing';
+    }
+  }
+
+  getRelativeTime(date: Date): string {
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - new Date(date).getTime()) / 1000);
+
+    if (diff < 60) {
+      return 'just now';
+    } else if (diff < 3600) {
+      const mins = Math.floor(diff / 60);
+      return `${mins}m ago`;
+    } else if (diff < 86400) {
+      const hours = Math.floor(diff / 3600);
+      return `${hours}h ago`;
+    } else {
+      const days = Math.floor(diff / 86400);
+      return `${days}d ago`;
+    }
+  }
+
+  /**
+   * Load videos from library for quick selection
+   */
+  async loadLibraryVideos() {
+    try {
+      this.isLoadingLibrary = true;
+      // Load first 50 videos sorted by date (most recent first)
+      const response = await this.databaseLibraryService.getVideos(50, 0);
+      this.libraryVideos = response.videos;
+      this.filteredLibraryVideos = response.videos;
+    } catch (error) {
+      console.error('Failed to load library videos:', error);
+      // Silently fail - library might not be initialized yet
+    } finally {
+      this.isLoadingLibrary = false;
+    }
+  }
+
+  /**
+   * Filter library videos based on search query
+   */
+  onLibrarySearchChange() {
+    if (!this.librarySearchQuery.trim()) {
+      this.filteredLibraryVideos = this.libraryVideos;
+      return;
+    }
+
+    const query = this.librarySearchQuery.toLowerCase();
+    this.filteredLibraryVideos = this.libraryVideos.filter(video =>
+      video.filename.toLowerCase().includes(query) ||
+      (video.date_folder && video.date_folder.toLowerCase().includes(query))
+    );
+  }
+
+  /**
+   * Select a video from library and set it as the input
+   */
+  selectLibraryVideo(video: DatabaseVideo) {
+    // Set the video path as input
+    this.analysisForm.patchValue({
+      inputType: 'file',
+      input: video.current_path
+    });
+
+    this.notificationService.success('Video Selected', video.filename);
+  }
+
+  /**
+   * Format file size helper
+   */
+  formatFileSize(bytes: number | null): string {
+    return this.databaseLibraryService.formatFileSize(bytes);
+  }
+
+  /**
+   * Format duration helper
+   */
+  formatDuration(seconds: number | null): string {
+    return this.databaseLibraryService.formatDuration(seconds);
+  }
+
+  /**
+   * Format date helper
+   */
+  formatDate(dateString: string | null): string {
+    if (!dateString) return 'Unknown';
+    try {
+      return new Date(dateString).toLocaleDateString();
+    } catch {
+      return dateString;
     }
   }
 }

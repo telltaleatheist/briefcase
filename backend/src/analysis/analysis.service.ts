@@ -10,6 +10,8 @@ import { DownloaderService } from '../downloader/downloader.service';
 import { PathService } from '../path/path.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { LibraryService } from '../library/library.service';
+import { LibraryManagerService } from '../database/library-manager.service';
+import { FileScannerService } from '../database/file-scanner.service';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -70,6 +72,8 @@ export class AnalysisService {
     private eventEmitter: EventEmitter2,
     private configService: SharedConfigService,
     private libraryService: LibraryService,
+    private libraryManagerService: LibraryManagerService,
+    private fileScannerService: FileScannerService,
   ) {}
 
   /**
@@ -144,9 +148,23 @@ export class AnalysisService {
     if (!job) throw new Error('Job not found');
 
     try {
-      // Determine output paths
-      const baseOutputPath = request.outputPath || this.getDefaultOutputPath();
-      const videosPath = path.join(baseOutputPath, 'videos');
+      // Determine output paths - use library clips folder if available
+      let baseOutputPath: string;
+      let videosPath: string;
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+
+      if (activeLibrary) {
+        // Save to library clips folder
+        this.logger.log(`Using active library clips folder: ${activeLibrary.clipsFolderPath}`);
+        baseOutputPath = activeLibrary.clipsFolderPath;
+        videosPath = baseOutputPath; // Videos go directly in clips folder
+      } else {
+        // Fallback to default output path if no library is active
+        this.logger.warn('No active library found, using default output path');
+        baseOutputPath = request.outputPath || this.getDefaultOutputPath();
+        videosPath = path.join(baseOutputPath, 'videos');
+      }
+
       const analysisPath = path.join(baseOutputPath, 'analysis');
       const transcriptsPath = path.join(analysisPath, 'transcripts');
       const reportsPath = path.join(analysisPath, 'reports');
@@ -397,13 +415,21 @@ export class AnalysisService {
         timing: { ...timing, totalDuration },
       });
 
-      // Add to library (only if full analysis mode AND we created the analysis report)
-      // Note: In analysis-only mode, the batch analysis service handles database insertion
-      if ((mode === 'full' || mode === 'analysis-only') && analysisOutputPath) {
-        // Skip library.json creation - we only use the database now
-        this.logger.log(`Skipping legacy library.json creation - using database-only mode`);
-      } else if (mode === 'transcribe-only') {
-        this.logger.log(`Transcription-only mode: Skipped library creation for job ${jobId}`);
+      // Auto-import to library if we have an active library and downloaded a video
+      if (activeLibrary && request.inputType === 'url' && videoPath) {
+        try {
+          this.logger.log(`Auto-importing video to library: ${videoPath}`);
+          const importResult = await this.fileScannerService.importVideos([videoPath]);
+
+          if (importResult.imported.length > 0) {
+            this.logger.log(`Successfully imported video to library: ${importResult.imported[0]}`);
+          } else if (importResult.errors.length > 0) {
+            this.logger.warn(`Failed to import video to library: ${importResult.errors.join(', ')}`);
+          }
+        } catch (error) {
+          this.logger.error(`Error during auto-import: ${(error as Error).message}`);
+          // Don't fail the entire job if import fails
+        }
       }
 
       this.logger.log(`Analysis job ${jobId} completed successfully`);

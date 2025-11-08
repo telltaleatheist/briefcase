@@ -6,8 +6,34 @@
 .video-info-container {
   height: 100%;
   width: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background-color: var(--background);
+  overflow: hidden;
+
+  // Default to light theme
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-elevated: #f8f9fa;
+  --text-primary: #212529;
+  --text-secondary: #6c757d;
+  --text-disabled: #adb5bd;
+  --border-color: #dee2e6;
+  --primary-color: #ff6b35;
+  --timestamp-bg: #fff5f0;
+  --timestamp-text: #d63e14;
+  --chip-bg: #f8f9fa;
+  --chip-text: #212529;
+  --chip-border: #dee2e6;
+  --chip-icon: #ff6b35;
+}
+
+// Container for video info
+.split-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 .loading-container {
@@ -25,7 +51,6 @@
 }
 
 .content-wrapper {
-  height: 100%;
   width: 100%;
   min-width: 100%;
   max-width: 100%;
@@ -34,6 +59,7 @@
   padding: 24px;
   overflow-y: auto;
   box-sizing: border-box;
+  flex: 1;
 }
 
 .header {
@@ -814,13 +840,73 @@
     --text-primary: #212529;
     --text-secondary: #6c757d;
     --text-disabled: #adb5bd;
-    --border-color: #d1d5db;
+    --border-color: #dee2e6;
     --primary-color: #ff6b35;
     --timestamp-bg: #fff5f0;
-    --timestamp-text: #e55529;
+    --timestamp-text: #d63e14;
     --chip-bg: #f8f9fa;
     --chip-text: #212529;
-    --chip-border: #d1d5db;
+    --chip-border: #dee2e6;
     --chip-icon: #ff6b35;
+  }
+
+  // Ensure chip text is visible in light mode
+  .analysis-meta,
+  .analysis-info,
+  .transcript-info {
+    ::ng-deep mat-chip {
+      background-color: #f8f9fa !important;
+
+      .mdc-evolution-chip__text-label,
+      .mat-mdc-chip-action-label,
+      span:not(.mat-icon) {
+        color: #212529 !important;
+      }
+
+      mat-icon,
+      .mat-icon {
+        color: #ff6b35 !important;
+      }
+    }
+  }
+}
+
+// Explicit light theme class support
+:host-context(.light-theme),
+:host-context(.theme-light) {
+  .video-info-container {
+    --background: #ffffff;
+    --surface: #ffffff;
+    --surface-elevated: #f8f9fa;
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --text-disabled: #adb5bd;
+    --border-color: #dee2e6;
+    --primary-color: #ff6b35;
+    --timestamp-bg: #fff5f0;
+    --timestamp-text: #d63e14;
+    --chip-bg: #f8f9fa;
+    --chip-text: #212529;
+    --chip-border: #dee2e6;
+    --chip-icon: #ff6b35;
+  }
+
+  .analysis-meta,
+  .analysis-info,
+  .transcript-info {
+    ::ng-deep mat-chip {
+      background-color: #f8f9fa !important;
+
+      .mdc-evolution-chip__text-label,
+      .mat-mdc-chip-action-label,
+      span:not(.mat-icon) {
+        color: #212529 !important;
+      }
+
+      mat-icon,
+      .mat-icon {
+        color: #ff6b35 !important;
+      }
+    }
   }
 }

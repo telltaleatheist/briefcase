@@ -620,36 +620,31 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Open video in player dialog
+   * Open video in editor/player
    */
   async openVideoPlayer(video: DatabaseVideo) {
+    // Navigate to video editor with video data
+    this.router.navigate(['/video-editor'], {
+      state: {
+        videoEditorData: {
+          videoId: video.id,
+          videoPath: video.current_path,
+          videoTitle: video.filename
+        }
+      }
+    });
+  }
+
+  /**
+   * Open video info/metadata page
+   */
+  async openMetadataEditor(video: DatabaseVideo) {
     // Navigate to video info page with video data
     this.router.navigate(['/video-info', video.id], {
       state: {
         videoData: video
       }
     });
-  }
-
-  /**
-   * Open metadata editor dialog
-   */
-  async openMetadataEditor(video: DatabaseVideo) {
-    // Import VideoMetadataDialogComponent dynamically
-    const { VideoMetadataDialogComponent } = await import('./video-metadata-dialog.component');
-
-    const dialogRef = this.dialog.open(VideoMetadataDialogComponent, {
-      width: '600px',
-      data: { video }
-    });
-
-    const metadataUpdated = await dialogRef.afterClosed().toPromise();
-
-    // Refresh video list if metadata was updated
-    if (metadataUpdated) {
-      await this.loadVideos();
-      await this.loadStats();
-    }
   }
 
   /**
