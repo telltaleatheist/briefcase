@@ -1298,48 +1298,16 @@
     transform: translateY(-1px);
   }
 
-  // Pending jobs (blue)
-  &.job-pending {
-    border-color: var(--info-text);
-    border-left-width: 4px;
-    background: var(--info-bg);
-
-    .job-icon mat-icon {
-      color: var(--info-text);
-    }
-  }
-
-  // Active jobs (highlighted with orange)
-  &.job-active {
+  // All job types use orange border
+  &.job-pending,
+  &.job-active,
+  &.job-failed,
+  &.job-completed {
     border-color: var(--primary-orange);
     border-left-width: 4px;
-    background: rgba(255, 143, 71, 0.05);
 
     .job-icon mat-icon {
       color: var(--primary-orange);
-    }
-  }
-
-  // Failed jobs (red)
-  &.job-failed {
-    border-color: var(--danger-text);
-    border-left-width: 4px;
-    background: var(--danger-bg);
-
-    .job-icon mat-icon {
-      color: var(--danger-text);
-    }
-  }
-
-  // Completed jobs
-  &.job-completed {
-    opacity: 0.8;
-    border-color: var(--success-text);
-    border-left-width: 4px;
-    background: var(--success-bg);
-
-    .job-icon mat-icon {
-      color: var(--success-text);
     }
   }
 
