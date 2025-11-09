@@ -586,7 +586,50 @@ export class AnalysisService {
       }
     }
 
-    // Save to database if video found
+    // If no videoId found, create a video record manually
+    if (!videoId && activeLibrary && request.videoPath) {
+      try {
+        const path = require('path');
+        const fs = require('fs');
+
+        // Generate video ID
+        const newVideoId = require('uuid').v4();
+        videoId = newVideoId;
+
+        // Get file stats
+        const stats = fs.statSync(request.videoPath);
+        const filename = path.basename(request.videoPath);
+
+        // Calculate file hash (simple approach - use file size + mtime as pseudo-hash)
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256')
+          .update(filename + stats.size + stats.mtime)
+          .digest('hex');
+
+        // Determine date folder from path or use current date
+        let dateFolder = new Date().toISOString().split('T')[0];
+        const dateMatch = request.videoPath.match(/\/(\d{4}-\d{2}-\d{2})\//);
+        if (dateMatch) {
+          dateFolder = dateMatch[1];
+        }
+
+        // Insert video record
+        this.databaseService.insertVideo({
+          id: newVideoId,
+          filename,
+          fileHash: hash,
+          currentPath: request.videoPath,
+          dateFolder,
+          fileSizeBytes: stats.size,
+        });
+
+        this.logger.log(`Created new video record with ID: ${newVideoId} for ${filename}`);
+      } catch (error) {
+        this.logger.error(`Failed to create video record: ${(error as Error).message}`);
+      }
+    }
+
+    // Save to database if video found or created
     if (videoId) {
       if (mode !== 'analysis-only' && request.transcriptText && request.transcriptSrt) {
         this.databaseService.insertTranscript({
@@ -606,6 +649,43 @@ export class AnalysisService {
           aiModel: request.aiModel,
           aiProvider: request.aiProvider || 'ollama',
         });
+
+        // Save analysis sections to database
+        const analysisResult = (request as any).analysisResult;
+        if (analysisResult && analysisResult.sections && Array.isArray(analysisResult.sections)) {
+          this.logger.log(`Saving ${analysisResult.sections.length} sections to database for video ${videoId}`);
+
+          for (const section of analysisResult.sections) {
+            // Parse time string like "0:42" or "1:23:45" to seconds
+            let startSeconds = 0;
+            if (section.start_time) {
+              const parts = section.start_time.split(':').map((p: string) => parseInt(p));
+              if (parts.length === 2) {
+                // M:SS format
+                startSeconds = parts[0] * 60 + parts[1];
+              } else if (parts.length === 3) {
+                // H:MM:SS format
+                startSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+              }
+            }
+
+            this.databaseService.insertAnalysisSection({
+              id: require('uuid').v4(),
+              videoId,
+              startSeconds,
+              endSeconds: startSeconds + 10, // Default 10 second duration
+              timestampText: section.start_time,
+              title: section.description ? section.description.substring(0, 100) : undefined,
+              description: section.description,
+              category: section.category || 'routine',
+              source: 'ai',
+            });
+          }
+
+          this.logger.log(`Successfully saved ${analysisResult.sections.length} sections for video ${videoId}`);
+        } else {
+          this.logger.warn(`No sections found in analysisResult for video ${videoId}`);
+        }
       }
     }
 

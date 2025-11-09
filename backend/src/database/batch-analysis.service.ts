@@ -388,10 +388,8 @@ export class BatchAnalysisService implements OnModuleInit {
       throw new Error(job.error || 'Analysis failed');
     }
 
-    // Store results in database (will skip transcript if it already exists)
-    await this.storeAnalysisResults(video.id, job, hasTranscript);
-
-    // Clean up the job from memory
+    // Results already saved by AnalysisService.finalize() - no need to duplicate
+    // Just clean up the job from memory
     await this.analysisService.deleteJob(jobId);
   }
 
@@ -428,6 +426,7 @@ export class BatchAnalysisService implements OnModuleInit {
     job: {
       transcriptPath?: string;
       analysisPath?: string;
+      analysisResult?: { sections: any[]; tags?: { people: string[]; topics: string[] }; sections_count?: number };
       tags?: { people: string[]; topics: string[] };
       timing?: any;
     },
@@ -475,8 +474,47 @@ export class BatchAnalysisService implements OnModuleInit {
       if (job.analysisPath) {
         const analysisContent = await fs.readFile(job.analysisPath, 'utf-8');
 
-        // Parse analysis to extract sections
-        const sections = await this.parseAnalysisForSections(analysisContent, videoId);
+        // Try to get sections from analysisResult first (from Python's return value)
+        let sections: any[] = [];
+        this.logger.log(`[DEBUG] job.analysisResult exists: ${!!job.analysisResult}`);
+        if (job.analysisResult) {
+          this.logger.log(`[DEBUG] job.analysisResult.sections exists: ${!!job.analysisResult.sections}`);
+          this.logger.log(`[DEBUG] job.analysisResult.sections is array: ${Array.isArray(job.analysisResult.sections)}`);
+          this.logger.log(`[DEBUG] job.analysisResult.sections length: ${job.analysisResult.sections?.length || 0}`);
+        }
+        if (job.analysisResult && job.analysisResult.sections && Array.isArray(job.analysisResult.sections)) {
+          // Convert Python sections to database format
+          sections = job.analysisResult.sections.map((section: any) => {
+            // Parse time string like "0:42" or "1:23:45" to seconds
+            let startSeconds = 0;
+            if (section.start_time) {
+              const parts = section.start_time.split(':').map((p: string) => parseInt(p));
+              if (parts.length === 2) {
+                // M:SS format
+                startSeconds = parts[0] * 60 + parts[1];
+              } else if (parts.length === 3) {
+                // H:MM:SS format
+                startSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+              }
+            }
+
+            return {
+              id: uuidv4(),
+              videoId,
+              startSeconds,
+              endSeconds: startSeconds + 10, // Default 10 second duration
+              timestampText: section.start_time,
+              title: section.description ? section.description.substring(0, 100) : undefined,
+              description: section.description,
+              category: section.category || 'routine',
+            };
+          });
+          this.logger.log(`Loaded ${sections.length} sections from analysisResult`);
+        } else {
+          // Fall back to parsing from text if analysisResult not available
+          this.logger.warn('No analysisResult.sections found, falling back to text parsing');
+          sections = await this.parseAnalysisForSections(analysisContent, videoId);
+        }
 
         // Check if analysis already exists
         const existingAnalysis = this.databaseService.getAnalysis(videoId);

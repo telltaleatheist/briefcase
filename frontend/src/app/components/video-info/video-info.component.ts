@@ -358,6 +358,10 @@ export class VideoInfoComponent implements OnInit {
       if (hasAnalysis) {
         this.analysis = await this.databaseLibraryService.getAnalysis(this.video.id);
         this.analysisSections = await this.databaseLibraryService.getAnalysisSections(this.video.id);
+
+        // Clear cache to ensure fresh data when navigating between videos
+        this.databaseLibraryService.clearCache();
+
         this.notificationService.success('Analysis Complete', 'Analysis has been completed successfully');
         return;
       }
