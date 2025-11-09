@@ -1632,6 +1632,40 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Move selected videos to another library
+   */
+  async moveToLibrary() {
+    if (this.selectedVideos.size === 0) {
+      return;
+    }
+
+    // Import the transfer dialog component
+    const { TransferVideosDialogComponent } = await import('./transfer-videos-dialog.component');
+
+    const dialogRef = this.dialog.open(TransferVideosDialogComponent, {
+      width: '600px',
+      data: {
+        selectedVideoIds: Array.from(this.selectedVideos),
+        currentLibraryId: this.activeLibrary?.id || ''
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.success) {
+      // Clear selection
+      this.selectedVideos.clear();
+      this.isAllSelected = false;
+
+      // Clear cache and reload data
+      this.databaseLibraryService.clearCache();
+      await this.loadVideos();
+      await this.loadStats();
+      await this.loadTags();
+    }
+  }
+
+  /**
    * Import videos - open file picker directly
    */
   async openImportManager() {

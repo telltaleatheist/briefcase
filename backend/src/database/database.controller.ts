@@ -955,4 +955,65 @@ export class DatabaseController {
       };
     }
   }
+
+  /**
+   * POST /api/database/transfer-videos
+   * Transfer (move or copy) videos from current library to another library
+   */
+  @Post('transfer-videos')
+  async transferVideos(@Body() body: {
+    videoIds: string[];
+    targetLibraryId: string;
+    action: 'move' | 'copy';
+    replaceExisting: boolean;
+  }) {
+    try {
+      this.logger.log(
+        `Transferring ${body.videoIds?.length || 0} videos to library ${body.targetLibraryId} (${body.action})`,
+      );
+
+      if (!body.videoIds || !Array.isArray(body.videoIds) || body.videoIds.length === 0) {
+        return {
+          success: false,
+          error: 'videoIds array is required',
+        };
+      }
+
+      if (!body.targetLibraryId) {
+        return {
+          success: false,
+          error: 'targetLibraryId is required',
+        };
+      }
+
+      if (!body.action || !['move', 'copy'].includes(body.action)) {
+        return {
+          success: false,
+          error: 'action must be "move" or "copy"',
+        };
+      }
+
+      const result = await this.libraryManagerService.transferVideos(
+        body.videoIds,
+        body.targetLibraryId,
+        body.action,
+        body.replaceExisting ?? false,
+      );
+
+      return {
+        success: true,
+        transferred: result.transferred,
+        skipped: result.skipped,
+        replaced: result.replaced,
+        errors: result.errors,
+        message: `${body.action === 'move' ? 'Moved' : 'Copied'} ${result.transferred} video${result.transferred !== 1 ? 's' : ''}`,
+      };
+    } catch (error: any) {
+      this.logger.error('Transfer failed:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to transfer videos',
+      };
+    }
+  }
 }

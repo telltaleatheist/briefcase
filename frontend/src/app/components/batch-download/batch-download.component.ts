@@ -1,6 +1,7 @@
 // clippy/frontend/src/app/components/batch-download/batch-download.component.ts
 import { Component, OnInit, OnDestroy, ChangeDetectorRef, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -24,11 +25,21 @@ import { SocketService } from '../../services/socket.service';
 import { SettingsService } from '../../services/settings.service';
 import { BatchStateService, PendingJob } from '../../services/batch-state.service';
 import { NotificationService } from '../../services/notification.service';
+import { BackendUrlService } from '../../services/backend-url.service';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJob, JobResponse, JobStatus } from '../../models/download.model';
 import { Settings } from '../../models/settings.model';
 import { Subscription, catchError, of, interval, forkJoin } from 'rxjs';
 import { ErrorDialogComponent } from '../error-dialog/error-dialog.component';
+
+interface ClipLibrary {
+  id: string;
+  name: string;
+  databasePath: string;
+  clipsFolderPath: string;
+  createdAt: string;
+  lastAccessedAt: string;
+}
 
 @Component({
   selector: 'app-batch-download',
@@ -99,6 +110,12 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   private isWaitingToStart = false;
   private startQueueSubscription: Subscription | null = null;
 
+  // Libraries
+  libraries: ClipLibrary[] = [];
+  selectedLibraryId: string = '';
+  isLoadingLibraries = false;
+  private readonly LAST_LIBRARY_KEY = 'batch_download_last_library';
+
   constructor(
     private fb: FormBuilder,
     private batchApiService: BatchApiService,
@@ -107,13 +124,18 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     private batchStateService: BatchStateService,
     private notificationService: NotificationService,
     private cdr: ChangeDetectorRef,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private http: HttpClient,
+    private backendUrlService: BackendUrlService
   ) {
     this.batchForm = this.createBatchForm();
     this.configForm = this.createConfigForm();
   }
   
   ngOnInit(): void {
+    // Load libraries and restore last selection
+    this.loadLibraries();
+
     this.settingsSubscription = this.settingsService.getSettings().subscribe((settings: Settings) => {
       this.updateDefaultValues(settings);
     });
@@ -376,7 +398,59 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.startQueueSubscription.unsubscribe();
     }
   }
-  
+
+  /**
+   * Load available libraries and restore last selection
+   */
+  async loadLibraries(): Promise<void> {
+    try {
+      this.isLoadingLibraries = true;
+
+      const url = await this.backendUrlService.getApiUrl('/database/libraries');
+      const response = await this.http.get<{
+        libraries: ClipLibrary[];
+        activeLibrary: ClipLibrary | null;
+      }>(url).toPromise();
+
+      if (response) {
+        this.libraries = response.libraries;
+
+        // Try to restore last used library from localStorage
+        const lastLibraryId = localStorage.getItem(this.LAST_LIBRARY_KEY);
+
+        if (lastLibraryId && this.libraries.some(lib => lib.id === lastLibraryId)) {
+          // Use the last library if it still exists
+          this.selectedLibraryId = lastLibraryId;
+        } else if (response.activeLibrary) {
+          // Otherwise, default to active library
+          this.selectedLibraryId = response.activeLibrary.id;
+        } else if (this.libraries.length > 0) {
+          // Or just use the first library
+          this.selectedLibraryId = this.libraries[0].id;
+        }
+
+        console.log(`[Batch Download] Loaded ${this.libraries.length} libraries, selected: ${this.selectedLibraryId}`);
+      }
+    } catch (error) {
+      console.error('[Batch Download] Failed to load libraries:', error);
+      this.notificationService.toastOnly('error', 'Failed to Load Libraries', 'Could not load available libraries');
+    } finally {
+      this.isLoadingLibraries = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  /**
+   * Handle library selection change
+   */
+  onLibraryChange(): void {
+    if (this.selectedLibraryId) {
+      // Save to localStorage
+      localStorage.setItem(this.LAST_LIBRARY_KEY, this.selectedLibraryId);
+      console.log(`[Batch Download] Library changed to: ${this.selectedLibraryId}`);
+    }
+  }
+
   updateJobStatus(jobId: string, status: JobStatus, task: string): void {
     // Maintain detailed logging
     console.log(`DETAILED STATUS TRANSITION TRACE: Job ${jobId}`, {

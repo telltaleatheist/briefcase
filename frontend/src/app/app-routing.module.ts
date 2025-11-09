@@ -9,8 +9,8 @@ const routes: Routes = [
     pathMatch: 'full'
   },
   {
-    path: 'analysis',
-    loadComponent: () => import('./components/video-analysis/video-analysis.component').then(m => m.VideoAnalysisComponent)
+    path: 'batch-downloads',
+    loadComponent: () => import('./components/batch-download/batch-download.component').then(m => m.BatchDownloadComponent)
   },
   {
     path: 'reports',

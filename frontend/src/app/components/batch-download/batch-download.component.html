@@ -7,6 +7,21 @@
         Batch Downloads
       </h1>
 
+      <!-- Library Selector -->
+      <div class="library-selector" *ngIf="!isLoadingLibraries && libraries.length > 0">
+        <mat-form-field appearance="outline" class="library-dropdown">
+          <mat-label>Target Library</mat-label>
+          <mat-select [(ngModel)]="selectedLibraryId" (selectionChange)="onLibraryChange()">
+            <mat-option *ngFor="let library of libraries" [value]="library.id">
+              <mat-icon>folder</mat-icon>
+              {{ library.name }}
+            </mat-option>
+          </mat-select>
+          <mat-icon matPrefix>library_books</mat-icon>
+          <mat-hint>Videos will be imported to this library</mat-hint>
+        </mat-form-field>
+      </div>
+
       <!-- Stats chips -->
       <div class="stats-chips" *ngIf="batchQueueStatus">
         <mat-chip-set>

@@ -240,7 +240,7 @@
       <button
         mat-raised-button
         color="primary"
-        *ngIf="getSelectedCount() > 0"
+        [disabled]="getSelectedCount() === 0"
         (click)="analyzeSelected()"
         matTooltip="Analyze or transcribe selected videos">
         <mat-icon>psychology</mat-icon>
@@ -248,8 +248,17 @@
       </button>
       <button
         mat-raised-button
+        color="accent"
+        [disabled]="getSelectedCount() === 0"
+        (click)="moveToLibrary()"
+        matTooltip="Move or copy selected videos to another library">
+        <mat-icon>drive_file_move</mat-icon>
+        Move to... ({{ getSelectedCount() }})
+      </button>
+      <button
+        mat-raised-button
         color="warn"
-        *ngIf="getSelectedCount() > 0"
+        [disabled]="getSelectedCount() === 0"
         (click)="deleteSelected()"
         matTooltip="Delete selected videos">
         <mat-icon>delete</mat-icon>

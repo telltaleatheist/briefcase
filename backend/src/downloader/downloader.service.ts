@@ -163,9 +163,6 @@ export class DownloaderService implements OnModuleInit {
       if (options.convertToMp4) {
         ytDlpManager.addOption('--merge-output-format', 'mp4');
       }
-      
-      // Add --restrict-filenames to avoid unsafe extension issues
-      ytDlpManager.addOption('--restrict-filenames');
 
       // Configure format options based on source
       if (options.url.includes('reddit.com')) {
