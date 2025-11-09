@@ -54,16 +54,24 @@ export class WhisperManager extends EventEmitter {
 
   // Detect whisper command line format by running help
   private async detectWhisperVersion(): Promise<void> {
+    // Skip version detection on Windows to avoid Unicode encoding errors
+    // The --help command contains Unicode characters that cause issues with Windows console encoding
+    if (process.platform === 'win32') {
+      this.logger.log('Skipping whisper version detection on Windows (using default arguments)');
+      this.whisperVersion = 'openai-whisper'; // Assume standard OpenAI whisper
+      return;
+    }
+
     try {
       exec(`${this.whisperPath} --help`, (error, stdout, stderr) => {
         if (error) {
           this.logger.warn(`Error checking whisper version: ${(error as Error).message}`);
           return;
         }
-        
+
         // Store output for later reference
         this.whisperVersion = stdout + stderr;
-        
+
         this.logger.log('Detected whisper help information');
       });
     } catch (error) {
