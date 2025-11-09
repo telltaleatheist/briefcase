@@ -1,19 +1,11 @@
-.video-analysis-dialog {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  overflow: hidden; // Prevent double scrollbars
-}
-
-.dialog-header {
-  display: flex;
-  align-items: flex-start;
+h2.dialog-header {
+  display: flex !important;
+  align-items: flex-start !important;
   gap: 16px;
-  padding: 24px;
+  padding: 24px !important;
+  margin: 0 !important;
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-card) 100%);
   border-bottom: 2px solid var(--primary-orange);
-  flex-shrink: 0; // Prevent header from shrinking
 
   .header-icon {
     background: var(--primary-orange);
@@ -38,7 +30,8 @@
     flex: 1;
     min-width: 0;
 
-    h2 {
+    .title-text {
+      display: block;
       margin: 0;
       font-size: 20px;
       font-weight: 600;
@@ -64,12 +57,8 @@
   }
 }
 
-.dialog-content {
-  padding: 24px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  flex: 1 1 auto; // Allow to grow and shrink
-  min-height: 0; // Important for flexbox scrolling
+mat-dialog-content.dialog-content {
+  padding: 24px !important;
 }
 
 .form-section {
@@ -410,14 +399,14 @@
   gap: 16px;
 }
 
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
+mat-dialog-actions.dialog-footer {
+  display: flex !important;
+  justify-content: flex-end !important;
   gap: 12px;
-  padding: 20px 24px;
+  padding: 20px 24px !important;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  flex-shrink: 0; // Prevent footer from shrinking
+  margin: 0 !important;
 
   button {
     min-width: 120px;

@@ -242,18 +242,9 @@
         color="primary"
         *ngIf="getSelectedCount() > 0"
         (click)="analyzeSelected()"
-        matTooltip="Full AI analysis of selected videos">
+        matTooltip="Analyze or transcribe selected videos">
         <mat-icon>psychology</mat-icon>
         Analyze ({{ getSelectedCount() }})
-      </button>
-      <button
-        mat-raised-button
-        color="accent"
-        *ngIf="getSelectedCount() > 0"
-        (click)="transcribeSelected()"
-        matTooltip="Transcribe selected videos without AI analysis">
-        <mat-icon>subtitles</mat-icon>
-        Transcribe ({{ getSelectedCount() }})
       </button>
       <button
         mat-raised-button
@@ -327,13 +318,9 @@
 
           <!-- Actions Menu -->
           <mat-menu #videoActionsMenu="matMenu">
-            <button mat-menu-item (click)="downloadAndTranscribe(video)">
-              <mat-icon>transcribe</mat-icon>
-              <span>Transcribe</span>
-            </button>
-            <button mat-menu-item (click)="downloadAndAnalyze(video)">
-              <mat-icon>auto_awesome</mat-icon>
-              <span>AI Analyze</span>
+            <button mat-menu-item (click)="openAnalyzeDialog(video)">
+              <mat-icon>psychology</mat-icon>
+              <span>Analyze</span>
             </button>
           </mat-menu>
         </div>

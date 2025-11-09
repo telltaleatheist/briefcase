@@ -237,42 +237,15 @@ export class VideoInfoComponent implements OnInit {
     return categoryColors[normalizedCategory] || '#ff6b35';
   }
 
-  async runTranscription() {
-    if (!this.video) return;
-
-    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
-      width: '700px',
-      maxWidth: '90vw',
-      height: 'auto',
-      maxHeight: '85vh',
-      panelClass: 'video-analysis-dialog-panel',
-      data: {
-        mode: 'transcribe',
-        videoPath: this.video.current_path,
-        videoTitle: this.video.filename,
-        selectedVideos: [this.video]
-      },
-      disableClose: false
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success) {
-        console.log('Video transcription added to queue');
-      }
-    });
-  }
-
   async runAnalysis() {
     if (!this.video) return;
 
     const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
       width: '700px',
       maxWidth: '90vw',
-      height: 'auto',
       maxHeight: '85vh',
       panelClass: 'video-analysis-dialog-panel',
       data: {
-        mode: 'analyze',
         videoPath: this.video.current_path,
         videoTitle: this.video.filename,
         selectedVideos: [this.video]

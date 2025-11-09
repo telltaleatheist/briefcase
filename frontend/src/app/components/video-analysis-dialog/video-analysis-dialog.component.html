@@ -1,10 +1,10 @@
 <div class="video-analysis-dialog">
-  <div class="dialog-header">
+  <h2 mat-dialog-title class="dialog-header">
     <div class="header-icon">
       <mat-icon>psychology</mat-icon>
     </div>
     <div class="header-content">
-      <h2>{{ data.mode === 'transcribe' ? 'Transcribe Video' : data.mode === 'import' ? 'Download & Analyze' : data.mode === 'download' ? 'Download from URL' : 'Analyze Video' }}</h2>
+      <span class="title-text">{{ data.mode === 'transcribe' ? 'Transcribe Video' : data.mode === 'import' ? 'Download & Analyze' : data.mode === 'download' ? 'Download from URL' : 'Analyze Video' }}</span>
       <p class="subtitle" *ngIf="data.selectedVideos && data.selectedVideos.length > 0">
         Configure settings for {{ data.selectedVideos.length }} selected video(s)
       </p>
@@ -12,10 +12,10 @@
     <button mat-icon-button class="close-btn" (click)="cancel()">
       <mat-icon>close</mat-icon>
     </button>
-  </div>
+  </h2>
 
   <form [formGroup]="analysisForm" (ngSubmit)="onSubmit()">
-    <div class="dialog-content">
+    <mat-dialog-content class="dialog-content">
       <!-- Video Source (only show if not from library) -->
       <div class="form-section" *ngIf="!data.selectedVideos || data.selectedVideos.length === 0">
         <h3 class="section-title">
@@ -227,9 +227,9 @@
           </div>
         </div>
       </div>
-    </div>
+    </mat-dialog-content>
 
-    <div class="dialog-footer">
+    <mat-dialog-actions align="end" class="dialog-footer">
       <button type="button" mat-stroked-button (click)="cancel()">
         <mat-icon>close</mat-icon>
         Cancel
@@ -238,6 +238,6 @@
         <mat-icon>add_circle</mat-icon>
         Add to Queue
       </button>
-    </div>
+    </mat-dialog-actions>
   </form>
 </div>

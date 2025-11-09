@@ -104,12 +104,42 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   cachedTimeMarkers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
   private lastMarkerCacheKey = '';
 
+  // Auto-follow playhead state
+  autoFollowPlayhead = true;
+  private previousIsPlaying = false;
+  private previousCurrentTime = 0;
+
+  // Animation for smooth scrolling
+  private animationFrameId: number | null = null;
+  private targetZoomOffset: number | null = null;
+  private animationStartTime: number | null = null;
+  private animationStartOffset: number = 0;
+  private readonly ANIMATION_DURATION = 300; // ms
+
   constructor(private ngZone: NgZone) {}
 
   ngOnChanges(changes: SimpleChanges) {
     // When sections change, update category filters
     if (changes['sections'] && !changes['sections'].firstChange) {
       this.updateCategoryFilters();
+    }
+
+    // Auto-follow playhead logic
+    if (changes['isPlaying'] || changes['currentTime']) {
+      const justPaused = this.previousIsPlaying && !this.isPlaying;
+      const isPlayingAndFollowing = this.isPlaying && this.autoFollowPlayhead;
+
+      // Always center playhead on pause
+      if (justPaused) {
+        this.centerPlayheadInViewport();
+      }
+      // Center playhead during playback if auto-follow is enabled
+      else if (isPlayingAndFollowing && changes['currentTime']) {
+        this.centerPlayheadInViewport();
+      }
+
+      this.previousIsPlaying = this.isPlaying;
+      this.previousCurrentTime = this.currentTime;
     }
   }
 
@@ -151,6 +181,12 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     if (this.boundMouseUp) document.removeEventListener('mouseup', this.boundMouseUp);
     if (this.boundWheel) document.removeEventListener('wheel', this.boundWheel);
     if (this.boundKeyDown) document.removeEventListener('keydown', this.boundKeyDown);
+
+    // Cancel any ongoing animation
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
   }
 
   /**
@@ -172,6 +208,83 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
    */
   getVisibleEndTime(): number {
     return Math.min(this.zoomOffset + this.getVisibleDuration(), this.duration);
+  }
+
+  /**
+   * Center the playhead in the viewport with smooth animation
+   */
+  centerPlayheadInViewport(): void {
+    const visibleStart = this.getVisibleStartTime();
+    const visibleEnd = this.getVisibleEndTime();
+
+    // Only adjust if playhead is outside the visible range or close to edges
+    if (this.currentTime < visibleStart || this.currentTime > visibleEnd) {
+      const visibleDuration = this.getVisibleDuration();
+      // Calculate target offset to center the playhead
+      const targetOffset = Math.max(0,
+        Math.min(
+          this.duration - visibleDuration,
+          this.currentTime - (visibleDuration / 2)
+        )
+      );
+
+      // Animate to the target offset
+      this.animateToOffset(targetOffset);
+    }
+  }
+
+  /**
+   * Animate zoom offset to a target value
+   */
+  private animateToOffset(targetOffset: number): void {
+    // Cancel any ongoing animation
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+    }
+
+    this.targetZoomOffset = targetOffset;
+    this.animationStartTime = performance.now();
+    this.animationStartOffset = this.zoomOffset;
+
+    const animate = (currentTime: number) => {
+      if (this.targetZoomOffset === null || this.animationStartTime === null) {
+        return;
+      }
+
+      const elapsed = currentTime - this.animationStartTime;
+      const progress = Math.min(elapsed / this.ANIMATION_DURATION, 1);
+
+      // Ease-in-out function for smooth animation
+      const easeInOut = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+      this.ngZone.run(() => {
+        this.zoomOffset = this.animationStartOffset +
+          (this.targetZoomOffset! - this.animationStartOffset) * easeInOut;
+      });
+
+      if (progress < 1) {
+        this.animationFrameId = requestAnimationFrame(animate);
+      } else {
+        this.animationFrameId = null;
+        this.targetZoomOffset = null;
+        this.animationStartTime = null;
+      }
+    };
+
+    this.animationFrameId = requestAnimationFrame(animate);
+  }
+
+  /**
+   * Toggle auto-follow playhead feature
+   */
+  toggleAutoFollow(): void {
+    this.autoFollowPlayhead = !this.autoFollowPlayhead;
+    // If just enabled, immediately center the playhead
+    if (this.autoFollowPlayhead) {
+      this.centerPlayheadInViewport();
+    }
   }
 
   /**
@@ -271,18 +384,27 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       const x = event.clientX - rect.left;
       const time = this.pixelsToTime(x);
 
-      // CURSOR TOOL: If clicking selection window, do nothing (let onWindowMouseDown handle it)
+      // CURSOR TOOL: Seek on click/drag, or allow panning with Shift key
       if (this.selectedTool === 'cursor') {
         // If clicking selection window, don't interfere
         if (isSelectionWindow) {
           return;
         }
 
-        // Start potential pan (we'll determine if it's a click or drag in mouse move/up)
-        this.isPanning = true;
-        this.panStartX = event.clientX;
-        this.panStartOffset = this.zoomOffset;
-        this.hasDraggedSincePanStart = false;
+        // If Shift key is held and zoomed, allow panning
+        if (event.shiftKey && this.zoomLevel > 1) {
+          this.isPanning = true;
+          this.panStartX = event.clientX;
+          this.panStartOffset = this.zoomOffset;
+          this.hasDraggedSincePanStart = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
+        // Otherwise, start scrubbing (seeking)
+        this.isScrubbing = true;
+        this.emitSeek(time);
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -562,16 +684,6 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
    * Handle mouse up to end dragging
    */
   handleMouseUp = (event: MouseEvent) => {
-    // If we were panning but didn't actually drag, treat it as a click to seek
-    if (this.isPanning && !this.hasDraggedSincePanStart && this.selectedTool === 'cursor') {
-      const rect = this.timelineElement?.nativeElement?.getBoundingClientRect();
-      if (rect) {
-        const x = event.clientX - rect.left;
-        const time = this.pixelsToTime(x);
-        this.emitSeek(time);
-      }
-    }
-
     // Clear range dragging flag after a short delay to prevent immediate seek
     if (this.isDraggingRange) {
       setTimeout(() => {

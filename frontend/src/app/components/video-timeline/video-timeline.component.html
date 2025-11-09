@@ -86,6 +86,15 @@
         [class.active]="zoomLevel > 1">
         <mat-icon>{{ zoomLevel > 1 ? 'zoom_in' : 'zoom_out_map' }}</mat-icon>
       </button>
+
+      <button
+        mat-icon-button
+        (click)="toggleAutoFollow()"
+        [matTooltip]="autoFollowPlayhead ? 'Auto-follow playhead: ON' : 'Auto-follow playhead: OFF'"
+        class="timeline-button"
+        [class.active]="autoFollowPlayhead">
+        <mat-icon>{{ autoFollowPlayhead ? 'center_focus_strong' : 'center_focus_weak' }}</mat-icon>
+      </button>
     </div>
   </div>
 

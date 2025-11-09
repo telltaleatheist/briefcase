@@ -682,15 +682,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
     console.log('Selected video details:', selectedVideoDetails);
 
-    // Open dialog instead of navigating
+    // Open dialog without specifying mode - let user choose
     const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
       width: '700px',
       maxWidth: '90vw',
-      height: 'auto',
       maxHeight: '85vh',
       panelClass: 'video-analysis-dialog-panel',
       data: {
-        mode: 'analyze',
         selectedVideos: selectedVideoDetails
       },
       disableClose: false
@@ -706,35 +704,23 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Transcribe selected videos (transcribe-only mode)
+   * Open analyze dialog for a single video
    */
-  async transcribeSelected() {
-    if (this.selectedVideos.size === 0) {
-      this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to transcribe');
-      return;
-    }
-
-    const videoIds = Array.from(this.selectedVideos);
-    const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
-
-    // Open dialog in transcribe-only mode
+  async openAnalyzeDialog(video: DatabaseVideo) {
     const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
       width: '700px',
       maxWidth: '90vw',
-      height: 'auto',
       maxHeight: '85vh',
       panelClass: 'video-analysis-dialog-panel',
       data: {
-        mode: 'transcribe',
-        selectedVideos: selectedVideoDetails
+        selectedVideos: [video]
       },
       disableClose: false
     });
 
     dialogRef.afterClosed().subscribe(result => {
       if (result && result.success) {
-        this.selectedVideos.clear();
-        this.updateAllSelectedState();
+        console.log('Video added to analysis queue');
       }
     });
   }
@@ -746,7 +732,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
       width: '700px',
       maxWidth: '90vw',
-      height: 'auto',
       maxHeight: '85vh',
       panelClass: 'video-analysis-dialog-panel',
       data: {
@@ -1537,63 +1522,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Transcribe video - add to analysis queue and navigate to analysis page
-   */
-  async downloadAndTranscribe(video: DatabaseVideo) {
-    try {
-      // Add video to batch analysis queue (transcribe-only)
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [video.id],
-        transcribeOnly: true
-      });
-
-      this.notificationService.toastOnly(
-        'success',
-        'Transcription Queued',
-        `${video.filename} has been added to the transcription queue`
-      );
-
-      // Navigate to analysis page
-      this.router.navigate(['/analysis']);
-    } catch (error: any) {
-      console.error('Failed to queue transcription:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Error',
-        error.error?.message || 'Failed to queue transcription'
-      );
-    }
-  }
-
-  /**
-   * AI analyze video - add to analysis queue and navigate to analysis page
-   */
-  async downloadAndAnalyze(video: DatabaseVideo) {
-    try {
-      // Add video to batch analysis queue (full analysis)
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [video.id],
-        transcribeOnly: false
-      });
-
-      this.notificationService.toastOnly(
-        'success',
-        'Analysis Queued',
-        `${video.filename} has been added to the analysis queue`
-      );
-
-      // Navigate to analysis page
-      this.router.navigate(['/analysis']);
-    } catch (error: any) {
-      console.error('Failed to queue analysis:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Error',
-        error.error?.message || 'Failed to queue analysis'
-      );
-    }
-  }
 
   /**
    * Get video URL from database or prompt user
