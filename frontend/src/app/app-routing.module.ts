@@ -9,10 +9,6 @@ const routes: Routes = [
     pathMatch: 'full'
   },
   {
-    path: 'batch',
-    loadComponent: () => import('./components/batch-download/batch-download.component').then(m => m.BatchDownloadComponent)
-  },
-  {
     path: 'analysis',
     loadComponent: () => import('./components/video-analysis/video-analysis.component').then(m => m.VideoAnalysisComponent)
   },

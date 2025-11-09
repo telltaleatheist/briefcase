@@ -121,10 +121,6 @@ export class AppComponent implements OnInit, OnDestroy {
     this.batchStateService.clearPendingJobs();
   }
 
-  navigateToBatch(): void {
-    this.router.navigate(['/batch']);
-  }
-
   navigateToAnalysis(): void {
     console.log('Navigating to analysis...');
     this.router.navigate(['/analysis']).then(success => {
