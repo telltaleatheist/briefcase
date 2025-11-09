@@ -45,14 +45,22 @@ body {
 /* Video Analysis Dialog Panel - Size to content, max 85vh */
 .cdk-overlay-pane.video-analysis-dialog-panel {
   max-height: 85vh !important;
+  overflow: visible !important;
 
   .mat-mdc-dialog-container {
     max-height: 85vh !important;
-    padding: 0 !important;
+    overflow: visible !important;
   }
 
   .mat-mdc-dialog-surface {
     max-height: 85vh !important;
+    overflow: visible !important;
+  }
+
+  // Only the content area should scroll if needed
+  mat-dialog-content {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
   }
 }
 

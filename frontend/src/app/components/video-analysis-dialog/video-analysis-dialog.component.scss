@@ -1,3 +1,18 @@
+.video-analysis-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  overflow: hidden;
+
+  form {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
 h2.dialog-header {
   display: flex !important;
   align-items: flex-start !important;
@@ -6,6 +21,7 @@ h2.dialog-header {
   margin: 0 !important;
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-card) 100%);
   border-bottom: 2px solid var(--primary-orange);
+  flex-shrink: 0;
 
   .header-icon {
     background: var(--primary-orange);
@@ -59,6 +75,10 @@ h2.dialog-header {
 
 mat-dialog-content.dialog-content {
   padding: 24px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  flex: 1;
+  min-height: 0;
 }
 
 .form-section {
@@ -407,6 +427,7 @@ mat-dialog-actions.dialog-footer {
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
   margin: 0 !important;
+  flex-shrink: 0;
 
   button {
     min-width: 120px;
