@@ -58,10 +58,28 @@ export interface AnalysisRequest {
   existingTranscriptSrt?: string; // For 'analysis-only' mode: SRT format transcript
 }
 
+// Extended request interface to track job state
+interface AnalysisRequestWithState extends AnalysisRequest {
+  transcriptText?: string;
+  transcriptSrt?: string;
+  videoPath?: string;
+  videoTitle?: string;
+  audioPath?: string;
+  phase?: 'download' | 'transcribe' | 'analyze' | 'finalize';
+}
+
 @Injectable()
 export class AnalysisService {
   private readonly logger = new Logger(AnalysisService.name);
   private jobs = new Map<string, AnalysisJob>();
+
+  // Queue management for concurrency control
+  private pendingQueue: Array<{ jobId: string; request: AnalysisRequestWithState }> = [];
+  private activeTranscriptions = 0;
+  private activeAnalyses = 0;
+  private readonly MAX_CONCURRENT_TRANSCRIPTIONS = 1;
+  private readonly MAX_CONCURRENT_ANALYSES = 1;
+  private isProcessing = false; // Prevent concurrent processNextInQueue calls
 
   constructor(
     private pythonBridge: PythonBridgeService,
@@ -79,7 +97,7 @@ export class AnalysisService {
   ) {}
 
   /**
-   * Start a new analysis job
+   * Start a new analysis job (adds to queue)
    */
   async startAnalysis(request: AnalysisRequest): Promise<string> {
     const jobId = uuidv4();
@@ -88,23 +106,108 @@ export class AnalysisService {
       id: jobId,
       status: 'pending',
       progress: 0,
-      currentPhase: 'Initializing...',
+      currentPhase: 'Waiting in queue...',
       createdAt: new Date(),
       timing: {},
     };
 
     this.jobs.set(jobId, job);
 
-    // Start processing asynchronously
-    this.processAnalysis(jobId, request).catch((error) => {
-      this.logger.error(`Analysis job ${jobId} failed: ${(error as Error).message}`);
-      this.updateJob(jobId, {
-        status: 'failed',
-        error: (error as Error).message,
-      });
-    });
+    // Determine initial phase based on mode and input type
+    const mode = request.mode || 'full';
+    let initialPhase: 'download' | 'transcribe' | 'analyze' | 'finalize';
+
+    if (mode === 'analysis-only') {
+      initialPhase = 'analyze';
+    } else if (request.inputType === 'file') {
+      // Local files skip download and go straight to transcribe
+      initialPhase = 'transcribe';
+    } else {
+      // URLs need download first
+      initialPhase = 'download';
+    }
+
+    // Add to pending queue with phase tracking
+    const requestWithState: AnalysisRequestWithState = {
+      ...request,
+      phase: initialPhase,
+    };
+
+    this.pendingQueue.push({ jobId, request: requestWithState });
+    this.logger.log(`Job ${jobId} added to queue at phase '${initialPhase}'. Queue length: ${this.pendingQueue.length}`);
+
+    // Try to process next job in queue (use setImmediate to allow synchronous code to complete first)
+    setImmediate(() => this.processNextInQueue());
 
     return jobId;
+  }
+
+  /**
+   * Process the next job in queue if resources are available
+   * Jobs are processed phase by phase, re-entering the queue between phases
+   * Priority: finalize > analyze > transcribe (complete jobs before starting new ones)
+   */
+  private processNextInQueue(): void {
+    if (this.pendingQueue.length === 0) {
+      return;
+    }
+
+    // Priority 1: Finalize jobs (quick, no resources needed)
+    for (let i = 0; i < this.pendingQueue.length; i++) {
+      const { jobId, request } = this.pendingQueue[i];
+      if ((request.phase || 'download') === 'finalize') {
+        this.pendingQueue.splice(i, 1);
+        this.logger.log(`Starting job ${jobId} at phase 'finalize'`);
+        this.processJobPhase(jobId, request).catch((error) => {
+          this.logger.error(`Job ${jobId} failed at phase 'finalize': ${(error as Error).message}`);
+          this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
+          setImmediate(() => this.processNextInQueue());
+        });
+        return;
+      }
+    }
+
+    // Priority 2: Analyze jobs (complete jobs that finished transcribing)
+    if (this.activeAnalyses < this.MAX_CONCURRENT_ANALYSES) {
+      for (let i = 0; i < this.pendingQueue.length; i++) {
+        const { jobId, request } = this.pendingQueue[i];
+        if ((request.phase || 'download') === 'analyze') {
+          this.activeAnalyses++;
+          this.pendingQueue.splice(i, 1);
+          this.logger.log(`Starting job ${jobId} at phase 'analyze'. Active: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS} transcriptions, ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES} analyses`);
+          this.processJobPhase(jobId, request).catch((error) => {
+            this.logger.error(`Job ${jobId} failed at phase 'analyze': ${(error as Error).message}`);
+            this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
+            this.activeAnalyses--;
+            setImmediate(() => this.processNextInQueue());
+          });
+          return;
+        }
+      }
+    }
+
+    // Priority 3: Transcribe/Download jobs (start new jobs)
+    if (this.activeTranscriptions < this.MAX_CONCURRENT_TRANSCRIPTIONS) {
+      for (let i = 0; i < this.pendingQueue.length; i++) {
+        const { jobId, request } = this.pendingQueue[i];
+        const phase = request.phase || 'download';
+        if (phase === 'download' || phase === 'transcribe') {
+          this.activeTranscriptions++;
+          this.pendingQueue.splice(i, 1);
+          this.logger.log(`Starting job ${jobId} at phase '${phase}'. Active: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS} transcriptions, ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES} analyses`);
+          this.processJobPhase(jobId, request).catch((error) => {
+            this.logger.error(`Job ${jobId} failed at phase '${phase}': ${(error as Error).message}`);
+            this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
+            this.activeTranscriptions--;
+            setImmediate(() => this.processNextInQueue());
+          });
+          return;
+        }
+      }
+    }
+
+    // No job could be started due to resource constraints
+    this.logger.debug(`No jobs can start. Active: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS} transcriptions, ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES} analyses. Queue: ${this.pendingQueue.length}`);
   }
 
   /**
@@ -140,334 +243,389 @@ export class AnalysisService {
   }
 
   /**
-   * Main processing pipeline
+   * Re-add job to queue at the next phase
    */
-  private async processAnalysis(
+  private requeueJobForNextPhase(jobId: string, request: AnalysisRequestWithState, nextPhase: 'download' | 'transcribe' | 'analyze' | 'finalize'): void {
+    request.phase = nextPhase;
+    this.pendingQueue.push({ jobId, request });
+    this.logger.log(`Job ${jobId} re-queued for phase '${nextPhase}'. Queue length: ${this.pendingQueue.length}`);
+    setImmediate(() => this.processNextInQueue());
+  }
+
+  /**
+   * Process a single phase of a job
+   */
+  private async processJobPhase(
     jobId: string,
-    request: AnalysisRequest,
+    request: AnalysisRequestWithState,
   ): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job) throw new Error('Job not found');
 
+    const phase = request.phase || 'download';
+    const mode = request.mode || 'full';
+
+    this.logger.log(`Processing job ${jobId} at phase '${phase}'`);
+
     try {
-      // Determine output paths - use library clips folder for videos only
-      let videosPath: string;
-      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (phase === 'download') {
+        // Phase 1: Download/prepare video
+        await this.processDownloadPhase(jobId, request);
 
-      if (activeLibrary) {
-        // Save videos to library clips folder
-        this.logger.log(`Using active library clips folder: ${activeLibrary.clipsFolderPath}`);
-        videosPath = activeLibrary.clipsFolderPath;
-      } else {
-        // Fallback to default output path if no library is active
-        this.logger.warn('No active library found, using default output path');
-        const baseOutputPath = request.outputPath || this.getDefaultOutputPath();
-        videosPath = path.join(baseOutputPath, 'videos');
+        // DON'T release transcription slot yet - transcribe phase needs it
+        // Just move directly to transcribe without re-queuing
+        this.logger.log(`Download phase complete for job ${jobId}, moving to transcribe...`);
+
+        // Continue directly to transcribe phase without releasing the slot
+        await this.processTranscribePhase(jobId, request);
+
+        // NOW release transcription slot after both download and transcribe are done
+        this.activeTranscriptions--;
+        this.logger.log(`Transcription phase complete for job ${jobId}. Active transcriptions: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS}`);
+
+        // Move to appropriate next phase based on mode
+        if (mode === 'transcribe-only') {
+          this.requeueJobForNextPhase(jobId, request, 'finalize');
+        } else {
+          this.requeueJobForNextPhase(jobId, request, 'analyze');
+        }
+      } else if (phase === 'transcribe') {
+        // This is for local files that start directly at transcribe (skipping download)
+        // Set up videoPath and videoTitle if not already set
+        if (!request.videoPath) {
+          request.videoPath = request.input;
+          request.videoTitle = path.basename(request.input, path.extname(request.input));
+        }
+
+        await this.processTranscribePhase(jobId, request);
+
+        // Release transcription slot
+        this.activeTranscriptions--;
+        this.logger.log(`Transcription phase complete for job ${jobId}. Active transcriptions: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS}`);
+
+        // Move to appropriate next phase based on mode
+        if (mode === 'transcribe-only') {
+          this.requeueJobForNextPhase(jobId, request, 'finalize');
+        } else {
+          this.requeueJobForNextPhase(jobId, request, 'analyze');
+        }
+      } else if (phase === 'analyze') {
+        // Phase 3: AI Analysis
+        await this.processAnalyzePhase(jobId, request);
+
+        // Release analysis slot
+        this.activeAnalyses--;
+        this.logger.log(`Analysis phase complete for job ${jobId}. Active analyses: ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES}`);
+
+        // Move to finalize
+        this.requeueJobForNextPhase(jobId, request, 'finalize');
+      } else if (phase === 'finalize') {
+        // Phase 4: Finalize
+        await this.processFinalizePhase(jobId, request);
+
+        this.logger.log(`Job ${jobId} completed successfully`);
+
+        // Process next job in queue
+        setImmediate(() => this.processNextInQueue());
+      }
+    } catch (error: any) {
+      // Release resources on error
+      if (phase === 'download' || phase === 'transcribe') {
+        this.activeTranscriptions--;
+      } else if (phase === 'analyze') {
+        this.activeAnalyses--;
       }
 
-      // Create videos directory
-      await fs.mkdir(videosPath, { recursive: true });
+      this.logger.error(`Job ${jobId} failed at phase '${phase}': ${(error as Error).message || 'Unknown error'}`);
+      throw error;
+    }
+  }
 
-      let videoPath: string;
-      let videoTitle: string;
+  /**
+   * Process download phase
+   */
+  private async processDownloadPhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error('Job not found');
 
-      // Phase 1: Download or prepare video (0-20%)
-      if (request.inputType === 'url') {
-        this.updateJob(jobId, {
-          status: 'downloading',
-          progress: 5,
-          currentPhase: 'Downloading video (fast mode)...',
-          timing: { ...job.timing, downloadStart: new Date() },
-        });
+    // Determine output paths - use library clips folder for videos only
+    let videosPath: string;
+    const activeLibrary = this.libraryManagerService.getActiveLibrary();
 
-        const downloadResult = await this.downloadVideo(
-          request.input,
-          videosPath,
-          jobId,
-        );
-        videoPath = downloadResult.path;
-        videoTitle = downloadResult.title;
+    if (activeLibrary) {
+      videosPath = activeLibrary.clipsFolderPath;
+    } else {
+      const baseOutputPath = request.outputPath || this.getDefaultOutputPath();
+      videosPath = path.join(baseOutputPath, 'videos');
+    }
 
-        this.updateJob(jobId, {
-          progress: 20,
-          videoPath,
-          timing: { ...job.timing, downloadEnd: new Date() },
-        });
-      } else {
-        // Local file
-        videoPath = request.input;
-        videoTitle = path.basename(videoPath, path.extname(videoPath));
+    await fs.mkdir(videosPath, { recursive: true });
 
-        this.updateJob(jobId, {
-          status: 'extracting',
-          progress: 5,
-          currentPhase: 'Preparing local video...',
-          videoPath,
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 500)); // Brief delay for UI
-        this.updateJob(jobId, { progress: 20 });
-      }
-
-      // Determine mode
-      const mode = request.mode || 'full';
-      this.logger.log(`Analysis mode: ${mode} (request.mode=${request.mode})`);
-
-      let transcriptPath: string | undefined;
-      let txtTranscriptPath: string | undefined;
-      let transcriptText: string = '';
-      let transcriptSrt: string = '';
-      let audioPath: string | undefined;
-
-      // Phase 2 & 3: Extract audio and transcribe (only if not analysis-only mode)
-      if (mode === 'analysis-only') {
-        // Use existing transcript from request
-        this.logger.log('Using existing transcript from database for analysis-only mode');
-        transcriptText = request.existingTranscriptText!;
-        transcriptSrt = request.existingTranscriptSrt!;
-
-        this.updateJob(jobId, {
-          progress: 60,
-          currentPhase: 'Using existing transcript...',
-        });
-      } else {
-        // Extract audio (20-30%)
-        const job2 = this.jobs.get(jobId);
-        this.updateJob(jobId, {
-          status: 'extracting',
-          progress: 20,
-          currentPhase: 'Extracting audio...',
-          timing: { ...job2?.timing, extractionStart: new Date() },
-        });
-
-        audioPath = await this.extractAudio(videoPath, jobId);
-
-        const job3 = this.jobs.get(jobId);
-        this.updateJob(jobId, {
-          progress: 30,
-          audioPath,
-          timing: { ...job3?.timing, extractionEnd: new Date() },
-        });
-
-        // Transcribe (30-60%)
-        const job4 = this.jobs.get(jobId);
-        this.updateJob(jobId, {
-          status: 'transcribing',
-          progress: 30,
-          currentPhase: 'Transcribing audio (this may take a few minutes)...',
-          timing: { ...job4?.timing, transcriptionStart: new Date() },
-        });
-
-        const transcriptResult = await this.pythonBridge.transcribe(
-          audioPath,
-          request.whisperModel || 'base',
-          request.language || 'en',
-          (progress) => {
-            this.updateJob(jobId, {
-              progress: progress.progress,
-              currentPhase: progress.message,
-            });
-          },
-        );
-
-        transcriptText = transcriptResult.text;
-        transcriptSrt = transcriptResult.srt;
-
-        const job5 = this.jobs.get(jobId);
-        this.updateJob(jobId, {
-          progress: 60,
-          timing: { ...job5?.timing, transcriptionEnd: new Date() },
-        });
-      }
-      let analysisOutputPath: string | undefined;
-      let analysisResult: any;
-
-      if (mode === 'transcribe-only') {
-        // Skip AI analysis, jump to finalization
-        this.logger.log('Skipping AI analysis in transcribe-only mode');
-        this.updateJob(jobId, {
-          progress: 95,
-          currentPhase: 'Transcription complete...',
-        });
-      } else {
-        this.logger.log('Starting AI analysis phase');
-        // Phase 4: AI Analysis (60-95%)
-        const job6 = this.jobs.get(jobId);
-        this.updateJob(jobId, {
-          status: 'analyzing',
-          progress: 60,
-          currentPhase: `Analyzing with ${request.aiModel}...`,
-          timing: { ...job6?.timing, analysisStart: new Date() },
-        });
-
-        // Create temp directory for analysis output
-        const os = require('os');
-        const tmpDir = os.tmpdir();
-        const sanitizedTitle = this.sanitizeFilename(videoTitle);
-        const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
-        analysisOutputPath = path.join(tmpDir, `${jobId}_${reportFileName}`);
-
-        // Parse SRT to get segments (needed for timestamp correlation)
-        const segments = this.parseSrtToSegments(transcriptSrt);
-
-        analysisResult = await this.pythonBridge.analyze(
-          request.ollamaEndpoint,
-          request.aiModel,
-          transcriptText,
-          segments,
-          analysisOutputPath,
-          (progress) => {
-            this.updateJob(jobId, {
-              progress: progress.progress,
-              currentPhase: progress.message,
-            });
-          },
-          request.customInstructions,
-          request.aiProvider,
-          request.apiKey,
-          videoTitle,
-        );
-
-        const job7 = this.jobs.get(jobId);
-        this.updateJob(jobId, {
-          progress: 95,
-          tags: analysisResult?.tags || { people: [], topics: [] },
-          timing: { ...job7?.timing, analysisEnd: new Date() },
-        });
-      }
-
-      // Phase 5: Finalize (95-100%)
+    if (request.inputType === 'url') {
       this.updateJob(jobId, {
-        progress: 98,
-        currentPhase: mode === 'transcribe-only' ? 'Finalizing transcription...' : 'Finalizing analysis...',
+        status: 'downloading',
+        progress: 5,
+        currentPhase: 'Downloading video (fast mode)...',
+        timing: { ...job.timing, downloadStart: new Date() },
       });
 
-      // Calculate total duration and timing information
-      const job8 = this.jobs.get(jobId);
-      const timing = job8?.timing || {};
-      const totalDuration = job8
-        ? (new Date().getTime() - job8.createdAt.getTime()) / 1000
-        : 0;
+      const downloadResult = await this.downloadVideo(request.input, videosPath, jobId);
+      request.videoPath = downloadResult.path;
+      request.videoTitle = downloadResult.title;
 
-      // Calculate individual phase durations
-      const transcriptionDuration = timing.transcriptionStart && timing.transcriptionEnd
-        ? (timing.transcriptionEnd.getTime() - timing.transcriptionStart.getTime()) / 1000
-        : 0;
+      this.updateJob(jobId, {
+        progress: 20,
+        videoPath: downloadResult.path,
+        timing: { ...job.timing, downloadEnd: new Date() },
+      });
+    } else {
+      request.videoPath = request.input;
+      request.videoTitle = path.basename(request.input, path.extname(request.input));
 
-      const analysisDuration = timing.analysisStart && timing.analysisEnd
-        ? (timing.analysisEnd.getTime() - timing.analysisStart.getTime()) / 1000
-        : 0;
+      this.updateJob(jobId, {
+        status: 'extracting',
+        progress: 5,
+        currentPhase: 'Preparing local video...',
+        videoPath: request.input,
+      });
 
-      // Append timing footer to the analysis report (only for full analysis)
-      if (mode === 'full' && analysisOutputPath) {
-        try {
-          const timingFooter = this.generateTimingFooter(
-            transcriptionDuration,
-            analysisDuration,
-            totalDuration,
-            request.whisperModel || 'base',
-            request.aiModel
-          );
-          await fs.appendFile(analysisOutputPath, timingFooter, 'utf-8');
-        } catch (error) {
-          this.logger.warn(`Failed to append timing footer: ${error}`);
-        }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      this.updateJob(jobId, { progress: 20 });
+    }
+  }
+
+  /**
+   * Process transcribe phase
+   */
+  private async processTranscribePhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error('Job not found');
+
+    const mode = request.mode || 'full';
+
+    if (mode === 'analysis-only') {
+      // Use existing transcript
+      request.transcriptText = request.existingTranscriptText!;
+      request.transcriptSrt = request.existingTranscriptSrt!;
+
+      this.updateJob(jobId, {
+        progress: 60,
+        currentPhase: 'Using existing transcript...',
+      });
+      return;
+    }
+
+    // Extract audio
+    this.updateJob(jobId, {
+      status: 'extracting',
+      progress: 20,
+      currentPhase: 'Extracting audio...',
+      timing: { ...job.timing, extractionStart: new Date() },
+    });
+
+    const audioPath = await this.extractAudio(request.videoPath!, jobId);
+    request.audioPath = audioPath;
+
+    this.updateJob(jobId, {
+      progress: 30,
+      audioPath,
+      timing: { ...job.timing, extractionEnd: new Date() },
+    });
+
+    // Transcribe
+    this.updateJob(jobId, {
+      status: 'transcribing',
+      progress: 30,
+      currentPhase: 'Transcribing audio (this may take a few minutes)...',
+      timing: { ...job.timing, transcriptionStart: new Date() },
+    });
+
+    this.logger.log(`Transcription started for job ${jobId}`);
+
+    const transcriptResult = await this.pythonBridge.transcribe(
+      audioPath,
+      request.whisperModel || 'base',
+      request.language || 'en',
+      (progress) => {
+        this.updateJob(jobId, {
+          progress: progress.progress,
+          currentPhase: progress.message,
+        });
+      },
+    );
+
+    request.transcriptText = transcriptResult.text;
+    request.transcriptSrt = transcriptResult.srt;
+
+    this.updateJob(jobId, {
+      progress: 60,
+      timing: { ...job.timing, transcriptionEnd: new Date() },
+    });
+
+    // Clean up audio file
+    if (audioPath) {
+      await fs.unlink(audioPath).catch(() => {});
+    }
+  }
+
+  /**
+   * Process analyze phase
+   */
+  private async processAnalyzePhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error('Job not found');
+
+    this.updateJob(jobId, {
+      status: 'analyzing',
+      progress: 60,
+      currentPhase: `Analyzing with ${request.aiModel}...`,
+      timing: { ...job.timing, analysisStart: new Date() },
+    });
+
+    this.logger.log(`Analysis started for job ${jobId}`);
+
+    // Prepare AI model (preload if not loaded, unload others if different model)
+    if (request.aiProvider === 'ollama' || !request.aiProvider) {
+      try {
+        await this.ollama.prepareModel(request.aiModel, request.ollamaEndpoint);
+      } catch (error: any) {
+        this.logger.warn(`Failed to prepare model ${request.aiModel}: ${(error as Error).message}. Continuing anyway...`);
       }
+    }
 
-      // Auto-import to library if we have an active library and downloaded a video
-      let videoId: string | undefined;
-      if (activeLibrary && request.inputType === 'url' && videoPath) {
-        try {
-          this.logger.log(`Auto-importing video to library: ${videoPath}`);
-          const importResult = await this.fileScannerService.importVideos([videoPath]);
+    // Create temp directory for analysis output
+    const os = require('os');
+    const tmpDir = os.tmpdir();
+    const sanitizedTitle = this.sanitizeFilename(request.videoTitle!);
+    const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
+    const analysisOutputPath = path.join(tmpDir, `${jobId}_${reportFileName}`);
 
-          if (importResult.imported.length > 0) {
-            videoId = importResult.imported[0];
-            this.logger.log(`Successfully imported video to library with ID: ${videoId}`);
-          } else if (importResult.errors.length > 0) {
-            this.logger.warn(`Failed to import video to library: ${importResult.errors.join(', ')}`);
-          }
-        } catch (error) {
-          this.logger.error(`Error during auto-import: ${(error as Error).message}`);
-          // Don't fail the entire job if import fails
+    // Parse SRT to get segments
+    const segments = this.parseSrtToSegments(request.transcriptSrt!);
+
+    const analysisResult = await this.pythonBridge.analyze(
+      request.ollamaEndpoint,
+      request.aiModel,
+      request.transcriptText!,
+      segments,
+      analysisOutputPath,
+      (progress) => {
+        this.updateJob(jobId, {
+          progress: progress.progress,
+          currentPhase: progress.message,
+        });
+      },
+      request.customInstructions,
+      request.aiProvider,
+      request.apiKey,
+      request.videoTitle!,
+    );
+
+    // Read and save analysis
+    const analysisText = await fs.readFile(analysisOutputPath, 'utf-8');
+
+    // Save to request for finalize phase
+    (request as any).analysisText = analysisText;
+    (request as any).analysisResult = analysisResult;
+    (request as any).analysisOutputPath = analysisOutputPath;
+
+    this.updateJob(jobId, {
+      progress: 95,
+      tags: (analysisResult as any)?.tags || { people: [], topics: [] },
+      timing: { ...job.timing, analysisEnd: new Date() },
+    });
+
+    // Keep-alive will maintain the model in memory for the next job in queue
+    this.logger.log(`Analysis complete for job ${jobId}. Model ${request.aiModel} will stay loaded for ${this.ollama['KEEP_ALIVE_DURATION'] / 60000} minutes.`);
+  }
+
+  /**
+   * Process finalize phase
+   */
+  private async processFinalizePhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error('Job not found');
+
+    const mode = request.mode || 'full';
+
+    this.updateJob(jobId, {
+      progress: 98,
+      currentPhase: mode === 'transcribe-only' ? 'Finalizing transcription...' : 'Finalizing analysis...',
+    });
+
+    // Calculate timing
+    const timing = job.timing || {};
+    const totalDuration = (new Date().getTime() - job.createdAt.getTime()) / 1000;
+
+    // Auto-import to library if needed
+    let videoId: string | undefined;
+    const activeLibrary = this.libraryManagerService.getActiveLibrary();
+
+    if (activeLibrary && request.videoPath) {
+      // Try to import the video regardless of input type (URL or file)
+      try {
+        const importResult = await this.fileScannerService.importVideos([request.videoPath]);
+        if (importResult.imported.length > 0) {
+          videoId = importResult.imported[0];
+          this.logger.log(`Video imported to library with ID: ${videoId}`);
         }
-      } else if (request.inputType === 'file') {
-        // For file input, try to find video in database by path
+      } catch (error) {
+        this.logger.error(`Error during auto-import: ${(error as Error).message}`);
+
+        // Fallback: try to find existing video in database
         try {
           const videos = await this.databaseService.getAllVideos();
-          const video = videos.find((v: any) => v.current_path === videoPath || v.file_path === videoPath);
+          const video = videos.find((v: any) => v.current_path === request.videoPath || v.file_path === request.videoPath);
           if (video) {
             videoId = video.id;
             this.logger.log(`Found existing video in database with ID: ${videoId}`);
           }
-        } catch (error) {
-          this.logger.warn(`Could not find video in database: ${(error as Error).message}`);
+        } catch (findError) {
+          this.logger.warn(`Could not find video in database: ${(findError as Error).message}`);
         }
       }
-
-      // Save transcript and analysis to database if video is in library
-      if (videoId) {
-        try {
-          // Save transcript if we have one (not in analysis-only mode)
-          if (mode !== 'analysis-only' && transcriptText && transcriptSrt) {
-            this.logger.log(`Saving transcript to database for video ${videoId}`);
-            this.databaseService.insertTranscript({
-              videoId,
-              plainText: transcriptText,
-              srtFormat: transcriptSrt,
-              whisperModel: request.whisperModel || 'base',
-              language: request.language || 'en',
-            });
-          }
-
-          // Save analysis if we have one (not in transcribe-only mode)
-          if (mode !== 'transcribe-only' && analysisOutputPath) {
-            const analysisText = await fs.readFile(analysisOutputPath, 'utf-8');
-            this.logger.log(`Saving analysis to database for video ${videoId}`);
-            this.databaseService.insertAnalysis({
-              videoId,
-              aiAnalysis: analysisText,
-              sectionsCount: analysisResult?.sections_count || 0,
-              aiModel: request.aiModel,
-              aiProvider: request.aiProvider || 'ollama',
-            });
-          }
-
-          this.logger.log(`Successfully saved transcript/analysis to database for video ${videoId}`);
-        } catch (error) {
-          this.logger.error(`Failed to save transcript/analysis to database: ${(error as Error).message}`);
-          // Don't fail the entire job if database save fails
-        }
-      } else {
-        this.logger.warn('Video not found in database - transcript/analysis not saved');
-      }
-
-      // Clean up temporary files
-      if (audioPath) {
-        await fs.unlink(audioPath).catch(() => {});
-      }
-      if (analysisOutputPath) {
-        await fs.unlink(analysisOutputPath).catch(() => {});
-      }
-
-      // Complete
-      const completionMessage = mode === 'transcribe-only'
-        ? 'Transcription complete!'
-        : `Analysis complete! Found ${analysisResult?.sections_count || 0} interesting sections.`;
-
-      this.updateJob(jobId, {
-        status: 'completed',
-        progress: 100,
-        currentPhase: completionMessage,
-        completedAt: new Date(),
-        timing: { ...timing, totalDuration },
-      });
-
-      this.logger.log(`Analysis job ${jobId} completed successfully`);
-    } catch (error: any) {
-      this.logger.error(`Analysis job ${jobId} failed: ${(error as Error).message || 'Unknown error'}`);
-      throw error;
     }
+
+    // Save to database if video found
+    if (videoId) {
+      if (mode !== 'analysis-only' && request.transcriptText && request.transcriptSrt) {
+        this.databaseService.insertTranscript({
+          videoId,
+          plainText: request.transcriptText,
+          srtFormat: request.transcriptSrt,
+          whisperModel: request.whisperModel || 'base',
+          language: request.language || 'en',
+        });
+      }
+
+      if (mode !== 'transcribe-only' && (request as any).analysisText) {
+        this.databaseService.insertAnalysis({
+          videoId,
+          aiAnalysis: (request as any).analysisText,
+          sectionsCount: (request as any).analysisResult?.sections_count || 0,
+          aiModel: request.aiModel,
+          aiProvider: request.aiProvider || 'ollama',
+        });
+      }
+    }
+
+    // Clean up temp files
+    if ((request as any).analysisOutputPath) {
+      await fs.unlink((request as any).analysisOutputPath).catch(() => {});
+    }
+
+    // Complete
+    const completionMessage = mode === 'transcribe-only'
+      ? 'Transcription complete!'
+      : `Analysis complete! Found ${(request as any).analysisResult?.sections_count || 0} interesting sections.`;
+
+    this.updateJob(jobId, {
+      status: 'completed',
+      progress: 100,
+      currentPhase: completionMessage,
+      completedAt: new Date(),
+      timing: { ...timing, totalDuration },
+    });
   }
 
   /**

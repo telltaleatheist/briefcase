@@ -225,7 +225,7 @@ export class DatabaseController {
 
   /**
    * POST /api/database/analysis-sections
-   * Add a custom analysis section (marker) to a video
+   * Add a custom marker to a video
    */
   @Post('analysis-sections')
   async addAnalysisSection(
@@ -249,9 +249,9 @@ export class DatabaseController {
         };
       }
 
-      // Generate unique ID for the section
+      // Generate unique ID for the marker
       const { v4: uuidv4 } = require('uuid');
-      const sectionId = uuidv4();
+      const markerId = uuidv4();
 
       // Format timestamp text
       const formatTimestamp = (seconds: number): string => {
@@ -262,37 +262,36 @@ export class DatabaseController {
 
       const timestampText = `${formatTimestamp(body.startSeconds)} - ${formatTimestamp(body.endSeconds)}`;
 
-      // Insert the section
-      this.databaseService.insertAnalysisSection({
-        id: sectionId,
+      // Insert the custom marker into the custom_markers table
+      this.databaseService.insertCustomMarker({
+        id: markerId,
         videoId: body.videoId,
         startSeconds: body.startSeconds,
         endSeconds: body.endSeconds,
         timestampText,
         title: body.title || undefined,
         description: body.description || undefined,
-        category: body.category || 'custom',
-        source: body.source || 'user'
+        category: body.category || 'custom'
       });
 
-      this.logger.log(`Added custom analysis section to video ${body.videoId}: ${timestampText}`);
+      this.logger.log(`Added custom marker to video ${body.videoId}: ${timestampText}`);
 
       return {
         success: true,
-        sectionId
+        sectionId: markerId
       };
     } catch (error: any) {
-      this.logger.error(`Error adding analysis section: ${error?.message || 'Unknown error'}`);
+      this.logger.error(`Error adding custom marker: ${error?.message || 'Unknown error'}`);
       return {
         success: false,
-        error: error?.message || 'Failed to add analysis section'
+        error: error?.message || 'Failed to add custom marker'
       };
     }
   }
 
   /**
    * DELETE /api/database/videos/:videoId/sections/:sectionId
-   * Delete a specific analysis section
+   * Delete a specific section (AI section or custom marker)
    */
   @Delete('videos/:videoId/sections/:sectionId')
   async deleteAnalysisSection(
@@ -300,20 +299,27 @@ export class DatabaseController {
     @Param('sectionId') sectionId: string
   ) {
     try {
-      // Delete the section
+      // Try to delete from analysis_sections first
       this.databaseService.deleteAnalysisSection(sectionId);
 
-      this.logger.log(`Deleted analysis section ${sectionId} from video ${videoId}`);
+      // Also try to delete from custom_markers (one of them will succeed)
+      try {
+        this.databaseService.deleteCustomMarker(sectionId);
+      } catch (e) {
+        // Ignore if it doesn't exist in custom_markers
+      }
+
+      this.logger.log(`Deleted section ${sectionId} from video ${videoId}`);
 
       return {
         success: true,
-        message: 'Analysis section deleted successfully'
+        message: 'Section deleted successfully'
       };
     } catch (error: any) {
-      this.logger.error(`Failed to delete analysis section ${sectionId}:`, error);
+      this.logger.error(`Failed to delete section ${sectionId}:`, error);
       return {
         success: false,
-        error: error.message || 'Failed to delete analysis section'
+        error: error.message || 'Failed to delete section'
       };
     }
   }

@@ -205,6 +205,19 @@ export class VideoInfoComponent implements OnInit {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
+  async deleteAnalysisSection(section: DatabaseAnalysisSection): Promise<void> {
+    if (!this.video || !section.id) return;
+
+    const result = await this.databaseLibraryService.deleteAnalysisSection(this.video.id, section.id);
+
+    if (result.success) {
+      // Remove from local array
+      this.analysisSections = this.analysisSections.filter(s => s.id !== section.id);
+    } else {
+      this.notificationService.error('Delete Failed', result.error || 'Failed to delete section');
+    }
+  }
+
   getCategoryColor(category: string): string {
     if (!category) return '#ff6b35';
 

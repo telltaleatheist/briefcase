@@ -341,9 +341,16 @@ export class DownloadProgressService {
     else if (status === 'completed') stage = 'completed';
     else if (status === 'failed') stage = 'failed';
 
+    // Extract filename from path if it's a file path
+    let filename = analysisJob.input || 'Video Analysis';
+    if (filename.includes('/') || filename.includes('\\')) {
+      const parts = filename.split(/[/\\]/);
+      filename = parts[parts.length - 1] || filename;
+    }
+
     const job: VideoProcessingJob = {
       id: jobId,
-      filename: analysisJob.input || 'Video Analysis',
+      filename: filename,
       stage: stage,
       progress: analysisJob.progress || 0,
       error: analysisJob.error,

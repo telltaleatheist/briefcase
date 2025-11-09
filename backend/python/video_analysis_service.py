@@ -218,6 +218,7 @@ def check_ollama_model(endpoint: str, model: str) -> bool:
                 "model": model,
                 "prompt": "Ready.",
                 "stream": False,
+                "keep_alive": "5m",  # Keep model loaded for 5 minutes after check
                 "options": {"num_predict": 5}
             },
             timeout=300  # 300 seconds (5 minutes) to allow large model loading
@@ -1057,13 +1058,14 @@ def call_ollama(endpoint: str, model: str, prompt: str, timeout: int = 60) -> Op
             "model": model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": "5m",  # Keep model loaded for 5 minutes after request
             "options": {
                 "temperature": 0.7,
                 "num_predict": 2000  # Limit response length for speed
             }
         }
 
-        print(f"[DEBUG] Calling Ollama with model {model}, timeout={timeout}s", file=sys.stderr)
+        print(f"[DEBUG] Calling Ollama with model {model}, timeout={timeout}s, keep_alive=5m", file=sys.stderr)
         print(f"[DEBUG] Prompt length: {len(prompt)} chars", file=sys.stderr)
 
         response = requests.post(url, json=payload, timeout=timeout)

@@ -159,7 +159,7 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
-      -- Analysis sections: Interesting moments (AI-identified or user-created)
+      -- Analysis sections: Interesting moments (AI-identified)
       CREATE TABLE IF NOT EXISTS analysis_sections (
         id TEXT PRIMARY KEY,
         video_id TEXT NOT NULL,
@@ -170,6 +170,20 @@ export class DatabaseService {
         description TEXT,
         category TEXT,
         source TEXT DEFAULT 'ai',
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      );
+
+      -- Custom markers: User-created markers (separate from AI analysis)
+      CREATE TABLE IF NOT EXISTS custom_markers (
+        id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        start_seconds REAL NOT NULL,
+        end_seconds REAL NOT NULL,
+        timestamp_text TEXT,
+        title TEXT,
+        description TEXT,
+        category TEXT DEFAULT 'custom',
+        created_at TEXT NOT NULL,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -193,6 +207,7 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_tags_video ON tags(video_id);
       CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
       CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
+      CREATE INDEX IF NOT EXISTS idx_custom_markers_video ON custom_markers(video_id);
 
       -- Full-text search tables (using regular tables since sql.js doesn't include FTS5)
       CREATE TABLE IF NOT EXISTS transcripts_fts (
@@ -301,6 +316,48 @@ export class DatabaseService {
         } catch (migrationError: any) {
           this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
         }
+      }
+    }
+
+    try {
+      // Migration 5: Move custom markers from analysis_sections to custom_markers table
+      // Check if custom_markers table exists by querying it
+      const stmt = db.prepare("SELECT COUNT(*) as count FROM custom_markers");
+      stmt.step();
+      const result = stmt.getAsObject() as any;
+      stmt.free();
+
+      // If table exists and is empty, check for custom markers in analysis_sections
+      if (result.count === 0) {
+        const checkStmt = db.prepare("SELECT COUNT(*) as count FROM analysis_sections WHERE source = 'user' OR category = 'custom'");
+        checkStmt.step();
+        const checkResult = checkStmt.getAsObject() as any;
+        checkStmt.free();
+
+        if (checkResult.count > 0) {
+          this.logger.log(`Running migration: Moving ${checkResult.count} custom markers from analysis_sections to custom_markers table`);
+          try {
+            db.exec(`
+              INSERT INTO custom_markers (id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, created_at)
+              SELECT id, video_id, start_seconds, end_seconds, timestamp_text, title, description,
+                     COALESCE(category, 'custom') as category,
+                     COALESCE((SELECT created_at FROM videos WHERE id = video_id), datetime('now')) as created_at
+              FROM analysis_sections
+              WHERE source = 'user' OR category = 'custom';
+
+              DELETE FROM analysis_sections WHERE source = 'user' OR category = 'custom';
+            `);
+            this.saveDatabase();
+            this.logger.log(`Migration complete: Moved ${checkResult.count} custom markers to custom_markers table`);
+          } catch (migrationError: any) {
+            this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      // Table might not exist yet (new installation) - silently ignore
+      if (!error.message || !error.message.includes('no such table')) {
+        this.logger.warn(`Migration check failed: ${error?.message || 'Unknown error'}`);
       }
     }
   }
@@ -655,7 +712,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
 
     db.run(
-      `INSERT INTO transcripts (
+      `INSERT OR REPLACE INTO transcripts (
         video_id, plain_text, srt_format, whisper_model, language, transcribed_at
       ) VALUES (?, ?, ?, ?, ?, ?)`,
       [
@@ -705,7 +762,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
 
     db.run(
-      `INSERT INTO analyses (
+      `INSERT OR REPLACE INTO analyses (
         video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -847,12 +904,84 @@ export class DatabaseService {
   }
 
   /**
-   * Get all sections for a video
+   * Get all sections for a video (both AI and custom markers)
    */
   getAnalysisSections(videoId: string) {
     const db = this.ensureInitialized();
+
+    // Get AI-generated sections
+    const aiStmt = db.prepare(
+      'SELECT *, \'ai\' as source FROM analysis_sections WHERE video_id = ? ORDER BY start_seconds'
+    );
+    aiStmt.bind([videoId]);
+
+    const aiResults: any[] = [];
+    while (aiStmt.step()) {
+      aiResults.push(aiStmt.getAsObject());
+    }
+    aiStmt.free();
+
+    // Get custom markers
+    const customStmt = db.prepare(
+      'SELECT *, \'user\' as source FROM custom_markers WHERE video_id = ? ORDER BY start_seconds'
+    );
+    customStmt.bind([videoId]);
+
+    const customResults: any[] = [];
+    while (customStmt.step()) {
+      customResults.push(customStmt.getAsObject());
+    }
+    customStmt.free();
+
+    // Merge and sort by start time
+    const allSections = [...aiResults, ...customResults];
+    allSections.sort((a: any, b: any) => a.start_seconds - b.start_seconds);
+
+    return allSections;
+  }
+
+  /**
+   * Insert a custom marker
+   */
+  insertCustomMarker(marker: {
+    id: string;
+    videoId: string;
+    startSeconds: number;
+    endSeconds: number;
+    timestampText?: string;
+    title?: string;
+    description?: string;
+    category?: string;
+  }) {
+    const db = this.ensureInitialized();
+
+    db.run(
+      `INSERT INTO custom_markers (
+        id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        marker.id,
+        marker.videoId,
+        marker.startSeconds,
+        marker.endSeconds,
+        marker.timestampText || null,
+        marker.title || null,
+        marker.description || null,
+        marker.category || 'custom',
+        new Date().toISOString(),
+      ]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Get all custom markers for a video
+   */
+  getCustomMarkers(videoId: string) {
+    const db = this.ensureInitialized();
     const stmt = db.prepare(
-      'SELECT * FROM analysis_sections WHERE video_id = ? ORDER BY start_seconds'
+      'SELECT * FROM custom_markers WHERE video_id = ? ORDER BY start_seconds'
     );
     stmt.bind([videoId]);
 
@@ -863,6 +992,26 @@ export class DatabaseService {
     stmt.free();
 
     return results;
+  }
+
+  /**
+   * Delete a specific custom marker by ID
+   */
+  deleteCustomMarker(markerId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM custom_markers WHERE id = ?', [markerId]);
+    this.saveDatabase();
+    this.logger.log(`Deleted custom marker ${markerId}`);
+  }
+
+  /**
+   * Delete all custom markers for a video
+   */
+  deleteCustomMarkers(videoId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM custom_markers WHERE video_id = ?', [videoId]);
+    this.saveDatabase();
+    this.logger.log(`Deleted all custom markers for video ${videoId}`);
   }
 
   /**

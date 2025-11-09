@@ -282,9 +282,16 @@
     <div class="queue-column" #queueColumn>
       <!-- Queue Header -->
       <div class="queue-header">
+        <mat-checkbox *ngIf="hasPendingJobs()"
+                      [checked]="selectAllChecked"
+                      (change)="toggleSelectAll()"
+                      class="select-all-checkbox"
+                      matTooltip="Select all">
+        </mat-checkbox>
         <h3>
           <mat-icon>queue</mat-icon>
           Analysis Queue
+          <span *ngIf="hasSelection()" class="selection-count">({{ getSelectedCount() }} selected)</span>
         </h3>
         <div class="queue-actions">
           <button mat-raised-button
@@ -304,15 +311,31 @@
         </div>
       </div>
 
-      <!-- Bulk Settings Panel -->
-      <div class="bulk-settings-panel" *ngIf="hasPendingJobs()">
-        <div class="bulk-header">
-          <mat-icon>tune</mat-icon>
-          <span>Apply to All Queue Items</span>
-        </div>
-        <div class="bulk-controls">
-          <!-- AI Model Selection -->
+      <!-- Bulk Settings Panel (Accordion) -->
+      <mat-accordion *ngIf="hasPendingJobs()" class="bulk-settings-accordion">
+        <mat-expansion-panel>
+          <mat-expansion-panel-header>
+            <mat-panel-title>
+              <mat-icon>tune</mat-icon>
+              <span>Batch Edit {{ hasSelection() ? '(' + getSelectedCount() + ' selected)' : '(All Items)' }}</span>
+            </mat-panel-title>
+          </mat-expansion-panel-header>
+
+          <div class="bulk-controls">
+          <!-- Processing Mode -->
           <div class="bulk-control-group">
+            <label class="bulk-label">
+              <mat-icon>psychology</mat-icon>
+              Processing Mode
+            </label>
+            <select class="bulk-select" [(ngModel)]="bulkMode">
+              <option value="full">Transcribe + Analysis</option>
+              <option value="transcribe-only">Transcribe Only</option>
+            </select>
+          </div>
+
+          <!-- AI Model Selection (only if full mode) -->
+          <div class="bulk-control-group" *ngIf="bulkMode === 'full'">
             <label class="bulk-label">
               <mat-icon>smart_toy</mat-icon>
               AI Model
@@ -320,7 +343,7 @@
             <select class="bulk-select"
                     [(ngModel)]="bulkAIModel"
                     (change)="onBulkModelChange()">
-              <option value="" disabled>Select model to apply...</option>
+              <option value="">Keep current</option>
               <optgroup label="Claude (API Key Required)">
                 <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
                 <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
@@ -339,7 +362,7 @@
           </div>
 
           <!-- API Key (for Claude/OpenAI) -->
-          <div class="bulk-control-group" *ngIf="bulkNeedsApiKey()">
+          <div class="bulk-control-group" *ngIf="bulkMode === 'full' && bulkNeedsApiKey()">
             <label class="bulk-label">
               <mat-icon>vpn_key</mat-icon>
               {{ getBulkApiKeyLabel() }}
@@ -353,7 +376,7 @@
           </div>
 
           <!-- Ollama Endpoint (for local models) -->
-          <div class="bulk-control-group" *ngIf="!bulkNeedsApiKey() && bulkAIModel">
+          <div class="bulk-control-group" *ngIf="bulkMode === 'full' && !bulkNeedsApiKey() && bulkAIModel">
             <label class="bulk-label">
               <mat-icon>dns</mat-icon>
               Ollama Endpoint
@@ -366,17 +389,56 @@
             </div>
           </div>
 
+          <!-- Custom Instructions (only if full mode) -->
+          <div class="bulk-control-group" *ngIf="bulkMode === 'full'">
+            <label class="bulk-label">
+              <mat-icon>edit_note</mat-icon>
+              Custom Instructions
+            </label>
+            <textarea class="bulk-textarea"
+                      [(ngModel)]="bulkCustomInstructions"
+                      rows="3"
+                      placeholder="Add instructions for AI analysis..."></textarea>
+          </div>
+
+          <!-- Whisper Model -->
+          <div class="bulk-control-group">
+            <label class="bulk-label">
+              <mat-icon>mic</mat-icon>
+              Whisper Model
+            </label>
+            <select class="bulk-select" [(ngModel)]="bulkWhisperModel">
+              <option value="tiny">Tiny - Fastest</option>
+              <option value="base">Base - Balanced</option>
+              <option value="small">Small - Better Quality</option>
+              <option value="medium">Medium - Great Quality</option>
+              <option value="large">Large - Best Quality</option>
+            </select>
+          </div>
+
+          <!-- Language -->
+          <div class="bulk-control-group">
+            <label class="bulk-label">
+              <mat-icon>language</mat-icon>
+              Language
+            </label>
+            <input type="text"
+                   class="bulk-input"
+                   [(ngModel)]="bulkLanguage"
+                   placeholder="en">
+          </div>
+
           <!-- Apply Button -->
           <button mat-raised-button
                   color="accent"
                   class="bulk-apply-btn"
-                  (click)="applyBulkSettings()"
-                  [disabled]="!canApplyBulkSettings()">
+                  (click)="applyBulkSettings()">
             <mat-icon>check_circle</mat-icon>
-            Apply to All ({{ pendingJobs.length }})
+            Apply to {{ hasSelection() ? getSelectedCount() + ' Selected' : 'All (' + pendingJobs.length + ')' }}
           </button>
         </div>
-      </div>
+        </mat-expansion-panel>
+      </mat-accordion>
 
       <!-- Queue List -->
       <div class="queue-list-container">
@@ -384,7 +446,15 @@
         <div class="queue-list" *ngIf="pendingJobs.length > 0">
           <div *ngFor="let job of pendingJobs" class="queue-job-wrapper">
             <div class="queue-job-card job-pending"
-                 [class.expanded]="isPendingJobExpanded(job.id)">
+                 [class.expanded]="isPendingJobExpanded(job.id)"
+                 [class.selected]="isJobSelected(job.id)">
+
+              <!-- Checkbox -->
+              <mat-checkbox [checked]="isJobSelected(job.id)"
+                            (change)="toggleJobSelection(job.id)"
+                            (click)="$event.stopPropagation()"
+                            class="job-checkbox">
+              </mat-checkbox>
 
               <!-- Icon -->
               <div class="job-icon">
@@ -450,8 +520,8 @@
                     AI Model
                   </label>
                   <select class="compact-select"
-                          [value]="job.aiModel"
-                          (change)="updatePendingJobModel(job.id, $any($event.target).value)">
+                          [ngModel]="job.aiModel"
+                          (ngModelChange)="updatePendingJobModel(job.id, $event)">
                     <optgroup label="Claude (API Key Required)">
                       <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
                       <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
@@ -481,6 +551,36 @@
                             (input)="updatePendingJobInstructions(job.id, $any($event.target).value)"
                             rows="3"
                             placeholder="Add specific instructions for the AI analysis..."></textarea>
+                </div>
+
+                <!-- Whisper Model -->
+                <div class="setting-group">
+                  <label class="setting-label">
+                    <mat-icon>mic</mat-icon>
+                    Whisper Model
+                  </label>
+                  <select class="compact-select"
+                          [ngModel]="job.whisperModel"
+                          (ngModelChange)="analysisQueueService.updatePendingJob(job.id, { whisperModel: $event })">
+                    <option value="tiny">Tiny - Fastest</option>
+                    <option value="base">Base - Balanced</option>
+                    <option value="small">Small - Better Quality</option>
+                    <option value="medium">Medium - Great Quality</option>
+                    <option value="large">Large - Best Quality</option>
+                  </select>
+                </div>
+
+                <!-- Language -->
+                <div class="setting-group">
+                  <label class="setting-label">
+                    <mat-icon>language</mat-icon>
+                    Language
+                  </label>
+                  <input type="text"
+                         class="compact-input"
+                         [value]="job.language"
+                         (input)="analysisQueueService.updatePendingJob(job.id, { language: $any($event.target).value })"
+                         placeholder="en">
                 </div>
 
                 <!-- Video Path -->
@@ -580,58 +680,6 @@
           </button>
         </mat-expansion-panel>
       </mat-accordion>
-
-      <!-- Quick Select Section -->
-      <div class="library-section">
-        <div class="section-header">
-          <h3>
-            <mat-icon>video_library</mat-icon>
-            Quick Select
-          </h3>
-        </div>
-
-        <!-- Search -->
-        <div class="library-search-wrapper">
-          <mat-icon>search</mat-icon>
-          <input type="text"
-                 class="library-search"
-                 [(ngModel)]="librarySearchQuery"
-                 [ngModelOptions]="{standalone: true}"
-                 (ngModelChange)="onLibrarySearchChange()"
-                 placeholder="Search your library...">
-        </div>
-
-        <!-- Loading -->
-        <div class="library-loading" *ngIf="isLoadingLibrary">
-          <mat-icon class="spinning">sync</mat-icon>
-          <span>Loading videos...</span>
-        </div>
-
-        <!-- Video List -->
-        <div class="library-list" *ngIf="!isLoadingLibrary && filteredLibraryVideos.length > 0">
-          <div class="library-item"
-               *ngFor="let video of filteredLibraryVideos"
-               (click)="selectLibraryVideo(video)">
-            <div class="item-icon">
-              <mat-icon>movie</mat-icon>
-            </div>
-            <div class="item-details">
-              <div class="item-name">{{ video.filename }}</div>
-              <div class="item-meta">
-                <span *ngIf="video.duration_seconds">{{ formatDuration(video.duration_seconds) }}</span>
-                <span *ngIf="video.file_size_bytes"> • {{ formatFileSize(video.file_size_bytes) }}</span>
-              </div>
-            </div>
-            <mat-icon class="select-icon">chevron_right</mat-icon>
-          </div>
-        </div>
-
-        <!-- Empty States -->
-        <div class="library-empty" *ngIf="!isLoadingLibrary && filteredLibraryVideos.length === 0">
-          <mat-icon>{{ libraryVideos.length === 0 ? 'video_library' : 'search_off' }}</mat-icon>
-          <p>{{ libraryVideos.length === 0 ? 'No videos in library' : 'No results found' }}</p>
-        </div>
-      </div>
     </div>
   </div>
 </div>

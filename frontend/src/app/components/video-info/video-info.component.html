@@ -267,10 +267,15 @@
             {{ analysisSections.length }} sections
           </mat-chip>
         </mat-chip-set>
-      </div>
 
       <div class="analysis-sections-grid">
         <mat-card class="section-card" *ngFor="let section of analysisSections">
+          <button mat-icon-button
+                  class="delete-section-button"
+                  (click)="deleteAnalysisSection(section)"
+                  matTooltip="Delete this section">
+            <mat-icon>close</mat-icon>
+          </button>
           <div class="section-card-header">
             <div class="section-timestamp">
               <mat-icon>schedule</mat-icon>
@@ -313,25 +318,22 @@
           </button>
         </div>
       </div>
+      <mat-chip-set class="transcript-meta">
+        <mat-chip *ngIf="transcript.whisper_model">
+          <mat-icon>mic</mat-icon>
+          {{ transcript.whisper_model }}
+        </mat-chip>
+        <mat-chip *ngIf="transcript.language">
+          <mat-icon>language</mat-icon>
+          {{ transcript.language }}
+          </mat-chip>
+        <mat-chip>
+          <mat-icon>schedule</mat-icon>
+          {{ formatDate(transcript.transcribed_at) }}
+        </mat-chip>
+      </mat-chip-set>
 
       <mat-card class="transcript-card">
-        <div class="transcript-info">
-          <mat-chip-set>
-            <mat-chip *ngIf="transcript.whisper_model">
-              <mat-icon>mic</mat-icon>
-              {{ transcript.whisper_model }}
-            </mat-chip>
-            <mat-chip *ngIf="transcript.language">
-              <mat-icon>language</mat-icon>
-              {{ transcript.language }}
-            </mat-chip>
-            <mat-chip>
-              <mat-icon>schedule</mat-icon>
-              {{ formatDate(transcript.transcribed_at) }}
-            </mat-chip>
-          </mat-chip-set>
-        </div>
-
         <div class="transcript-content">
           <div class="transcript-entry" *ngFor="let entry of parsedTranscript">
             <span class="timestamp-badge">{{ entry.timestamp }}</span>

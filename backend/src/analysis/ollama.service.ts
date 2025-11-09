@@ -17,6 +17,10 @@ export class OllamaService {
   private readonly logger = new Logger(OllamaService.name);
   private defaultEndpoint = 'http://localhost:11434';
 
+  // Model keep-alive tracking
+  private loadedModels = new Map<string, { endpoint: string; lastUsed: Date; unloadTimer?: NodeJS.Timeout }>();
+  private readonly KEEP_ALIVE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
+
   /**
    * Check if Ollama is running and accessible
    */
@@ -98,6 +102,7 @@ export class OllamaService {
           model: modelName,
           prompt: 'Ready.',
           stream: false,
+          keep_alive: '5m',  // Keep model loaded for 5 minutes after check
           options: { num_predict: 5 }
         },
         { timeout: 300000 } // 300 second (5 minute) timeout to allow large model loading
@@ -177,5 +182,241 @@ Current model status: Not installed
         description: 'Best quality, requires significant RAM',
       },
     ];
+  }
+
+  /**
+   * Preload a model to keep it in memory
+   * This sends a simple request to warm up the model
+   */
+  async preloadModel(modelName: string, endpoint?: string): Promise<void> {
+    const url = endpoint || this.defaultEndpoint;
+    const modelKey = `${url}:${modelName}`;
+
+    this.logger.log(`[Keep-Alive] Preloading model: ${modelName} at ${url}`);
+
+    try {
+      // Send a simple request to load the model into memory
+      await axios.post(
+        `${url}/api/generate`,
+        {
+          model: modelName,
+          prompt: 'Ready.',
+          stream: false,
+          keep_alive: '5m',  // Keep model loaded for 5 minutes
+          options: { num_predict: 1 }
+        },
+        { timeout: 300000 } // 5 minute timeout for large models
+      );
+
+      // Track this model as loaded
+      this.registerModelAsLoaded(modelName, url);
+
+      this.logger.log(`[Keep-Alive] Model ${modelName} preloaded successfully`);
+    } catch (error: any) {
+      this.logger.error(`[Keep-Alive] Failed to preload model ${modelName}: ${(error as Error).message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Register a model as loaded and start keep-alive timer
+   */
+  private registerModelAsLoaded(modelName: string, endpoint: string): void {
+    const url = endpoint || this.defaultEndpoint;
+    const modelKey = `${url}:${modelName}`;
+
+    // Clear existing timer if any
+    const existing = this.loadedModels.get(modelKey);
+    if (existing?.unloadTimer) {
+      clearTimeout(existing.unloadTimer);
+    }
+
+    // Set up new keep-alive timer
+    const unloadTimer = setTimeout(() => {
+      this.logger.log(`[Keep-Alive] Model ${modelName} idle timeout reached, unloading...`);
+      this.unloadModel(modelName, endpoint).catch(err => {
+        this.logger.warn(`[Keep-Alive] Failed to unload idle model ${modelName}: ${err.message}`);
+      });
+    }, this.KEEP_ALIVE_DURATION);
+
+    this.loadedModels.set(modelKey, {
+      endpoint: url,
+      lastUsed: new Date(),
+      unloadTimer
+    });
+
+    this.logger.log(`[Keep-Alive] Model ${modelName} registered as loaded (will unload after ${this.KEEP_ALIVE_DURATION / 60000} minutes of inactivity)`);
+  }
+
+  /**
+   * Refresh keep-alive timer for a model
+   * Call this before using a model to extend its keep-alive
+   */
+  async touchModel(modelName: string, endpoint?: string): Promise<void> {
+    const url = endpoint || this.defaultEndpoint;
+    const modelKey = `${url}:${modelName}`;
+
+    const existing = this.loadedModels.get(modelKey);
+    if (!existing) {
+      // Model not loaded, preload it first
+      await this.preloadModel(modelName, endpoint);
+      return;
+    }
+
+    // Send a keep-alive request to Ollama to refresh ITS timer too
+    try {
+      await axios.post(
+        `${url}/api/generate`,
+        {
+          model: modelName,
+          prompt: '',
+          stream: false,
+          keep_alive: '5m',  // Refresh Ollama's keep-alive timer
+          options: { num_predict: 0 }  // Don't generate anything
+        },
+        { timeout: 10000 }
+      );
+      this.logger.log(`[Keep-Alive] Sent keep-alive refresh to Ollama for model ${modelName}`);
+    } catch (error: any) {
+      this.logger.warn(`[Keep-Alive] Failed to refresh Ollama keep-alive for ${modelName}: ${(error as Error).message}`);
+      // Continue anyway - the Python script will also send keep_alive
+    }
+
+    // Clear old timer
+    if (existing.unloadTimer) {
+      clearTimeout(existing.unloadTimer);
+    }
+
+    // Set up new timer
+    const unloadTimer = setTimeout(() => {
+      this.logger.log(`[Keep-Alive] Model ${modelName} idle timeout reached, unloading...`);
+      this.unloadModel(modelName, endpoint).catch(err => {
+        this.logger.warn(`[Keep-Alive] Failed to unload idle model ${modelName}: ${err.message}`);
+      });
+    }, this.KEEP_ALIVE_DURATION);
+
+    this.loadedModels.set(modelKey, {
+      endpoint: url,
+      lastUsed: new Date(),
+      unloadTimer
+    });
+
+    this.logger.log(`[Keep-Alive] Model ${modelName} keep-alive refreshed`);
+  }
+
+  /**
+   * Unload a model from memory
+   */
+  async unloadModel(modelName: string, endpoint?: string): Promise<void> {
+    const url = endpoint || this.defaultEndpoint;
+    const modelKey = `${url}:${modelName}`;
+
+    this.logger.log(`[Keep-Alive] Unloading model: ${modelName}`);
+
+    try {
+      // Clear timer
+      const existing = this.loadedModels.get(modelKey);
+      if (existing?.unloadTimer) {
+        clearTimeout(existing.unloadTimer);
+      }
+
+      // Remove from tracking
+      this.loadedModels.delete(modelKey);
+
+      // Tell Ollama to unload the model by setting keep_alive to 0
+      await axios.post(
+        `${url}/api/generate`,
+        {
+          model: modelName,
+          prompt: '',
+          keep_alive: 0  // This tells Ollama to unload the model immediately
+        },
+        { timeout: 10000 }
+      );
+
+      this.logger.log(`[Keep-Alive] Model ${modelName} unloaded successfully`);
+    } catch (error: any) {
+      this.logger.warn(`[Keep-Alive] Error unloading model ${modelName}: ${(error as Error).message}`);
+      // Don't throw - unloading is best-effort
+    }
+  }
+
+  /**
+   * Prepare to use a specific model - unload others if needed
+   */
+  async prepareModel(modelName: string, endpoint?: string): Promise<void> {
+    const url = endpoint || this.defaultEndpoint;
+    const modelKey = `${url}:${modelName}`;
+
+    this.logger.log(`[Keep-Alive] prepareModel called for ${modelName} at ${url}`);
+    this.logger.log(`[Keep-Alive] Model key: ${modelKey}`);
+    this.logger.log(`[Keep-Alive] Currently loaded models: ${Array.from(this.loadedModels.keys()).join(', ') || 'none'}`);
+
+    // Check if this model is already loaded
+    const isAlreadyLoaded = this.loadedModels.has(modelKey);
+
+    if (isAlreadyLoaded) {
+      // Just refresh keep-alive
+      this.logger.log(`[Keep-Alive] Model ${modelName} found in tracking map, refreshing keep-alive...`);
+      await this.touchModel(modelName, endpoint);
+      this.logger.log(`[Keep-Alive] Model ${modelName} already loaded, keep-alive refreshed`);
+      return;
+    }
+
+    this.logger.log(`[Keep-Alive] Model ${modelName} NOT in tracking map, checking for other models to unload...`);
+
+    // Unload all other models at this endpoint to free up memory
+    const modelsToUnload: string[] = [];
+    for (const [key, info] of this.loadedModels.entries()) {
+      if (info.endpoint === url && key !== modelKey) {
+        // Extract model name from key (format: "endpoint:modelname")
+        const otherModelName = key.substring(url.length + 1);
+        modelsToUnload.push(otherModelName);
+      }
+    }
+
+    // Unload other models in parallel
+    if (modelsToUnload.length > 0) {
+      this.logger.log(`[Keep-Alive] Unloading ${modelsToUnload.length} other model(s) to make room for ${modelName}: ${modelsToUnload.join(', ')}`);
+      await Promise.all(
+        modelsToUnload.map(m => this.unloadModel(m, endpoint))
+      );
+    }
+
+    // Now preload the new model
+    this.logger.log(`[Keep-Alive] Loading new model ${modelName}...`);
+    await this.preloadModel(modelName, endpoint);
+  }
+
+  /**
+   * Get list of currently loaded models
+   */
+  getLoadedModels(): Array<{ model: string; endpoint: string; lastUsed: Date }> {
+    const result: Array<{ model: string; endpoint: string; lastUsed: Date }> = [];
+
+    for (const [key, info] of this.loadedModels.entries()) {
+      // Extract model name from key (format: "endpoint:modelname")
+      const modelName = key.substring(info.endpoint.length + 1);
+      result.push({
+        model: modelName,
+        endpoint: info.endpoint,
+        lastUsed: info.lastUsed
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Cleanup all timers (call on service shutdown)
+   */
+  onModuleDestroy(): void {
+    this.logger.log('[Keep-Alive] Cleaning up all model keep-alive timers');
+    for (const [_, info] of this.loadedModels.entries()) {
+      if (info.unloadTimer) {
+        clearTimeout(info.unloadTimer);
+      }
+    }
+    this.loadedModels.clear();
   }
 }

@@ -17,10 +17,10 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
-import { DatabaseLibraryService, DatabaseVideo } from '../../services/database-library.service';
 import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysis-queue.service';
 import { Subscription } from 'rxjs';
 
@@ -60,6 +60,7 @@ interface AnalysisJob {
     MatTabsModule,
     MatDialogModule,
     MatTooltipModule,
+    MatCheckboxModule,
   ],
   templateUrl: './video-analysis.component.html',
   styleUrls: ['./video-analysis.component.scss']
@@ -78,12 +79,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   isCompletedAccordionExpanded = false;
   private expandedJobIds = new Set<string>();
 
-  // Video library integration
-  libraryVideos: DatabaseVideo[] = [];
-  filteredLibraryVideos: DatabaseVideo[] = [];
-  isLoadingLibrary = false;
-  librarySearchQuery = '';
-
   // Drag and drop
   isDraggingFile = false;
 
@@ -101,6 +96,14 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   bulkAIModel = '';
   bulkApiKey = '';
   bulkOllamaEndpoint = 'http://localhost:11434';
+  bulkMode: 'full' | 'transcribe-only' = 'full';
+  bulkCustomInstructions = '';
+  bulkWhisperModel = 'base';
+  bulkLanguage = 'en';
+
+  // Checkbox selection
+  selectedJobIds = new Set<string>();
+  selectAllChecked = false;
 
   constructor(
     private fb: FormBuilder,
@@ -109,8 +112,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
     private downloadProgressService: DownloadProgressService,
-    private databaseLibraryService: DatabaseLibraryService,
-    private analysisQueueService: AnalysisQueueService,
+    public analysisQueueService: AnalysisQueueService,
     private cdr: ChangeDetectorRef,
     private router: Router,
     private ngZone: NgZone,
@@ -150,7 +152,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     // Handle multiple selected videos from library
     if (state && state['selectedVideos']) {
-      const selectedVideos: DatabaseVideo[] = state['selectedVideos'];
+      const selectedVideos: any[] = state['selectedVideos'];
       console.log('[VideoAnalysis] Found selected videos in state:', selectedVideos.length);
       console.log('[VideoAnalysis] Video details:', selectedVideos);
 
@@ -204,9 +206,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     // Check for any active jobs and restore state
     await this.checkForActiveJobs();
-
-    // Load library videos when in file mode with no file selected
-    await this.loadLibraryVideos();
   }
 
   ngOnDestroy(): void {
@@ -357,54 +356,54 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
   /**
    * Start polling for job progress updates (REST polling - simple and reliable)
+   * Now polls ALL active jobs, not just one
    */
   private startPolling(): void {
     // Clear any existing polling
     this.stopPolling();
 
-    console.log('[Video Analysis] Starting REST polling for job:', this.currentJob?.id);
+    console.log('[Video Analysis] Starting REST polling for all active jobs');
 
     // Poll every 500ms
     this.pollingInterval = setInterval(async () => {
-      if (!this.currentJob) {
-        this.stopPolling();
-        return;
-      }
-
       try {
-        const jobUrl = await this.backendUrlService.getApiUrl(`/analysis/job/${this.currentJob.id}`);
-        const response = await fetch(jobUrl);
+        // Get all active jobs from the download progress service
+        const activeJobs = this.processingJobs.filter(job =>
+          job.stage !== 'completed' && job.stage !== 'failed'
+        );
 
-        if (!response.ok) {
-          console.error('[Video Analysis] Failed to fetch job status:', response.status);
+        if (activeJobs.length === 0) {
+          console.log('[Video Analysis] No active jobs, stopping polling');
+          this.stopPolling();
+          this.isProcessing = false;
           return;
         }
 
-        const data = await response.json();
+        // Poll each active job
+        for (const job of activeJobs) {
+          // Extract the actual backend job ID (remove 'analysis-' prefix)
+          const backendJobId = job.id.replace('analysis-', '');
+          const jobUrl = await this.backendUrlService.getApiUrl(`/analysis/job/${backendJobId}`);
+          const response = await fetch(jobUrl);
 
-        if (data.success && data.job) {
-          console.log('[Video Analysis] Polled job status:', data.job);
+          if (!response.ok) {
+            console.error('[Video Analysis] Failed to fetch job status for', job.id, ':', response.status);
+            continue;
+          }
 
-          // Update the entire job object
-          this.currentJob = {
-            ...this.currentJob,
-            ...data.job
-          };
+          const data = await response.json();
 
-          // Also report to download progress service for unified queue
-          this.downloadProgressService.addOrUpdateAnalysisJob(this.currentJob);
+          if (data.success && data.job) {
+            // Update the job in the download progress service
+            this.downloadProgressService.addOrUpdateAnalysisJob(data.job);
 
-          // Check if job is complete
-          if (data.job.status === 'completed') {
-            this.isProcessing = false;
-            this.stopPolling();
-            this.notificationService.success('Analysis Complete', 'Video analysis finished successfully');
-          } else if (data.job.status === 'failed') {
-            this.isProcessing = false;
-            this.stopPolling();
-            // Use notification service for errors with full error details
-            const errorMessage = data.job.error || 'Unknown error occurred during analysis';
-            this.notificationService.error('Analysis Failed', errorMessage);
+            // Check if job is complete
+            if (data.job.status === 'completed') {
+              this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
+            } else if (data.job.status === 'failed') {
+              const errorMessage = data.job.error || 'Unknown error occurred during analysis';
+              this.notificationService.error('Analysis Failed', errorMessage);
+            }
           }
         }
       } catch (error: any) {
@@ -511,7 +510,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     try {
       const text = await navigator.clipboard.readText();
       this.analysisForm.patchValue({ input: text });
-      this.notificationService.success('Pasted', 'URL pasted from clipboard');
     } catch (error) {
       this.notificationService.error('Paste Failed', 'Could not paste from clipboard');
     }
@@ -718,18 +716,19 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
       const data = await response.json();
       if (data.success && data.jobs && data.jobs.length > 0) {
-        // Find the first non-completed job
-        const activeJob = data.jobs.find((job: AnalysisJob) =>
+        // Find all non-completed jobs
+        const activeJobs = data.jobs.filter((job: AnalysisJob) =>
           job.status !== 'completed' && job.status !== 'failed'
         );
 
-        if (activeJob) {
-          console.log('[Video Analysis] Found active job on init:', activeJob.id);
-          this.currentJob = activeJob;
+        if (activeJobs.length > 0) {
+          console.log('[Video Analysis] Found', activeJobs.length, 'active job(s) on init');
           this.isProcessing = true;
 
-          // Report to download progress service for unified queue
-          this.downloadProgressService.addOrUpdateAnalysisJob(this.currentJob);
+          // Report all active jobs to download progress service for unified queue
+          for (const job of activeJobs) {
+            this.downloadProgressService.addOrUpdateAnalysisJob(job);
+          }
 
           this.startPolling();
         }
@@ -834,7 +833,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
    */
 
   /**
-   * Start processing the queue - submit all pending jobs to backend
+   * Start processing the queue - submit only the first pending job to backend
+   * The backend will manage the queue and process jobs one at a time
    */
   async startQueue(): Promise<void> {
     if (!this.hasPendingJobs()) {
@@ -844,7 +844,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
     const jobs = this.analysisQueueService.getCurrentPendingJobs();
 
-    // Start each job sequentially
+    // Submit ALL jobs to the backend queue (backend will process them one at a time)
     for (const job of jobs) {
       try {
         // Parse provider and model from combined format (provider:model)
@@ -877,7 +877,7 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
           language: job.language,
         };
 
-        // Start analysis via API
+        // Start analysis via API (adds to backend queue)
         const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
         const response = await fetch(startUrl, {
           method: 'POST',
@@ -909,18 +909,18 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
         this.downloadProgressService.addOrUpdateAnalysisJob(analysisJob);
 
-        // Start polling if not already polling
-        if (!this.pollingInterval) {
-          this.currentJob = analysisJob;
-          this.startPolling();
-        }
-
       } catch (error: any) {
         this.notificationService.error('Failed to Start Job', error.message || `Failed to start analysis for ${job.displayName}`);
       }
     }
 
-    this.notificationService.toastOnly('success', 'Queue Started', `Started processing ${jobs.length} job(s)`);
+    // Start polling for all jobs (if not already polling)
+    if (!this.pollingInterval) {
+      this.isProcessing = true;
+      this.startPolling();
+    }
+
+    this.notificationService.toastOnly('success', 'Queue Started', `Submitted ${jobs.length} job(s) to queue`);
     this.cdr.detectChanges();
   }
 
@@ -1104,24 +1104,81 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Apply bulk settings to all pending jobs
+   * Apply bulk settings to all pending jobs (or selected jobs)
    */
   applyBulkSettings(): void {
     if (!this.canApplyBulkSettings()) {
       return;
     }
 
-    // Apply the settings to all jobs
-    this.analysisQueueService.updateAllJobsAISettings(
-      this.bulkAIModel,
-      this.bulkApiKey,
-      this.bulkOllamaEndpoint
-    );
+    const jobsToUpdate = this.selectedJobIds.size > 0
+      ? Array.from(this.selectedJobIds)
+      : this.pendingJobs.map(j => j.id);
 
-    // Reset bulk settings after applying
-    this.bulkAIModel = '';
-    this.bulkApiKey = '';
-    this.bulkOllamaEndpoint = 'http://localhost:11434';
+    // Apply the settings to selected or all jobs
+    this.analysisQueueService.updateMultipleJobs(jobsToUpdate, {
+      aiModel: this.bulkAIModel || undefined,
+      apiKey: this.bulkApiKey || undefined,
+      ollamaEndpoint: this.bulkOllamaEndpoint || undefined,
+      mode: this.bulkMode || undefined,
+      customInstructions: this.bulkCustomInstructions || undefined,
+      whisperModel: this.bulkWhisperModel || undefined,
+      language: this.bulkLanguage || undefined,
+    });
+
+    // Force immediate UI update
+    this.ngZone.run(() => {
+      this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
+      this.cdr.markForCheck();
+      this.cdr.detectChanges();
+    });
+
+    // Clear selection after applying
+    this.selectedJobIds.clear();
+    this.selectAllChecked = false;
+
+    this.notificationService.toastOnly('success', 'Settings Applied', `Updated ${jobsToUpdate.length} job(s)`);
+  }
+
+  /**
+   * Checkbox selection methods
+   */
+  toggleJobSelection(jobId: string): void {
+    if (this.selectedJobIds.has(jobId)) {
+      this.selectedJobIds.delete(jobId);
+    } else {
+      this.selectedJobIds.add(jobId);
+    }
+    this.updateSelectAllState();
+  }
+
+  isJobSelected(jobId: string): boolean {
+    return this.selectedJobIds.has(jobId);
+  }
+
+  toggleSelectAll(): void {
+    if (this.selectAllChecked) {
+      // Deselect all
+      this.selectedJobIds.clear();
+      this.selectAllChecked = false;
+    } else {
+      // Select all
+      this.pendingJobs.forEach(job => this.selectedJobIds.add(job.id));
+      this.selectAllChecked = true;
+    }
+  }
+
+  private updateSelectAllState(): void {
+    this.selectAllChecked = this.pendingJobs.length > 0 &&
+                            this.selectedJobIds.size === this.pendingJobs.length;
+  }
+
+  getSelectedCount(): number {
+    return this.selectedJobIds.size;
+  }
+
+  hasSelection(): boolean {
+    return this.selectedJobIds.size > 0;
   }
 
   /**
@@ -1158,89 +1215,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
     }
 
     return mode;
-  }
-
-  /**
-   * Load videos from library for quick selection
-   * Only loads videos that need transcription and/or analysis
-   */
-  async loadLibraryVideos() {
-    try {
-      this.isLoadingLibrary = true;
-      // Load first 50 videos sorted by date (most recent first)
-      const response = await this.databaseLibraryService.getVideos(50, 0);
-      this.libraryVideos = response.videos;
-
-      // Filter to only show videos missing transcript and/or analysis
-      this.filteredLibraryVideos = response.videos.filter(video =>
-        video.has_transcript === 0 || video.has_analysis === 0
-      );
-    } catch (error) {
-      console.error('Failed to load library videos:', error);
-      // Silently fail - library might not be initialized yet
-    } finally {
-      this.isLoadingLibrary = false;
-    }
-  }
-
-  /**
-   * Filter library videos based on search query
-   * Also filters to only show videos missing transcript and/or analysis
-   */
-  onLibrarySearchChange() {
-    // First filter: only show videos that don't have transcript AND/OR analysis
-    const videosNeedingAnalysis = this.libraryVideos.filter(video =>
-      video.has_transcript === 0 || video.has_analysis === 0
-    );
-
-    if (!this.librarySearchQuery.trim()) {
-      this.filteredLibraryVideos = videosNeedingAnalysis;
-      return;
-    }
-
-    // Second filter: apply search query
-    const query = this.librarySearchQuery.toLowerCase();
-    this.filteredLibraryVideos = videosNeedingAnalysis.filter(video =>
-      video.filename.toLowerCase().includes(query) ||
-      (video.date_folder && video.date_folder.toLowerCase().includes(query))
-    );
-  }
-
-  /**
-   * Select a video from library and set it as the input
-   */
-  selectLibraryVideo(video: DatabaseVideo) {
-    // Set the video path as input
-    this.analysisForm.patchValue({
-      inputType: 'file',
-      input: video.current_path
-    });
-  }
-
-  /**
-   * Format file size helper
-   */
-  formatFileSize(bytes: number | null): string {
-    return this.databaseLibraryService.formatFileSize(bytes);
-  }
-
-  /**
-   * Format duration helper
-   */
-  formatDuration(seconds: number | null): string {
-    return this.databaseLibraryService.formatDuration(seconds);
-  }
-
-  /**
-   * Format date helper
-   */
-  formatDate(dateString: string | null): string {
-    if (!dateString) return 'Unknown';
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
   }
 
   /**

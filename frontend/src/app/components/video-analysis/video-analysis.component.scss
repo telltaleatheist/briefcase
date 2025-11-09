@@ -106,7 +106,7 @@
 
 .queue-column {
   width: 420px;
-  min-width: 420px;
+  min-width: 320px;
   max-width: 600px;
   background: var(--bg-secondary);
   overflow-y: auto;
@@ -116,7 +116,6 @@
   gap: 8px;
   flex-shrink: 0;
   min-height: 0;
-  flex: 1;
 }
 
 // ========================================
@@ -1102,12 +1101,16 @@
 // ========================================
 .queue-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 8px 10px;
   background: var(--bg-card);
   border-radius: 6px;
   border: 1px solid var(--border-color);
+
+  .select-all-checkbox {
+    flex-shrink: 0;
+  }
 
   h3 {
     margin: 0;
@@ -1117,12 +1120,19 @@
     font-size: 14px;
     font-weight: 500;
     color: var(--text-primary);
+    flex: 1;
 
     mat-icon {
       font-size: 16px;
       width: 16px;
       height: 16px;
       color: var(--primary-orange);
+    }
+
+    .selection-count {
+      color: var(--primary-orange);
+      font-size: 12px;
+      margin-left: 4px;
     }
   }
 
@@ -1151,31 +1161,49 @@
   }
 }
 
-// Bulk Settings Panel
-.bulk-settings-panel {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+// Bulk Settings Accordion
+.bulk-settings-accordion {
+  ::ng-deep .mat-expansion-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: none;
+  }
 
-  .bulk-header {
+  ::ng-deep .mat-expansion-panel-header {
+    padding: 0 12px;
+    min-height: 40px;
+    font-size: 13px;
+
+    .mat-expansion-indicator {
+      &::after {
+        color: var(--text-secondary);
+      }
+    }
+  }
+
+  ::ng-deep .mat-expansion-panel-header-title {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    font-weight: 600;
+    gap: 8px;
     color: var(--text-primary);
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
 
     mat-icon {
       font-size: 16px;
       width: 16px;
       height: 16px;
-      color: var(--primary-orange);
+      color: rgba(100, 149, 237, 0.7);
+    }
+  }
+
+  ::ng-deep .mat-expansion-panel-body {
+    padding: 12px;
+  }
+
+  ::ng-deep .mat-expansion-panel:not(.mat-expanded) {
+    .mat-expansion-panel-header:hover {
+      background: var(--bg-secondary);
     }
   }
 
@@ -1208,7 +1236,8 @@
   }
 
   .bulk-select,
-  .bulk-input {
+  .bulk-input,
+  .bulk-textarea {
     width: 100%;
     padding: 8px 12px;
     background: var(--bg-secondary);
@@ -1218,6 +1247,7 @@
     font-size: 13px;
     font-family: inherit;
     transition: all 0.2s ease;
+    resize: vertical;
 
     &:focus {
       outline: none;
@@ -1228,6 +1258,11 @@
     &:hover {
       border-color: var(--text-tertiary);
     }
+  }
+
+  .bulk-textarea {
+    min-height: 60px;
+    line-height: 1.4;
   }
 
   .bulk-input-wrapper {
@@ -1282,33 +1317,68 @@
   padding: 6px 8px;
   background: var(--bg-card);
   border-radius: 6px;
-  border: 2px solid var(--border-color);
+  border: 1px solid var(--border-color);
   transition: all 0.2s ease;
   min-height: 40px;
   max-height: 56px;
   position: relative;
   cursor: pointer;
   overflow: visible;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 
   &:hover {
     background: var(--bg-secondary);
-    border-color: var(--primary-orange);
-    box-shadow: 0 2px 8px rgba(255, 143, 71, 0.3);
+    border-color: var(--text-tertiary);
     transform: translateY(-1px);
   }
 
-  // All job types use orange border
-  &.job-pending,
-  &.job-active,
-  &.job-failed,
-  &.job-completed {
-    border-color: var(--primary-orange);
-    border-left-width: 4px;
+  &.selected {
+    background: rgba(100, 149, 237, 0.08);
+    border-color: rgba(100, 149, 237, 0.4);
+  }
+
+  // Pending jobs - subtle blue
+  &.job-pending {
+    border-left: 3px solid rgba(100, 149, 237, 0.5);
 
     .job-icon mat-icon {
-      color: var(--primary-orange);
+      color: rgba(100, 149, 237, 0.7);
     }
+  }
+
+  // Active jobs - green
+  &.job-active {
+    border-left: 3px solid rgba(76, 175, 80, 0.7);
+    background: rgba(76, 175, 80, 0.03);
+
+    .job-icon mat-icon {
+      color: rgba(76, 175, 80, 0.9);
+    }
+  }
+
+  // Failed jobs - red
+  &.job-failed {
+    border-left: 3px solid rgba(244, 67, 54, 0.7);
+    background: rgba(244, 67, 54, 0.03);
+
+    .job-icon mat-icon {
+      color: rgba(244, 67, 54, 0.9);
+    }
+  }
+
+  // Completed jobs - subtle gray
+  &.job-completed {
+    border-left: 3px solid rgba(100, 100, 100, 0.3);
+    opacity: 0.7;
+
+    .job-icon mat-icon {
+      color: rgba(100, 100, 100, 0.6);
+    }
+  }
+
+  .job-checkbox {
+    flex-shrink: 0;
+    margin-right: 4px;
   }
 
   .job-icon {
@@ -1372,6 +1442,12 @@
     ::ng-deep .mat-mdc-progress-bar {
       --mdc-linear-progress-active-indicator-height: 3px;
       --mdc-linear-progress-track-height: 3px;
+      --mdc-linear-progress-active-indicator-color: rgba(76, 175, 80, 0.8);
+      --mdc-linear-progress-track-color: rgba(76, 175, 80, 0.15);
+    }
+
+    ::ng-deep .mdc-linear-progress__bar-inner {
+      border-color: rgba(76, 175, 80, 0.8);
     }
   }
 
@@ -1762,6 +1838,25 @@
   min-height: 60px;
   transition: all 0.2s ease;
   line-height: 1.4;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 2px rgba(255, 143, 71, 0.1);
+  }
+}
+
+// Compact input
+.compact-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+  transition: all 0.2s ease;
 
   &:focus {
     outline: none;

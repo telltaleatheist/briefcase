@@ -146,4 +146,28 @@ export class AnalysisQueueService {
     }));
     this.pendingJobs.next(updatedJobs);
   }
+
+  /**
+   * Update multiple jobs with partial updates
+   */
+  updateMultipleJobs(jobIds: string[], updates: Partial<Omit<PendingAnalysisJob, 'id'>>): void {
+    const currentJobs = this.pendingJobs.value;
+    const jobIdSet = new Set(jobIds);
+
+    const updatedJobs = currentJobs.map(job => {
+      if (jobIdSet.has(job.id)) {
+        // Only update non-undefined values
+        const cleanUpdates = Object.fromEntries(
+          Object.entries(updates).filter(([_, value]) => value !== undefined)
+        );
+        return {
+          ...job,
+          ...cleanUpdates
+        };
+      }
+      return job;
+    });
+
+    this.pendingJobs.next(updatedJobs);
+  }
 }

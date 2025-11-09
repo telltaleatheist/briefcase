@@ -4,12 +4,11 @@
 }
 
 .video-info-container {
-  height: 100%;
+  min-height: 100%;
   width: 100%;
   display: flex;
   flex-direction: column;
   background-color: var(--background);
-  overflow: hidden;
 
   // Default to light theme
   --background: #ffffff;
@@ -32,8 +31,7 @@
 .split-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
 }
 
 .loading-container {
@@ -52,14 +50,8 @@
 
 .content-wrapper {
   width: 100%;
-  min-width: 100%;
-  max-width: 100%;
-  display: flex;
-  flex-direction: column;
   padding: 24px;
-  overflow-y: auto;
   box-sizing: border-box;
-  flex: 1;
 }
 
 .header {
@@ -488,6 +480,9 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  padding: 24px;
+  background-color: var(--surface);
+  border-radius: 8px;
 }
 
 .analysis-header {
@@ -549,10 +544,42 @@
   padding: 16px !important;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
 
   &:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+    .delete-section-button {
+      opacity: 1;
+    }
+  }
+
+  .delete-section-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
+    z-index: 1;
+
+    &:hover {
+      background-color: rgba(220, 53, 69, 0.1);
+    }
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: var(--text-secondary);
+    }
+
+    &:hover mat-icon {
+      color: #dc3545;
+    }
   }
 
   .section-card-header {
@@ -561,6 +588,7 @@
     justify-content: space-between;
     margin-bottom: 12px;
     gap: 8px;
+    padding-right: 32px; // Make room for delete button
   }
 
   .section-timestamp {
@@ -610,6 +638,21 @@
 
 .transcript-section {
   margin-bottom: 32px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 24px;
+  background-color: var(--surface);
+  border-radius: 8px;
+}
+
+.transcript-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
 
   h2 {
     display: flex;
@@ -626,48 +669,6 @@
       width: 20px;
       height: 20px;
     }
-  }
-}
-
-.transcript-card {
-  padding: 20px !important;
-}
-
-.transcript-info {
-  margin-bottom: 20px;
-
-  mat-chip-set {
-    ::ng-deep mat-chip {
-      background-color: var(--chip-bg) !important;
-      color: var(--chip-text) !important;
-      border: 1px solid var(--chip-border) !important;
-
-      mat-icon {
-        font-size: 16px;
-        width: 16px;
-        height: 16px;
-        margin-right: 4px;
-        color: var(--chip-icon) !important;
-      }
-
-      // Force text color on Material chip internals - all possible selectors
-      .mdc-evolution-chip__text-label,
-      .mat-mdc-chip-action-label,
-      span {
-        color: var(--chip-text) !important;
-      }
-    }
-  }
-}
-
-.transcript-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-
-  h2 {
-    margin: 0;
   }
 
   .transcript-actions {
@@ -689,28 +690,37 @@
   }
 }
 
-.transcript-content {
-  max-height: 600px;
-  overflow-y: auto;
-  padding-right: 8px;
+.transcript-meta {
+  margin-bottom: 20px;
 
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
+  ::ng-deep mat-chip {
+    background-color: var(--chip-bg) !important;
+    color: var(--chip-text) !important;
+    border: 1px solid var(--chip-border) !important;
 
-  &::-webkit-scrollbar-track {
-    background: var(--surface);
-    border-radius: 4px;
-  }
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      margin-right: 4px;
+      color: var(--chip-icon) !important;
+    }
 
-  &::-webkit-scrollbar-thumb {
-    background: var(--text-disabled);
-    border-radius: 4px;
-
-    &:hover {
-      background: var(--text-secondary);
+    // Force text color on Material chip internals - all possible selectors
+    .mdc-evolution-chip__text-label,
+    .mat-mdc-chip-action-label,
+    span {
+      color: var(--chip-text) !important;
     }
   }
+}
+
+.transcript-card {
+  padding: 16px !important;
+}
+
+.transcript-content {
+  // Content flows naturally
 }
 
 .transcript-entry {
@@ -930,8 +940,7 @@
 
   // Make chip text more visible in dark mode - use multiple selectors for specificity
   .analysis-meta,
-  .analysis-info,
-  .transcript-info {
+  .transcript-meta {
     ::ng-deep mat-chip {
       background-color: #2d2d2d !important;
 
@@ -972,8 +981,7 @@
 
   // Make chip text more visible in dark mode
   .analysis-meta,
-  .analysis-info,
-  .transcript-info {
+  .transcript-meta {
     ::ng-deep mat-chip {
       background-color: #2d2d2d !important;
 
@@ -1012,8 +1020,7 @@
 
   // Ensure chip text is visible in light mode
   .analysis-meta,
-  .analysis-info,
-  .transcript-info {
+  .transcript-meta {
     ::ng-deep mat-chip {
       background-color: #f8f9fa !important;
 
@@ -1052,8 +1059,7 @@
   }
 
   .analysis-meta,
-  .analysis-info,
-  .transcript-info {
+  .transcript-meta {
     ::ng-deep mat-chip {
       background-color: #f8f9fa !important;
 
