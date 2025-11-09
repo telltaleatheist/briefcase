@@ -9,6 +9,7 @@ import { MediaModule } from './media/media.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { LibraryModule } from './library/library.module';
 import { DatabaseModule } from './database/database.module';
+import { SavedLinksModule } from './saved-links/saved-links.module';
 import { ConfigModule } from '@nestjs/config';
 import { SharedConfigModule } from './config/shared-config.module';
 import { environment } from './config/environment';
@@ -33,6 +34,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     MediaModule,
     AnalysisModule,
     LibraryModule,
+    SavedLinksModule,
     JobStateManagerModule,
   ],
   controllers: [AppController],

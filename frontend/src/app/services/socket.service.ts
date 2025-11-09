@@ -275,4 +275,52 @@ export class SocketService {
   sendLibraryDownloadUserAction(jobId: string, action: 'replace' | 'cancel'): void {
     this.emitEvent('library-download-user-action', { jobId, action });
   }
+
+  // ============================================================================
+  // SAVED LINKS WEBSOCKET LISTENERS
+  // ============================================================================
+
+  /**
+   * Listen for saved link added events
+   */
+  onSavedLinkAdded(): Observable<any> {
+    return new Observable(observer => {
+      this.socket.on('saved-link-added', (data: any) => {
+        observer.next(data);
+      });
+    });
+  }
+
+  /**
+   * Listen for saved link updated events
+   */
+  onSavedLinkUpdated(): Observable<any> {
+    return new Observable(observer => {
+      this.socket.on('saved-link-updated', (data: any) => {
+        observer.next(data);
+      });
+    });
+  }
+
+  /**
+   * Listen for saved link deleted events
+   */
+  onSavedLinkDeleted(): Observable<any> {
+    return new Observable(observer => {
+      this.socket.on('saved-link-deleted', (data: any) => {
+        observer.next(data);
+      });
+    });
+  }
+
+  /**
+   * Listen for saved links count updates
+   */
+  onSavedLinksCountUpdated(): Observable<{ count: number }> {
+    return new Observable(observer => {
+      this.socket.on('saved-links-count', (data: { count: number }) => {
+        observer.next(data);
+      });
+    });
+  }
 }

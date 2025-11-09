@@ -5,6 +5,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 import { environment } from '../../environment/environment';
 import { DownloadOptions, DownloadResult, HistoryItem } from '../models/download.model';
+import { SavedLink, SavedLinkCreateRequest } from '../models/saved-link.model';
 
 @Injectable({
   providedIn: 'root'
@@ -98,5 +99,64 @@ export class ApiService {
    */
   getStreamUrl(id: string): string {
     return this.getFullUrl(`/downloader/stream/${id}`);
+  }
+
+  // ============================================================================
+  // SAVED LINKS API METHODS
+  // ============================================================================
+
+  /**
+   * Get all saved links
+   */
+  getSavedLinks(status?: string): Observable<SavedLink[]> {
+    const url = status
+      ? this.getFullUrl(`/saved-links?status=${status}`)
+      : this.getFullUrl('/saved-links');
+    return this.http.get<SavedLink[]>(url);
+  }
+
+  /**
+   * Get a saved link by ID
+   */
+  getSavedLink(id: string): Observable<SavedLink> {
+    return this.http.get<SavedLink>(this.getFullUrl(`/saved-links/${id}`));
+  }
+
+  /**
+   * Add a new saved link
+   */
+  addSavedLink(request: SavedLinkCreateRequest): Observable<SavedLink> {
+    return this.http.post<SavedLink>(this.getFullUrl('/saved-links'), request);
+  }
+
+  /**
+   * Delete a saved link
+   */
+  deleteSavedLink(id: string): Observable<void> {
+    return this.http.delete<void>(this.getFullUrl(`/saved-links/${id}`));
+  }
+
+  /**
+   * Retry a failed saved link
+   */
+  retrySavedLink(id: string): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(this.getFullUrl(`/saved-links/${id}/retry`), {});
+  }
+
+  /**
+   * Get count of saved links
+   */
+  getSavedLinksCount(status?: string): Observable<{ count: number }> {
+    const url = status
+      ? this.getFullUrl(`/saved-links/stats/count?status=${status}`)
+      : this.getFullUrl('/saved-links/stats/count');
+    return this.http.get<{ count: number }>(url);
+  }
+
+  /**
+   * Get count of active (pending/downloading) saved links
+   */
+  getActiveSavedLinksCount(): Observable<{ count: number }> {
+    return this.http.get<{ count: number }>(this.getFullUrl('/saved-links/stats/active'));
   }
 }

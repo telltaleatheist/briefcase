@@ -11,6 +11,11 @@
         "include": "../python/**/*",
         "outDir": "dist/python",
         "watchAssets": true
+      },
+      {
+        "include": "saved-links/web/**/*",
+        "outDir": "dist/saved-links",
+        "watchAssets": true
       }
     ]
   }

@@ -29,6 +29,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
   },
   {
+    path: 'saved-links',
+    loadComponent: () => import('./components/saved-links/saved-links.component').then(m => m.SavedLinksComponent)
+  },
+  {
     path: 'video-info/:id',
     loadComponent: () => import('./components/video-info/video-info.component').then(m => m.VideoInfoComponent)
   },

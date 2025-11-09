@@ -7,6 +7,7 @@ import { ExecutablesUtil } from './utilities/executables';
 import { WindowService } from './services/window-service';
 import { BackendService } from './services/backend-service';
 import { SetupService } from './services/setup-service';
+import { TrayService } from './services/tray-service';
 import { setupIpcHandlers } from './ipc/ipc-handlers';
 import { UpdateService } from './services/update-service';
 import { LogUtil } from './utilities/log-util';
@@ -45,6 +46,7 @@ let windowService: WindowService;
 let backendService: BackendService;
 let updateService: UpdateService;
 let setupService: SetupService;
+let trayService: TrayService;
 
 // Configure logging - always log to file
 log.transports.console.level = 'info';
@@ -97,6 +99,7 @@ app.whenReady().then(async () => {
     // Initialize services
     backendService = new BackendService();
     windowService = new WindowService();
+    trayService = new TrayService(windowService);
     updateService = new UpdateService(windowService);
     setupService = new SetupService();
 
@@ -118,6 +121,10 @@ app.whenReady().then(async () => {
       // Set the actual frontend port before creating the window
       windowService.setFrontendPort(backendService.getFrontendPort());
       windowService.createMainWindow();
+
+      // Create tray icon
+      trayService.createTray();
+      trayService.setBackendPort(backendService.getBackendPort());
 
       // Run optional AI features setup after window is created (non-blocking)
       // This runs in the background and won't prevent the app from starting
@@ -154,15 +161,29 @@ app.whenReady().then(async () => {
   }
 });
 
-// Quit when all windows are closed, except on macOS
+// Don't quit when all windows are closed - keep running in tray
+// The app will only quit when user selects "Quit" from the tray menu
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Keep the app running in the tray
+  log.info('All windows closed, app continues running in tray');
 });
 
 // Cleanup before quitting
 app.on('before-quit', () => {
   log.info('Application is quitting...');
+
+  // Set the quitting flag to allow windows to close
+  if (windowService) {
+    windowService.setQuitting(true);
+  }
+
+  // Shutdown backend service
   if (backendService) {
     backendService.shutdown();
+  }
+
+  // Destroy tray icon
+  if (trayService) {
+    trayService.destroy();
   }
 });

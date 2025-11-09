@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Save for Later - Clippy</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 2em;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .input-section {
+      background: white;
+      border-radius: 15px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 30px;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+    }
+
+    input[type="text"],
+    input[type="url"] {
+      width: 100%;
+      padding: 15px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+
+    input[type="text"]:focus,
+    input[type="url"]:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .status-message {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      font-weight: 500;
+      display: none;
+    }
+
+    .status-message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .status-message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status-message.show {
+      display: block;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .links-section {
+      background: white;
+      border-radius: 15px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .links-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .links-header h2 {
+      font-size: 1.5em;
+      color: #333;
+    }
+
+    .count-badge {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.9em;
+      font-weight: 600;
+    }
+
+    .link-item {
+      background: #f8f9fa;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: transform 0.2s;
+    }
+
+    .link-item:hover {
+      transform: translateX(5px);
+    }
+
+    .link-info {
+      flex: 1;
+      margin-right: 10px;
+    }
+
+    .link-title {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 5px;
+      word-break: break-word;
+    }
+
+    .link-url {
+      font-size: 0.85em;
+      color: #666;
+      word-break: break-all;
+    }
+
+    .link-status {
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 0.85em;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .status-pending { background: #fff3cd; color: #856404; }
+    .status-downloading { background: #cce5ff; color: #004085; }
+    .status-completed { background: #d4edda; color: #155724; }
+    .status-failed { background: #f8d7da; color: #721c24; }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+    }
+
+    .empty-state-icon {
+      font-size: 3em;
+      margin-bottom: 10px;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 30px;
+      height: 30px;
+      border: 3px solid rgba(102, 126, 234, 0.3);
+      border-radius: 50%;
+      border-top-color: #667eea;
+      animation: spin 1s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .delete-btn {
+      background: #dc3545;
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 0.9em;
+      margin-left: 10px;
+      transition: background 0.2s;
+    }
+
+    .delete-btn:hover {
+      background: #c82333;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 15px;
+      }
+
+      h1 {
+        font-size: 1.5em;
+      }
+
+      .link-item {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .link-info {
+        margin-bottom: 10px;
+        margin-right: 0;
+      }
+
+      .link-actions {
+        display: flex;
+        gap: 10px;
+        width: 100%;
+      }
+
+      .delete-btn {
+        flex: 1;
+        margin-left: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📎 Save for Later</h1>
+
+    <div class="input-section">
+      <form id="addLinkForm">
+        <div class="form-group">
+          <label for="url">Video/Page URL</label>
+          <input
+            type="url"
+            id="url"
+            name="url"
+            placeholder="https://..."
+            required
+            autocomplete="off"
+          >
+        </div>
+        <div class="form-group">
+          <label for="title">Title (optional)</label>
+          <input
+            type="text"
+            id="title"
+            name="title"
+            placeholder="Add a custom title..."
+            autocomplete="off"
+          >
+        </div>
+        <button type="submit" class="btn" id="submitBtn">
+          Save Link
+        </button>
+        <div id="statusMessage" class="status-message"></div>
+      </form>
+    </div>
+
+    <div class="links-section">
+      <div class="links-header">
+        <h2>Saved Links</h2>
+        <span class="count-badge" id="countBadge">0</span>
+      </div>
+      <div id="linksList" class="loading">
+        <div class="spinner"></div>
+        <div>Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const API_BASE = '/api/saved-links';
+    const socket = io();
+
+    // DOM elements
+    const form = document.getElementById('addLinkForm');
+    const urlInput = document.getElementById('url');
+    const titleInput = document.getElementById('title');
+    const submitBtn = document.getElementById('submitBtn');
+    const statusMessage = document.getElementById('statusMessage');
+    const linksList = document.getElementById('linksList');
+    const countBadge = document.getElementById('countBadge');
+
+    // Load links on page load
+    loadLinks();
+
+    // Form submission
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const url = urlInput.value.trim();
+      const title = titleInput.value.trim();
+
+      if (!url) return;
+
+      try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+
+        const response = await fetch(API_BASE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, title: title || undefined })
+        });
+
+        if (response.ok) {
+          showStatus('Link saved! Download starting...', 'success');
+          urlInput.value = '';
+          titleInput.value = '';
+          loadLinks();
+        } else {
+          const error = await response.json();
+          showStatus(error.message || 'Failed to save link', 'error');
+        }
+      } catch (error) {
+        showStatus('Network error. Please try again.', 'error');
+        console.error('Error:', error);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Link';
+      }
+    });
+
+    // Load links from API
+    async function loadLinks() {
+      try {
+        const response = await fetch(API_BASE);
+        const links = await response.json();
+        renderLinks(links);
+        updateCount(links.length);
+      } catch (error) {
+        linksList.innerHTML = '<div class="error">Failed to load links</div>';
+        console.error('Error loading links:', error);
+      }
+    }
+
+    // Render links list
+    function renderLinks(links) {
+      if (links.length === 0) {
+        linksList.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📭</div>
+            <div>No saved links yet</div>
+          </div>
+        `;
+        return;
+      }
+
+      linksList.innerHTML = links.map(link => `
+        <div class="link-item" data-id="${link.id}">
+          <div class="link-info">
+            <div class="link-title">${escapeHtml(link.title || link.url)}</div>
+            <div class="link-url">${escapeHtml(link.url)}</div>
+          </div>
+          <div class="link-actions">
+            <span class="link-status status-${link.status}">${link.status}</span>
+            <button class="delete-btn" onclick="deleteLink('${link.id}')">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Delete link
+    async function deleteLink(id) {
+      if (!confirm('Delete this saved link?')) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
+        if (response.ok) {
+          loadLinks();
+        }
+      } catch (error) {
+        console.error('Error deleting link:', error);
+      }
+    }
+
+    // Update count badge
+    function updateCount(count) {
+      countBadge.textContent = count;
+    }
+
+    // Show status message
+    function showStatus(message, type) {
+      statusMessage.textContent = message;
+      statusMessage.className = `status-message ${type} show`;
+      setTimeout(() => {
+        statusMessage.classList.remove('show');
+      }, 5000);
+    }
+
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // WebSocket listeners for real-time updates
+    socket.on('saved-link-added', (link) => {
+      loadLinks();
+    });
+
+    socket.on('saved-link-updated', (link) => {
+      loadLinks();
+    });
+
+    socket.on('saved-link-deleted', ({ id }) => {
+      loadLinks();
+    });
+
+    // Expose deleteLink to global scope
+    window.deleteLink = deleteLink;
+  </script>
+</body>
+</html>

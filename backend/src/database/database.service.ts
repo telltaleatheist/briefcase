@@ -199,6 +199,23 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
+      -- Saved links: Links saved from mobile/web for later processing
+      CREATE TABLE IF NOT EXISTS saved_links (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL UNIQUE,
+        title TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        date_added TEXT NOT NULL,
+        date_completed TEXT,
+        download_path TEXT,
+        thumbnail_path TEXT,
+        video_id TEXT,
+        error_message TEXT,
+        metadata TEXT,
+        CHECK (status IN ('pending', 'downloading', 'completed', 'failed')),
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
       CREATE INDEX IF NOT EXISTS idx_videos_hash ON videos(file_hash);
@@ -208,6 +225,9 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
       CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
       CREATE INDEX IF NOT EXISTS idx_custom_markers_video ON custom_markers(video_id);
+      CREATE INDEX IF NOT EXISTS idx_saved_links_status ON saved_links(status);
+      CREATE INDEX IF NOT EXISTS idx_saved_links_date_added ON saved_links(date_added);
+      CREATE INDEX IF NOT EXISTS idx_saved_links_url ON saved_links(url);
 
       -- Full-text search tables (using regular tables since sql.js doesn't include FTS5)
       CREATE TABLE IF NOT EXISTS transcripts_fts (
@@ -1226,6 +1246,208 @@ export class DatabaseService {
       withAnalyses,
       totalTags,
     };
+  }
+
+  // ============================================================================
+  // SAVED LINKS OPERATIONS
+  // ============================================================================
+
+  /**
+   * Insert a new saved link
+   */
+  insertSavedLink(savedLink: {
+    id: string;
+    url: string;
+    title?: string;
+    status?: string;
+    metadata?: any;
+  }) {
+    const db = this.ensureInitialized();
+    const now = new Date().toISOString();
+    const metadataJson = savedLink.metadata ? JSON.stringify(savedLink.metadata) : null;
+
+    db.run(
+      `INSERT INTO saved_links (
+        id, url, title, status, date_added, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        savedLink.id,
+        savedLink.url,
+        savedLink.title || null,
+        savedLink.status || 'pending',
+        now,
+        metadataJson,
+      ]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Find saved link by ID
+   */
+  findSavedLinkById(id: string) {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT * FROM saved_links WHERE id = ?');
+    stmt.bind([id]);
+
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+
+    // Parse metadata JSON if present
+    if (result && result.metadata) {
+      try {
+        result.metadata = JSON.parse(result.metadata as string);
+      } catch (e) {
+        this.logger.warn(`Failed to parse metadata for saved link ${id}`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Find saved link by URL
+   */
+  findSavedLinkByUrl(url: string) {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT * FROM saved_links WHERE url = ?');
+    stmt.bind([url]);
+
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+
+    // Parse metadata JSON if present
+    if (result && result.metadata) {
+      try {
+        result.metadata = JSON.parse(result.metadata as string);
+      } catch (e) {
+        this.logger.warn(`Failed to parse metadata for saved link with url ${url}`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all saved links
+   */
+  getAllSavedLinks(status?: string): any[] {
+    const db = this.ensureInitialized();
+    let query = 'SELECT * FROM saved_links';
+    const params: any[] = [];
+
+    if (status) {
+      query += ' WHERE status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY date_added DESC';
+
+    const stmt = db.prepare(query);
+    if (params.length > 0) {
+      stmt.bind(params);
+    }
+
+    const results: any[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      // Parse metadata JSON if present
+      if (row.metadata) {
+        try {
+          row.metadata = JSON.parse(row.metadata as string);
+        } catch (e) {
+          this.logger.warn(`Failed to parse metadata for saved link ${row.id}`);
+        }
+      }
+      results.push(row);
+    }
+    stmt.free();
+
+    return results;
+  }
+
+  /**
+   * Update saved link status
+   */
+  updateSavedLinkStatus(
+    id: string,
+    status: string,
+    errorMessage?: string,
+    downloadPath?: string,
+    thumbnailPath?: string,
+  ) {
+    const db = this.ensureInitialized();
+    const now = new Date().toISOString();
+
+    const dateCompleted = (status === 'completed' || status === 'failed') ? now : null;
+
+    db.run(
+      `UPDATE saved_links
+       SET status = ?,
+           error_message = ?,
+           download_path = ?,
+           thumbnail_path = ?,
+           date_completed = ?
+       WHERE id = ?`,
+      [
+        status,
+        errorMessage || null,
+        downloadPath || null,
+        thumbnailPath || null,
+        dateCompleted,
+        id,
+      ]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Link saved link to a video
+   */
+  linkSavedLinkToVideo(savedLinkId: string, videoId: string) {
+    const db = this.ensureInitialized();
+
+    db.run(
+      `UPDATE saved_links SET video_id = ? WHERE id = ?`,
+      [videoId, savedLinkId]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Delete saved link by ID
+   */
+  deleteSavedLink(id: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM saved_links WHERE id = ?', [id]);
+    this.saveDatabase();
+  }
+
+  /**
+   * Count saved links by status
+   */
+  countSavedLinksByStatus(status?: string): number {
+    const db = this.ensureInitialized();
+    let query = 'SELECT COUNT(*) as count FROM saved_links';
+    const params: any[] = [];
+
+    if (status) {
+      query += ' WHERE status = ?';
+      params.push(status);
+    }
+
+    const stmt = db.prepare(query);
+    if (params.length > 0) {
+      stmt.bind(params);
+    }
+
+    const result = stmt.step() ? stmt.getAsObject() : { count: 0 };
+    stmt.free();
+
+    return Number(result.count) || 0;
   }
 
   /**

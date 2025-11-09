@@ -1,0 +1,92 @@
+<div class="saved-links-container">
+  <div class="header">
+    <h2>Saved for Later</h2>
+    <div class="stats">
+      <mat-chip class="stat-chip" [class.active]="!filterStatus" (click)="filterByStatus(undefined)">
+        All ({{ savedLinks.length }})
+      </mat-chip>
+      <mat-chip class="stat-chip" [class.active]="filterStatus === 'pending'" (click)="filterByStatus('pending')">
+        Pending ({{ pendingCount }})
+      </mat-chip>
+      <mat-chip class="stat-chip" [class.active]="filterStatus === 'downloading'" (click)="filterByStatus('downloading')">
+        Downloading ({{ downloadingCount }})
+      </mat-chip>
+      <mat-chip class="stat-chip" [class.active]="filterStatus === 'completed'" (click)="filterByStatus('completed')">
+        Completed ({{ completedCount }})
+      </mat-chip>
+      <mat-chip class="stat-chip" [class.active]="filterStatus === 'failed'" (click)="filterByStatus('failed')">
+        Failed ({{ failedCount }})
+      </mat-chip>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div *ngIf="isLoading" class="loading-state">
+    <mat-spinner diameter="50"></mat-spinner>
+    <p>Loading saved links...</p>
+  </div>
+
+  <!-- Empty State -->
+  <div *ngIf="!isLoading && savedLinks.length === 0" class="empty-state">
+    <mat-icon class="empty-icon">link_off</mat-icon>
+    <h3>No saved links</h3>
+    <p>Use the web interface on your phone to save links while you're out!</p>
+    <p class="hint">Visit: <strong>http://owens-mac-studio.local:3000/saved</strong></p>
+  </div>
+
+  <!-- Links List -->
+  <div *ngIf="!isLoading && savedLinks.length > 0" class="links-grid">
+    <mat-card *ngFor="let link of savedLinks" class="link-card" [class]="'status-' + link.status">
+      <mat-card-header>
+        <mat-icon [matTooltip]="link.status" class="status-icon">
+          {{ getStatusIcon(link.status) }}
+        </mat-icon>
+        <mat-card-title>{{ link.title || 'Untitled' }}</mat-card-title>
+        <mat-card-subtitle>{{ formatDate(link.date_added) }}</mat-card-subtitle>
+      </mat-card-header>
+
+      <mat-card-content>
+        <div class="url-container">
+          <mat-icon>link</mat-icon>
+          <span class="url">{{ link.url }}</span>
+        </div>
+
+        <div *ngIf="link.error_message" class="error-message">
+          <mat-icon>error</mat-icon>
+          <span>{{ link.error_message }}</span>
+        </div>
+
+        <div *ngIf="link.status === 'completed' && link.download_path" class="success-message">
+          <mat-icon>check_circle</mat-icon>
+          <span>Downloaded successfully</span>
+        </div>
+      </mat-card-content>
+
+      <mat-card-actions>
+        <button mat-button (click)="openUrl(link, $event)" matTooltip="Open URL in browser">
+          <mat-icon>open_in_new</mat-icon>
+          Open URL
+        </button>
+
+        <button
+          *ngIf="link.status === 'failed'"
+          mat-button
+          color="primary"
+          (click)="retryLink(link, $event)"
+          matTooltip="Retry download">
+          <mat-icon>refresh</mat-icon>
+          Retry
+        </button>
+
+        <button
+          mat-button
+          color="warn"
+          (click)="deleteLink(link, $event)"
+          matTooltip="Delete this saved link">
+          <mat-icon>delete</mat-icon>
+          Delete
+        </button>
+      </mat-card-actions>
+    </mat-card>
+  </div>
+</div>

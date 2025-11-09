@@ -64,8 +64,11 @@ async function bootstrap() {
     });
 
     app.useWebSocketAdapter(new ExtendedIoAdapter(app));
-    
-    app.setGlobalPrefix(environment.apiPrefix);
+
+    // Set global prefix but exclude certain routes
+    app.setGlobalPrefix(environment.apiPrefix, {
+      exclude: ['saved'] // Exclude the web interface route from the API prefix
+    });
 
     // Global validation pipe
     app.useGlobalPipes(

@@ -12,6 +12,7 @@ import { ServerConfig } from '../config/server-config';
 export class WindowService {
   private mainWindow: BrowserWindow | null = null;
   private frontendPort: number = 8080;
+  private isQuitting: boolean = false;
 
   /**
    * Set the frontend port to use
@@ -51,7 +52,25 @@ export class WindowService {
     log.info(`Loading frontend from: ${frontendUrl}`);
     this.mainWindow.loadURL(frontendUrl);
 
-    // Window close handler
+    // Intercept window close event to hide instead of quit
+    this.mainWindow.on('close', (event) => {
+      // If we're actually quitting, allow the window to close
+      if (this.isQuitting) {
+        return;
+      }
+
+      // Otherwise, prevent the window from closing
+      event.preventDefault();
+
+      // Hide the window instead
+      if (this.mainWindow) {
+        this.mainWindow.hide();
+      }
+
+      log.info('Window hidden to tray');
+    });
+
+    // Window closed handler (if actually destroyed)
     this.mainWindow.on('closed', () => {
       this.mainWindow = null;
     });
@@ -178,6 +197,13 @@ export class WindowService {
    */
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
+  }
+
+  /**
+   * Set the quitting flag to allow the app to actually quit
+   */
+  setQuitting(quitting: boolean): void {
+    this.isQuitting = quitting;
   }
   
   /**
