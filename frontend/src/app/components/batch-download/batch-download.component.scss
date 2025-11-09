@@ -46,6 +46,8 @@
     }
 
     .library-selector {
+      margin-top: 8px; // Add spacing between header and library dropdown
+
       .library-dropdown {
         min-width: 280px;
 

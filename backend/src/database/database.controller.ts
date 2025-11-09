@@ -596,13 +596,16 @@ export class DatabaseController {
 
   /**
    * PATCH /api/database/videos/:id/filename
-   * Update video filename/title
+   * Update video filename/title (renames both database record AND physical file)
    */
   @Patch('videos/:id/filename')
   async updateVideoFilename(
     @Param('id') videoId: string,
     @Body() body: { filename: string }
   ) {
+    const fs = require('fs').promises;
+    const path = require('path');
+
     try {
       // Verify video exists
       const video = this.databaseService.getVideoById(videoId);
@@ -621,14 +624,54 @@ export class DatabaseController {
         };
       }
 
-      // Update filename
-      this.databaseService.updateVideoFilename(videoId, body.filename.trim());
+      const newFilename = body.filename.trim();
+      const oldPath = video.current_path as string;
 
-      this.logger.log(`Updated filename for video ${videoId}: ${body.filename}`);
+      // Skip if filename hasn't changed
+      if (video.filename === newFilename) {
+        return {
+          success: true,
+          message: 'Filename unchanged'
+        };
+      }
+
+      // Get the directory path and construct new path
+      const directory = path.dirname(oldPath);
+      const newPath = path.join(directory, newFilename);
+
+      // Check if new path already exists
+      try {
+        await fs.access(newPath);
+        return {
+          success: false,
+          error: 'A file with this name already exists in the library'
+        };
+      } catch {
+        // File doesn't exist, which is what we want
+      }
+
+      // Rename the physical file
+      try {
+        await fs.rename(oldPath, newPath);
+        this.logger.log(`Renamed physical file: ${oldPath} -> ${newPath}`);
+      } catch (error: any) {
+        this.logger.error(`Failed to rename physical file: ${error.message}`);
+        return {
+          success: false,
+          error: `Failed to rename file: ${error.message}`
+        };
+      }
+
+      // Update database with new filename and path
+      this.databaseService.updateVideoFilename(videoId, newFilename);
+      this.databaseService.updateVideoPath(videoId, newPath);
+
+      this.logger.log(`Updated filename for video ${videoId}: ${newFilename}`);
 
       return {
         success: true,
-        message: 'Video filename updated successfully'
+        message: 'Video filename updated successfully',
+        newPath: newPath
       };
     } catch (error: any) {
       this.logger.error(`Failed to update video filename: ${error.message}`);

@@ -131,6 +131,10 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsBoolean()
   shouldImport?: boolean = false;  // Auto-import to library after download (only for library downloads)
+
+  @IsOptional()
+  @IsString()
+  libraryId?: string;  // Library ID for database import
 }
 
 export class DownloadProgressDto {

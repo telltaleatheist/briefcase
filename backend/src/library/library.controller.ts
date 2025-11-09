@@ -22,6 +22,8 @@ import { Logger } from '@nestjs/common';
 import { RelinkService } from './relink.service';
 import { ClipExtractorService } from './clip-extractor.service';
 import { SharedConfigService } from '../config/shared-config.service';
+import { FileScannerService } from '../database/file-scanner.service';
+import { LibraryManagerService } from '../database/library-manager.service';
 import {
   CreateLibraryAnalysisRequest,
   UpdateLibraryAnalysisRequest,
@@ -39,8 +41,26 @@ export class LibraryController {
     private libraryService: LibraryService,
     private relinkService: RelinkService,
     private clipExtractor: ClipExtractorService,
-    private configService: SharedConfigService
+    private configService: SharedConfigService,
+    private fileScannerService: FileScannerService,
+    private libraryManagerService: LibraryManagerService
   ) {}
+
+  /**
+   * Calculate the Sunday of the current week for a given date
+   * Format: YYYY-MM-DD (e.g., "2025-09-02")
+   */
+  private getWeekStartDate(date: Date = new Date()): string {
+    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const sundayDate = new Date(date);
+    sundayDate.setDate(date.getDate() - dayOfWeek); // Subtract days to get to Sunday
+
+    const year = sundayDate.getFullYear();
+    const month = String(sundayDate.getMonth() + 1).padStart(2, '0');
+    const day = String(sundayDate.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
 
   /**
    * Get all analyses (optionally filtered by archived status)
@@ -816,16 +836,31 @@ export class LibraryController {
 
       // Determine output path
       let outputDir: string;
+      let weekFolder: string | null = null;
 
       if (body.customDirectory) {
         outputDir = body.customDirectory.replace(/[\\/]+$/, '');
       } else {
-        // Use default [library folder]/clips
-        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
-        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, '');
-        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
-        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
-        outputDir = path.join(clippyDir, 'clips');
+        // Use active library's clips folder with weekly organization
+        const activeLibrary = this.libraryManagerService.getActiveLibrary();
+        if (!activeLibrary) {
+          throw new HttpException(
+            'No active library. Please create or select a library first.',
+            HttpStatus.BAD_REQUEST
+          );
+        }
+
+        // Create weekly folder based on current date
+        weekFolder = this.getWeekStartDate(new Date());
+        const weekFolderPath = path.join(activeLibrary.clipsFolderPath, weekFolder);
+
+        // Ensure weekly folder exists
+        if (!fs.existsSync(weekFolderPath)) {
+          fs.mkdirSync(weekFolderPath, { recursive: true });
+          this.logger.log(`Created weekly folder: ${weekFolderPath}`);
+        }
+
+        outputDir = weekFolderPath;
       }
 
       const outputPath = path.join(outputDir, clipFilename);
@@ -848,6 +883,18 @@ export class LibraryController {
           extractionResult.error || 'Failed to extract clip',
           HttpStatus.INTERNAL_SERVER_ERROR
         );
+      }
+
+      // Automatically import the clip to the library
+      try {
+        const importResult = await this.fileScannerService.importVideos([outputPath]);
+        this.logger.log(`Imported clip to library: ${importResult.imported.length > 0 ? 'success' : 'failed'}`);
+        if (importResult.errors.length > 0) {
+          this.logger.warn(`Import warnings: ${importResult.errors.join(', ')}`);
+        }
+      } catch (importError) {
+        this.logger.error(`Failed to import clip to library: ${(importError as Error).message}`);
+        // Don't fail the whole request if import fails
       }
 
       return {

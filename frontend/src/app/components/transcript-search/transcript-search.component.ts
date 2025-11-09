@@ -6,6 +6,8 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 
@@ -14,6 +16,14 @@ export interface TranscriptMatch {
   text: string;
   context: string;
   timestamp?: number; // Timestamp in seconds if we can parse it from SRT
+}
+
+export interface SavedSearch {
+  id: string;
+  query: string;
+  useWildcards: boolean;
+  useBooleanLogic: boolean;
+  createdAt: string;
 }
 
 @Component({
@@ -26,7 +36,9 @@ export interface TranscriptMatch {
     MatButtonModule,
     MatInputModule,
     MatFormFieldModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatExpansionModule,
+    MatTooltipModule
   ],
   templateUrl: './transcript-search.component.html',
   styleUrls: ['./transcript-search.component.scss']
@@ -44,6 +56,10 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   useWildcards = false;
   useBooleanLogic = false;
 
+  savedSearches: SavedSearch[] = [];
+  savedSearchesExpanded = false;
+  private readonly SAVED_SEARCHES_KEY = 'transcript_saved_searches';
+
   private searchSubject = new Subject<string>();
 
   ngOnInit() {
@@ -56,6 +72,9 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
       .subscribe(query => {
         this.performSearch(query);
       });
+
+    // Load saved searches from localStorage
+    this.loadSavedSearches();
   }
 
   ngOnDestroy() {
@@ -320,5 +339,116 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * Load saved searches from localStorage
+   */
+  private loadSavedSearches(): void {
+    try {
+      const saved = localStorage.getItem(this.SAVED_SEARCHES_KEY);
+      if (saved) {
+        this.savedSearches = JSON.parse(saved);
+        console.log('Loaded saved searches:', this.savedSearches);
+      }
+    } catch (error) {
+      console.error('Failed to load saved searches:', error);
+      this.savedSearches = [];
+    }
+  }
+
+  /**
+   * Save searches to localStorage
+   */
+  private saveSavedSearches(): void {
+    try {
+      localStorage.setItem(this.SAVED_SEARCHES_KEY, JSON.stringify(this.savedSearches));
+      console.log('Saved searches to localStorage');
+    } catch (error) {
+      console.error('Failed to save searches:', error);
+    }
+  }
+
+  /**
+   * Save current search query
+   */
+  saveCurrentSearch(): void {
+    if (!this.searchQuery || !this.searchQuery.trim()) {
+      return;
+    }
+
+    // Check if this search already exists
+    const existing = this.savedSearches.find(
+      s => s.query === this.searchQuery &&
+           s.useWildcards === this.useWildcards &&
+           s.useBooleanLogic === this.useBooleanLogic
+    );
+
+    if (existing) {
+      console.log('Search already saved');
+      return;
+    }
+
+    // Add new saved search
+    const newSearch: SavedSearch = {
+      id: Date.now().toString(),
+      query: this.searchQuery,
+      useWildcards: this.useWildcards,
+      useBooleanLogic: this.useBooleanLogic,
+      createdAt: new Date().toISOString()
+    };
+
+    this.savedSearches.unshift(newSearch); // Add to beginning
+    this.saveSavedSearches();
+    console.log('Saved search:', newSearch);
+  }
+
+  /**
+   * Load a saved search
+   */
+  loadSavedSearch(search: SavedSearch): void {
+    this.searchQuery = search.query;
+    this.useWildcards = search.useWildcards;
+    this.useBooleanLogic = search.useBooleanLogic;
+    this.onSearchInput();
+  }
+
+  /**
+   * Delete a saved search
+   */
+  deleteSavedSearch(search: SavedSearch, event: Event): void {
+    event.stopPropagation(); // Prevent accordion toggle
+    this.savedSearches = this.savedSearches.filter(s => s.id !== search.id);
+    this.saveSavedSearches();
+    console.log('Deleted saved search:', search);
+  }
+
+  /**
+   * Get tooltip text for a saved search
+   */
+  getSavedSearchTooltip(search: SavedSearch): string {
+    let tooltip = `Query: ${search.query}`;
+    if (search.useWildcards) {
+      tooltip += '\nMode: Wildcards';
+    } else if (search.useBooleanLogic) {
+      tooltip += '\nMode: Boolean Logic';
+    } else {
+      tooltip += '\nMode: Simple';
+    }
+    tooltip += `\nSaved: ${new Date(search.createdAt).toLocaleDateString()}`;
+    return tooltip;
+  }
+
+  /**
+   * Get display label for a saved search
+   */
+  getSavedSearchLabel(search: SavedSearch): string {
+    if (search.useWildcards) {
+      return '🔍 ' + search.query;
+    } else if (search.useBooleanLogic) {
+      return '🔢 ' + search.query;
+    } else {
+      return search.query;
+    }
   }
 }

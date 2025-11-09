@@ -737,4 +737,32 @@ export class DatabaseLibraryService {
       return { success: false, error: 'Failed to delete tag' };
     }
   }
+
+  /**
+   * Update video filename (renames both database record AND physical file)
+   */
+  async updateVideoFilename(
+    videoId: string,
+    newFilename: string
+  ): Promise<{ success: boolean; message?: string; error?: string; newPath?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const result = await firstValueFrom(
+        this.http.patch<{ success: boolean; message?: string; error?: string; newPath?: string }>(
+          `${baseUrl}/videos/${videoId}/filename`,
+          { filename: newFilename }
+        )
+      );
+
+      // Clear cache if successful since data changed
+      if (result.success) {
+        this.clearCache();
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error('[DatabaseLibraryService] Error updating filename:', error);
+      return { success: false, error: error.error?.error || 'Failed to update filename' };
+    }
+  }
 }

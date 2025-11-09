@@ -89,6 +89,7 @@
   flex-direction: column;
   z-index: 1000;
   animation: slideDown 0.2s ease-out;
+  overflow: hidden;
 }
 
 @keyframes slideDown {
@@ -178,7 +179,9 @@
 
 .jobs-list {
   overflow-y: auto;
-  max-height: 460px;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -671,6 +674,7 @@
 // Job Item Wrappers and Pending Job Styles
 .job-item-wrapper {
   width: 100%;
+  overflow: hidden;
 }
 
 .job-item {
@@ -783,12 +787,14 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+    overflow: hidden;
 
     .job-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      overflow: hidden;
     }
 
     .job-name {
@@ -798,6 +804,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     .job-status-text {
@@ -807,6 +814,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     .error-message {
@@ -885,38 +893,38 @@
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 6px 6px;
-  padding: 12px;
+  padding: 8px;
   animation: expandPanel 0.2s ease-out;
 
   .settings-content {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
   }
 
   .setting-group {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
   }
 
   .setting-label {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 12px;
+    gap: 4px;
+    font-size: 10px;
     font-weight: 500;
     color: var(--text-secondary);
 
     mat-icon {
-      font-size: 14px;
-      width: 14px;
-      height: 14px;
+      font-size: 12px;
+      width: 12px;
+      height: 12px;
       color: var(--text-tertiary);
     }
 
     .optional-text {
-      font-size: 11px;
+      font-size: 9px;
       color: var(--text-muted);
       font-style: italic;
       margin-left: 4px;
@@ -925,27 +933,27 @@
 
   .mode-toggle-compact {
     display: flex;
-    gap: 6px;
+    gap: 4px;
 
     .mode-btn {
       flex: 1;
-      padding: 8px;
+      padding: 6px;
       background: var(--bg-card);
       border: 1px solid var(--border-color);
-      border-radius: 4px;
+      border-radius: 3px;
       cursor: pointer;
       transition: all 0.2s ease;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 4px;
       color: var(--text-secondary);
-      font-size: 12px;
+      font-size: 10px;
 
       mat-icon {
-        font-size: 16px;
-        width: 16px;
-        height: 16px;
+        font-size: 14px;
+        width: 14px;
+        height: 14px;
       }
 
       &:hover {
@@ -965,12 +973,12 @@
   .compact-input,
   .compact-textarea {
     width: 100%;
-    padding: 8px 12px;
+    padding: 6px 10px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 3px;
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 11px;
     font-family: inherit;
     transition: all 0.2s ease;
     resize: vertical;
@@ -987,19 +995,19 @@
   }
 
   .compact-textarea {
-    min-height: 60px;
-    line-height: 1.4;
+    min-height: 50px;
+    line-height: 1.3;
   }
 
   .path-display {
-    padding: 8px 12px;
+    padding: 6px 10px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 11px;
+    border-radius: 3px;
+    font-size: 10px;
     color: var(--text-secondary);
     word-break: break-all;
-    line-height: 1.4;
+    line-height: 1.3;
   }
 }
 
@@ -1020,53 +1028,53 @@
   border: 1px solid var(--border-color);
   border-top: none;
   border-radius: 0 0 6px 6px;
-  padding: 12px;
+  padding: 8px;
   animation: expandPanel 0.2s ease-out;
 
   .details-content {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
   }
 
   .detail-group {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
   }
 
   .detail-label {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 11px;
+    gap: 4px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
 
     mat-icon {
-      font-size: 14px;
-      width: 14px;
-      height: 14px;
+      font-size: 12px;
+      width: 12px;
+      height: 12px;
       color: var(--primary-orange);
     }
   }
 
   .detail-value {
-    padding: 6px 10px;
+    padding: 4px 8px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: 3px;
+    font-size: 11px;
     color: var(--text-primary);
     font-weight: 500;
 
     &.path-display {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-secondary);
       word-break: break-all;
-      line-height: 1.4;
+      line-height: 1.3;
     }
   }
 }

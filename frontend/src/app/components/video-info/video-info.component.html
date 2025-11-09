@@ -296,6 +296,10 @@
           Transcript
         </h2>
         <div class="transcript-actions">
+          <button mat-stroked-button (click)="toggleSearchPanel()" [class.active]="isSearchPanelOpen">
+            <mat-icon>search</mat-icon>
+            {{ isSearchPanelOpen ? 'Close Search' : 'Search' }}
+          </button>
           <button mat-stroked-button (click)="copyTranscript(false)">
             <mat-icon>content_copy</mat-icon>
             Copy (No Timestamps)
@@ -321,14 +325,47 @@
         </mat-chip>
       </mat-chip-set>
 
+      <!-- Transcript Content with Search Panel -->
       <mat-card class="transcript-card">
-        <div class="transcript-content">
+        <div class="transcript-content" #transcriptContainer>
           <div class="transcript-entry" *ngFor="let entry of parsedTranscript">
             <span class="timestamp-badge">{{ entry.timestamp }}</span>
             <p class="transcript-text">{{ entry.text }}</p>
           </div>
         </div>
       </mat-card>
+    </div>
+  </div>
+
+  <!-- Floating Search Panel (outside of main content, position: fixed) -->
+  <div
+    class="floating-search-panel"
+    *ngIf="isSearchPanelOpen"
+    [style.left.px]="searchPanelX"
+    [style.top.px]="searchPanelY"
+    [style.width.px]="searchPanelWidth"
+    [class.dragging]="isDraggingSearchPanel"
+    [class.resizing]="isResizingSearchPanel">
+
+    <!-- Drag Handle -->
+    <div class="search-panel-header" (mousedown)="startDragSearchPanel($event)">
+      <mat-icon class="drag-icon">drag_indicator</mat-icon>
+      <span class="panel-title">Search Transcript</span>
+      <button mat-icon-button class="close-panel-btn" (click)="isSearchPanelOpen = false" (mousedown)="$event.stopPropagation()">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+
+    <!-- Resize Handle -->
+    <div class="search-panel-resize-handle" (mousedown)="startResizeSearchPanel($event)"></div>
+
+    <!-- Search Content -->
+    <div class="search-panel-content">
+      <app-transcript-search
+        [transcriptText]="transcript ? transcript.srt_format : null"
+        [transcriptExists]="!!transcript"
+        (seekToTime)="onSeekToTimestamp($event)">
+      </app-transcript-search>
     </div>
   </div>
 </div>

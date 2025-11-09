@@ -380,15 +380,6 @@
               <div class="detail-value">{{ job.stage || 'Processing' }}</div>
             </div>
 
-            <!-- Progress -->
-            <div class="detail-group" *ngIf="job.progress !== undefined">
-              <label class="detail-label">
-                <mat-icon>donut_small</mat-icon>
-                Progress
-              </label>
-              <div class="detail-value">{{ job.progress }}%</div>
-            </div>
-
             <!-- Input Source -->
             <div class="detail-group">
               <label class="detail-label">

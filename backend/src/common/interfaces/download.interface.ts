@@ -69,6 +69,7 @@ export interface DownloadOptions {
   transcribeVideo?: boolean;
   shouldImport?: boolean; // For library downloads
   skipProcessing?: boolean; // Skip processing entirely - just download and mark as completed
+  libraryId?: string; // Library ID for database import
 }
 
 export interface DownloadResult {

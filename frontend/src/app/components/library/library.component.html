@@ -298,12 +298,57 @@
           <mat-icon>movie</mat-icon>
         </div>
 
-        <!-- Content (clickable) - single line -->
-        <div class="card-content" (click)="openVideoPlayer(video)">
-          <span class="video-title">
-            {{ video.filename }}
-            <mat-icon *ngIf="isLongVideo(video)" class="long-video-badge" matTooltip="Long video (> 10 minutes)">schedule</mat-icon>
+        <!-- Content (clickable) - inline editable single line -->
+        <div class="card-content" (click)="onVideoClick(video, $event)">
+          <!-- Date chip (editable on click) -->
+          <mat-chip *ngIf="parseFilename(video.filename).date && !editingVideo[video.id]?.date"
+                    class="date-chip"
+                    (click)="startEditing(video, 'date', $event)">
+            {{ formatDateChip(parseFilename(video.filename).date) }}
+          </mat-chip>
+          <input *ngIf="editingVideo[video.id]?.date"
+                 type="text"
+                 class="date-input"
+                 [(ngModel)]="editedValues[video.id].date"
+                 (keydown)="onEditKeydown(video, $event)"
+                 (blur)="onEditBlur(video, 'date')"
+                 (click)="$event.stopPropagation()"
+                 placeholder="yyyy-mm-dd"
+                 #dateInput>
+
+          <!-- Title (editable on click) -->
+          <span *ngIf="!editingVideo[video.id]?.title" class="video-title-text">
+            {{ parseFilename(video.filename).title }}
           </span>
+          <input *ngIf="editingVideo[video.id]?.title"
+                 type="text"
+                 class="title-input"
+                 [(ngModel)]="editedValues[video.id].title"
+                 (keydown)="onEditKeydown(video, $event)"
+                 (blur)="onEditBlur(video, 'title')"
+                 (click)="$event.stopPropagation()"
+                 placeholder="Video title"
+                 #titleInput>
+
+          <!-- Extension (editable on click) -->
+          <span *ngIf="parseFilename(video.filename).extension && !editingVideo[video.id]?.extension"
+                class="extension-text"
+                (click)="startEditing(video, 'extension', $event)">
+            .{{ parseFilename(video.filename).extension }}
+          </span>
+          <input *ngIf="editingVideo[video.id]?.extension"
+                 type="text"
+                 class="extension-input"
+                 [(ngModel)]="editedValues[video.id].extension"
+                 (keydown)="onEditKeydown(video, $event)"
+                 (blur)="onEditBlur(video, 'extension')"
+                 (click)="$event.stopPropagation()"
+                 placeholder="mp4"
+                 #extensionInput>
+
+          <mat-icon *ngIf="isLongVideo(video)" class="long-video-badge" matTooltip="Long video (> 10 minutes)">schedule</mat-icon>
+
+          <!-- Subtitle (duration info) on the right side -->
           <span class="video-subtitle">
             <span *ngIf="video.date_folder">{{ formatDate(video.date_folder) }}</span>
             <span *ngIf="video.duration_seconds"> • {{ formatDuration(video.duration_seconds) }}</span>

@@ -47,6 +47,7 @@ export interface DownloadOptions {
   transcribeVideo?: boolean;
   analyzeVideo?: boolean;
   shouldImport?: boolean;
+  libraryId?: string; // Library ID for database import
 }
 
 export interface BatchDownloadOptions {

@@ -40,7 +40,50 @@
       <mat-icon>{{useBooleanLogic ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
       <span>Boolean</span>
     </button>
+    <button
+      mat-button
+      class="search-option-btn save-search-btn"
+      [disabled]="!searchQuery"
+      (click)="saveCurrentSearch()"
+      matTooltip="Save current search query">
+      <mat-icon>bookmark_add</mat-icon>
+      <span>Save</span>
+    </button>
   </div>
+
+  <!-- Saved Searches Accordion -->
+  <mat-accordion *ngIf="transcriptExists && savedSearches.length > 0" class="saved-searches-accordion">
+    <mat-expansion-panel [(expanded)]="savedSearchesExpanded" class="saved-searches-panel">
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>bookmarks</mat-icon>
+          <span>Saved Searches ({{ savedSearches.length }})</span>
+        </mat-panel-title>
+      </mat-expansion-panel-header>
+      <div class="saved-searches-list">
+        <div
+          *ngFor="let search of savedSearches"
+          class="saved-search-item"
+          [matTooltip]="getSavedSearchTooltip(search)"
+          matTooltipShowDelay="300"
+          (click)="loadSavedSearch(search)">
+          <div class="saved-search-content">
+            <mat-icon class="saved-search-icon">
+              {{ search.useWildcards ? 'asterisk' : (search.useBooleanLogic ? 'calculate' : 'search') }}
+            </mat-icon>
+            <span class="saved-search-query">{{ search.query }}</span>
+          </div>
+          <button
+            mat-icon-button
+            class="delete-search-btn"
+            (click)="deleteSavedSearch(search, $event)"
+            matTooltip="Delete saved search">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </div>
+      </div>
+    </mat-expansion-panel>
+  </mat-accordion>
 
   <!-- Run Transcription Button (shown when transcript doesn't exist) -->
   <div *ngIf="!transcriptExists" class="no-transcript-container">

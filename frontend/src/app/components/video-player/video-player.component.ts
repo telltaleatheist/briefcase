@@ -9,6 +9,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
+import { MatExpansionModule } from '@angular/material/expansion';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { DatabaseLibraryService } from '../../services/database-library.service';
@@ -28,6 +29,7 @@ import { TranscriptSearchComponent } from '../transcript-search/transcript-searc
     MatTooltipModule,
     MatSnackBarModule,
     MatTabsModule,
+    MatExpansionModule,
     VideoTimelineComponent,
     TranscriptSearchComponent,
   ],
@@ -939,6 +941,57 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.timelineComponent) {
       this.timelineComponent.toggleCategoryFilter(category);
     }
+  }
+
+  /**
+   * Open bulk export dialog with filtered sections
+   */
+  async openBulkExport() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      return;
+    }
+
+    const videoPath = this.data.videoPath || this.data.analysis?.video.currentPath;
+    if (!videoPath) {
+      this.notificationService.toastOnly('error', 'Error', 'No video path available');
+      return;
+    }
+
+    // Get the filtered sections from the database
+    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+    // Filter sections based on active category filters
+    const enabledCategories = new Set(
+      this.categoryFilters
+        .filter(f => f.enabled)
+        .map(f => f.category)
+    );
+
+    const filteredSections = dbSections.filter(section => {
+      const category = section.category?.toLowerCase() || 'other';
+      return enabledCategories.has(category);
+    });
+
+    if (filteredSections.length === 0) {
+      this.notificationService.toastOnly('info', 'No Clips', 'No sections match the current filter');
+      return;
+    }
+
+    // Import and open the BulkExportDialogComponent
+    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
+
+    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: videoId,
+        videoPath: videoPath,
+        sections: filteredSections
+      }
+    });
+
+    await dialogRef.afterClosed().toPromise();
   }
 
   getCategoryColor(category: string): string {

@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -25,10 +25,12 @@ import {
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
+import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 
 interface TranscriptEntry {
   timestamp: string;
   text: string;
+  timestampSeconds?: number;
 }
 
 @Component({
@@ -46,12 +48,15 @@ interface TranscriptEntry {
     MatChipsModule,
     MatInputModule,
     MatFormFieldModule,
-    MatDialogModule
+    MatDialogModule,
+    TranscriptSearchComponent
   ],
   templateUrl: './video-info.component.html',
   styleUrl: './video-info.component.scss'
 })
 export class VideoInfoComponent implements OnInit {
+  @ViewChild('transcriptContainer') transcriptContainer?: ElementRef<HTMLDivElement>;
+
   video: DatabaseVideo | null = null;
   transcript: DatabaseTranscript | null = null;
   analysis: DatabaseAnalysis | null = null;
@@ -66,6 +71,16 @@ export class VideoInfoComponent implements OnInit {
   isAddingTag = false;
   newTagName = '';
   newTagType = 'manual';
+
+  // Search panel state
+  isSearchPanelOpen = false;
+  searchPanelWidth = 400; // default width in pixels
+  minSearchPanelWidth = 300;
+  maxSearchPanelWidth = 600;
+  isResizingSearchPanel = false;
+  isDraggingSearchPanel = false;
+  searchPanelX = 100; // position from left
+  searchPanelY = 100; // position from top
 
   constructor(
     private router: Router,
@@ -416,11 +431,30 @@ export class VideoInfoComponent implements OnInit {
       if (lines.length >= 3) {
         const timestamp = lines[1].split(' --> ')[0].trim();
         const text = lines.slice(2).join(' ').trim();
-        entries.push({ timestamp, text });
+
+        // Parse timestamp to seconds for scrolling
+        const timestampSeconds = this.parseTimestampToSeconds(timestamp);
+
+        entries.push({ timestamp, text, timestampSeconds });
       }
     }
 
     return entries;
+  }
+
+  /**
+   * Parse SRT timestamp (HH:MM:SS,mmm) to seconds
+   */
+  private parseTimestampToSeconds(timestamp: string): number {
+    const match = timestamp.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+    if (!match) return 0;
+
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const seconds = parseInt(match[3], 10);
+    const milliseconds = parseInt(match[4], 10);
+
+    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
   }
 
   /**
@@ -633,5 +667,112 @@ export class VideoInfoComponent implements OnInit {
       'other': '#6b7280'
     };
     return colors[type] || colors['manual'];
+  }
+
+  /**
+   * Toggle search panel open/closed
+   */
+  toggleSearchPanel() {
+    this.isSearchPanelOpen = !this.isSearchPanelOpen;
+  }
+
+  /**
+   * Handle seeking to a timestamp from search results
+   */
+  onSeekToTimestamp(timestampSeconds: number) {
+    if (!this.transcriptContainer) return;
+
+    // Find the transcript entry closest to this timestamp
+    const targetEntry = this.parsedTranscript.find(
+      entry => entry.timestampSeconds !== undefined && entry.timestampSeconds >= timestampSeconds
+    );
+
+    if (!targetEntry) return;
+
+    // Find the DOM element for this transcript entry
+    const container = this.transcriptContainer.nativeElement;
+    const entries = container.querySelectorAll('.transcript-entry');
+    const targetIndex = this.parsedTranscript.indexOf(targetEntry);
+
+    if (targetIndex >= 0 && targetIndex < entries.length) {
+      const targetElement = entries[targetIndex] as HTMLElement;
+
+      // Scroll to the element with smooth behavior
+      targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      // Highlight the element briefly
+      targetElement.classList.add('highlighted');
+      setTimeout(() => {
+        targetElement.classList.remove('highlighted');
+      }, 2000);
+    }
+  }
+
+  /**
+   * Start dragging the search panel to reposition it
+   */
+  startDragSearchPanel(event: MouseEvent) {
+    event.preventDefault();
+    this.isDraggingSearchPanel = true;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startPanelX = this.searchPanelX;
+    const startPanelY = this.searchPanelY;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isDraggingSearchPanel) return;
+
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      // Keep panel within viewport bounds
+      const maxX = window.innerWidth - this.searchPanelWidth - 20;
+      const maxY = window.innerHeight - 200; // approximate panel height
+
+      this.searchPanelX = Math.max(10, Math.min(maxX, startPanelX + deltaX));
+      this.searchPanelY = Math.max(10, Math.min(maxY, startPanelY + deltaY));
+    };
+
+    const onMouseUp = () => {
+      this.isDraggingSearchPanel = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  /**
+   * Start resizing the search panel
+   */
+  startResizeSearchPanel(event: MouseEvent) {
+    event.preventDefault();
+    this.isResizingSearchPanel = true;
+
+    const startX = event.clientX;
+    const startWidth = this.searchPanelWidth;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isResizingSearchPanel) return;
+
+      const delta = startX - e.clientX;
+      const newWidth = Math.max(
+        this.minSearchPanelWidth,
+        Math.min(this.maxSearchPanelWidth, startWidth + delta)
+      );
+
+      this.searchPanelWidth = newWidth;
+    };
+
+    const onMouseUp = () => {
+      this.isResizingSearchPanel = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 }

@@ -115,6 +115,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Virtual scrolling
   itemSize = 44; // Height of each video card (compact single-line design)
 
+  // Inline editing
+  editingVideo: { [videoId: string]: { date: boolean; title: boolean; extension: boolean } } = {};
+  editedValues: { [videoId: string]: { date: string; title: string; extension: string } } = {};
+
   // Drag and drop
   isDragging = false;
   private dragCounter = 0; // Track nested drag events
@@ -1773,5 +1777,211 @@ export class LibraryComponent implements OnInit, OnDestroy {
       console.error('Error importing videos:', error);
       this.notificationService.error('Import Failed', 'Could not open import dialog');
     }
+  }
+
+  /**
+   * Parse filename into date, title, and extension components
+   * Supports formats:
+   * - yyyy-mm-dd filename.ext (full date)
+   * - yyyy-mm-tT filename.ext (trimester: T1, T2, T3)
+   * - yyyy-mm filename.ext (year-month)
+   * - yyyy filename.ext (year only)
+   */
+  parseFilename(filename: string): { date: string; title: string; extension: string } {
+    const lastDotIndex = filename.lastIndexOf('.');
+    const extension = lastDotIndex !== -1 ? filename.substring(lastDotIndex + 1) : '';
+    const nameWithoutExt = lastDotIndex !== -1 ? filename.substring(0, lastDotIndex) : filename;
+
+    // Try to match date patterns at the start (ordered from most specific to least specific)
+
+    // Pattern 1: yyyy-mm-dd (full date)
+    const fullDateMatch = nameWithoutExt.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);
+    if (fullDateMatch) {
+      return {
+        date: fullDateMatch[1],
+        title: fullDateMatch[2],
+        extension: extension
+      };
+    }
+
+    // Pattern 2: yyyy-mm-tT (trimester format, e.g., 2024-11-T2)
+    const trimesterMatch = nameWithoutExt.match(/^(\d{4}-\d{2}-T[123])\s+(.+)$/);
+    if (trimesterMatch) {
+      return {
+        date: trimesterMatch[1],
+        title: trimesterMatch[2],
+        extension: extension
+      };
+    }
+
+    // Pattern 3: yyyy-mm (year-month)
+    const yearMonthMatch = nameWithoutExt.match(/^(\d{4}-\d{2})\s+(.+)$/);
+    if (yearMonthMatch) {
+      return {
+        date: yearMonthMatch[1],
+        title: yearMonthMatch[2],
+        extension: extension
+      };
+    }
+
+    // Pattern 4: yyyy (year only)
+    const yearMatch = nameWithoutExt.match(/^(\d{4})\s+(.+)$/);
+    if (yearMatch) {
+      return {
+        date: yearMatch[1],
+        title: yearMatch[2],
+        extension: extension
+      };
+    }
+
+    // No date pattern found - entire name is the title
+    return {
+      date: '',
+      title: nameWithoutExt,
+      extension: extension
+    };
+  }
+
+  /**
+   * Format date for display in chip
+   */
+  formatDateChip(date: string): string {
+    if (!date) return '';
+
+    // Check if it's a trimester format
+    if (date.match(/^\d{4}-\d{2}-T[123]$/)) {
+      return date; // Display as-is for trimester format
+    }
+
+    // Standard date format - could format differently if needed
+    return date;
+  }
+
+  /**
+   * Start editing a specific field (date, title, or extension)
+   */
+  startEditing(video: DatabaseVideo, field: 'date' | 'title' | 'extension', event: Event) {
+    event.stopPropagation();
+
+    // Initialize editing state for this video if not exists
+    if (!this.editingVideo[video.id]) {
+      this.editingVideo[video.id] = { date: false, title: false, extension: false };
+    }
+
+    // Initialize edited values if not exists
+    if (!this.editedValues[video.id]) {
+      const parsed = this.parseFilename(video.filename);
+      this.editedValues[video.id] = parsed;
+    }
+
+    // Set editing flag
+    this.editingVideo[video.id][field] = true;
+
+    // Auto-focus the input after it renders
+    setTimeout(() => {
+      const inputSelector = field === 'date' ? '.date-input' :
+                           field === 'title' ? '.title-input' :
+                           '.extension-input';
+      const input = document.querySelector(inputSelector) as HTMLInputElement;
+      if (input) {
+        input.focus();
+        input.select(); // Select all text for easy replacement
+      }
+    }, 0);
+  }
+
+  /**
+   * Click handler for video card - now starts editing title instead of opening video player
+   */
+  onVideoClick(video: DatabaseVideo, event: Event) {
+    event.stopPropagation();
+    this.startEditing(video, 'title', event);
+  }
+
+  /**
+   * Save edited filename
+   */
+  async saveFilename(video: DatabaseVideo) {
+    const edited = this.editedValues[video.id];
+    if (!edited) return;
+
+    // Reconstruct filename
+    let newFilename = '';
+    if (edited.date) {
+      newFilename = `${edited.date} ${edited.title}`;
+    } else {
+      newFilename = edited.title;
+    }
+
+    if (edited.extension) {
+      newFilename += `.${edited.extension}`;
+    }
+
+    // Skip if unchanged
+    if (newFilename === video.filename) {
+      this.cancelEditing(video.id);
+      return;
+    }
+
+    try {
+      // Call backend to rename the file
+      await this.databaseLibraryService.updateVideoFilename(video.id, newFilename);
+
+      // Update local copy
+      video.filename = newFilename;
+
+      // Clear editing state
+      this.cancelEditing(video.id);
+
+      this.notificationService.toastOnly('success', 'Renamed', `Video renamed to "${newFilename}"`);
+    } catch (error: any) {
+      console.error('Failed to rename video:', error);
+      this.notificationService.toastOnly('error', 'Rename Failed', error.error?.message || 'Failed to rename video');
+    }
+  }
+
+  /**
+   * Cancel editing
+   */
+  cancelEditing(videoId: string) {
+    if (this.editingVideo[videoId]) {
+      this.editingVideo[videoId] = { date: false, title: false, extension: false };
+    }
+  }
+
+  /**
+   * Handle Enter key to save, Escape to cancel
+   */
+  onEditKeydown(video: DatabaseVideo, event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.saveFilename(video);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelEditing(video.id);
+
+      // Reset to original values
+      const parsed = this.parseFilename(video.filename);
+      this.editedValues[video.id] = parsed;
+    }
+  }
+
+  /**
+   * Handle blur event to save changes
+   */
+  onEditBlur(video: DatabaseVideo, field: 'date' | 'title' | 'extension') {
+    // End editing for this field immediately
+    if (this.editingVideo[video.id]) {
+      this.editingVideo[video.id][field] = false;
+    }
+
+    // Small timeout to allow clicking between fields
+    setTimeout(() => {
+      const editing = this.editingVideo[video.id];
+      // If no fields are being edited anymore, save changes
+      if (!editing || (!editing.date && !editing.title && !editing.extension)) {
+        this.saveFilename(video);
+      }
+    }, 150);
   }
 }

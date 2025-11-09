@@ -209,8 +209,9 @@ export class BatchDownloaderService {
     this.jobStateManager.updateJobStatus(job, 'downloading', 'Initializing download...');
 
     try {
-      // Start fetching metadata in the background (non-blocking)
-      this.fetchMetadataInBackground(job);
+      // Skip background metadata fetch - yt-dlp gets metadata during download
+      // The old fetchMetadataInBackground was causing 10-second delays per video
+      // this.fetchMetadataInBackground(job);
 
       // Start download with downloaderService
       this.logger.log(`Starting download for job ${job.id}: ${job.url}`);

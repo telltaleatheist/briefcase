@@ -104,13 +104,14 @@ interface CategoryGroup {
   styles: [`
     .bulk-export-dialog {
       min-width: 500px;
+      padding: 1.5rem;
 
       h2 {
         display: flex;
         align-items: center;
         gap: 0.5rem;
         color: var(--primary-orange);
-        margin: 0;
+        margin: 0 0 1rem 0;
 
         mat-icon {
           color: var(--primary-orange);
@@ -119,7 +120,7 @@ interface CategoryGroup {
     }
 
     mat-dialog-content {
-      padding: 1.5rem 0;
+      padding: 0;
       min-height: 200px;
       max-height: 600px;
     }
@@ -276,12 +277,16 @@ interface CategoryGroup {
     }
 
     mat-dialog-actions {
-      padding: 1rem 0 0 0;
+      padding: 1.5rem 0 0 0;
       margin: 0;
+      gap: 0.75rem;
 
       button {
+        padding: 0.625rem 1.5rem;
+        font-size: 0.95rem;
+
         mat-icon {
-          margin-right: 0.25rem;
+          margin-right: 0.375rem;
         }
       }
     }
@@ -367,11 +372,11 @@ export class BulkExportDialogComponent implements OnInit {
   }
 
   async chooseOutputDirectory() {
-    // Use Electron dialog if available
+    // Use Electron dialog if available (desktop app)
     const electron = (window as any).electron;
-    if (electron && electron.dialog) {
+    if (electron && electron.showOpenDialog) {
       try {
-        const result = await electron.dialog.showOpenDialog({
+        const result = await electron.showOpenDialog({
           properties: ['openDirectory', 'createDirectory'],
           title: 'Choose Output Folder for Clips'
         });
@@ -384,9 +389,10 @@ export class BulkExportDialogComponent implements OnInit {
         this.notificationService.error('Error', 'Failed to open directory picker');
       }
     } else {
-      this.notificationService.warning(
-        'Not Available',
-        'Directory picker is only available in the desktop app'
+      // Web mode - inform user that default location will be used
+      this.notificationService.info(
+        'Default Location',
+        'Clips will be exported to your library folder. Directory picker is only available in the desktop app.'
       );
     }
   }

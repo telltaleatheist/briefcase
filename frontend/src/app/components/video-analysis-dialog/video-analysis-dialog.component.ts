@@ -172,7 +172,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
         });
       }
 
-      this.notificationService.success('Added to Queue', `Added ${this.data.selectedVideos.length} video(s) to analysis queue`);
+      // Toast notification removed - download queue dialog shows the status
     } else {
       // Single video/URL
       let displayName = 'Video Analysis';
@@ -202,7 +202,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
         loading: false
       });
 
-      this.notificationService.success('Added to Queue', 'Video added to analysis queue');
+      // Toast notification removed - download queue dialog shows the status
     }
 
     // Close the dialog

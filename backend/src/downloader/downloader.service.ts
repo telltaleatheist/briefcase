@@ -136,11 +136,13 @@ export class DownloaderService implements OnModuleInit {
         }
       }
       
-      // Configure output template with truncated title to avoid filename too long errors
-      // Max filename length on most systems is 255 chars, leave room for date (11) + extension (~5) + buffer
+      // Configure output template with unique ID suffix to prevent filename collisions
+      // yt-dlp will get the title during download
+      // Add jobId suffix to ensure uniqueness if multiple videos have same title/date
       const dateFormat = '%(upload_date>%Y-%m-%d)s ';
+      const uniqueSuffix = jobId ? `_${jobId.substring(0, 12)}` : `_${Date.now()}`;
       const maxTitleLength = 200; // Conservative limit to stay under 255 total
-      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
+      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s${uniqueSuffix}.%(ext)s`);
       
       // Create ytDlpManager instance
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);

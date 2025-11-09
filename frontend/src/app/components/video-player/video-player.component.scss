@@ -418,26 +418,43 @@
     flex-shrink: 0; // Don't let hint shrink
   }
 
-  .category-filters {
+  .category-filters-accordion {
     flex-shrink: 0;
-    padding: 12px;
-    background-color: #0f0f0f;
-    border-bottom: 1px solid #1a1a1a;
+    margin: 12px;
 
-    .filters-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 12px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #999;
+    .category-filters-panel {
+      box-shadow: none;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      background-color: #0f0f0f;
 
-      mat-icon {
-        font-size: 18px;
-        width: 18px;
-        height: 18px;
-        color: #ff6600;
+      ::ng-deep .mat-expansion-panel-header {
+        padding: 0 12px;
+        height: 40px;
+        font-size: 13px;
+
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.02);
+        }
+      }
+
+      ::ng-deep .mat-expansion-panel-body {
+        padding: 0 12px 12px 12px;
+      }
+
+      ::ng-deep .mat-panel-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #999;
+        font-weight: 600;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+          color: #ff6600;
+        }
       }
     }
 
@@ -445,6 +462,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+      margin-top: 8px;
     }
 
     .filter-checkbox {
@@ -480,6 +498,36 @@
         font-size: 13px;
         color: #ccc;
         flex: 1;
+      }
+    }
+
+    .export-filtered-btn {
+      width: 100%;
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: #ff6600;
+      border-color: #ff6600;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+
+      &:hover:not(:disabled) {
+        background-color: rgba(255, 102, 0, 0.1);
+        border-color: #ff8833;
+      }
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
       }
     }
   }
@@ -873,21 +921,29 @@ app-video-timeline {
     }
   }
 
-  .category-filters {
-    background-color: var(--bg-card);
-    border-bottom-color: var(--border-color);
+  .category-filters-accordion {
+    .category-filters-panel {
+      background-color: var(--bg-card);
+      border-color: var(--border-color);
 
-    .filters-header {
-      color: var(--text-secondary);
-    }
-
-    .filter-checkbox {
-      &:hover {
-        background-color: rgba(255, 143, 71, 0.05);
+      ::ng-deep .mat-expansion-panel-header {
+        &:hover {
+          background-color: rgba(255, 143, 71, 0.02);
+        }
       }
 
-      .filter-label {
-        color: var(--text-primary);
+      ::ng-deep .mat-panel-title {
+        color: var(--text-secondary);
+      }
+
+      .filter-checkbox {
+        &:hover {
+          background-color: rgba(255, 143, 71, 0.05);
+        }
+
+        .filter-label {
+          color: var(--text-primary);
+        }
       }
     }
   }

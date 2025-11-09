@@ -308,7 +308,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       this.startPolling();
     }
 
-    this.notificationService.toastOnly('success', 'Queue Started', `Submitted ${jobs.length} job(s) to queue`);
+    // Toast notification removed - dialog is already visible showing queue status
     this.cdr.detectChanges();
   }
 

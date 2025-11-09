@@ -1106,6 +1106,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Validate library selection
+    if (!this.selectedLibraryId) {
+      this.notificationService.toastOnly('warning', 'No Library Selected', 'Please select a library first');
+      return;
+    }
+
+    // Get the selected library's clips folder path
+    const selectedLibrary = this.libraries.find(lib => lib.id === this.selectedLibraryId);
+    if (!selectedLibrary) {
+      this.notificationService.toastOnly('error', 'Library Not Found', 'Selected library not found');
+      return;
+    }
+
     // Process the URLs
     const urls = this.multiUrlText
       .split('\n')
@@ -1126,14 +1139,16 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         fixAspectRatio: this.batchForm.get('fixAspectRatio')?.value,
         useCookies: this.batchForm.get('useCookies')?.value,
         browser: this.batchForm.get('browser')?.value,
-        outputDir: this.batchForm.get('outputDir')?.value,
+        outputDir: selectedLibrary.clipsFolderPath, // Use library's clips folder
         normalizeAudio: this.batchForm.get('normalizeAudio')?.value,
         useRmsNormalization: this.batchForm.get('useRmsNormalization')?.value,
         rmsNormalizationLevel: this.batchForm.get('rmsNormalizationLevel')?.value,
         useCompression: this.batchForm.get('useCompression')?.value,
         compressionLevel: this.batchForm.get('compressionLevel')?.value,
         transcribeVideo: this.batchForm.get('transcribeVideo')?.value,
-        displayName: this.getShortUrl(url) // Will be updated by backend during download
+        displayName: this.getShortUrl(url), // Will be updated by backend during download
+        shouldImport: true, // Enable auto-import to library
+        libraryId: this.selectedLibraryId // Pass library ID for database import
       };
 
       // Add job to the service with URL as temporary display name

@@ -75,23 +75,35 @@
           <div class="tab-content">
             <!-- Show analysis sections if available -->
             <div *ngIf="metadata && metadata.sections && metadata.sections.length > 0" class="sections-container">
-              <!-- Category Filters -->
-              <div class="category-filters" *ngIf="categoryFilters.length > 0">
-                <div class="filters-header">
-                  <mat-icon>filter_list</mat-icon>
-                  <span>Filter Categories</span>
-                </div>
-                <div class="filters-list">
-                  <label *ngFor="let filter of categoryFilters" class="filter-checkbox">
-                    <input
-                      type="checkbox"
-                      [checked]="filter.enabled"
-                      (change)="toggleCategoryFilter(filter.category)">
-                    <span class="filter-indicator" [style.background-color]="filter.color"></span>
-                    <span class="filter-label">{{ filter.label }}</span>
-                  </label>
-                </div>
-              </div>
+              <!-- Category Filters Accordion -->
+              <mat-accordion *ngIf="categoryFilters.length > 0" class="category-filters-accordion">
+                <mat-expansion-panel class="category-filters-panel" [expanded]="true">
+                  <mat-expansion-panel-header>
+                    <mat-panel-title>
+                      <mat-icon>filter_list</mat-icon>
+                      <span>Filter Categories</span>
+                    </mat-panel-title>
+                  </mat-expansion-panel-header>
+                  <div class="filters-list">
+                    <label *ngFor="let filter of categoryFilters" class="filter-checkbox">
+                      <input
+                        type="checkbox"
+                        [checked]="filter.enabled"
+                        (change)="toggleCategoryFilter(filter.category)">
+                      <span class="filter-indicator" [style.background-color]="filter.color"></span>
+                      <span class="filter-label">{{ filter.label }}</span>
+                    </label>
+                  </div>
+                  <button
+                    mat-stroked-button
+                    class="export-filtered-btn"
+                    (click)="openBulkExport()"
+                    [disabled]="filteredMetadataSections.length === 0">
+                    <mat-icon>video_library</mat-icon>
+                    Export Filtered Clips ({{ filteredMetadataSections.length }})
+                  </button>
+                </mat-expansion-panel>
+              </mat-accordion>
 
               <p class="sections-hint">Click a section to jump to that timestamp</p>
               <div class="sections-list">
