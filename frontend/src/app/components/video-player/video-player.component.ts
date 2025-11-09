@@ -237,6 +237,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
+    // Get video element reference immediately so keyboard shortcuts work from the start
+    if (this.videoElement) {
+      this.videoEl = this.videoElement.nativeElement;
+    }
+
     // Set up keyboard shortcuts immediately so spacebar works from the start
     this.setupKeyboardShortcuts();
 
