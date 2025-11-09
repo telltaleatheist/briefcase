@@ -186,7 +186,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             this.notificationService.trackable(
               `job-${data.jobId}`,
               'success',
-              `${displayName}`,
+              this.truncateForNotification(displayName),
               'Completed successfully'
             );
           } else if (data.status === 'failed') {
@@ -196,7 +196,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             this.notificationService.trackable(
               `job-${data.jobId}`,
               'error',
-              `${displayName}`,
+              this.truncateForNotification(displayName),
               `Failed: ${data.task}`
             );
           }
@@ -285,7 +285,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             this.notificationService.trackable(
               `job-${data.jobId}`,
               'success',
-              `${displayName}`,
+              this.truncateForNotification(displayName),
               'Completed successfully'
             );
           }
@@ -633,7 +633,18 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
     
     return formatted;
   }
-    
+
+  /**
+   * Truncate display name for notifications (max 80 chars)
+   */
+  private truncateForNotification(displayName: string): string {
+    const maxLength = 80;
+    if (displayName.length <= maxLength) {
+      return displayName;
+    }
+    return displayName.substring(0, maxLength) + '...';
+  }
+
   /**
    * Get a human-readable display name for a job
    */
@@ -1413,7 +1424,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
   updateDefaultValues(settings: Settings): void {
     this.batchForm.patchValue({
-      quality: settings.quality,
+      quality: settings.quality.value, // Extract the value from QualityOption object
       convertToMp4: settings.convertToMp4,
       fixAspectRatio: settings.fixAspectRatio,
       useCookies: false,

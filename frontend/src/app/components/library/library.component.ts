@@ -1475,31 +1475,61 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Transcribe video (no download, just transcribe existing file)
+   * Transcribe video - add to analysis queue and navigate to analysis page
    */
   async downloadAndTranscribe(video: DatabaseVideo) {
-    // Navigate to video analysis page with video pre-filled and transcribe-only mode
-    this.router.navigate(['/analysis'], {
-      state: {
-        videoPath: video.current_path,
-        videoTitle: video.filename,
-        mode: 'transcribe-only'
-      }
-    });
+    try {
+      // Add video to batch analysis queue (transcribe-only)
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [video.id],
+        transcribeOnly: true
+      });
+
+      this.notificationService.toastOnly(
+        'success',
+        'Transcription Queued',
+        `${video.filename} has been added to the transcription queue`
+      );
+
+      // Navigate to analysis page
+      this.router.navigate(['/analysis']);
+    } catch (error: any) {
+      console.error('Failed to queue transcription:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Error',
+        error.error?.message || 'Failed to queue transcription'
+      );
+    }
   }
 
   /**
-   * AI analyze video (no download, just analyze existing file)
+   * AI analyze video - add to analysis queue and navigate to analysis page
    */
   async downloadAndAnalyze(video: DatabaseVideo) {
-    // Navigate to video analysis page with video pre-filled and full analysis mode
-    this.router.navigate(['/analysis'], {
-      state: {
-        videoPath: video.current_path,
-        videoTitle: video.filename,
-        mode: 'full'
-      }
-    });
+    try {
+      // Add video to batch analysis queue (full analysis)
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [video.id],
+        transcribeOnly: false
+      });
+
+      this.notificationService.toastOnly(
+        'success',
+        'Analysis Queued',
+        `${video.filename} has been added to the analysis queue`
+      );
+
+      // Navigate to analysis page
+      this.router.navigate(['/analysis']);
+    } catch (error: any) {
+      console.error('Failed to queue analysis:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Error',
+        error.error?.message || 'Failed to queue analysis'
+      );
+    }
   }
 
   /**

@@ -636,18 +636,25 @@ export class BatchDownloaderService {
   }
 
   /**
-   * Fetch metadata in the background with a 30-second timeout
+   * Fetch metadata in the background with a 10-second timeout
    * Updates the job's displayName when metadata is retrieved
    */
   private async fetchMetadataInBackground(job: Job): Promise<void> {
-    const METADATA_TIMEOUT = 30000; // 30 seconds
+    const METADATA_TIMEOUT = 10000; // 10 seconds - fail fast to avoid delaying downloads
 
     this.logger.log(`Starting background metadata fetch for job ${job.id}`);
+
+    // Skip metadata fetch for Facebook - it's too slow and unreliable
+    // The download will proceed with the URL-based display name
+    if (job.url.includes('facebook.com') || job.url.includes('fb.watch')) {
+      this.logger.log(`Skipping metadata fetch for Facebook URL - will use filename from download`);
+      return;
+    }
 
     // Create a timeout promise
     const timeoutPromise = new Promise<null>((resolve) => {
       setTimeout(() => {
-        this.logger.warn(`Metadata fetch timeout for job ${job.id} after 30 seconds`);
+        this.logger.warn(`Metadata fetch timeout for job ${job.id} after ${METADATA_TIMEOUT}ms - proceeding with download`);
         resolve(null);
       }, METADATA_TIMEOUT);
     });
@@ -671,11 +678,18 @@ export class BatchDownloaderService {
     if (result && result.title) {
       const oldDisplayName = job.displayName;
 
+      // Truncate title to prevent excessively long display names (max 200 chars for title)
+      const maxTitleLength = 200;
+      let truncatedTitle = result.title;
+      if (truncatedTitle.length > maxTitleLength) {
+        truncatedTitle = truncatedTitle.substring(0, maxTitleLength) + '...';
+      }
+
       // Create a display name with upload date if available
       if (result.uploadDate) {
-        job.displayName = `${result.uploadDate} ${result.title}`;
+        job.displayName = `${result.uploadDate} ${truncatedTitle}`;
       } else {
-        job.displayName = result.title;
+        job.displayName = truncatedTitle;
       }
 
       this.logger.log(`Updated job ${job.id} displayName from "${oldDisplayName}" to "${job.displayName}"`);
@@ -718,11 +732,18 @@ export class BatchDownloaderService {
       const dir = path.dirname(job.outputFile);
       const ext = path.extname(job.outputFile);
 
+      // Truncate title to prevent filename too long errors (max 200 chars for title)
+      const maxTitleLength = 200;
+      let truncatedTitle = metadata.title;
+      if (truncatedTitle.length > maxTitleLength) {
+        truncatedTitle = truncatedTitle.substring(0, maxTitleLength);
+      }
+
       let newFilename: string;
       if (metadata.uploadDate) {
-        newFilename = `${metadata.uploadDate} ${metadata.title}${ext}`;
+        newFilename = `${metadata.uploadDate} ${truncatedTitle}${ext}`;
       } else {
-        newFilename = `${metadata.title}${ext}`;
+        newFilename = `${truncatedTitle}${ext}`;
       }
 
       // Sanitize filename (remove invalid characters)

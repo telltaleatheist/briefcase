@@ -1057,50 +1057,27 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    // Check if transcript already exists
-    const hasTranscript = await this.databaseLibraryService.hasTranscript(videoId);
-
-    // Always show the dialog to let user choose AI provider
-    const { AnalyzeSelectedDialogComponent } = await import('../library/analyze-selected-dialog.component');
-
-    const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
-      width: '500px',
-      data: { selectedCount: 1 }
-    });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (!result || result.option === 'skip') {
-      return; // User cancelled
-    }
-
-    // Start analysis based on user choice
+    // Add video to batch analysis queue (full analysis)
     try {
-      const transcribeOnly = result.option === 'transcribe-only';
-
       await this.databaseLibraryService.startBatchAnalysis({
         videoIds: [videoId],
-        limit: 1,
-        transcribeOnly,
-        aiProvider: result.aiProvider,
-        aiModel: result.aiModel,
-        claudeApiKey: result.claudeApiKey,
-        openaiApiKey: result.openaiApiKey
+        transcribeOnly: false
       });
 
       this.notificationService.toastOnly(
         'success',
-        transcribeOnly ? 'Transcription Started' : 'Analysis Started',
-        transcribeOnly
-          ? 'Transcription has been queued. You will be notified when it completes.'
-          : 'AI analysis has been queued. You will be notified when it completes.'
+        'Analysis Queued',
+        'Video has been added to the analysis queue'
       );
+
+      // Navigate to analysis page
+      this.router.navigate(['/analysis']);
     } catch (error: any) {
-      console.error('Failed to start analysis:', error);
+      console.error('Failed to queue analysis:', error);
       this.notificationService.toastOnly(
         'error',
         'Error',
-        error.error?.message || 'Failed to start analysis'
+        error.error?.message || 'Failed to queue analysis'
       );
     }
   }

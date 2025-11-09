@@ -20,6 +20,7 @@ export interface AnalysisJob {
   status: 'pending' | 'downloading' | 'extracting' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
   progress: number;
   currentPhase: string;
+  title?: string; // Video title/filename for display
   error?: string;
   videoPath?: string;
   audioPath?: string;
@@ -102,11 +103,22 @@ export class AnalysisService {
   async startAnalysis(request: AnalysisRequest): Promise<string> {
     const jobId = uuidv4();
 
+    // Determine title from input
+    let title = 'Video Analysis';
+    if (request.inputType === 'file' && request.input) {
+      // Extract filename from path
+      const path = require('path');
+      title = path.basename(request.input, path.extname(request.input));
+    } else if (request.inputType === 'url') {
+      title = 'Downloaded Video';
+    }
+
     const job: AnalysisJob = {
       id: jobId,
       status: 'pending',
       progress: 0,
       currentPhase: 'Waiting in queue...',
+      title,
       createdAt: new Date(),
       timing: {},
     };

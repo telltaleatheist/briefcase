@@ -24,9 +24,6 @@ import {
 } from '../../services/database-library.service';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
-import {
-  AnalyzeSelectedDialogComponent
-} from '../library/analyze-selected-dialog.component';
 
 interface TranscriptEntry {
   timestamp: string;
@@ -247,25 +244,25 @@ export class VideoInfoComponent implements OnInit {
     this.processingType = 'transcript';
 
     try {
-      // If transcript exists, delete it first
-      if (this.transcript) {
-        await this.databaseLibraryService.deleteTranscript(this.video.id);
-        this.transcript = null;
-        this.parsedTranscript = [];
-      }
+      // Add video to batch analysis queue (transcribe-only)
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [this.video.id],
+        transcribeOnly: true
+      });
 
-      const url = await this.backendUrlService.getApiUrl('/analysis/transcribe');
-      await firstValueFrom(
-        this.http.post(url, { videoId: this.video.id })
+      this.notificationService.success(
+        'Transcription Queued',
+        `${this.video.filename} has been added to the transcription queue`
       );
 
-      this.notificationService.success('Transcription Started', 'Video transcription has been queued');
-
-      // Poll for completion
-      await this.pollForTranscript();
-    } catch (error) {
+      // Navigate to analysis page
+      this.router.navigate(['/analysis']);
+    } catch (error: any) {
       console.error('Error starting transcription:', error);
-      this.notificationService.error('Transcription Error', 'Failed to start transcription');
+      this.notificationService.error(
+        'Transcription Error',
+        error.error?.message || 'Failed to queue transcription'
+      );
     } finally {
       this.isProcessing = false;
       this.processingType = null;
@@ -275,49 +272,29 @@ export class VideoInfoComponent implements OnInit {
   async runAnalysis() {
     if (!this.video || this.isProcessing) return;
 
-    // Open dialog to select AI provider and model
-    const dialogRef = this.dialog.open(AnalyzeSelectedDialogComponent, {
-      width: '700px',
-      data: {
-        selectedCount: 1,
-        videosWithExistingAnalysis: this.analysis ? 1 : 0
-      }
-    });
-
-    const result = await firstValueFrom(dialogRef.afterClosed());
-    if (!result) return;
-
     this.isProcessing = true;
     this.processingType = 'analysis';
 
     try {
-      // If analysis exists, delete it first
-      if (this.analysis) {
-        await this.databaseLibraryService.deleteAnalysis(this.video.id);
-        this.analysis = null;
-        this.analysisSections = [];
-      }
+      // Add video to batch analysis queue (full analysis)
+      await this.databaseLibraryService.startBatchAnalysis({
+        videoIds: [this.video.id],
+        transcribeOnly: false
+      });
 
-      const url = await this.backendUrlService.getApiUrl('/analysis/analyze');
-      await firstValueFrom(
-        this.http.post(url, {
-          videoId: this.video.id,
-          videoTitle: this.video.filename,
-          aiProvider: result.aiProvider,
-          aiModel: result.aiModel,
-          claudeApiKey: result.claudeApiKey,
-          openaiApiKey: result.openaiApiKey,
-          forceReanalyze: result.forceReanalyze
-        })
+      this.notificationService.success(
+        'Analysis Queued',
+        `${this.video.filename} has been added to the analysis queue`
       );
 
-      this.notificationService.success('Analysis Started', 'Analysis has been queued');
-
-      // Poll for completion
-      await this.pollForAnalysis();
-    } catch (error) {
+      // Navigate to analysis page
+      this.router.navigate(['/analysis']);
+    } catch (error: any) {
       console.error('Error starting analysis:', error);
-      this.notificationService.error('Analysis Error', 'Failed to start analysis');
+      this.notificationService.error(
+        'Analysis Error',
+        error.error?.message || 'Failed to queue analysis'
+      );
     } finally {
       this.isProcessing = false;
       this.processingType = null;

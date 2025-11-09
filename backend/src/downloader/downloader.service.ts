@@ -136,9 +136,11 @@ export class DownloaderService implements OnModuleInit {
         }
       }
       
-      // Configure output template
+      // Configure output template with truncated title to avoid filename too long errors
+      // Max filename length on most systems is 255 chars, leave room for date (11) + extension (~5) + buffer
       const dateFormat = '%(upload_date>%Y-%m-%d)s ';
-      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title)s.%(ext)s`);
+      const maxTitleLength = 200; // Conservative limit to stay under 255 total
+      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
       
       // Create ytDlpManager instance
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);
@@ -882,6 +884,12 @@ export class DownloaderService implements OnModuleInit {
       // For Twitter/X, use faster syndication API
       if (url.includes('twitter.com') || url.includes('x.com')) {
         ytDlpManager.addOption('--extractor-args', 'twitter:api=syndication');
+      }
+
+      // For Facebook, reduce timeout for metadata since it can be very slow
+      if (url.includes('facebook.com') || url.includes('fb.watch')) {
+        ytDlpManager.addOption('--socket-timeout', '5'); // Shorter timeout for Facebook
+        ytDlpManager.addOption('--extractor-retries', '0'); // No retries for metadata - fail fast
       }
 
       // Execute the command and get output
