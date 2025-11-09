@@ -227,16 +227,25 @@ export class BackendService {
       
       const nodePath = process.execPath;
       const frontendPath = AppConfig.frontendPath;
-      
+
       // Use environment variable if already set (for test mode), otherwise use process.resourcesPath
       const resourcesPath = process.env.RESOURCES_PATH || process.resourcesPath;
+
+      // Get the backend node_modules path - handle both development and production
+      const backendDir = path.dirname(path.dirname(backendPath)); // Go up from dist/main.js to backend/
+      const backendNodeModules = path.join(backendDir, 'node_modules');
+
+      log.info(`Backend path: ${backendPath}`);
+      log.info(`Backend directory: ${backendDir}`);
+      log.info(`Backend node_modules: ${backendNodeModules}`);
+      log.info(`Node modules exists: ${fs.existsSync(backendNodeModules)}`);
 
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         CLIPPY_BACKEND: 'true',
         FRONTEND_PATH: frontendPath,
-        NODE_PATH: path.join(resourcesPath, 'backend/node_modules'),
+        NODE_PATH: backendNodeModules,
         RESOURCES_PATH: resourcesPath,
         PORT: this.actualBackendPort.toString(),
         NODE_ENV: process.env.NODE_ENV || 'production',
@@ -244,9 +253,14 @@ export class BackendService {
         VERBOSE: 'true'
       };
       
+      // Set the working directory to the backend directory for proper module resolution
+      const workingDir = backendDir;
+      log.info(`Starting backend with working directory: ${workingDir}`);
+
       this.backendProcess = spawn(nodePath, [backendPath], {
         env: backendEnv,
         stdio: 'pipe',
+        cwd: workingDir
       });
       
       this.setupProcessEventHandlers();
