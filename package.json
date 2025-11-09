@@ -55,6 +55,10 @@
   ],
   "author": "Your Name",
   "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0 <21.0.0",
+    "npm": ">=10.0.0"
+  },
   "devDependencies": {
     "@electron/typescript-definitions": "^9.1.2",
     "@types/better-sqlite3": "^7.6.13",

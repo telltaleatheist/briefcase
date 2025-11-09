@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -26,10 +27,10 @@ export class SavedLinksController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async addLink(
-    @Body() body: { url: string; title?: string }
+    @Body() body: { url: string; title?: string; libraryId?: string }
   ): Promise<SavedLink> {
-    this.logger.log(`Adding new link: ${body.url}`);
-    return await this.savedLinksService.addLink(body.url, body.title);
+    this.logger.log(`Adding new link: ${body.url} (library: ${body.libraryId || 'default'})`);
+    return await this.savedLinksService.addLink(body.url, body.title, body.libraryId);
   }
 
   /**
@@ -50,6 +51,20 @@ export class SavedLinksController {
   getLinkById(@Param('id') id: string): SavedLink | null {
     this.logger.log(`Getting saved link: ${id}`);
     return this.savedLinksService.getLinkById(id);
+  }
+
+  /**
+   * Update a saved link's title
+   * PATCH /api/saved-links/:id
+   */
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  updateLink(
+    @Param('id') id: string,
+    @Body() body: { title: string }
+  ): SavedLink {
+    this.logger.log(`Updating saved link title: ${id}`);
+    return this.savedLinksService.updateLinkTitle(id, body.title);
   }
 
   /**

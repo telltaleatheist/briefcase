@@ -329,6 +329,7 @@ export class DownloadProgressService {
   addOrUpdateAnalysisJob(analysisJob: any) {
     const jobId = `analysis-${analysisJob.id}`;
     const currentJobs = this.jobs.value;
+    const existingJob = currentJobs.get(jobId);
 
     // Map analysis job status to our stages
     let stage: VideoProcessingJob['stage'] = 'analyzing';
@@ -342,19 +343,27 @@ export class DownloadProgressService {
     else if (status === 'failed') stage = 'failed';
 
     // Extract filename from path if it's a file path
-    let filename = analysisJob.input || 'Video Analysis';
-    if (filename.includes('/') || filename.includes('\\')) {
-      const parts = filename.split(/[/\\]/);
-      filename = parts[parts.length - 1] || filename;
+    // If updating existing job and no new input provided, keep the old filename
+    let filename = 'Video Analysis';
+    if (analysisJob.input) {
+      filename = analysisJob.input;
+      if (filename.includes('/') || filename.includes('\\')) {
+        const parts = filename.split(/[/\\]/);
+        filename = parts[parts.length - 1] || filename;
+      }
+    } else if (existingJob) {
+      // Preserve existing filename if no new input provided
+      filename = existingJob.filename;
     }
 
     const job: VideoProcessingJob = {
       id: jobId,
       filename: filename,
+      url: analysisJob.input || existingJob?.url,
       stage: stage,
       progress: analysisJob.progress || 0,
       error: analysisJob.error,
-      startedAt: new Date(),
+      startedAt: existingJob?.startedAt || new Date(),
       completedAt: (stage === 'completed' || stage === 'failed') ? new Date() : undefined
     };
 

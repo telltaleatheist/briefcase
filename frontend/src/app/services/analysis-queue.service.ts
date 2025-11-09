@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 
 export interface PendingAnalysisJob {
   id: string;
@@ -25,6 +25,10 @@ export class AnalysisQueueService {
   private pendingJobs = new BehaviorSubject<PendingAnalysisJob[]>([]);
   private jobIdCounter = 0;
 
+  // Emit event when a job is added to open the download queue
+  private jobAdded = new Subject<void>();
+  public jobAdded$ = this.jobAdded.asObservable();
+
   constructor() {}
 
   /**
@@ -46,6 +50,9 @@ export class AnalysisQueueService {
 
     const currentJobs = this.pendingJobs.value;
     this.pendingJobs.next([...currentJobs, newJob]);
+
+    // Emit event to open download queue
+    this.jobAdded.next();
 
     return jobId;
   }

@@ -5,6 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Save for Later - Clippy</title>
   <style>
+    /* Clippy Creamsicle Theme Variables */
+    :root {
+      --primary-orange: #ff6b35;
+      --light-orange: #ff8c5a;
+      --dark-orange: #e55529;
+
+      --bg-primary: #ffffff;
+      --bg-secondary: #f8f9fa;
+      --bg-tertiary: #e9ecef;
+      --bg-card: #ffffff;
+
+      --text-primary: #212529;
+      --text-secondary: #6c757d;
+      --text-muted: #adb5bd;
+      --border-color: #d1d5db;
+      --shadow-color: rgba(0, 0, 0, 0.1);
+
+      --border-radius: 8px;
+      --border-radius-large: 12px;
+      --transition: all 0.3s ease;
+      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+      --shadow-sm: 0 1px 2px 0 var(--shadow-color);
+      --shadow-md: 0 4px 6px -1px var(--shadow-color);
+      --shadow-lg: 0 10px 15px -3px var(--shadow-color);
+
+      --success-bg: #dcfce7;
+      --success-text: #16a34a;
+      --warning-bg: #fef3c7;
+      --warning-text: #d97706;
+      --danger-bg: #fee2e2;
+      --danger-text: #dc2626;
+      --info-bg: #dbeafe;
+      --info-text: #2563eb;
+    }
+
+    /* Dark Theme */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #0f0f0f;
+        --bg-secondary: #1a1a1a;
+        --bg-tertiary: #2d2d2d;
+        --bg-card: #1e1e1e;
+        --text-primary: #ffffff;
+        --text-secondary: #d1d5db;
+        --text-muted: #9ca3af;
+        --border-color: #374151;
+        --shadow-color: rgba(0, 0, 0, 0.5);
+      }
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -12,11 +63,12 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: var(--font-family);
+      background: var(--bg-primary);
       min-height: 100vh;
       padding: 20px;
-      color: #333;
+      color: var(--text-primary);
+      transition: var(--transition);
     }
 
     .container {
@@ -25,19 +77,20 @@
     }
 
     h1 {
-      color: white;
+      color: var(--primary-orange);
       text-align: center;
       margin-bottom: 30px;
       font-size: 2em;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      font-weight: 700;
     }
 
     .input-section {
-      background: white;
-      border-radius: 15px;
+      background: var(--bg-card);
+      border-radius: var(--border-radius-large);
       padding: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      box-shadow: var(--shadow-md);
       margin-bottom: 30px;
+      border: 1px solid var(--border-color);
     }
 
     .form-group {
@@ -46,69 +99,100 @@
 
     label {
       display: block;
-      margin-bottom: 5px;
+      margin-bottom: 8px;
       font-weight: 600;
-      color: #555;
+      color: var(--text-primary);
+      font-size: 0.95em;
     }
 
     input[type="text"],
-    input[type="url"] {
+    input[type="url"],
+    select {
       width: 100%;
-      padding: 15px;
-      border: 2px solid #e0e0e0;
-      border-radius: 10px;
+      padding: 12px 15px;
+      border: 2px solid var(--border-color);
+      border-radius: var(--border-radius);
       font-size: 16px;
-      transition: border-color 0.3s;
+      transition: var(--transition);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-family);
     }
 
     input[type="text"]:focus,
-    input[type="url"]:focus {
+    input[type="url"]:focus,
+    select:focus {
       outline: none;
-      border-color: #667eea;
+      border-color: var(--primary-orange);
+      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+    }
+
+    input::placeholder {
+      color: var(--text-muted);
+    }
+
+    select {
+      cursor: pointer;
+      appearance: none;
+      background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23ff6b35" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>');
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 20px;
+      padding-right: 40px;
     }
 
     .btn {
       width: 100%;
-      padding: 15px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 14px 20px;
+      background: var(--primary-orange);
       color: white;
       border: none;
-      border-radius: 10px;
-      font-size: 18px;
+      border-radius: var(--border-radius);
+      font-size: 16px;
       font-weight: 600;
       cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+      transition: var(--transition);
+      box-shadow: var(--shadow-sm);
+      font-family: var(--font-family);
+    }
+
+    .btn:hover {
+      background: var(--dark-orange);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-1px);
     }
 
     .btn:active {
-      transform: scale(0.98);
+      transform: translateY(0);
     }
 
     .btn:disabled {
-      opacity: 0.6;
+      opacity: 0.5;
       cursor: not-allowed;
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
     }
 
     .status-message {
       margin-top: 15px;
-      padding: 12px;
-      border-radius: 8px;
+      padding: 12px 16px;
+      border-radius: var(--border-radius);
       text-align: center;
       font-weight: 500;
       display: none;
+      font-size: 0.95em;
     }
 
     .status-message.success {
-      background: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
+      background: var(--success-bg);
+      color: var(--success-text);
+      border: 1px solid var(--success-text);
     }
 
     .status-message.error {
-      background: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border: 1px solid var(--danger-text);
     }
 
     .status-message.show {
@@ -128,10 +212,11 @@
     }
 
     .links-section {
-      background: white;
-      border-radius: 15px;
+      background: var(--bg-card);
+      border-radius: var(--border-radius-large);
       padding: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--border-color);
     }
 
     .links-header {
@@ -139,113 +224,355 @@
       justify-content: space-between;
       align-items: center;
       margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid var(--border-color);
     }
 
     .links-header h2 {
       font-size: 1.5em;
-      color: #333;
+      color: var(--text-primary);
+      font-weight: 700;
     }
 
     .count-badge {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: var(--primary-orange);
       color: white;
-      padding: 5px 12px;
+      padding: 6px 14px;
       border-radius: 20px;
       font-size: 0.9em;
       font-weight: 600;
     }
 
     .link-item {
-      background: #f8f9fa;
-      border-radius: 10px;
-      padding: 15px;
-      margin-bottom: 10px;
+      background: var(--bg-secondary);
+      border-radius: var(--border-radius);
+      padding: 12px 16px;
+      margin-bottom: 8px;
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      transition: transform 0.2s;
+      transition: var(--transition);
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+      gap: 12px;
     }
 
     .link-item:hover {
-      transform: translateX(5px);
+      border-color: var(--primary-orange);
+      box-shadow: var(--shadow-sm);
+      transform: translateX(2px);
     }
 
-    .link-info {
+    .link-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      background: var(--bg-primary);
+      border-radius: var(--border-radius);
+      color: var(--primary-orange);
+      flex-shrink: 0;
+    }
+
+    .link-icon svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+
+    .link-content {
       flex: 1;
-      margin-right: 10px;
+      min-width: 0;
+      cursor: pointer;
     }
 
     .link-title {
       font-weight: 600;
-      color: #333;
-      margin-bottom: 5px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
       word-break: break-word;
+      font-size: 0.95em;
+      line-height: 1.3;
+    }
+
+    .link-subtitle {
+      font-size: 0.8em;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .link-url {
-      font-size: 0.85em;
-      color: #666;
-      word-break: break-all;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 300px;
+    }
+
+    .link-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
 
     .link-status {
-      padding: 5px 10px;
-      border-radius: 5px;
-      font-size: 0.85em;
+      padding: 6px 12px;
+      border-radius: var(--border-radius);
+      font-size: 0.8em;
       font-weight: 600;
       white-space: nowrap;
+      text-transform: capitalize;
     }
 
-    .status-pending { background: #fff3cd; color: #856404; }
-    .status-downloading { background: #cce5ff; color: #004085; }
-    .status-completed { background: #d4edda; color: #155724; }
-    .status-failed { background: #f8d7da; color: #721c24; }
+    .status-pending {
+      background: var(--warning-bg);
+      color: var(--warning-text);
+      border: 1px solid var(--warning-text);
+    }
+    .status-downloading {
+      background: var(--info-bg);
+      color: var(--info-text);
+      border: 1px solid var(--info-text);
+    }
+    .status-completed {
+      background: var(--success-bg);
+      color: var(--success-text);
+      border: 1px solid var(--success-text);
+    }
+    .status-failed {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border: 1px solid var(--danger-text);
+    }
 
     .empty-state {
       text-align: center;
-      padding: 40px 20px;
-      color: #999;
+      padding: 50px 20px;
+      color: var(--text-muted);
     }
 
     .empty-state-icon {
-      font-size: 3em;
-      margin-bottom: 10px;
+      font-size: 4em;
+      margin-bottom: 15px;
+      opacity: 0.5;
+    }
+
+    .empty-state-text {
+      font-size: 1.1em;
+      color: var(--text-secondary);
     }
 
     .loading {
       text-align: center;
-      padding: 20px;
-      color: #666;
+      padding: 30px 20px;
+      color: var(--text-secondary);
     }
 
     .spinner {
       display: inline-block;
-      width: 30px;
-      height: 30px;
-      border: 3px solid rgba(102, 126, 234, 0.3);
+      width: 35px;
+      height: 35px;
+      border: 3px solid var(--border-color);
       border-radius: 50%;
-      border-top-color: #667eea;
+      border-top-color: var(--primary-orange);
       animation: spin 1s ease-in-out infinite;
+      margin-bottom: 10px;
     }
 
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
 
-    .delete-btn {
-      background: #dc3545;
+    .action-btn {
       color: white;
       border: none;
-      padding: 8px 15px;
-      border-radius: 5px;
+      padding: 6px 12px;
+      border-radius: var(--border-radius);
       cursor: pointer;
-      font-size: 0.9em;
-      margin-left: 10px;
-      transition: background 0.2s;
+      font-size: 0.75em;
+      font-weight: 600;
+      transition: var(--transition);
+      font-family: var(--font-family);
+      white-space: nowrap;
     }
 
-    .delete-btn:hover {
-      background: #c82333;
+    .action-btn.edit {
+      background: var(--primary-orange);
+    }
+
+    .action-btn.edit:hover {
+      background: var(--dark-orange);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .action-btn.delete {
+      background: var(--danger-text);
+    }
+
+    .action-btn.delete:hover {
+      background: #b91c1c;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .action-btn:active {
+      transform: scale(0.98);
+    }
+
+    /* Modal styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .modal {
+      background: var(--bg-card);
+      border-radius: var(--border-radius-large);
+      max-width: 600px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border-color);
+    }
+
+    .modal-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-title {
+      font-size: 1.3em;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0;
+    }
+
+    .modal-close {
+      background: var(--bg-tertiary);
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+      color: var(--text-primary);
+      font-size: 1.2em;
+    }
+
+    .modal-close:hover {
+      background: var(--border-color);
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .detail-row {
+      margin-bottom: 16px;
+    }
+
+    .detail-label {
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-size: 0.85em;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .detail-value {
+      color: var(--text-primary);
+      font-size: 0.95em;
+      word-break: break-word;
+    }
+
+    .detail-value.url {
+      color: var(--primary-orange);
+      text-decoration: none;
+    }
+
+    .detail-value.url:hover {
+      text-decoration: underline;
+    }
+
+    .modal-actions {
+      padding: 20px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .edit-mode {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .edit-input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 2px solid var(--primary-orange);
+      border-radius: var(--border-radius);
+      font-size: 0.95em;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-weight: 600;
+    }
+
+    .edit-input:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+    }
+
+    .save-btn,
+    .cancel-btn {
+      padding: 6px 12px;
+      border-radius: var(--border-radius);
+      font-size: 0.8em;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: var(--transition);
+      font-family: var(--font-family);
+    }
+
+    .save-btn {
+      background: var(--success-text);
+      color: white;
+    }
+
+    .save-btn:hover {
+      background: #15803d;
+    }
+
+    .cancel-btn {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+    }
+
+    .cancel-btn:hover {
+      background: var(--border-color);
     }
 
     @media (max-width: 600px) {
@@ -263,24 +590,37 @@
       }
 
       .link-info {
-        margin-bottom: 10px;
+        margin-bottom: 12px;
         margin-right: 0;
-      }
-
-      .link-actions {
-        display: flex;
-        gap: 10px;
         width: 100%;
       }
 
-      .delete-btn {
-        flex: 1;
-        margin-left: 0;
+      .link-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .link-subtitle {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+
+      .link-url {
+        max-width: 100%;
+      }
+
+      .modal {
+        max-height: 100vh;
+        border-radius: 0;
       }
     }
   </style>
 </head>
 <body>
+  <!-- Modal placeholder -->
+  <div id="modalContainer"></div>
+
   <div class="container">
     <h1>📎 Save for Later</h1>
 
@@ -298,7 +638,13 @@
           >
         </div>
         <div class="form-group">
-          <label for="title">Title (optional)</label>
+          <label for="library">Save to Library</label>
+          <select id="library" name="library">
+            <option value="">Loading libraries...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="title">Notes (Optional)</label>
           <input
             type="text"
             id="title"
@@ -335,12 +681,14 @@
     const form = document.getElementById('addLinkForm');
     const urlInput = document.getElementById('url');
     const titleInput = document.getElementById('title');
+    const librarySelect = document.getElementById('library');
     const submitBtn = document.getElementById('submitBtn');
     const statusMessage = document.getElementById('statusMessage');
     const linksList = document.getElementById('linksList');
     const countBadge = document.getElementById('countBadge');
 
-    // Load links on page load
+    // Load libraries and links on page load
+    loadLibraries();
     loadLinks();
 
     // Form submission
@@ -349,6 +697,7 @@
 
       const url = urlInput.value.trim();
       const title = titleInput.value.trim();
+      const libraryId = librarySelect.value;
 
       if (!url) return;
 
@@ -359,7 +708,11 @@
         const response = await fetch(API_BASE, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, title: title || undefined })
+          body: JSON.stringify({
+            url,
+            title: title || undefined,
+            libraryId: libraryId || undefined
+          })
         });
 
         if (response.ok) {
@@ -380,6 +733,30 @@
       }
     });
 
+    // Load libraries from API
+    async function loadLibraries() {
+      try {
+        const response = await fetch('/api/database/libraries');
+        const data = await response.json();
+        const libraries = data.libraries || [];
+        const activeLibrary = data.activeLibrary;
+
+        // Populate library dropdown
+        if (libraries.length === 0) {
+          librarySelect.innerHTML = '<option value="">No libraries found</option>';
+          return;
+        }
+
+        librarySelect.innerHTML = libraries.map(lib => {
+          const isActive = activeLibrary && lib.id === activeLibrary.id;
+          return `<option value="${lib.id}" ${isActive ? 'selected' : ''}>${escapeHtml(lib.name)}${isActive ? ' (Active)' : ''}</option>`;
+        }).join('');
+      } catch (error) {
+        console.error('Error loading libraries:', error);
+        librarySelect.innerHTML = '<option value="">Error loading libraries</option>';
+      }
+    }
+
     // Load links from API
     async function loadLinks() {
       try {
@@ -395,11 +772,14 @@
 
     // Render links list
     function renderLinks(links) {
+      // Store links globally for modal access
+      allLinks = links;
+
       if (links.length === 0) {
         linksList.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">📭</div>
-            <div>No saved links yet</div>
+            <div class="empty-state-text">No saved links yet</div>
           </div>
         `;
         return;
@@ -407,16 +787,200 @@
 
       linksList.innerHTML = links.map(link => `
         <div class="link-item" data-id="${link.id}">
-          <div class="link-info">
-            <div class="link-title">${escapeHtml(link.title || link.url)}</div>
-            <div class="link-url">${escapeHtml(link.url)}</div>
+          <!-- Icon -->
+          <div class="link-icon">
+            <svg viewBox="0 0 24 24">
+              <path d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+            </svg>
           </div>
-          <div class="link-actions">
+
+          <!-- Content (clickable) -->
+          <div class="link-content" id="content-${link.id}" onclick="openLinkDetails('${link.id}')">
+            <div class="link-title">${escapeHtml(link.title || link.url)}</div>
+            <div class="link-subtitle">
+              <span class="link-url">${escapeHtml(link.url)}</span>
+              <span>•</span>
+              <span>${formatDate(link.date_added)}</span>
+            </div>
+          </div>
+
+          <!-- Status and Actions -->
+          <div class="link-actions" onclick="event.stopPropagation()">
             <span class="link-status status-${link.status}">${link.status}</span>
-            <button class="delete-btn" onclick="deleteLink('${link.id}')">Delete</button>
+            <button class="action-btn edit" onclick="startEdit('${link.id}', '${escapeHtml(link.title || link.url).replace(/'/g, "\\'")}')">Rename</button>
+            <button class="action-btn delete" onclick="deleteLink('${link.id}')">Delete</button>
           </div>
         </div>
       `).join('');
+    }
+
+    // Format date
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffTime = Math.abs(now - date);
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 0) {
+        return 'Today';
+      } else if (diffDays === 1) {
+        return 'Yesterday';
+      } else if (diffDays < 7) {
+        return `${diffDays} days ago`;
+      } else {
+        return date.toLocaleDateString();
+      }
+    }
+
+    // Open link details modal
+    function openLinkDetails(id) {
+      const link = allLinks.find(l => l.id === id);
+      if (!link) return;
+
+      const modal = `
+        <div class="modal-overlay" onclick="closeModal(event)">
+          <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+              <h2 class="modal-title">Link Details</h2>
+              <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="detail-row">
+                <div class="detail-label">Title</div>
+                <div class="detail-value">${escapeHtml(link.title || 'No title')}</div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-label">URL</div>
+                <a href="${escapeHtml(link.url)}" target="_blank" class="detail-value url">${escapeHtml(link.url)}</a>
+              </div>
+              <div class="detail-row">
+                <div class="detail-label">Status</div>
+                <div class="detail-value"><span class="link-status status-${link.status}">${link.status}</span></div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-label">Added</div>
+                <div class="detail-value">${formatDate(link.date_added)}</div>
+              </div>
+              ${link.date_completed ? `
+                <div class="detail-row">
+                  <div class="detail-label">Completed</div>
+                  <div class="detail-value">${formatDate(link.date_completed)}</div>
+                </div>
+              ` : ''}
+              ${link.download_path ? `
+                <div class="detail-row">
+                  <div class="detail-label">Downloaded To</div>
+                  <div class="detail-value">${escapeHtml(link.download_path)}</div>
+                </div>
+              ` : ''}
+              ${link.error_message ? `
+                <div class="detail-row">
+                  <div class="detail-label">Error</div>
+                  <div class="detail-value" style="color: var(--danger-text);">${escapeHtml(link.error_message)}</div>
+                </div>
+              ` : ''}
+            </div>
+            <div class="modal-actions">
+              ${link.status === 'failed' ? `<button class="btn" onclick="retryLink('${link.id}')">Retry Download</button>` : ''}
+              <button class="action-btn edit" onclick="closeModal(); startEdit('${link.id}', '${escapeHtml(link.title || link.url).replace(/'/g, "\\'")}')">Rename</button>
+              <button class="action-btn delete" onclick="closeModal(); deleteLink('${link.id}')">Delete</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('modalContainer').innerHTML = modal;
+    }
+
+    // Close modal
+    function closeModal(event) {
+      if (!event || event.target.classList.contains('modal-overlay')) {
+        document.getElementById('modalContainer').innerHTML = '';
+      }
+    }
+
+    // Store all links globally for modal access
+    let allLinks = [];
+
+    // Start editing a link's title
+    function startEdit(id, currentTitle) {
+      const contentDiv = document.getElementById(`content-${id}`);
+      const originalHtml = contentDiv.innerHTML;
+
+      contentDiv.innerHTML = `
+        <div class="edit-mode">
+          <input type="text" class="edit-input" id="edit-input-${id}" value="${currentTitle}" autofocus>
+          <button class="save-btn" onclick="saveEdit('${id}', '${escapeHtml(originalHtml).replace(/'/g, "\\'")}')">Save</button>
+          <button class="cancel-btn" onclick="cancelEdit('${id}', '${escapeHtml(originalHtml).replace(/'/g, "\\'")}')">Cancel</button>
+        </div>
+      `;
+
+      // Focus the input and select all text
+      const input = document.getElementById(`edit-input-${id}`);
+      input.focus();
+      input.select();
+
+      // Allow Enter to save, Escape to cancel
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          saveEdit(id, originalHtml);
+        } else if (e.key === 'Escape') {
+          cancelEdit(id, originalHtml);
+        }
+      });
+    }
+
+    // Save the edited title
+    async function saveEdit(id, originalHtml) {
+      const input = document.getElementById(`edit-input-${id}`);
+      const newTitle = input.value.trim();
+
+      if (!newTitle) {
+        alert('Title cannot be empty');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: newTitle })
+        });
+
+        if (response.ok) {
+          loadLinks(); // Reload to show updated title
+        } else {
+          alert('Failed to update title');
+          cancelEdit(id, originalHtml);
+        }
+      } catch (error) {
+        console.error('Error updating title:', error);
+        alert('Error updating title');
+        cancelEdit(id, originalHtml);
+      }
+    }
+
+    // Cancel editing
+    function cancelEdit(id, originalHtml) {
+      const contentDiv = document.getElementById(`content-${id}`);
+      contentDiv.innerHTML = originalHtml;
+    }
+
+    // Retry failed download
+    async function retryLink(id) {
+      try {
+        const response = await fetch(`${API_BASE}/${id}/retry`, { method: 'POST' });
+        if (response.ok) {
+          closeModal();
+          showStatus('Download restarted', 'success');
+          loadLinks();
+        } else {
+          alert('Failed to retry download');
+        }
+      } catch (error) {
+        console.error('Error retrying link:', error);
+        alert('Error retrying download');
+      }
     }
 
     // Delete link
@@ -467,8 +1031,14 @@
       loadLinks();
     });
 
-    // Expose deleteLink to global scope
+    // Expose functions to global scope
     window.deleteLink = deleteLink;
+    window.startEdit = startEdit;
+    window.saveEdit = saveEdit;
+    window.cancelEdit = cancelEdit;
+    window.openLinkDetails = openLinkDetails;
+    window.closeModal = closeModal;
+    window.retryLink = retryLink;
   </script>
 </body>
 </html>

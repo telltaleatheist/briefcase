@@ -6,8 +6,15 @@ import { AppService } from './app.service';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
+  /**
+   * Health check endpoint for Electron main process
+   * GET /api (due to global prefix)
+   */
   @Get()
-  getHello(): string {
-    return 'Hello World';
+  getHealth(): { status: string; message: string } {
+    return {
+      status: 'ok',
+      message: 'Clippy backend is running'
+    };
   }
 }

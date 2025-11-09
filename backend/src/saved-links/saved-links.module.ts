@@ -6,9 +6,10 @@ import { WebController } from './web.controller';
 import { SavedLinksGateway } from './saved-links.gateway';
 import { DatabaseModule } from '../database/database.module';
 import { DownloaderModule } from '../downloader/downloader.module';
+import { MediaModule } from '../media/media.module';
 
 @Module({
-  imports: [DatabaseModule, DownloaderModule],
+  imports: [DatabaseModule, DownloaderModule, MediaModule],
   providers: [SavedLinksService, SavedLinksGateway],
   controllers: [SavedLinksController, WebController],
   exports: [SavedLinksService],

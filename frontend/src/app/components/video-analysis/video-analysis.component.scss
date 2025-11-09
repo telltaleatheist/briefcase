@@ -75,47 +75,7 @@
   background: var(--bg-primary);
   display: flex;
   justify-content: center;
-  min-width: 400px;
-}
-
-.resize-handle {
-  width: 4px;
-  background: var(--border-color);
-  cursor: col-resize;
-  position: relative;
-  flex-shrink: 0;
-  transition: background 0.2s ease;
-
-  &:hover {
-    background: var(--primary-orange);
-  }
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -4px;
-    right: -4px;
-  }
-
-  &.dragging {
-    background: var(--primary-orange);
-  }
-}
-
-.queue-column {
-  width: 420px;
-  min-width: 320px;
-  max-width: 600px;
-  background: var(--bg-secondary);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  padding: 10px;
-  gap: 8px;
-  flex-shrink: 0;
-  min-height: 0;
+  width: 100%;
 }
 
 // ========================================

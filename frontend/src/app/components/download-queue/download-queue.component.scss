@@ -78,8 +78,9 @@
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: 420px;
-  max-height: 600px;
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-large);
@@ -102,18 +103,33 @@
 }
 
 .panel-header {
-  padding: 16px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+
+  .select-all-checkbox {
+    flex-shrink: 0;
+  }
 
   h3 {
     margin: 0;
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-primary);
+    flex: 1 1 auto;
+    min-width: fit-content;
+
+    .selection-count {
+      color: var(--primary-orange);
+      font-size: 13px;
+      margin-left: 4px;
+    }
   }
 }
 
@@ -129,6 +145,12 @@
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+
+  &.pending {
+    background: rgba(100, 149, 237, 0.15);
+    color: rgba(100, 149, 237, 1);
+    border: 1px solid rgba(100, 149, 237, 0.3);
+  }
 
   &.active {
     background: rgba(255, 107, 53, 0.15);
@@ -486,5 +508,565 @@
 
   &:active {
     background: var(--bg-tertiary);
+  }
+}
+
+// Queue Actions
+.queue-actions {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+
+  .start-queue-btn,
+  .clear-queue-btn {
+    flex: 1;
+    font-size: 13px;
+    padding: 0 12px;
+    height: 36px;
+    line-height: 36px;
+    white-space: nowrap;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+  }
+}
+
+// Bulk Settings Accordion
+.bulk-settings-accordion {
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+
+  ::ng-deep .mat-expansion-panel {
+    background: var(--bg-card);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  ::ng-deep .mat-expansion-panel-header {
+    padding: 0 16px;
+    min-height: 44px;
+    font-size: 13px;
+
+    .mat-expansion-indicator {
+      &::after {
+        color: var(--text-secondary);
+      }
+    }
+  }
+
+  ::ng-deep .mat-expansion-panel-header-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-weight: 600;
+
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      color: rgba(100, 149, 237, 0.7);
+    }
+  }
+
+  ::ng-deep .mat-expansion-panel-body {
+    padding: 12px 16px;
+  }
+
+  ::ng-deep .mat-expansion-panel:not(.mat-expanded) {
+    .mat-expansion-panel-header:hover {
+      background: var(--bg-secondary);
+    }
+  }
+
+  .bulk-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .bulk-control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .bulk-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      color: var(--text-tertiary);
+    }
+  }
+
+  .bulk-select,
+  .bulk-input,
+  .bulk-textarea {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.2s ease;
+    resize: vertical;
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary-orange);
+      background: var(--bg-primary);
+    }
+
+    &:hover {
+      border-color: var(--text-tertiary);
+    }
+  }
+
+  .bulk-textarea {
+    min-height: 60px;
+    line-height: 1.4;
+  }
+
+  .bulk-input-wrapper {
+    display: flex;
+    position: relative;
+  }
+
+  .bulk-apply-btn {
+    margin-top: 4px;
+    font-size: 12px;
+    height: 32px;
+    background: var(--primary-orange) !important;
+    color: white !important;
+
+    &:disabled {
+      background: var(--bg-tertiary) !important;
+      color: var(--text-tertiary) !important;
+    }
+
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+  }
+}
+
+// Job Item Wrappers and Pending Job Styles
+.job-item-wrapper {
+  width: 100%;
+}
+
+.job-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s ease;
+  min-height: 40px;
+  max-height: 56px;
+  position: relative;
+  overflow: visible;
+
+  &:hover {
+    background: var(--bg-secondary);
+    border-color: var(--text-tertiary);
+    transform: translateY(-1px);
+  }
+
+  // Pending jobs - blue
+  &.pending {
+    cursor: pointer;
+    border-left: 3px solid rgba(100, 149, 237, 0.5);
+
+    &.selected {
+      background: rgba(100, 149, 237, 0.08);
+      border-color: rgba(100, 149, 237, 0.4);
+    }
+
+    &.expanded {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    .job-icon mat-icon {
+      color: rgba(100, 149, 237, 0.7);
+    }
+  }
+
+  // Active jobs - orange
+  &.active {
+    border-left: 3px solid var(--primary-orange);
+    background: rgba(255, 143, 71, 0.05);
+    cursor: pointer;
+
+    &.expanded {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    .job-icon mat-icon {
+      color: var(--primary-orange);
+    }
+
+    .job-content {
+      cursor: pointer;
+    }
+  }
+
+  // Failed jobs - red
+  &.failed {
+    border-left: 3px solid rgba(244, 67, 54, 0.7);
+    background: rgba(244, 67, 54, 0.03);
+
+    .job-icon mat-icon {
+      color: rgba(244, 67, 54, 0.9);
+    }
+  }
+
+  // Completed jobs - subtle gray
+  &.completed {
+    border-left: 3px solid rgba(100, 100, 100, 0.3);
+    opacity: 0.7;
+
+    .job-icon mat-icon {
+      color: rgba(76, 175, 80, 0.9);
+    }
+  }
+
+  .job-checkbox {
+    flex-shrink: 0;
+  }
+
+  .job-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      transition: color 0.2s ease;
+
+      &.spinning {
+        animation: spin 1s linear infinite;
+      }
+    }
+  }
+
+  .job-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+
+    .job-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .job-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .job-status-text {
+      margin: 0;
+      font-size: 10px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .error-message {
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: rgba(244, 67, 54, 0.08);
+      border-radius: 4px;
+      font-size: 10px;
+      color: #f44336;
+      line-height: 1.4;
+
+      mat-icon {
+        font-size: 12px;
+        width: 12px;
+        height: 12px;
+        flex-shrink: 0;
+      }
+    }
+  }
+
+  .job-progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+
+    ::ng-deep .mat-mdc-progress-bar {
+      --mdc-linear-progress-active-indicator-height: 3px;
+      --mdc-linear-progress-track-height: 3px;
+      --mdc-linear-progress-active-indicator-color: var(--primary-orange);
+      --mdc-linear-progress-track-color: rgba(255, 143, 71, 0.15);
+    }
+
+    ::ng-deep .mdc-linear-progress__bar-inner {
+      border-color: var(--primary-orange);
+    }
+  }
+
+  .expand-button,
+  .remove-job-button {
+    flex-shrink: 0;
+    width: 26px !important;
+    height: 26px !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    &:hover {
+      background-color: rgba(100, 149, 237, 0.1);
+      color: rgba(100, 149, 237, 0.9);
+    }
+  }
+
+  .remove-job-button:hover {
+    background-color: rgba(255, 68, 68, 0.1);
+    color: #ff4444;
+  }
+}
+
+// Job Settings Panel (Expandable)
+.job-settings-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 12px;
+  animation: expandPanel 0.2s ease-out;
+
+  .settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .setting-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      color: var(--text-tertiary);
+    }
+
+    .optional-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-style: italic;
+      margin-left: 4px;
+    }
+  }
+
+  .mode-toggle-compact {
+    display: flex;
+    gap: 6px;
+
+    .mode-btn {
+      flex: 1;
+      padding: 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+      }
+
+      &:hover {
+        border-color: var(--primary-orange);
+        background: var(--bg-secondary);
+      }
+
+      &.active {
+        border-color: var(--primary-orange);
+        background: rgba(255, 143, 71, 0.1);
+        color: var(--primary-orange);
+      }
+    }
+  }
+
+  .compact-select,
+  .compact-input,
+  .compact-textarea {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.2s ease;
+    resize: vertical;
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary-orange);
+      background: var(--bg-primary);
+    }
+
+    &:hover {
+      border-color: var(--text-tertiary);
+    }
+  }
+
+  .compact-textarea {
+    min-height: 60px;
+    line-height: 1.4;
+  }
+
+  .path-display {
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    word-break: break-all;
+    line-height: 1.4;
+  }
+}
+
+@keyframes expandPanel {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+  }
+}
+
+// Job Details Panel (for active jobs)
+.job-details-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 12px;
+  animation: expandPanel 0.2s ease-out;
+
+  .details-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .detail-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .detail-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      color: var(--primary-orange);
+    }
+  }
+
+  .detail-value {
+    padding: 6px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-primary);
+    font-weight: 500;
+
+    &.path-display {
+      font-size: 11px;
+      color: var(--text-secondary);
+      word-break: break-all;
+      line-height: 1.4;
+    }
   }
 }

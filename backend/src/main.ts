@@ -67,7 +67,7 @@ async function bootstrap() {
 
     // Set global prefix but exclude certain routes
     app.setGlobalPrefix(environment.apiPrefix, {
-      exclude: ['saved'] // Exclude the web interface route from the API prefix
+      exclude: ['saved'] // Exclude /saved route from the API prefix
     });
 
     // Global validation pipe

@@ -1418,6 +1418,20 @@ export class DatabaseService {
   }
 
   /**
+   * Update saved link title
+   */
+  updateSavedLinkTitle(id: string, title: string) {
+    const db = this.ensureInitialized();
+
+    db.run(
+      `UPDATE saved_links SET title = ? WHERE id = ?`,
+      [title, id]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
    * Delete saved link by ID
    */
   deleteSavedLink(id: string) {

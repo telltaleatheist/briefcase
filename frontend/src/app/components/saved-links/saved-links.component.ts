@@ -1,7 +1,6 @@
 // clippy/frontend/src/app/components/saved-links/saved-links.component.ts
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatChipsModule } from '@angular/material/chips';
@@ -20,7 +19,6 @@ import { Subscription } from 'rxjs';
   standalone: true,
   imports: [
     CommonModule,
-    MatCardModule,
     MatIconModule,
     MatButtonModule,
     MatChipsModule,
@@ -194,6 +192,15 @@ export class SavedLinksComponent implements OnInit, OnDestroy {
     if (diffDays < 7) return `${diffDays}d ago`;
 
     return date.toLocaleDateString();
+  }
+
+  /**
+   * Truncate URL for display
+   */
+  truncateUrl(url: string): string {
+    const maxLength = 60;
+    if (url.length <= maxLength) return url;
+    return url.substring(0, maxLength) + '...';
   }
 
   /**

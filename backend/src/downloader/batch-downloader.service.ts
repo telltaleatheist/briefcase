@@ -229,7 +229,53 @@ export class BatchDownloaderService {
           this.jobStateManager.updateJobStatus(job, 'completed', 'Image download completed');
           this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Image download completed');
           this.logger.log(`Image download completed for job ${job.id}`);
+        } else if (job.options.skipProcessing) {
+          // Skip processing - just import and complete
+          this.logger.log(`Skipping processing for job ${job.id} (skipProcessing flag set)`);
+
+          // Check if this job should auto-import
+          const shouldImport = job.options.shouldImport === true;
+
+          if (shouldImport) {
+            // Import the downloaded video to the database
+            try {
+              if (result.outputFile) {
+                this.logger.log(`Importing video to database: ${result.outputFile}`);
+                this.jobStateManager.updateJobStatus(job, 'downloaded', 'Importing to library...');
+
+                const importResult = await this.fileScannerService.importVideos([result.outputFile]);
+
+                if (importResult.imported.length > 0) {
+                  this.logger.log(`Video imported successfully: ${importResult.imported[0]}`);
+                  // Mark as completed since we're skipping processing
+                  this.jobStateManager.updateJobStatus(job, 'completed', 'Download and import completed');
+                  this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download and import completed');
+                  this.logger.log(`Video download and import completed (no processing): ${job.id}`);
+                } else {
+                  this.logger.warn(`Failed to import video: ${importResult.errors.join(', ')}`);
+                  // Still mark as completed - the download succeeded
+                  this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import failed)');
+                  this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import failed)');
+                }
+              } else {
+                this.logger.error('Cannot import: output file path is missing');
+                this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (no import)');
+                this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (no import)');
+              }
+            } catch (error) {
+              this.logger.error(`Error importing video: ${error}`);
+              // Still mark as completed - the download succeeded
+              this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import error)');
+              this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import error)');
+            }
+          } else {
+            // No import, no processing - just mark as completed
+            this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed');
+            this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed');
+            this.logger.log(`Video download completed (no processing or import): ${job.id}`);
+          }
         } else {
+          // Normal flow - download, then wait for processing
           // Check if this job should auto-import (only for library downloads)
           const shouldImport = (job.options as any).shouldImport === true;
 

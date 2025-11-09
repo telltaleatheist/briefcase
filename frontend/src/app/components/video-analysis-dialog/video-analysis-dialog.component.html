@@ -1,0 +1,240 @@
+<div class="video-analysis-dialog">
+  <div class="dialog-header">
+    <div class="header-icon">
+      <mat-icon>psychology</mat-icon>
+    </div>
+    <div class="header-content">
+      <h2>{{ data.mode === 'transcribe' ? 'Transcribe Video' : data.mode === 'import' ? 'Download & Analyze' : 'Analyze Video' }}</h2>
+      <p class="subtitle" *ngIf="data.selectedVideos && data.selectedVideos.length > 0">
+        Configure settings for {{ data.selectedVideos.length }} selected video(s)
+      </p>
+    </div>
+    <button mat-icon-button class="close-btn" (click)="cancel()">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <form [formGroup]="analysisForm" (ngSubmit)="onSubmit()">
+    <div class="dialog-content">
+      <!-- Video Source (only show if not from library) -->
+      <div class="form-section" *ngIf="!data.selectedVideos || data.selectedVideos.length === 0">
+        <h3 class="section-title">
+          <mat-icon>video_file</mat-icon>
+          Video Source
+        </h3>
+
+        <!-- Source Type Toggle -->
+        <div class="source-toggle">
+          <button type="button"
+                  class="toggle-option"
+                  [class.active]="analysisForm.get('inputType')?.value === 'url'"
+                  (click)="analysisForm.patchValue({inputType: 'url'})">
+            <mat-icon>link</mat-icon>
+            <span>URL</span>
+          </button>
+          <button type="button"
+                  class="toggle-option"
+                  [class.active]="analysisForm.get('inputType')?.value === 'file'"
+                  (click)="analysisForm.patchValue({inputType: 'file'})">
+            <mat-icon>video_file</mat-icon>
+            <span>Local File</span>
+          </button>
+        </div>
+
+        <!-- URL Input -->
+        <ng-container *ngIf="analysisForm.get('inputType')?.value === 'url'">
+          <div class="input-wrapper">
+            <mat-icon class="input-icon">link</mat-icon>
+            <input type="text"
+                   class="modern-input"
+                   placeholder="Paste video URL (e.g., https://youtube.com/watch?v=...)"
+                   formControlName="input">
+            <button type="button"
+                    mat-icon-button
+                    class="paste-btn"
+                    (click)="pasteFromClipboard()"
+                    matTooltip="Paste from clipboard">
+              <mat-icon>content_paste</mat-icon>
+            </button>
+          </div>
+        </ng-container>
+
+        <!-- Local File Input -->
+        <ng-container *ngIf="analysisForm.get('inputType')?.value === 'file'">
+          <!-- File Selected State -->
+          <div class="file-selected" *ngIf="analysisForm.get('input')?.value">
+            <div class="file-icon">
+              <mat-icon>movie</mat-icon>
+            </div>
+            <div class="file-details">
+              <div class="file-name">{{ analysisForm.get('input')?.value | slice:-50 }}</div>
+              <div class="file-path">{{ analysisForm.get('input')?.value }}</div>
+            </div>
+            <button type="button"
+                    mat-icon-button
+                    class="remove-btn"
+                    (click)="analysisForm.patchValue({input: ''})"
+                    matTooltip="Remove file">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+
+          <!-- Drop Zone -->
+          <div class="drop-zone"
+               *ngIf="!analysisForm.get('input')?.value"
+               (dragover)="onFileDragOver($event)"
+               (dragleave)="onFileDragLeave($event)"
+               (drop)="onFileDrop($event)"
+               [class.dragging]="isDraggingFile">
+            <div class="drop-icon">
+              <mat-icon>cloud_upload</mat-icon>
+            </div>
+            <h4>Drag & drop your video here</h4>
+            <span class="or-text">or</span>
+            <button type="button"
+                    mat-raised-button
+                    color="primary"
+                    (click)="browseFile()">
+              <mat-icon>folder_open</mat-icon>
+              Browse Files
+            </button>
+            <p class="formats">MP4, MOV, AVI, MKV, WebM supported</p>
+          </div>
+        </ng-container>
+      </div>
+
+      <!-- Processing Mode -->
+      <div class="form-section">
+        <h3 class="section-title">
+          <mat-icon>settings</mat-icon>
+          Processing Mode
+        </h3>
+
+        <div class="mode-toggle">
+          <button type="button"
+                  class="toggle-option"
+                  [class.active]="analysisForm.get('mode')?.value === 'full'"
+                  (click)="analysisForm.patchValue({mode: 'full'})">
+            <mat-icon>psychology</mat-icon>
+            <div class="option-text">
+              <span class="option-title">Transcribe + Analysis</span>
+              <span class="option-subtitle">Full AI processing</span>
+            </div>
+          </button>
+          <button type="button"
+                  class="toggle-option"
+                  [class.active]="analysisForm.get('mode')?.value === 'transcribe-only'"
+                  (click)="analysisForm.patchValue({mode: 'transcribe-only'})">
+            <mat-icon>subtitles</mat-icon>
+            <div class="option-text">
+              <span class="option-title">Transcribe Only</span>
+              <span class="option-subtitle">No AI analysis</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- AI Settings (only if full mode) -->
+      <div class="form-section" *ngIf="isAIAnalysisEnabled()">
+        <h3 class="section-title">
+          <mat-icon>smart_toy</mat-icon>
+          AI Configuration
+        </h3>
+
+        <!-- AI Model Selection -->
+        <div class="setting-group">
+          <label class="setting-label">Analysis Model</label>
+          <select class="modern-select" formControlName="aiModel" (change)="onModelChange()">
+            <optgroup label="Claude (API Key Required)">
+              <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
+              <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+              <option value="claude:claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+            </optgroup>
+            <optgroup label="ChatGPT / OpenAI (API Key Required)">
+              <option value="openai:gpt-4o">GPT-4o</option>
+              <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
+              <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            </optgroup>
+            <optgroup label="Ollama (Local - Free)">
+              <option *ngIf="availableOllamaModels.length === 0" value="" disabled>No Ollama models installed</option>
+              <option *ngFor="let model of availableOllamaModels" [value]="'ollama:' + model">{{ model }}</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- API Key (for Claude/OpenAI) -->
+        <div class="setting-group" *ngIf="needsApiKey()">
+          <label class="setting-label">{{ getApiKeyLabel() }}</label>
+          <div class="input-wrapper">
+            <mat-icon class="input-icon">vpn_key</mat-icon>
+            <input type="password"
+                   class="modern-input"
+                   formControlName="apiKey"
+                   [placeholder]="'Enter your ' + getApiKeyLabel()">
+          </div>
+        </div>
+
+        <!-- Ollama Endpoint -->
+        <div class="setting-group" *ngIf="!needsApiKey()">
+          <label class="setting-label">Ollama Endpoint</label>
+          <div class="input-wrapper">
+            <mat-icon class="input-icon">dns</mat-icon>
+            <input type="text"
+                   class="modern-input"
+                   formControlName="ollamaEndpoint"
+                   placeholder="http://localhost:11434">
+          </div>
+        </div>
+
+        <!-- Custom Instructions -->
+        <div class="setting-group">
+          <label class="setting-label">Custom Instructions <span class="optional">(Optional)</span></label>
+          <textarea class="modern-textarea"
+                    formControlName="customInstructions"
+                    rows="3"
+                    placeholder="Add specific instructions for the AI analysis..."></textarea>
+        </div>
+      </div>
+
+      <!-- Transcription Settings -->
+      <div class="form-section">
+        <h3 class="section-title">
+          <mat-icon>mic</mat-icon>
+          Transcription Settings
+        </h3>
+
+        <div class="settings-row">
+          <div class="setting-group">
+            <label class="setting-label">Whisper Model</label>
+            <select class="modern-select" formControlName="whisperModel">
+              <option value="tiny">Tiny - Fastest</option>
+              <option value="base">Base - Balanced</option>
+              <option value="small">Small - Better Quality</option>
+              <option value="medium">Medium - Great Quality</option>
+              <option value="large">Large - Best Quality</option>
+            </select>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">Language</label>
+            <input type="text"
+                   class="modern-input"
+                   formControlName="language"
+                   placeholder="en">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dialog-footer">
+      <button type="button" mat-stroked-button (click)="cancel()">
+        <mat-icon>close</mat-icon>
+        Cancel
+      </button>
+      <button type="submit" mat-raised-button color="primary" [disabled]="analysisForm.invalid">
+        <mat-icon>add_circle</mat-icon>
+        Add to Queue
+      </button>
+    </div>
+  </form>
+</div>

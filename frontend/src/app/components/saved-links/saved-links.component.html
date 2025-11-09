@@ -2,21 +2,23 @@
   <div class="header">
     <h2>Saved for Later</h2>
     <div class="stats">
-      <mat-chip class="stat-chip" [class.active]="!filterStatus" (click)="filterByStatus(undefined)">
-        All ({{ savedLinks.length }})
-      </mat-chip>
-      <mat-chip class="stat-chip" [class.active]="filterStatus === 'pending'" (click)="filterByStatus('pending')">
-        Pending ({{ pendingCount }})
-      </mat-chip>
-      <mat-chip class="stat-chip" [class.active]="filterStatus === 'downloading'" (click)="filterByStatus('downloading')">
-        Downloading ({{ downloadingCount }})
-      </mat-chip>
-      <mat-chip class="stat-chip" [class.active]="filterStatus === 'completed'" (click)="filterByStatus('completed')">
-        Completed ({{ completedCount }})
-      </mat-chip>
-      <mat-chip class="stat-chip" [class.active]="filterStatus === 'failed'" (click)="filterByStatus('failed')">
-        Failed ({{ failedCount }})
-      </mat-chip>
+      <mat-chip-set>
+        <mat-chip class="stat-chip" [highlighted]="!filterStatus" (click)="filterByStatus(undefined)">
+          All ({{ savedLinks.length }})
+        </mat-chip>
+        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'pending'" (click)="filterByStatus('pending')">
+          Pending ({{ pendingCount }})
+        </mat-chip>
+        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'downloading'" (click)="filterByStatus('downloading')">
+          Downloading ({{ downloadingCount }})
+        </mat-chip>
+        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'completed'" (click)="filterByStatus('completed')">
+          Completed ({{ completedCount }})
+        </mat-chip>
+        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'failed'" (click)="filterByStatus('failed')">
+          Failed ({{ failedCount }})
+        </mat-chip>
+      </mat-chip-set>
     </div>
   </div>
 
@@ -35,58 +37,49 @@
   </div>
 
   <!-- Links List -->
-  <div *ngIf="!isLoading && savedLinks.length > 0" class="links-grid">
-    <mat-card *ngFor="let link of savedLinks" class="link-card" [class]="'status-' + link.status">
-      <mat-card-header>
-        <mat-icon [matTooltip]="link.status" class="status-icon">
+  <div *ngIf="!isLoading && savedLinks.length > 0" class="links-list">
+    <div *ngFor="let link of savedLinks" class="link-row" [class]="'status-' + link.status">
+      <!-- Status Icon -->
+      <div class="card-icon">
+        <mat-icon [matTooltip]="link.status">
           {{ getStatusIcon(link.status) }}
         </mat-icon>
-        <mat-card-title>{{ link.title || 'Untitled' }}</mat-card-title>
-        <mat-card-subtitle>{{ formatDate(link.date_added) }}</mat-card-subtitle>
-      </mat-card-header>
+      </div>
 
-      <mat-card-content>
-        <div class="url-container">
-          <mat-icon>link</mat-icon>
-          <span class="url">{{ link.url }}</span>
-        </div>
+      <!-- Content (clickable) - single line -->
+      <div class="card-content" (click)="openUrl(link, $event)">
+        <span class="link-title">{{ link.title || 'Untitled' }}</span>
+        <span class="link-subtitle">
+          <span>{{ formatDate(link.date_added) }}</span>
+          <span *ngIf="link.url"> • {{ truncateUrl(link.url) }}</span>
+          <span *ngIf="link.error_message" class="error-text"> • {{ link.error_message }}</span>
+          <span *ngIf="link.status === 'completed' && link.download_path" class="success-text"> • Downloaded successfully</span>
+        </span>
+      </div>
 
-        <div *ngIf="link.error_message" class="error-message">
-          <mat-icon>error</mat-icon>
-          <span>{{ link.error_message }}</span>
-        </div>
-
-        <div *ngIf="link.status === 'completed' && link.download_path" class="success-message">
-          <mat-icon>check_circle</mat-icon>
-          <span>Downloaded successfully</span>
-        </div>
-      </mat-card-content>
-
-      <mat-card-actions>
-        <button mat-button (click)="openUrl(link, $event)" matTooltip="Open URL in browser">
+      <!-- Action buttons -->
+      <div class="card-actions">
+        <button mat-icon-button (click)="openUrl(link, $event)" matTooltip="Open URL in browser">
           <mat-icon>open_in_new</mat-icon>
-          Open URL
         </button>
 
         <button
           *ngIf="link.status === 'failed'"
-          mat-button
+          mat-icon-button
           color="primary"
           (click)="retryLink(link, $event)"
           matTooltip="Retry download">
           <mat-icon>refresh</mat-icon>
-          Retry
         </button>
 
         <button
-          mat-button
+          mat-icon-button
           color="warn"
           (click)="deleteLink(link, $event)"
           matTooltip="Delete this saved link">
           <mat-icon>delete</mat-icon>
-          Delete
         </button>
-      </mat-card-actions>
-    </mat-card>
+      </div>
+    </div>
   </div>
 </div>

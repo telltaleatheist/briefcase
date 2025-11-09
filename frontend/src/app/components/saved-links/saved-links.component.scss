@@ -19,18 +19,42 @@
       gap: 8px;
       flex-wrap: wrap;
 
+      mat-chip-set {
+        display: flex;
+        flex-wrap: wrap;
+      }
+
       .stat-chip {
         cursor: pointer;
         transition: all 0.2s;
 
+        // Default state - use secondary background with primary text
+        &:not(.mat-mdc-chip-highlighted) {
+          ::ng-deep {
+            .mdc-evolution-chip__action {
+              background-color: var(--bg-secondary);
+            }
+            .mdc-evolution-chip__text-label {
+              color: var(--text-primary) !important;
+            }
+          }
+        }
+
+        // Highlighted/Active state - use orange background
+        &.mat-mdc-chip-highlighted {
+          ::ng-deep {
+            .mdc-evolution-chip__action {
+              background-color: var(--primary-orange) !important;
+            }
+            .mdc-evolution-chip__text-label {
+              color: white !important;
+            }
+          }
+        }
+
         &:hover {
           transform: translateY(-2px);
           box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        &.active {
-          background-color: #3f51b5;
-          color: white;
         }
       }
     }
@@ -87,159 +111,156 @@
     }
   }
 
-  .links-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 16px;
+  .links-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 
-    .link-card {
-      transition: transform 0.2s, box-shadow 0.2s;
+    .link-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background-color 0.15s;
+      padding: 8px 12px;
+      overflow: hidden;
+      border-radius: 4px;
+      background: var(--bg-card);
+      max-width: 100%;
+      width: 100%;
+      box-sizing: border-box;
 
       &:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+        background-color: var(--bg-secondary);
       }
 
-      mat-card-header {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-
-        .status-icon {
-          font-size: 24px;
-          width: 24px;
-          height: 24px;
-        }
-
-        mat-card-title {
-          font-size: 18px;
-          font-weight: 500;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        mat-card-subtitle {
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.6);
-        }
-      }
-
-      mat-card-content {
-        padding-top: 12px;
-
-        .url-container {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: rgba(0, 0, 0, 0.03);
-          border-radius: 4px;
-          margin-bottom: 12px;
-
-          mat-icon {
-            font-size: 18px;
-            width: 18px;
-            height: 18px;
-            color: rgba(0, 0, 0, 0.5);
-          }
-
-          .url {
-            font-size: 13px;
-            color: rgba(0, 0, 0, 0.7);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-family: monospace;
-          }
-        }
-
-        .error-message {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: rgba(244, 67, 54, 0.1);
-          border-left: 3px solid #f44336;
-          border-radius: 4px;
-          color: #d32f2f;
-          font-size: 13px;
-
-          mat-icon {
-            font-size: 18px;
-            width: 18px;
-            height: 18px;
-          }
-        }
-
-        .success-message {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: rgba(76, 175, 80, 0.1);
-          border-left: 3px solid #4caf50;
-          border-radius: 4px;
-          color: #388e3c;
-          font-size: 13px;
-
-          mat-icon {
-            font-size: 18px;
-            width: 18px;
-            height: 18px;
-          }
-        }
-      }
-
-      mat-card-actions {
-        display: flex;
-        gap: 8px;
-        padding: 8px 16px;
-        border-top: 1px solid rgba(0, 0, 0, 0.1);
-
-        button {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-
-          mat-icon {
-            font-size: 18px;
-            width: 18px;
-            height: 18px;
-          }
-        }
-      }
-
-      // Status-specific styling
+      // Status-specific styling with left border
       &.status-pending {
-        border-left: 4px solid #ff9800;
-
-        .status-icon {
-          color: #ff9800;
-        }
+        border-left: 3px solid #ff9800;
+        padding-left: 9px;
       }
 
       &.status-downloading {
-        border-left: 4px solid #2196f3;
-
-        .status-icon {
-          color: #2196f3;
-        }
+        border-left: 3px solid #2196f3;
+        padding-left: 9px;
       }
 
       &.status-completed {
-        border-left: 4px solid #4caf50;
-
-        .status-icon {
-          color: #4caf50;
-        }
+        border-left: 3px solid #4caf50;
+        padding-left: 9px;
       }
 
       &.status-failed {
-        border-left: 4px solid #f44336;
+        border-left: 3px solid #f44336;
+        padding-left: 9px;
+      }
 
-        .status-icon {
-          color: #f44336;
+      // Icon - small and compact
+      .card-icon {
+        flex-shrink: 0;
+        line-height: 0;
+
+        mat-icon {
+          width: 20px;
+          height: 20px;
+          font-size: 20px;
+        }
+      }
+
+      // Color icons based on status
+      &.status-pending .card-icon mat-icon {
+        color: #ff9800;
+      }
+
+      &.status-downloading .card-icon mat-icon {
+        color: #2196f3;
+      }
+
+      &.status-completed .card-icon mat-icon {
+        color: #4caf50;
+      }
+
+      &.status-failed .card-icon mat-icon {
+        color: #f44336;
+      }
+
+      // Content - compact single line
+      .card-content {
+        flex: 1;
+        min-width: 0;
+        cursor: pointer;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        overflow: hidden;
+        max-width: 100%;
+
+        .link-title {
+          flex: 1 1 auto;
+          min-width: 0;
+          max-width: 100%;
+          font-size: 14px;
+          font-weight: 400;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          color: var(--text-primary);
+        }
+
+        .link-subtitle {
+          flex: 0 1 auto;
+          min-width: 0;
+          max-width: 50%;
+          font-size: 12px;
+          color: var(--text-secondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+
+          .error-text {
+            color: #f44336;
+          }
+
+          .success-text {
+            color: #4caf50;
+          }
+        }
+      }
+
+      // Actions - always visible
+      .card-actions {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        opacity: 1;
+
+        button[mat-icon-button] {
+          width: 32px;
+          height: 32px;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0.7;
+          transition: opacity 0.15s, background-color 0.15s;
+
+          mat-icon {
+            font-size: 18px;
+            width: 18px;
+            height: 18px;
+          }
+
+          &:hover {
+            background-color: rgba(0, 0, 0, 0.04);
+            opacity: 1;
+          }
+        }
+      }
+
+      // Make buttons more visible on hover
+      &:hover .card-actions {
+        button[mat-icon-button] {
+          opacity: 1;
         }
       }
     }

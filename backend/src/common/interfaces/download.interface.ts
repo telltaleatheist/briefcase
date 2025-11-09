@@ -68,6 +68,7 @@ export interface DownloadOptions {
   compressionLevel?: number;
   transcribeVideo?: boolean;
   shouldImport?: boolean; // For library downloads
+  skipProcessing?: boolean; // Skip processing entirely - just download and mark as completed
 }
 
 export interface DownloadResult {

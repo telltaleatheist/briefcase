@@ -39,7 +39,7 @@ import { BackendUrlService } from '../../services/backend-url.service';
         </p>
 
         <mat-form-field appearance="outline" class="full-width">
-          <mat-label>Title (Optional)</mat-label>
+          <mat-label>Notes (Optional)</mat-label>
           <input matInput [(ngModel)]="title" placeholder="Brief title for this marker">
         </mat-form-field>
 
