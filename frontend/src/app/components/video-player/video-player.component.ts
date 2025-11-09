@@ -675,8 +675,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.activeSectionIndex = currentSection;
       this.previousActiveSectionIndex = currentSection;
 
-      // Auto-scroll to section in AI Analysis tab if it's currently open and video is playing
-      if (this.isPlaying && this.tabGroup && this.tabGroup.selectedIndex === 0) {
+      // Auto-scroll to section in AI Analysis tab if it's currently open (works during playback AND scrubbing)
+      if (this.tabGroup && this.tabGroup.selectedIndex === 0) {
         this.scrollToActiveSection();
       }
     } else if (currentSection === -1) {

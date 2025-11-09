@@ -41,6 +41,8 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   matches: TranscriptMatch[] = [];
   isSearching = false;
   selectedMatchIndex = -1;
+  useWildcards = false;
+  useBooleanLogic = false;
 
   private searchSubject = new Subject<string>();
 
@@ -74,38 +76,15 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
     this.matches = [];
 
     try {
-      // Split transcript into lines
       const lines = this.transcriptText.split('\n');
-      const regex = new RegExp(query, 'gi');
-      const seenLines = new Set<number>(); // Track lines we've already added
 
-      // Search through each line
-      lines.forEach((line, lineIndex) => {
-        // Skip if we've already found a match in this line
-        if (seenLines.has(lineIndex)) {
-          return;
-        }
-
-        const match = regex.exec(line);
-        if (match) {
-          seenLines.add(lineIndex);
-          const startIdx = Math.max(0, match.index - 50);
-          const endIdx = Math.min(line.length, match.index + query.length + 50);
-          const context = line.substring(startIdx, endIdx);
-          const timestamp = this.extractTimestamp(lines, lineIndex);
-
-          console.log('Found match on line', lineIndex, 'with timestamp:', timestamp);
-
-          this.matches.push({
-            index: this.matches.length,
-            text: match[0],
-            context: startIdx > 0 ? '...' + context : context,
-            timestamp: timestamp
-          });
-        }
-        // Reset regex lastIndex for next line
-        regex.lastIndex = 0;
-      });
+      if (this.useBooleanLogic) {
+        this.performBooleanSearch(query, lines);
+      } else if (this.useWildcards) {
+        this.performWildcardSearch(query, lines);
+      } else {
+        this.performSimpleSearch(query, lines);
+      }
 
       console.log('Total matches found:', this.matches.length);
     } catch (error) {
@@ -113,6 +92,165 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
     } finally {
       this.isSearching = false;
     }
+  }
+
+  /**
+   * Simple search (original behavior)
+   */
+  private performSimpleSearch(query: string, lines: string[]) {
+    const regex = new RegExp(query, 'gi');
+    const seenLines = new Set<number>();
+
+    lines.forEach((line, lineIndex) => {
+      if (seenLines.has(lineIndex)) return;
+
+      const match = regex.exec(line);
+      if (match) {
+        this.addMatch(line, lineIndex, match.index, match[0], lines, seenLines);
+      }
+      regex.lastIndex = 0;
+    });
+  }
+
+  /**
+   * Wildcard search (* and ?)
+   */
+  private performWildcardSearch(query: string, lines: string[]) {
+    // Convert wildcards to regex
+    // Escape regex special chars except * and ?
+    let regexPattern = query.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    // Convert * to .* and ? to .
+    regexPattern = regexPattern.replace(/\*/g, '.*').replace(/\?/g, '.');
+
+    const regex = new RegExp(regexPattern, 'gi');
+    const seenLines = new Set<number>();
+
+    lines.forEach((line, lineIndex) => {
+      if (seenLines.has(lineIndex)) return;
+
+      const match = regex.exec(line);
+      if (match) {
+        this.addMatch(line, lineIndex, match.index, match[0], lines, seenLines);
+      }
+      regex.lastIndex = 0;
+    });
+  }
+
+  /**
+   * Boolean search (AND, OR, NOT)
+   * Examples:
+   * - "bill AND congress" - both words must appear
+   * - "senate OR house" - either word must appear
+   * - "trump NOT impeachment" - first word but not second
+   * - "bill AND (senate OR congress)" - supports grouping
+   */
+  private performBooleanSearch(query: string, lines: string[]) {
+    const seenLines = new Set<number>();
+
+    lines.forEach((line, lineIndex) => {
+      if (seenLines.has(lineIndex)) return;
+
+      if (this.evaluateBooleanQuery(query, line)) {
+        // For boolean matches, we'll highlight the first matching term
+        const firstTerm = this.getFirstTerm(query);
+        const match = line.toLowerCase().indexOf(firstTerm.toLowerCase());
+        if (match !== -1) {
+          this.addMatch(line, lineIndex, match, line.substring(match, match + firstTerm.length), lines, seenLines);
+        }
+      }
+    });
+  }
+
+  /**
+   * Evaluate a boolean query against a line
+   */
+  private evaluateBooleanQuery(query: string, line: string): boolean {
+    // Handle NOT operator (highest precedence)
+    const notPattern = /(\w+)\s+NOT\s+(\w+)/gi;
+    let processedQuery = query;
+    let notMatches = [...query.matchAll(notPattern)];
+
+    for (const match of notMatches) {
+      const term1 = match[1];
+      const term2 = match[2];
+      const hasFirst = new RegExp(term1, 'i').test(line);
+      const hasSecond = new RegExp(term2, 'i').test(line);
+      const result = hasFirst && !hasSecond;
+      processedQuery = processedQuery.replace(match[0], result ? 'TRUE' : 'FALSE');
+    }
+
+    // Handle AND operator
+    const andPattern = /(\w+)\s+AND\s+(\w+)/gi;
+    let andMatches = [...processedQuery.matchAll(andPattern)];
+
+    for (const match of andMatches) {
+      const term1 = match[1];
+      const term2 = match[2];
+
+      if (term1 === 'TRUE' || term1 === 'FALSE' || term2 === 'TRUE' || term2 === 'FALSE') {
+        const val1 = term1 === 'TRUE';
+        const val2 = term2 === 'TRUE';
+        processedQuery = processedQuery.replace(match[0], (val1 && val2) ? 'TRUE' : 'FALSE');
+      } else {
+        const hasFirst = new RegExp(term1, 'i').test(line);
+        const hasSecond = new RegExp(term2, 'i').test(line);
+        processedQuery = processedQuery.replace(match[0], (hasFirst && hasSecond) ? 'TRUE' : 'FALSE');
+      }
+    }
+
+    // Handle OR operator (lowest precedence)
+    const orPattern = /(\w+)\s+OR\s+(\w+)/gi;
+    let orMatches = [...processedQuery.matchAll(orPattern)];
+
+    for (const match of orMatches) {
+      const term1 = match[1];
+      const term2 = match[2];
+
+      if (term1 === 'TRUE' || term1 === 'FALSE' || term2 === 'TRUE' || term2 === 'FALSE') {
+        const val1 = term1 === 'TRUE';
+        const val2 = term2 === 'TRUE';
+        processedQuery = processedQuery.replace(match[0], (val1 || val2) ? 'TRUE' : 'FALSE');
+      } else {
+        const hasFirst = new RegExp(term1, 'i').test(line);
+        const hasSecond = new RegExp(term2, 'i').test(line);
+        processedQuery = processedQuery.replace(match[0], (hasFirst || hasSecond) ? 'TRUE' : 'FALSE');
+      }
+    }
+
+    // If no boolean operators, just search for the term
+    if (!query.match(/\s+(AND|OR|NOT)\s+/i)) {
+      return new RegExp(query, 'i').test(line);
+    }
+
+    return processedQuery.includes('TRUE');
+  }
+
+  /**
+   * Extract the first search term from a boolean query
+   */
+  private getFirstTerm(query: string): string {
+    const match = query.match(/^\w+/);
+    return match ? match[0] : query;
+  }
+
+  /**
+   * Helper to add a match to the results
+   */
+  private addMatch(line: string, lineIndex: number, matchIndex: number, matchText: string, lines: string[], seenLines: Set<number>) {
+    seenLines.add(lineIndex);
+    const startIdx = Math.max(0, matchIndex - 50);
+    const endIdx = Math.min(line.length, matchIndex + matchText.length + 50);
+    const context = line.substring(startIdx, endIdx);
+    const timestamp = this.extractTimestamp(lines, lineIndex);
+
+    console.log('Found match on line', lineIndex, 'with timestamp:', timestamp);
+
+    this.matches.push({
+      index: this.matches.length,
+      text: matchText,
+      context: startIdx > 0 ? '...' + context : context,
+      timestamp: timestamp
+    });
   }
 
   /**

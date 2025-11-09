@@ -20,6 +20,28 @@
     </mat-form-field>
   </div>
 
+  <!-- Search Options -->
+  <div class="search-options" *ngIf="transcriptExists">
+    <button
+      mat-button
+      class="search-option-btn"
+      [class.active]="useWildcards"
+      (click)="useWildcards = !useWildcards; useBooleanLogic = false; onSearchInput()"
+      matTooltip="Enable wildcards (* and ?) in search">
+      <mat-icon>{{useWildcards ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
+      <span>Wildcards</span>
+    </button>
+    <button
+      mat-button
+      class="search-option-btn"
+      [class.active]="useBooleanLogic"
+      (click)="useBooleanLogic = !useBooleanLogic; useWildcards = false; onSearchInput()"
+      matTooltip="Enable boolean operators (AND, OR, NOT)">
+      <mat-icon>{{useBooleanLogic ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
+      <span>Boolean</span>
+    </button>
+  </div>
+
   <!-- Run Transcription Button (shown when transcript doesn't exist) -->
   <div *ngIf="!transcriptExists" class="no-transcript-container">
     <mat-icon class="no-transcript-icon">transcribe</mat-icon>
