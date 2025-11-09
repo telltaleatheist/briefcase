@@ -72,10 +72,23 @@
     <div class="jobs-list">
       <div *ngFor="let job of getActiveJobsForDisplay()" class="job-card-wrapper">
         <div class="job-card" [ngClass]="getJobStatusClassWithQueueType(job)">
-          <!-- Icon -->
-          <div class="card-icon">
-            <mat-spinner *ngIf="job.loading" diameter="24"></mat-spinner>
-            <mat-icon *ngIf="!job.loading">{{ job.status === 'failed' ? 'error' : 'cloud_download' }}</mat-icon>
+          <!-- Checkbox -->
+          <div class="card-checkbox">
+            <mat-checkbox></mat-checkbox>
+          </div>
+
+          <!-- Primary actions (play and info) -->
+          <div class="card-primary-actions">
+            <button mat-icon-button
+                    matTooltip="Play video"
+                    (click)="$event.stopPropagation()">
+              <mat-icon>play_arrow</mat-icon>
+            </button>
+            <button mat-icon-button
+                    matTooltip="Video info"
+                    (click)="toggleJobDetails(job.id); $event.stopPropagation()">
+              <mat-icon>info</mat-icon>
+            </button>
           </div>
 
           <!-- Content (clickable) -->
@@ -169,9 +182,23 @@
       <div class="completed-jobs-list">
         <div *ngFor="let job of getCompletedJobsForDisplay()" class="job-card-wrapper">
           <div class="job-card" [ngClass]="getJobStatusClassWithQueueType(job)">
-            <!-- Icon -->
-            <div class="card-icon">
-              <mat-icon>{{ job.status === 'completed' ? 'check_circle' : 'error' }}</mat-icon>
+            <!-- Checkbox -->
+            <div class="card-checkbox">
+              <mat-checkbox></mat-checkbox>
+            </div>
+
+            <!-- Primary actions (play and info) -->
+            <div class="card-primary-actions">
+              <button mat-icon-button
+                      matTooltip="Play video"
+                      (click)="$event.stopPropagation()">
+                <mat-icon>play_arrow</mat-icon>
+              </button>
+              <button mat-icon-button
+                      matTooltip="Video info"
+                      (click)="toggleJobDetails(job.id); $event.stopPropagation()">
+                <mat-icon>info</mat-icon>
+              </button>
             </div>
 
             <!-- Content -->

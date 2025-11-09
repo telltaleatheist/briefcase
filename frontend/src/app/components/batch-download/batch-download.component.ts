@@ -1130,7 +1130,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Add all URLs to pending jobs immediately (no metadata fetching)
+    // Add all URLs to pending jobs immediately with loading state
     urls.forEach(url => {
       const downloadOptions: DownloadOptions = {
         url,
@@ -1146,24 +1146,50 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         useCompression: this.batchForm.get('useCompression')?.value,
         compressionLevel: this.batchForm.get('compressionLevel')?.value,
         transcribeVideo: this.batchForm.get('transcribeVideo')?.value,
-        displayName: this.getShortUrl(url), // Will be updated by backend during download
+        displayName: this.getShortUrl(url), // Temporary name
         shouldImport: true, // Enable auto-import to library
         libraryId: this.selectedLibraryId // Pass library ID for database import
       };
 
-      // Add job to the service with URL as temporary display name
-      this.batchStateService.addPendingJob({
+      // Add job to the service with loading state (service generates ID)
+      const pendingJobId = this.batchStateService.addPendingJob({
         url,
         displayName: this.getShortUrl(url),
         uploadDate: '',
         options: downloadOptions,
-        loading: false // No loading state needed since we're not fetching
+        loading: true // Show loading state while fetching metadata
       });
-    });
 
-    // Don't show notification when adding URLs to pending queue - only notify when queue starts
-    this.multiUrlText = ''; // Clear the textarea
-    this.cdr.detectChanges(); // Update the UI to show pending jobs
+      // Fetch metadata in parallel (fast now with fixed binary!)
+      this.batchApiService.getVideoInfo(url)
+        .pipe(
+          catchError(err => {
+            console.error(`Error fetching video info for ${url}:`, err);
+            // Use fallback name
+            return of({ title: this.getShortUrl(url), uploadDate: '' });
+          })
+        )
+        .subscribe(info => {
+          // Generate sanitized display name
+          const title = info?.title || this.getShortUrl(url);
+          const uploadDate = info?.uploadDate || '';
+          const displayName = this.generateSanitizedFilename(
+            uploadDate ? `${uploadDate} ${title}` : title
+          );
+
+          // Update the pending job with the fetched metadata
+          this.batchStateService.updatePendingJob(pendingJobId, {
+            displayName,
+            uploadDate,
+            loading: false,
+            options: {
+              ...downloadOptions,
+              displayName
+            }
+          });
+          this.cdr.detectChanges();
+        });
+    });
   }
 
   /**
@@ -1729,11 +1755,28 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   cancelJob(jobId: string): void {
     this.batchApiService.cancelJob(jobId).subscribe({
       next: () => {
-        this.notificationService.toastOnly('success', 'Job Cancelled', 'Job cancelled');
+        this.notificationService.toastOnly('success', 'Job Removed', 'Job removed from queue');
+
+        // Immediately remove from frontend display
+        if (this.batchQueueStatus) {
+          this.batchQueueStatus.queuedJobs = this.batchQueueStatus.queuedJobs?.filter(j => j.id !== jobId) || [];
+          this.batchQueueStatus.downloadingJobs = this.batchQueueStatus.downloadingJobs?.filter(j => j.id !== jobId) || [];
+          this.batchQueueStatus.downloadedJobs = this.batchQueueStatus.downloadedJobs?.filter(j => j.id !== jobId) || [];
+          this.batchQueueStatus.processingJobs = this.batchQueueStatus.processingJobs?.filter(j => j.id !== jobId) || [];
+          this.batchQueueStatus.transcribingJobs = this.batchQueueStatus.transcribingJobs?.filter(j => j.id !== jobId) || [];
+
+          // Remove from order tracking
+          this.originalJobOrder = this.originalJobOrder.filter(id => id !== jobId);
+
+          // Force UI update
+          this.cdr.detectChanges();
+        }
+
+        // Refresh from backend to confirm
         setTimeout(() => this.refreshBatchStatus(), 300);
       },
       error: (error) => {
-        this.notificationService.toastOnly('error', 'Cancel Failed', 'Failed to cancel job');
+        this.notificationService.toastOnly('error', 'Remove Failed', 'Failed to remove job');
         console.error('Error cancelling job:', error);
       }
     });

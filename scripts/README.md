@@ -1,54 +1,60 @@
-# Clippy Verification Scripts
+# Build Scripts
 
-This directory contains scripts to verify and validate various aspects of the Clippy application.
+This directory contains scripts for packaging and building Clippy.
 
-## verify-python-setup.js
+## yt-dlp Binary Management
 
-Comprehensive verification script for Python configuration.
+### Problem
 
-### What It Checks
+The compiled yt-dlp binaries (built with PyInstaller) have significant startup overhead (~8-9 seconds per execution) due to:
+- Extracting the embedded Python runtime
+- Initializing the Python interpreter
+- Loading bundled modules
 
-1. **Configuration Files** - Verifies all Python config files exist
-2. **Python Detection** - Confirms Python is found at the configured path
-3. **Python Validation** - Validates Python version and accessibility
-4. **Package Availability** - Checks for whisper, requests, openai, anthropic
-5. **Bridge Execution** - Tests actual Python script execution via the bridge
+This causes metadata fetching to be 10x slower than necessary.
+
+### Solution
+
+We use the Python script versions of yt-dlp instead:
+- **macOS/Linux**: Python scripts that use the system Python interpreter (~1 second startup)
+- **Windows**: Must use `.exe` as Python isn't guaranteed to be installed
 
 ### Usage
 
+**Download fast yt-dlp binaries:**
 ```bash
-# Run verification
-node scripts/verify-python-setup.js
-
-# Or use npm script (if defined)
-npm run verify:python
+npm run download:ytdlp
 ```
 
-### Expected Output
+This script:
+1. Backs up existing binaries with timestamps
+2. Downloads the latest Python script versions for macOS/Linux
+3. Downloads the latest .exe for Windows
+4. Verifies the downloads are correct
 
+**The download script is automatically run before each packaging command:**
+```bash
+npm run package:mac-arm64   # Downloads yt-dlp, then packages
+npm run package:mac-x64     # Downloads yt-dlp, then packages
+npm run package:win-x64     # Downloads yt-dlp, then packages
+npm run package:linux       # Downloads yt-dlp, then packages
 ```
-✓ ALL TESTS PASSED
-  Python configuration is correct and consistent!
-```
 
-### If Tests Fail
+### Performance Impact
 
-1. **Config files missing**: Run `npm run build:electron && npm run build:backend`
-2. **Python not found**: Check `backend/src/shared/python-config.ts` and verify the path exists
-3. **Packages missing**: Install with: `[python-command] -m pip install openai-whisper requests openai anthropic`
-4. **Bridge fails**: Check that `backend/python/video_analysis_service.py` exists
+- **Before (compiled binary)**: 9 seconds per metadata fetch
+- **After (Python script)**: 1 second per metadata fetch
+- **Improvement**: 9x faster metadata loading!
 
-### Exit Codes
+### Files
 
-- `0` - All tests passed
-- `1` - One or more tests failed
+- `download-ytdlp.js` - Downloads fast yt-dlp binaries for all platforms
+- `package-python-mac.js` - Packages Python environment for macOS
+- `package-python-windows.js` - Packages Python environment for Windows
 
-## Adding New Verification Scripts
+### Important Notes
 
-When adding new scripts to this directory:
-
-1. Make them executable: `chmod +x scripts/your-script.js`
-2. Add shebang line: `#!/usr/bin/env node`
-3. Document usage in this README
-4. Use clear logging with emojis for readability
-5. Exit with appropriate codes (0 = success, 1 = failure)
+1. **Do not manually replace yt-dlp binaries with compiled versions** - they will be slow
+2. **macOS/Linux require Python 3** - The yt-dlp scripts use `#!/usr/bin/env python3`
+3. **Windows uses .exe** - No Python dependency on Windows
+4. **Backups are timestamped** - Old binaries are preserved with `.backup.{timestamp}` suffix

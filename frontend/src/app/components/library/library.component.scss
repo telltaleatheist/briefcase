@@ -512,6 +512,35 @@
       line-height: 0;
     }
 
+    // Primary actions (play and info)
+    .card-primary-actions {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 4px;
+
+      button[mat-icon-button] {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        mat-icon {
+          font-size: 20px;
+          width: 20px;
+          height: 20px;
+          color: var(--primary-orange);
+        }
+
+        &:hover {
+          background-color: rgba(255, 143, 71, 0.1);
+        }
+      }
+    }
+
     // Icon - small and compact
     .card-icon {
       flex-shrink: 0;
@@ -663,35 +692,7 @@
       gap: 8px;
       opacity: 1; // Always visible
 
-      // Primary action buttons (play and info) - mini FABs
-      .primary-action {
-        width: 36px;
-        height: 36px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-
-        mat-icon {
-          font-size: 20px;
-          width: 20px;
-          height: 20px;
-        }
-
-        &:hover {
-          box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
-          transform: scale(1.05);
-        }
-      }
-
-      // Info button - accent color
-      .info-button {
-        background-color: var(--primary-orange, #ff8f47);
-        color: white;
-
-        &:hover {
-          background-color: var(--primary-orange-dark, #ff7a28);
-        }
-      }
-
-      // Secondary action buttons (menu and delete)
+      // Action buttons (menu and delete)
       button[mat-icon-button] {
         width: 32px;
         height: 32px;
@@ -715,7 +716,7 @@
       }
     }
 
-    // Make secondary buttons more visible on hover
+    // Make action buttons more visible on hover
     &:hover .card-actions {
       button[mat-icon-button] {
         opacity: 1;
@@ -1025,25 +1026,6 @@
     }
 
     .card-actions {
-      // Mini FAB buttons have proper colors already, just adjust shadows
-      .primary-action {
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-
-        &:hover {
-          box-shadow: 0 3px 6px rgba(0, 0, 0, 0.5);
-        }
-      }
-
-      // Info button stays orange but with adjusted shadow
-      .info-button {
-        background-color: var(--primary-orange, #ff8f47);
-        color: white;
-
-        &:hover {
-          background-color: var(--primary-orange-dark, #ff7a28);
-        }
-      }
-
       button[mat-icon-button] {
         &:hover {
           background-color: rgba(255, 255, 255, 0.08);

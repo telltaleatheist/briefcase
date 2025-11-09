@@ -861,7 +861,8 @@ export class DownloaderService implements OnModuleInit {
    */
   async getVideoInfo(url: string): Promise<any> {
     try {
-      this.logger.log(`Fetching video info for URL: ${url}`);
+      const startTime = Date.now();
+      this.logger.log(`[TIMING] Fetching video info for URL: ${url}`);
 
       // Create and configure YtDlpManager
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);
@@ -869,21 +870,20 @@ export class DownloaderService implements OnModuleInit {
         .input(url)
         .addOption('--dump-json')
         .addOption('--no-playlist')
+        .addOption('--flat-playlist')
         .addOption('--skip-download')
         .addOption('--no-warnings')
         .addOption('--no-check-certificates')
         .addOption('--extractor-retries', '1')
-        .addOption('--socket-timeout', '10');
+        .addOption('--socket-timeout', '5');
 
       // For YouTube URLs, use android client for better reliability
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
         ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
       }
 
-      // For Twitter/X, use faster syndication API
-      if (url.includes('twitter.com') || url.includes('x.com')) {
-        ytDlpManager.addOption('--extractor-args', 'twitter:api=syndication');
-      }
+      // For Twitter/X, let yt-dlp use its default API (syndication API is slow now)
+      // Removed: twitter:api=syndication - it was causing 20+ second delays
 
       // For Facebook, reduce timeout for metadata since it can be very slow
       if (url.includes('facebook.com') || url.includes('fb.watch')) {
@@ -891,8 +891,14 @@ export class DownloaderService implements OnModuleInit {
         ytDlpManager.addOption('--extractor-retries', '0'); // No retries for metadata - fail fast
       }
 
+      const beforeRun = Date.now();
+      this.logger.log(`[TIMING] Setup took ${beforeRun - startTime}ms, about to call ytDlpManager.run()`);
+
       // Execute the command and get output
       const output = await ytDlpManager.run();
+
+      const afterRun = Date.now();
+      this.logger.log(`[TIMING] ytDlpManager.run() took ${afterRun - beforeRun}ms, processing output...`);
 
       this.logger.log(`yt-dlp output length: ${output.length} characters`);
       this.logger.log(`yt-dlp output preview: ${output.substring(0, 200)}...`);

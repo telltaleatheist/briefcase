@@ -11,6 +11,7 @@ export interface Job {
   currentTask: string;
   error?: string;
   createdAt: string;
+  uploadDate?: string; // Date from the video (yyyy-mm-dd format)
   options: DownloadOptions;
   downloadStartTime?: string;
   downloadEndTime?: string;
@@ -30,6 +31,7 @@ export interface JobResponse {
   currentTask: string;
   error?: string;
   createdAt: string;
+  uploadDate?: string; // Date from the video (yyyy-mm-dd format)
   downloadStartTime?: string;
   downloadEndTime?: string;
   processingStartTime?: string;

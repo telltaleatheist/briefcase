@@ -452,7 +452,7 @@ export class DatabaseLibraryService {
    */
   sortVideos(
     videos: DatabaseVideo[],
-    sortBy: 'date' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date',
+    sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date',
     order: 'asc' | 'desc' = 'desc'
   ): DatabaseVideo[] {
     const sorted = [...videos].sort((a, b) => {
@@ -460,9 +460,17 @@ export class DatabaseLibraryService {
 
       switch (sortBy) {
         case 'date':
+          // Sort by date_folder (date from video filename - "Date Created")
           const dateA = a.date_folder ? new Date(a.date_folder).getTime() : 0;
           const dateB = b.date_folder ? new Date(b.date_folder).getTime() : 0;
           comparison = dateA - dateB;
+          break;
+
+        case 'date-added':
+          // Sort by created_at (date added to database - "Date Added")
+          const addedA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const addedB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          comparison = addedA - addedB;
           break;
 
         case 'filename':

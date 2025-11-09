@@ -475,25 +475,25 @@ export class BatchDownloaderService {
   cancelJob(jobId: string): boolean {
     const job = this.jobs.get(jobId);
     if (!job) return false;
-    
+
     // Handle different job states
     if (job.status === 'queued') {
       this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
       return true;
     }
-    
+
     if (job.status === 'downloading') {
       if (this.downloaderService.cancelDownload(jobId)) {
         this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
         return true;
       }
     }
-    
-    if (job.status === 'downloaded' || job.status === 'processing') {
+
+    if (job.status === 'downloaded' || job.status === 'processing' || job.status === 'transcribing') {
       this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
       return true;
     }
-    
+
     return false;
   }
   
@@ -735,6 +735,7 @@ export class BatchDownloaderService {
       // Create a display name with upload date if available
       if (result.uploadDate) {
         job.displayName = `${result.uploadDate} ${truncatedTitle}`;
+        job.uploadDate = result.uploadDate; // Store the upload date separately
       } else {
         job.displayName = truncatedTitle;
       }

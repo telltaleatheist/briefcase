@@ -102,7 +102,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Search and filter
   searchQuery = '';
-  sortBy: 'date' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date';
+  sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date';
   sortOrder: 'asc' | 'desc' = 'desc';
 
   // Track open video player dialog to prevent multiple instances
@@ -627,7 +627,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Change sort criteria
    */
-  changeSortBy(sortBy: 'date' | 'filename' | 'size' | 'no-transcript' | 'no-analysis') {
+  changeSortBy(sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis') {
     if (this.sortBy === sortBy) {
       // Toggle order if same criteria
       this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
