@@ -172,12 +172,19 @@ export class CreateClipDialogComponent {
         );
       } else if (this.data.customVideo) {
         // Extract clip from custom video
+        // Use realFilePath if available (for dragged/dropped files), otherwise use videoPath
+        const videoPath = this.data.customVideo.realFilePath || this.data.customVideo.videoPath;
+
+        if (!videoPath || videoPath.startsWith('blob:')) {
+          throw new Error('Cannot extract clip: No valid file path available. Please ensure the video file is accessible.');
+        }
+
         const extractUrl = await this.backendUrlService.getApiUrl('/library/videos/custom/extract-clip');
         const response = await fetch(extractUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            videoPath: this.data.customVideo.videoPath,
+            videoPath: videoPath,
             startTime: this.data.startTime,
             endTime: this.data.endTime,
             title: this.title,

@@ -94,8 +94,18 @@ export class ExecutablesUtil {
 
     log.info('Auto-detection failed, proceeding to Step 2...');
 
-    // Step 2: Try automatic installation (macOS with Homebrew)
-    log.info('Step 2: Attempting automatic installation...');
+    // Step 2: Check if executables are configured (from previous runs)
+    let executablesConfigured = await this.checkRequiredExecutables();
+
+    if (executablesConfigured) {
+      log.info('Using previously configured executables');
+      return true;
+    }
+
+    log.info('No previously configured executables found, proceeding to Step 3...');
+
+    // Step 3: Try automatic installation (macOS with Homebrew) - only as fallback
+    log.info('Step 3: Attempting automatic installation...');
     const autoInstallResult = await this.autoInstallDependencies();
 
     if (autoInstallResult) {
@@ -103,31 +113,26 @@ export class ExecutablesUtil {
       return true;
     }
 
-    log.info('Automatic installation failed or was skipped, proceeding to Step 3...');
+    log.info('Automatic installation failed or was skipped, proceeding to Step 4...');
 
-    // Step 3: Check if executables are configured (from previous runs)
-    let executablesConfigured = await this.checkRequiredExecutables();
+    // Step 4: Show manual configuration dialog as last resort
+    log.info('Step 4: Showing manual configuration dialog...');
+    const dialogResult = await this.showExecutablesConfigDialog();
+
+    if (!dialogResult) {
+      log.info('User cancelled configuration dialog');
+      return false;
+    }
+
+    executablesConfigured = await this.checkRequiredExecutables();
 
     if (!executablesConfigured) {
-      // Step 4: Show manual configuration dialog as last resort
-      log.info('Step 4: Showing manual configuration dialog...');
-      const dialogResult = await this.showExecutablesConfigDialog();
-
-      if (!dialogResult) {
-        log.info('User cancelled configuration dialog');
-        return false;
-      }
-
-      executablesConfigured = await this.checkRequiredExecutables();
-
-      if (!executablesConfigured) {
-        log.error('Still unable to configure required executables');
-        dialog.showErrorBox(
-          'Configuration Error',
-          'Failed to configure required executables. Please ensure FFmpeg, FFprobe, and yt-dlp are installed and accessible.'
-        );
-        return false;
-      }
+      log.error('Still unable to configure required executables');
+      dialog.showErrorBox(
+        'Configuration Error',
+        'Failed to configure required executables. Please ensure FFmpeg, FFprobe, and yt-dlp are installed and accessible.'
+      );
+      return false;
     }
 
     return true;
@@ -421,23 +426,50 @@ export class ExecutablesUtil {
     // Check if at least one path was found
     const hasValidPaths = Object.values(detectedPaths).some(path => path !== undefined);
 
-    if (hasValidPaths) {
-      // Validate detected paths
-      const validationResult = await PathValidator.validateAllPaths(detectedPaths);
-
-      if (validationResult.allValid) {
-        // Update config with detected paths
-        const updateSuccess = this.configManager.updateConfig(detectedPaths);
-
-        if (updateSuccess) {
-          log.info('Successfully auto-configured binary paths');
-          return true;
-        }
-      }
+    if (!hasValidPaths) {
+      log.warn('Auto-detection failed: No binary paths were detected');
+      return false;
     }
 
-    log.warn('Auto-detection failed or paths are invalid');
-    return false;
+    // Validate detected paths
+    log.info('Validating detected binary paths...');
+    const validationResult = await PathValidator.validateAllPaths(detectedPaths);
+
+    // Log validation results in detail
+    log.info('Validation results:', {
+      allValid: validationResult.allValid,
+      ffmpeg: {
+        isValid: validationResult.ffmpeg.isValid,
+        version: validationResult.ffmpeg.version,
+        error: validationResult.ffmpeg.error
+      },
+      ffprobe: {
+        isValid: validationResult.ffprobe.isValid,
+        version: validationResult.ffprobe.version,
+        error: validationResult.ffprobe.error
+      },
+      ytDlp: {
+        isValid: validationResult.ytDlp.isValid,
+        version: validationResult.ytDlp.version,
+        error: validationResult.ytDlp.error
+      }
+    });
+
+    if (!validationResult.allValid) {
+      log.warn('Auto-detection failed: Some detected paths failed validation');
+      return false;
+    }
+
+    // Update config with detected paths
+    const updateSuccess = this.configManager.updateConfig(detectedPaths);
+
+    if (!updateSuccess) {
+      log.error('Auto-detection failed: Could not save configuration');
+      return false;
+    }
+
+    log.info('Successfully auto-configured binary paths');
+    return true;
   }
 
   /**

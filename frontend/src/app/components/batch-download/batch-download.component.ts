@@ -1188,6 +1188,12 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             }
           });
           this.cdr.detectChanges();
+
+          // If we're waiting to start and all metadata is now loaded, start automatically
+          if (this.isWaitingToStart && !this.isLoadingPendingJobs()) {
+            console.log('All metadata loaded, starting queue automatically');
+            this.executeStartQueue();
+          }
         });
     });
   }
@@ -1228,6 +1234,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
 
     // Extract download options from pending jobs
     const downloadOptions: DownloadOptions[] = this.pendingJobs.map(job => job.options);
+
+    // Debug: Log the displayNames being sent
+    console.log('Starting queue with displayNames:', downloadOptions.map(opt => opt.displayName));
 
     // Submit all pending jobs to backend
     this.startQueueSubscription = this.batchApiService.addMultipleToBatchQueue(downloadOptions).subscribe({

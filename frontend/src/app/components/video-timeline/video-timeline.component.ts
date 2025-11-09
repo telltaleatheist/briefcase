@@ -427,6 +427,8 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
           this.rangeStartTime = time;
           this.selectionStart = time;
           this.selectionEnd = time;
+          // Move playhead to selection start
+          this.emitSeek(time);
         }
 
         event.preventDefault();
@@ -468,6 +470,8 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     event.stopPropagation();
     this.isDraggingLeftHandle = true;
     this.dragStartX = event.clientX;
+    // Move playhead to left handle position (selection start)
+    this.emitSeek(this.selectionStart);
   }
 
   /**
@@ -480,6 +484,8 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     event.stopPropagation();
     this.isDraggingRightHandle = true;
     this.dragStartX = event.clientX;
+    // Move playhead to right handle position (selection end)
+    this.emitSeek(this.selectionEnd);
   }
 
   /**
@@ -661,6 +667,8 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       this.ngZone.run(() => {
         this.selectionStart = Math.max(0, Math.min(time, this.selectionEnd - minDuration));
         this.emitSelection();
+        // Move playhead to follow the left handle
+        this.emitSeek(this.selectionStart);
       });
       return;
     }
@@ -675,6 +683,8 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       this.ngZone.run(() => {
         this.selectionEnd = Math.min(this.duration, Math.max(time, this.selectionStart + minDuration));
         this.emitSelection();
+        // Move playhead to follow the right handle
+        this.emitSeek(this.selectionEnd);
       });
       return;
     }

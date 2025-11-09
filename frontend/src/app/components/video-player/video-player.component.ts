@@ -787,6 +787,14 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       };
     }
 
+    // For custom videos with real file paths (dragged/dropped files), ensure we pass the real path
+    if (customVideoData && this.data.realFilePath) {
+      customVideoData = {
+        ...customVideoData,
+        realFilePath: this.data.realFilePath
+      };
+    }
+
     // Import and open the CreateClipDialogComponent as a modal
     const { CreateClipDialogComponent } = await import('../create-clip-dialog/create-clip-dialog.component');
 
@@ -806,7 +814,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.notificationService.toastOnly(
         'success',
         'Clip Created',
-        `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`
+        `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`,
+        {
+          type: 'open-folder',
+          path: result.extraction?.outputPath
+        }
       );
     }
   }

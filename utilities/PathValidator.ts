@@ -50,15 +50,31 @@ export class PathValidator {
     return new Promise(async (resolve) => {
       const basicCheck = await this.validateExecutable(ffmpegPath);
       if (!basicCheck.isValid) {
+        log.warn(`FFmpeg basic check failed for ${ffmpegPath}:`, basicCheck.error);
         resolve(basicCheck);
         return;
       }
 
-      execFile(ffmpegPath!, ['-version'], (error, stdout) => {
+      log.info(`Validating FFmpeg at: ${ffmpegPath}`);
+
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        log.error(`FFmpeg validation timed out for: ${ffmpegPath}`);
+        resolve({
+          isValid: false,
+          error: 'FFmpeg validation timed out after 10 seconds'
+        });
+      }, 10000);
+
+      execFile(ffmpegPath!, ['-version'], (error, stdout, stderr) => {
+        clearTimeout(timeout);
+
         if (error) {
-          resolve({ 
-            isValid: false, 
-            error: `FFmpeg execution error: ${error.message}` 
+          log.error(`FFmpeg execution error for ${ffmpegPath}:`, error.message);
+          if (stderr) log.error(`FFmpeg stderr: ${stderr}`);
+          resolve({
+            isValid: false,
+            error: `FFmpeg execution error: ${error.message}`
           });
           return;
         }
@@ -66,9 +82,11 @@ export class PathValidator {
         // Extract version from output
         const versionMatch = stdout.match(/ffmpeg version (\S+)/);
         const version = versionMatch ? versionMatch[1] : 'unknown';
-        
-        resolve({ 
-          isValid: true, 
+
+        log.info(`FFmpeg validated successfully: ${version}`);
+
+        resolve({
+          isValid: true,
           version: version
         });
       });
@@ -82,15 +100,31 @@ export class PathValidator {
     return new Promise(async (resolve) => {
       const basicCheck = await this.validateExecutable(ffprobePath);
       if (!basicCheck.isValid) {
+        log.warn(`FFprobe basic check failed for ${ffprobePath}:`, basicCheck.error);
         resolve(basicCheck);
         return;
       }
 
-      execFile(ffprobePath!, ['-version'], (error, stdout) => {
+      log.info(`Validating FFprobe at: ${ffprobePath}`);
+
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        log.error(`FFprobe validation timed out for: ${ffprobePath}`);
+        resolve({
+          isValid: false,
+          error: 'FFprobe validation timed out after 10 seconds'
+        });
+      }, 10000);
+
+      execFile(ffprobePath!, ['-version'], (error, stdout, stderr) => {
+        clearTimeout(timeout);
+
         if (error) {
-          resolve({ 
-            isValid: false, 
-            error: `FFprobe execution error: ${error.message}` 
+          log.error(`FFprobe execution error for ${ffprobePath}:`, error.message);
+          if (stderr) log.error(`FFprobe stderr: ${stderr}`);
+          resolve({
+            isValid: false,
+            error: `FFprobe execution error: ${error.message}`
           });
           return;
         }
@@ -98,9 +132,11 @@ export class PathValidator {
         // Extract version from output
         const versionMatch = stdout.match(/ffprobe version (\S+)/);
         const version = versionMatch ? versionMatch[1] : 'unknown';
-        
-        resolve({ 
-          isValid: true, 
+
+        log.info(`FFprobe validated successfully: ${version}`);
+
+        resolve({
+          isValid: true,
           version: version
         });
       });
@@ -114,24 +150,42 @@ export class PathValidator {
     return new Promise(async (resolve) => {
       const basicCheck = await this.validateExecutable(ytDlpPath);
       if (!basicCheck.isValid) {
+        log.warn(`yt-dlp basic check failed for ${ytDlpPath}:`, basicCheck.error);
         resolve(basicCheck);
         return;
       }
 
-      execFile(ytDlpPath!, ['--version'], (error, stdout) => {
+      log.info(`Validating yt-dlp at: ${ytDlpPath}`);
+
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        log.error(`yt-dlp validation timed out for: ${ytDlpPath}`);
+        resolve({
+          isValid: false,
+          error: 'yt-dlp validation timed out after 10 seconds'
+        });
+      }, 10000);
+
+      execFile(ytDlpPath!, ['--version'], (error, stdout, stderr) => {
+        clearTimeout(timeout);
+
         if (error) {
-          resolve({ 
-            isValid: false, 
-            error: `yt-dlp execution error: ${error.message}` 
+          log.error(`yt-dlp execution error for ${ytDlpPath}:`, error.message);
+          if (stderr) log.error(`yt-dlp stderr: ${stderr}`);
+          resolve({
+            isValid: false,
+            error: `yt-dlp execution error: ${error.message}`
           });
           return;
         }
 
         // The version output is just the version number
         const version = stdout.trim();
-        
-        resolve({ 
-          isValid: true, 
+
+        log.info(`yt-dlp validated successfully: ${version}`);
+
+        resolve({
+          isValid: true,
           version: version
         });
       });

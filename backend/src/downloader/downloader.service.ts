@@ -136,13 +136,12 @@ export class DownloaderService implements OnModuleInit {
         }
       }
       
-      // Configure output template with unique ID suffix to prevent filename collisions
-      // yt-dlp will get the title during download
-      // Add jobId suffix to ensure uniqueness if multiple videos have same title/date
+      // Configure output template
+      // yt-dlp will get the title and upload date during download
+      // Format: YYYY-MM-DD Title.ext
       const dateFormat = '%(upload_date>%Y-%m-%d)s ';
-      const uniqueSuffix = jobId ? `_${jobId.substring(0, 12)}` : `_${Date.now()}`;
       const maxTitleLength = 200; // Conservative limit to stay under 255 total
-      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s${uniqueSuffix}.%(ext)s`);
+      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
       
       // Create ytDlpManager instance
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);
@@ -200,6 +199,18 @@ export class DownloaderService implements OnModuleInit {
         if (options.useCookies && options.browser) {
           ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
         }
+      } else if (options.url.includes('vimeo.com')) {
+        // Vimeo-specific configuration: Vimeo requires authentication for most videos
+        ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
+        ytDlpManager.addOption('--merge-output-format', 'mp4');
+
+        // Vimeo REQUIRES cookies from browser - use Chrome by default
+        const browser = (options.useCookies && options.browser && options.browser !== 'auto')
+          ? options.browser
+          : 'chrome';
+
+        ytDlpManager.addOption('--cookies-from-browser', browser);
+        this.logger.log(`Using cookies from ${browser} for Vimeo authentication`);
       } else {
         // For other sites, use standard format selection
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
@@ -880,6 +891,12 @@ export class DownloaderService implements OnModuleInit {
       // For YouTube URLs, use android client for better reliability
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
         ytDlpManager.addOption('--extractor-args', 'youtube:player_client=android');
+      }
+
+      // For Vimeo, use cookies from Chrome for authentication
+      if (url.includes('vimeo.com')) {
+        ytDlpManager.addOption('--cookies-from-browser', 'chrome');
+        this.logger.log('Using cookies from Chrome for Vimeo metadata retrieval');
       }
 
       // For Twitter/X, let yt-dlp use its default API (syndication API is slow now)

@@ -274,11 +274,19 @@ export class FileScannerService {
             const ext = path.extname(entry.name).toLowerCase();
 
             if (this.VIDEO_EXTENSIONS.includes(ext)) {
-              // Extract date folder from path
-              // e.g., /Volumes/Callisto/clips/2021-08-08/video.mov -> "2021-08-08"
-              const relativePath = fullPath.replace(clipsRoot, '');
-              const pathParts = relativePath.split(path.sep).filter(Boolean);
-              const dateFolder = pathParts.length > 1 ? pathParts[0] : undefined;
+              // First, try to extract date from filename (format: YYYY-MM-DD Title.ext)
+              const filenameDateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\s/);
+              let dateFolder: string | undefined;
+
+              if (filenameDateMatch) {
+                dateFolder = filenameDateMatch[1];
+              } else {
+                // Fallback: Extract date folder from path
+                // e.g., /Volumes/Callisto/clips/2021-08-08/video.mov -> "2021-08-08"
+                const relativePath = fullPath.replace(clipsRoot, '');
+                const pathParts = relativePath.split(path.sep).filter(Boolean);
+                dateFolder = pathParts.length > 1 ? pathParts[0] : undefined;
+              }
 
               results.push({
                 filename: entry.name,
@@ -391,24 +399,45 @@ export class FileScannerService {
         let destinationPath: string;
         let dateFolder: string | null = null;
 
+        // First, try to extract date from filename (format: YYYY-MM-DD Title.ext)
+        const filenameDateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})\s/);
+        if (filenameDateMatch) {
+          dateFolder = filenameDateMatch[1];
+          this.logger.log(`Extracted date from filename: ${dateFolder}`);
+        }
+
         if (fullPath.startsWith(clipsRoot)) {
           // File is already in the clips folder - don't copy, just use it
           destinationPath = fullPath;
           this.logger.log(`Video already in clips folder: ${fullPath}`);
 
-          // Try to extract date folder from path
-          const relativePath = path.relative(clipsRoot, fullPath);
-          const pathParts = relativePath.split(path.sep);
-          if (pathParts.length > 1) {
-            // File is in a subfolder - use that as the date folder
-            dateFolder = pathParts[0];
-            this.logger.log(`Extracted date folder from path: ${dateFolder}`);
+          // If we didn't get date from filename, try to extract from path
+          if (!dateFolder) {
+            const relativePath = path.relative(clipsRoot, fullPath);
+            const pathParts = relativePath.split(path.sep);
+            if (pathParts.length > 1) {
+              // File is in a subfolder - use that as the date folder
+              dateFolder = pathParts[0];
+              this.logger.log(`Extracted date folder from path: ${dateFolder}`);
+            }
           }
         } else {
-          // File is outside clips folder - copy to weekly folder based on file creation date
-          // Use the earlier of birthtime (creation) or mtime (modification)
-          const fileDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
-          const weekFolder = this.getWeekStartDate(fileDate);
+          // File is outside clips folder - copy to weekly folder
+          // Use date from filename if available, otherwise use file creation date
+          let weekFolder: string;
+          if (dateFolder) {
+            // Use the date from filename to calculate week folder
+            const filenameDate = new Date(dateFolder);
+            weekFolder = this.getWeekStartDate(filenameDate);
+            this.logger.log(`Using week folder based on filename date: ${weekFolder}`);
+          } else {
+            // Fallback to file creation date
+            const fileDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+            weekFolder = this.getWeekStartDate(fileDate);
+            dateFolder = weekFolder;
+            this.logger.log(`Using week folder based on file date: ${weekFolder}`);
+          }
+
           const weekFolderPath = path.join(clipsRoot, weekFolder);
 
           // Create week folder if it doesn't exist
@@ -419,8 +448,7 @@ export class FileScannerService {
 
           destinationPath = path.join(weekFolderPath, filename);
           fs.copyFileSync(fullPath, destinationPath);
-          this.logger.log(`Copied ${filename} to ${weekFolder}/ (based on file date: ${fileDate.toISOString()})`);
-          dateFolder = weekFolder;
+          this.logger.log(`Copied ${filename} to ${weekFolder}/`);
         }
 
         // Check if video already exists in database (by hash)
