@@ -12,60 +12,15 @@
   <div class="main-layout">
     <div class="settings-content">
       <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="settings-form">
-          <!-- Output Directory -->
-          <div class="form-step">
+          <!-- Library Management Info -->
+          <div class="form-step info-section">
             <div class="step-content">
-              <h3 class="step-title">Output Directory</h3>
-              <div class="setting-group">
-                <div class="input-wrapper">
-                  <mat-icon class="input-icon">folder</mat-icon>
-                  <input type="text"
-                         class="modern-input"
-                         formControlName="outputDir"
-                         placeholder="/path/to/folder">
-                  <button mat-raised-button
-                          color="primary"
-                          type="button"
-                          (click)="browseOutputDir()"
-                          *ngIf="isElectron"
-                          class="browse-btn">
-                    <mat-icon>folder_open</mat-icon>
-                    Browse
-                  </button>
+              <div class="info-card">
+                <mat-icon class="info-icon">info</mat-icon>
+                <div class="info-text">
+                  <h3>Library-Based Storage</h3>
+                  <p>All videos and clips are now managed through libraries. Create and manage libraries from the <strong>Video Library</strong> page to organize your content.</p>
                 </div>
-                <span class="hint-text">
-                  <mat-icon>info</mat-icon>
-                  Files will be organized in: <code>videos/</code>, <code>analysis/transcripts/</code>, <code>analysis/reports/</code>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Clips Folder -->
-          <div class="form-step">
-            <div class="step-content">
-              <h3 class="step-title">Clips Folder (Library)</h3>
-              <div class="setting-group">
-                <div class="input-wrapper">
-                  <mat-icon class="input-icon">video_library</mat-icon>
-                  <input type="text"
-                         class="modern-input"
-                         formControlName="clipsFolder"
-                         placeholder="/path/to/clips">
-                  <button mat-raised-button
-                          color="primary"
-                          type="button"
-                          (click)="browseClipsFolder()"
-                          *ngIf="isElectron"
-                          class="browse-btn">
-                    <mat-icon>folder_open</mat-icon>
-                    Browse
-                  </button>
-                </div>
-                <span class="hint-text">
-                  <mat-icon>info</mat-icon>
-                  Location where video clips are stored. Library will scan this folder for videos to import.
-                </span>
               </div>
             </div>
           </div>

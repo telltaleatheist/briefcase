@@ -80,18 +80,11 @@ export class SettingsComponent implements OnInit {
   ngOnInit(): void {
     this.settingsService.getSettings().subscribe(settings => {
       this.updateForm(settings);
-      
-      // If outputDir is empty, get the default from the backend
-      if (!settings.outputDir) {
-        this.getDefaultPath();
-      }
     });
   }
 
   createForm(): FormGroup {
     return this.fb.group({
-      outputDir: [''],
-      clipsFolder: [''],
       quality: ['720'],
       convertToMp4: [true],
       useCookies: [false],
@@ -105,8 +98,6 @@ export class SettingsComponent implements OnInit {
 
   updateForm(settings: Settings): void {
     this.settingsForm.patchValue({
-      outputDir: settings.outputDir,
-      clipsFolder: settings.clipsFolder || '',
       quality: settings.quality,
       convertToMp4: settings.convertToMp4,
       useCookies: settings.useCookies,
@@ -120,107 +111,15 @@ export class SettingsComponent implements OnInit {
 
   onSubmit(): void {
     if (this.settingsForm.invalid) return;
-    
-    // Validate the path before saving
-    const outputDir = this.settingsForm.get('outputDir')?.value;
-    if (outputDir) {
-      this.validatePath(outputDir, true);
-    } else {
-      // No path specified, fallback to default
-      this.getDefaultPath(true);
-    }
+    this.saveSettings();
   }
 
   resetToDefaults(): void {
     if (confirm('Are you sure you want to reset all settings to defaults?')) {
       this.settingsService.resetSettings();
-      // Get the default path from the backend
-      this.getDefaultPath();
       // Badge only - user explicitly reset, result is obvious
       this.notificationService.success('Settings Reset', 'All settings have been reset to defaults', false);
     }
-  }
-
-  browseOutputDir(): void {
-    if (this.isElectron) {
-      this.pathService.openDirectoryPicker().subscribe({
-        next: (path) => {
-          if (path) {
-            this.settingsForm.patchValue({ outputDir: path });
-            this.validatePath(path);
-          }
-        },
-        error: (error) => {
-          console.error('Error picking directory:', error);
-          this.notificationService.error('Directory Selection Failed', error.message || 'Could not select directory');
-        }
-      });
-    } else {
-      this.notificationService.info('Not Available', 'Directory selection is only available in the desktop version');
-    }
-  }
-
-  browseClipsFolder(): void {
-    if (this.isElectron) {
-      this.pathService.openDirectoryPicker().subscribe({
-        next: (path) => {
-          if (path) {
-            this.settingsForm.patchValue({ clipsFolder: path });
-            this.validatePath(path);
-          }
-        },
-        error: (error) => {
-          console.error('Error picking directory:', error);
-          this.notificationService.error('Directory Selection Failed', error.message || 'Could not select directory');
-        }
-      });
-    } else {
-      this.notificationService.info('Not Available', 'Directory selection is only available in the desktop version');
-    }
-  }
-
-  getDefaultPath(saveAfter = false): void {
-    this.pathService.getDefaultPath().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.settingsForm.patchValue({ outputDir: response.path });
-          if (saveAfter) {
-            this.saveSettings();
-          }
-        }
-      },
-      error: (error) => {
-        console.error('Error getting default path:', error);
-        this.notificationService.error('Path Error', 'Could not get default download path');
-      }
-    });
-  }
-
-  validatePath(path: string, saveAfter = false): void {
-    this.isValidatingPath = true;
-
-    this.pathService.validatePath(path)
-      .pipe(finalize(() => this.isValidatingPath = false))
-      .subscribe({
-        next: (result) => {
-          if (result.success) {
-            if (result.isValid) {
-              if (saveAfter) {
-                this.saveSettings();
-              } else {
-                // Badge only - intermediate validation feedback
-                this.notificationService.success('Path Valid', 'Directory is valid and writable', false);
-              }
-            } else {
-              this.notificationService.warning('Path Not Writable', 'Directory is not writable. Please choose another location.');
-            }
-          }
-        },
-        error: (error) => {
-          console.error('Error validating path:', error);
-          this.notificationService.error('Validation Error', 'Could not validate directory');
-        }
-      });
   }
 
   saveSettings(): void {

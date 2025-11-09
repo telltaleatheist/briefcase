@@ -97,6 +97,53 @@
 }
 
 // ========================================
+// Info Card (Library Management Notice)
+// ========================================
+.info-section {
+  .info-card {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    background: rgba(255, 102, 0, 0.1);
+    border: 1px solid rgba(255, 102, 0, 0.3);
+    border-radius: 8px;
+    align-items: flex-start;
+
+    .info-icon {
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+      color: var(--primary-orange);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .info-text {
+      flex: 1;
+
+      h3 {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+
+        strong {
+          color: var(--primary-orange);
+          font-weight: 600;
+        }
+      }
+    }
+  }
+}
+
+// ========================================
 // Settings Groups
 // ========================================
 .setting-group {
