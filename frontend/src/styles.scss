@@ -42,6 +42,28 @@ body {
   flex: 1 1 auto;
 }
 
+/* Video Analysis Dialog Panel - Direct CDK overlay pane targeting */
+.cdk-overlay-pane.video-analysis-dialog-panel {
+  max-height: 85vh !important;
+  height: auto !important;
+
+  .mat-mdc-dialog-container {
+    max-height: 85vh !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
+  .mat-mdc-dialog-surface {
+    max-height: 85vh !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+}
+
 /* Fullscreen dialog */
 .fullscreen-dialog {
   .mat-mdc-dialog-container {

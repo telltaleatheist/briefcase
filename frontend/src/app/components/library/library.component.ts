@@ -28,6 +28,7 @@ import {
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
+import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 
 interface ClipLibrary {
   id: string;
@@ -681,21 +682,83 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
     console.log('Selected video details:', selectedVideoDetails);
 
-    // Navigate to analysis page with selected videos
-    console.log('Navigating to /analysis with state');
-    this.router.navigate(['/analysis'], {
-      state: {
+    // Open dialog instead of navigating
+    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      height: 'auto',
+      maxHeight: '85vh',
+      panelClass: 'video-analysis-dialog-panel',
+      data: {
+        mode: 'analyze',
         selectedVideos: selectedVideoDetails
-      }
-    }).then(success => {
-      console.log('Navigation result:', success);
-      if (success) {
-        // Clear selection after successful navigation
+      },
+      disableClose: false
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.success) {
+        // Clear selection after adding to queue
         this.selectedVideos.clear();
         this.updateAllSelectedState();
       }
-    }).catch(error => {
-      console.error('Navigation error:', error);
+    });
+  }
+
+  /**
+   * Transcribe selected videos (transcribe-only mode)
+   */
+  async transcribeSelected() {
+    if (this.selectedVideos.size === 0) {
+      this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to transcribe');
+      return;
+    }
+
+    const videoIds = Array.from(this.selectedVideos);
+    const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
+
+    // Open dialog in transcribe-only mode
+    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      height: 'auto',
+      maxHeight: '85vh',
+      panelClass: 'video-analysis-dialog-panel',
+      data: {
+        mode: 'transcribe',
+        selectedVideos: selectedVideoDetails
+      },
+      disableClose: false
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.success) {
+        this.selectedVideos.clear();
+        this.updateAllSelectedState();
+      }
+    });
+  }
+
+  /**
+   * Download from URL - open dialog for importing URL
+   */
+  async downloadFromUrl() {
+    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      height: 'auto',
+      maxHeight: '85vh',
+      panelClass: 'video-analysis-dialog-panel',
+      data: {
+        mode: 'download'
+      },
+      disableClose: false
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.success) {
+        console.log('URL download added to queue');
+      }
     });
   }
 

@@ -11,7 +11,7 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatDialog } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import {
@@ -24,6 +24,7 @@ import {
 } from '../../services/database-library.service';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 
 interface TranscriptEntry {
   timestamp: string;
@@ -44,7 +45,8 @@ interface TranscriptEntry {
     MatDividerModule,
     MatChipsModule,
     MatInputModule,
-    MatFormFieldModule
+    MatFormFieldModule,
+    MatDialogModule
   ],
   templateUrl: './video-info.component.html',
   styleUrl: './video-info.component.scss'
@@ -56,8 +58,6 @@ export class VideoInfoComponent implements OnInit {
   analysisSections: DatabaseAnalysisSection[] = [];
   tags: DatabaseTag[] = [];
   isLoading = true;
-  isProcessing = false;
-  processingType: 'transcript' | 'analysis' | null = null;
   videoUrl: string = '';
   videoError: string = '';
   parsedTranscript: TranscriptEntry[] = [];
@@ -238,67 +238,53 @@ export class VideoInfoComponent implements OnInit {
   }
 
   async runTranscription() {
-    if (!this.video || this.isProcessing) return;
+    if (!this.video) return;
 
-    this.isProcessing = true;
-    this.processingType = 'transcript';
+    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      height: 'auto',
+      maxHeight: '85vh',
+      panelClass: 'video-analysis-dialog-panel',
+      data: {
+        mode: 'transcribe',
+        videoPath: this.video.current_path,
+        videoTitle: this.video.filename,
+        selectedVideos: [this.video]
+      },
+      disableClose: false
+    });
 
-    try {
-      // Add video to batch analysis queue (transcribe-only)
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [this.video.id],
-        transcribeOnly: true
-      });
-
-      this.notificationService.success(
-        'Transcription Queued',
-        `${this.video.filename} has been added to the transcription queue`
-      );
-
-      // Navigate to analysis page
-      this.router.navigate(['/analysis']);
-    } catch (error: any) {
-      console.error('Error starting transcription:', error);
-      this.notificationService.error(
-        'Transcription Error',
-        error.error?.message || 'Failed to queue transcription'
-      );
-    } finally {
-      this.isProcessing = false;
-      this.processingType = null;
-    }
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.success) {
+        console.log('Video transcription added to queue');
+      }
+    });
   }
 
   async runAnalysis() {
-    if (!this.video || this.isProcessing) return;
+    if (!this.video) return;
 
-    this.isProcessing = true;
-    this.processingType = 'analysis';
+    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      height: 'auto',
+      maxHeight: '85vh',
+      panelClass: 'video-analysis-dialog-panel',
+      data: {
+        mode: 'analyze',
+        videoPath: this.video.current_path,
+        videoTitle: this.video.filename,
+        selectedVideos: [this.video]
+      },
+      disableClose: false
+    });
 
-    try {
-      // Add video to batch analysis queue (full analysis)
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [this.video.id],
-        transcribeOnly: false
-      });
-
-      this.notificationService.success(
-        'Analysis Queued',
-        `${this.video.filename} has been added to the analysis queue`
-      );
-
-      // Navigate to analysis page
-      this.router.navigate(['/analysis']);
-    } catch (error: any) {
-      console.error('Error starting analysis:', error);
-      this.notificationService.error(
-        'Analysis Error',
-        error.error?.message || 'Failed to queue analysis'
-      );
-    } finally {
-      this.isProcessing = false;
-      this.processingType = null;
-    }
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.success) {
+        console.log('Video analysis added to queue');
+      }
+    });
   }
 
   private async pollForTranscript() {

@@ -13,7 +13,7 @@ import { BackendUrlService } from '../../services/backend-url.service';
 import { AnalysisQueueService } from '../../services/analysis-queue.service';
 
 export interface VideoAnalysisDialogData {
-  mode?: 'analyze' | 'transcribe' | 'import';
+  mode?: 'analyze' | 'transcribe' | 'import' | 'download';
   selectedVideos?: any[];
   videoPath?: string;
   videoTitle?: string;
@@ -75,16 +75,19 @@ export class VideoAnalysisDialogComponent implements OnInit {
       });
     }
 
-    // If this is for URL import, default to URL input
-    if (this.data.mode === 'import') {
+    // If this is for URL import or download, default to URL input
+    if (this.data.mode === 'import' || this.data.mode === 'download') {
       this.analysisForm.patchValue({ inputType: 'url' });
     }
+
+    // Update validation based on whether we have selected videos
+    this.updateInputValidation();
   }
 
   createForm(): FormGroup {
     return this.fb.group({
       inputType: ['url', Validators.required],
-      input: ['', Validators.required],
+      input: [''], // Don't require if selectedVideos provided
       mode: ['full', Validators.required],
       customInstructions: [''],
       aiModel: ['ollama:qwen2.5:7b', Validators.required],
@@ -347,5 +350,22 @@ export class VideoAnalysisDialogComponent implements OnInit {
     } catch (error) {
       console.error('Failed to save settings:', error);
     }
+  }
+
+  /**
+   * Update input field validation based on whether videos are selected
+   */
+  private updateInputValidation(): void {
+    const inputControl = this.analysisForm.get('input');
+
+    // If we have selected videos from library, input field is not required
+    if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
+      inputControl?.clearValidators();
+    } else {
+      // Otherwise, input is required for URL/file selection
+      inputControl?.setValidators([Validators.required]);
+    }
+
+    inputControl?.updateValueAndValidity();
   }
 }

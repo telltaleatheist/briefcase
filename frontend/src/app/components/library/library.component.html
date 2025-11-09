@@ -77,6 +77,10 @@
         <mat-icon>file_download</mat-icon>
         Import Videos
       </button>
+      <button mat-raised-button color="primary" (click)="downloadFromUrl()" matTooltip="Download video from URL and add to queue">
+        <mat-icon>link</mat-icon>
+        Download from URL
+      </button>
       <button mat-raised-button (click)="scanLibrary()" matTooltip="Scan and import all videos from clips folder">
         <mat-icon>sync</mat-icon>
         Scan All
@@ -238,9 +242,18 @@
         color="primary"
         *ngIf="getSelectedCount() > 0"
         (click)="analyzeSelected()"
-        matTooltip="Analyze selected videos">
-        <mat-icon>analytics</mat-icon>
-        Analyze Selected ({{ getSelectedCount() }})
+        matTooltip="Full AI analysis of selected videos">
+        <mat-icon>psychology</mat-icon>
+        Analyze ({{ getSelectedCount() }})
+      </button>
+      <button
+        mat-raised-button
+        color="accent"
+        *ngIf="getSelectedCount() > 0"
+        (click)="transcribeSelected()"
+        matTooltip="Transcribe selected videos without AI analysis">
+        <mat-icon>subtitles</mat-icon>
+        Transcribe ({{ getSelectedCount() }})
       </button>
       <button
         mat-raised-button
@@ -249,7 +262,7 @@
         (click)="deleteSelected()"
         matTooltip="Delete selected videos">
         <mat-icon>delete</mat-icon>
-        Delete Selected ({{ getSelectedCount() }})
+        Delete ({{ getSelectedCount() }})
       </button>
     </div>
   </div>

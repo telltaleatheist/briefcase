@@ -54,24 +54,12 @@
           Clip Creator
         </button>
         <button mat-raised-button
-                (click)="runTranscription()"
-                [disabled]="isProcessing"
-                [class.processing]="processingType === 'transcript'">
-          <mat-spinner diameter="20" *ngIf="processingType === 'transcript'"></mat-spinner>
-          <mat-icon *ngIf="processingType !== 'transcript'">
-            {{ transcript ? 'refresh' : 'subtitles' }}
+                color="accent"
+                (click)="runAnalysis()">
+          <mat-icon>
+            {{ analysis || transcript ? 'refresh' : 'psychology' }}
           </mat-icon>
-          {{ transcript ? 'Re-transcribe' : 'Transcribe' }}
-        </button>
-        <button mat-raised-button
-                (click)="runAnalysis()"
-                [disabled]="isProcessing"
-                [class.processing]="processingType === 'analysis'">
-          <mat-spinner diameter="20" *ngIf="processingType === 'analysis'"></mat-spinner>
-          <mat-icon *ngIf="processingType !== 'analysis'">
-            {{ analysis ? 'check_circle' : 'analytics' }}
-          </mat-icon>
-          {{ analysis ? 'Re-analyze' : 'Analyze' }}
+          {{ analysis || transcript ? 'Re-analyze' : 'Analyze' }}
         </button>
       </div>
     </div>

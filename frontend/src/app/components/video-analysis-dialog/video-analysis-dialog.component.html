@@ -4,7 +4,7 @@
       <mat-icon>psychology</mat-icon>
     </div>
     <div class="header-content">
-      <h2>{{ data.mode === 'transcribe' ? 'Transcribe Video' : data.mode === 'import' ? 'Download & Analyze' : 'Analyze Video' }}</h2>
+      <h2>{{ data.mode === 'transcribe' ? 'Transcribe Video' : data.mode === 'import' ? 'Download & Analyze' : data.mode === 'download' ? 'Download from URL' : 'Analyze Video' }}</h2>
       <p class="subtitle" *ngIf="data.selectedVideos && data.selectedVideos.length > 0">
         Configure settings for {{ data.selectedVideos.length }} selected video(s)
       </p>
@@ -23,8 +23,8 @@
           Video Source
         </h3>
 
-        <!-- Source Type Toggle -->
-        <div class="source-toggle">
+        <!-- Source Type Toggle (hide for download mode) -->
+        <div class="source-toggle" *ngIf="data.mode !== 'download'">
           <button type="button"
                   class="toggle-option"
                   [class.active]="analysisForm.get('inputType')?.value === 'url'"
@@ -217,10 +217,13 @@
 
           <div class="setting-group">
             <label class="setting-label">Language</label>
-            <input type="text"
-                   class="modern-input"
-                   formControlName="language"
-                   placeholder="en">
+            <div class="input-wrapper">
+              <mat-icon class="input-icon">language</mat-icon>
+              <input type="text"
+                     class="modern-input"
+                     formControlName="language"
+                     placeholder="en">
+            </div>
           </div>
         </div>
       </div>
