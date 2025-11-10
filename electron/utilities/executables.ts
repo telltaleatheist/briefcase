@@ -83,8 +83,8 @@ export class ExecutablesUtil {
    * Shows configuration dialog if needed
    */
   async checkAndConfigureExecutables(): Promise<boolean> {
-    // Step 1: Try auto-detection
-    log.info('Step 1: Attempting auto-detection of binaries...');
+    // Step 1: Try auto-detection of bundled binaries
+    log.info('Step 1: Attempting auto-detection of bundled binaries...');
     const autoDetectionResult = await this.autoDetectBinaries();
 
     if (autoDetectionResult) {
@@ -102,21 +102,37 @@ export class ExecutablesUtil {
       return true;
     }
 
-    log.info('No previously configured executables found, proceeding to Step 3...');
+    log.info('No previously configured executables found.');
 
-    // Step 3: Try automatic installation (macOS with Homebrew) - only as fallback
-    log.info('Step 3: Attempting automatic installation...');
-    const autoInstallResult = await this.autoInstallDependencies();
+    // IMPORTANT: We do NOT attempt automatic installation (Step 3) because
+    // all dependencies should be bundled with the application. If we reach this
+    // point, it means either:
+    // 1. The app was not packaged correctly, OR
+    // 2. The bundled binaries are corrupted/missing
+    //
+    // In production, we should NEVER ask users to install dependencies via Homebrew.
+    // Instead, we show an error and ask them to reinstall the app.
 
-    if (autoInstallResult) {
-      log.info('Automatic installation successful!');
-      return true;
+    log.error('Bundled executables not found or invalid. This indicates a packaging issue.');
+
+    // Show error dialog instead of trying to install dependencies
+    const response = await dialog.showMessageBox({
+      type: 'error',
+      buttons: ['Show Manual Configuration', 'Quit'],
+      defaultId: 1,
+      title: 'Missing Dependencies',
+      message: 'Clippy is missing required components.',
+      detail: 'The application appears to be missing FFmpeg and yt-dlp binaries. This may indicate the app was not installed correctly.\n\nPlease try reinstalling Clippy. If the problem persists, you can manually configure the paths to these tools.'
+    });
+
+    if (response.response === 1) {
+      // User chose to quit
+      log.info('User chose to quit after missing dependencies error');
+      return false;
     }
 
-    log.info('Automatic installation failed or was skipped, proceeding to Step 4...');
-
-    // Step 4: Show manual configuration dialog as last resort
-    log.info('Step 4: Showing manual configuration dialog...');
+    // Step 3: Show manual configuration dialog as last resort
+    log.info('Step 3: Showing manual configuration dialog...');
     const dialogResult = await this.showExecutablesConfigDialog();
 
     if (!dialogResult) {
@@ -268,17 +284,35 @@ export class ExecutablesUtil {
 
       // Try extraResources first (production)
       const resourcesPath = process.resourcesPath || app.getAppPath();
-      const extraResourcesPath = path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, binaryName);
 
-      if (fs.existsSync(extraResourcesPath)) {
-        log.info(`Found bundled ffmpeg in extraResources: ${extraResourcesPath}`);
-        bundledPaths.ffmpegPath = extraResourcesPath;
-      } else {
+      // Check multiple possible locations for bundled ffmpeg
+      const possiblePaths = [
+        // Production: in Resources/node_modules (packaged by electron-builder)
+        path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, binaryName),
+        // Production alternative: app.asar.unpacked
+        path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@ffmpeg-installer', platformFolder, binaryName),
+      ];
+
+      let found = false;
+      for (const ffmpegPath of possiblePaths) {
+        if (fs.existsSync(ffmpegPath)) {
+          log.info(`Found bundled ffmpeg at: ${ffmpegPath}`);
+          bundledPaths.ffmpegPath = ffmpegPath;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
         // Fall back to npm package (development)
-        const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-        if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
-          log.info(`Found bundled ffmpeg at: ${ffmpegInstaller.path}`);
-          bundledPaths.ffmpegPath = ffmpegInstaller.path;
+        try {
+          const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+          if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
+            log.info(`Found bundled ffmpeg at: ${ffmpegInstaller.path}`);
+            bundledPaths.ffmpegPath = ffmpegInstaller.path;
+          }
+        } catch (error) {
+          log.warn('Could not load @ffmpeg-installer/ffmpeg via require:', error);
         }
       }
     } catch (error) {
@@ -304,17 +338,35 @@ export class ExecutablesUtil {
 
       // Try extraResources first (production)
       const resourcesPath = process.resourcesPath || app.getAppPath();
-      const extraResourcesPath = path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, binaryName);
 
-      if (fs.existsSync(extraResourcesPath)) {
-        log.info(`Found bundled ffprobe in extraResources: ${extraResourcesPath}`);
-        bundledPaths.ffprobePath = extraResourcesPath;
-      } else {
+      // Check multiple possible locations for bundled ffprobe
+      const possiblePaths = [
+        // Production: in Resources/node_modules (packaged by electron-builder)
+        path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, binaryName),
+        // Production alternative: app.asar.unpacked
+        path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@ffprobe-installer', platformFolder, binaryName),
+      ];
+
+      let found = false;
+      for (const ffprobePath of possiblePaths) {
+        if (fs.existsSync(ffprobePath)) {
+          log.info(`Found bundled ffprobe at: ${ffprobePath}`);
+          bundledPaths.ffprobePath = ffprobePath;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
         // Fall back to npm package (development)
-        const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
-        if (ffprobeInstaller && ffprobeInstaller.path && fs.existsSync(ffprobeInstaller.path)) {
-          log.info(`Found bundled ffprobe at: ${ffprobeInstaller.path}`);
-          bundledPaths.ffprobePath = ffprobeInstaller.path;
+        try {
+          const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
+          if (ffprobeInstaller && ffprobeInstaller.path && fs.existsSync(ffprobeInstaller.path)) {
+            log.info(`Found bundled ffprobe at: ${ffprobeInstaller.path}`);
+            bundledPaths.ffprobePath = ffprobeInstaller.path;
+          }
+        } catch (error) {
+          log.warn('Could not load @ffprobe-installer/ffprobe via require:', error);
         }
       }
     } catch (error) {

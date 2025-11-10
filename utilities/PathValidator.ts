@@ -12,6 +12,49 @@ export interface ValidationResult {
 
 export class PathValidator {
   /**
+   * Get the bundled Python path for yt-dlp
+   * This is a simplified version that doesn't depend on backend modules
+   */
+  private static getBundledPythonPath(): string | null {
+    try {
+      const { app } = require('electron');
+      const platform = process.platform;
+
+      // Check if we're running from a packaged app by checking if we have resourcesPath
+      // This is more reliable than NODE_ENV which may not be set correctly
+      const resourcesPath = (process as any).resourcesPath || process.env.RESOURCES_PATH;
+
+      log.info(`[PathValidator] Checking for bundled Python. resourcesPath: ${resourcesPath}, NODE_ENV: ${process.env.NODE_ENV}`);
+
+      if (!resourcesPath) {
+        // Development mode - no resourcesPath means we're running from source
+        log.info('[PathValidator] No resourcesPath found, using system Python');
+        return null;
+      }
+
+      // Production: Get bundled Python path
+      let pythonPath: string;
+      if (platform === 'win32') {
+        pythonPath = path.join(resourcesPath, 'python', 'python.exe');
+      } else {
+        pythonPath = path.join(resourcesPath, 'python', 'bin', 'python3');
+      }
+
+      // Check if it exists
+      if (fs.existsSync(pythonPath)) {
+        log.info(`Found bundled Python at: ${pythonPath}`);
+        return pythonPath;
+      }
+
+      log.warn(`Bundled Python not found at expected path: ${pythonPath}`);
+      return null;
+    } catch (error) {
+      log.warn('Error getting bundled Python path:', error);
+      return null;
+    }
+  }
+
+  /**
    * Validate that a file exists and is executable
    */
   static async validateExecutable(filePath: string | undefined): Promise<ValidationResult> {
@@ -166,7 +209,27 @@ export class PathValidator {
         });
       }, 10000);
 
-      execFile(ytDlpPath!, ['--version'], (error, stdout, stderr) => {
+      // Get the bundled Python to ensure yt-dlp uses the correct Python version
+      const bundledPythonPath = this.getBundledPythonPath();
+
+      // If we have bundled Python, execute yt-dlp with it explicitly
+      // Otherwise, execute yt-dlp directly (which will use the shebang)
+      let command: string;
+      let args: string[];
+
+      if (bundledPythonPath) {
+        // Execute: python3 /path/to/yt-dlp --version
+        command = bundledPythonPath;
+        args = [ytDlpPath!, '--version'];
+        log.info(`Using bundled Python to run yt-dlp: ${bundledPythonPath} ${ytDlpPath}`);
+      } else {
+        // Execute: /path/to/yt-dlp --version (uses shebang)
+        command = ytDlpPath!;
+        args = ['--version'];
+        log.info(`Running yt-dlp directly (system Python): ${ytDlpPath}`);
+      }
+
+      execFile(command, args, (error, stdout, stderr) => {
         clearTimeout(timeout);
 
         if (error) {

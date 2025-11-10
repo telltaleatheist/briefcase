@@ -430,28 +430,34 @@ export class DownloaderService implements OnModuleInit {
   private async determineOutputFile(output: string, downloadFolder: string, downloadStartTime: number): Promise<string | null> {
     // Try to extract from output first
     let outputFile: string | null = null;
-    
-    // Check for '[download] Destination:' line
-    const destinationMatch = output.match(/\[download\] Destination: (.+)$/m);
-    if (destinationMatch) {
-      outputFile = destinationMatch[1];
-      this.logger.log(`Found output file from destination line: ${outputFile}`);
-      
-      // Verify file exists
-      if (fs.existsSync(outputFile)) {
-        return outputFile;
-      }
-    }
-    
-    // Check for '[Merger] Merging formats into' line
+
+    // IMPORTANT: Check merger line FIRST because it's the final output file
+    // yt-dlp may report a destination file with one extension (.mp4) but then
+    // merge formats and create a different file with another extension (.mov)
     const mergerMatch = output.match(/\[Merger\] Merging formats into "(.+)"$/m);
     if (mergerMatch) {
       outputFile = mergerMatch[1];
       this.logger.log(`Found output file from merger line: ${outputFile}`);
-      
+
       // Verify file exists
       if (fs.existsSync(outputFile)) {
         return outputFile;
+      } else {
+        this.logger.warn(`Merger output file does not exist: ${outputFile}`);
+      }
+    }
+
+    // Check for '[download] Destination:' line as fallback
+    const destinationMatch = output.match(/\[download\] Destination: (.+)$/m);
+    if (destinationMatch) {
+      outputFile = destinationMatch[1];
+      this.logger.log(`Found output file from destination line: ${outputFile}`);
+
+      // Verify file exists
+      if (fs.existsSync(outputFile)) {
+        return outputFile;
+      } else {
+        this.logger.warn(`Destination file does not exist: ${outputFile}`);
       }
     }
     

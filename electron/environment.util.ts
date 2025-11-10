@@ -198,16 +198,15 @@ export class EnvironmentUtil {
 
     // Try all possible paths in order - works for both packaged and unpackaged
     const possiblePaths = [
-      // Unpackaged paths (from project root)
-      path.join(process.cwd(), 'backend', 'dist', 'main.js'),
-      path.join(__dirname, '..', '..', 'backend', 'dist', 'main.js'),
-      path.join(app.getAppPath(), 'backend', 'dist', 'main.js'),
-
-      // Packaged paths (inside app bundle)
-      path.join(process.resourcesPath, 'app.asar', 'backend', 'dist', 'main.js'),
+      // Packaged paths (MUST be checked first - backend is in extraResources, NOT in asar)
       path.join(process.resourcesPath, 'backend', 'dist', 'main.js'),
       path.join(process.resourcesPath, 'app', 'backend', 'dist', 'main.js'),
-      path.join(app.getAppPath(), '..', 'backend', 'dist', 'main.js')
+      path.join(app.getAppPath(), '..', 'backend', 'dist', 'main.js'),
+
+      // Unpackaged paths (from project root - for development)
+      path.join(process.cwd(), 'backend', 'dist', 'main.js'),
+      path.join(__dirname, '..', '..', 'backend', 'dist', 'main.js'),
+      path.join(app.getAppPath(), 'backend', 'dist', 'main.js')
     ];
 
     // Find the first path that exists

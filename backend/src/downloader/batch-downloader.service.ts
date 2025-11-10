@@ -412,20 +412,72 @@ export class BatchDownloaderService {
             };
             
             const processingResult = await this.mediaProcessingService.processMedia(
-              outputFile, 
-              processingOptions, 
+              outputFile,
+              processingOptions,
               job.id
             );
-            
+
             if (processingResult.success) {
+              // IMPORTANT: If the output file path changed (e.g., due to re-encoding changing extension from .mp4 to .mov),
+              // we need to update the database record to point to the new file
               if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
-                job.outputFile = processingResult.outputFile;
+                const oldPath = outputFile;
+                const newPath = processingResult.outputFile;
+                job.outputFile = newPath;
+
+                this.logger.log(`Output file path changed from ${oldPath} to ${newPath}`);
+
+                // Check if this job should have been imported (library downloads)
+                const shouldImport = (job.options as any).shouldImport === true;
+
+                // Update database if the video was imported
+                if (shouldImport) {
+                  try {
+                    // The video was imported at the old path, so we need to update it
+                    // Find the video by the OLD path and update it to the NEW path
+                    const videos = await this.fileScannerService['databaseService'].getAllVideos();
+                    const video = videos.find((v: any) =>
+                      v.current_path === oldPath || v.file_path === oldPath
+                    );
+
+                    if (video) {
+                      this.logger.log(`Updating database path for video ${video.id} from ${oldPath} to ${newPath}`);
+
+                      // Update both the path and filename
+                      const path = require('path');
+                      const newFilename = path.basename(newPath);
+
+                      await this.fileScannerService['databaseService'].updateVideoPath(
+                        video.id,
+                        newPath,
+                        video.date_folder || undefined
+                      );
+
+                      // Also update the filename if it changed
+                      if (newFilename !== video.filename) {
+                        const db = this.fileScannerService['databaseService']['db'];
+                        if (db) {
+                          db.run(
+                            'UPDATE videos SET filename = ? WHERE id = ?',
+                            [newFilename, video.id]
+                          );
+                        }
+                      }
+
+                      this.logger.log(`Successfully updated database with new file path`);
+                    } else {
+                      this.logger.warn(`Could not find video in database with path ${oldPath}`);
+                    }
+                  } catch (error) {
+                    this.logger.error(`Failed to update database path: ${(error as Error).message}`);
+                  }
+                }
               }
-            
+
               if (processingResult.transcriptFile) {
                 job.transcriptFile = processingResult.transcriptFile;
               }
-              
+
               if (job.status !== 'transcribing') {
                 this.jobStateManager.updateJobStatus(job, 'completed', 'Processing completed');
                 this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Processing completed');

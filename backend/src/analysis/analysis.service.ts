@@ -758,22 +758,38 @@ export class AnalysisService {
     const os = require('os');
     const tmpDir = os.tmpdir();
 
+    // Verify that the video file exists before attempting extraction
+    try {
+      await fs.access(videoPath);
+    } catch (error) {
+      const errorMsg = `Video file not found: ${videoPath}`;
+      this.logger.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
     // Create unique filename in tmp directory to avoid conflicts
     const audioFilename = `${jobId}_${Date.now()}_audio.wav`;
     const audioPath = path.join(tmpDir, audioFilename);
 
+    this.logger.log(`Extracting audio from: ${videoPath}`);
     this.logger.log(`Extracting audio to temporary file: ${audioPath}`);
 
     // Use FFmpeg to extract audio
     return new Promise((resolve, reject) => {
       const ffmpeg = require('fluent-ffmpeg');
 
-      ffmpeg(videoPath)
+      // fluent-ffmpeg should handle path escaping internally, but we'll also
+      // ensure the input is properly set using .input() method
+      ffmpeg()
+        .input(videoPath)
         .noVideo()
         .audioCodec('pcm_s16le')
         .audioFrequency(16000)
         .audioChannels(1)
         .format('wav')
+        .on('start', (cmdline: string) => {
+          this.logger.log(`FFmpeg command: ${cmdline}`);
+        })
         .on('end', () => {
           this.logger.log(`Audio extraction complete: ${audioPath}`);
           resolve(audioPath);

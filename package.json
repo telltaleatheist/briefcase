@@ -106,6 +106,10 @@
         "to": "backend/node_modules"
       },
       {
+        "from": "backend/dist",
+        "to": "backend/dist"
+      },
+      {
         "from": "backend/python",
         "to": "backend/python"
       },
@@ -127,13 +131,9 @@
       "dist-electron/config/**/*",
       "dist-electron/utilities/**/*",
       "!dist-electron/**/*.map",
-      "backend/dist/**/*",
-      "!backend/dist/**/*.map",
-      "!backend/dist/python/**",
-      "backend/package.json",
+      "!backend/**",
       "frontend/dist/clippy-frontend/**/*",
-      "backend/node_modules/**/*",
-      "utilities/**/*",
+      "!utilities/**",
       "node_modules/**/*",
       "!**/node_modules/**/test/**",
       "!**/node_modules/**/tests/**",
@@ -150,7 +150,6 @@
       "!**/node_modules/**/CHANGELOG*"
     ],
     "asarUnpack": [
-      "backend/node_modules/**",
       "utilities/**"
     ],
     "mac": {

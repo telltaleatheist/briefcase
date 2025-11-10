@@ -186,7 +186,8 @@
               [currentTime]="currentTime"
               [autoScrollEnabled]="autoScrollEnabled"
               (seekToTime)="onTranscriptSeek($event)"
-              (runAnalysis)="onRunTranscriptAnalysis()">
+              (runAnalysis)="onRunTranscriptAnalysis()"
+              (autoScrollToggled)="toggleAutoScroll()">
             </app-transcript-viewer>
           </div>
         </mat-tab>

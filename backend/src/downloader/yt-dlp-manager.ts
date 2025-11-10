@@ -8,6 +8,7 @@ import { SharedConfigService } from '../config/shared-config.service';
 import * as readline from 'readline';
 import * as logger from 'electron-log';
 import { log } from 'electron-log';
+import { getPythonConfig } from '../shared/python-config';
 
 export interface YtDlpProgress {
   percent: number;
@@ -203,9 +204,30 @@ export class YtDlpManager extends EventEmitter {
         return;
       }
       
-      // Spawn the yt-dlp process
+      // Spawn the yt-dlp process with bundled Python
       this.isRunning = true;
-      this.currentProcess = spawn(this.ytDlpPath, finalArgs);
+
+      // Get bundled Python to execute yt-dlp with the correct Python version
+      const pythonConfig = getPythonConfig();
+
+      // If we have bundled Python, execute yt-dlp with it explicitly
+      // Otherwise, execute yt-dlp directly (which will use the shebang)
+      let command: string;
+      let args: string[];
+
+      if (pythonConfig.fullPath) {
+        // Execute: python3 /path/to/yt-dlp [args...]
+        command = pythonConfig.fullPath;
+        args = [this.ytDlpPath, ...finalArgs];
+        logger.info(`Using bundled Python to run yt-dlp: ${pythonConfig.fullPath} ${this.ytDlpPath}`);
+      } else {
+        // Execute: /path/to/yt-dlp [args...] (uses shebang)
+        command = this.ytDlpPath;
+        args = finalArgs;
+        logger.info(`Running yt-dlp directly (system Python): ${this.ytDlpPath}`);
+      }
+
+      this.currentProcess = spawn(command, args);
       
       // Set up stdout and stderr handlers
       this.currentProcess.stdout?.on('data', (data) => {
