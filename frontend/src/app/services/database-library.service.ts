@@ -693,11 +693,11 @@ export class DatabaseLibraryService {
   /**
    * Delete a video from the library
    */
-  async deleteVideo(videoId: string): Promise<{ success: boolean; message: string }> {
+  async deleteVideo(videoId: string, deleteFiles: boolean = true): Promise<{ success: boolean; message: string }> {
     const baseUrl = await this.getBaseUrl();
     return firstValueFrom(
       this.http.delete<{ success: boolean; message: string }>(
-        `${baseUrl}/videos/${videoId}`
+        `${baseUrl}/videos/${videoId}?deleteFiles=${deleteFiles}`
       )
     );
   }

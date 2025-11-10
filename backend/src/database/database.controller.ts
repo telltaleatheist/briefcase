@@ -747,30 +747,39 @@ export class DatabaseController {
    * Delete a video from the library (both database record AND physical file)
    */
   @Delete('videos/:id')
-  async deleteVideo(@Param('id') videoId: string) {
+  async deleteVideo(
+    @Param('id') videoId: string,
+    @Query('deleteFiles') deleteFiles?: string
+  ) {
     try {
       // Delete from database and get video info (includes file path)
       const video = this.databaseService.deleteVideo(videoId);
 
-      // Delete physical file from library folder
-      const fs = require('fs').promises;
-      const videoPath = video.current_path;
+      // Only delete physical file if deleteFiles parameter is 'true'
+      const shouldDeleteFiles = deleteFiles === 'true';
 
-      if (videoPath) {
-        try {
-          await fs.unlink(videoPath);
-          this.logger.log(`Deleted physical file: ${videoPath}`);
-        } catch (fileError: any) {
-          // File might already be deleted or not exist - log but don't fail
-          this.logger.warn(`Could not delete physical file ${videoPath}: ${fileError.message}`);
+      if (shouldDeleteFiles) {
+        const fs = require('fs').promises;
+        const videoPath = video.current_path;
+
+        if (videoPath) {
+          try {
+            await fs.unlink(videoPath);
+            this.logger.log(`Deleted physical file: ${videoPath}`);
+          } catch (fileError: any) {
+            // File might already be deleted or not exist - log but don't fail
+            this.logger.warn(`Could not delete physical file ${videoPath}: ${fileError.message}`);
+          }
         }
-      }
 
-      this.logger.log(`Deleted video ${videoId} from library (database and file)`);
+        this.logger.log(`Deleted video ${videoId} from library (database and file)`);
+      } else {
+        this.logger.log(`Removed video ${videoId} from library (database only, file kept)`);
+      }
 
       return {
         success: true,
-        message: 'Video deleted successfully'
+        message: shouldDeleteFiles ? 'Video deleted successfully' : 'Video removed from library'
       };
     } catch (error: any) {
       this.logger.error(`Failed to delete video: ${error.message}`);

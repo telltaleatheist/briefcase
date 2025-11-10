@@ -469,30 +469,22 @@
     font-size: 14px;
     color: var(--text-secondary);
 
-    .selection-checkboxes {
+    .selection-buttons {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 8px;
 
-      mat-checkbox {
-        ::ng-deep .mdc-form-field {
-          display: flex;
-          align-items: center;
-        }
+      button {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        padding: 4px 12px;
 
-        ::ng-deep .mdc-label {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 14px;
-          white-space: nowrap;
-        }
-
-        .checkbox-icon {
+        mat-icon {
           font-size: 18px;
           width: 18px;
           height: 18px;
-          vertical-align: middle;
         }
       }
     }
@@ -542,28 +534,25 @@
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   margin-bottom: 24px;
+  padding-bottom: 24px;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-card);
 }
 
 .week-group {
-  border-bottom: 1px solid var(--border-color, #e0e0e0);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  // No border-bottom - only the week header line is visible
 }
 
 .week-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 4px 12px;
   cursor: pointer;
   user-select: none;
   position: relative;
-  margin: 8px 0 4px 0;
+  margin: 4px 0 2px 0;
 
   // Line that goes through the header
   &::before {
@@ -579,6 +568,25 @@
 
   &:hover {
     .week-title, .week-count {
+      color: var(--primary-orange, #ff8f47);
+    }
+  }
+
+  &.highlighted {
+    background: rgba(255, 143, 71, 0.1);
+
+    .week-title, .week-count, .collapse-icon {
+      color: var(--primary-orange, #ff8f47);
+    }
+  }
+
+  &.selected {
+    background: rgba(255, 143, 71, 0.1);
+    border-left: 3px solid var(--primary-orange, #ff8f47);
+    margin-left: 8px; // Align border with video-card-wrapper start
+    padding-left: 9px; // Original padding (12px) - margin (8px) + border offset = 9px
+
+    .week-title, .week-count, .collapse-icon {
       color: var(--primary-orange, #ff8f47);
     }
   }
@@ -875,7 +883,16 @@
     &.highlighted {
       background-color: rgba(255, 143, 71, 0.15) !important;
       border-left: 3px solid var(--primary-orange) !important;
-      padding-left: 9px !important;
+      padding-left: 8px !important;
+      outline: 2px solid rgba(255, 143, 71, 0.3);
+      outline-offset: -2px;
+    }
+
+    // Selected state (for multi-select) - use same orange style as highlighted
+    &.selected {
+      background-color: rgba(255, 143, 71, 0.15) !important;
+      border-left: 3px solid var(--primary-orange) !important;
+      padding-left: 8px !important;
       outline: 2px solid rgba(255, 143, 71, 0.3);
       outline-offset: -2px;
     }
@@ -1045,15 +1062,12 @@
   .preview-panel-resize-handle {
     position: absolute;
     bottom: 0;
-    right: 0;
     width: 24px;
     height: 24px;
-    cursor: nwse-resize;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--bg-secondary, #f5f5f5);
-    border-top-left-radius: 4px;
     transition: background-color 0.2s;
 
     &:hover {
@@ -1069,8 +1083,27 @@
       width: 16px;
       height: 16px;
       color: var(--text-secondary, #666);
-      transform: rotate(-45deg);
       transition: color 0.2s;
+    }
+
+    &.preview-panel-resize-handle-right {
+      right: 0;
+      cursor: nwse-resize;
+      border-top-left-radius: 4px;
+
+      mat-icon {
+        transform: rotate(-45deg);
+      }
+    }
+
+    &.preview-panel-resize-handle-left {
+      left: 0;
+      cursor: nesw-resize;
+      border-top-right-radius: 4px;
+
+      mat-icon {
+        transform: rotate(45deg);
+      }
     }
   }
 }
@@ -1357,6 +1390,10 @@
 
       &:hover {
         background: var(--primary-orange, #ff8f47);
+
+        mat-icon {
+          color: white;
+        }
       }
 
       mat-icon {

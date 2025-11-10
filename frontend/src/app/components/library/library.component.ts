@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -9,7 +9,7 @@ import { MatCardModule } from '@angular/material/card';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatMenuTrigger } from '@angular/material/menu';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -20,6 +20,7 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatExpansionModule } from '@angular/material/expansion';
+import { MatRadioModule } from '@angular/material/radio';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { AngularSplitModule } from 'angular-split';
@@ -188,9 +189,29 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Week grouping state
   collapsedWeeks = new Set<string>(); // Set of collapsed week identifiers
   groupedVideos: { week: string; videos: DatabaseVideo[] }[] = [];
+  selectedWeeks = new Set<string>(); // Set of selected week identifiers
+  highlightedWeek: string | null = null; // Currently highlighted week section
 
   @HostListener('window:keydown', ['$event'])
   handleKeyDown(event: KeyboardEvent) {
+    // Handle Cmd+A / Ctrl+A for select all
+    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyA') {
+      event.preventDefault();
+      this.selectAll();
+      return;
+    }
+
+    // Handle Delete/Backspace to delete selected videos
+    // Delete key on Windows/Linux, or Cmd+Backspace on Mac, or plain Backspace
+    if (event.code === 'Delete' ||
+        (event.code === 'Backspace' && (event.metaKey || !event.target || (event.target as HTMLElement).tagName !== 'INPUT'))) {
+      if (this.selectedVideos.size > 0) {
+        event.preventDefault();
+        this.deleteSelected();
+        return;
+      }
+    }
+
     // Handle preview modal in list view
     if (this.viewMode === 'list' && this.isPreviewModalOpen) {
       if (event.code === 'Space') {
@@ -214,11 +235,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
     // Handle navigation in list view without modal
-    else if (this.viewMode === 'list' && this.highlightedVideo && !this.isPreviewModalOpen) {
+    else if (this.viewMode === 'list' && !this.isPreviewModalOpen) {
+      // Up/Down arrows navigate videos
       if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
         event.preventDefault();
         this.navigateHighlightedVideo(event.code === 'ArrowUp' ? -1 : 1);
-      } else if (event.code === 'Space') {
+      }
+      // Left/Right arrows expand/collapse sections with selected videos
+      else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+        event.preventDefault();
+        this.toggleSelectedSections(event.code === 'ArrowRight');
+      }
+      // Space opens preview modal
+      else if (event.code === 'Space') {
         event.preventDefault();
         this.openPreviewModal();
       }
@@ -817,28 +846,31 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Get week identifier in YYYY-Www format (ISO week date)
+   * Get week identifier in yyyy-mm-dd format (date of Monday of that week)
    */
   private getWeekIdentifier(date: Date): string {
-    // Get the ISO week number
     const tempDate = new Date(date.getTime());
     tempDate.setHours(0, 0, 0, 0);
-    // Thursday in current week decides the year
-    tempDate.setDate(tempDate.getDate() + 3 - (tempDate.getDay() + 6) % 7);
-    // January 4 is always in week 1
-    const week1 = new Date(tempDate.getFullYear(), 0, 4);
-    // Calculate full weeks to nearest Thursday
-    const weekNum = 1 + Math.round(((tempDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 
-    // Format as YYYY-Www
+    // Get the Monday of this week
+    const day = tempDate.getDay();
+    const diff = tempDate.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+    tempDate.setDate(diff);
+
+    // Format as yyyy-mm-dd
     const year = tempDate.getFullYear();
-    return `${year}-W${String(weekNum).padStart(2, '0')}`;
+    const month = String(tempDate.getMonth() + 1).padStart(2, '0');
+    const dayOfMonth = String(tempDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${dayOfMonth}`;
   }
 
   /**
    * Toggle week collapse state
    */
-  toggleWeek(week: string) {
+  toggleWeek(week: string, event?: Event) {
+    if (event) {
+      event.stopPropagation();
+    }
     if (this.collapsedWeeks.has(week)) {
       this.collapsedWeeks.delete(week);
     } else {
@@ -851,6 +883,185 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   isWeekCollapsed(week: string): boolean {
     return this.collapsedWeeks.has(week);
+  }
+
+  /**
+   * Select a week section (clicking the week header selects all videos in that week)
+   */
+  selectWeekSection(week: string, event?: Event) {
+    if (event) {
+      event.stopPropagation();
+    }
+
+    const mouseEvent = event as MouseEvent | undefined;
+    const weekGroup = this.groupedVideos.find(g => g.week === week);
+    if (!weekGroup) return;
+
+    // Handle Cmd/Ctrl+Click for individual multi-select of weeks
+    if (mouseEvent && (mouseEvent.metaKey || mouseEvent.ctrlKey)) {
+      if (this.selectedWeeks.has(week)) {
+        this.selectedWeeks.delete(week);
+        // Deselect all videos in this week
+        weekGroup.videos.forEach(v => this.selectedVideos.delete(v.id));
+      } else {
+        this.selectedWeeks.add(week);
+        // Select all videos in this week
+        weekGroup.videos.forEach(v => this.selectedVideos.add(v.id));
+      }
+      // Also highlight the first video in this week
+      if (weekGroup.videos.length > 0) {
+        this.highlightedVideo = weekGroup.videos[0];
+      }
+      this.updateAllSelectedState();
+      return;
+    }
+
+    // Handle Shift+Click for range selection (select videos from last highlighted to first in this week)
+    if (mouseEvent && mouseEvent.shiftKey && this.highlightedVideo) {
+      const lastVideoIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo!.id);
+      // Find the first video in this week
+      const firstVideoInWeek = weekGroup.videos[0];
+      const currentIndex = this.filteredVideos.findIndex(v => v.id === firstVideoInWeek.id);
+
+      if (currentIndex !== -1 && lastVideoIndex !== -1) {
+        const startIndex = Math.min(currentIndex, lastVideoIndex);
+        const endIndex = Math.max(currentIndex, lastVideoIndex);
+
+        // Select all videos in the range
+        for (let i = startIndex; i <= endIndex; i++) {
+          this.selectedVideos.add(this.filteredVideos[i].id);
+          // Also mark the week as selected if all videos in it are selected
+          const videoWeek = this.filteredVideos[i].date_folder || this.getWeekIdentifier(new Date(this.filteredVideos[i].created_at || this.filteredVideos[i].added_at));
+          const weekGroupForVideo = this.groupedVideos.find(g => g.week === videoWeek);
+          if (weekGroupForVideo && weekGroupForVideo.videos.every(v => this.selectedVideos.has(v.id))) {
+            this.selectedWeeks.add(videoWeek);
+          }
+        }
+        this.updateAllSelectedState();
+      }
+      return;
+    }
+
+    // Normal click - select all videos in this week (clear other selections)
+    this.selectedVideos.clear();
+    this.selectedWeeks.clear();
+    this.selectedWeeks.add(week);
+    weekGroup.videos.forEach(v => this.selectedVideos.add(v.id));
+    // Highlight the first video in this week
+    if (weekGroup.videos.length > 0) {
+      this.highlightedVideo = weekGroup.videos[0];
+    }
+    this.updateAllSelectedState();
+  }
+
+  /**
+   * Check if week is highlighted
+   */
+  isWeekHighlighted(week: string): boolean {
+    return this.highlightedWeek === week;
+  }
+
+  /**
+   * Check if week is selected
+   */
+  isWeekSelected(week: string): boolean {
+    // Week is only selected if ALL videos in that week are selected
+    const weekGroup = this.groupedVideos.find(g => g.week === week);
+    if (!weekGroup || weekGroup.videos.length === 0) {
+      return false;
+    }
+    return weekGroup.videos.every(v => this.selectedVideos.has(v.id));
+  }
+
+  /**
+   * Select all videos and weeks
+   */
+  selectAll() {
+    // Select all videos
+    this.filteredVideos.forEach(video => this.selectedVideos.add(video.id));
+
+    // Select all weeks
+    this.groupedVideos.forEach(group => this.selectedWeeks.add(group.week));
+
+    this.updateAllSelectedState();
+  }
+
+  /**
+   * Toggle expand/collapse for sections with selected videos
+   * @param expand true to expand, false to collapse
+   */
+  toggleSelectedSections(expand: boolean) {
+    if (this.selectedVideos.size === 0) return;
+
+    // Find all weeks that have selected videos
+    const weeksWithSelectedVideos = new Set<string>();
+    this.groupedVideos.forEach(group => {
+      const hasSelectedVideo = group.videos.some(v => this.selectedVideos.has(v.id));
+      if (hasSelectedVideo) {
+        weeksWithSelectedVideos.add(group.week);
+      }
+    });
+
+    // Expand or collapse those weeks
+    weeksWithSelectedVideos.forEach(week => {
+      if (expand) {
+        this.collapsedWeeks.delete(week);
+      } else {
+        this.collapsedWeeks.add(week);
+      }
+    });
+  }
+
+  /**
+   * Select all videos missing transcript
+   */
+  selectAllMissingTranscript() {
+    // Toggle behavior: if already selected, deselect those videos
+    if (this.isMissingTranscriptSelected) {
+      // Deselect all videos without transcription
+      this.filteredVideos.forEach(video => {
+        if (!video.has_transcript) {
+          this.selectedVideos.delete(video.id);
+        }
+      });
+      this.isMissingTranscriptSelected = false;
+    } else {
+      // Add videos without transcription to current selection
+      this.filteredVideos.forEach(video => {
+        if (!video.has_transcript) {
+          this.selectedVideos.add(video.id);
+        }
+      });
+      this.isMissingTranscriptSelected = true;
+    }
+
+    this.updateAllSelectedState();
+  }
+
+  /**
+   * Select all videos missing AI analysis
+   */
+  selectAllMissingAnalysis() {
+    // Toggle behavior: if already selected, deselect those videos
+    if (this.isMissingAnalysisSelected) {
+      // Deselect all videos without analysis
+      this.filteredVideos.forEach(video => {
+        if (!video.has_analysis) {
+          this.selectedVideos.delete(video.id);
+        }
+      });
+      this.isMissingAnalysisSelected = false;
+    } else {
+      // Add videos without analysis to current selection
+      this.filteredVideos.forEach(video => {
+        if (!video.has_analysis) {
+          this.selectedVideos.add(video.id);
+        }
+      });
+      this.isMissingAnalysisSelected = true;
+    }
+
+    this.updateAllSelectedState();
   }
 
   /**
@@ -1570,68 +1781,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   toggleAllSelection() {
     if (this.isAllSelected) {
-      // Deselect all (including transcript and analysis checkboxes)
+      // Deselect all
       this.selectedVideos.clear();
+      this.selectedWeeks.clear();
       this.isAllSelected = false;
       this.isMissingTranscriptSelected = false;
       this.isMissingAnalysisSelected = false;
     } else {
-      // Select all visible videos
-      this.filteredVideos.forEach(video => this.selectedVideos.add(video.id));
+      // Select all
+      this.selectAll();
       this.isAllSelected = true;
-      // Don't automatically check the other boxes when selecting all
-    }
-  }
-
-  /**
-   * Select all videos missing transcription
-   */
-  selectAllMissingTranscript() {
-    if (this.isMissingTranscriptSelected) {
-      // Deselect - clear all selections
-      this.selectedVideos.clear();
-      this.isMissingTranscriptSelected = false;
-      this.isAllSelected = false;
-    } else {
-      // Clear current selection
-      this.selectedVideos.clear();
-
-      // Select all videos without transcription
-      this.filteredVideos.forEach(video => {
-        if (!video.has_transcript) {
-          this.selectedVideos.add(video.id);
-        }
-      });
-
-      this.isMissingTranscriptSelected = true;
-      this.isMissingAnalysisSelected = false;
-      this.updateAllSelectedState();
-    }
-  }
-
-  /**
-   * Select all videos missing AI analysis
-   */
-  selectAllMissingAnalysis() {
-    if (this.isMissingAnalysisSelected) {
-      // Deselect - clear all selections
-      this.selectedVideos.clear();
-      this.isMissingAnalysisSelected = false;
-      this.isAllSelected = false;
-    } else {
-      // Clear current selection
-      this.selectedVideos.clear();
-
-      // Select all videos without analysis
-      this.filteredVideos.forEach(video => {
-        if (!video.has_analysis) {
-          this.selectedVideos.add(video.id);
-        }
-      });
-
-      this.isMissingAnalysisSelected = true;
-      this.isMissingTranscriptSelected = false;
-      this.updateAllSelectedState();
     }
   }
 
@@ -1701,21 +1860,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Confirm bulk deletion
-    const confirmed = confirm(
-      `Are you sure you want to delete ${selectedCount} video${selectedCount > 1 ? 's' : ''} from the library?\n\n` +
-      `This will permanently delete:\n` +
-      `- Video files from library folder\n` +
-      `- Video metadata\n` +
-      `- Transcripts (if exist)\n` +
-      `- Analyses (if exist)\n` +
-      `- All tags\n\n` +
-      `THIS CANNOT BE UNDONE!`
-    );
+    // Open delete options dialog
+    const dialogRef = this.dialog.open(DeleteConfirmationDialog, {
+      width: '500px',
+      data: {
+        count: selectedCount,
+        videoName: selectedCount === 1 ? this.videos.find(v => this.selectedVideos.has(v.id))?.filename : null
+      }
+    });
 
-    if (!confirmed) {
-      return;
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (!result) {
+      return; // User cancelled
     }
+
+    const deleteFiles = result === 'everything';
 
     try {
       const videoIds = Array.from(this.selectedVideos);
@@ -1726,7 +1886,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
       for (const videoId of videoIds) {
         try {
-          await this.databaseLibraryService.deleteVideo(videoId);
+          await this.databaseLibraryService.deleteVideo(videoId, deleteFiles);
           successCount++;
         } catch (error) {
           console.error(`Failed to delete video ${videoId}:`, error);
@@ -1742,8 +1902,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
       if (successCount > 0) {
         this.notificationService.toastOnly(
           errorCount > 0 ? 'warning' : 'success',
-          'Bulk Delete Complete',
-          `Deleted ${successCount} video${successCount > 1 ? 's' : ''}` +
+          deleteFiles ? 'Delete Complete' : 'Removed from Library',
+          `${deleteFiles ? 'Deleted' : 'Removed'} ${successCount} video${successCount > 1 ? 's' : ''}` +
           (errorCount > 0 ? `. ${errorCount} failed.` : '')
         );
       }
@@ -1754,7 +1914,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       await this.loadStats();
       await this.loadTags();
     } catch (error: any) {
-      console.error('Bulk delete failed:', error);
+      console.error('Delete operation failed:', error);
       this.notificationService.toastOnly(
         'error',
         'Delete Failed',
@@ -2326,6 +2486,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // If right-clicked video is not selected, add it to selection
+    if (!this.selectedVideos.has(video.id)) {
+      this.selectedVideos.add(video.id);
+      this.updateAllSelectedState();
+    }
+
     // Highlight the video when right-clicking
     this.highlightedVideo = video;
     this.contextMenuVideo = video;
@@ -2474,12 +2640,89 @@ export class LibraryComponent implements OnInit, OnDestroy {
   highlightVideo(video: DatabaseVideo, event: Event) {
     event.stopPropagation();
 
+    const mouseEvent = event as MouseEvent;
+
     // Close context menu if it's open
     if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
       this.contextMenuTrigger.closeMenu();
     }
 
+    // Handle Cmd/Ctrl+Click for individual multi-select
+    if (mouseEvent.metaKey || mouseEvent.ctrlKey) {
+      if (this.selectedVideos.has(video.id)) {
+        this.selectedVideos.delete(video.id);
+        // If we just deselected the only video, clear the highlight
+        if (this.selectedVideos.size === 0) {
+          this.highlightedVideo = null;
+        }
+      } else {
+        this.selectedVideos.add(video.id);
+        this.highlightedVideo = video;
+      }
+      this.updateAllSelectedState();
+      return;
+    }
+
+    // Handle Shift+Click for range selection using the display order (grouped videos)
+    if (mouseEvent.shiftKey && this.highlightedVideo) {
+      // Flatten grouped videos to get display order
+      const displayOrder: DatabaseVideo[] = [];
+      this.groupedVideos.forEach(group => {
+        displayOrder.push(...group.videos);
+      });
+
+      const currentIndex = displayOrder.findIndex(v => v.id === video.id);
+      const lastIndex = displayOrder.findIndex(v => v.id === this.highlightedVideo!.id);
+
+      if (currentIndex !== -1 && lastIndex !== -1) {
+        const startIndex = Math.min(currentIndex, lastIndex);
+        const endIndex = Math.max(currentIndex, lastIndex);
+
+        // Keep existing selections and add range (additive behavior)
+        // Select all videos in the range
+        for (let i = startIndex; i <= endIndex; i++) {
+          this.selectedVideos.add(displayOrder[i].id);
+        }
+
+        // Update week selections
+        this.groupedVideos.forEach(group => {
+          if (group.videos.every(v => this.selectedVideos.has(v.id))) {
+            this.selectedWeeks.add(group.week);
+          }
+        });
+
+        this.updateAllSelectedState();
+      }
+      return;
+    }
+
+    // Normal click - highlight and select single video (clear other selections)
     this.highlightedVideo = video;
+    this.selectedVideos.clear();
+    this.selectedWeeks.clear();
+    this.selectedVideos.add(video.id); // Add the clicked video to selection
+    this.updateAllSelectedState();
+
+    // Handle video preview when modal is open
+    if (this.isPreviewModalOpen) {
+      setTimeout(() => {
+        const videoEl = this.previewVideoPlayer?.nativeElement;
+        if (videoEl) {
+          if (this.previewAutoPlayEnabled) {
+            // Auto-play the video
+            videoEl.play().catch(err => {
+              console.error('Auto-play failed:', err);
+            });
+          } else {
+            // Load the video and show first frame without playing
+            videoEl.load();
+            videoEl.addEventListener('loadeddata', () => {
+              videoEl.currentTime = 0.1; // Seek to first frame
+            }, { once: true });
+          }
+        }
+      }, 150);
+    }
   }
 
   /**
@@ -2573,17 +2816,24 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // Update highlighted video
       this.highlightedVideo = this.filteredVideos[newIndex];
 
-      // Auto-play new video if enabled
-      if (this.previewAutoPlayEnabled) {
-        setTimeout(() => {
-          const newVideoEl = this.previewVideoPlayer?.nativeElement;
-          if (newVideoEl) {
+      // Handle video preview based on auto-play setting
+      setTimeout(() => {
+        const newVideoEl = this.previewVideoPlayer?.nativeElement;
+        if (newVideoEl) {
+          if (this.previewAutoPlayEnabled) {
+            // Auto-play the video
             newVideoEl.play().catch(err => {
               console.error('Auto-play failed:', err);
             });
+          } else {
+            // Load the video and show first frame without playing
+            newVideoEl.load();
+            newVideoEl.addEventListener('loadeddata', () => {
+              newVideoEl.currentTime = 0.1; // Seek to first frame
+            }, { once: true });
           }
-        }, 150);
-      }
+        }
+      }, 150);
     }
   }
 
@@ -2595,6 +2845,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // No video highlighted, highlight the first one
       if (this.filteredVideos.length > 0) {
         this.highlightedVideo = this.filteredVideos[0];
+        // Clear all selections and select only this video
+        this.selectedVideos.clear();
+        this.selectedWeeks.clear();
+        this.selectedVideos.add(this.filteredVideos[0].id);
+        this.updateAllSelectedState();
         this.scrollToHighlightedVideo();
       }
       return;
@@ -2606,6 +2861,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const newIndex = currentIndex + direction;
     if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
       this.highlightedVideo = this.filteredVideos[newIndex];
+      // Clear all selections and select only the new video
+      this.selectedVideos.clear();
+      this.selectedWeeks.clear();
+      this.selectedVideos.add(this.filteredVideos[newIndex].id);
+      this.updateAllSelectedState();
       this.scrollToHighlightedVideo();
     }
   }
@@ -2705,7 +2965,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Start resizing the preview panel
+   * Start resizing the preview panel from bottom-right
    */
   startResizePreviewPanel(event: MouseEvent) {
     event.preventDefault();
@@ -2746,5 +3006,116 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+  }
+
+  /**
+   * Start resizing the preview panel from bottom-left
+   */
+  startResizePreviewPanelLeft(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isResizingPreviewPanel = true;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = this.previewPanelWidth;
+    const startHeight = this.previewPanelHeight;
+    const startPanelX = this.previewPanelX;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isResizingPreviewPanel) return;
+
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      // Calculate new dimensions with min/max constraints
+      // When resizing from left, we grow in the opposite direction
+      const newWidth = Math.max(300, Math.min(800, startWidth - deltaX));
+      const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
+
+      // Adjust X position to keep the right edge fixed
+      const newX = startPanelX + (startWidth - newWidth);
+
+      this.previewPanelWidth = newWidth;
+      this.previewPanelHeight = newHeight;
+      this.previewPanelX = Math.max(10, newX);
+
+      // Adjust Y position if panel goes out of bounds
+      const maxY = window.innerHeight - this.previewPanelHeight - 20;
+      this.previewPanelY = Math.max(10, Math.min(maxY, this.previewPanelY));
+    };
+
+    const onMouseUp = () => {
+      this.isResizingPreviewPanel = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+}
+
+/**
+ * Delete Confirmation Dialog Component
+ */
+@Component({
+  selector: 'delete-confirmation-dialog',
+  template: `
+    <h2 mat-dialog-title>Delete {{ data.count > 1 ? data.count + ' Videos' : 'Video' }}</h2>
+    <mat-dialog-content>
+      <p *ngIf="data.videoName" style="margin-bottom: 16px; font-weight: 500;">{{ data.videoName }}</p>
+      <p style="margin-bottom: 16px;">What would you like to do?</p>
+      <mat-radio-group [(ngModel)]="selectedOption" style="display: flex; flex-direction: column; gap: 12px;">
+        <mat-radio-button value="library" style="margin-bottom: 8px;">
+          <div style="margin-left: 8px;">
+            <div style="font-weight: 500;">Remove from Library</div>
+            <div style="font-size: 13px; color: #666; margin-top: 4px;">
+              Only remove from database. Video file{{ data.count > 1 ? 's' : '' }} will remain in the clips folder.
+            </div>
+          </div>
+        </mat-radio-button>
+        <mat-radio-button value="everything" color="warn">
+          <div style="margin-left: 8px;">
+            <div style="font-weight: 500; color: #f44336;">Delete Everything</div>
+            <div style="font-size: 13px; color: #666; margin-top: 4px;">
+              Permanently delete video file{{ data.count > 1 ? 's' : '' }}, metadata, transcripts, analyses, and tags. Cannot be undone!
+            </div>
+          </div>
+        </mat-radio-button>
+      </mat-radio-group>
+    </mat-dialog-content>
+    <mat-dialog-actions align="end">
+      <button mat-button (click)="onCancel()">Cancel</button>
+      <button mat-raised-button [color]="selectedOption === 'everything' ? 'warn' : 'primary'"
+              (click)="onConfirm()"
+              [disabled]="!selectedOption">
+        {{ selectedOption === 'everything' ? 'Delete Everything' : 'Remove from Library' }}
+      </button>
+    </mat-dialog-actions>
+  `,
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatDialogModule,
+    MatButtonModule,
+    MatRadioModule,
+    FormsModule
+  ]
+})
+export class DeleteConfirmationDialog {
+  selectedOption: 'library' | 'everything' | null = null;
+
+  constructor(
+    public dialogRef: MatDialogRef<DeleteConfirmationDialog>,
+    @Inject(MAT_DIALOG_DATA) public data: { count: number; videoName: string | null }
+  ) {}
+
+  onCancel(): void {
+    this.dialogRef.close(null);
+  }
+
+  onConfirm(): void {
+    this.dialogRef.close(this.selectedOption);
   }
 }

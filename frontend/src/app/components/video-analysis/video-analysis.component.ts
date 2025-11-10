@@ -929,7 +929,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
    */
   removePendingJob(jobId: string): void {
     this.analysisQueueService.removePendingJob(jobId);
-    this.notificationService.toastOnly('success', 'Job Removed', 'Removed from pending queue');
 
     // Force immediate update
     this.ngZone.run(() => {

@@ -236,31 +236,31 @@
     </mat-expansion-panel>
   </mat-accordion>
 
-  <!-- Results count and master checkbox -->
+  <!-- Results count and selection buttons -->
   <div class="results-header" *ngIf="filteredVideos.length > 0 || (!isLoading && filteredVideos.length === 0)">
     <div class="results-count">
-      <div class="selection-checkboxes" *ngIf="filteredVideos.length > 0">
-        <mat-checkbox
-          [checked]="isAllSelected"
-          [indeterminate]="getSelectedCount() > 0 && !isAllSelected"
-          (change)="toggleAllSelection()"
-          matTooltip="Select all visible videos">
+      <div class="selection-buttons" *ngIf="filteredVideos.length > 0">
+        <button mat-stroked-button
+                (click)="toggleAllSelection()"
+                [color]="isAllSelected ? 'primary' : undefined"
+                matTooltip="Select all visible videos (Cmd/Ctrl+A)">
+          <mat-icon>select_all</mat-icon>
           All
-        </mat-checkbox>
-        <mat-checkbox
-          [checked]="isMissingTranscriptSelected"
-          (change)="selectAllMissingTranscript()"
-          matTooltip="Select all videos missing transcription">
-          <mat-icon class="checkbox-icon">subtitles_off</mat-icon>
+        </button>
+        <button mat-stroked-button
+                (click)="selectAllMissingTranscript()"
+                [color]="isMissingTranscriptSelected ? 'primary' : undefined"
+                matTooltip="Select all videos missing transcription">
+          <mat-icon>subtitles_off</mat-icon>
           No Transcript
-        </mat-checkbox>
-        <mat-checkbox
-          [checked]="isMissingAnalysisSelected"
-          (change)="selectAllMissingAnalysis()"
-          matTooltip="Select all videos missing AI analysis">
-          <mat-icon class="checkbox-icon">psychology</mat-icon>
+        </button>
+        <button mat-stroked-button
+                (click)="selectAllMissingAnalysis()"
+                [color]="isMissingAnalysisSelected ? 'primary' : undefined"
+                matTooltip="Select all videos missing AI analysis">
+          <mat-icon>psychology</mat-icon>
           No Analysis
-        </mat-checkbox>
+        </button>
       </div>
       <span class="count-text">
         Showing {{ filteredVideos.length }} of {{ videos.length }} videos
@@ -313,8 +313,10 @@
   <div *ngIf="filteredVideos.length > 0" class="video-list-container">
     <div *ngFor="let group of groupedVideos" class="week-group">
       <!-- Week header with collapse toggle -->
-      <div class="week-header" (click)="toggleWeek(group.week)">
-        <mat-icon class="collapse-icon">
+      <div class="week-header"
+           [class.selected]="isWeekSelected(group.week)"
+           (click)="selectWeekSection(group.week, $event)">
+        <mat-icon class="collapse-icon" (click)="toggleWeek(group.week, $event); $event.stopPropagation()">
           {{ isWeekCollapsed(group.week) ? 'chevron_right' : 'expand_more' }}
         </mat-icon>
         <span class="week-title">{{ group.week }}</span>
@@ -330,16 +332,10 @@
            [class.missing-analysis]="!video.has_analysis"
            [class.missing-both]="!video.has_transcript && !video.has_analysis"
            [class.highlighted]="isVideoHighlighted(video)"
+           [class.selected]="isVideoSelected(video)"
            (click)="highlightVideo(video, $event)"
            (dblclick)="onVideoDoubleClick(video, $event)"
            (contextmenu)="onVideoContextMenu($event, video)">
-        <!-- Checkbox on the left -->
-        <div class="card-checkbox" (click)="$event.stopPropagation()">
-          <mat-checkbox
-            [checked]="isVideoSelected(video)"
-            (change)="toggleVideoSelection(video)">
-          </mat-checkbox>
-        </div>
 
         <!-- Status Indicator (color-coded based on transcript/analysis status) -->
         <div class="card-status-indicator"
@@ -436,31 +432,38 @@
 
   <mat-menu #videoContextMenu="matMenu">
     <ng-container *ngIf="contextMenuVideo">
-      <button mat-menu-item (click)="startRenamingVideo(contextMenuVideo)">
+      <!-- Single video actions -->
+      <button mat-menu-item (click)="startRenamingVideo(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
         <mat-icon>edit</mat-icon>
         <span>Rename</span>
       </button>
-      <button mat-menu-item (click)="openVideoPlayer(contextMenuVideo)">
+      <button mat-menu-item (click)="openVideoPlayer(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
         <mat-icon>play_arrow</mat-icon>
         <span>Open in Video Editor</span>
       </button>
-      <button mat-menu-item (click)="openMetadataEditor(contextMenuVideo)">
+      <button mat-menu-item (click)="openMetadataEditor(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
         <mat-icon>info</mat-icon>
         <span>View Details</span>
       </button>
-      <button mat-menu-item (click)="openAnalyzeDialog(contextMenuVideo)">
-        <mat-icon>psychology</mat-icon>
-        <span>Analyze</span>
-      </button>
-      <mat-divider></mat-divider>
-      <button mat-menu-item (click)="copyFilename(contextMenuVideo)">
+      <button mat-menu-item (click)="copyFilename(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
         <mat-icon>content_copy</mat-icon>
         <span>Copy Filename</span>
       </button>
+      <mat-divider *ngIf="getSelectedCount() === 1"></mat-divider>
+
+      <!-- Multi-selection actions -->
+      <button mat-menu-item (click)="analyzeSelected()">
+        <mat-icon>psychology</mat-icon>
+        <span>Analyze{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
+      </button>
+      <button mat-menu-item (click)="moveToLibrary()">
+        <mat-icon>drive_file_move</mat-icon>
+        <span>Move to...{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
+      </button>
       <mat-divider></mat-divider>
-      <button mat-menu-item (click)="deleteVideo(contextMenuVideo)">
+      <button mat-menu-item (click)="deleteSelected()">
         <mat-icon color="warn">delete</mat-icon>
-        <span>Delete</span>
+        <span>Delete{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
       </button>
     </ng-container>
   </mat-menu>
@@ -534,8 +537,11 @@
       <span><mat-icon>keyboard</mat-icon> Esc</span>
     </div>
 
-    <!-- Resize Handle -->
-    <div class="preview-panel-resize-handle" (mousedown)="startResizePreviewPanel($event)">
+    <!-- Resize Handles -->
+    <div class="preview-panel-resize-handle preview-panel-resize-handle-right" (mousedown)="startResizePreviewPanel($event)">
+      <mat-icon>drag_handle</mat-icon>
+    </div>
+    <div class="preview-panel-resize-handle preview-panel-resize-handle-left" (mousedown)="startResizePreviewPanelLeft($event)">
       <mat-icon>drag_handle</mat-icon>
     </div>
   </div>
