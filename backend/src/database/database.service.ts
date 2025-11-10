@@ -1248,6 +1248,138 @@ export class DatabaseService {
     };
   }
 
+  /**
+   * Search videos with full-text search across filename, AI description, transcripts, analyses, and tags
+   * Returns video IDs that match the search query
+   */
+  searchVideos(query: string, limit: number = 1000): Array<{ id: string; score: number; matchType: string }> {
+    const db = this.ensureInitialized();
+
+    if (!query || query.trim() === '') {
+      return [];
+    }
+
+    const searchTerm = query.toLowerCase().trim();
+    const results = new Map<string, { id: string; score: number; matchType: string }>();
+
+    // Helper to add or update result
+    const addResult = (videoId: string, score: number, matchType: string) => {
+      const existing = results.get(videoId);
+      if (!existing || existing.score < score) {
+        results.set(videoId, { id: videoId, score, matchType });
+      }
+    };
+
+    // 1. Search in video filename and AI description (highest priority)
+    try {
+      const stmt = db.prepare(`
+        SELECT id, filename, ai_description
+        FROM videos
+        WHERE lower(filename) LIKE ? OR lower(ai_description) LIKE ?
+        LIMIT ?
+      `);
+      stmt.bind([`%${searchTerm}%`, `%${searchTerm}%`, limit]);
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as { id: string; filename: string; ai_description: string | null };
+        const filename = (row.filename || '').toLowerCase();
+        const aiDesc = (row.ai_description || '').toLowerCase();
+
+        if (filename.includes(searchTerm)) {
+          addResult(row.id, 100, 'filename');
+        } else if (aiDesc.includes(searchTerm)) {
+          addResult(row.id, 90, 'ai_description');
+        }
+      }
+      stmt.free();
+    } catch (error) {
+      this.logger.warn('Error searching videos table:', error);
+    }
+
+    // 2. Search in transcripts (high priority)
+    try {
+      const stmt = db.prepare(`
+        SELECT video_id, plain_text
+        FROM transcripts
+        WHERE lower(plain_text) LIKE ?
+        LIMIT ?
+      `);
+      stmt.bind([`%${searchTerm}%`, limit]);
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as { video_id: string; plain_text: string };
+        addResult(row.video_id, 80, 'transcript');
+      }
+      stmt.free();
+    } catch (error) {
+      this.logger.warn('Error searching transcripts:', error);
+    }
+
+    // 3. Search in analyses (medium priority)
+    try {
+      const stmt = db.prepare(`
+        SELECT video_id, ai_analysis, summary
+        FROM analyses
+        WHERE lower(ai_analysis) LIKE ? OR lower(summary) LIKE ?
+        LIMIT ?
+      `);
+      stmt.bind([`%${searchTerm}%`, `%${searchTerm}%`, limit]);
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as { video_id: string };
+        addResult(row.video_id, 70, 'analysis');
+      }
+      stmt.free();
+    } catch (error) {
+      this.logger.warn('Error searching analyses:', error);
+    }
+
+    // 4. Search in analysis sections (medium priority)
+    try {
+      const stmt = db.prepare(`
+        SELECT DISTINCT video_id, title, description
+        FROM analysis_sections
+        WHERE lower(title) LIKE ? OR lower(description) LIKE ?
+        LIMIT ?
+      `);
+      stmt.bind([`%${searchTerm}%`, `%${searchTerm}%`, limit]);
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as { video_id: string };
+        addResult(row.video_id, 65, 'section');
+      }
+      stmt.free();
+    } catch (error) {
+      this.logger.warn('Error searching analysis sections:', error);
+    }
+
+    // 5. Search in tags (lower priority)
+    try {
+      const stmt = db.prepare(`
+        SELECT DISTINCT video_id, tag_name
+        FROM tags
+        WHERE lower(tag_name) LIKE ?
+        LIMIT ?
+      `);
+      stmt.bind([`%${searchTerm}%`, limit]);
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as { video_id: string };
+        addResult(row.video_id, 60, 'tag');
+      }
+      stmt.free();
+    } catch (error) {
+      this.logger.warn('Error searching tags:', error);
+    }
+
+    // Convert map to array and sort by score (descending)
+    const sortedResults = Array.from(results.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    return sortedResults;
+  }
+
   // ============================================================================
   // SAVED LINKS OPERATIONS
   // ============================================================================

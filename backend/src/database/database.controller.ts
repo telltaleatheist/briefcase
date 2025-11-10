@@ -146,6 +146,43 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/search
+   * Search videos across filename, AI description, transcripts, analyses, and tags
+   */
+  @Get('search')
+  searchVideos(@Query('q') query: string, @Query('limit') limit?: string) {
+    if (!query || query.trim() === '') {
+      return {
+        results: [],
+        count: 0,
+        query: query || '',
+      };
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 1000;
+    const searchResults = this.databaseService.searchVideos(query, limitNum);
+
+    // Get full video details for each result
+    const videos = searchResults.map(result => {
+      const video = this.databaseService.getVideoById(result.id);
+      if (!video) {
+        return null;
+      }
+      return {
+        ...video,
+        searchScore: result.score,
+        matchType: result.matchType,
+      };
+    }).filter((v): v is NonNullable<typeof v> => v !== null); // Filter out any null results
+
+    return {
+      results: videos,
+      count: videos.length,
+      query,
+    };
+  }
+
+  /**
    * GET /api/database/tags
    * Get all tags with counts (grouped by type)
    */

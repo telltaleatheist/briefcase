@@ -408,19 +408,36 @@ export class DatabaseLibraryService {
   }
 
   /**
-   * Search videos by keyword (searches filenames, transcripts, analyses)
-   * This is a client-side search for Phase 3 - will be enhanced with backend search in Phase 4
+   * Search videos by keyword across filenames, AI descriptions, transcripts, analyses, and tags
+   * Uses backend full-text search for comprehensive results
    */
   async searchVideos(query: string, videos: DatabaseVideo[]): Promise<DatabaseVideo[]> {
     if (!query || query.trim() === '') {
       return videos;
     }
 
-    const lowerQuery = query.toLowerCase();
-    return videos.filter(video =>
-      video.filename.toLowerCase().includes(lowerQuery) ||
-      (video.date_folder && video.date_folder.toLowerCase().includes(lowerQuery))
-    );
+    try {
+      // Call backend search API
+      const baseUrl = await this.getBaseUrl();
+      const response = await firstValueFrom(
+        this.http.get<{ results: DatabaseVideo[]; count: number; query: string }>(
+          `${baseUrl}/search?q=${encodeURIComponent(query)}`
+        )
+      );
+
+      // Return the search results (backend already returns full video objects with search scores)
+      return response.results;
+    } catch (error) {
+      console.error('Backend search failed, falling back to client-side search:', error);
+
+      // Fallback to client-side search if backend fails
+      const lowerQuery = query.toLowerCase();
+      return videos.filter(video =>
+        video.filename.toLowerCase().includes(lowerQuery) ||
+        (video.date_folder && video.date_folder.toLowerCase().includes(lowerQuery)) ||
+        (video.ai_description && video.ai_description.toLowerCase().includes(lowerQuery))
+      );
+    }
   }
 
   /**
