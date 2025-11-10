@@ -310,7 +310,7 @@
   </div>
 
   <!-- Video List with Week Grouping -->
-  <div *ngIf="filteredVideos.length > 0" class="video-list-container">
+  <div *ngIf="filteredVideos.length > 0" class="video-list-container" (click)="onListContainerClick($event)">
     <div *ngFor="let group of groupedVideos" class="week-group">
       <!-- Week header with collapse toggle -->
       <div class="week-header"
@@ -348,11 +348,13 @@
 
         <!-- Content (non-editable by click) -->
         <div class="card-content">
-          <!-- Date chip (non-editable) -->
+          <!-- Date chip (with placeholder for alignment when empty) -->
           <mat-chip *ngIf="parseFilename(video.filename).date && !editingVideo[video.id]?.date"
                     class="date-chip">
             {{ formatDateChip(parseFilename(video.filename).date) }}
           </mat-chip>
+          <span *ngIf="!parseFilename(video.filename).date && !editingVideo[video.id]?.date"
+                class="date-placeholder"></span>
           <input *ngIf="editingVideo[video.id]?.date"
                  type="text"
                  class="date-input"
@@ -377,11 +379,13 @@
                  placeholder="Video title"
                  #titleInput>
 
-          <!-- Extension (non-editable) -->
+          <!-- Extension (with placeholder for alignment when empty) -->
           <span *ngIf="parseFilename(video.filename).extension && !editingVideo[video.id]?.extension"
                 class="extension-text">
             .{{ parseFilename(video.filename).extension }}
           </span>
+          <span *ngIf="!parseFilename(video.filename).extension && !editingVideo[video.id]?.extension"
+                class="extension-placeholder"></span>
           <input *ngIf="editingVideo[video.id]?.extension"
                  type="text"
                  class="extension-input"

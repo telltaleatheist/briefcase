@@ -192,6 +192,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
   selectedWeeks = new Set<string>(); // Set of selected week identifiers
   highlightedWeek: string | null = null; // Currently highlighted week section
 
+  // Type-ahead search state
+  private typeAheadBuffer = '';
+  private typeAheadTimer: any;
+
   @HostListener('window:keydown', ['$event'])
   handleKeyDown(event: KeyboardEvent) {
     // Handle Cmd+A / Ctrl+A for select all
@@ -250,6 +254,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
       else if (event.code === 'Space') {
         event.preventDefault();
         this.openPreviewModal();
+      }
+      // Type-ahead search (alphanumeric keys when not editing)
+      else if (!event.metaKey && !event.ctrlKey && !event.altKey &&
+               event.key.length === 1 && event.key.match(/[a-z0-9 ]/i)) {
+        // Check if user is not editing a field
+        const activeElement = document.activeElement;
+        if (!activeElement || !['INPUT', 'TEXTAREA'].includes(activeElement.tagName)) {
+          event.preventDefault();
+          this.handleTypeAhead(event.key);
+        }
       }
     }
   }
@@ -2615,16 +2629,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Handle blur event to save changes
    */
   onEditBlur(video: DatabaseVideo, field: 'date' | 'title' | 'extension') {
-    // End editing for this field immediately
-    if (this.editingVideo[video.id]) {
-      this.editingVideo[video.id][field] = false;
-    }
-
-    // Small timeout to allow clicking between fields
+    // Don't close fields immediately - wait to see if user is clicking another field
     setTimeout(() => {
-      const editing = this.editingVideo[video.id];
-      // If no fields are being edited anymore, save changes
-      if (!editing || (!editing.date && !editing.title && !editing.extension)) {
+      // Check if focus moved to another input field for this video
+      const activeElement = document.activeElement;
+      const isEditingAnotherField = activeElement && (
+        activeElement.classList.contains('date-input') ||
+        activeElement.classList.contains('title-input') ||
+        activeElement.classList.contains('extension-input')
+      );
+
+      // Only close editing mode if user clicked outside all edit fields
+      if (!isEditingAnotherField) {
+        // Close all fields and save
+        if (this.editingVideo[video.id]) {
+          this.editingVideo[video.id] = { date: false, title: false, extension: false };
+        }
         this.saveFilename(video);
       }
     }, 150);
@@ -2703,23 +2723,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
     this.selectedVideos.add(video.id); // Add the clicked video to selection
     this.updateAllSelectedState();
 
-    // Handle video preview when modal is open
-    if (this.isPreviewModalOpen) {
+    // Auto-play if preview modal is open and auto-play is enabled
+    if (this.isPreviewModalOpen && this.previewAutoPlayEnabled) {
       setTimeout(() => {
         const videoEl = this.previewVideoPlayer?.nativeElement;
         if (videoEl) {
-          if (this.previewAutoPlayEnabled) {
-            // Auto-play the video
-            videoEl.play().catch(err => {
-              console.error('Auto-play failed:', err);
-            });
-          } else {
-            // Load the video and show first frame without playing
-            videoEl.load();
-            videoEl.addEventListener('loadeddata', () => {
-              videoEl.currentTime = 0.1; // Seek to first frame
-            }, { once: true });
-          }
+          videoEl.play().catch(err => {
+            console.error('Auto-play failed:', err);
+          });
         }
       }, 150);
     }
@@ -2816,24 +2827,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // Update highlighted video
       this.highlightedVideo = this.filteredVideos[newIndex];
 
-      // Handle video preview based on auto-play setting
-      setTimeout(() => {
-        const newVideoEl = this.previewVideoPlayer?.nativeElement;
-        if (newVideoEl) {
-          if (this.previewAutoPlayEnabled) {
-            // Auto-play the video
+      // Auto-play new video if enabled
+      if (this.previewAutoPlayEnabled) {
+        setTimeout(() => {
+          const newVideoEl = this.previewVideoPlayer?.nativeElement;
+          if (newVideoEl) {
             newVideoEl.play().catch(err => {
               console.error('Auto-play failed:', err);
             });
-          } else {
-            // Load the video and show first frame without playing
-            newVideoEl.load();
-            newVideoEl.addEventListener('loadeddata', () => {
-              newVideoEl.currentTime = 0.1; // Seek to first frame
-            }, { once: true });
           }
-        }
-      }, 150);
+        }, 150);
+      }
     }
   }
 
@@ -2880,6 +2884,56 @@ export class LibraryComponent implements OnInit, OnDestroy {
         highlightedElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
       }
     }, 50);
+  }
+
+  /**
+   * Handle type-ahead search to jump to videos by title
+   */
+  handleTypeAhead(key: string) {
+    // Clear the existing timer
+    if (this.typeAheadTimer) {
+      clearTimeout(this.typeAheadTimer);
+    }
+
+    // Add the key to the buffer
+    this.typeAheadBuffer += key.toLowerCase();
+
+    // Find the first video that starts with the buffer
+    const matchingVideo = this.filteredVideos.find(video => {
+      const filename = this.parseFilename(video.filename);
+      const title = filename.title.toLowerCase();
+      return title.startsWith(this.typeAheadBuffer);
+    });
+
+    if (matchingVideo) {
+      // Clear all selections and select the matching video
+      this.selectedVideos.clear();
+      this.selectedWeeks.clear();
+      this.highlightedVideo = matchingVideo;
+      this.selectedVideos.add(matchingVideo.id);
+      this.updateAllSelectedState();
+      this.scrollToHighlightedVideo();
+    }
+
+    // Reset the buffer after 1 second of no typing
+    this.typeAheadTimer = setTimeout(() => {
+      this.typeAheadBuffer = '';
+    }, 1000);
+  }
+
+  /**
+   * Handle clicks on the list container to deselect when clicking empty space
+   */
+  onListContainerClick(event: Event) {
+    // Check if the click target is the container itself (not a child element)
+    const target = event.target as HTMLElement;
+    if (target.classList.contains('video-list-container')) {
+      // Clear all selections
+      this.selectedVideos.clear();
+      this.selectedWeeks.clear();
+      this.highlightedVideo = null;
+      this.updateAllSelectedState();
+    }
   }
 
   /**

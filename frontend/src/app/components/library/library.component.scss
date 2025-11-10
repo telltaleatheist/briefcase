@@ -534,7 +534,7 @@
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 8px;
   margin-bottom: 24px;
-  padding-bottom: 24px;
+  padding-bottom: 60px; // More space at the bottom for comfortable scrolling
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-card);
@@ -717,13 +717,17 @@
       min-width: 0;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       overflow: hidden;
       max-width: 100%;
 
-      .date-chip {
+      .date-chip, .date-placeholder {
         flex-shrink: 0;
+        width: 85px; // Fixed width for column alignment
         height: 18px;
+      }
+
+      .date-chip {
         font-size: 10px;
         font-weight: 600;
         background: var(--primary-orange, #ff8f47);
@@ -732,6 +736,7 @@
         transition: background-color 0.2s;
         padding: 0 7px;
         border-radius: 9px;
+        text-align: center;
         display: inline-flex;
         align-items: center;
         line-height: 1;
@@ -789,8 +794,12 @@
         }
       }
 
-      .extension-text {
+      .extension-text, .extension-placeholder {
         flex-shrink: 0;
+        width: 50px; // Fixed width for column alignment
+      }
+
+      .extension-text {
         font-size: 12px;
         font-weight: 500;
         color: var(--text-secondary);
@@ -798,6 +807,7 @@
         padding: 2px 4px;
         border-radius: 3px;
         transition: background-color 0.2s;
+        text-align: left;
 
         &:hover {
           background: var(--bg-secondary);
@@ -806,7 +816,7 @@
 
       .extension-input {
         flex-shrink: 0;
-        width: 42px;
+        width: 50px; // Match extension-text width for column alignment
         height: 20px;
         padding: 2px 5px;
         font-size: 12px;
