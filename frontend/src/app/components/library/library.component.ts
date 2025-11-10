@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -10,6 +10,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatMenuTrigger } from '@angular/material/menu';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatChipsModule } from '@angular/material/chips';
@@ -18,7 +19,10 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ScrollingModule } from '@angular/cdk/scrolling';
+import { AngularSplitModule } from 'angular-split';
 import {
   DatabaseLibraryService,
   DatabaseVideo,
@@ -67,7 +71,10 @@ interface UnimportedVideo {
     MatTabsModule,
     MatMenuModule,
     MatDividerModule,
-    ScrollingModule
+    MatExpansionModule,
+    MatSnackBarModule,
+    ScrollingModule,
+    AngularSplitModule
   ],
   templateUrl: './library.component.html',
   styleUrls: ['./library.component.scss']
@@ -112,6 +119,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     tags: true
   };
   showSearchFilters = false;
+  showSearchAccordion = false; // For compact search/filter accordion
+  searchFiltersExpanded = false; // For main accordion collapsed by default
 
   // Track open video player dialog to prevent multiple instances
   private openVideoPlayerDialog: any = null;
@@ -119,6 +128,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Selection
   selectedVideos = new Set<string>(); // Set of video IDs
   isAllSelected = false;
+  isMissingTranscriptSelected = false;
+  isMissingAnalysisSelected = false;
 
   // Virtual scrolling
   itemSize = 44; // Height of each video card (compact single-line design)
@@ -144,6 +155,76 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }> = [];
   private lastProcessedCount = 0;
 
+  // View mode (list or detail split view)
+  viewMode: 'list' | 'detail' = 'list';
+  selectedVideo: DatabaseVideo | null = null;
+  autoPlayEnabled = true;
+  backendUrl = '';
+
+  // Video player state
+  @ViewChild('detailVideoPlayer') detailVideoPlayer?: ElementRef<HTMLVideoElement>;
+  @ViewChild('previewVideoPlayer') previewVideoPlayer?: ElementRef<HTMLVideoElement>;
+  @ViewChild('contextMenuTrigger') contextMenuTrigger?: MatMenuTrigger;
+  videoElement: HTMLVideoElement | null = null;
+  isPlaying = false;
+
+  // Preview modal state for list view
+  highlightedVideo: DatabaseVideo | null = null;
+  isPreviewModalOpen = false;
+  previewAutoPlayEnabled = true;
+
+  // Preview panel position and dragging
+  previewPanelWidth = 500;
+  previewPanelHeight = 400;
+  previewPanelX = 100;
+  previewPanelY = 100;
+  isDraggingPreviewPanel = false;
+  isResizingPreviewPanel = false;
+
+  // Context menu state
+  contextMenuPosition = { x: 0, y: 0 };
+  contextMenuVideo: DatabaseVideo | null = null;
+
+  // Week grouping state
+  collapsedWeeks = new Set<string>(); // Set of collapsed week identifiers
+  groupedVideos: { week: string; videos: DatabaseVideo[] }[] = [];
+
+  @HostListener('window:keydown', ['$event'])
+  handleKeyDown(event: KeyboardEvent) {
+    // Handle preview modal in list view
+    if (this.viewMode === 'list' && this.isPreviewModalOpen) {
+      if (event.code === 'Space') {
+        event.preventDefault();
+        this.togglePreviewPlayPause();
+      } else if (event.code === 'Escape') {
+        event.preventDefault();
+        this.closePreviewModal();
+      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        event.preventDefault();
+        this.navigatePreviewVideos(event.code === 'ArrowUp' ? -1 : 1);
+      }
+    }
+    // Handle detail view
+    else if (this.viewMode === 'detail') {
+      if (event.code === 'Space') {
+        this.onSpacebarPress(event);
+      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        event.preventDefault();
+        this.navigateVideos(event.code === 'ArrowUp' ? -1 : 1);
+      }
+    }
+    // Handle navigation in list view without modal
+    else if (this.viewMode === 'list' && this.highlightedVideo && !this.isPreviewModalOpen) {
+      if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        event.preventDefault();
+        this.navigateHighlightedVideo(event.code === 'ArrowUp' ? -1 : 1);
+      } else if (event.code === 'Space') {
+        event.preventDefault();
+        this.openPreviewModal();
+      }
+    }
+  }
+
   constructor(
     private databaseLibraryService: DatabaseLibraryService,
     private dialog: MatDialog,
@@ -151,7 +232,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     private http: HttpClient,
     private backendUrlService: BackendUrlService,
     private router: Router,
-    private apiService: ApiService
+    private apiService: ApiService,
+    private snackBar: MatSnackBar
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -160,6 +242,25 @@ export class LibraryComponent implements OnInit, OnDestroy {
   async ngOnInit() {
     const startTime = performance.now();
     console.log('[LibraryComponent] ngOnInit started');
+
+    // Add document listeners for closing context menu
+    document.addEventListener('click', this.handleDocumentClick);
+    document.addEventListener('contextmenu', this.handleDocumentContextMenu);
+
+    // Load backend URL
+    this.backendUrl = await this.backendUrlService.getBackendUrl();
+
+    // Load view mode preference from localStorage
+    const savedViewMode = localStorage.getItem('library-view-mode');
+    if (savedViewMode === 'detail' || savedViewMode === 'list') {
+      this.viewMode = savedViewMode;
+    }
+
+    // Load auto-play preference from localStorage
+    const savedAutoPlay = localStorage.getItem('library-auto-play');
+    if (savedAutoPlay !== null) {
+      this.autoPlayEnabled = savedAutoPlay === 'true';
+    }
 
     // Load all data in parallel for maximum speed
     await Promise.all([
@@ -192,7 +293,33 @@ export class LibraryComponent implements OnInit, OnDestroy {
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
     }
+
+    // Remove document listeners
+    document.removeEventListener('click', this.handleDocumentClick);
+    document.removeEventListener('contextmenu', this.handleDocumentContextMenu);
   }
+
+  /**
+   * Handle document click to close context menu
+   */
+  private handleDocumentClick = (event: MouseEvent) => {
+    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+      this.contextMenuTrigger.closeMenu();
+    }
+  };
+
+  /**
+   * Handle document right-click to potentially close context menu
+   */
+  private handleDocumentContextMenu = (event: MouseEvent) => {
+    // Only close if not right-clicking on a video card
+    const target = event.target as HTMLElement;
+    if (!target.closest('.video-card')) {
+      if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+        this.contextMenuTrigger.closeMenu();
+      }
+    }
+  };
 
   /**
    * Load database statistics
@@ -387,6 +514,39 @@ export class LibraryComponent implements OnInit, OnDestroy {
     if (index === 1) {
       // Unimported tab selected
       await this.loadUnimportedVideos();
+    }
+  }
+
+  /**
+   * View unimported videos - for now shows unimported dialog
+   * TODO: Create separate unimported videos page/component
+   */
+  async viewUnimportedVideos() {
+    // For now, just load unimported videos and show a dialog or switch view
+    // In the future, this should navigate to a separate route
+    await this.loadUnimportedVideos();
+
+    // Import and open unimported videos dialog
+    const { UnimportedVideosDialogComponent } = await import('./unimported-videos-dialog.component');
+
+    const dialogRef = this.dialog.open(UnimportedVideosDialogComponent, {
+      width: '900px',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      data: {
+        activeLibrary: this.activeLibrary,
+        unimportedVideos: this.unimportedVideos
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.videosImported) {
+      // Reload library data
+      this.databaseLibraryService.clearCache();
+      await this.loadVideos();
+      await this.loadStats();
+      await this.loadTags();
     }
   }
 
@@ -624,6 +784,73 @@ export class LibraryComponent implements OnInit, OnDestroy {
     );
 
     this.filteredVideos = filtered;
+
+    // Group videos by week/folder
+    this.groupVideosByWeek();
+  }
+
+  /**
+   * Group videos by date folder/week
+   */
+  groupVideosByWeek() {
+    const groups = new Map<string, DatabaseVideo[]>();
+
+    for (const video of this.filteredVideos) {
+      let week = video.date_folder;
+
+      // If no date_folder, generate one from the video's creation date
+      if (!week) {
+        const createdDate = new Date(video.created_at || video.added_at);
+        week = this.getWeekIdentifier(createdDate);
+      }
+
+      if (!groups.has(week)) {
+        groups.set(week, []);
+      }
+      groups.get(week)!.push(video);
+    }
+
+    // Convert to array and sort by week name (descending - newest first)
+    this.groupedVideos = Array.from(groups.entries())
+      .map(([week, videos]) => ({ week, videos }))
+      .sort((a, b) => b.week.localeCompare(a.week));
+  }
+
+  /**
+   * Get week identifier in YYYY-Www format (ISO week date)
+   */
+  private getWeekIdentifier(date: Date): string {
+    // Get the ISO week number
+    const tempDate = new Date(date.getTime());
+    tempDate.setHours(0, 0, 0, 0);
+    // Thursday in current week decides the year
+    tempDate.setDate(tempDate.getDate() + 3 - (tempDate.getDay() + 6) % 7);
+    // January 4 is always in week 1
+    const week1 = new Date(tempDate.getFullYear(), 0, 4);
+    // Calculate full weeks to nearest Thursday
+    const weekNum = 1 + Math.round(((tempDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+
+    // Format as YYYY-Www
+    const year = tempDate.getFullYear();
+    return `${year}-W${String(weekNum).padStart(2, '0')}`;
+  }
+
+  /**
+   * Toggle week collapse state
+   */
+  toggleWeek(week: string) {
+    if (this.collapsedWeeks.has(week)) {
+      this.collapsedWeeks.delete(week);
+    } else {
+      this.collapsedWeeks.add(week);
+    }
+  }
+
+  /**
+   * Check if week is collapsed
+   */
+  isWeekCollapsed(week: string): boolean {
+    return this.collapsedWeeks.has(week);
   }
 
   /**
@@ -646,6 +873,207 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.sortOrder = (sortBy === 'no-transcript' || sortBy === 'no-analysis') ? 'desc' : 'desc';
     }
     this.applyFiltersAndSort();
+  }
+
+  /**
+   * Toggle between list and detail view modes
+   */
+  toggleViewMode() {
+    this.viewMode = this.viewMode === 'list' ? 'detail' : 'list';
+    localStorage.setItem('library-view-mode', this.viewMode);
+
+    // If switching to detail view and there are videos, select the first one
+    if (this.viewMode === 'detail' && this.filteredVideos.length > 0 && !this.selectedVideo) {
+      this.selectVideo(this.filteredVideos[0]);
+    }
+  }
+
+  /**
+   * Toggle auto-play feature
+   */
+  toggleAutoPlay() {
+    this.autoPlayEnabled = !this.autoPlayEnabled;
+    localStorage.setItem('library-auto-play', String(this.autoPlayEnabled));
+  }
+
+  /**
+   * Select a video in detail view
+   */
+  selectVideo(video: DatabaseVideo) {
+    console.log('[selectVideo] Selecting video:', video.id, video.filename);
+
+    // Stop previous video if playing
+    if (this.videoElement && !this.videoElement.paused) {
+      this.videoElement.pause();
+    }
+
+    this.selectedVideo = video;
+    this.isPlaying = false;
+
+    // Auto-play the video if enabled
+    if (this.autoPlayEnabled) {
+      // Wait for video element to be ready and get fresh reference
+      setTimeout(() => {
+        // Get fresh reference to video element
+        const videoEl = this.detailVideoPlayer?.nativeElement;
+        if (videoEl) {
+          this.videoElement = videoEl;
+          videoEl.play().catch(err => {
+            console.error('Auto-play failed:', err);
+          });
+          this.isPlaying = true;
+        } else {
+          console.warn('[selectVideo] Video element not found in DOM');
+        }
+      }, 150);
+    }
+  }
+
+  /**
+   * Get thumbnail URL for a video
+   */
+  getVideoThumbnailUrl(video: DatabaseVideo): string {
+    return `${this.backendUrl}/api/database/videos/${video.id}/thumbnail`;
+  }
+
+  /**
+   * Get video stream URL for playing
+   */
+  getVideoStreamUrl(video: DatabaseVideo): string {
+    const encodedPath = encodeURIComponent(btoa(video.current_path));
+    return `${this.backendUrl}/api/library/videos/custom?path=${encodedPath}`;
+  }
+
+  /**
+   * Handle thumbnail loading error
+   */
+  onThumbnailError(event: Event) {
+    const img = event.target as HTMLImageElement;
+    img.src = '/assets/video-placeholder.png';
+  }
+
+  /**
+   * Handle video loaded event
+   */
+  onVideoLoaded(videoEl: HTMLVideoElement) {
+    this.videoElement = videoEl;
+  }
+
+  /**
+   * Group videos by week for display with separators
+   */
+  getGroupedVideos(): Array<{type: 'separator', weekLabel: string} | {type: 'video', video: DatabaseVideo}> {
+    const grouped: Array<{type: 'separator', weekLabel: string} | {type: 'video', video: DatabaseVideo}> = [];
+    let currentWeek: string | null = null;
+
+    for (const video of this.filteredVideos) {
+      // Extract date from filename (assuming format: YYYY-MM-DD at start)
+      const dateMatch = video.filename.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (dateMatch) {
+        const videoDate = new Date(dateMatch[1]);
+        const weekStart = this.getWeekStartDate(videoDate);
+        const weekLabel = this.formatWeekLabel(weekStart);
+
+        // Add separator if we're in a new week
+        if (weekLabel !== currentWeek) {
+          grouped.push({ type: 'separator', weekLabel });
+          currentWeek = weekLabel;
+        }
+      }
+
+      grouped.push({ type: 'video', video });
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Get the start date (Sunday) of the week for a given date
+   */
+  private getWeekStartDate(date: Date): Date {
+    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const sunday = new Date(date);
+    sunday.setDate(date.getDate() - dayOfWeek);
+    sunday.setHours(0, 0, 0, 0);
+    return sunday;
+  }
+
+  /**
+   * Format week label (e.g., "Week of Nov 4, 2025")
+   */
+  private formatWeekLabel(weekStart: Date): string {
+    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+    return `Week of ${weekStart.toLocaleDateString('en-US', options)}`;
+  }
+
+  /**
+   * Navigate through videos with arrow keys
+   */
+  navigateVideos(direction: number) {
+    if (!this.selectedVideo || this.filteredVideos.length === 0) {
+      // No video selected, select first one
+      if (this.filteredVideos.length > 0) {
+        this.selectVideo(this.filteredVideos[0]);
+        this.scrollToVideo(this.filteredVideos[0]);
+      }
+      return;
+    }
+
+    const currentIndex = this.filteredVideos.findIndex(v => v.id === this.selectedVideo!.id);
+    if (currentIndex === -1) return;
+
+    const newIndex = currentIndex + direction;
+    if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
+      const newVideo = this.filteredVideos[newIndex];
+      this.selectVideo(newVideo);
+      this.scrollToVideo(newVideo);
+    }
+  }
+
+  /**
+   * Scroll to a video in the list
+   */
+  scrollToVideo(video: DatabaseVideo) {
+    setTimeout(() => {
+      const videoElement = document.querySelector(`.video-list-item.selected`);
+      if (videoElement) {
+        videoElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 50);
+  }
+
+  /**
+   * Handle spacebar key press for play/pause
+   */
+  onSpacebarPress(event: KeyboardEvent) {
+    if (this.viewMode === 'detail' && this.videoElement) {
+      event.preventDefault();
+      if (this.videoElement.paused) {
+        this.videoElement.play();
+        this.isPlaying = true;
+      } else {
+        this.videoElement.pause();
+        this.isPlaying = false;
+      }
+    }
+  }
+
+  /**
+   * Reanalyze the selected video
+   */
+  reanalyzeSelectedVideo() {
+    if (this.selectedVideo) {
+      const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+        width: '700px',
+        maxWidth: '90vw',
+        maxHeight: '85vh',
+        panelClass: 'video-analysis-dialog-panel',
+        data: {
+          selectedVideos: [this.selectedVideo]
+        },
+        disableClose: false
+      });
+    }
   }
 
   /**
@@ -1068,6 +1496,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
   }
 
+  encodeURIComponent(str: string): string {
+    return encodeURIComponent(btoa(str));
+  }
+
   formatTimeRemaining(seconds: number | undefined): string {
     if (!seconds) return 'Calculating...';
 
@@ -1138,13 +1570,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   toggleAllSelection() {
     if (this.isAllSelected) {
-      // Deselect all
+      // Deselect all (including transcript and analysis checkboxes)
       this.selectedVideos.clear();
       this.isAllSelected = false;
+      this.isMissingTranscriptSelected = false;
+      this.isMissingAnalysisSelected = false;
     } else {
       // Select all visible videos
       this.filteredVideos.forEach(video => this.selectedVideos.add(video.id));
       this.isAllSelected = true;
+      // Don't automatically check the other boxes when selecting all
     }
   }
 
@@ -1152,34 +1587,52 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Select all videos missing transcription
    */
   selectAllMissingTranscript() {
-    // Clear current selection
-    this.selectedVideos.clear();
+    if (this.isMissingTranscriptSelected) {
+      // Deselect - clear all selections
+      this.selectedVideos.clear();
+      this.isMissingTranscriptSelected = false;
+      this.isAllSelected = false;
+    } else {
+      // Clear current selection
+      this.selectedVideos.clear();
 
-    // Select all videos without transcription
-    this.filteredVideos.forEach(video => {
-      if (!video.has_transcript) {
-        this.selectedVideos.add(video.id);
-      }
-    });
+      // Select all videos without transcription
+      this.filteredVideos.forEach(video => {
+        if (!video.has_transcript) {
+          this.selectedVideos.add(video.id);
+        }
+      });
 
-    this.updateAllSelectedState();
+      this.isMissingTranscriptSelected = true;
+      this.isMissingAnalysisSelected = false;
+      this.updateAllSelectedState();
+    }
   }
 
   /**
    * Select all videos missing AI analysis
    */
   selectAllMissingAnalysis() {
-    // Clear current selection
-    this.selectedVideos.clear();
+    if (this.isMissingAnalysisSelected) {
+      // Deselect - clear all selections
+      this.selectedVideos.clear();
+      this.isMissingAnalysisSelected = false;
+      this.isAllSelected = false;
+    } else {
+      // Clear current selection
+      this.selectedVideos.clear();
 
-    // Select all videos without analysis
-    this.filteredVideos.forEach(video => {
-      if (!video.has_analysis) {
-        this.selectedVideos.add(video.id);
-      }
-    });
+      // Select all videos without analysis
+      this.filteredVideos.forEach(video => {
+        if (!video.has_analysis) {
+          this.selectedVideos.add(video.id);
+        }
+      });
 
-    this.updateAllSelectedState();
+      this.isMissingAnalysisSelected = true;
+      this.isMissingTranscriptSelected = false;
+      this.updateAllSelectedState();
+    }
   }
 
   private updateAllSelectedState() {
@@ -1832,11 +2285,91 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Click handler for video card - now starts editing title instead of opening video player
+   * Handle three-dot menu click (triggers same context menu as right-click)
    */
-  onVideoClick(video: DatabaseVideo, event: Event) {
+  onThreeDotsClick(event: MouseEvent, video: DatabaseVideo) {
+    event.preventDefault();
     event.stopPropagation();
-    this.startEditing(video, 'title', event);
+
+    // If menu is already open, close it
+    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+      this.contextMenuTrigger.closeMenu();
+      return;
+    }
+
+    // Highlight the video and set context menu video
+    this.highlightedVideo = video;
+    this.contextMenuVideo = video;
+
+    // Position the context menu at the click location
+    this.contextMenuPosition = {
+      x: event.clientX,
+      y: event.clientY
+    };
+
+    // Open the context menu
+    if (this.contextMenuTrigger) {
+      this.contextMenuTrigger.openMenu();
+    }
+  }
+
+  /**
+   * Handle right-click context menu
+   */
+  onVideoContextMenu(event: MouseEvent, video: DatabaseVideo) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    // If menu is already open, close it
+    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+      this.contextMenuTrigger.closeMenu();
+      return;
+    }
+
+    // Highlight the video when right-clicking
+    this.highlightedVideo = video;
+    this.contextMenuVideo = video;
+
+    // Position the context menu at cursor location
+    this.contextMenuPosition = {
+      x: event.clientX,
+      y: event.clientY
+    };
+
+    // Open the context menu
+    if (this.contextMenuTrigger) {
+      this.contextMenuTrigger.openMenu();
+    }
+  }
+
+  /**
+   * Start renaming a video (opens inline editor for all three parts)
+   */
+  startRenamingVideo(video: DatabaseVideo) {
+    // Initialize editing state for this video if not exists
+    if (!this.editingVideo[video.id]) {
+      this.editingVideo[video.id] = { date: false, title: false, extension: false };
+    }
+
+    // Initialize edited values if not exists
+    if (!this.editedValues[video.id]) {
+      const parsed = this.parseFilename(video.filename);
+      this.editedValues[video.id] = parsed;
+    }
+
+    // Enable editing for all three parts simultaneously
+    this.editingVideo[video.id].date = true;
+    this.editingVideo[video.id].title = true;
+    this.editingVideo[video.id].extension = true;
+
+    // Auto-focus the title input after it renders
+    setTimeout(() => {
+      const input = document.querySelector('.title-input') as HTMLInputElement;
+      if (input) {
+        input.focus();
+        input.select(); // Select all text for easy replacement
+      }
+    }, 0);
   }
 
   /**
@@ -1866,13 +2399,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     try {
       // Call backend to rename the file
-      await this.databaseLibraryService.updateVideoFilename(video.id, newFilename);
+      const result = await this.databaseLibraryService.updateVideoFilename(video.id, newFilename);
 
-      // Update local copy
-      video.filename = newFilename;
+      if (result.success) {
+        // Update local copy with new filename and path
+        video.filename = newFilename;
+        if (result.newPath) {
+          video.current_path = result.newPath;
+        }
 
-      // Clear editing state
-      this.cancelEditing(video.id);
+        // Clear editing state
+        this.cancelEditing(video.id);
+      } else {
+        this.notificationService.toastOnly('error', 'Rename Failed', result.error || 'Failed to rename video');
+      }
     } catch (error: any) {
       console.error('Failed to rename video:', error);
       this.notificationService.toastOnly('error', 'Rename Failed', error.error?.message || 'Failed to rename video');
@@ -1922,5 +2462,289 @@ export class LibraryComponent implements OnInit, OnDestroy {
         this.saveFilename(video);
       }
     }, 150);
+  }
+
+  /**
+   * PREVIEW MODAL METHODS FOR LIST VIEW
+   */
+
+  /**
+   * Highlight a video on single click (without opening preview)
+   */
+  highlightVideo(video: DatabaseVideo, event: Event) {
+    event.stopPropagation();
+
+    // Close context menu if it's open
+    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+      this.contextMenuTrigger.closeMenu();
+    }
+
+    this.highlightedVideo = video;
+  }
+
+  /**
+   * Handle double-click to open preview modal
+   */
+  onVideoDoubleClick(video: DatabaseVideo, event: Event) {
+    event.preventDefault(); // Prevent text selection
+    event.stopPropagation();
+    this.highlightedVideo = video;
+    this.openPreviewModal();
+  }
+
+  /**
+   * Open the preview modal for the highlighted video
+   */
+  openPreviewModal() {
+    if (!this.highlightedVideo) {
+      // If no video highlighted, highlight the first one
+      if (this.filteredVideos.length > 0) {
+        this.highlightedVideo = this.filteredVideos[0];
+      } else {
+        return;
+      }
+    }
+
+    // Position panel on the right side of the screen
+    this.previewPanelX = window.innerWidth - this.previewPanelWidth - 20;
+    this.previewPanelY = 100;
+
+    this.isPreviewModalOpen = true;
+
+    // Auto-play the video if enabled
+    if (this.previewAutoPlayEnabled) {
+      setTimeout(() => {
+        const videoEl = this.previewVideoPlayer?.nativeElement;
+        if (videoEl) {
+          videoEl.play().catch(err => {
+            console.error('Auto-play failed:', err);
+          });
+        }
+      }, 150);
+    }
+  }
+
+  /**
+   * Close the preview modal
+   */
+  closePreviewModal() {
+    this.isPreviewModalOpen = false;
+
+    // Pause the video when closing
+    const videoEl = this.previewVideoPlayer?.nativeElement;
+    if (videoEl && !videoEl.paused) {
+      videoEl.pause();
+    }
+  }
+
+  /**
+   * Toggle play/pause in preview modal
+   */
+  togglePreviewPlayPause() {
+    const videoEl = this.previewVideoPlayer?.nativeElement;
+    if (videoEl) {
+      if (videoEl.paused) {
+        videoEl.play();
+      } else {
+        videoEl.pause();
+      }
+    }
+  }
+
+  /**
+   * Navigate between videos in preview modal
+   */
+  navigatePreviewVideos(direction: number) {
+    if (!this.highlightedVideo || this.filteredVideos.length === 0) {
+      return;
+    }
+
+    const currentIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo!.id);
+    if (currentIndex === -1) return;
+
+    const newIndex = currentIndex + direction;
+    if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
+      // Stop current video
+      const videoEl = this.previewVideoPlayer?.nativeElement;
+      if (videoEl && !videoEl.paused) {
+        videoEl.pause();
+      }
+
+      // Update highlighted video
+      this.highlightedVideo = this.filteredVideos[newIndex];
+
+      // Auto-play new video if enabled
+      if (this.previewAutoPlayEnabled) {
+        setTimeout(() => {
+          const newVideoEl = this.previewVideoPlayer?.nativeElement;
+          if (newVideoEl) {
+            newVideoEl.play().catch(err => {
+              console.error('Auto-play failed:', err);
+            });
+          }
+        }, 150);
+      }
+    }
+  }
+
+  /**
+   * Navigate highlighted video without opening preview
+   */
+  navigateHighlightedVideo(direction: number) {
+    if (!this.highlightedVideo || this.filteredVideos.length === 0) {
+      // No video highlighted, highlight the first one
+      if (this.filteredVideos.length > 0) {
+        this.highlightedVideo = this.filteredVideos[0];
+        this.scrollToHighlightedVideo();
+      }
+      return;
+    }
+
+    const currentIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo!.id);
+    if (currentIndex === -1) return;
+
+    const newIndex = currentIndex + direction;
+    if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
+      this.highlightedVideo = this.filteredVideos[newIndex];
+      this.scrollToHighlightedVideo();
+    }
+  }
+
+  /**
+   * Scroll to the highlighted video in the list
+   */
+  private scrollToHighlightedVideo() {
+    setTimeout(() => {
+      const highlightedElement = document.querySelector('.video-card.highlighted');
+      if (highlightedElement) {
+        highlightedElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+    }, 50);
+  }
+
+  /**
+   * Toggle preview auto-play
+   */
+  togglePreviewAutoPlay() {
+    this.previewAutoPlayEnabled = !this.previewAutoPlayEnabled;
+    localStorage.setItem('library-preview-auto-play', String(this.previewAutoPlayEnabled));
+  }
+
+  /**
+   * Copy filename to clipboard
+   */
+  copyFilename(video: DatabaseVideo) {
+    navigator.clipboard.writeText(video.filename).then(() => {
+      this.snackBar.open('Filename copied to clipboard', 'Close', {
+        duration: 2000
+      });
+    }).catch(err => {
+      console.error('Failed to copy filename:', err);
+      this.snackBar.open('Failed to copy filename', 'Close', {
+        duration: 2000
+      });
+    });
+  }
+
+  /**
+   * Check if a video is highlighted
+   */
+  isVideoHighlighted(video: DatabaseVideo): boolean {
+    return this.highlightedVideo?.id === video.id;
+  }
+
+  /**
+   * Get status tooltip for a video
+   */
+  getStatusTooltip(video: DatabaseVideo): string {
+    if (video.has_transcript && video.has_analysis) {
+      return 'Has transcript and analysis';
+    } else if (video.has_transcript) {
+      return 'Has transcript only';
+    } else if (video.has_analysis) {
+      return 'Has analysis only';
+    } else {
+      return 'No transcript or analysis';
+    }
+  }
+
+  /**
+   * Start dragging the preview panel
+   */
+  startDragPreviewPanel(event: MouseEvent) {
+    event.preventDefault();
+    this.isDraggingPreviewPanel = true;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startPanelX = this.previewPanelX;
+    const startPanelY = this.previewPanelY;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isDraggingPreviewPanel) return;
+
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      // Keep panel within viewport bounds
+      const maxX = window.innerWidth - this.previewPanelWidth - 20;
+      const maxY = window.innerHeight - 200; // approximate panel height
+
+      this.previewPanelX = Math.max(10, Math.min(maxX, startPanelX + deltaX));
+      this.previewPanelY = Math.max(10, Math.min(maxY, startPanelY + deltaY));
+    };
+
+    const onMouseUp = () => {
+      this.isDraggingPreviewPanel = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  /**
+   * Start resizing the preview panel
+   */
+  startResizePreviewPanel(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isResizingPreviewPanel = true;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = this.previewPanelWidth;
+    const startHeight = this.previewPanelHeight;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isResizingPreviewPanel) return;
+
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      // Calculate new dimensions with min/max constraints
+      const newWidth = Math.max(300, Math.min(800, startWidth + deltaX));
+      const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
+
+      this.previewPanelWidth = newWidth;
+      this.previewPanelHeight = newHeight;
+
+      // Adjust position if panel goes out of bounds
+      const maxX = window.innerWidth - this.previewPanelWidth - 20;
+      const maxY = window.innerHeight - this.previewPanelHeight - 20;
+
+      this.previewPanelX = Math.max(10, Math.min(maxX, this.previewPanelX));
+      this.previewPanelY = Math.max(10, Math.min(maxY, this.previewPanelY));
+    };
+
+    const onMouseUp = () => {
+      this.isResizingPreviewPanel = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 }

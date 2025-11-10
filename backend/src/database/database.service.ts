@@ -1154,21 +1154,34 @@ export class DatabaseService {
       return [];
     }
 
-    // Build a query that finds videos with ANY of the specified tags
+    // Build a query that finds videos with ANY of the specified tags (case-insensitive)
     const placeholders = tagNames.map(() => '?').join(',');
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
       SELECT DISTINCT video_id
       FROM tags
-      WHERE tag_name IN (${placeholders})
+      WHERE LOWER(tag_name) IN (${placeholders})
     `);
-    stmt.bind(tagNames);
+    // Convert tag names to lowercase for case-insensitive matching
+    stmt.bind(tagNames.map(t => t.toLowerCase()));
 
     const results: string[] = [];
     while (stmt.step()) {
       const row = stmt.getAsObject() as any;
       results.push(row.video_id);
     }
+
+    console.log(`[getVideoIdsByTags] Searching for tags:`, tagNames, `Found ${results.length} videos`);
+
+    // Debug: Let's see what tags exist in the database
+    const allTagsStmt = db.prepare(`SELECT DISTINCT tag_name FROM tags LIMIT 20`);
+    const sampleTags: string[] = [];
+    while (allTagsStmt.step()) {
+      const row = allTagsStmt.getAsObject() as any;
+      sampleTags.push(row.tag_name);
+    }
+    allTagsStmt.free();
+    console.log(`[getVideoIdsByTags] Sample tags in database:`, sampleTags);
     stmt.free();
 
     return results;

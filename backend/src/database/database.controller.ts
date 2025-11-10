@@ -1,9 +1,13 @@
-import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Response } from 'express';
+import * as path from 'path';
+import * as fs from 'fs';
 import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
 import { BatchAnalysisService } from './batch-analysis.service';
 import { LibraryManagerService } from './library-manager.service';
+import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 
 /**
  * DatabaseController - REST API endpoints for database operations
@@ -25,6 +29,7 @@ export class DatabaseController {
     private readonly migrationService: MigrationService,
     private readonly batchAnalysisService: BatchAnalysisService,
     private readonly libraryManagerService: LibraryManagerService,
+    private readonly ffmpegService: FfmpegService,
   ) {}
 
   /**
@@ -1112,6 +1117,64 @@ export class DatabaseController {
         success: false,
         error: error.message || 'Failed to transfer videos',
       };
+    }
+  }
+
+  /**
+   * GET /api/database/videos/:id/thumbnail
+   * Get or generate thumbnail for a library video
+   */
+  @Get('videos/:id/thumbnail')
+  async getVideoThumbnail(
+    @Param('id') id: string,
+    @Res() res: Response
+  ) {
+    try {
+      const video = this.databaseService.getVideoById(id);
+
+      if (!video) {
+        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
+      }
+
+      if (!video.current_path || typeof video.current_path !== 'string') {
+        throw new HttpException('Video path not available', HttpStatus.NOT_FOUND);
+      }
+
+      const videoPath = video.current_path as string;
+
+      if (!fs.existsSync(videoPath)) {
+        throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Check if thumbnail already exists
+      const videoDir = path.dirname(videoPath);
+      const videoBase = path.parse(videoPath).name;
+      const thumbnailPath = path.join(videoDir, `${videoBase}_thumbnail.jpg`);
+
+      // If thumbnail doesn't exist, generate it
+      if (!fs.existsSync(thumbnailPath)) {
+        this.logger.log(`Generating thumbnail for video ${id}: ${video.filename}`);
+        const generatedPath = await this.ffmpegService.createThumbnail(videoPath);
+
+        if (!generatedPath || !fs.existsSync(generatedPath)) {
+          throw new HttpException(
+            'Failed to generate thumbnail',
+            HttpStatus.INTERNAL_SERVER_ERROR
+          );
+        }
+      }
+
+      // Send the thumbnail file
+      res.sendFile(thumbnailPath);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Error getting thumbnail: ${(error as Error).message}`);
+      throw new HttpException(
+        `Failed to get thumbnail: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 }

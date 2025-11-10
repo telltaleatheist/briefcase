@@ -118,7 +118,9 @@ export class VideoInfoComponent implements OnInit {
   async loadVideoById(videoId: string) {
     try {
       // Get all videos and find the one we need
-      const result = await this.databaseLibraryService.getVideos(1000, 0);
+      // Use useCache=false to ensure we get fresh data from the database
+      // This is especially important after a video has been renamed
+      const result = await this.databaseLibraryService.getVideos(1000, 0, false);
       this.video = result.videos.find(v => v.id === videoId) || null;
 
       if (!this.video) {

@@ -621,13 +621,18 @@ export class FfmpegService {
         outputPath = path.join(fileDir, `${fileBase}_thumbnail.jpg`);
       }
 
+      // First, get video duration to calculate 10% mark
+      const metadata = await this.getVideoMetadata(videoPath);
+      const duration = metadata.duration || 0;
+      const thumbnailTime = Math.max(1, duration * 0.1); // 10% of duration, minimum 1 second
+
       return new Promise<string | null>((resolve, reject) => {
         const command = ffmpeg(videoPath)
           .screenshots({
-            timestamps: ['10%'], // Take screenshot at 10% of the video duration
+            timestamps: [thumbnailTime], // Take screenshot at 10% of the video duration
             filename: path.basename(outputPath || ''),
             folder: path.dirname(outputPath || ''),
-            size: '640x360', // Thumbnail size
+            size: '?x360', // Height of 360px, width auto-calculated to preserve aspect ratio
           })
           .on('start', (cmdline) => {
             this.logger.log(`FFmpeg thumbnail command started: ${cmdline}`);
@@ -640,7 +645,7 @@ export class FfmpegService {
             this.logger.error(`Error creating thumbnail: ${err.message}`);
             resolve(null);
           });
-          
+
         // Make sure the command is explicitly run
         command.run();
       });

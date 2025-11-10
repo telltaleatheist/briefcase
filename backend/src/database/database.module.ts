@@ -6,6 +6,7 @@ import { BatchAnalysisService } from './batch-analysis.service';
 import { LibraryManagerService } from './library-manager.service';
 import { DatabaseController } from './database.controller';
 import { AnalysisModule } from '../analysis/analysis.module';
+import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 
 /**
  * DatabaseModule - Global module providing database services
@@ -15,7 +16,10 @@ import { AnalysisModule } from '../analysis/analysis.module';
  */
 @Global()
 @Module({
-  imports: [forwardRef(() => AnalysisModule)],
+  imports: [
+    forwardRef(() => AnalysisModule),
+    FfmpegModule,
+  ],
   controllers: [DatabaseController],
   providers: [
     DatabaseService,
