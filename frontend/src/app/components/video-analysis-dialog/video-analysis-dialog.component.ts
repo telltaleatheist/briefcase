@@ -1,7 +1,7 @@
 import { Component, Inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA, MatDialog } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -11,6 +11,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { AnalysisQueueService } from '../../services/analysis-queue.service';
+import { AiSetupHelperService, AIAvailability } from '../../services/ai-setup-helper.service';
+import { AiSetupWizardComponent } from '../ai-setup-wizard/ai-setup-wizard.component';
+import { AiSetupTooltipComponent } from '../ai-setup-tooltip/ai-setup-tooltip.component';
 
 export interface VideoAnalysisDialogData {
   mode?: 'analyze' | 'transcribe' | 'import' | 'download';
@@ -41,6 +44,8 @@ export class VideoAnalysisDialogComponent implements OnInit {
   analysisForm: FormGroup;
   availableOllamaModels: string[] = [];
   isDraggingFile = false;
+  aiAvailability: AIAvailability | null = null;
+  showAiSetupPrompt = false;
 
   constructor(
     private fb: FormBuilder,
@@ -48,12 +53,17 @@ export class VideoAnalysisDialogComponent implements OnInit {
     @Inject(MAT_DIALOG_DATA) public data: VideoAnalysisDialogData,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
-    private analysisQueueService: AnalysisQueueService
+    private analysisQueueService: AnalysisQueueService,
+    private aiSetupHelper: AiSetupHelperService,
+    private dialog: MatDialog
   ) {
     this.analysisForm = this.createForm();
   }
 
   async ngOnInit(): Promise<void> {
+    // Check AI availability first
+    this.aiAvailability = await this.aiSetupHelper.checkAIAvailability();
+
     // Load available Ollama models
     await this.loadAvailableOllamaModels();
 
@@ -80,8 +90,17 @@ export class VideoAnalysisDialogComponent implements OnInit {
       this.analysisForm.patchValue({ inputType: 'url' });
     }
 
+    // If videos are from library, change default from 'import-only' to 'transcribe-only'
+    // since import doesn't make sense for videos already in library
+    if (this.isFromLibrary() && this.analysisForm.get('mode')?.value === 'import-only') {
+      this.analysisForm.patchValue({ mode: 'transcribe-only' });
+    }
+
     // Update validation based on whether we have selected videos
     this.updateInputValidation();
+
+    // Check if we should show AI setup prompt
+    this.checkAndPromptAISetup();
   }
 
   createForm(): FormGroup {
@@ -109,6 +128,13 @@ export class VideoAnalysisDialogComponent implements OnInit {
 
   isImportOnly(): boolean {
     return this.analysisForm.get('mode')?.value === 'import-only';
+  }
+
+  /**
+   * Check if videos are already in library (not new imports)
+   */
+  isFromLibrary(): boolean {
+    return !!(this.data.selectedVideos && this.data.selectedVideos.length > 0);
   }
 
   needsApiKey(): boolean {
@@ -376,5 +402,91 @@ export class VideoAnalysisDialogComponent implements OnInit {
     }
 
     inputControl?.updateValueAndValidity();
+  }
+
+  /**
+   * Check if AI setup is needed and show prompt
+   */
+  private checkAndPromptAISetup(): void {
+    const mode = this.analysisForm.get('mode')?.value;
+
+    // Only check if mode requires AI (full analysis or transcription)
+    if (mode === 'import-only') {
+      return;
+    }
+
+    // If no AI provider is available, show setup prompt
+    if (this.aiAvailability && !this.hasAnyAIProvider()) {
+      this.showAiSetupPrompt = true;
+    }
+  }
+
+  /**
+   * Check if any AI provider is available
+   */
+  hasAnyAIProvider(): boolean {
+    if (!this.aiAvailability) return false;
+
+    return (this.aiAvailability.hasOllama && this.aiAvailability.ollamaModels.length > 0) ||
+           this.aiAvailability.hasClaudeKey ||
+           this.aiAvailability.hasOpenAIKey;
+  }
+
+  /**
+   * Open the AI setup wizard
+   */
+  openAISetupWizard(): void {
+    const dialogRef = this.dialog.open(AiSetupWizardComponent, {
+      width: '800px',
+      maxWidth: '90vw',
+      maxHeight: '80vh',
+      disableClose: false,
+      data: { forceSetup: false }
+    });
+
+    dialogRef.afterClosed().subscribe(async (result) => {
+      if (result?.completed) {
+        // Refresh AI availability
+        this.aiAvailability = await this.aiSetupHelper.checkAIAvailability();
+
+        // Reload models
+        await this.loadAvailableOllamaModels();
+
+        // Hide the prompt
+        this.showAiSetupPrompt = false;
+
+        this.notificationService.success('AI Setup Complete', 'You can now use AI features!');
+      } else if (result?.skipped) {
+        this.showAiSetupPrompt = false;
+      }
+    });
+  }
+
+  /**
+   * Dismiss AI setup prompt
+   */
+  dismissAISetupPrompt(): void {
+    this.showAiSetupPrompt = false;
+  }
+
+  /**
+   * Get friendly message about AI setup needs
+   */
+  getAISetupMessage(): string {
+    if (!this.aiAvailability) {
+      return 'Checking AI availability...';
+    }
+
+    const mode = this.analysisForm.get('mode')?.value;
+
+    if (mode === 'transcribe-only') {
+      return 'Transcription does not require AI setup. However, you can optionally use AI for enhanced transcription quality.';
+    }
+
+    if (mode === 'full') {
+      return 'AI analysis requires either Ollama (free, runs locally) or an API key for Claude/ChatGPT. Click "Set Up AI" to get started!';
+    }
+
+    return 'Some features require AI setup.';
   }
 }

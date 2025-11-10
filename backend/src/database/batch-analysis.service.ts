@@ -320,6 +320,19 @@ export class BatchAnalysisService implements OnModuleInit {
       openaiApiKey?: string;
     },
   ): Promise<void> {
+    // Re-fetch video data from database to get the most current path
+    // (in case the video was renamed after being queued)
+    const currentVideoData = this.databaseService.getVideoById(video.id);
+    if (!currentVideoData) {
+      throw new Error(`Video ${video.id} not found in database`);
+    }
+
+    // Use the current path from database instead of the queued path
+    const currentPath = currentVideoData.current_path as string;
+    const currentFilename = currentVideoData.filename as string;
+
+    this.logger.log(`Processing video: ${currentFilename} at path: ${currentPath}`);
+
     // Check if transcript and analysis already exist
     const existingTranscript = this.databaseService.getTranscript(video.id);
     const existingAnalysis = this.databaseService.getAnalysis(video.id);
@@ -332,7 +345,7 @@ export class BatchAnalysisService implements OnModuleInit {
     if (config.transcribeOnly) {
       // User explicitly requested transcribe-only
       if (hasTranscript) {
-        this.logger.log(`Transcript already exists for ${video.filename}, skipping transcription`);
+        this.logger.log(`Transcript already exists for ${currentFilename}, skipping transcription`);
         return; // Skip this video entirely
       }
       mode = 'transcribe-only';
@@ -340,7 +353,7 @@ export class BatchAnalysisService implements OnModuleInit {
       // User requested full analysis
       // Check if analysis already exists and if we should skip
       if (hasAnalysis && !config.forceReanalyze) {
-        this.logger.log(`Analysis already exists for ${video.filename}, skipping (use forceReanalyze to override)`);
+        this.logger.log(`Analysis already exists for ${currentFilename}, skipping (use forceReanalyze to override)`);
         if (this.currentBatchJob) {
           this.currentBatchJob.skippedVideos++;
         }
@@ -350,16 +363,16 @@ export class BatchAnalysisService implements OnModuleInit {
       if (hasTranscript) {
         // Transcript exists, only run AI analysis
         mode = 'analysis-only';
-        this.logger.log(`Transcript exists for ${video.filename}, running analysis-only mode`);
+        this.logger.log(`Transcript exists for ${currentFilename}, running analysis-only mode`);
       } else {
         // No transcript, run full pipeline
         mode = 'full';
-        this.logger.log(`No transcript for ${video.filename}, running full analysis mode`);
+        this.logger.log(`No transcript for ${currentFilename}, running full analysis mode`);
       }
     }
 
     const request: AnalysisRequest = {
-      input: video.current_path,
+      input: currentPath,  // Use current path from database, not queued path
       inputType: 'file',
       mode: mode as any, // Add 'analysis-only' to AnalysisRequest type
       aiModel: config.aiModel,

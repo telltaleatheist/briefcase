@@ -18,6 +18,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatOptionModule } from '@angular/material/core';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 
 import { SettingsService } from '../../services/settings.service';
 import { PathService } from '../../services/path.service';
@@ -26,6 +27,8 @@ import { Settings } from '../../models/settings.model';
 import { BROWSER_OPTIONS, QUALITY_OPTIONS } from '../download-form/download-form.constants';
 import { finalize } from 'rxjs';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { AiSetupHelperService, AIAvailability } from '../../services/ai-setup-helper.service';
+import { AiSetupWizardComponent } from '../ai-setup-wizard/ai-setup-wizard.component';
 
 @Component({
   selector: 'app-settings',
@@ -48,7 +51,8 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
     MatTooltipModule,
     MatProgressSpinnerModule,
     MatSlideToggleModule,
-    MatExpansionModule
+    MatExpansionModule,
+    MatDialogModule
   ]
 })
 export class SettingsComponent implements OnInit {
@@ -58,6 +62,10 @@ export class SettingsComponent implements OnInit {
   private snackBar = inject(MatSnackBar);
   private notificationService = inject(NotificationService);
   private router = inject(Router);
+  private dialog = inject(MatDialog);
+  private aiSetupHelper = inject(AiSetupHelperService);
+
+  aiAvailability: AIAvailability | null = null;
   private themeService = inject(ThemeService);
 
   settingsForm: FormGroup;
@@ -77,10 +85,13 @@ export class SettingsComponent implements OnInit {
     this.isDarkTheme$ = this.themeService.isDarkTheme$;
   }
 
-  ngOnInit(): void {
+  async ngOnInit(): Promise<void> {
     this.settingsService.getSettings().subscribe(settings => {
       this.updateForm(settings);
     });
+
+    // Check AI availability for the AI setup section
+    this.aiAvailability = await this.aiSetupHelper.checkAIAvailability();
   }
 
   createForm(): FormGroup {
@@ -139,5 +150,67 @@ export class SettingsComponent implements OnInit {
 
   toggleTheme(): void {
     this.themeService.toggleTheme();
+  }
+
+  /**
+   * Open AI setup wizard
+   */
+  openAISetup(): void {
+    const dialogRef = this.dialog.open(AiSetupWizardComponent, {
+      width: '800px',
+      maxWidth: '90vw',
+      maxHeight: '80vh',
+      disableClose: false,
+      data: { forceSetup: false }
+    });
+
+    dialogRef.afterClosed().subscribe(async (result) => {
+      if (result?.completed || result?.skipped) {
+        // Refresh AI availability
+        this.aiAvailability = await this.aiSetupHelper.checkAIAvailability();
+
+        if (result?.completed) {
+          this.notificationService.success('AI Setup Complete', 'Your AI providers are now configured!');
+        }
+      }
+    });
+  }
+
+  /**
+   * Get AI status summary for display
+   */
+  getAIStatusSummary(): string {
+    if (!this.aiAvailability) {
+      return 'Checking...';
+    }
+
+    const providers: string[] = [];
+
+    if (this.aiAvailability.hasOllama && this.aiAvailability.ollamaModels.length > 0) {
+      providers.push(`Ollama (${this.aiAvailability.ollamaModels.length} models)`);
+    }
+    if (this.aiAvailability.hasClaudeKey) {
+      providers.push('Claude API');
+    }
+    if (this.aiAvailability.hasOpenAIKey) {
+      providers.push('OpenAI API');
+    }
+
+    if (providers.length === 0) {
+      return 'Not configured';
+    }
+
+    return providers.join(', ');
+  }
+
+  /**
+   * Check if any AI provider is configured
+   */
+  hasAnyAIProvider(): boolean {
+    if (!this.aiAvailability) return false;
+
+    return (this.aiAvailability.hasOllama && this.aiAvailability.ollamaModels.length > 0) ||
+           this.aiAvailability.hasClaudeKey ||
+           this.aiAvailability.hasOpenAIKey;
   }
 }

@@ -517,7 +517,8 @@ def analyze_with_ai(
         return {
             "sections_count": len(analyzed_sections),
             "sections": analyzed_sections,
-            "tags": tags
+            "tags": tags,
+            "description": summary  # Add the summary as description for the video
         }
 
     except Exception as e:

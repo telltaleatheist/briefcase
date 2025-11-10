@@ -194,3 +194,12 @@ body {
 }
 
 /* Batch progress card positioning - handled by app.component.ts JavaScript */
+
+/* AI Setup Wizard Dialog - Remove default padding */
+.ai-wizard-dialog .mat-mdc-dialog-container .mdc-dialog__surface {
+  padding: 0 !important;
+}
+
+.ai-wizard-dialog .mat-mdc-dialog-container {
+  padding: 0 !important;
+}

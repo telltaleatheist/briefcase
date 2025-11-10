@@ -8,4 +8,4 @@ import { ApiKeysController } from './api-keys.controller';
   controllers: [ApiKeysController],
   exports: [ApiKeysService],
 })
-export class ConfigModule {}
+export class ApiKeysModule {}

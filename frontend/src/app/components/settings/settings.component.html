@@ -25,6 +25,35 @@
             </div>
           </div>
 
+          <!-- AI Features Setup -->
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">
+                <mat-icon>smart_toy</mat-icon>
+                AI Features
+              </h3>
+
+              <div class="ai-setup-card">
+                <div class="ai-status">
+                  <div class="status-info">
+                    <span class="status-label">Status:</span>
+                    <span class="status-value" [class.configured]="hasAnyAIProvider()" [class.not-configured]="!hasAnyAIProvider()">
+                      {{ getAIStatusSummary() }}
+                    </span>
+                  </div>
+                  <p class="ai-description">
+                    Configure AI providers for video transcription and analysis. <strong>AI features are completely optional</strong> - you can use all core features without AI setup.
+                  </p>
+                </div>
+
+                <button type="button" mat-raised-button color="primary" (click)="openAISetup()" class="setup-button">
+                  <mat-icon>{{ hasAnyAIProvider() ? 'edit' : 'add' }}</mat-icon>
+                  {{ hasAnyAIProvider() ? 'Manage AI Setup' : 'Set Up AI Features' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Download Settings -->
           <div class="form-step">
             <div class="step-content">

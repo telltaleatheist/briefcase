@@ -611,36 +611,75 @@ export class VideoInfoComponent implements OnInit {
   }
 
   /**
-   * Save a new tag
+   * Save a new tag (legacy method for single tag)
    */
   async saveTag() {
+    await this.saveTags();
+  }
+
+  /**
+   * Save new tags (supports comma-separated values)
+   */
+  async saveTags() {
     if (!this.video || !this.newTagName.trim()) {
       this.cancelAddingTag();
       return;
     }
 
-    const tagName = this.newTagName.trim();
+    // Split by commas and trim each tag
+    const tagNames = this.newTagName
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(tag => tag.length > 0);
+
+    if (tagNames.length === 0) {
+      this.cancelAddingTag();
+      return;
+    }
 
     try {
-      const result = await this.databaseLibraryService.addVideoTag(
-        this.video.id,
-        tagName,
-        this.newTagType,
-        undefined,
-        'user'
-      );
+      let successCount = 0;
+      let failedTags: string[] = [];
 
-      if (result.success) {
-        // Reload tags
-        this.tags = await this.databaseLibraryService.getVideoTags(this.video.id);
-        this.notificationService.success('Tag Added', `Tag "${tagName}" has been added`);
-        this.cancelAddingTag();
-      } else {
-        this.notificationService.error('Failed to Add Tag', result.error || 'Unknown error');
+      // Add each tag
+      for (const tagName of tagNames) {
+        const result = await this.databaseLibraryService.addVideoTag(
+          this.video.id,
+          tagName,
+          this.newTagType,
+          undefined,
+          'user'
+        );
+
+        if (result.success) {
+          successCount++;
+        } else {
+          failedTags.push(tagName);
+        }
       }
+
+      // Reload tags to get updated list
+      this.tags = await this.databaseLibraryService.getVideoTags(this.video.id);
+
+      // Show appropriate notification
+      if (successCount === tagNames.length) {
+        const message = tagNames.length === 1
+          ? `Tag "${tagNames[0]}" has been added`
+          : `${successCount} tags have been added`;
+        this.notificationService.success('Tags Added', message);
+      } else if (successCount > 0) {
+        this.notificationService.warning(
+          'Partially Added',
+          `${successCount} tag(s) added, ${failedTags.length} failed`
+        );
+      } else {
+        this.notificationService.error('Failed to Add Tags', 'All tags failed to add');
+      }
+
+      this.cancelAddingTag();
     } catch (error) {
-      console.error('Error adding tag:', error);
-      this.notificationService.error('Failed to Add Tag', 'An error occurred');
+      console.error('Error adding tags:', error);
+      this.notificationService.error('Failed to Add Tags', 'An error occurred');
     }
   }
 
@@ -672,7 +711,7 @@ export class VideoInfoComponent implements OnInit {
   onTagKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
-      this.saveTag();
+      this.saveTags();
     } else if (event.key === 'Escape') {
       event.preventDefault();
       this.cancelAddingTag();

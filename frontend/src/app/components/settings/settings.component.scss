@@ -573,3 +573,87 @@
     }
   }
 }
+
+// ========================================
+// AI Setup Card
+// ========================================
+.ai-setup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px;
+  background: var(--bg-card);
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--primary-orange);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .ai-status {
+    flex: 1;
+
+    .status-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+
+      .status-label {
+        font-weight: 600;
+        color: var(--text-secondary);
+      }
+
+      .status-value {
+        font-weight: 600;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 14px;
+
+        &.configured {
+          background: rgba(72, 187, 120, 0.1);
+          color: #38a169;
+        }
+
+        &.not-configured {
+          background: rgba(237, 137, 54, 0.1);
+          color: #ed8936;
+        }
+      }
+    }
+
+    .ai-description {
+      margin: 0;
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+
+      strong {
+        color: var(--text-primary);
+      }
+    }
+  }
+
+  .setup-button {
+    flex-shrink: 0;
+    white-space: nowrap;
+
+    mat-icon {
+      margin-right: 8px;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .ai-setup-card {
+    flex-direction: column;
+    align-items: stretch;
+
+    .setup-button {
+      width: 100%;
+    }
+  }
+}

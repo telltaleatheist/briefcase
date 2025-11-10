@@ -195,11 +195,11 @@
           <!-- Tag Input -->
           <div *ngIf="isAddingTag" class="tag-input-container">
             <mat-form-field appearance="outline" class="tag-name-input">
-              <mat-label>Tag Name</mat-label>
+              <mat-label>Tag Names (comma-separated)</mat-label>
               <input matInput
                      [(ngModel)]="newTagName"
                      (keydown)="onTagKeydown($event)"
-                     placeholder="Enter tag name"
+                     placeholder="e.g. politics, debate, election"
                      autofocus>
             </mat-form-field>
             <mat-form-field appearance="outline" class="tag-type-select">
@@ -212,9 +212,9 @@
               </select>
             </mat-form-field>
             <button mat-icon-button
-                    (click)="saveTag()"
+                    (click)="saveTags()"
                     color="primary"
-                    matTooltip="Save tag">
+                    matTooltip="Save tags">
               <mat-icon>check</mat-icon>
             </button>
             <button mat-icon-button

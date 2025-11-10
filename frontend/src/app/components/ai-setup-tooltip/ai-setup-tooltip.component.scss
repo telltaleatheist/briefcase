@@ -1,0 +1,250 @@
+.tooltip-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  padding: 20px;
+}
+
+.tooltip-container {
+  position: relative;
+  background: white;
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 90vw;
+  animation: float 3s ease-in-out infinite;
+
+  // Fun cartoon border styles
+  &::before {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: -5px;
+    right: -5px;
+    bottom: -5px;
+    border-radius: 22px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    z-index: -1;
+    opacity: 0.3;
+  }
+
+  // Type-specific styles
+  &.tooltip-info {
+    border: 3px solid #4299e1;
+
+    &::before {
+      background: linear-gradient(135deg, #4299e1 0%, #667eea 100%);
+    }
+  }
+
+  &.tooltip-warning {
+    border: 3px solid #f6ad55;
+
+    &::before {
+      background: linear-gradient(135deg, #f6ad55 0%, #ed8936 100%);
+    }
+  }
+
+  &.tooltip-success {
+    border: 3px solid #48bb78;
+
+    &::before {
+      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+    }
+  }
+
+  &.tooltip-setup {
+    border: 3px solid #9f7aea;
+
+    &::before {
+      background: linear-gradient(135deg, #9f7aea 0%, #805ad5 100%);
+    }
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.close-button {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  color: #a0aec0;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: #edf2f7;
+    color: #2d3748;
+    transform: rotate(90deg);
+  }
+}
+
+.tooltip-icon {
+  font-size: 64px;
+  text-align: center;
+  margin-bottom: 20px;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+
+  &.bounce {
+    animation: bounce 2s ease-in-out infinite;
+  }
+}
+
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  40% {
+    transform: translateY(-15px) scale(1.1);
+  }
+  60% {
+    transform: translateY(-7px) scale(1.05);
+  }
+}
+
+.tooltip-content {
+  text-align: center;
+  color: #2d3748;
+}
+
+.tooltip-title {
+  font-size: 24px;
+  font-weight: bold;
+  margin: 0 0 15px 0;
+  color: #1a202c;
+}
+
+.tooltip-message {
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0 0 20px 0;
+  color: #4a5568;
+}
+
+.tooltip-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 25px;
+  flex-wrap: wrap;
+}
+
+.action-button {
+  padding: 12px 32px;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  &.primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  &.secondary {
+    background: white;
+    color: #667eea;
+    border: 2px solid #667eea;
+    box-shadow: none;
+
+    &:hover {
+      background: #f7fafc;
+    }
+  }
+}
+
+// Responsive adjustments
+@media (max-width: 600px) {
+  .tooltip-container {
+    padding: 20px;
+    border-radius: 15px;
+  }
+
+  .tooltip-icon {
+    font-size: 48px;
+  }
+
+  .tooltip-title {
+    font-size: 20px;
+  }
+
+  .tooltip-message {
+    font-size: 14px;
+  }
+
+  .action-button {
+    padding: 10px 24px;
+    font-size: 14px;
+  }
+}
+
+// Dark mode support
+@media (prefers-color-scheme: dark) {
+  .tooltip-container {
+    background: #2d3748;
+    color: #e2e8f0;
+  }
+
+  .tooltip-title {
+    color: #f7fafc;
+  }
+
+  .tooltip-message {
+    color: #cbd5e0;
+  }
+
+  .close-button {
+    color: #718096;
+
+    &:hover {
+      background: #4a5568;
+      color: #e2e8f0;
+    }
+  }
+
+  .action-button.secondary {
+    background: #2d3748;
+    color: #667eea;
+    border-color: #667eea;
+
+    &:hover {
+      background: #4a5568;
+    }
+  }
+}

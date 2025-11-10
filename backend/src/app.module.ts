@@ -12,6 +12,7 @@ import { DatabaseModule } from './database/database.module';
 import { SavedLinksModule } from './saved-links/saved-links.module';
 import { ConfigModule } from '@nestjs/config';
 import { SharedConfigModule } from './config/shared-config.module';
+import { ApiKeysModule } from './config/config.module';
 import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -27,6 +28,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       global: true,
     }),
     SharedConfigModule,
+    ApiKeysModule,
     DatabaseModule,
     DownloaderModule,
     FfmpegModule,

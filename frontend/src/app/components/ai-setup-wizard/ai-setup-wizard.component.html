@@ -1,0 +1,323 @@
+<div class="wizard-container">
+  <!-- Close Button -->
+  <button mat-icon-button class="close-button" (click)="skipSetup()" matTooltip="Close">
+    <mat-icon>close</mat-icon>
+  </button>
+
+  <!-- Welcome Step -->
+  <div class="wizard-step" *ngIf="currentStep === 'welcome'">
+    <div class="step-icon">🤖</div>
+    <h2 class="step-title">AI Features Setup</h2>
+
+    <div class="welcome-message">
+      <p class="emphasis">Good news! AI features are completely optional.</p>
+      <p>You can use Clippy's library, video player, and editing tools without any AI setup.</p>
+      <p class="separator">However, if you want AI-powered features like:</p>
+
+      <ul class="feature-list">
+        <li>🎯 Automatic video analysis</li>
+        <li>📝 Smart transcription and summaries</li>
+        <li>🏷️ Topic and people tag extraction</li>
+        <li>🔍 Content-based search</li>
+      </ul>
+
+      <p class="setup-prompt">You can set up one or more AI providers:</p>
+    </div>
+
+    <div class="options-grid">
+      <!-- Ollama Option -->
+      <div class="option-card recommended" (click)="selectOption('ollama')">
+        <div class="option-badge">Recommended</div>
+        <div class="option-icon">💻</div>
+        <h3>Ollama</h3>
+        <p class="option-desc">Free, runs on your computer</p>
+        <ul class="option-features">
+          <li>✓ No API costs</li>
+          <li>✓ Privacy - data stays local</li>
+          <li>✓ No internet required</li>
+          <li>✗ Requires 4+ GB download</li>
+        </ul>
+        <button mat-raised-button color="primary">Configure Ollama</button>
+      </div>
+
+      <!-- Claude Option -->
+      <div class="option-card" (click)="selectOption('claude')">
+        <div class="option-icon">🧠</div>
+        <h3>Claude API</h3>
+        <p class="option-desc">High quality, pay-per-use</p>
+        <ul class="option-features">
+          <li>✓ Best quality results</li>
+          <li>✓ No local installation</li>
+          <li>✓ Fast processing</li>
+          <li>✗ Costs ~$0.01-0.05 per video</li>
+        </ul>
+        <button mat-raised-button>Configure Claude</button>
+      </div>
+
+      <!-- OpenAI Option -->
+      <div class="option-card" (click)="selectOption('openai')">
+        <div class="option-icon">⚡</div>
+        <h3>ChatGPT API</h3>
+        <p class="option-desc">Fast, pay-per-use</p>
+        <ul class="option-features">
+          <li>✓ Good quality results</li>
+          <li>✓ No local installation</li>
+          <li>✓ Fast processing</li>
+          <li>✗ Costs ~$0.01-0.03 per video</li>
+        </ul>
+        <button mat-raised-button>Configure OpenAI</button>
+      </div>
+    </div>
+
+    <div class="step-actions">
+      <button mat-button (click)="skipSetup()" class="skip-button">
+        Skip for now (I'll set this up later)
+      </button>
+    </div>
+  </div>
+
+  <!-- Ollama Installation Step -->
+  <div class="wizard-step" *ngIf="currentStep === 'ollama'">
+    <button mat-icon-button class="back-button" (click)="goToStep('welcome')">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+
+    <div class="step-icon">💻</div>
+    <h2 class="step-title">Install Ollama</h2>
+
+    <div class="instruction-box">
+      <p class="platform-info">Instructions for <strong>{{ installInstructions.platform }}</strong></p>
+
+      <ol class="instruction-steps">
+        <li *ngFor="let step of installInstructions.steps">{{ step }}</li>
+      </ol>
+
+      <div class="quick-actions">
+        <button mat-raised-button color="primary" (click)="openOllamaWebsite()">
+          <mat-icon>open_in_new</mat-icon>
+          Open Ollama Website
+        </button>
+      </div>
+    </div>
+
+    <div class="recommended-models">
+      <h3>Recommended Models</h3>
+      <p class="helper-text">
+        After installing Ollama, run one of these commands in your terminal:
+      </p>
+      <p class="helper-text model-size-explanation">
+        <mat-icon inline class="info-icon">info</mat-icon>
+        The "B" stands for "billions of parameters" - larger models are smarter but need more RAM
+      </p>
+
+      <div class="model-cards">
+        <div
+          *ngFor="let model of recommendedModels"
+          class="model-card"
+          [class.recommended]="model.recommended">
+          <div class="model-badge" *ngIf="model.recommended">Best for Most Users</div>
+          <h4>{{ model.name }}</h4>
+          <p class="model-size">Size: {{ model.size }}</p>
+          <p class="model-ram">{{ model.ramRequirement }}</p>
+          <p class="model-desc">{{ model.description }}</p>
+          <div class="command-box">
+            <code>{{ model.pullCommand }}</code>
+            <button
+              mat-icon-button
+              (click)="copyToClipboard(model.pullCommand)"
+              matTooltip="Copy to clipboard">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-check">
+      <p class="check-prompt">Once you've installed Ollama and downloaded a model, click below:</p>
+      <button
+        mat-raised-button
+        color="accent"
+        (click)="checkOllamaAgain()"
+        [disabled]="isCheckingOllama">
+        <mat-spinner *ngIf="isCheckingOllama" diameter="20"></mat-spinner>
+        <span *ngIf="!isCheckingOllama">Check if Ollama is Ready</span>
+      </button>
+
+      <div class="status-result" *ngIf="!isCheckingOllama && availability.hasOllama">
+        <mat-icon class="success-icon">check_circle</mat-icon>
+        <p>Great! Found {{ availability.ollamaModels.length }} model(s)</p>
+      </div>
+
+      <div class="status-result error" *ngIf="!isCheckingOllama && !availability.hasOllama && availability.lastChecked">
+        <mat-icon class="error-icon">error</mat-icon>
+        <p>Couldn't detect Ollama. Make sure it's running and try again.</p>
+      </div>
+    </div>
+
+    <div class="step-actions">
+      <button
+        *ngIf="!availability.hasOllama || availability.ollamaModels.length === 0"
+        mat-button
+        (click)="skipSetup()">
+        Skip for now
+      </button>
+      <button
+        *ngIf="availability.hasOllama && availability.ollamaModels.length > 0"
+        mat-raised-button
+        color="primary"
+        (click)="complete()">
+        Done
+      </button>
+    </div>
+  </div>
+
+  <!-- Claude API Key Step -->
+  <div class="wizard-step" *ngIf="currentStep === 'claude'">
+    <button mat-icon-button class="back-button" (click)="goToStep('welcome')">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+
+    <div class="step-icon">🧠</div>
+    <h2 class="step-title">Claude API Setup</h2>
+
+    <div class="instruction-box">
+      <p class="platform-info">Configure Claude API from Anthropic</p>
+
+      <p class="helper-text">
+        Get your API key from <a (click)="openClaudeWebsite()" class="link">console.anthropic.com</a>
+      </p>
+
+      <ol class="instruction-steps">
+        <li>Sign up or log in to Anthropic Console</li>
+        <li>Navigate to API Keys section</li>
+        <li>Click "Create Key"</li>
+        <li>Copy the key and paste below</li>
+      </ol>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Claude API Key</mat-label>
+        <input
+          matInput
+          type="password"
+          [(ngModel)]="claudeApiKey"
+          placeholder="sk-ant-api03-...">
+        <mat-icon matSuffix>vpn_key</mat-icon>
+      </mat-form-field>
+    </div>
+
+    <div class="step-actions">
+      <button mat-button (click)="goToStep('welcome')">Back</button>
+      <button mat-button (click)="skipSetup()">Skip for now</button>
+      <button
+        mat-raised-button
+        color="primary"
+        (click)="saveClaudeKey()"
+        [disabled]="!claudeApiKey || isSavingKeys">
+        <mat-spinner *ngIf="isSavingKeys" diameter="20"></mat-spinner>
+        <span *ngIf="!isSavingKeys">Save and Continue</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- OpenAI API Key Step -->
+  <div class="wizard-step" *ngIf="currentStep === 'openai'">
+    <button mat-icon-button class="back-button" (click)="goToStep('welcome')">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+
+    <div class="step-icon">⚡</div>
+    <h2 class="step-title">OpenAI API Setup</h2>
+
+    <div class="instruction-box">
+      <p class="platform-info">Configure ChatGPT API from OpenAI</p>
+
+      <p class="helper-text">
+        Get your API key from <a (click)="openOpenAIWebsite()" class="link">platform.openai.com/api-keys</a>
+      </p>
+
+      <ol class="instruction-steps">
+        <li>Sign up or log in to OpenAI Platform</li>
+        <li>Navigate to API Keys page</li>
+        <li>Click "Create new secret key"</li>
+        <li>Copy the key and paste below</li>
+      </ol>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>OpenAI API Key</mat-label>
+        <input
+          matInput
+          type="password"
+          [(ngModel)]="openaiApiKey"
+          placeholder="sk-...">
+        <mat-icon matSuffix>vpn_key</mat-icon>
+      </mat-form-field>
+    </div>
+
+    <div class="step-actions">
+      <button mat-button (click)="goToStep('welcome')">Back</button>
+      <button mat-button (click)="skipSetup()">Skip for now</button>
+      <button
+        mat-raised-button
+        color="primary"
+        (click)="saveOpenAIKey()"
+        [disabled]="!openaiApiKey || isSavingKeys">
+        <mat-spinner *ngIf="isSavingKeys" diameter="20"></mat-spinner>
+        <span *ngIf="!isSavingKeys">Save and Continue</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Success/Done Step -->
+  <div class="wizard-step" *ngIf="currentStep === 'done'">
+    <div class="step-icon success">✨</div>
+    <h2 class="step-title">All Set!</h2>
+
+    <div class="success-message">
+      <p class="congrats">You're ready to use AI features!</p>
+
+      <div class="provider-summary">
+        <h3>Active Providers:</h3>
+        <div class="provider-list">
+          <div class="provider-item" *ngIf="availability.hasOllama && availability.ollamaModels.length > 0">
+            <mat-icon>check_circle</mat-icon>
+            <div>
+              <strong>Ollama</strong>
+              <span class="provider-detail">{{ availability.ollamaModels.length }} model(s) available</span>
+            </div>
+          </div>
+          <div class="provider-item" *ngIf="availability.hasClaudeKey">
+            <mat-icon>check_circle</mat-icon>
+            <div>
+              <strong>Claude API</strong>
+              <span class="provider-detail">Ready to use</span>
+            </div>
+          </div>
+          <div class="provider-item" *ngIf="availability.hasOpenAIKey">
+            <mat-icon>check_circle</mat-icon>
+            <div>
+              <strong>OpenAI API</strong>
+              <span class="provider-detail">Ready to use</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="next-steps">
+        <h3>What's Next?</h3>
+        <ul class="next-steps-list">
+          <li>Start analyzing videos from your library</li>
+          <li>Download and analyze videos with AI</li>
+          <li>Search your videos by content</li>
+          <li>Get smart summaries and tags</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step-actions">
+      <button mat-raised-button color="primary" (click)="complete()">
+        Get Started
+      </button>
+    </div>
+  </div>
+</div>
