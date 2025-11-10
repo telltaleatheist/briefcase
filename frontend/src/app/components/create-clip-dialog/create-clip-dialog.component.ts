@@ -7,8 +7,11 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { LibraryService, LibraryAnalysis } from '../../services/library.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { ProcessingQueueService } from '../../services/processing-queue.service';
 
 export interface CreateClipDialogData {
   analysis?: LibraryAnalysis;
@@ -29,12 +32,15 @@ export interface CreateClipDialogData {
     MatFormFieldModule,
     MatInputModule,
     MatProgressSpinnerModule,
+    MatCheckboxModule,
+    MatTooltipModule,
   ],
   templateUrl: './create-clip-dialog.component.html',
   styleUrls: ['./create-clip-dialog.component.scss']
 })
 export class CreateClipDialogComponent {
   title = '';
+  reEncode = false;
   isCreating = false;
   error: string | null = null;
   savePath = '';
@@ -46,7 +52,8 @@ export class CreateClipDialogComponent {
     @Inject(MAT_DIALOG_DATA) public data: CreateClipDialogData,
     private dialogRef: MatDialogRef<CreateClipDialogComponent>,
     private libraryService: LibraryService,
-    private backendUrlService: BackendUrlService
+    private backendUrlService: BackendUrlService,
+    private processingQueue: ProcessingQueueService
   ) {
     // Set default title based on whether it's an analyzed video or custom video
     if (this.data.analysis) {
@@ -120,10 +127,21 @@ export class CreateClipDialogComponent {
       const timestamp = `${Math.floor(this.data.startTime)}-${Math.floor(this.data.endTime)}`;
       const clipFilename = `${safeFilename}_${timestamp}.mp4`;
 
-      // Use default Downloads/clippy/clips directory
-      const homedir = await (window as any).electron?.getPath('downloads') || 'Downloads';
-      this.saveDirectory = `${homedir}/clippy/clips`;
-      this.savePath = `${this.saveDirectory}/${clipFilename}`;
+      // Fetch library paths from backend to use the clips directory
+      const pathsUrl = await this.backendUrlService.getApiUrl('/library/paths');
+      const response = await fetch(pathsUrl);
+
+      if (response.ok) {
+        const libraryPaths = await response.json();
+        this.saveDirectory = libraryPaths.clipsDir;
+        this.savePath = `${this.saveDirectory}/${clipFilename}`;
+      } else {
+        // Fallback to Downloads if API fails
+        const homedir = await (window as any).electron?.getPath('downloads') || 'Downloads';
+        this.saveDirectory = `${homedir}/clippy/clips`;
+        this.savePath = `${this.saveDirectory}/${clipFilename}`;
+        console.warn('Failed to fetch library paths, using fallback directory');
+      }
     } catch (error) {
       console.error('Error generating custom video save path:', error);
       this.savePath = 'clip.mp4';
@@ -157,6 +175,34 @@ export class CreateClipDialogComponent {
 
       let result: any;
 
+      // If re-encoding is enabled, add to processing queue instead of blocking
+      if (this.reEncode) {
+        const videoPath = this.data.analysis
+          ? this.data.analysis.video.currentPath
+          : (this.data.customVideo?.realFilePath || this.data.customVideo?.videoPath);
+
+        // Add to processing queue
+        const jobId = this.processingQueue.addJob({
+          type: 'clip-extraction',
+          title: this.title,
+          metadata: {
+            videoPath,
+            clipStartTime: this.data.startTime,
+            clipEndTime: this.data.endTime,
+            outputPath: this.savePath,
+            reEncode: true
+          }
+        });
+
+        // Process the clip in the background
+        this.processClipInBackground(jobId);
+
+        // Close dialog immediately
+        this.dialogRef.close({ created: true, queued: true });
+        return;
+      }
+
+      // Fast mode (no re-encoding) - process synchronously
       if (this.data.analysis) {
         // Extract clip from analyzed video
         result = await this.libraryService.extractClip(
@@ -168,6 +214,7 @@ export class CreateClipDialogComponent {
             description: '',
             category: undefined,
             customDirectory: this.customDirectory || undefined,
+            reEncode: false,
           }
         );
       } else if (this.data.customVideo) {
@@ -191,6 +238,7 @@ export class CreateClipDialogComponent {
             description: '',
             category: undefined,
             customDirectory: this.customDirectory || undefined,
+            reEncode: false,
           }),
         });
 
@@ -216,6 +264,73 @@ export class CreateClipDialogComponent {
       console.error('Error creating clip:', error);
       this.error = 'An error occurred while creating the clip';
       this.isCreating = false;
+    }
+  }
+
+  private async processClipInBackground(jobId: string) {
+    try {
+      this.processingQueue.updateJob(jobId, { status: 'processing', startTime: new Date() });
+
+      let result: any;
+
+      if (this.data.analysis) {
+        result = await this.libraryService.extractClip(
+          this.data.analysis.id,
+          {
+            startTime: this.data.startTime,
+            endTime: this.data.endTime,
+            title: this.title,
+            description: '',
+            category: undefined,
+            customDirectory: this.customDirectory || undefined,
+            reEncode: true,
+          }
+        );
+      } else if (this.data.customVideo) {
+        const videoPath = this.data.customVideo.realFilePath || this.data.customVideo.videoPath;
+        const extractUrl = await this.backendUrlService.getApiUrl('/library/videos/custom/extract-clip');
+        const response = await fetch(extractUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoPath: videoPath,
+            startTime: this.data.startTime,
+            endTime: this.data.endTime,
+            title: this.title,
+            description: '',
+            category: undefined,
+            customDirectory: this.customDirectory || undefined,
+            reEncode: true,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to extract clip from custom video');
+        }
+
+        result = await response.json();
+      }
+
+      if (result.success) {
+        this.processingQueue.updateJob(jobId, {
+          status: 'completed',
+          progress: 100,
+          endTime: new Date()
+        });
+      } else {
+        this.processingQueue.updateJob(jobId, {
+          status: 'failed',
+          error: result.error || 'Failed to create clip',
+          endTime: new Date()
+        });
+      }
+    } catch (error) {
+      console.error('Background clip extraction error:', error);
+      this.processingQueue.updateJob(jobId, {
+        status: 'failed',
+        error: 'An error occurred while creating the clip',
+        endTime: new Date()
+      });
     }
   }
 

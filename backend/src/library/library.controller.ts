@@ -629,6 +629,7 @@ export class LibraryController {
       category?: string;
       customDirectory?: string;
       progressId?: string;
+      reEncode?: boolean;
     }
   ) {
     try {
@@ -666,14 +667,8 @@ export class LibraryController {
         // If custom directory is provided, use it directly without adding /clips subfolder
         outputDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
       } else {
-        // Otherwise use configured directory or default Downloads with clippy/clips structure
-        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
-        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
-
-        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
-        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
-        outputDir = path.join(clippyDir, 'clips');
+        // Use library clips directory
+        outputDir = this.libraryService.getLibraryPaths().clipsDir;
       }
 
       const outputPath = path.join(outputDir, clipFilename);
@@ -688,6 +683,7 @@ export class LibraryController {
         startTime: body.startTime,
         endTime: body.endTime,
         outputPath,
+        reEncode: body.reEncode || false,
         metadata: {
           title: body.title,
           description: body.description,
@@ -705,8 +701,27 @@ export class LibraryController {
         );
       }
 
+      // Import the created clip to the library
+      let videoId: string | undefined;
+      if (extractionResult.outputPath) {
+        try {
+          this.logger.log(`Importing clip to library: ${extractionResult.outputPath}`);
+          const importResult = await this.fileScannerService.importVideos([extractionResult.outputPath]);
+          if (importResult.imported.length > 0) {
+            videoId = importResult.imported[0];
+            this.logger.log(`Clip imported to library with ID: ${videoId}`);
+          } else {
+            this.logger.warn(`Failed to import clip to library: ${extractionResult.outputPath}`);
+          }
+        } catch (importError) {
+          this.logger.error(`Error importing clip to library: ${(importError as Error).message}`);
+          // Don't fail the entire request if import fails
+        }
+      }
+
       return {
         success: true,
+        videoId,
         extraction: {
           duration: extractionResult.duration,
           fileSize: extractionResult.fileSize,
@@ -765,14 +780,11 @@ export class LibraryController {
         clippyDir = baseDir;
         outputDir = baseDir;
       } else {
-        // Otherwise use configured directory or default Downloads with clippy/clips structure
-        baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
-        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
-
-        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
-        clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
-        outputDir = path.join(clippyDir, 'clips');
+        // Use library clips directory
+        const libraryPaths = this.libraryService.getLibraryPaths();
+        outputDir = libraryPaths.clipsDir;
+        baseDir = libraryPaths.libraryDir;
+        clippyDir = libraryPaths.libraryDir;
       }
 
       const outputPath = path.join(outputDir, clipFilename);
@@ -930,6 +942,7 @@ export class LibraryController {
       category?: string;
       customDirectory?: string;
       progressId?: string;
+      reEncode?: boolean;
     }
   ) {
     try {
@@ -967,14 +980,8 @@ export class LibraryController {
         // If custom directory is provided, use it directly without adding /clips subfolder
         outputDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
       } else {
-        // Otherwise use configured directory or default Downloads with clippy/clips structure
-        const baseDir = this.configService.getOutputDir() || path.join(os.homedir(), 'Downloads');
-        const normalizedBaseDir = baseDir.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        const endsWithClippy = path.basename(normalizedBaseDir).toLowerCase() === 'clippy';
-
-        // If baseDir already ends with 'clippy', use it directly. Otherwise add 'clippy' folder
-        const clippyDir = endsWithClippy ? normalizedBaseDir : path.join(normalizedBaseDir, 'clippy');
-        outputDir = path.join(clippyDir, 'clips');
+        // Use library clips directory
+        outputDir = this.libraryService.getLibraryPaths().clipsDir;
       }
 
       const outputPath = path.join(outputDir, clipFilename);
@@ -989,6 +996,7 @@ export class LibraryController {
         startTime: body.startTime,
         endTime: body.endTime,
         outputPath,
+        reEncode: body.reEncode || false,
         metadata: {
           title: body.title,
           description: body.description,

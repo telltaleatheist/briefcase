@@ -284,6 +284,42 @@
   padding: 0 !important; // Zero padding on parent
   margin: 0 !important;
 
+  .sidebar-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+
+    .auto-scroll-toggle {
+      transition: all 0.2s ease;
+
+      &.enabled {
+        mat-icon {
+          color: #4CAF50;
+        }
+      }
+
+      &:not(.enabled) {
+        mat-icon {
+          color: #999;
+        }
+      }
+
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+      }
+    }
+
+    .toolbar-label {
+      font-size: 0.875rem;
+      color: rgba(255, 255, 255, 0.7);
+      user-select: none;
+    }
+  }
+
   ::ng-deep .mat-mdc-tab-group {
     padding: 0 !important;
     margin: 0 !important;
@@ -391,6 +427,15 @@
   }
 
   .search-tab-content {
+    padding: 0; // Zero padding
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0; // Critical for flex scrolling
+  }
+
+  .transcript-tab-content {
     padding: 0; // Zero padding
     display: flex;
     flex-direction: column;

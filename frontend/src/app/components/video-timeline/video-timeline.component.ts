@@ -410,10 +410,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
         return;
       }
 
-      // HIGHLIGHT TOOL: Click outside window to create new selection, or inside to drag
+      // HIGHLIGHT TOOL: Click inside window to drag, or outside to start new selection
       if (this.selectedTool === 'highlight') {
         // Check if click is within selection window
-        const clickInWindow = time >= this.selectionStart && time <= this.selectionEnd;
+        const hasSelection = this.selectionStart !== this.selectionEnd;
+        const clickInWindow = hasSelection && time >= this.selectionStart && time <= this.selectionEnd;
 
         if (clickInWindow) {
           // Click inside window - start dragging window
@@ -422,13 +423,11 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
           this.dragStartSelectionStart = this.selectionStart;
           this.dragStartSelectionEnd = this.selectionEnd;
         } else {
-          // Click outside window - start new range selection
+          // Click outside window - start new range selection (or clear on simple click)
           this.isDraggingRange = true;
           this.rangeStartTime = time;
           this.selectionStart = time;
           this.selectionEnd = time;
-          // Move playhead to selection start
-          this.emitSeek(time);
         }
 
         event.preventDefault();
@@ -694,6 +693,16 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
    * Handle mouse up to end dragging
    */
   handleMouseUp = (event: MouseEvent) => {
+    // Check if range drag was a simple click (no actual selection made)
+    if (this.isDraggingRange && this.selectionStart === this.selectionEnd) {
+      // Simple click with highlight tool - clear selection (unhighlight)
+      this.ngZone.run(() => {
+        this.selectionStart = 0;
+        this.selectionEnd = 0;
+        this.emitSelection();
+      });
+    }
+
     // Clear range dragging flag after a short delay to prevent immediate seek
     if (this.isDraggingRange) {
       setTimeout(() => {
@@ -810,18 +819,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    // Playback control shortcuts (J/K/L) - Final Cut Pro X style
+    // Playback control shortcuts (J/K/L)
     if (event.key === 'j' || event.key === 'J') {
       event.preventDefault();
       this.ngZone.run(() => {
-        // J key: Reverse playback, increase speed with each press
-        if (this.lastKeyPressed === 'j' && this.currentPlaybackSpeed < 0) {
-          // Already going backwards, increase reverse speed (cycle: -1x → -2x → -4x → -8x → -1x)
-          const absSpeed = Math.abs(this.currentPlaybackSpeed);
-          this.currentPlaybackSpeed = absSpeed >= 8 ? -1 : -(absSpeed * 2);
+        // J key: Slow down playback speed
+        if (this.currentPlaybackSpeed > 1) {
+          // If playing faster than 1x, slow down (8x → 4x → 2x → 1x)
+          this.currentPlaybackSpeed = this.currentPlaybackSpeed / 2;
         } else {
-          // Start reverse playback at 1x
-          this.currentPlaybackSpeed = -1;
+          // Already at 1x or slower, reset to 1x
+          this.currentPlaybackSpeed = 1;
         }
         this.lastKeyPressed = 'j';
         this.emitPlaybackSpeed(this.currentPlaybackSpeed);
@@ -843,12 +851,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     if (event.key === 'l' || event.key === 'L') {
       event.preventDefault();
       this.ngZone.run(() => {
-        // L key: Forward playback, increase speed with each press
-        if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0) {
-          // Already going forward, increase forward speed (cycle: 1x → 2x → 4x → 8x → 1x)
-          this.currentPlaybackSpeed = this.currentPlaybackSpeed >= 8 ? 1 : this.currentPlaybackSpeed * 2;
+        // L key: Speed up playback (requires two presses to reach 2x)
+        if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0 && this.currentPlaybackSpeed < 8) {
+          // Already going forward, increase speed (1x → 2x → 4x → 8x)
+          this.currentPlaybackSpeed = this.currentPlaybackSpeed * 2;
+        } else if (this.currentPlaybackSpeed >= 8) {
+          // Already at max speed, stay at 8x
+          this.currentPlaybackSpeed = 8;
         } else {
-          // Start forward playback at 1x
+          // Start forward playback at 1x (first press)
           this.currentPlaybackSpeed = 1;
         }
         this.lastKeyPressed = 'l';

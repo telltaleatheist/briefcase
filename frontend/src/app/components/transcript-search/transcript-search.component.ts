@@ -58,6 +58,7 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
 
   savedSearches: SavedSearch[] = [];
   savedSearchesExpanded = false;
+  searchOptionsExpanded = false;
   private readonly SAVED_SEARCHES_KEY = 'transcript_saved_searches';
 
   private searchSubject = new Subject<string>();

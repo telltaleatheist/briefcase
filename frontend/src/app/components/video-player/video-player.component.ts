@@ -16,6 +16,7 @@ import { DatabaseLibraryService } from '../../services/database-library.service'
 import { BackendUrlService } from '../../services/backend-url.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
+import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewer.component';
 
 @Component({
   selector: 'app-video-player',
@@ -32,6 +33,7 @@ import { TranscriptSearchComponent } from '../transcript-search/transcript-searc
     MatExpansionModule,
     VideoTimelineComponent,
     TranscriptSearchComponent,
+    TranscriptViewerComponent,
   ],
   templateUrl: './video-player.component.html',
   styleUrls: ['./video-player.component.scss']
@@ -80,6 +82,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   // Transcript state
   transcriptText: string | null = null;
   transcriptExists = false;
+
+  // Auto-scroll state
+  autoScrollEnabled = true;
 
   // Track if opened as dialog or route
   isDialogMode = false;
@@ -690,6 +695,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Scroll to the active section in the sections list
    */
   private scrollToActiveSection() {
+    // Only auto-scroll if enabled
+    if (!this.autoScrollEnabled) return;
+
     // Wait for next tick to ensure DOM is updated
     setTimeout(() => {
       const activeElement = document.querySelector('.section-item.active');
@@ -698,6 +706,13 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         activeElement.scrollIntoView({ behavior: 'instant', block: 'nearest' });
       }
     }, 100);
+  }
+
+  /**
+   * Toggle auto-scroll for AI analysis and transcript
+   */
+  toggleAutoScroll() {
+    this.autoScrollEnabled = !this.autoScrollEnabled;
   }
 
   /**

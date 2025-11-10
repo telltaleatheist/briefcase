@@ -95,7 +95,7 @@ export class NotificationService {
   }
 
   // Update an existing notification by tracking key
-  private updateNotificationByKey(trackingKey: string, type: NotificationType, title: string, message: string): Notification | null {
+  private updateNotificationByKey(trackingKey: string, type: NotificationType, title: string, message: string, action?: NotificationAction): Notification | null {
     const existingIndex = this.notifications.findIndex(n => n.trackingKey === trackingKey);
     console.log('updateNotificationByKey() - Looking for:', trackingKey, 'Found at index:', existingIndex);
 
@@ -108,7 +108,8 @@ export class NotificationService {
         title,
         message,
         timestamp: new Date(), // Update timestamp
-        read: false // Mark as unread again
+        read: false, // Mark as unread again
+        action // Update action if provided
       };
 
       this.saveNotifications();
@@ -213,11 +214,11 @@ export class NotificationService {
   }
 
   // Trackable notification that can be updated later
-  trackable(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = true): string {
-    console.log('trackable() called:', {trackingKey, type, title, message, showToast});
+  trackable(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = true, action?: NotificationAction): string {
+    console.log('trackable() called:', {trackingKey, type, title, message, showToast, action});
 
     // Check if notification with this tracking key already exists
-    const updated = this.updateNotificationByKey(trackingKey, type, title, message);
+    const updated = this.updateNotificationByKey(trackingKey, type, title, message, action);
 
     if (updated) {
       // Existing notification was updated
@@ -228,7 +229,7 @@ export class NotificationService {
       return updated.id;
     } else {
       // Create new notification with tracking key
-      const notification = this.addNotification(type, title, message, trackingKey);
+      const notification = this.addNotification(type, title, message, trackingKey, action);
       console.log('Created new notification:', notification);
       if (showToast) {
         this.toastSubject.next(notification);

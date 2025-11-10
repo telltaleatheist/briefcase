@@ -155,6 +155,7 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
+      "icon": "assets/icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -196,6 +197,7 @@
       ]
     },
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -231,6 +233,7 @@
       "packElevateHelper": true
     },
     "linux": {
+      "icon": "assets/icon.png",
       "target": [
         "AppImage",
         "deb"

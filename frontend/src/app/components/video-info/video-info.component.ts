@@ -56,6 +56,8 @@ interface TranscriptEntry {
 })
 export class VideoInfoComponent implements OnInit {
   @ViewChild('transcriptContainer') transcriptContainer?: ElementRef<HTMLDivElement>;
+  @ViewChild('analysisSection') analysisSection?: ElementRef<HTMLDivElement>;
+  @ViewChild('transcriptSection') transcriptSection?: ElementRef<HTMLDivElement>;
 
   video: DatabaseVideo | null = null;
   transcript: DatabaseTranscript | null = null;
@@ -360,6 +362,30 @@ export class VideoInfoComponent implements OnInit {
 
   goBack() {
     this.router.navigate(['/library']);
+  }
+
+  /**
+   * Scroll to the AI Analysis section
+   */
+  scrollToAnalysis() {
+    if (this.analysisSection) {
+      this.analysisSection.nativeElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+  }
+
+  /**
+   * Scroll to the Transcript section
+   */
+  scrollToTranscript() {
+    if (this.transcriptSection) {
+      this.transcriptSection.nativeElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
   }
 
   onVideoError(event: any) {

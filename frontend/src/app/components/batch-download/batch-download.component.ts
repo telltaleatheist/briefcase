@@ -205,11 +205,19 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             const job = this.findJobById(data.jobId);
             const displayName = job?.displayName || job?.url || 'Video';
 
+            // Create action to open file location if outputFile exists
+            const action = job?.outputFile ? {
+              type: 'open-folder' as const,
+              path: job.outputFile
+            } : undefined;
+
             this.notificationService.trackable(
               `job-${data.jobId}`,
               'success',
               this.truncateForNotification(displayName),
-              'Completed successfully'
+              'Completed successfully',
+              true,
+              action
             );
           } else if (data.status === 'failed') {
             const job = this.findJobById(data.jobId);
@@ -304,11 +312,20 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
           } else {
             this.updateJobStatus(data.jobId, 'completed', 'Image download completed');
             // Final notification for images only (they don't need processing)
+
+            // Create action to open file location if outputFile exists
+            const action = job?.outputFile ? {
+              type: 'open-folder' as const,
+              path: job.outputFile
+            } : undefined;
+
             this.notificationService.trackable(
               `job-${data.jobId}`,
               'success',
               this.truncateForNotification(displayName),
-              'Completed successfully'
+              'Completed successfully',
+              true,
+              action
             );
           }
         }

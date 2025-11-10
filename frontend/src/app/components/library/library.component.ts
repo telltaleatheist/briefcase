@@ -1932,8 +1932,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
       // Clear editing state
       this.cancelEditing(video.id);
-
-      this.notificationService.toastOnly('success', 'Renamed', `Video renamed to "${newFilename}"`);
     } catch (error: any) {
       console.error('Failed to rename video:', error);
       this.notificationService.toastOnly('error', 'Rename Failed', error.error?.message || 'Failed to rename video');

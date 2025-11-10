@@ -49,6 +49,25 @@
         </div>
       </div>
       <div class="header-actions">
+        <!-- Quick Navigation Buttons -->
+        <div class="quick-nav-buttons">
+          <button mat-stroked-button
+                  (click)="scrollToAnalysis()"
+                  *ngIf="analysisSections.length > 0"
+                  matTooltip="Scroll to AI Analysis section">
+            <mat-icon>analytics</mat-icon>
+            Jump to Analysis
+          </button>
+          <button mat-stroked-button
+                  (click)="scrollToTranscript()"
+                  *ngIf="transcript"
+                  matTooltip="Scroll to Transcript section">
+            <mat-icon>subtitles</mat-icon>
+            Jump to Transcript
+          </button>
+        </div>
+
+        <!-- Main Action Buttons -->
         <button mat-raised-button color="primary" (click)="openClipCreator()" class="primary-action">
           <mat-icon>movie_filter</mat-icon>
           Clip Creator
@@ -234,7 +253,7 @@
     </div>
 
     <!-- Analysis Section -->
-    <div class="analysis-section" *ngIf="analysisSections.length > 0">
+    <div class="analysis-section" *ngIf="analysisSections.length > 0" #analysisSection>
       <div class="analysis-header">
         <h2>
           <mat-icon>analytics</mat-icon>
@@ -289,7 +308,7 @@
     </div>
 
     <!-- Transcript Section -->
-    <div class="transcript-section" *ngIf="transcript">
+    <div class="transcript-section" *ngIf="transcript" #transcriptSection>
       <div class="transcript-header">
         <h2>
           <mat-icon>subtitles</mat-icon>

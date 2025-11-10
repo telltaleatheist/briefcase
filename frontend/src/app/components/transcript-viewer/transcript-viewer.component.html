@@ -1,0 +1,102 @@
+<div class="transcript-viewer-container">
+  <!-- No Transcript State -->
+  <div *ngIf="!transcriptExists" class="no-transcript-container">
+    <mat-icon class="no-transcript-icon">transcribe</mat-icon>
+    <h3>No Transcript</h3>
+    <p>This video hasn't been transcribed yet. Generate a transcript to read through the spoken content.</p>
+    <button
+      mat-raised-button
+      color="primary"
+      class="run-transcription-btn"
+      (click)="onRunAnalysis()">
+      <mat-icon>play_arrow</mat-icon>
+      Generate Transcript
+    </button>
+  </div>
+
+  <!-- Transcript Lines -->
+  <div *ngIf="transcriptExists && transcriptLines.length > 0" class="transcript-content">
+    <div class="transcript-header">
+      <div class="header-content">
+        <h3>
+          <mat-icon>article</mat-icon>
+          Full Transcript
+        </h3>
+        <button
+          mat-icon-button
+          (click)="toggleAutoScroll()"
+          [matTooltip]="autoScrollEnabled ? 'Auto-scroll: ON - Click to disable' : 'Auto-scroll: OFF - Click to enable'"
+          class="auto-scroll-toggle"
+          [class.enabled]="autoScrollEnabled">
+          <mat-icon>{{ autoScrollEnabled ? 'sync' : 'sync_disabled' }}</mat-icon>
+        </button>
+      </div>
+      <p class="transcript-hint">Click on any line to jump to that timestamp</p>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="transcript-search-bar">
+      <mat-form-field appearance="outline" class="search-field">
+        <input
+          matInput
+          [(ngModel)]="searchQuery"
+          (ngModelChange)="onSearchInput()"
+          placeholder="Search transcript..."
+          autocomplete="off">
+        <button
+          mat-icon-button
+          matSuffix
+          *ngIf="searchQuery"
+          (click)="clearSearch()">
+          <mat-icon>close</mat-icon>
+        </button>
+        <mat-icon matPrefix>search</mat-icon>
+      </mat-form-field>
+      <div class="search-navigation" *ngIf="searchResults.length > 0">
+        <span class="search-result-count">
+          {{ currentSearchIndex + 1 }} / {{ searchResults.length }}
+        </span>
+        <button
+          mat-icon-button
+          (click)="previousSearchResult()"
+          [disabled]="searchResults.length === 0"
+          matTooltip="Previous result">
+          <mat-icon>keyboard_arrow_up</mat-icon>
+        </button>
+        <button
+          mat-icon-button
+          (click)="nextSearchResult()"
+          [disabled]="searchResults.length === 0"
+          matTooltip="Next result">
+          <mat-icon>keyboard_arrow_down</mat-icon>
+        </button>
+      </div>
+    </div>
+
+    <div class="transcript-lines">
+      <div
+        *ngFor="let line of transcriptLines; let i = index"
+        class="transcript-line"
+        [class.active]="isLineActive(i)"
+        [class.search-result]="isSearchResult(i)"
+        [class.current-search-result]="isCurrentSearchResult(i)"
+        [class.clickable]="hasTimestamp(line)"
+        [id]="'transcript-line-' + i"
+        [matTooltip]="hasTimestamp(line) ? 'Click to jump to ' + formatTime(line.timestamp!) : ''"
+        [matTooltipDisabled]="!hasTimestamp(line)"
+        (click)="onLineClick(line, i)">
+        <span class="timestamp" *ngIf="hasTimestamp(line)">
+          {{ formatTime(line.timestamp!) }}
+        </span>
+        <span class="line-text" [innerHTML]="highlightSearchTerm(line.text, i)"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty Transcript State -->
+  <div *ngIf="transcriptExists && transcriptLines.length === 0" class="empty-transcript-container">
+    <mat-icon class="empty-icon">description</mat-icon>
+    <h3>Transcript is Empty</h3>
+    <p>The transcript file exists but appears to be empty.</p>
+  </div>
+</div>

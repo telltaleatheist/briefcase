@@ -6,6 +6,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
@@ -30,7 +31,8 @@ interface CategoryGroup {
     MatButtonModule,
     MatIconModule,
     MatCheckboxModule,
-    MatProgressBarModule
+    MatProgressBarModule,
+    MatTooltipModule
   ],
   template: `
     <div class="bulk-export-dialog">
@@ -91,6 +93,16 @@ interface CategoryGroup {
           <mat-icon>close</mat-icon>
           {{ exportComplete ? 'Close' : 'Cancel' }}
         </button>
+        <div class="export-options" *ngIf="!exportComplete">
+          <mat-checkbox
+            [(ngModel)]="reEncode"
+            [disabled]="isExporting"
+            color="primary"
+            matTooltip="Re-encoding creates new video files. Turn this OFF for faster extraction if videos use common codecs (H.264/AAC). Turn this ON if clips have playback issues or use uncommon codecs."
+            matTooltipPosition="above">
+            Re-encode
+          </mat-checkbox>
+        </div>
         <button mat-raised-button
                 color="primary"
                 (click)="onExport()"
@@ -281,6 +293,12 @@ interface CategoryGroup {
       margin: 0;
       gap: 0.75rem;
 
+      .export-options {
+        flex: 1;
+        display: flex;
+        align-items: center;
+      }
+
       button {
         padding: 0.625rem 1.5rem;
         font-size: 0.95rem;
@@ -303,6 +321,7 @@ export class BulkExportDialogComponent implements OnInit {
   successCount = 0;
   failedCount = 0;
   outputDirectory: string | null = null;
+  reEncode = false;
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: {
@@ -441,6 +460,7 @@ export class BulkExportDialogComponent implements OnInit {
         category: section.category,
         title: section.title || section.description,
         customDirectory: this.outputDirectory || undefined,
+        reEncode: this.reEncode,
       })
     );
   }

@@ -69,6 +69,19 @@
 
     <!-- Analysis Sections Sidebar with Tabs -->
     <div class="sections-sidebar" *ngIf="!error && !isLoading && duration > 0">
+      <!-- Auto-scroll toggle button -->
+      <div class="sidebar-toolbar">
+        <button
+          mat-icon-button
+          (click)="toggleAutoScroll()"
+          [matTooltip]="autoScrollEnabled ? 'Auto-scroll: ON - Click to disable' : 'Auto-scroll: OFF - Click to enable'"
+          class="auto-scroll-toggle"
+          [class.enabled]="autoScrollEnabled">
+          <mat-icon>{{ autoScrollEnabled ? 'sync' : 'sync_disabled' }}</mat-icon>
+        </button>
+        <span class="toolbar-label">{{ autoScrollEnabled ? 'Auto-scroll enabled' : 'Auto-scroll disabled' }}</span>
+      </div>
+
       <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms">
         <!-- Analysis Tab -->
         <mat-tab label="Analysis">
@@ -77,7 +90,7 @@
             <div *ngIf="metadata && metadata.sections && metadata.sections.length > 0" class="sections-container">
               <!-- Category Filters Accordion -->
               <mat-accordion *ngIf="categoryFilters.length > 0" class="category-filters-accordion">
-                <mat-expansion-panel class="category-filters-panel" [expanded]="true">
+                <mat-expansion-panel class="category-filters-panel" [expanded]="false">
                   <mat-expansion-panel-header>
                     <mat-panel-title>
                       <mat-icon>filter_list</mat-icon>
@@ -161,6 +174,20 @@
               (seekToTime)="onTranscriptSeek($event)"
               (runAnalysis)="onRunTranscriptAnalysis()">
             </app-transcript-search>
+          </div>
+        </mat-tab>
+
+        <!-- Transcript Viewer Tab -->
+        <mat-tab label="Transcript">
+          <div class="tab-content transcript-tab-content">
+            <app-transcript-viewer
+              [transcriptText]="transcriptText"
+              [transcriptExists]="transcriptExists"
+              [currentTime]="currentTime"
+              [autoScrollEnabled]="autoScrollEnabled"
+              (seekToTime)="onTranscriptSeek($event)"
+              (runAnalysis)="onRunTranscriptAnalysis()">
+            </app-transcript-viewer>
           </div>
         </mat-tab>
       </mat-tab-group>

@@ -20,36 +20,46 @@
     </mat-form-field>
   </div>
 
-  <!-- Search Options -->
-  <div class="search-options" *ngIf="transcriptExists">
-    <button
-      mat-button
-      class="search-option-btn"
-      [class.active]="useWildcards"
-      (click)="useWildcards = !useWildcards; useBooleanLogic = false; onSearchInput()"
-      matTooltip="Enable wildcards (* and ?) in search">
-      <mat-icon>{{useWildcards ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
-      <span>Wildcards</span>
-    </button>
-    <button
-      mat-button
-      class="search-option-btn"
-      [class.active]="useBooleanLogic"
-      (click)="useBooleanLogic = !useBooleanLogic; useWildcards = false; onSearchInput()"
-      matTooltip="Enable boolean operators (AND, OR, NOT)">
-      <mat-icon>{{useBooleanLogic ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
-      <span>Boolean</span>
-    </button>
-    <button
-      mat-button
-      class="search-option-btn save-search-btn"
-      [disabled]="!searchQuery"
-      (click)="saveCurrentSearch()"
-      matTooltip="Save current search query">
-      <mat-icon>bookmark_add</mat-icon>
-      <span>Save</span>
-    </button>
-  </div>
+  <!-- Search Options Accordion -->
+  <mat-accordion *ngIf="transcriptExists" class="search-options-accordion">
+    <mat-expansion-panel [(expanded)]="searchOptionsExpanded" class="search-options-panel">
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>settings</mat-icon>
+          <span>Search Options</span>
+        </mat-panel-title>
+      </mat-expansion-panel-header>
+      <div class="search-options">
+        <button
+          mat-button
+          class="search-option-btn"
+          [class.active]="useWildcards"
+          (click)="useWildcards = !useWildcards; useBooleanLogic = false; onSearchInput()"
+          matTooltip="Enable wildcards (* and ?) in search">
+          <mat-icon>{{useWildcards ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
+          <span>Wildcards</span>
+        </button>
+        <button
+          mat-button
+          class="search-option-btn"
+          [class.active]="useBooleanLogic"
+          (click)="useBooleanLogic = !useBooleanLogic; useWildcards = false; onSearchInput()"
+          matTooltip="Enable boolean operators (AND, OR, NOT)">
+          <mat-icon>{{useBooleanLogic ? 'check_box' : 'check_box_outline_blank'}}</mat-icon>
+          <span>Boolean</span>
+        </button>
+        <button
+          mat-button
+          class="search-option-btn save-search-btn"
+          [disabled]="!searchQuery"
+          (click)="saveCurrentSearch()"
+          matTooltip="Save current search query">
+          <mat-icon>bookmark_add</mat-icon>
+          <span>Save</span>
+        </button>
+      </div>
+    </mat-expansion-panel>
+  </mat-accordion>
 
   <!-- Saved Searches Accordion -->
   <mat-accordion *ngIf="transcriptExists && savedSearches.length > 0" class="saved-searches-accordion">

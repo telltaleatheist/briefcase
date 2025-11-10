@@ -137,11 +137,22 @@ export class DownloaderService implements OnModuleInit {
       }
       
       // Configure output template
-      // yt-dlp will get the title and upload date during download
+      // Use displayName from metadata if available, otherwise fall back to yt-dlp title
       // Format: YYYY-MM-DD Title.ext
-      const dateFormat = '%(upload_date>%Y-%m-%d)s ';
-      const maxTitleLength = 200; // Conservative limit to stay under 255 total
-      const outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
+      let outputTemplate: string;
+
+      if (options.displayName) {
+        // Use the pre-fetched and sanitized displayName from frontend metadata
+        // This avoids the slow metadata re-fetch by yt-dlp and prevents "NA" titles
+        outputTemplate = path.join(downloadFolder, `${options.displayName}.%(ext)s`);
+        this.logger.log(`Using pre-fetched displayName for output: ${options.displayName}`);
+      } else {
+        // Fallback to yt-dlp's dynamic title extraction
+        const dateFormat = '%(upload_date>%Y-%m-%d)s ';
+        const maxTitleLength = 200; // Conservative limit to stay under 255 total
+        outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
+        this.logger.log(`Using yt-dlp title extraction for output template`);
+      }
       
       // Create ytDlpManager instance
       const ytDlpManager = new YtDlpManager(this.sharedConfigService);

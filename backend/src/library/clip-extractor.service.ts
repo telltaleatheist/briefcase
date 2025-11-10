@@ -8,6 +8,7 @@ export interface ClipExtractionRequest {
   startTime: number; // seconds
   endTime: number; // seconds
   outputPath: string;
+  reEncode?: boolean; // Whether to re-encode for frame accuracy (default: false)
   metadata?: {
     title?: string;
     description?: string;
@@ -57,6 +58,7 @@ export class ClipExtractorService {
         request.startTime,
         duration,
         request.outputPath,
+        request.reEncode || false,
         request.onProgress
       );
 
@@ -90,19 +92,39 @@ export class ClipExtractorService {
     startTime: number,
     duration: number,
     outputPath: string,
+    reEncode: boolean = false,
     onProgress?: (progress: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        // Seek to start time BEFORE reading input (faster and more accurate)
-        .inputOptions([`-ss ${startTime}`])
+      const command = ffmpeg(inputPath);
+
+      // Use accurate input seeking (seeks before decoding)
+      command.inputOptions([`-ss ${startTime}`]);
+
+      if (reEncode) {
+        // Re-encode with fast preset to ensure frame-accurate cuts
+        // This prevents frozen/black frames at the start
+        this.logger.log('Using re-encoding mode for frame-accurate extraction');
+        command
+          .videoCodec('libx264')  // Use H.264 encoder
+          .audioCodec('aac')      // Use AAC audio encoder
+          .outputOptions([
+            '-preset ultrafast',  // Fastest encoding preset
+            '-crf 18',            // High quality (lower = better, 18 is visually lossless)
+            '-movflags +faststart', // Enable fast start for web playback
+            '-avoid_negative_ts make_zero',
+          ]);
+      } else {
+        // Fast stream copy mode (may have frozen frames at start)
+        this.logger.log('Using stream copy mode for fast extraction');
+        command.outputOptions([
+          '-c copy',  // Use copy codec for fast extraction without re-encoding
+          '-avoid_negative_ts make_zero',  // Reset timestamps to start at zero
+        ]);
+      }
+
+      command
         .setDuration(duration)
-        // Use copy codec for fast extraction without re-encoding
-        // Reset timestamps to start at zero for proper playback
-        .outputOptions([
-          '-c copy',
-          '-avoid_negative_ts make_zero',
-        ])
         .output(outputPath)
         .on('start', (commandLine) => {
           this.logger.log('FFmpeg command: ' + commandLine);

@@ -61,6 +61,17 @@
   gap: 16px;
   margin-bottom: 24px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: var(--background);
+  padding: 16px 0;
+  margin-left: -24px;
+  margin-right: -24px;
+  padding-left: 24px;
+  padding-right: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--border-color);
 
   .header-left {
     display: flex;
@@ -167,6 +178,37 @@
     display: flex;
     gap: 12px;
     flex-shrink: 0;
+    flex-wrap: wrap;
+
+    .quick-nav-buttons {
+      display: flex;
+      gap: 8px;
+      margin-right: 8px;
+      padding-right: 12px;
+      border-right: 1px solid var(--border-color);
+
+      button {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        padding: 0 12px;
+        height: 40px;
+        white-space: nowrap;
+        opacity: 0.8;
+        transition: opacity 0.2s ease;
+
+        &:hover {
+          opacity: 1;
+        }
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
 
     button {
       display: flex;
@@ -718,10 +760,14 @@
 
 .transcript-card {
   padding: 16px !important;
+  overflow: hidden; // Prevent card from expanding beyond bounds
+  max-width: 100%; // Ensure card doesn't exceed container
 }
 
 .transcript-content {
   // Content flows naturally
+  max-width: 100%; // Ensure content doesn't exceed container
+  overflow-x: hidden; // Hide horizontal overflow
 }
 
 .transcript-entry {
@@ -731,6 +777,8 @@
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-color);
   transition: background-color 0.3s ease;
+  max-width: 100%; // Prevent overflow
+  overflow: hidden; // Hide any overflow content
 
   &:last-child {
     border-bottom: none;
@@ -767,6 +815,12 @@
     line-height: 1.6;
     color: var(--text-primary);
     flex: 1;
+    min-width: 0; // Allow flex item to shrink below content size
+    word-wrap: break-word; // Break long words
+    word-break: break-word; // Break long words that don't have natural break points
+    overflow-wrap: break-word; // Modern property for word breaking
+    white-space: pre-wrap; // Preserve whitespace but wrap when needed
+    max-width: 100%; // Ensure it doesn't exceed container width
   }
 }
 
@@ -1058,6 +1112,11 @@
     --chip-icon: #ff8c5a;
   }
 
+  // Adjust header shadow for dark mode
+  .header {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+
   // Make chip text more visible in dark mode - use multiple selectors for specificity
   .analysis-meta,
   .transcript-meta {
@@ -1097,6 +1156,11 @@
     --chip-text: #e5e7eb;
     --chip-border: #374151;
     --chip-icon: #ff8c5a;
+  }
+
+  // Adjust header shadow for dark mode
+  .header {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
 
   // Make chip text more visible in dark mode

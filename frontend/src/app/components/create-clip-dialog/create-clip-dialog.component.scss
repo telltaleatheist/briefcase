@@ -205,8 +205,18 @@ mat-dialog-content {
 
 mat-dialog-actions {
   padding: 16px 24px !important;
-  gap: 8px;
+  gap: 12px;
   background-color: var(--background-color);
+
+  .action-options {
+    flex: 1;
+    display: flex;
+    align-items: center;
+
+    .re-encode-checkbox {
+      font-size: 14px;
+    }
+  }
 
   button {
     mat-icon {

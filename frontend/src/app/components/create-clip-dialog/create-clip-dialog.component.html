@@ -80,6 +80,17 @@
     <button mat-button (click)="cancel()" [disabled]="isCreating">
       Cancel
     </button>
+    <div class="action-options" *ngIf="!isCreating">
+      <mat-checkbox
+        [(ngModel)]="reEncode"
+        [disabled]="isCreating"
+        color="primary"
+        class="re-encode-checkbox"
+        matTooltip="Re-encoding creates a new video file. Turn this OFF for faster extraction if the video uses common codecs (H.264/AAC). Turn this ON if the clip has playback issues or uses uncommon codecs."
+        matTooltipPosition="above">
+        Re-encode
+      </mat-checkbox>
+    </div>
     <button
       mat-raised-button
       color="primary"
