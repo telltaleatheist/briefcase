@@ -104,6 +104,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   searchQuery = '';
   sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date';
   sortOrder: 'asc' | 'desc' = 'desc';
+  searchFilters = {
+    filename: true,
+    aiDescription: true,
+    transcript: true,
+    analysis: true,
+    tags: true
+  };
+  showSearchFilters = false;
 
   // Track open video player dialog to prevent multiple instances
   private openVideoPlayerDialog: any = null;
@@ -601,10 +609,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Then apply search
+    // Then apply search with filters
     filtered = await this.databaseLibraryService.searchVideos(
       this.searchQuery,
-      filtered
+      filtered,
+      this.searchFilters
     );
 
     // Sort
@@ -1072,6 +1081,42 @@ export class LibraryComponent implements OnInit, OnDestroy {
     } else {
       return `<1m remaining`;
     }
+  }
+
+  /**
+   * Get human-readable label for search match type
+   */
+  getMatchTypeLabel(matchType: string | undefined): string {
+    if (!matchType) return '';
+
+    const labels: { [key: string]: string } = {
+      'filename': 'Filename',
+      'ai_description': 'AI Description',
+      'transcript': 'Transcript',
+      'analysis': 'Analysis',
+      'section': 'Analysis Section',
+      'tag': 'Tag'
+    };
+
+    return labels[matchType] || matchType;
+  }
+
+  /**
+   * Get icon for search match type
+   */
+  getMatchTypeIcon(matchType: string | undefined): string {
+    if (!matchType) return '';
+
+    const icons: { [key: string]: string } = {
+      'filename': 'description',
+      'ai_description': 'smart_toy',
+      'transcript': 'subtitles',
+      'analysis': 'analytics',
+      'section': 'bookmark',
+      'tag': 'label'
+    };
+
+    return icons[matchType] || 'search';
   }
 
   /**

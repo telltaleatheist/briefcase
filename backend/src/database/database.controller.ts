@@ -150,7 +150,15 @@ export class DatabaseController {
    * Search videos across filename, AI description, transcripts, analyses, and tags
    */
   @Get('search')
-  searchVideos(@Query('q') query: string, @Query('limit') limit?: string) {
+  searchVideos(
+    @Query('q') query: string,
+    @Query('limit') limit?: string,
+    @Query('filename') searchFilename?: string,
+    @Query('aiDescription') searchAiDescription?: string,
+    @Query('transcript') searchTranscript?: string,
+    @Query('analysis') searchAnalysis?: string,
+    @Query('tags') searchTags?: string,
+  ) {
     if (!query || query.trim() === '') {
       return {
         results: [],
@@ -160,7 +168,17 @@ export class DatabaseController {
     }
 
     const limitNum = limit ? parseInt(limit, 10) : 1000;
-    const searchResults = this.databaseService.searchVideos(query, limitNum);
+
+    // Parse filter flags (default to true if not specified)
+    const filters = {
+      filename: searchFilename !== 'false',
+      aiDescription: searchAiDescription !== 'false',
+      transcript: searchTranscript !== 'false',
+      analysis: searchAnalysis !== 'false',
+      tags: searchTags !== 'false',
+    };
+
+    const searchResults = this.databaseService.searchVideos(query, limitNum, filters);
 
     // Get full video details for each result
     const videos = searchResults.map(result => {

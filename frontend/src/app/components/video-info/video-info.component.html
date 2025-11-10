@@ -315,7 +315,7 @@
           Transcript
         </h2>
         <div class="transcript-actions">
-          <button mat-stroked-button (click)="toggleSearchPanel()" [class.active]="isSearchPanelOpen">
+          <button mat-stroked-button (click)="toggleSearchPanel($event)" [class.active]="isSearchPanelOpen">
             <mat-icon>search</mat-icon>
             {{ isSearchPanelOpen ? 'Close Search' : 'Search' }}
           </button>

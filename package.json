@@ -102,6 +102,14 @@
     },
     "extraResources": [
       {
+        "from": "assets",
+        "to": "assets",
+        "filter": [
+          "tray-icon-*.png",
+          "tray-icon-*.ico"
+        ]
+      },
+      {
         "from": "backend/node_modules",
         "to": "backend/node_modules"
       },

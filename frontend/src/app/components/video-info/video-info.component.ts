@@ -270,9 +270,13 @@ export class VideoInfoComponent implements OnInit {
       disableClose: false
     });
 
-    dialogRef.afterClosed().subscribe(result => {
+    dialogRef.afterClosed().subscribe(async result => {
       if (result && result.success) {
         console.log('Video analysis added to queue');
+        // Reload video data from database to get any updates (e.g., if filename was changed during analysis)
+        if (this.video?.id) {
+          await this.loadVideoById(this.video.id);
+        }
       }
     });
   }
@@ -559,14 +563,19 @@ export class VideoInfoComponent implements OnInit {
     try {
       const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/filename`);
       const result = await firstValueFrom(
-        this.http.patch<{ success: boolean; message?: string; error?: string }>(url, {
+        this.http.patch<{ success: boolean; message?: string; error?: string; newPath?: string }>(url, {
           filename: newTitle
         })
       );
 
       if (result.success) {
-        // Update local video object
+        // Update local video object with new filename and path
         this.video.filename = newTitle;
+        if (result.newPath) {
+          this.video.current_path = result.newPath;
+          // Also regenerate the video URL since the path changed
+          this.videoUrl = await this.getVideoUrl();
+        }
         this.notificationService.success('Title Updated', 'Video title has been updated successfully');
         this.isEditingTitle = false;
         this.editedTitle = '';
@@ -737,8 +746,25 @@ export class VideoInfoComponent implements OnInit {
   /**
    * Toggle search panel open/closed
    */
-  toggleSearchPanel() {
+  toggleSearchPanel(event?: MouseEvent) {
     this.isSearchPanelOpen = !this.isSearchPanelOpen;
+
+    // Position the panel near the button when opening
+    if (this.isSearchPanelOpen && event) {
+      const button = event.currentTarget as HTMLElement;
+      const rect = button.getBoundingClientRect();
+
+      // Position panel below and to the left of the button
+      this.searchPanelX = Math.max(10, rect.left - this.searchPanelWidth + rect.width);
+      this.searchPanelY = Math.min(
+        window.innerHeight - 400, // Keep panel visible (approximate panel height)
+        rect.bottom + 10
+      );
+
+      // Ensure panel stays within viewport
+      const maxX = window.innerWidth - this.searchPanelWidth - 20;
+      this.searchPanelX = Math.max(10, Math.min(maxX, this.searchPanelX));
+    }
   }
 
   /**

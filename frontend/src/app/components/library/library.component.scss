@@ -249,6 +249,50 @@
   }
 }
 
+// Search filter checkboxes
+.search-filter-checkboxes {
+  padding: 12px 16px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  background: var(--surface, #fafafa);
+  margin-top: 8px;
+
+  .filter-options {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+
+    mat-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        margin-right: 4px;
+      }
+    }
+  }
+}
+
+// Match type indicator chip
+.match-indicator {
+  margin-left: 8px;
+  font-size: 11px;
+  height: 24px;
+  background-color: rgba(255, 143, 71, 0.15) !important;
+  border: 1px solid rgba(255, 143, 71, 0.3) !important;
+
+  mat-icon {
+    font-size: 14px !important;
+    width: 14px !important;
+    height: 14px !important;
+    margin-right: 2px;
+  }
+}
+
 .tag-filters {
   padding: 16px;
   border: 1px solid var(--border-color, #e0e0e0);

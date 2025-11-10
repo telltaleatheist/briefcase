@@ -27,6 +27,8 @@ export interface DatabaseVideo {
   is_linked: number; // 0 or 1 (SQLite boolean)
   has_transcript: number; // 0 or 1
   has_analysis: number; // 0 or 1
+  searchScore?: number; // Added by search results
+  matchType?: string; // Added by search results (filename, transcript, analysis, etc.)
 }
 
 export interface DatabaseTranscript {
@@ -411,18 +413,36 @@ export class DatabaseLibraryService {
    * Search videos by keyword across filenames, AI descriptions, transcripts, analyses, and tags
    * Uses backend full-text search for comprehensive results
    */
-  async searchVideos(query: string, videos: DatabaseVideo[]): Promise<DatabaseVideo[]> {
+  async searchVideos(
+    query: string,
+    videos: DatabaseVideo[],
+    filters?: {
+      filename?: boolean;
+      aiDescription?: boolean;
+      transcript?: boolean;
+      analysis?: boolean;
+      tags?: boolean;
+    }
+  ): Promise<DatabaseVideo[]> {
     if (!query || query.trim() === '') {
       return videos;
     }
 
     try {
-      // Call backend search API
+      // Build query params for filters
       const baseUrl = await this.getBaseUrl();
+      let url = `${baseUrl}/search?q=${encodeURIComponent(query)}`;
+
+      if (filters) {
+        if (filters.filename !== undefined) url += `&filename=${filters.filename}`;
+        if (filters.aiDescription !== undefined) url += `&aiDescription=${filters.aiDescription}`;
+        if (filters.transcript !== undefined) url += `&transcript=${filters.transcript}`;
+        if (filters.analysis !== undefined) url += `&analysis=${filters.analysis}`;
+        if (filters.tags !== undefined) url += `&tags=${filters.tags}`;
+      }
+
       const response = await firstValueFrom(
-        this.http.get<{ results: DatabaseVideo[]; count: number; query: string }>(
-          `${baseUrl}/search?q=${encodeURIComponent(query)}`
-        )
+        this.http.get<{ results: DatabaseVideo[]; count: number; query: string }>(url)
       );
 
       // Return the search results (backend already returns full video objects with search scores)
@@ -432,11 +452,16 @@ export class DatabaseLibraryService {
 
       // Fallback to client-side search if backend fails
       const lowerQuery = query.toLowerCase();
-      return videos.filter(video =>
-        video.filename.toLowerCase().includes(lowerQuery) ||
-        (video.date_folder && video.date_folder.toLowerCase().includes(lowerQuery)) ||
-        (video.ai_description && video.ai_description.toLowerCase().includes(lowerQuery))
-      );
+      return videos.filter(video => {
+        const searchFilename = !filters || filters.filename !== false;
+        const searchAiDesc = !filters || filters.aiDescription !== false;
+
+        return (
+          (searchFilename && video.filename.toLowerCase().includes(lowerQuery)) ||
+          (searchFilename && video.date_folder && video.date_folder.toLowerCase().includes(lowerQuery)) ||
+          (searchAiDesc && video.ai_description && video.ai_description.toLowerCase().includes(lowerQuery))
+        );
+      });
     }
   }
 

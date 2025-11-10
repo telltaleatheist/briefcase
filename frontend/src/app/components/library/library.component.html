@@ -114,6 +114,14 @@
       <mat-icon matPrefix>search</mat-icon>
     </mat-form-field>
 
+    <!-- Search filter toggles -->
+    <button mat-stroked-button
+            (click)="showSearchFilters = !showSearchFilters"
+            matTooltip="Select which metadata types to search">
+      <mat-icon>filter_list</mat-icon>
+      Search Filters
+    </button>
+
     <!-- Sort buttons -->
     <div class="sort-buttons">
       <button mat-stroked-button
@@ -156,6 +164,32 @@
         <mat-icon>psychology</mat-icon>
         No Analysis {{ sortBy === 'no-analysis' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
       </button>
+    </div>
+  </div>
+
+  <!-- Search Filters Checkboxes -->
+  <div class="search-filter-checkboxes" *ngIf="showSearchFilters">
+    <div class="filter-options">
+      <mat-checkbox [(ngModel)]="searchFilters.filename" (change)="onSearchChange()">
+        <mat-icon>description</mat-icon>
+        Filename
+      </mat-checkbox>
+      <mat-checkbox [(ngModel)]="searchFilters.aiDescription" (change)="onSearchChange()">
+        <mat-icon>smart_toy</mat-icon>
+        AI Description
+      </mat-checkbox>
+      <mat-checkbox [(ngModel)]="searchFilters.transcript" (change)="onSearchChange()">
+        <mat-icon>subtitles</mat-icon>
+        Transcript
+      </mat-checkbox>
+      <mat-checkbox [(ngModel)]="searchFilters.analysis" (change)="onSearchChange()">
+        <mat-icon>analytics</mat-icon>
+        Analysis
+      </mat-checkbox>
+      <mat-checkbox [(ngModel)]="searchFilters.tags" (change)="onSearchChange()">
+        <mat-icon>label</mat-icon>
+        Tags
+      </mat-checkbox>
     </div>
   </div>
 
@@ -369,6 +403,12 @@
                  #extensionInput>
 
           <mat-icon *ngIf="isLongVideo(video)" class="long-video-badge" matTooltip="Long video (> 10 minutes)">schedule</mat-icon>
+
+          <!-- Search match indicator -->
+          <mat-chip *ngIf="video.matchType && searchQuery" class="match-indicator" [matTooltip]="'Found in: ' + getMatchTypeLabel(video.matchType)">
+            <mat-icon>{{ getMatchTypeIcon(video.matchType) }}</mat-icon>
+            {{ getMatchTypeLabel(video.matchType) }}
+          </mat-chip>
 
           <!-- Subtitle (duration info) on the right side -->
           <span class="video-subtitle">

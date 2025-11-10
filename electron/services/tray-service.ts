@@ -115,7 +115,7 @@ export class TrayService {
       iconName = 'tray-icon-linux.png';
     }
 
-    return path.join(AppConfig.appPath, 'assets', iconName);
+    return path.join(AppConfig.resourcesPath, 'assets', iconName);
   }
 
   /**
@@ -222,7 +222,7 @@ export class TrayService {
     const notification = new (require('electron').Notification)({
       title,
       body,
-      icon: path.join(AppConfig.appPath, 'assets', 'icon.png')
+      icon: path.join(AppConfig.resourcesPath, 'assets', 'icon.png')
     });
 
     notification.show();
