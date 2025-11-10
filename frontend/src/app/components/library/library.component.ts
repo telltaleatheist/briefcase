@@ -1370,86 +1370,34 @@ export class LibraryComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Show import options dialog
-    const { ImportOptionsDialogComponent } = await import('./import-options-dialog.component');
-
-    const optionsDialogRef = this.dialog.open(ImportOptionsDialogComponent, {
-      width: '500px',
-      data: { videoCount: filePaths.length }
+    // Create video objects from dropped file paths
+    const selectedVideos = filePaths.map((filePath: string) => {
+      const parts = filePath.split(/[/\\]/);
+      const filename = parts[parts.length - 1] || 'Unknown';
+      return {
+        current_path: filePath,
+        filename: filename
+      };
     });
 
-    const importAction = await optionsDialogRef.afterClosed().toPromise();
-
-    if (!importAction) {
-      return; // User cancelled
-    }
-
-    // Open import progress dialog
-    const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
-
-    const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
-      width: '500px',
-      disableClose: true,
-      data: { filePaths: filePaths }
+    // Open video analysis dialog with import mode and selected videos
+    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      maxHeight: '85vh',
+      panelClass: 'video-analysis-dialog-panel',
+      data: {
+        mode: 'import',
+        selectedVideos: selectedVideos
+      },
+      disableClose: false
     });
 
-    // Wait for import to complete
-    const importResult = await dialogRef.afterClosed().toPromise();
-
-    // Refresh library if successful
-    if (importResult?.success) {
-      // Clear cache since data changed
-      this.databaseLibraryService.clearCache();
-
-      await this.loadVideos();
-      await this.loadStats();
-
-      // Get the imported video IDs
-      const importedVideoIds = importResult.imported || [];
-
-      // Start batch analysis if requested
-      if (importAction === 'import-and-transcribe' && importedVideoIds.length > 0) {
-        try {
-          await this.databaseLibraryService.startBatchAnalysis({
-            videoIds: importedVideoIds,
-            transcribeOnly: true
-          });
-          this.notificationService.toastOnly(
-            'success',
-            'Transcription Started',
-            `Transcribing ${importedVideoIds.length} video${importedVideoIds.length !== 1 ? 's' : ''}`
-          );
-          this.startProgressPolling();
-        } catch (error: any) {
-          console.error('Failed to start transcription:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Error',
-            error.error?.message || 'Failed to start transcription'
-          );
-        }
-      } else if (importAction === 'import-and-analyze' && importedVideoIds.length > 0) {
-        try {
-          await this.databaseLibraryService.startBatchAnalysis({
-            videoIds: importedVideoIds,
-            transcribeOnly: false
-          });
-          this.notificationService.toastOnly(
-            'success',
-            'Analysis Started',
-            `Processing ${importedVideoIds.length} video${importedVideoIds.length !== 1 ? 's' : ''}`
-          );
-          this.startProgressPolling();
-        } catch (error: any) {
-          console.error('Failed to start analysis:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Error',
-            error.error?.message || 'Failed to start analysis'
-          );
-        }
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.success) {
+        console.log('Import added to queue');
       }
-    }
+    });
   }
 
   /**
@@ -1693,86 +1641,34 @@ export class LibraryComponent implements OnInit, OnDestroy {
         return; // User cancelled
       }
 
-      // Show import options dialog first
-      const { ImportOptionsDialogComponent } = await import('./import-options-dialog.component');
-
-      const optionsDialogRef = this.dialog.open(ImportOptionsDialogComponent, {
-        width: '500px',
-        data: { videoCount: result.filePaths.length }
+      // Create video objects from selected file paths
+      const selectedVideos = result.filePaths.map((filePath: string) => {
+        const parts = filePath.split(/[/\\]/);
+        const filename = parts[parts.length - 1] || 'Unknown';
+        return {
+          current_path: filePath,
+          filename: filename
+        };
       });
 
-      const importAction = await optionsDialogRef.afterClosed().toPromise();
-
-      if (!importAction) {
-        return; // User cancelled
-      }
-
-      // Open import progress dialog
-      const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
-
-      const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
-        width: '500px',
-        disableClose: true,
-        data: { filePaths: result.filePaths }
+      // Open video analysis dialog with import mode and selected videos
+      const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+        width: '700px',
+        maxWidth: '90vw',
+        maxHeight: '85vh',
+        panelClass: 'video-analysis-dialog-panel',
+        data: {
+          mode: 'import',
+          selectedVideos: selectedVideos
+        },
+        disableClose: false
       });
 
-      // Wait for import to complete
-      const importResult = await dialogRef.afterClosed().toPromise();
-
-      // Refresh library if successful
-      if (importResult?.success) {
-        // Clear cache since data changed
-        this.databaseLibraryService.clearCache();
-
-        await this.loadVideos();
-        await this.loadStats();
-
-        // Get the imported video IDs
-        const importedVideoIds = importResult.imported || [];
-
-        // Start batch analysis if requested
-        if (importAction === 'import-and-transcribe' && importedVideoIds.length > 0) {
-          try {
-            await this.databaseLibraryService.startBatchAnalysis({
-              videoIds: importedVideoIds,
-              transcribeOnly: true
-            });
-            this.notificationService.toastOnly(
-              'success',
-              'Transcription Started',
-              `Transcribing ${importedVideoIds.length} video${importedVideoIds.length !== 1 ? 's' : ''}`
-            );
-            this.startProgressPolling();
-          } catch (error: any) {
-            console.error('Failed to start transcription:', error);
-            this.notificationService.toastOnly(
-              'error',
-              'Error',
-              error.error?.message || 'Failed to start transcription'
-            );
-          }
-        } else if (importAction === 'import-and-analyze' && importedVideoIds.length > 0) {
-          try {
-            await this.databaseLibraryService.startBatchAnalysis({
-              videoIds: importedVideoIds,
-              transcribeOnly: false
-            });
-            this.notificationService.toastOnly(
-              'success',
-              'Analysis Started',
-              `Processing ${importedVideoIds.length} video${importedVideoIds.length !== 1 ? 's' : ''}`
-            );
-            this.startProgressPolling();
-          } catch (error: any) {
-            console.error('Failed to start analysis:', error);
-            this.notificationService.toastOnly(
-              'error',
-              'Error',
-              error.error?.message || 'Failed to start analysis'
-            );
-          }
+      dialogRef.afterClosed().subscribe(result => {
+        if (result && result.success) {
+          console.log('Import added to queue');
         }
-      }
+      });
     } catch (error) {
       console.error('Error importing videos:', error);
       this.notificationService.error('Import Failed', 'Could not open import dialog');

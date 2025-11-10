@@ -22,16 +22,8 @@
           <mat-icon>article</mat-icon>
           Full Transcript
         </h3>
-        <button
-          mat-icon-button
-          (click)="toggleAutoScroll()"
-          [matTooltip]="autoScrollEnabled ? 'Auto-scroll: ON - Click to disable' : 'Auto-scroll: OFF - Click to enable'"
-          class="auto-scroll-toggle"
-          [class.enabled]="autoScrollEnabled">
-          <mat-icon>{{ autoScrollEnabled ? 'sync' : 'sync_disabled' }}</mat-icon>
-        </button>
       </div>
-      <p class="transcript-hint">Click on any line to jump to that timestamp</p>
+      <p class="transcript-hint">Click on any line to jump to that timestamp. Use the auto-scroll button above to control scrolling behavior.</p>
     </div>
 
     <!-- Search Bar -->

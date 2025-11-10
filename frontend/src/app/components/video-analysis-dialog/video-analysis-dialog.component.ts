@@ -88,7 +88,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
     return this.fb.group({
       inputType: ['url', Validators.required],
       input: [''], // Don't require if selectedVideos provided
-      mode: ['full', Validators.required],
+      mode: ['import-only', Validators.required],
       customInstructions: [''],
       aiModel: ['ollama:qwen2.5:7b', Validators.required],
       apiKey: [''],
@@ -100,6 +100,15 @@ export class VideoAnalysisDialogComponent implements OnInit {
 
   isAIAnalysisEnabled(): boolean {
     return this.analysisForm.get('mode')?.value === 'full';
+  }
+
+  isTranscriptionEnabled(): boolean {
+    const mode = this.analysisForm.get('mode')?.value;
+    return mode === 'transcribe-only' || mode === 'full';
+  }
+
+  isImportOnly(): boolean {
+    return this.analysisForm.get('mode')?.value === 'import-only';
   }
 
   needsApiKey(): boolean {

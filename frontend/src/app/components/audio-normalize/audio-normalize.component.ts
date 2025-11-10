@@ -44,6 +44,7 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
   selectedFiles: AudioFile[] = [];
   isProcessing = false;
   isElectron = false;
+  isDraggingFiles = false;
 
   private filesSubscription?: Subscription;
   private isProcessingSubscription?: Subscription;
@@ -378,6 +379,86 @@ export class AudioNormalizeComponent implements OnInit, OnDestroy {
         this.stateService.setTargetVolume(result);
       }
     });
+  }
+
+  /**
+   * Handle drag over event
+   */
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingFiles = true;
+  }
+
+  /**
+   * Handle drag leave event
+   */
+  onDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingFiles = false;
+  }
+
+  /**
+   * Handle drop event
+   */
+  async onDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingFiles = false;
+
+    if (!this.isElectron) {
+      this.notificationService.toastOnly('info', 'Electron Required', 'Drag and drop is only available in Electron');
+      return;
+    }
+
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const electron = (window as any).electron;
+    if (!electron || !electron.getFilePathFromFile) {
+      this.notificationService.toastOnly('error', 'Not Available', 'Drag and drop is not properly configured');
+      return;
+    }
+
+    const validExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.aac', '.flac', '.m4a', '.webm'];
+    const newFiles: AudioFile[] = [];
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+
+        if (!validExtensions.includes(ext)) {
+          this.notificationService.toastOnly('warning', 'Invalid File', `${file.name} is not a supported media file`);
+          continue;
+        }
+
+        try {
+          const filePath = electron.getFilePathFromFile(file);
+          if (!this.selectedFiles.find(f => f.path === filePath)) {
+            newFiles.push({
+              path: filePath,
+              name: this.extractFileName(filePath),
+              status: 'pending'
+            });
+          }
+        } catch (error) {
+          console.error(`Failed to get path for file: ${file.name}`, error);
+          this.notificationService.toastOnly('error', 'Error', `Failed to process ${file.name}`);
+        }
+      }
+
+      if (newFiles.length > 0) {
+        this.stateService.addFiles(newFiles);
+        this.notificationService.toastOnly('success', 'Files Added', `Added ${newFiles.length} file(s)`);
+      }
+    } catch (error) {
+      console.error('Error processing dropped files:', error);
+      this.notificationService.toastOnly('error', 'Error', 'Failed to process dropped files');
+    }
   }
 }
 

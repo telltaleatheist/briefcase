@@ -69,20 +69,20 @@
 
     <!-- Analysis Sections Sidebar with Tabs -->
     <div class="sections-sidebar" *ngIf="!error && !isLoading && duration > 0">
-      <!-- Auto-scroll toggle button -->
+      <!-- Auto-scroll toggle button - Always visible -->
       <div class="sidebar-toolbar">
         <button
           mat-icon-button
           (click)="toggleAutoScroll()"
-          [matTooltip]="autoScrollEnabled ? 'Auto-scroll: ON - Click to disable' : 'Auto-scroll: OFF - Click to enable'"
+          [matTooltip]="getAutoScrollTooltip()"
           class="auto-scroll-toggle"
           [class.enabled]="autoScrollEnabled">
           <mat-icon>{{ autoScrollEnabled ? 'sync' : 'sync_disabled' }}</mat-icon>
         </button>
-        <span class="toolbar-label">{{ autoScrollEnabled ? 'Auto-scroll enabled' : 'Auto-scroll disabled' }}</span>
+        <span class="toolbar-label">{{ getAutoScrollLabel() }}</span>
       </div>
 
-      <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms">
+      <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms" (selectedTabChange)="onTabChange($event)">
         <!-- Analysis Tab -->
         <mat-tab label="Analysis">
           <div class="tab-content">
@@ -186,8 +186,7 @@
               [currentTime]="currentTime"
               [autoScrollEnabled]="autoScrollEnabled"
               (seekToTime)="onTranscriptSeek($event)"
-              (runAnalysis)="onRunTranscriptAnalysis()"
-              (autoScrollToggled)="toggleAutoScroll()">
+              (runAnalysis)="onRunTranscriptAnalysis()">
             </app-transcript-viewer>
           </div>
         </mat-tab>

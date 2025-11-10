@@ -85,6 +85,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Auto-scroll state
   autoScrollEnabled = true;
+  currentTabIndex = 0; // Track which tab is active (0=Analysis, 1=Search, 2=Transcript)
 
   // Track if opened as dialog or route
   isDialogMode = false;
@@ -713,6 +714,53 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    */
   toggleAutoScroll() {
     this.autoScrollEnabled = !this.autoScrollEnabled;
+  }
+
+  /**
+   * Handle tab change to track which tab is active
+   */
+  onTabChange(event: any) {
+    this.currentTabIndex = event.index;
+  }
+
+  /**
+   * Get dynamic tooltip text based on current tab
+   */
+  getAutoScrollTooltip(): string {
+    if (!this.autoScrollEnabled) {
+      return 'Auto-scroll: OFF - Click to enable scrolling with video playback';
+    }
+
+    switch (this.currentTabIndex) {
+      case 0: // Analysis tab
+        return 'Auto-scroll: ON - Analysis sections will scroll with video playback';
+      case 1: // Search tab
+        return 'Auto-scroll: ON - (Search tab does not auto-scroll)';
+      case 2: // Transcript tab
+        return 'Auto-scroll: ON - Transcript will scroll with video playback';
+      default:
+        return 'Auto-scroll: ON - Content will scroll with video playback';
+    }
+  }
+
+  /**
+   * Get dynamic label text based on current tab
+   */
+  getAutoScrollLabel(): string {
+    if (!this.autoScrollEnabled) {
+      return 'Auto-scroll disabled';
+    }
+
+    switch (this.currentTabIndex) {
+      case 0: // Analysis tab
+        return 'Auto-scroll: Analysis';
+      case 1: // Search tab
+        return 'Auto-scroll enabled (N/A for search)';
+      case 2: // Transcript tab
+        return 'Auto-scroll: Transcript';
+      default:
+        return 'Auto-scroll enabled';
+    }
   }
 
   /**

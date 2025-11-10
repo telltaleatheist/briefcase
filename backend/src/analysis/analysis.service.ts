@@ -698,6 +698,51 @@ export class AnalysisService {
         } else {
           this.logger.warn(`No sections found in analysisResult for video ${videoId}`);
         }
+
+        // Save AI description to video if available
+        if (analysisResult && analysisResult.description) {
+          this.logger.log(`Saving AI description for video ${videoId}`);
+          this.databaseService.updateVideoDescription(videoId, analysisResult.description);
+        }
+
+        // Save tags (people and topics) if available
+        if (analysisResult && analysisResult.tags) {
+          this.logger.log(`Saving tags for video ${videoId}: ${JSON.stringify(analysisResult.tags)}`);
+
+          // Save people tags
+          if (analysisResult.tags.people && Array.isArray(analysisResult.tags.people)) {
+            for (const person of analysisResult.tags.people) {
+              if (person && typeof person === 'string' && person.trim()) {
+                this.databaseService.insertTag({
+                  id: require('uuid').v4(),
+                  videoId,
+                  tagName: person.trim(),
+                  tagType: 'person',
+                  source: 'ai',
+                  confidence: 0.8, // Default confidence for AI-generated tags
+                });
+              }
+            }
+          }
+
+          // Save topic tags
+          if (analysisResult.tags.topics && Array.isArray(analysisResult.tags.topics)) {
+            for (const topic of analysisResult.tags.topics) {
+              if (topic && typeof topic === 'string' && topic.trim()) {
+                this.databaseService.insertTag({
+                  id: require('uuid').v4(),
+                  videoId,
+                  tagName: topic.trim(),
+                  tagType: 'topic',
+                  source: 'ai',
+                  confidence: 0.8, // Default confidence for AI-generated tags
+                });
+              }
+            }
+          }
+
+          this.logger.log(`Successfully saved tags for video ${videoId}`);
+        }
       }
     }
 

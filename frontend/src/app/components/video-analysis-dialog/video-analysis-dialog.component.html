@@ -1,12 +1,15 @@
 <div class="video-analysis-dialog">
   <h2 mat-dialog-title class="dialog-header">
     <div class="header-icon">
-      <mat-icon>psychology</mat-icon>
+      <mat-icon>video_library</mat-icon>
     </div>
     <div class="header-content">
-      <span class="title-text">{{ data.mode === 'transcribe' ? 'Transcribe Video' : data.mode === 'import' ? 'Download & Analyze' : data.mode === 'download' ? 'Download from URL' : 'Analyze Video' }}</span>
+      <span class="title-text">Video Processing Options</span>
       <p class="subtitle" *ngIf="data.selectedVideos && data.selectedVideos.length > 0">
         Configure settings for {{ data.selectedVideos.length }} selected video(s)
+      </p>
+      <p class="subtitle" *ngIf="!data.selectedVideos || data.selectedVideos.length === 0">
+        Choose how you want to process your video
       </p>
     </div>
     <button mat-icon-button class="close-btn" (click)="cancel()">
@@ -23,7 +26,7 @@
           Video Source
         </h3>
 
-        <!-- Source Type Toggle (hide for download mode) -->
+        <!-- Source Type Toggle (only show for import mode, not download mode) -->
         <div class="source-toggle" *ngIf="data.mode !== 'download'">
           <button type="button"
                   class="toggle-option"
@@ -59,8 +62,8 @@
           </div>
         </ng-container>
 
-        <!-- Local File Input -->
-        <ng-container *ngIf="analysisForm.get('inputType')?.value === 'file'">
+        <!-- Local File Input (not available in download mode) -->
+        <ng-container *ngIf="analysisForm.get('inputType')?.value === 'file' && data.mode !== 'download'">
           <!-- File Selected State -->
           <div class="file-selected" *ngIf="analysisForm.get('input')?.value">
             <div class="file-icon">
@@ -103,32 +106,60 @@
         </ng-container>
       </div>
 
-      <!-- Processing Mode -->
+      <!-- Processing Mode - PRIMARY CHOICE -->
       <div class="form-section">
         <h3 class="section-title">
-          <mat-icon>settings</mat-icon>
-          Processing Mode
+          <mat-icon>tune</mat-icon>
+          Processing Options
         </h3>
+        <p class="section-description">Choose how you want to process this video</p>
 
-        <div class="mode-toggle">
+        <div class="mode-cards">
           <button type="button"
-                  class="toggle-option"
-                  [class.active]="analysisForm.get('mode')?.value === 'full'"
-                  (click)="analysisForm.patchValue({mode: 'full'})">
-            <mat-icon>psychology</mat-icon>
-            <div class="option-text">
-              <span class="option-title">Transcribe + Analysis</span>
-              <span class="option-subtitle">Full AI processing</span>
+                  class="mode-card"
+                  [class.active]="analysisForm.get('mode')?.value === 'import-only'"
+                  (click)="analysisForm.patchValue({mode: 'import-only'})">
+            <div class="card-icon">
+              <mat-icon>download</mat-icon>
+            </div>
+            <div class="card-content">
+              <h4 class="card-title">Import Only</h4>
+              <p class="card-description">Download and add to library without any processing</p>
+            </div>
+            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'import-only'">
+              <mat-icon>check_circle</mat-icon>
             </div>
           </button>
+
           <button type="button"
-                  class="toggle-option"
+                  class="mode-card"
                   [class.active]="analysisForm.get('mode')?.value === 'transcribe-only'"
                   (click)="analysisForm.patchValue({mode: 'transcribe-only'})">
-            <mat-icon>subtitles</mat-icon>
-            <div class="option-text">
-              <span class="option-title">Transcribe Only</span>
-              <span class="option-subtitle">No AI analysis</span>
+            <div class="card-icon">
+              <mat-icon>subtitles</mat-icon>
+            </div>
+            <div class="card-content">
+              <h4 class="card-title">Transcribe</h4>
+              <p class="card-description">Generate searchable text transcript using Whisper</p>
+            </div>
+            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'transcribe-only'">
+              <mat-icon>check_circle</mat-icon>
+            </div>
+          </button>
+
+          <button type="button"
+                  class="mode-card"
+                  [class.active]="analysisForm.get('mode')?.value === 'full'"
+                  (click)="analysisForm.patchValue({mode: 'full'})">
+            <div class="card-icon">
+              <mat-icon>psychology</mat-icon>
+            </div>
+            <div class="card-content">
+              <h4 class="card-title">Transcribe + AI Analysis</h4>
+              <p class="card-description">Full processing with transcript and AI-powered insights</p>
+            </div>
+            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'full'">
+              <mat-icon>check_circle</mat-icon>
             </div>
           </button>
         </div>
@@ -196,8 +227,8 @@
         </div>
       </div>
 
-      <!-- Transcription Settings -->
-      <div class="form-section">
+      <!-- Transcription Settings (only if transcribing) -->
+      <div class="form-section" *ngIf="isTranscriptionEnabled()">
         <h3 class="section-title">
           <mat-icon>mic</mat-icon>
           Transcription Settings
@@ -235,8 +266,8 @@
         Cancel
       </button>
       <button type="submit" mat-raised-button color="primary" [disabled]="analysisForm.invalid">
-        <mat-icon>add_circle</mat-icon>
-        Add to Queue
+        <mat-icon>{{ isImportOnly() ? 'download' : 'play_arrow' }}</mat-icon>
+        {{ isImportOnly() ? 'Import Video' : 'Start Processing' }}
       </button>
     </mat-dialog-actions>
   </form>

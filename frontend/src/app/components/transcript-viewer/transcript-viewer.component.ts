@@ -36,7 +36,6 @@ export class TranscriptViewerComponent implements OnChanges {
   @Input() autoScrollEnabled = true; // Control auto-scroll behavior
   @Output() seekToTime = new EventEmitter<number>();
   @Output() runAnalysis = new EventEmitter<void>();
-  @Output() autoScrollToggled = new EventEmitter<void>();
 
   transcriptLines: TranscriptLine[] = [];
   activeLineIndex = -1;
@@ -47,13 +46,6 @@ export class TranscriptViewerComponent implements OnChanges {
   currentSearchIndex = -1;
 
   constructor(private sanitizer: DomSanitizer) {}
-
-  /**
-   * Toggle auto-scroll - emit event to parent
-   */
-  toggleAutoScroll() {
-    this.autoScrollToggled.emit();
-  }
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['transcriptText'] && this.transcriptText) {
