@@ -332,22 +332,33 @@
     justify-content: center;
 
     &.drag-over {
-      border-color: var(--primary-orange);
-      background: rgba(255, 143, 71, 0.05);
-      transform: scale(1.02);
+      position: relative;
+      border: 4px dashed rgba(255, 255, 255, 0.9);
+      background: rgba(255, 143, 71, 0.95);
 
       .drop-icon-container {
-        background: rgba(255, 143, 71, 0.15);
-        transform: scale(1.1);
+        background: transparent;
 
         mat-icon {
-          color: var(--primary-orange);
+          color: white;
           opacity: 1;
+          font-size: 96px;
+          width: 96px;
+          height: 96px;
+          animation: bounce 1s infinite;
         }
       }
 
       h2 {
-        color: var(--primary-orange);
+        color: white;
+        font-size: 32px;
+        font-weight: 600;
+      }
+
+      p {
+        color: white;
+        opacity: 0.9;
+        font-size: 18px;
       }
     }
 
@@ -395,6 +406,15 @@
       font-weight: 500;
       color: var(--primary-orange);
     }
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
   }
 }
 

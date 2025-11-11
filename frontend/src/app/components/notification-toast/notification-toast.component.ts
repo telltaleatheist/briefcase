@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { NotificationService, Notification } from '../../services/notification.service';
 
@@ -15,7 +16,10 @@ export class NotificationToastComponent implements OnInit, OnDestroy {
   private subscription?: Subscription;
   private toastTimers: Map<string, any> = new Map();
 
-  constructor(private notificationService: NotificationService) {}
+  constructor(
+    private notificationService: NotificationService,
+    private router: Router
+  ) {}
 
   ngOnInit(): void {
     this.subscription = this.notificationService.toastNotifications$.subscribe(
@@ -59,6 +63,9 @@ export class NotificationToastComponent implements OnInit, OnDestroy {
   }
 
   clickToast(notification: Notification): void {
+    console.log('[NotificationToast] Clicked notification:', notification);
+    console.log('[NotificationToast] Action:', notification.action);
+
     // Handle action if present
     if (notification.action) {
       this.handleAction(notification.action);
@@ -73,6 +80,9 @@ export class NotificationToastComponent implements OnInit, OnDestroy {
   }
 
   private handleAction(action: any): void {
+    console.log('[NotificationToast] Handling action type:', action.type);
+    console.log('[NotificationToast] Full action object:', action);
+
     switch (action.type) {
       case 'open-folder':
         if (action.path && (window as any).electron?.showInFolder) {
@@ -84,11 +94,28 @@ export class NotificationToastComponent implements OnInit, OnDestroy {
           (window as any).electron.openFile(action.path);
         }
         break;
+      case 'navigate-library':
+        console.log('[NotificationToast] Navigating to library with videoId:', action.videoId);
+        if (action.videoId) {
+          // Navigate to library and pass videoId to highlight
+          this.router.navigate(['/library'], {
+            queryParams: { highlightVideo: action.videoId }
+          }).then(result => {
+            console.log('[NotificationToast] Navigation result:', result);
+          }).catch(error => {
+            console.error('[NotificationToast] Navigation error:', error);
+          });
+        } else {
+          console.warn('[NotificationToast] No videoId provided for navigate-library action');
+        }
+        break;
       case 'custom':
         if (action.customHandler) {
           action.customHandler();
         }
         break;
+      default:
+        console.warn('[NotificationToast] Unknown action type:', action.type);
     }
   }
 

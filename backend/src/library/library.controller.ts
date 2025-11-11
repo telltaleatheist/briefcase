@@ -1024,9 +1024,28 @@ export class LibraryController {
         notes: body.description || undefined,
       });
 
+      // Import the created clip to the library as a video
+      let videoId: string | undefined;
+      if (extractionResult.outputPath) {
+        try {
+          this.logger.log(`Importing clip to library: ${extractionResult.outputPath}`);
+          const importResult = await this.fileScannerService.importVideos([extractionResult.outputPath]);
+          if (importResult.imported.length > 0) {
+            videoId = importResult.imported[0];
+            this.logger.log(`Clip imported to library with ID: ${videoId}`);
+          } else {
+            this.logger.warn(`Failed to import clip to library: ${extractionResult.outputPath}`);
+          }
+        } catch (importError) {
+          this.logger.error(`Error importing clip to library: ${(importError as Error).message}`);
+          // Don't fail the entire request if import fails
+        }
+      }
+
       return {
         success: true,
         clip,
+        videoId,
         extraction: {
           duration: extractionResult.duration,
           fileSize: extractionResult.fileSize,

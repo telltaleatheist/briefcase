@@ -12,6 +12,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { LibraryService, LibraryAnalysis } from '../../services/library.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ProcessingQueueService } from '../../services/processing-queue.service';
+import { NotificationService } from '../../services/notification.service';
 
 export interface CreateClipDialogData {
   analysis?: LibraryAnalysis;
@@ -40,7 +41,7 @@ export interface CreateClipDialogData {
 })
 export class CreateClipDialogComponent {
   title = '';
-  reEncode = false;
+  reEncode = true;  // Default to true to avoid black frames at the start of clips
   isCreating = false;
   error: string | null = null;
   savePath = '';
@@ -53,7 +54,8 @@ export class CreateClipDialogComponent {
     private dialogRef: MatDialogRef<CreateClipDialogComponent>,
     private libraryService: LibraryService,
     private backendUrlService: BackendUrlService,
-    private processingQueue: ProcessingQueueService
+    private processingQueue: ProcessingQueueService,
+    private notificationService: NotificationService
   ) {
     // Set default title based on whether it's an analyzed video or custom video
     if (this.data.analysis) {
@@ -317,6 +319,31 @@ export class CreateClipDialogComponent {
           progress: 100,
           endTime: new Date()
         });
+
+        // Show notification with navigation to library if videoId is available
+        const videoId = result.videoId;
+        if (videoId) {
+          this.notificationService.toastOnly(
+            'success',
+            'Clip Created',
+            'Click to view in library',
+            {
+              type: 'navigate-library',
+              videoId: videoId
+            }
+          );
+        } else {
+          // Fallback to folder notification
+          this.notificationService.toastOnly(
+            'success',
+            'Clip Created',
+            `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`,
+            {
+              type: 'open-folder',
+              path: result.extraction?.outputPath
+            }
+          );
+        }
       } else {
         this.processingQueue.updateJob(jobId, {
           status: 'failed',

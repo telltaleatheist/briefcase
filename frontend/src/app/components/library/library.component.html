@@ -54,8 +54,8 @@
 
     </div>
 
-    <!-- Action buttons -->
-    <div class="header-actions">
+    <!-- Action buttons - Library View -->
+    <div class="header-actions" *ngIf="pageMode === 'library'">
       <button mat-raised-button color="primary" (click)="openImportManager()" matTooltip="Import specific videos from clips folder">
         <mat-icon>file_download</mat-icon>
         Import Videos
@@ -64,177 +64,165 @@
         <mat-icon>link</mat-icon>
         Download from URL
       </button>
-      <button mat-raised-button color="accent" (click)="viewUnimportedVideos()" matTooltip="View and import unimported videos from clips folder">
-        <mat-icon>folder_open</mat-icon>
-        View Unimported Videos
+      <button mat-raised-button color="accent" (click)="viewUnimportedVideos()" matTooltip="Scan for new videos, find orphaned entries, and manage your library">
+        <mat-icon>manage_search</mat-icon>
+        Video Management
+        <span class="badge" *ngIf="stats && stats.unlinkedVideos > 0">{{ stats.unlinkedVideos }}</span>
       </button>
-      <button
-        mat-raised-button
-        color="warn"
-        (click)="pruneOrphanedVideos()"
-        *ngIf="stats && stats.unlinkedVideos > 0"
-        [matTooltip]="'Delete ' + stats.unlinkedVideos + ' orphaned video' + (stats.unlinkedVideos > 1 ? 's' : '') + ' from database'">
-        <mat-icon>cleaning_services</mat-icon>
-        Prune ({{ stats.unlinkedVideos }})
+    </div>
+
+    <!-- Action buttons - Management View -->
+    <div class="header-actions" *ngIf="pageMode === 'management'">
+      <button mat-raised-button (click)="backToLibrary()">
+        <mat-icon>arrow_back</mat-icon>
+        Back to Library
+      </button>
+      <button mat-raised-button
+              color="primary"
+              (click)="relinkSelectedOrphans()"
+              [disabled]="selectedOrphanedVideos.size === 0"
+              matTooltip="Select a new folder that contains the missing files">
+        <mat-icon>link</mat-icon>
+        Relink Selected ({{ selectedOrphanedVideos.size }})
+      </button>
+      <button mat-raised-button
+              color="warn"
+              (click)="deleteSelectedOrphans()"
+              [disabled]="selectedOrphanedVideos.size === 0"
+              matTooltip="Remove selected entries from database">
+        <mat-icon>delete</mat-icon>
+        Delete Selected ({{ selectedOrphanedVideos.size }})
       </button>
     </div>
   </div>
 
   <!-- Main Content -->
 
-  <!-- Search and Filters Accordion -->
-  <mat-accordion class="search-filters-accordion">
-    <mat-expansion-panel [expanded]="searchFiltersExpanded">
-      <mat-expansion-panel-header>
-        <mat-panel-title>
-          <mat-icon>search</mat-icon>
-          Search & Filters
-          <span *ngIf="searchQuery || selectedTags.length > 0" class="active-indicator"> • Active</span>
-        </mat-panel-title>
-      </mat-expansion-panel-header>
-
-      <!-- Search Bar -->
-      <div class="search-bar">
-        <mat-form-field appearance="outline" class="search-field">
-          <mat-label>Search videos</mat-label>
-          <input matInput
-                 [(ngModel)]="searchQuery"
-                 (ngModelChange)="onSearchChange()"
-                 placeholder="Search filenames, transcripts, analyses, tags, and AI descriptions...">
-          <mat-icon matPrefix>search</mat-icon>
-        </mat-form-field>
-
-        <!-- Search filter toggles -->
-        <button mat-stroked-button
-                (click)="showSearchFilters = !showSearchFilters"
-                matTooltip="Select which metadata types to search">
-          <mat-icon>filter_list</mat-icon>
-          Search Filters
+  <!-- Library View -->
+  <div *ngIf="pageMode === 'library'">
+    <!-- Compact Search Box -->
+    <div class="compact-search-container">
+      <mat-form-field appearance="outline" class="compact-search-field">
+        <input matInput
+               [(ngModel)]="searchQuery"
+               (ngModelChange)="onSearchChange()"
+               (focus)="searchFiltersExpanded = true"
+               placeholder="Search videos..."
+               [matTooltip]="searchQuery || selectedTags.length > 0 ? '' : 'Click to expand search options'">
+        <mat-icon matPrefix>search</mat-icon>
+        <button mat-icon-button matSuffix
+                *ngIf="searchQuery || selectedTags.length > 0"
+                (click)="clearSearch(); $event.stopPropagation()"
+                matTooltip="Clear search">
+          <mat-icon>clear</mat-icon>
         </button>
-      </div>
+      </mat-form-field>
+    </div>
 
-      <!-- Search Filters Checkboxes -->
-      <div class="search-filter-checkboxes" *ngIf="showSearchFilters">
-        <div class="filter-options">
-          <mat-checkbox [(ngModel)]="searchFilters.filename" (change)="onSearchChange()">
-            <mat-icon>description</mat-icon>
-            Filename
-          </mat-checkbox>
-          <mat-checkbox [(ngModel)]="searchFilters.aiDescription" (change)="onSearchChange()">
-            <mat-icon>smart_toy</mat-icon>
-            AI Description
-          </mat-checkbox>
-          <mat-checkbox [(ngModel)]="searchFilters.transcript" (change)="onSearchChange()">
-            <mat-icon>subtitles</mat-icon>
-            Transcript
-          </mat-checkbox>
-          <mat-checkbox [(ngModel)]="searchFilters.analysis" (change)="onSearchChange()">
-            <mat-icon>analytics</mat-icon>
-            Analysis
-          </mat-checkbox>
-          <mat-checkbox [(ngModel)]="searchFilters.tags" (change)="onSearchChange()">
-            <mat-icon>label</mat-icon>
-            Tags
-          </mat-checkbox>
-        </div>
-      </div>
+    <!-- Search Filters Accordion -->
+    <mat-accordion class="search-filters-accordion">
+      <mat-expansion-panel [expanded]="searchFiltersExpanded" (opened)="searchFiltersExpanded = true" (closed)="searchFiltersExpanded = false">
+        <mat-expansion-panel-header>
+          <mat-panel-title>
+            <mat-icon>tune</mat-icon>
+            Filters & Sorting
+            <span *ngIf="selectedTags.length > 0" class="active-indicator"> • {{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }}</span>
+          </mat-panel-title>
+        </mat-expansion-panel-header>
 
-      <!-- Sort buttons -->
-      <div class="sort-buttons">
-        <button mat-stroked-button
-                (click)="changeSortBy('date')"
-                [color]="sortBy === 'date' ? 'primary' : undefined"
-                matTooltip="Sort by video creation date (from filename)">
-          <mat-icon>event</mat-icon>
-          Date Created {{ sortBy === 'date' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('date-added')"
-                [color]="sortBy === 'date-added' ? 'primary' : undefined"
-                matTooltip="Sort by when video was added to library">
-          <mat-icon>add_circle</mat-icon>
-          Date Added {{ sortBy === 'date-added' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('filename')"
-                [color]="sortBy === 'filename' ? 'primary' : undefined">
-          <mat-icon>sort_by_alpha</mat-icon>
-          Name {{ sortBy === 'filename' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('size')"
-                [color]="sortBy === 'size' ? 'primary' : undefined">
-          <mat-icon>data_usage</mat-icon>
-          Size {{ sortBy === 'size' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('no-transcript')"
-                [color]="sortBy === 'no-transcript' ? 'primary' : undefined"
-                matTooltip="Sort by missing transcription">
-          <mat-icon>subtitles_off</mat-icon>
-          No Transcript {{ sortBy === 'no-transcript' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('no-analysis')"
-                [color]="sortBy === 'no-analysis' ? 'primary' : undefined"
-                matTooltip="Sort by missing analysis">
-          <mat-icon>psychology</mat-icon>
-          No Analysis {{ sortBy === 'no-analysis' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-        </button>
-      </div>
-
-      <!-- Tag Filters -->
-      <div class="tag-filters" *ngIf="allTags && (allTags.people.length > 0 || allTags.topic.length > 0)">
-        <button mat-stroked-button (click)="showTagFilters = !showTagFilters" class="toggle-filters-btn">
-          <mat-icon>{{ showTagFilters ? 'expand_less' : 'expand_more' }}</mat-icon>
-          Filter by Tags
-          <span *ngIf="selectedTags.length > 0" class="selected-count">({{ selectedTags.length }})</span>
-        </button>
-
-        <div class="tag-filter-content" *ngIf="showTagFilters">
-          <!-- Selected Tags (Active Filters) -->
-          <div class="selected-tags" *ngIf="selectedTags.length > 0">
-            <strong>Active Filters:</strong>
-            <mat-chip-set>
-              <mat-chip *ngFor="let tag of selectedTags" (removed)="toggleTag(tag)" [removable]="true">
-                {{ tag }}
-                <mat-icon matChipRemove>cancel</mat-icon>
-              </mat-chip>
-            </mat-chip-set>
-            <button mat-button color="warn" (click)="clearTagFilters()">Clear All</button>
-          </div>
-
-          <!-- People Tags -->
-          <div class="tag-section" *ngIf="allTags?.people && allTags.people.length > 0">
-            <h3>People</h3>
-            <mat-chip-set>
-              <mat-chip
-                *ngFor="let tag of allTags.people.slice(0, 20)"
-                (click)="toggleTag(tag.name)"
-                [class.selected]="isTagSelected(tag.name)"
-                class="clickable-chip people-chip">
-                {{ tag.name }} ({{ tag.count }})
-              </mat-chip>
-            </mat-chip-set>
-          </div>
-
-          <!-- Topic Tags -->
-          <div class="tag-section" *ngIf="allTags?.topic && allTags.topic.length > 0">
-            <h3>Topics</h3>
-            <mat-chip-set>
-              <mat-chip
-                *ngFor="let tag of allTags.topic.slice(0, 20)"
-                (click)="toggleTag(tag.name)"
-                [class.selected]="isTagSelected(tag.name)"
-                class="clickable-chip topic-chip">
-                {{ tag.name }} ({{ tag.count }})
-              </mat-chip>
-            </mat-chip-set>
+        <!-- Search Filters -->
+        <div class="filter-section">
+          <div class="filter-section-title">Search in:</div>
+          <div class="filter-checkboxes-compact">
+            <mat-checkbox [(ngModel)]="searchFilters.filename" (change)="onSearchChange()">Filename</mat-checkbox>
+            <mat-checkbox [(ngModel)]="searchFilters.aiDescription" (change)="onSearchChange()">AI Description</mat-checkbox>
+            <mat-checkbox [(ngModel)]="searchFilters.transcript" (change)="onSearchChange()">Transcript</mat-checkbox>
+            <mat-checkbox [(ngModel)]="searchFilters.analysis" (change)="onSearchChange()">Analysis</mat-checkbox>
+            <mat-checkbox [(ngModel)]="searchFilters.tags" (change)="onSearchChange()">Tags</mat-checkbox>
           </div>
         </div>
-      </div>
-    </mat-expansion-panel>
-  </mat-accordion>
+
+        <!-- Sort buttons -->
+        <div class="filter-section">
+          <div class="filter-section-title">Sort by:</div>
+          <div class="sort-buttons-compact">
+            <button mat-stroked-button
+                    (click)="changeSortBy('date')"
+                    [color]="sortBy === 'date' ? 'primary' : undefined">
+              Date {{ sortBy === 'date' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+            </button>
+            <button mat-stroked-button
+                    (click)="changeSortBy('date-added')"
+                    [color]="sortBy === 'date-added' ? 'primary' : undefined">
+              Added {{ sortBy === 'date-added' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+            </button>
+            <button mat-stroked-button
+                    (click)="changeSortBy('filename')"
+                    [color]="sortBy === 'filename' ? 'primary' : undefined">
+              Name {{ sortBy === 'filename' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+            </button>
+            <button mat-stroked-button
+                    (click)="changeSortBy('size')"
+                    [color]="sortBy === 'size' ? 'primary' : undefined">
+              Size {{ sortBy === 'size' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+            </button>
+            <button mat-stroked-button
+                    (click)="changeSortBy('no-transcript')"
+                    [color]="sortBy === 'no-transcript' ? 'primary' : undefined">
+              No Transcript {{ sortBy === 'no-transcript' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+            </button>
+            <button mat-stroked-button
+                    (click)="changeSortBy('no-analysis')"
+                    [color]="sortBy === 'no-analysis' ? 'primary' : undefined">
+              No Analysis {{ sortBy === 'no-analysis' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Tag Filters -->
+        <div class="filter-section" *ngIf="allTags && (allTags.people.length > 0 || allTags.topic.length > 0)">
+          <div class="filter-section-title">
+            Filter by Tags
+            <button mat-button
+                    *ngIf="selectedTags.length > 0"
+                    color="warn"
+                    (click)="clearTagFilters()"
+                    style="margin-left: 8px; font-size: 12px; padding: 0 8px; min-width: auto; line-height: 24px;">
+              Clear ({{ selectedTags.length }})
+            </button>
+          </div>
+
+          <!-- Compact Tag Chips -->
+          <div class="tag-chips-compact">
+            <div class="tag-group" *ngIf="allTags?.people && allTags.people.length > 0">
+              <span class="tag-group-label">People:</span>
+              <mat-chip-set class="compact-chip-set">
+                <mat-chip
+                  *ngFor="let tag of allTags.people.slice(0, 15)"
+                  (click)="toggleTag(tag.name)"
+                  [class.selected]="isTagSelected(tag.name)"
+                  class="compact-chip">
+                  {{ tag.name }} <span class="chip-count">({{ tag.count }})</span>
+                </mat-chip>
+              </mat-chip-set>
+            </div>
+
+            <div class="tag-group" *ngIf="allTags?.topic && allTags.topic.length > 0">
+              <span class="tag-group-label">Topics:</span>
+              <mat-chip-set class="compact-chip-set">
+                <mat-chip
+                  *ngFor="let tag of allTags.topic.slice(0, 15)"
+                  (click)="toggleTag(tag.name)"
+                  [class.selected]="isTagSelected(tag.name)"
+                  class="compact-chip">
+                  {{ tag.name }} <span class="chip-count">({{ tag.count }})</span>
+                </mat-chip>
+              </mat-chip-set>
+            </div>
+          </div>
+        </div>
+      </mat-expansion-panel>
+    </mat-accordion>
 
   <!-- Results count and selection buttons -->
   <div class="results-header" *ngIf="filteredVideos.length > 0 || (!isLoading && filteredVideos.length === 0)">
@@ -285,20 +273,11 @@
       <button
         mat-raised-button
         color="accent"
-        [disabled]="getSelectedCount() === 0"
-        (click)="moveToLibrary()"
-        matTooltip="Move or copy selected videos to another library">
-        <mat-icon>drive_file_move</mat-icon>
-        Move to... ({{ getSelectedCount() }})
-      </button>
-      <button
-        mat-raised-button
-        color="warn"
-        [disabled]="getSelectedCount() === 0"
-        (click)="deleteSelected()"
-        matTooltip="Delete selected videos">
-        <mat-icon>delete</mat-icon>
-        Delete ({{ getSelectedCount() }})
+        [disabled]="getSelectedCount() !== 1"
+        (click)="openVideoEditor()"
+        matTooltip="Open video editor (requires exactly one video selected)">
+        <mat-icon>video_settings</mat-icon>
+        Video Editor
       </button>
     </div>
   </div>
@@ -327,6 +306,7 @@
       <div *ngIf="!isWeekCollapsed(group.week)" class="week-videos">
         <div *ngFor="let video of group.videos" class="video-card-wrapper">
       <div class="video-card"
+           [attr.data-video-id]="video.id"
            [class.long-video]="isLongVideo(video)"
            [class.missing-transcript]="!video.has_transcript"
            [class.missing-analysis]="!video.has_analysis"
@@ -453,6 +433,10 @@
         <mat-icon>content_copy</mat-icon>
         <span>Copy Filename</span>
       </button>
+      <button mat-menu-item (click)="openFileLocation(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
+        <mat-icon>folder_open</mat-icon>
+        <span>Open File Location</span>
+      </button>
       <mat-divider *ngIf="getSelectedCount() === 1"></mat-divider>
 
       <!-- Multi-selection actions -->
@@ -549,4 +533,102 @@
       <mat-icon>drag_handle</mat-icon>
     </div>
   </div>
+  </div>
+
+  <!-- Management View -->
+  <div *ngIf="pageMode === 'management'" class="management-view">
+    <div class="management-header">
+      <div class="header-content">
+        <div>
+          <h2>
+            <mat-icon>broken_image</mat-icon>
+            Orphaned Video Entries
+          </h2>
+          <p class="description">Database entries where the video file no longer exists on disk.</p>
+        </div>
+        <div class="header-actions-inline">
+          <button mat-raised-button
+                  color="accent"
+                  (click)="scanDirectoryForVideos()"
+                  matTooltip="Scan a directory for videos that haven't been imported yet">
+            <mat-icon>folder_open</mat-icon>
+            Scan Directory
+          </button>
+          <button mat-raised-button
+                  color="primary"
+                  (click)="loadOrphanedVideos()"
+                  [disabled]="loadingOrphaned">
+            <mat-icon>search</mat-icon>
+            {{ loadingOrphaned ? 'Scanning...' : 'Scan for Orphans' }}
+          </button>
+          <button mat-raised-button
+                  color="warn"
+                  (click)="pruneAllOrphans()"
+                  [disabled]="orphanedVideos.length === 0 || loadingOrphaned"
+                  matTooltip="Remove all orphaned entries from database">
+            <mat-icon>delete_sweep</mat-icon>
+            Prune All ({{ orphanedVideos.length }})
+          </button>
+        </div>
+      </div>
+      <p class="count-info" *ngIf="!loadingOrphaned && orphanedVideos.length > 0">
+        <mat-icon class="warning-icon">warning</mat-icon>
+        {{ orphanedVideos.length }} orphaned entr{{ orphanedVideos.length !== 1 ? 'ies' : 'y' }} found
+      </p>
+    </div>
+
+    <!-- Loading state -->
+    <div class="loading-container" *ngIf="loadingOrphaned">
+      <mat-spinner></mat-spinner>
+      <p>Scanning for orphaned entries...</p>
+    </div>
+
+    <!-- Selection header -->
+    <div class="results-header" *ngIf="!loadingOrphaned && orphanedVideos.length > 0">
+      <div class="results-count">
+        <div class="selection-buttons">
+          <button mat-stroked-button
+                  (click)="toggleAllOrphanedSelection()"
+                  [color]="isAllOrphanedSelected ? 'primary' : undefined"
+                  matTooltip="Select all orphaned videos">
+            <mat-icon>select_all</mat-icon>
+            All
+          </button>
+        </div>
+        <span class="count-text">
+          {{ selectedOrphanedVideos.size > 0 ? selectedOrphanedVideos.size + ' selected of ' : '' }}{{ orphanedVideos.length }} video{{ orphanedVideos.length !== 1 ? 's' : '' }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Orphaned videos list -->
+    <div *ngIf="!loadingOrphaned && orphanedVideos.length > 0" class="video-list-container orphaned-list">
+      <div class="video-item orphaned-item"
+           *ngFor="let video of orphanedVideos"
+           [class.selected]="selectedOrphanedVideos.has(video.id)"
+           (click)="toggleOrphanedVideo(video.id)">
+        <div class="video-item-content">
+          <div class="checkbox-wrapper">
+            <mat-checkbox
+              [checked]="selectedOrphanedVideos.has(video.id)"
+              (click)="$event.stopPropagation()"
+              (change)="toggleOrphanedVideo(video.id)">
+            </mat-checkbox>
+          </div>
+          <div class="video-info-compact">
+            <span class="video-title">{{ video.filename }}</span>
+            <span class="video-path">{{ video.current_path }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div class="empty-state" *ngIf="!loadingOrphaned && orphanedVideos.length === 0">
+      <mat-icon>check_circle</mat-icon>
+      <p>No orphaned entries found</p>
+      <p class="secondary">All database entries have valid video files</p>
+    </div>
+  </div>
+
 </div>

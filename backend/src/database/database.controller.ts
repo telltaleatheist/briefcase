@@ -129,9 +129,15 @@ export class DatabaseController {
    * Get all videos with optional filters
    */
   @Get('videos')
-  getVideos(@Query('tags') tags?: string) {
+  getVideos(
+    @Query('tags') tags?: string,
+    @Query('linkedOnly') linkedOnly?: string
+  ) {
+    // Default to linked only unless explicitly set to false
+    const shouldFilterLinked = linkedOnly === 'false' ? false : true;
+
     let videos = this.databaseService.getAllVideos({
-      linkedOnly: true,
+      linkedOnly: shouldFilterLinked,
     });
 
     // Filter by tags if specified
@@ -937,6 +943,238 @@ export class DatabaseController {
         ? `Pruned ${result.deletedCount} orphaned video${result.deletedCount > 1 ? 's' : ''} from database`
         : 'No orphaned videos to prune'
     };
+  }
+
+  /**
+   * POST /api/database/prune-selected
+   * Delete selected orphaned videos from the database
+   */
+  @Post('prune-selected')
+  pruneSelectedVideos(@Body() body: { videoIds: string[] }) {
+    this.logger.log(`Pruning ${body.videoIds?.length || 0} selected orphaned videos`);
+
+    if (!body.videoIds || !Array.isArray(body.videoIds) || body.videoIds.length === 0) {
+      return {
+        success: false,
+        error: 'videoIds array is required',
+        deletedCount: 0,
+      };
+    }
+
+    let deletedCount = 0;
+    for (const videoId of body.videoIds) {
+      try {
+        this.databaseService.deleteVideo(videoId);
+        deletedCount++;
+      } catch (error: any) {
+        this.logger.warn(`Failed to delete video ${videoId}: ${error.message}`);
+      }
+    }
+
+    return {
+      success: true,
+      deletedCount,
+      message: deletedCount > 0
+        ? `Deleted ${deletedCount} orphaned video${deletedCount > 1 ? 's' : ''} from database`
+        : 'No videos were deleted'
+    };
+  }
+
+  /**
+   * POST /api/database/relink
+   * Attempt to relink orphaned videos by searching for them recursively in a new folder
+   */
+  @Post('relink')
+  async relinkOrphanedVideos(@Body() body: { videoIds: string[]; newFolder: string }) {
+    this.logger.log(`Attempting to relink ${body.videoIds?.length || 0} orphaned videos from folder: ${body.newFolder}`);
+
+    if (!body.videoIds || !Array.isArray(body.videoIds) || body.videoIds.length === 0) {
+      return {
+        success: false,
+        error: 'videoIds array is required',
+        relinkedCount: 0,
+        failedCount: 0,
+      };
+    }
+
+    if (!body.newFolder || typeof body.newFolder !== 'string') {
+      return {
+        success: false,
+        error: 'newFolder path is required',
+        relinkedCount: 0,
+        failedCount: 0,
+      };
+    }
+
+    // Check if the new folder exists
+    if (!fs.existsSync(body.newFolder)) {
+      return {
+        success: false,
+        error: 'The specified folder does not exist',
+        relinkedCount: 0,
+        failedCount: 0,
+      };
+    }
+
+    // Recursively search for video files in the folder
+    const findVideosRecursively = (dir: string, fileMap: Map<string, string>) => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+
+          if (entry.isDirectory()) {
+            // Recursively search subdirectories
+            findVideosRecursively(fullPath, fileMap);
+          } else if (entry.isFile()) {
+            // Add file to map with filename as key
+            fileMap.set(entry.name, fullPath);
+          }
+        }
+      } catch (error: any) {
+        this.logger.warn(`Could not read directory ${dir}: ${error.message}`);
+      }
+    };
+
+    // Build a map of all video files in the directory tree
+    const videoFileMap = new Map<string, string>();
+    findVideosRecursively(body.newFolder, videoFileMap);
+
+    this.logger.log(`Found ${videoFileMap.size} files in ${body.newFolder} (recursive)`);
+
+    let relinkedCount = 0;
+    let failedCount = 0;
+
+    for (const videoId of body.videoIds) {
+      try {
+        const video = this.databaseService.getVideoById(videoId);
+        if (!video) {
+          failedCount++;
+          continue;
+        }
+
+        const filename = video.filename as string;
+
+        // Look for the video file in the map
+        if (videoFileMap.has(filename)) {
+          const foundPath = videoFileMap.get(filename)!;
+
+          // Update the video path (this also marks it as linked)
+          this.databaseService.updateVideoPath(videoId, foundPath);
+          relinkedCount++;
+          this.logger.log(`Relinked video ${videoId}: ${foundPath}`);
+        } else {
+          failedCount++;
+          this.logger.warn(`Could not find video ${filename} in ${body.newFolder}`);
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to relink video ${videoId}: ${error.message}`);
+        failedCount++;
+      }
+    }
+
+    return {
+      success: true,
+      relinkedCount,
+      failedCount,
+      message: relinkedCount > 0
+        ? `Relinked ${relinkedCount} video${relinkedCount > 1 ? 's' : ''}${failedCount > 0 ? `, ${failedCount} failed` : ''}`
+        : `Could not relink any videos (${failedCount} failed)`
+    };
+  }
+
+  /**
+   * POST /api/database/scan-directory
+   * Scan a directory for videos that haven't been imported yet
+   */
+  @Post('scan-directory')
+  async scanDirectoryForUnimportedVideos(@Body() body: { directoryPath: string }) {
+    this.logger.log(`Scanning directory for unimported videos: ${body.directoryPath}`);
+
+    if (!body.directoryPath || typeof body.directoryPath !== 'string') {
+      return {
+        success: false,
+        error: 'directoryPath is required',
+        videos: [],
+        total: 0,
+        alreadyImported: 0
+      };
+    }
+
+    // Check if directory exists
+    if (!fs.existsSync(body.directoryPath)) {
+      return {
+        success: false,
+        error: 'Directory does not exist',
+        videos: [],
+        total: 0,
+        alreadyImported: 0
+      };
+    }
+
+    try {
+      // Video extensions to search for
+      const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
+
+      // Recursively find all video files in the directory
+      const findVideosRecursively = (dir: string, files: Array<{ filename: string; fullPath: string }> = []) => {
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+
+            if (entry.isDirectory()) {
+              // Recursively search subdirectories
+              findVideosRecursively(fullPath, files);
+            } else if (entry.isFile()) {
+              // Check if it's a video file
+              const ext = path.extname(entry.name).toLowerCase();
+              if (videoExtensions.includes(ext)) {
+                files.push({
+                  filename: entry.name,
+                  fullPath: fullPath
+                });
+              }
+            }
+          }
+        } catch (error: any) {
+          this.logger.warn(`Could not read directory ${dir}: ${error.message}`);
+        }
+
+        return files;
+      };
+
+      // Find all video files
+      const allVideos = findVideosRecursively(body.directoryPath);
+      this.logger.log(`Found ${allVideos.length} video files in ${body.directoryPath}`);
+
+      // Get all videos from database to check which are already imported
+      const allDbVideos = this.databaseService.getAllVideos();
+      const importedPaths = new Set(allDbVideos.map(v => v.current_path));
+
+      // Filter out videos that are already imported
+      const unimportedVideos = allVideos.filter(video => !importedPaths.has(video.fullPath));
+
+      this.logger.log(`${unimportedVideos.length} videos are not yet imported`);
+
+      return {
+        success: true,
+        videos: unimportedVideos,
+        total: allVideos.length,
+        alreadyImported: allVideos.length - unimportedVideos.length
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to scan directory: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        videos: [],
+        total: 0,
+        alreadyImported: 0
+      };
+    }
   }
 
   /**

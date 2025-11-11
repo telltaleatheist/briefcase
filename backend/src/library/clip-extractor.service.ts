@@ -98,28 +98,33 @@ export class ClipExtractorService {
     return new Promise((resolve, reject) => {
       const command = ffmpeg(inputPath);
 
-      // Use accurate input seeking (seeks before decoding)
-      command.inputOptions([`-ss ${startTime}`]);
-
       if (reEncode) {
-        // Re-encode with fast preset to ensure frame-accurate cuts
-        // This prevents frozen/black frames at the start
+        // Re-encode mode: Frame-accurate extraction with no black frames
+        // Use output seeking (after decoding) for maximum accuracy
         this.logger.log('Using re-encoding mode for frame-accurate extraction');
+
+        // Output seeking: decode from start, then seek precisely before encoding
+        // This is the most accurate method but slower
+        command.outputOptions([`-ss ${startTime}`]);
+
         command
           .videoCodec('libx264')  // Use H.264 encoder
           .audioCodec('aac')      // Use AAC audio encoder
           .outputOptions([
-            '-preset ultrafast',  // Fastest encoding preset
-            '-crf 18',            // High quality (lower = better, 18 is visually lossless)
-            '-movflags +faststart', // Enable fast start for web playback
-            '-avoid_negative_ts make_zero',
+            '-preset ultrafast',     // Fastest encoding preset
+            '-crf 18',               // High quality (lower = better, 18 is visually lossless)
+            '-movflags +faststart',  // Enable fast start for web playback
           ]);
       } else {
-        // Fast stream copy mode (may have frozen frames at start)
+        // Stream copy mode: Fast extraction using input seeking
         this.logger.log('Using stream copy mode for fast extraction');
+
+        // Input seeking (before decoding) for speed
+        command.inputOptions([`-ss ${startTime}`]);
+
         command.outputOptions([
-          '-c copy',  // Use copy codec for fast extraction without re-encoding
-          '-avoid_negative_ts make_zero',  // Reset timestamps to start at zero
+          '-c copy',  // Copy streams without re-encoding
+          '-avoid_negative_ts make_zero',  // Fix timestamp issues
         ]);
       }
 

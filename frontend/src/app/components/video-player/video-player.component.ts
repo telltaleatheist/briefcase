@@ -874,15 +874,44 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     const result = await dialogRef.afterClosed().toPromise();
 
     if (result?.created) {
-      this.notificationService.toastOnly(
-        'success',
-        'Clip Created',
-        `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`,
-        {
-          type: 'open-folder',
-          path: result.extraction?.outputPath
-        }
-      );
+      console.log('[VideoPlayer] Clip created, result:', result);
+
+      // If the clip is queued for background processing, don't show a notification yet
+      // The notification will be shown when the background processing completes
+      if (result.queued) {
+        console.log('[VideoPlayer] Clip queued for background processing, skipping immediate notification');
+        return;
+      }
+
+      // Check if we have a videoId (from import) to navigate to
+      const videoId = result.videoId;
+      console.log('[VideoPlayer] VideoId:', videoId);
+
+      if (videoId) {
+        console.log('[VideoPlayer] Showing navigation notification');
+        // If the clip was imported to the library, offer navigation
+        this.notificationService.toastOnly(
+          'success',
+          'Clip Created',
+          'Click to view in library',
+          {
+            type: 'navigate-library',
+            videoId: videoId
+          }
+        );
+      } else {
+        console.log('[VideoPlayer] No videoId, showing folder notification');
+        // Otherwise, just offer to open the folder
+        this.notificationService.toastOnly(
+          'success',
+          'Clip Created',
+          `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`,
+          {
+            type: 'open-folder',
+            path: result.extraction?.outputPath
+          }
+        );
+      }
     }
   }
 
@@ -912,6 +941,17 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     if (result?.created) {
       // Reload timeline sections to show the new marker
       await this.reloadAnalysisSections();
+
+      // Show success notification with action to navigate to library
+      this.notificationService.toastOnly(
+        'success',
+        'Marker Created',
+        'New marker has been added to the timeline',
+        {
+          type: 'navigate-library',
+          videoId: videoId
+        }
+      );
     }
   }
 

@@ -16,8 +16,9 @@ export interface Notification {
 }
 
 export interface NotificationAction {
-  type: 'open-folder' | 'open-file' | 'custom';
+  type: 'open-folder' | 'open-file' | 'custom' | 'navigate-library';
   path?: string; // File or folder path for open-folder/open-file actions
+  videoId?: string; // Video ID for navigate-library action
   customHandler?: () => void; // Custom handler function
 }
 

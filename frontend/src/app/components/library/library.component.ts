@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Inje
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
@@ -97,11 +97,21 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Tabs
   selectedTabIndex = 0;
 
+  // Page mode: 'library' or 'management'
+  pageMode: 'library' | 'management' = 'library';
+  managementMode: 'unimported' | 'orphaned' | 'scan' = 'orphaned';
+
   // Unimported videos
   unimportedVideos: UnimportedVideo[] = [];
   loadingUnimported = false;
   selectedUnimportedVideos = new Set<string>(); // Set of file paths
   isAllUnimportedSelected = false;
+
+  // Orphaned videos
+  orphanedVideos: DatabaseVideo[] = [];
+  loadingOrphaned = false;
+  selectedOrphanedVideos = new Set<string>(); // Set of video IDs
+  isAllOrphanedSelected = false;
 
   // Tags
   allTags: { people: Array<{ name: string; count: number }>; topic: Array<{ name: string; count: number }> } | null = null;
@@ -198,6 +208,31 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   @HostListener('window:keydown', ['$event'])
   handleKeyDown(event: KeyboardEvent) {
+    // Check if user is editing any video field - if so, disable all keyboard shortcuts
+    const isEditing = Object.values(this.editingVideo).some(fields =>
+      fields.date || fields.title || fields.extension
+    );
+
+    // Also check if focus is on an input/textarea element
+    const activeElement = document.activeElement;
+    const isFocusedOnInput = activeElement && ['INPUT', 'TEXTAREA'].includes(activeElement.tagName);
+
+    // If user is editing, allow only escape key to cancel editing
+    if (isEditing || isFocusedOnInput) {
+      if (event.code === 'Escape') {
+        // Cancel all editing
+        for (const videoId in this.editingVideo) {
+          this.editingVideo[videoId] = { date: false, title: false, extension: false };
+        }
+        // Blur the active input
+        if (activeElement && activeElement instanceof HTMLElement) {
+          activeElement.blur();
+        }
+      }
+      // Don't process any other shortcuts while editing
+      return;
+    }
+
     // Handle Cmd+A / Ctrl+A for select all
     if ((event.metaKey || event.ctrlKey) && event.code === 'KeyA') {
       event.preventDefault();
@@ -275,6 +310,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     private http: HttpClient,
     private backendUrlService: BackendUrlService,
     private router: Router,
+    private route: ActivatedRoute,
     private apiService: ApiService,
     private snackBar: MatSnackBar
   ) {
@@ -314,6 +350,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
     ]);
 
     this.startProgressPolling();
+
+    // Check for query param to highlight a specific video
+    this.route.queryParams.subscribe(params => {
+      console.log('[LibraryComponent] Query params received:', params);
+      const videoIdToHighlight = params['highlightVideo'];
+      if (videoIdToHighlight) {
+        console.log('[LibraryComponent] Highlighting video with ID:', videoIdToHighlight);
+        this.highlightVideoById(videoIdToHighlight);
+        // Clear the query param after handling it
+        this.router.navigate([], {
+          queryParams: { highlightVideo: null },
+          queryParamsHandling: 'merge',
+          replaceUrl: true
+        });
+      }
+    });
 
     console.log(`[LibraryComponent] Total load time: ${(performance.now() - startTime).toFixed(0)}ms`);
 
@@ -516,7 +568,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
         await this.loadStats();
         await this.loadVideos();
         await this.loadTags();
-        this.notificationService.toastOnly('success', 'Library Switched', 'Active library changed');
       }
     } catch (error) {
       console.error('Failed to switch library:', error);
@@ -561,35 +612,49 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * View unimported videos - for now shows unimported dialog
-   * TODO: Create separate unimported videos page/component
+   * Open video management dialog
    */
   async viewUnimportedVideos() {
-    // For now, just load unimported videos and show a dialog or switch view
-    // In the future, this should navigate to a separate route
-    await this.loadUnimportedVideos();
+    // Switch to management page mode
+    this.pageMode = 'management';
+    this.managementMode = 'orphaned';
+    await this.loadOrphanedVideos();
+  }
 
-    // Import and open unimported videos dialog
-    const { UnimportedVideosDialogComponent } = await import('./unimported-videos-dialog.component');
+  /**
+   * Switch back to library view
+   */
+  backToLibrary() {
+    this.pageMode = 'library';
+    // Reload library data in case anything changed
+    this.databaseLibraryService.clearCache();
+    this.loadVideos();
+    this.loadStats();
+    this.loadTags();
+  }
 
-    const dialogRef = this.dialog.open(UnimportedVideosDialogComponent, {
-      width: '900px',
-      maxWidth: '95vw',
-      maxHeight: '90vh',
-      data: {
-        activeLibrary: this.activeLibrary,
-        unimportedVideos: this.unimportedVideos
-      }
-    });
+  /**
+   * Load orphaned videos
+   */
+  async loadOrphanedVideos() {
+    this.loadingOrphaned = true;
+    try {
+      // First run a full scan to mark missing videos
+      const scanUrl = await this.backendUrlService.getApiUrl('/database/scan');
+      await this.http.post(scanUrl, {}).toPromise();
 
-    const result = await dialogRef.afterClosed().toPromise();
+      // Get the actual orphaned video details (is_linked = 0)
+      const videosUrl = await this.backendUrlService.getApiUrl('/database/videos?linkedOnly=false');
+      const response = await this.http.get<{ videos: DatabaseVideo[] }>(videosUrl).toPromise();
 
-    if (result?.videosImported) {
-      // Reload library data
-      this.databaseLibraryService.clearCache();
-      await this.loadVideos();
-      await this.loadStats();
-      await this.loadTags();
+      this.orphanedVideos = response?.videos.filter(v => v.is_linked === 0) || [];
+      this.selectedOrphanedVideos.clear();
+    } catch (error) {
+      console.error('Failed to load orphaned videos:', error);
+      this.snackBar.open('Failed to load orphaned videos', 'Close', { duration: 3000 });
+      this.orphanedVideos = [];
+    } finally {
+      this.loadingOrphaned = false;
     }
   }
 
@@ -785,6 +850,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
   clearTagFilters() {
     this.selectedTags = [];
     this.applyFiltersAndSort();
+  }
+
+  /**
+   * Clear search query and tag filters
+   */
+  clearSearch() {
+    this.searchQuery = '';
+    this.selectedTags = [];
+    this.onSearchChange();
   }
 
   /**
@@ -1327,6 +1401,28 @@ export class LibraryComponent implements OnInit, OnDestroy {
         videoData: video
       }
     });
+  }
+
+  /**
+   * Open video editor for the selected video
+   */
+  async openVideoEditor() {
+    if (this.selectedVideos.size !== 1) {
+      this.notificationService.toastOnly('info', 'Select One Video', 'Please select exactly one video to edit');
+      return;
+    }
+
+    // Get the selected video ID
+    const videoId = Array.from(this.selectedVideos)[0];
+    const video = this.videos.find(v => v.id === videoId);
+
+    if (!video) {
+      this.notificationService.toastOnly('error', 'Video Not Found', 'Could not find the selected video');
+      return;
+    }
+
+    // Navigate to video editor
+    this.openVideoPlayer(video);
   }
 
   /**
@@ -2348,6 +2444,93 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Scan a directory for videos that haven't been imported yet
+   */
+  async scanDirectoryForVideos() {
+    const electron = (window as any).electron;
+    if (!electron || !electron.openDirectoryPicker) {
+      this.notificationService.error('Not Available', 'Folder picker only works in Electron app');
+      return;
+    }
+
+    try {
+      // Open folder picker
+      const result = await electron.openDirectoryPicker();
+
+      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return; // User cancelled
+      }
+
+      const directoryPath = result.filePaths[0];
+
+      // Call backend to scan directory for unimported videos
+      const scanUrl = await this.backendUrlService.getApiUrl('/database/scan-directory');
+
+      this.notificationService.toastOnly('info', 'Scanning Directory', 'Searching for video files...');
+
+      const response = await this.http.post<{
+        videos: Array<{ filename: string; fullPath: string }>;
+        total: number;
+        alreadyImported: number;
+      }>(scanUrl, {
+        directoryPath
+      }).toPromise();
+
+      if (!response || response.total === 0) {
+        this.notificationService.toastOnly('info', 'No Videos Found', 'No video files found in the selected directory');
+        return;
+      }
+
+      if (response.videos.length === 0) {
+        this.notificationService.toastOnly(
+          'info',
+          'All Videos Imported',
+          `Found ${response.total} video${response.total !== 1 ? 's' : ''}, but all have already been imported`
+        );
+        return;
+      }
+
+      // Convert to the format expected by the import dialog
+      const selectedVideos = response.videos.map(video => ({
+        current_path: video.fullPath,
+        filename: video.filename
+      }));
+
+      this.notificationService.toastOnly(
+        'success',
+        'Videos Found',
+        `Found ${selectedVideos.length} new video${selectedVideos.length !== 1 ? 's' : ''} to import`
+      );
+
+      // Open video analysis dialog with import mode and unimported videos
+      const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+        width: '700px',
+        maxWidth: '90vw',
+        maxHeight: '85vh',
+        panelClass: 'video-analysis-dialog-panel',
+        data: {
+          mode: 'import',
+          selectedVideos: selectedVideos
+        },
+        disableClose: false
+      });
+
+      dialogRef.afterClosed().subscribe(result => {
+        if (result && result.success) {
+          console.log('Import added to queue');
+          this.loadVideos(); // Refresh the video list
+        }
+      });
+    } catch (error: any) {
+      console.error('Error scanning directory:', error);
+      this.notificationService.error(
+        'Scan Failed',
+        error?.error?.message || 'Could not scan directory for videos'
+      );
+    }
+  }
+
+  /**
    * Parse filename into date, title, and extension components
    * Supports formats:
    * - yyyy-mm-dd filename.ext (full date)
@@ -2737,6 +2920,37 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Highlight a video by its ID (used for notifications/deep links)
+   */
+  highlightVideoById(videoId: string) {
+    // Find the video in the filtered videos list
+    const video = this.filteredVideos.find(v => v.id === videoId);
+
+    if (video) {
+      // Clear existing selections
+      this.selectedVideos.clear();
+      this.selectedWeeks.clear();
+
+      // Highlight and select the video
+      this.highlightedVideo = video;
+      this.selectedVideos.add(video.id);
+      this.updateAllSelectedState();
+
+      // Scroll the video into view
+      setTimeout(() => {
+        const videoElement = document.querySelector(`[data-video-id="${videoId}"]`);
+        if (videoElement) {
+          videoElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+
+      console.log(`[LibraryComponent] Highlighted video with ID: ${videoId}`);
+    } else {
+      console.warn(`[LibraryComponent] Video with ID ${videoId} not found in filtered videos`);
+    }
+  }
+
+  /**
    * Handle double-click to open preview modal
    */
   onVideoDoubleClick(video: DatabaseVideo, event: Event) {
@@ -2961,6 +3175,34 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Open file location in Finder/Explorer
+   */
+  openFileLocation(video: DatabaseVideo) {
+    if (!video.current_path) {
+      this.snackBar.open('File path not available', 'Close', {
+        duration: 2000
+      });
+      return;
+    }
+
+    this.http.post(`${this.backendUrl}/api/path/open-file-location`, {
+      filePath: video.current_path
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('Opened file location', 'Close', {
+          duration: 2000
+        });
+      },
+      error: (error) => {
+        console.error('Failed to open file location:', error);
+        this.snackBar.open('Failed to open file location', 'Close', {
+          duration: 2000
+        });
+      }
+    });
+  }
+
+  /**
    * Check if a video is highlighted
    */
   isVideoHighlighted(video: DatabaseVideo): boolean {
@@ -3107,6 +3349,151 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+  }
+
+  /**
+   * Toggle selection of an orphaned video
+   */
+  toggleOrphanedVideo(videoId: string) {
+    if (this.selectedOrphanedVideos.has(videoId)) {
+      this.selectedOrphanedVideos.delete(videoId);
+    } else {
+      this.selectedOrphanedVideos.add(videoId);
+    }
+    this.updateOrphanedSelectionState();
+  }
+
+  /**
+   * Toggle all orphaned videos selection
+   */
+  toggleAllOrphanedSelection() {
+    if (this.isAllOrphanedSelected) {
+      this.selectedOrphanedVideos.clear();
+    } else {
+      this.orphanedVideos.forEach(v => this.selectedOrphanedVideos.add(v.id));
+    }
+    this.updateOrphanedSelectionState();
+  }
+
+  /**
+   * Update orphaned selection state
+   */
+  private updateOrphanedSelectionState() {
+    this.isAllOrphanedSelected = this.orphanedVideos.length > 0 &&
+      this.orphanedVideos.every(v => this.selectedOrphanedVideos.has(v.id));
+  }
+
+  /**
+   * Relink selected orphaned videos
+   */
+  async relinkSelectedOrphans() {
+    if (this.selectedOrphanedVideos.size === 0) return;
+
+    // Open folder selection dialog
+    const result = await (window as any).electron.openFolderDialog();
+    if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return;
+    }
+
+    const newFolder = result.filePaths[0];
+    const selectedIds = Array.from(this.selectedOrphanedVideos);
+
+    try {
+      const url = await this.backendUrlService.getApiUrl('/database/relink');
+      const response = await this.http.post<{
+        success: boolean;
+        relinkedCount: number;
+        failedCount: number;
+        message: string;
+      }>(url, {
+        videoIds: selectedIds,
+        newFolder: newFolder
+      }).toPromise();
+
+      if (response?.success) {
+        this.snackBar.open(
+          `Relinked ${response.relinkedCount} video${response.relinkedCount !== 1 ? 's' : ''}`,
+          'Close',
+          { duration: 3000 }
+        );
+        this.selectedOrphanedVideos.clear();
+        await this.loadOrphanedVideos();
+      } else {
+        this.snackBar.open(response?.message || 'Failed to relink videos', 'Close', { duration: 3000 });
+      }
+    } catch (error) {
+      console.error('Failed to relink videos:', error);
+      this.snackBar.open('Failed to relink videos', 'Close', { duration: 3000 });
+    }
+  }
+
+  /**
+   * Delete selected orphaned videos
+   */
+  async deleteSelectedOrphans() {
+    if (this.selectedOrphanedVideos.size === 0) return;
+
+    const confirmed = confirm(
+      `Are you sure you want to permanently delete ${this.selectedOrphanedVideos.size} selected orphaned entr${this.selectedOrphanedVideos.size !== 1 ? 'ies' : 'y'}?\n\n` +
+      'This will remove these entries from the database. This action cannot be undone.'
+    );
+
+    if (!confirmed) return;
+
+    const selectedIds = Array.from(this.selectedOrphanedVideos);
+    try {
+      const url = await this.backendUrlService.getApiUrl('/database/prune-selected');
+      const response = await this.http.post<{
+        success: boolean;
+        deletedCount: number;
+        message: string;
+      }>(url, { videoIds: selectedIds }).toPromise();
+
+      if (response?.success) {
+        this.snackBar.open(response.message, 'Close', { duration: 3000 });
+        this.selectedOrphanedVideos.clear();
+        await this.loadOrphanedVideos();
+      } else {
+        this.snackBar.open('Failed to delete selected entries', 'Close', { duration: 3000 });
+      }
+    } catch (error) {
+      console.error('Failed to delete selected entries:', error);
+      this.snackBar.open('Failed to delete selected entries', 'Close', { duration: 3000 });
+    }
+  }
+
+  /**
+   * Prune all orphaned videos
+   */
+  async pruneAllOrphans() {
+    if (this.orphanedVideos.length === 0) return;
+
+    const confirmed = confirm(
+      `Are you sure you want to permanently delete ${this.orphanedVideos.length} orphaned database entr${this.orphanedVideos.length !== 1 ? 'ies' : 'y'}?\n\n` +
+      'This will remove these entries from the database. This action cannot be undone.'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const url = await this.backendUrlService.getApiUrl('/database/prune');
+      const response = await this.http.post<{
+        success: boolean;
+        deletedCount: number;
+        message: string;
+      }>(url, {}).toPromise();
+
+      if (response?.success) {
+        this.snackBar.open(response.message, 'Close', { duration: 3000 });
+        this.orphanedVideos = [];
+        this.selectedOrphanedVideos.clear();
+      } else {
+        this.snackBar.open('Failed to prune orphaned entries', 'Close', { duration: 3000 });
+      }
+    } catch (error) {
+      console.error('Failed to prune orphaned entries:', error);
+      this.snackBar.open('Failed to prune orphaned entries', 'Close', { duration: 3000 });
+    }
   }
 }
 
