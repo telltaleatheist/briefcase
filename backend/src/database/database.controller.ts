@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
-import { BatchAnalysisService } from './batch-analysis.service';
+import { AnalysisService } from '../analysis/analysis.service';
 import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 
@@ -27,7 +27,7 @@ export class DatabaseController {
     private readonly databaseService: DatabaseService,
     private readonly fileScannerService: FileScannerService,
     private readonly migrationService: MigrationService,
-    private readonly batchAnalysisService: BatchAnalysisService,
+    private readonly analysisService: AnalysisService,
     private readonly libraryManagerService: LibraryManagerService,
     private readonly ffmpegService: FfmpegService,
   ) {}
@@ -921,69 +921,73 @@ export class DatabaseController {
     },
   ) {
     this.logger.log(`Starting batch ${options?.transcribeOnly ? 'transcription' : 'analysis'}`);
-    const jobId = await this.batchAnalysisService.startBatchAnalysis(options);
+    const result = await this.analysisService.startBatchAnalysis(options || {});
     return {
       success: true,
-      jobId,
+      batchId: result.batchId,
+      jobIds: result.jobIds,
+      totalJobs: result.jobIds.length,
       message: options?.transcribeOnly ? 'Batch transcription started' : 'Batch analysis started',
     };
   }
 
   /**
    * GET /api/database/batch/progress
-   * Get current batch analysis progress
+   * Get batch analysis progress for specific job IDs
    */
   @Get('batch/progress')
-  getBatchProgress() {
-    const progress = this.batchAnalysisService.getBatchProgress();
-    if (!progress) {
+  getBatchProgress(@Query('jobIds') jobIds?: string) {
+    if (!jobIds) {
       return {
         running: false,
-        message: 'No batch job currently running',
+        message: 'No batch job IDs provided',
       };
     }
+
+    const jobIdArray = jobIds.split(',');
+    const progress = this.analysisService.getBatchProgress(jobIdArray);
+
     return {
-      running: true,
+      running: progress.processing > 0 || progress.pending > 0,
       ...progress,
     };
   }
 
   /**
    * POST /api/database/batch/pause
-   * Pause the current batch analysis
+   * Pause the current batch analysis (deprecated - kept for compatibility)
    */
   @Post('batch/pause')
   pauseBatch() {
-    const success = this.batchAnalysisService.pauseBatch();
+    // This functionality is deprecated with the new queue system
+    // Jobs are automatically managed by the queue
     return {
-      success,
-      message: success ? 'Batch paused' : 'No running batch to pause',
+      success: false,
+      message: 'Batch pause/resume is no longer supported with the new queue system',
     };
   }
 
   /**
    * POST /api/database/batch/resume
-   * Resume a paused batch analysis
+   * Resume a paused batch analysis (deprecated - kept for compatibility)
    */
   @Post('batch/resume')
   async resumeBatch() {
-    const success = await this.batchAnalysisService.resumeBatch();
     return {
-      success,
-      message: success ? 'Batch resumed' : 'No paused batch to resume',
+      success: false,
+      message: 'Batch pause/resume is no longer supported with the new queue system',
     };
   }
 
   /**
    * POST /api/database/batch/stop
-   * Stop the current batch analysis
+   * Stop the current batch analysis (deprecated - kept for compatibility)
    */
   @Post('batch/stop')
   stopBatch() {
-    const success = this.batchAnalysisService.stopBatch();
     return {
-      success,
-      message: success ? 'Batch stopped' : 'No running batch to stop',
+      success: false,
+      message: 'Batch stop is no longer supported with the new queue system',
     };
   }
 

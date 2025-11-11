@@ -544,6 +544,10 @@ export class BatchAnalysisService implements OnModuleInit {
         const overviewMatch = analysisContent.match(/\*\*VIDEO OVERVIEW\*\*\s*\n\n([\s\S]*?)\n\n-{3,}/);
         if (overviewMatch && overviewMatch[1]) {
           summary = overviewMatch[1].trim();
+          this.logger.log(`[AI Description] Extracted summary for video ${videoId}: ${summary.substring(0, 100)}...`);
+        } else {
+          this.logger.warn(`[AI Description] Failed to extract summary from analysis for video ${videoId}`);
+          this.logger.debug(`[AI Description] Analysis content preview: ${analysisContent.substring(0, 500)}`);
         }
 
         // Store new analysis

@@ -714,9 +714,14 @@ export class AnalysisService {
         }
 
         // Save AI description to video if available
+        this.logger.log(`[AI Description Debug] analysisResult exists: ${!!analysisResult}`);
+        this.logger.log(`[AI Description Debug] analysisResult.description exists: ${!!(analysisResult && analysisResult.description)}`);
         if (analysisResult && analysisResult.description) {
+          this.logger.log(`[AI Description Debug] Description value: ${analysisResult.description.substring(0, 100)}...`);
           this.logger.log(`Saving AI description for video ${videoId}`);
           this.databaseService.updateVideoDescription(videoId, analysisResult.description);
+        } else {
+          this.logger.warn(`[AI Description Debug] No description in analysisResult for video ${videoId}. Keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
         }
 
         // Save tags (people and topics) if available
@@ -992,5 +997,172 @@ export class AnalysisService {
       jobId,
       ...updates,
     });
+  }
+
+  /**
+   * Start batch analysis for multiple videos
+   * Returns a batch ID that can be used to track overall progress
+   */
+  async startBatchAnalysis(options: {
+    videoIds?: string[]; // Specific video IDs to process
+    aiModel?: string;
+    aiProvider?: 'ollama' | 'claude' | 'openai';
+    whisperModel?: string;
+    ollamaEndpoint?: string;
+    transcribeOnly?: boolean;
+    forceReanalyze?: boolean;
+    claudeApiKey?: string;
+    openaiApiKey?: string;
+    limit?: number; // Process only first N videos (for testing)
+  }): Promise<{ batchId: string; jobIds: string[] }> {
+    const batchId = uuidv4();
+
+    // Get config
+    const config = await this.configService.getConfig();
+    const transcribeOnly = options?.transcribeOnly || false;
+    const forceReanalyze = options?.forceReanalyze || false;
+    const aiModel = options?.aiModel || config.aiModel || 'qwen2.5:7b';
+    const aiProvider = options?.aiProvider || 'ollama';
+    const whisperModel = options?.whisperModel || 'base';
+    const ollamaEndpoint = options?.ollamaEndpoint || config.ollamaEndpoint || 'http://localhost:11434';
+    const apiKey = aiProvider === 'claude' ? options?.claudeApiKey : aiProvider === 'openai' ? options?.openaiApiKey : undefined;
+
+    // Get videos to process
+    let videosToProcess: Array<{ id: string; filename: string; current_path: string }>;
+
+    if (options?.videoIds && options.videoIds.length > 0) {
+      // Process specific videos by ID
+      const dbVideos = options.videoIds
+        .map(id => this.databaseService.getVideoById(id))
+        .filter(video => video !== null);
+
+      if (dbVideos.length === 0) {
+        throw new Error('None of the specified videos were found in the database');
+      }
+
+      videosToProcess = dbVideos.map(video => ({
+        id: video.id as string,
+        filename: video.filename as string,
+        current_path: video.current_path as string,
+      }));
+    } else {
+      // Get all videos that need analysis
+      const videosNeedingAnalysis = this.fileScannerService.getNeedsAnalysis();
+
+      // Apply limit if specified
+      videosToProcess = options?.limit
+        ? videosNeedingAnalysis.slice(0, options.limit)
+        : videosNeedingAnalysis;
+
+      if (videosToProcess.length === 0) {
+        throw new Error('No videos need analysis');
+      }
+    }
+
+    this.logger.log(
+      `Starting batch ${transcribeOnly ? 'transcription' : 'analysis'} ${batchId} for ${videosToProcess.length} videos`
+    );
+
+    // Submit all videos to the queue
+    const jobIds: string[] = [];
+
+    for (const video of videosToProcess) {
+      try {
+        // Check if transcript and analysis already exist
+        const existingTranscript = this.databaseService.getTranscript(video.id);
+        const existingAnalysis = this.databaseService.getAnalysis(video.id);
+        const hasTranscript = !!existingTranscript;
+        const hasAnalysis = !!existingAnalysis;
+
+        // Determine mode
+        let mode: 'full' | 'transcribe-only' | 'analysis-only';
+
+        if (transcribeOnly) {
+          if (hasTranscript) {
+            this.logger.log(`Transcript already exists for ${video.filename}, skipping`);
+            continue;
+          }
+          mode = 'transcribe-only';
+        } else {
+          if (hasAnalysis && !forceReanalyze) {
+            this.logger.log(`Analysis already exists for ${video.filename}, skipping`);
+            continue;
+          }
+
+          if (hasTranscript) {
+            mode = 'analysis-only';
+          } else {
+            mode = 'full';
+          }
+        }
+
+        const request: AnalysisRequest = {
+          input: video.current_path,
+          inputType: 'file',
+          mode: mode as any,
+          aiModel,
+          aiProvider,
+          apiKey,
+          whisperModel,
+          ollamaEndpoint,
+          customReportName: `${video.id}.txt`,
+          existingTranscriptText: mode === 'analysis-only' ? (existingTranscript?.plain_text as string) : undefined,
+          existingTranscriptSrt: mode === 'analysis-only' ? (existingTranscript?.srt_format as string) : undefined,
+          videoId: video.id,
+        };
+
+        const jobId = await this.startAnalysis(request);
+        jobIds.push(jobId);
+
+      } catch (error) {
+        this.logger.error(`Failed to queue video ${video.filename}: ${(error as Error).message}`);
+      }
+    }
+
+    this.logger.log(`Batch ${batchId}: Queued ${jobIds.length} videos for processing`);
+
+    // Emit batch started event
+    this.eventEmitter.emit('batch.started', {
+      batchId,
+      totalJobs: jobIds.length,
+      jobIds,
+    });
+
+    return { batchId, jobIds };
+  }
+
+  /**
+   * Get batch progress by checking status of all jobs in the batch
+   */
+  getBatchProgress(jobIds: string[]): {
+    total: number;
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    progress: number;
+  } {
+    const stats = {
+      total: jobIds.length,
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+      progress: 0,
+    };
+
+    for (const jobId of jobIds) {
+      const job = this.jobs.get(jobId);
+      if (!job) continue;
+
+      if (job.status === 'pending') stats.pending++;
+      else if (job.status === 'completed') stats.completed++;
+      else if (job.status === 'failed') stats.failed++;
+      else stats.processing++;
+    }
+
+    stats.progress = stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0;
+
+    return stats;
   }
 }

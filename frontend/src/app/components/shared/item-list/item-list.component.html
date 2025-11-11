@@ -1,0 +1,67 @@
+<div class="item-list-container" #listContainer tabindex="0">
+  <!-- Empty State -->
+  <div *ngIf="isEmpty" class="empty-state">
+    <mat-icon class="empty-icon">{{ emptyIcon }}</mat-icon>
+    <p class="empty-message">{{ emptyMessage }}</p>
+  </div>
+
+  <!-- Item Groups -->
+  <div *ngIf="!isEmpty" class="item-groups">
+    <div *ngFor="let group of groupedItems" class="item-group">
+      <!-- Group Header (only show if grouping is enabled) -->
+      <div *ngIf="groupConfig?.enabled"
+           class="group-header"
+           [class.selected]="isGroupSelected(group.id)"
+           (click)="toggleGroup(group.id)"
+           (click)="handleGroupClick(group, $event)">
+        <mat-icon class="collapse-icon">
+          {{ isGroupCollapsed(group.id) ? 'chevron_right' : 'expand_more' }}
+        </mat-icon>
+        <span class="group-label">{{ group.label }}</span>
+        <span class="group-count">({{ group.items.length }})</span>
+      </div>
+
+      <!-- Items List -->
+      <div *ngIf="!isGroupCollapsed(group.id)" class="items-list">
+        <div
+          *ngFor="let item of group.items; let i = index"
+          [id]="'item-' + item.id"
+          class="item-card"
+          [class.selected]="isItemSelected(item.id)"
+          [class.highlighted]="isItemHighlighted(item.id)"
+          [class.selection-edge-top]="isSelectionEdgeTop(group.items, i)"
+          [class.selection-edge-bottom]="isSelectionEdgeBottom(group.items, i)"
+          (click)="handleItemClick(item, $event)"
+          (dblclick)="handleItemDoubleClick(item)"
+          (contextmenu)="handleContextMenu($event, item)">
+
+          <!-- Status Indicator -->
+          <div *ngIf="getStatus(item)"
+               class="status-indicator"
+               [style.background-color]="getStatus(item)!.color"
+               [matTooltip]="getStatus(item)!.tooltip || ''">
+          </div>
+
+          <!-- Icon -->
+          <mat-icon class="item-icon">{{ getIcon(item) }}</mat-icon>
+
+          <!-- Content -->
+          <div class="item-content">
+            <!-- Badge -->
+            <span *ngIf="getBadge(item)" class="item-badge">
+              {{ getBadge(item) }}
+            </span>
+
+            <!-- Primary Text -->
+            <div class="item-primary">{{ getPrimaryText(item) }}</div>
+
+            <!-- Secondary Text -->
+            <div *ngIf="getSecondaryText(item)" class="item-secondary">
+              {{ getSecondaryText(item) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

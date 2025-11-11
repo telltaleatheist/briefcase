@@ -103,40 +103,28 @@
 
   <!-- Library View -->
   <div *ngIf="pageMode === 'library'">
-    <!-- Standalone Search Bar -->
-    <div class="search-bar-standalone">
-      <mat-icon class="search-icon">search</mat-icon>
-      <input
-        class="standalone-search-input"
-        type="text"
-        [(ngModel)]="searchQuery"
-        (ngModelChange)="onSearchChange()"
-        (keydown)="onSearchInputKeyDown($event)"
-        placeholder="Search videos..."
-        [matTooltip]="searchFiltersExpanded ? '' : 'Expand filters below for advanced search options'">
-      <button mat-icon-button
-              class="clear-search-btn"
-              *ngIf="searchQuery || selectedTags.length > 0"
-              (click)="clearSearch()"
-              matTooltip="Clear search">
-        <mat-icon>clear</mat-icon>
-      </button>
-      <button mat-icon-button
-              class="expand-filters-btn"
-              (click)="searchFiltersExpanded = !searchFiltersExpanded"
-              [matTooltip]="searchFiltersExpanded ? 'Hide filters' : 'Show filters'">
-        <mat-icon>{{ searchFiltersExpanded ? 'expand_less' : 'expand_more' }}</mat-icon>
-      </button>
-      <span *ngIf="selectedTags.length > 0" class="active-indicator">{{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }}</span>
-    </div>
-
     <!-- Search Filters Accordion -->
     <mat-accordion class="search-filters-accordion">
       <mat-expansion-panel [expanded]="searchFiltersExpanded" (opened)="searchFiltersExpanded = true" (closed)="searchFiltersExpanded = false">
         <mat-expansion-panel-header>
-          <mat-panel-title>
-            <mat-icon>filter_list</mat-icon>
-            <span>Search Filters & Sorting</span>
+          <mat-panel-title class="search-in-header">
+            <mat-icon class="search-icon">search</mat-icon>
+            <input
+              class="header-search-input"
+              type="text"
+              [(ngModel)]="searchQuery"
+              (ngModelChange)="onSearchChange()"
+              (click)="searchFiltersExpanded = true; $event.stopPropagation()"
+              placeholder="Search videos..."
+              [matTooltip]="searchQuery || selectedTags.length > 0 ? '' : 'Click to expand filters and sorting options'">
+            <button mat-icon-button
+                    class="clear-search-btn"
+                    *ngIf="searchQuery || selectedTags.length > 0"
+                    (click)="clearSearch(); $event.stopPropagation()"
+                    matTooltip="Clear search">
+              <mat-icon>clear</mat-icon>
+            </button>
+            <span *ngIf="selectedTags.length > 0" class="active-indicator">{{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }}</span>
           </mat-panel-title>
         </mat-expansion-panel-header>
 
@@ -360,15 +348,132 @@
     [statusMapper]="getVideoStatusMapper"
     (itemClick)="onListItemClick($event)"
     (itemDoubleClick)="onListItemDoubleClick($event)"
-    (itemsSelected)="onListItemsSelected($event)"
-    (itemsDeselected)="onListItemsDeselected($event)"
-    (itemHighlighted)="onListItemHighlighted($event)"
     (spaceAction)="onListSpaceAction($event)"
     (deleteAction)="onListDeleteAction($event)"
-    (contextMenu)="onListContextMenu($event)"
     (contextMenuAction)="onListContextMenuAction($event)">
   </app-item-list>
 
+  <!-- OLD VIDEO LIST (commented out for reference) -->
+  <!--
+  <div *ngIf="filteredVideos.length > 0" class="video-list-container" (click)="onListContainerClick($event)">
+    <div *ngFor="let group of groupedVideos" class="week-group">
+      <div class="week-header"
+           [class.selected]="isWeekSelected(group.week)"
+           (click)="selectWeekSection(group.week, $event)">
+        <mat-icon class="collapse-icon" (click)="toggleWeek(group.week, $event); $event.stopPropagation()">
+          {{ isWeekCollapsed(group.week) ? 'chevron_right' : 'expand_more' }}
+        </mat-icon>
+        <span class="week-title">{{ group.week }}</span>
+        <span class="week-count">{{ group.videos.length }} video{{ group.videos.length !== 1 ? 's' : '' }}</span>
+      </div>
+      <div *ngIf="!isWeekCollapsed(group.week)" class="week-videos">
+        <div *ngFor="let video of group.videos" class="video-card-wrapper">
+      <div class="video-card"
+           [attr.data-video-id]="video.id"
+           [class.long-video]="isLongVideo(video)"
+           [class.missing-transcript]="!video.has_transcript && canAnalyzeMedia(video)"
+           [class.missing-analysis]="!video.has_analysis && canAnalyzeMedia(video)"
+           [class.missing-both]="!video.has_transcript && !video.has_analysis && canAnalyzeMedia(video)"
+           [class.highlighted]="isVideoHighlighted(video)"
+           [class.selected]="isVideoSelected(video)"
+           (click)="highlightVideo(video, $event)"
+           (dblclick)="onVideoDoubleClick(video, $event)"
+           (contextmenu)="onVideoContextMenu($event, video)">
+
+        <!-- Status Indicator (color-coded based on transcript/analysis status) -->
+        <div class="card-status-indicator"
+             [class.has-both]="video.has_transcript && video.has_analysis"
+             [class.has-transcript-only]="video.has_transcript && !video.has_analysis && canAnalyzeMedia(video)"
+             [class.has-analysis-only]="!video.has_transcript && video.has_analysis && canAnalyzeMedia(video)"
+             [class.has-neither]="!video.has_transcript && !video.has_analysis && canAnalyzeMedia(video)"
+             [matTooltip]="getStatusTooltip(video)">
+        </div>
+
+        <!-- Content (non-editable by click) -->
+        <div class="card-content">
+          <!-- Media type icon -->
+          <mat-icon class="media-type-icon" [matTooltip]="getMediaTypeLabel(video.media_type)">
+            {{ getMediaTypeIcon(video.media_type) }}
+          </mat-icon>
+
+          <!-- Date chip (with placeholder for alignment when empty) -->
+          <mat-chip *ngIf="parseFilename(video.filename).date && !editingVideo[video.id]?.date"
+                    class="date-chip">
+            {{ formatDateChip(parseFilename(video.filename).date) }}
+          </mat-chip>
+          <span *ngIf="!parseFilename(video.filename).date && !editingVideo[video.id]?.date"
+                class="date-placeholder"></span>
+          <input *ngIf="editingVideo[video.id]?.date"
+                 type="text"
+                 class="date-input"
+                 [(ngModel)]="editedValues[video.id].date"
+                 (keydown)="onEditKeydown(video, $event)"
+                 (blur)="onEditBlur(video, 'date')"
+                 (click)="$event.stopPropagation()"
+                 placeholder="yyyy-mm-dd"
+                 #dateInput>
+
+          <!-- Title (editable on click) -->
+          <span *ngIf="!editingVideo[video.id]?.title" class="video-title-text">
+            {{ parseFilename(video.filename).title }}
+          </span>
+          <input *ngIf="editingVideo[video.id]?.title"
+                 type="text"
+                 class="title-input"
+                 [(ngModel)]="editedValues[video.id].title"
+                 (keydown)="onEditKeydown(video, $event)"
+                 (blur)="onEditBlur(video, 'title')"
+                 (click)="$event.stopPropagation()"
+                 placeholder="Video title"
+                 #titleInput>
+
+          <!-- Extension (with placeholder for alignment when empty) -->
+          <span *ngIf="parseFilename(video.filename).extension && !editingVideo[video.id]?.extension"
+                class="extension-text">
+            .{{ parseFilename(video.filename).extension }}
+          </span>
+          <span *ngIf="!parseFilename(video.filename).extension && !editingVideo[video.id]?.extension"
+                class="extension-placeholder"></span>
+          <input *ngIf="editingVideo[video.id]?.extension"
+                 type="text"
+                 class="extension-input"
+                 [(ngModel)]="editedValues[video.id].extension"
+                 (keydown)="onEditKeydown(video, $event)"
+                 (blur)="onEditBlur(video, 'extension')"
+                 (click)="$event.stopPropagation()"
+                 placeholder="mp4"
+                 #extensionInput>
+
+          <mat-icon *ngIf="isLongVideo(video)" class="long-video-badge" matTooltip="Long video (> 10 minutes)">schedule</mat-icon>
+
+          <!-- Search match indicator -->
+          <mat-chip *ngIf="video.matchType && searchQuery" class="match-indicator" [matTooltip]="'Found in: ' + getMatchTypeLabel(video.matchType)">
+            <mat-icon>{{ getMatchTypeIcon(video.matchType) }}</mat-icon>
+            {{ getMatchTypeLabel(video.matchType) }}
+          </mat-chip>
+
+          <!-- Subtitle (duration info) on the right side -->
+          <span class="video-subtitle">
+            <span *ngIf="video.date_folder">{{ formatDate(video.date_folder) }}</span>
+            <span *ngIf="video.duration_seconds"> • {{ formatDuration(video.duration_seconds) }}</span>
+          </span>
+        </div>
+
+        <!-- Action buttons on the right -->
+        <div class="card-actions">
+          <button mat-icon-button (click)="onThreeDotsClick($event, video)" matTooltip="More actions">
+            <mat-icon>more_vert</mat-icon>
+          </button>
+          <button mat-icon-button color="warn" (click)="deleteVideo(video); $event.stopPropagation()" matTooltip="Delete video from library">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </div>
+      </div>
+    </div>
+      </div>
+    </div>
+  </div>
+  -->
 
   <!-- Context Menu (Right-click) - positioned at cursor -->
   <div style="visibility: hidden; position: fixed;"

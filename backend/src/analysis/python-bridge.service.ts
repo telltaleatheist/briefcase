@@ -278,7 +278,7 @@ export class PythonBridgeService {
     aiProvider?: 'ollama' | 'openai' | 'claude',
     apiKey?: string,
     videoTitle?: string,
-  ): Promise<{ sections_count: number; sections: any[] }> {
+  ): Promise<{ sections_count: number; sections: any[]; tags?: { people: string[]; topics: string[] }; description?: string }> {
     const command = {
       command: 'analyze',
       ai_provider: aiProvider || 'ollama',

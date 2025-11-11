@@ -688,6 +688,8 @@ export class DatabaseService {
   updateVideoDescription(id: string, description: string | null) {
     const db = this.ensureInitialized();
 
+    this.logger.log(`[AI Description] Updating description for video ${id}: ${description ? description.substring(0, 100) + '...' : 'null'}`);
+
     try {
       db.run(
         `UPDATE videos
@@ -697,11 +699,13 @@ export class DatabaseService {
       );
 
       this.saveDatabase();
+      this.logger.log(`[AI Description] Successfully updated description for video ${id}`);
     } catch (error: any) {
       // If column doesn't exist yet (pre-migration), just log and continue
       if (error.message && error.message.includes('no such column: ai_description')) {
         this.logger.warn('ai_description column does not exist yet - skipping description update');
       } else {
+        this.logger.error(`[AI Description] Failed to update description: ${error.message}`);
         throw error;
       }
     }

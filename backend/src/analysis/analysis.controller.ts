@@ -19,7 +19,6 @@ import { AnalysisService, AnalysisRequest } from './analysis.service';
 import { OllamaService } from './ollama.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { DatabaseService } from '../database/database.service';
-import { BatchAnalysisService } from '../database/batch-analysis.service';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -34,7 +33,6 @@ export class AnalysisController implements OnGatewayInit {
     private ollamaService: OllamaService,
     private configService: SharedConfigService,
     private databaseService: DatabaseService,
-    private batchAnalysisService: BatchAnalysisService,
   ) {}
 
   afterInit(server: Server) {
@@ -410,7 +408,7 @@ export class AnalysisController implements OnGatewayInit {
       const whisperModel = body.whisperModel || 'base';
 
       // Start batch analysis with transcribe-only mode for this single video
-      const jobId = await this.batchAnalysisService.startBatchAnalysis({
+      const result = await this.analysisService.startBatchAnalysis({
         videoIds: [body.videoId],
         transcribeOnly: true,
         whisperModel,
@@ -418,7 +416,8 @@ export class AnalysisController implements OnGatewayInit {
 
       return {
         success: true,
-        jobId,
+        batchId: result.batchId,
+        jobIds: result.jobIds,
         message: 'Transcription started',
       };
     } catch (error: any) {
@@ -471,7 +470,7 @@ export class AnalysisController implements OnGatewayInit {
       const forceReanalyze = body.forceReanalyze || false;
 
       // Start batch analysis for this single video
-      const jobId = await this.batchAnalysisService.startBatchAnalysis({
+      const result = await this.analysisService.startBatchAnalysis({
         videoIds: [body.videoId],
         aiModel,
         aiProvider,
@@ -483,7 +482,8 @@ export class AnalysisController implements OnGatewayInit {
 
       return {
         success: true,
-        jobId,
+        batchId: result.batchId,
+        jobIds: result.jobIds,
         message: 'Analysis started',
       };
     } catch (error: any) {

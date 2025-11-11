@@ -2,7 +2,6 @@ import { Module, Global, forwardRef } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
-import { BatchAnalysisService } from './batch-analysis.service';
 import { LibraryManagerService } from './library-manager.service';
 import { DatabaseController } from './database.controller';
 import { AnalysisModule } from '../analysis/analysis.module';
@@ -26,14 +25,12 @@ import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
     LibraryManagerService,
     FileScannerService,
     MigrationService,
-    BatchAnalysisService,
   ],
   exports: [
     DatabaseService,
     LibraryManagerService,
     FileScannerService,
     MigrationService,
-    BatchAnalysisService,
   ],
 })
 export class DatabaseModule {}

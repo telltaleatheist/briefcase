@@ -34,6 +34,16 @@ import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
+import { ItemListComponent } from '../shared/item-list/item-list.component';
+import {
+  ListItem,
+  ItemDisplayConfig,
+  GroupConfig,
+  KeyboardConfig,
+  SelectionMode,
+  ItemStatus,
+  ContextMenuAction
+} from '../shared/item-list/item-list.types';
 
 interface ClipLibrary {
   id: string;
@@ -75,7 +85,8 @@ interface UnimportedVideo {
     MatExpansionModule,
     MatSnackBarModule,
     ScrollingModule,
-    AngularSplitModule
+    AngularSplitModule,
+    ItemListComponent
   ],
   templateUrl: './library.component.html',
   styleUrls: ['./library.component.scss']
@@ -219,6 +230,50 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Type-ahead search state
   private typeAheadBuffer = '';
   private typeAheadTimer: any;
+
+  // Expose SelectionMode enum for template
+  SelectionMode = SelectionMode;
+
+  // ItemListComponent configuration
+  listDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'filename',
+    secondaryField: 'added_at',
+    iconField: 'media_type',
+    // badgeField removed - we show dates in secondary text instead
+    renderPrimary: (item) => this.getVideoDisplayName(item as any),
+    renderSecondary: (item) => this.formatVideoSecondaryText(item as any),
+    renderIcon: (item) => this.getMediaIcon(item as any)
+  };
+
+  listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
+    enabled: true,
+    groupBy: (video) => this.getWeekIdentifier(new Date(video.date_folder || video.added_at)),
+    groupLabel: (weekKey) => this.formatWeekLabel(weekKey),
+    sortDescending: true,
+    selectableGroups: true
+  };
+
+  listKeyboardConfig: KeyboardConfig = {
+    enableArrowNavigation: true,
+    enableTypeAhead: true,
+    typeAheadField: 'filename',
+    enableSpaceAction: true,
+    enableDelete: true,
+    enableSelectAll: true,
+    enableEscapeDeselect: true
+  };
+
+  listContextMenuActions: ContextMenuAction[] = [
+    { id: 'open', label: 'Open in Video Editor', icon: 'play_arrow' },
+    { id: 'openLocation', label: 'Open File Location', icon: 'folder_open' },
+    { id: 'copyPath', label: 'Copy File Path', icon: 'content_copy' },
+    { id: 'divider1', label: '', divider: true },
+    { id: 'analyze', label: 'Run Analysis', icon: 'analytics' },
+    { id: 'transcribe', label: 'Run Transcription', icon: 'transcribe' },
+    { id: 'divider2', label: '', divider: true },
+    { id: 'relink', label: 'Relink Video', icon: 'link' },
+    { id: 'delete', label: 'Delete', icon: 'delete' }
+  ];
 
   handleKeyDown(event: KeyboardEvent) {
     // Check if user is editing any video field - if so, disable all keyboard shortcuts
@@ -1533,6 +1588,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Handle keyboard events on the search input to prevent interference
+   * from global keyboard handlers
+   */
+  onSearchInputKeyDown(event: KeyboardEvent) {
+    // Stop all keyboard events from propagating up when the search input is focused
+    // This prevents video player shortcuts and other global handlers
+    // from interfering with typing in the search box
+    event.stopPropagation();
+  }
+
+  /**
    * Change sort criteria
    */
   changeSortBy(sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis') {
@@ -1671,9 +1737,224 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Format week label (e.g., "Week of Nov 4, 2025")
    */
-  private formatWeekLabel(weekStart: Date): string {
+  private formatWeekLabel(weekStart: string | Date): string {
+    const date = typeof weekStart === 'string' ? new Date(weekStart) : weekStart;
     const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
-    return `Week of ${weekStart.toLocaleDateString('en-US', options)}`;
+    return `Week of ${date.toLocaleDateString('en-US', options)}`;
+  }
+
+  /**
+   * Get display name for video (remove extension and clean up)
+   */
+  getVideoDisplayName(video: DatabaseVideo): string {
+    let name = video.filename;
+
+    // Remove extension if present
+    if (video.file_extension) {
+      name = name.replace(new RegExp(video.file_extension + '$'), '');
+    }
+
+    // Remove leading date patterns from display:
+    // - YYYY-MM-DD: "2025-11-02 - filename"
+    // - YYYY-MM-TT: "2025-11-T1" or "2025-11-T2" or "2025-11-T3" (trimester format)
+    // - YYYY-MM: "2025-11 filename"
+    // - YYYY: "2025 filename"
+    // Followed by optional separators: space, dash, underscore
+    name = name.replace(/^\d{4}(-\d{2}(-(\d{2}|T[123]))?)?[\s_-]*/, '');
+
+    return name;
+  }
+
+  /**
+   * Format secondary text for video (shows both content date and creation date)
+   */
+  formatVideoSecondaryText(video: DatabaseVideo): string {
+    const parts: string[] = [];
+
+    // Content date (from filename/date_folder) - when video was originally filmed
+    if (video.date_folder) {
+      const contentDate = new Date(video.date_folder);
+      parts.push(`Content: ${contentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
+    }
+
+    // Creation date (when file was created/downloaded) - when user got the video
+    if (video.created_at) {
+      const createdDate = new Date(video.created_at);
+      parts.push(`Created: ${createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
+    }
+
+    // Duration if available
+    if (video.duration_seconds) {
+      const hours = Math.floor(video.duration_seconds / 3600);
+      const mins = Math.floor((video.duration_seconds % 3600) / 60);
+      const secs = Math.floor(video.duration_seconds % 60);
+      if (hours > 0) {
+        parts.push(`${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
+      } else {
+        parts.push(`${mins}:${secs.toString().padStart(2, '0')}`);
+      }
+    }
+
+    return parts.join(' • ');
+  }
+
+  /**
+   * Get media icon based on type
+   */
+  getMediaIcon(video: DatabaseVideo): string {
+    switch (video.media_type) {
+      case 'video': return 'movie';
+      case 'audio': return 'audiotrack';
+      case 'document': return 'description';
+      case 'image': return 'image';
+      case 'webpage': return 'language';
+      default: return 'description';
+    }
+  }
+
+  /**
+   * Get status indicator for video
+   */
+  getVideoStatusMapper = (video: DatabaseVideo): ItemStatus | null => {
+    // Priority: missing both > missing analysis > missing transcript > has both
+    if (!video.has_transcript && !video.has_analysis) {
+      return { color: '#dc3545', tooltip: 'Missing transcript and analysis' }; // Red
+    }
+    if (!video.has_analysis) {
+      return { color: '#0dcaf0', tooltip: 'Missing analysis' }; // Blue
+    }
+    if (!video.has_transcript) {
+      return { color: '#a855f7', tooltip: 'Missing transcript' }; // Purple
+    }
+    if (video.duration_seconds && video.duration_seconds > 600) {
+      return { color: '#ff6600', tooltip: 'Long video (>10 min)' }; // Orange
+    }
+    return { color: '#198754', tooltip: 'Complete' }; // Green
+  };
+
+  /**
+   * Convert DatabaseVideo array to ListItem compatible array
+   */
+  get videosAsListItems(): (DatabaseVideo & ListItem)[] {
+    return this.filteredVideos as (DatabaseVideo & ListItem)[];
+  }
+
+  /**
+   * Handle ItemListComponent events
+   */
+  onListItemClick(video: DatabaseVideo) {
+    // Click handling is managed by ItemListComponent for selection
+    // For detail view, load video in preview
+    if (this.viewMode === 'detail') {
+      this.selectVideo(video);
+    } else if (this.viewMode === 'list' && this.isPreviewModalOpen) {
+      // If preview is open, clicking should load that video
+      this.loadPreviewVideo(video);
+    }
+  }
+
+  onListItemDoubleClick(video: DatabaseVideo) {
+    this.openVideoPlayer(video);
+  }
+
+  onListItemsSelected(videos: DatabaseVideo[]) {
+    // Add selected videos to the selection set
+    videos.forEach(video => this.selectedVideos.add(video.id));
+  }
+
+  onListItemsDeselected(videos: DatabaseVideo[]) {
+    // Remove deselected videos from the selection set
+    videos.forEach(video => this.selectedVideos.delete(video.id));
+  }
+
+  onListSpaceAction(video: DatabaseVideo | null) {
+    if (!video || this.viewMode !== 'list') return;
+
+    // If preview modal is already open
+    if (this.isPreviewModalOpen) {
+      // If same video, toggle play/pause
+      if (this.highlightedVideo?.id === video.id && this.previewVideoPlayer) {
+        const videoEl = this.previewVideoPlayer.nativeElement;
+        if (videoEl.paused) {
+          videoEl.play();
+        } else {
+          videoEl.pause();
+        }
+      }
+      // If different video, load the new video
+      else {
+        this.loadPreviewVideo(video);
+      }
+    }
+    // If preview modal is closed, open it with the selected video
+    else {
+      this.highlightedVideo = video; // Set the video BEFORE opening modal
+      this.openPreviewModal();
+    }
+  }
+
+  onListDeleteAction(videos: DatabaseVideo[]) {
+    this.deleteSelected();
+  }
+
+  onListItemHighlighted(video: DatabaseVideo | null) {
+    // Auto-load preview when navigating with arrow keys if preview is already open
+    if (video && this.isPreviewModalOpen && video.id !== this.highlightedVideo?.id) {
+      this.loadPreviewVideo(video);
+    }
+  }
+
+  onListContextMenu(data: { event: MouseEvent; item: DatabaseVideo }) {
+    // Prevent default and stop propagation
+    data.event.preventDefault();
+    data.event.stopPropagation();
+
+    // Set context menu position and video
+    this.contextMenuPosition = {
+      x: data.event.clientX,
+      y: data.event.clientY
+    };
+    this.contextMenuVideo = data.item;
+
+    // Open the Material menu with a slight delay to ensure it stays open
+    setTimeout(() => {
+      if (this.contextMenuTrigger) {
+        this.contextMenuTrigger.openMenu();
+      }
+    }, 0);
+  }
+
+  onListContextMenuAction(event: { action: string; items: DatabaseVideo[] }) {
+    switch (event.action) {
+      case 'open':
+        if (event.items.length > 0) {
+          this.openVideoPlayer(event.items[0]);
+        }
+        break;
+      case 'openLocation':
+        if (event.items.length > 0) {
+          this.openFileLocation(event.items[0]);
+        }
+        break;
+      case 'copyPath':
+        if (event.items.length > 0) {
+          this.copyFilename(event.items[0]);
+        }
+        break;
+      case 'analyze':
+        this.analyzeSelected();
+        break;
+      case 'transcribe':
+        this.analyzeSelected(); // Using analyzeSelected since transcribeSelected doesn't exist
+        break;
+      case 'relink':
+        // TODO: Implement single video relink
+        console.log('Relink not yet implemented for single video from list');
+        break;
+      case 'delete':
+        this.deleteSelected();
+        break;
+    }
   }
 
   /**
@@ -3562,6 +3843,26 @@ export class LibraryComponent implements OnInit, OnDestroy {
           });
         }
       }, 150);
+    }
+  }
+
+  /**
+   * Load a new video in the preview modal
+   */
+  loadPreviewVideo(video: DatabaseVideo) {
+    this.highlightedVideo = video;
+
+    // Wait for view to update, then auto-play if enabled
+    if (this.previewAutoPlayEnabled) {
+      setTimeout(() => {
+        const videoEl = this.previewVideoPlayer?.nativeElement;
+        if (videoEl) {
+          videoEl.load(); // Force reload of new video
+          videoEl.play().catch(err => {
+            console.error('Auto-play failed:', err);
+          });
+        }
+      }, 100);
     }
   }
 
