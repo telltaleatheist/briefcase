@@ -438,7 +438,9 @@
     [style.width.px]="previewPanelWidth"
     [style.height.px]="previewPanelHeight"
     [class.dragging]="isDraggingPreviewPanel"
-    [class.resizing]="isResizingPreviewPanel">
+    [class.resizing]="isResizingPreviewPanel"
+    tabindex="-1"
+    (keydown)="onPreviewPanelKeyDown($event)">
 
     <!-- Drag Handle Bar -->
     <div class="preview-panel-header" (mousedown)="startDragPreviewPanel($event)">

@@ -182,42 +182,48 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   /**
    * Check if item is at the top edge of a selection group
-   * (selected, but previous item is not selected)
+   * (selected or highlighted, but previous item is not selected/highlighted)
    */
   isSelectionEdgeTop(items: T[], index: number): boolean {
     const currentItem = items[index];
-    if (!this.selectedItems.has(currentItem.id)) {
+    // Item must be either selected OR highlighted
+    const isCurrentActive = this.selectedItems.has(currentItem.id) || this.highlightedItemId === currentItem.id;
+    if (!isCurrentActive) {
       return false;
     }
 
-    // First item in group is always a top edge if selected
+    // First item in group is always a top edge if active
     if (index === 0) {
       return true;
     }
 
-    // Check if previous item is not selected
+    // Check if previous item is not selected or highlighted
     const prevItem = items[index - 1];
-    return !this.selectedItems.has(prevItem.id);
+    const isPrevActive = this.selectedItems.has(prevItem.id) || this.highlightedItemId === prevItem.id;
+    return !isPrevActive;
   }
 
   /**
    * Check if item is at the bottom edge of a selection group
-   * (selected, but next item is not selected)
+   * (selected or highlighted, but next item is not selected/highlighted)
    */
   isSelectionEdgeBottom(items: T[], index: number): boolean {
     const currentItem = items[index];
-    if (!this.selectedItems.has(currentItem.id)) {
+    // Item must be either selected OR highlighted
+    const isCurrentActive = this.selectedItems.has(currentItem.id) || this.highlightedItemId === currentItem.id;
+    if (!isCurrentActive) {
       return false;
     }
 
-    // Last item in group is always a bottom edge if selected
+    // Last item in group is always a bottom edge if active
     if (index === items.length - 1) {
       return true;
     }
 
-    // Check if next item is not selected
+    // Check if next item is not selected or highlighted
     const nextItem = items[index + 1];
-    return !this.selectedItems.has(nextItem.id);
+    const isNextActive = this.selectedItems.has(nextItem.id) || this.highlightedItemId === nextItem.id;
+    return !isNextActive;
   }
 
   handleItemClick(item: T, event: MouseEvent) {
@@ -424,7 +430,16 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     if (this.keyboardConfig.enableArrowNavigation) {
       if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
         event.preventDefault();
-        this.navigateItems(event.code === 'ArrowUp' ? -1 : 1);
+        const direction = event.code === 'ArrowUp' ? -1 : 1;
+
+        // Shift+Arrow: Extend selection (like Finder)
+        if (event.shiftKey && this.selectionMode === SelectionMode.Multiple) {
+          this.navigateItemsWithShift(direction);
+        }
+        // Plain Arrow: Move highlight and clear selection (like Finder)
+        else {
+          this.navigateItems(direction);
+        }
         return;
       }
     }
@@ -464,6 +479,54 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     }
 
     const newItem = flatItems[currentIndex];
+
+    // Finder behavior: Arrow keys without modifiers clear selection and just highlight
+    const previouslySelected = Array.from(this.selectedItems);
+    this.selectedItems.clear();
+    this.highlightedItemId = newItem.id;
+
+    // Emit deselection event if items were previously selected
+    if (previouslySelected.length > 0) {
+      const deselected = this.items.filter(i => previouslySelected.includes(i.id));
+      if (deselected.length > 0) {
+        this.itemsDeselected.emit(deselected);
+      }
+    }
+
+    // Emit highlighted item changed event
+    this.itemHighlighted.emit(newItem);
+
+    // Scroll into view
+    this.scrollToItem(newItem.id);
+  }
+
+  /**
+   * Navigate items with Shift held (extend selection like Finder)
+   */
+  private navigateItemsWithShift(direction: number) {
+    const flatItems = this.getFlatItemList();
+    if (flatItems.length === 0) return;
+
+    let currentIndex = this.highlightedItemId
+      ? flatItems.findIndex(i => i.id === this.highlightedItemId)
+      : -1;
+
+    if (currentIndex === -1) {
+      currentIndex = direction > 0 ? 0 : flatItems.length - 1;
+    } else {
+      currentIndex += direction;
+      if (currentIndex < 0) currentIndex = 0;
+      if (currentIndex >= flatItems.length) currentIndex = flatItems.length - 1;
+    }
+
+    const newItem = flatItems[currentIndex];
+
+    // Add new item to selection
+    if (!this.selectedItems.has(newItem.id)) {
+      this.selectedItems.add(newItem.id);
+      this.itemsSelected.emit([newItem]);
+    }
+
     this.highlightedItemId = newItem.id;
 
     // Emit highlighted item changed event

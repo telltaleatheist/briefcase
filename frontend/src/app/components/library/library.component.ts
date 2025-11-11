@@ -330,10 +330,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Handle preview modal in list view
     if (this.viewMode === 'list' && this.isPreviewModalOpen) {
-      if (event.code === 'Space' && !isFocusedOnInput) {
-        event.preventDefault();
-        this.togglePreviewPlayPause();
-      } else if (event.code === 'Escape') {
+      // Note: Spacebar is now handled directly on the preview panel element to prevent
+      // conflicts with video controls. See onPreviewPanelSpacePress()
+      if (event.code === 'Escape') {
         event.preventDefault();
         this.closePreviewModal();
       } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
@@ -357,10 +356,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
         event.preventDefault();
         this.navigateHighlightedVideo(event.code === 'ArrowUp' ? -1 : 1);
       }
-      // Left/Right arrows expand/collapse sections with selected videos
+      // Left/Right arrows expand/collapse date accordion of highlighted video
       else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
         event.preventDefault();
-        this.toggleSelectedSections(event.code === 'ArrowRight');
+        this.toggleHighlightedSection(event.code === 'ArrowRight');
       }
       // Space opens preview modal
       else if (event.code === 'Space' && !isFocusedOnInput) {
@@ -1503,6 +1502,27 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Toggle expand/collapse for the date section of the currently highlighted video
+   * @param expand true to expand, false to collapse
+   */
+  toggleHighlightedSection(expand: boolean) {
+    if (!this.highlightedVideo) return;
+
+    // Find the week/date group that contains the highlighted video
+    const group = this.groupedVideos.find(g =>
+      g.videos.some(v => v.id === this.highlightedVideo!.id)
+    );
+
+    if (group) {
+      if (expand) {
+        this.collapsedWeeks.delete(group.week);
+      } else {
+        this.collapsedWeeks.add(group.week);
+      }
+    }
+  }
+
+  /**
    * Toggle expand/collapse for sections with selected videos
    * @param expand true to expand, false to collapse
    */
@@ -1916,12 +1936,23 @@ export class LibraryComponent implements OnInit, OnDestroy {
     };
     this.contextMenuVideo = data.item;
 
-    // Open the Material menu with a slight delay to ensure it stays open
-    setTimeout(() => {
-      if (this.contextMenuTrigger) {
-        this.contextMenuTrigger.openMenu();
-      }
-    }, 0);
+    // If menu is already open, close it first then reopen at new position
+    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+      this.contextMenuTrigger.closeMenu();
+      // Reopen after a short delay to allow closing animation
+      setTimeout(() => {
+        if (this.contextMenuTrigger) {
+          this.contextMenuTrigger.openMenu();
+        }
+      }, 50);
+    } else {
+      // Open the Material menu with a slight delay to ensure it stays open
+      setTimeout(() => {
+        if (this.contextMenuTrigger) {
+          this.contextMenuTrigger.openMenu();
+        }
+      }, 0);
+    }
   }
 
   onListContextMenuAction(event: { action: string; items: DatabaseVideo[] }) {
@@ -3531,12 +3562,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
-    // If menu is already open, close it
-    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
-      this.contextMenuTrigger.closeMenu();
-      return;
-    }
-
     // If right-clicked video is not selected, add it to selection
     if (!this.selectedVideos.has(video.id)) {
       this.selectedVideos.add(video.id);
@@ -3553,9 +3578,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
       y: event.clientY
     };
 
-    // Open the context menu
-    if (this.contextMenuTrigger) {
-      this.contextMenuTrigger.openMenu();
+    // If menu is already open, close it first then reopen at new position
+    if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+      this.contextMenuTrigger.closeMenu();
+      // Reopen after a short delay to allow closing animation
+      setTimeout(() => {
+        if (this.contextMenuTrigger) {
+          this.contextMenuTrigger.openMenu();
+        }
+      }, 50);
+    } else {
+      // Open the context menu
+      if (this.contextMenuTrigger) {
+        this.contextMenuTrigger.openMenu();
+      }
     }
   }
 
@@ -3880,6 +3916,18 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Handle keydown on preview panel (capture spacebar before video element gets it)
+   */
+  onPreviewPanelKeyDown(event: KeyboardEvent) {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      this.togglePreviewPlayPause();
+    }
+  }
+
+  /**
    * Toggle play/pause in preview modal
    */
   togglePreviewPlayPause() {
@@ -3906,25 +3954,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     const newIndex = currentIndex + direction;
     if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
-      // Stop current video
+      // Stop and reset current video
       const videoEl = this.previewVideoPlayer?.nativeElement;
-      if (videoEl && !videoEl.paused) {
+      if (videoEl) {
         videoEl.pause();
+        videoEl.currentTime = 0;
       }
 
-      // Update highlighted video
+      // Update highlighted video (this triggers Angular to update the [src] binding)
       this.highlightedVideo = this.filteredVideos[newIndex];
 
-      // Auto-play new video if enabled
+      // Wait for the new video element to load and then auto-play if enabled
       if (this.previewAutoPlayEnabled) {
+        // Use a longer timeout to ensure Angular has updated the DOM and the new src is loaded
         setTimeout(() => {
           const newVideoEl = this.previewVideoPlayer?.nativeElement;
           if (newVideoEl) {
-            newVideoEl.play().catch(err => {
-              console.error('Auto-play failed:', err);
-            });
+            // Load the new video and play when ready
+            newVideoEl.load();
+            const playPromise = newVideoEl.play();
+            if (playPromise) {
+              playPromise.catch(err => {
+                console.error('Auto-play failed:', err);
+              });
+            }
           }
-        }, 150);
+        }, 200);
       }
     }
   }
