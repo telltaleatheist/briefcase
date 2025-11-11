@@ -34,6 +34,8 @@ export class SavedLinksComponent implements OnInit, OnDestroy {
   savedLinks: SavedLink[] = [];
   isLoading = true;
   filterStatus: string | undefined = undefined;
+  isDragging = false;
+  private dragCounter = 0;
 
   private subscriptions: Subscription[] = [];
 
@@ -220,5 +222,121 @@ export class SavedLinksComponent implements OnInit, OnDestroy {
 
   get failedCount(): number {
     return this.savedLinks.filter(l => l.status === 'failed').length;
+  }
+
+  /**
+   * Handle drag over event - show drop zone
+   */
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!this.isDragging) {
+      this.dragCounter++;
+    }
+    this.isDragging = true;
+  }
+
+  /**
+   * Handle drag leave event - hide drop zone
+   */
+  onDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.dragCounter--;
+    if (this.dragCounter === 0) {
+      this.isDragging = false;
+    }
+  }
+
+  /**
+   * Handle drop event - extract URL and add to saved links
+   */
+  async onDrop(event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.isDragging = false;
+    this.dragCounter = 0;
+
+    // Try to get URL from dropped data
+    const url = this.extractUrlFromDragEvent(event);
+
+    if (!url) {
+      this.notificationService.toastOnly(
+        'warning',
+        'No URL Found',
+        'Please drop a valid video URL'
+      );
+      return;
+    }
+
+    // Validate URL format
+    if (!this.isValidUrl(url)) {
+      this.notificationService.toastOnly(
+        'error',
+        'Invalid URL',
+        'The dropped text does not appear to be a valid URL'
+      );
+      return;
+    }
+
+    // Add the link via API (backend will automatically start download)
+    this.apiService.addSavedLink({ url }).subscribe({
+      next: (savedLink) => {
+        this.notificationService.toastOnly(
+          'success',
+          'Download Started',
+          `Started downloading: ${savedLink.title || url}`
+        );
+      },
+      error: (error) => {
+        console.error('Error adding saved link:', error);
+        this.notificationService.toastOnly(
+          'error',
+          'Download Failed',
+          error.error?.message || 'Failed to start download'
+        );
+      }
+    });
+  }
+
+  /**
+   * Extract URL from drag event data
+   */
+  private extractUrlFromDragEvent(event: DragEvent): string | null {
+    // Try to get URL from different data types
+    const dataTransfer = event.dataTransfer;
+    if (!dataTransfer) return null;
+
+    // Try text/uri-list first (standard for URLs)
+    let url = dataTransfer.getData('text/uri-list');
+    if (url) return url.trim();
+
+    // Try text/plain
+    url = dataTransfer.getData('text/plain');
+    if (url) return url.trim();
+
+    // Try text/html and extract href
+    const html = dataTransfer.getData('text/html');
+    if (html) {
+      const match = html.match(/href=["']([^"']+)["']/);
+      if (match) return match[1];
+    }
+
+    return null;
+  }
+
+  /**
+   * Validate if string is a valid URL
+   */
+  private isValidUrl(urlString: string): boolean {
+    try {
+      const url = new URL(urlString);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
   }
 }

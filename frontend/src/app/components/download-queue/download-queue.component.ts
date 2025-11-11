@@ -314,7 +314,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   removePendingJob(jobId: string): void {
     this.analysisQueueService.removePendingJob(jobId);
-    this.notificationService.toastOnly('success', 'Job Removed', 'Removed from pending queue');
+    // Notification removed - user is already in the queue panel
 
     this.ngZone.run(() => {
       this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
@@ -325,7 +325,14 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   clearQueue(): void {
     this.analysisQueueService.clearPendingJobs();
-    this.notificationService.toastOnly('success', 'Queue Cleared', 'All pending jobs cleared');
+    // Notification removed - user is already in the queue panel
+  }
+
+  clearAll(): void {
+    // Clear both pending and completed jobs
+    this.analysisQueueService.clearPendingJobs();
+    this.downloadProgressService.clearCompletedJobs();
+    // Notification removed - user is already in the queue panel
   }
 
   togglePendingJobExpansion(jobId: string): void {

@@ -135,6 +135,11 @@ export class VideoAnalysisDialogComponent implements OnInit {
    * Check if videos are already in library (not new imports)
    */
   isFromLibrary(): boolean {
+    // If mode is 'import', these are NEW videos being imported, not from library
+    if (this.data.mode === 'import') {
+      return false;
+    }
+    // Otherwise, if we have selectedVideos, they're from the library
     return !!(this.data.selectedVideos && this.data.selectedVideos.length > 0);
   }
 
@@ -190,6 +195,40 @@ export class VideoAnalysisDialogComponent implements OnInit {
     // Auto-save settings
     await this.saveSettings();
 
+    // Handle import-only mode - directly import videos without analysis queue
+    if (formValue.mode === 'import-only') {
+      if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
+        try {
+          const videoPaths = this.data.selectedVideos.map(v => v.current_path);
+          const importUrl = await this.backendUrlService.getApiUrl('/database/import');
+
+          const response = await fetch(importUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ videoPaths })
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            this.notificationService.success(
+              'Videos Imported',
+              `Successfully imported ${result.importedCount} video${result.importedCount !== 1 ? 's' : ''}`
+            );
+          } else {
+            this.notificationService.error('Import Failed', result.error || 'Failed to import videos');
+          }
+        } catch (error: any) {
+          console.error('Error importing videos:', error);
+          this.notificationService.error('Import Failed', error.message || 'Failed to import videos');
+        }
+      }
+
+      this.dialogRef.close({ success: true });
+      return;
+    }
+
+    // For transcribe/analyze modes, add to analysis queue
     // If we have selected videos from library, add each one
     if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
       for (const video of this.data.selectedVideos) {

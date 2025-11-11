@@ -355,7 +355,7 @@ export class ManageLibrariesDialogComponent implements OnInit {
     try {
       // Use Electron's dialog to select folder
       const result = await (window as any).electron.showOpenDialog({
-        properties: ['openDirectory'],
+        properties: ['openDirectory', 'createDirectory'],
         title: 'Select Clips Folder',
         message: 'Choose where your video clips will be stored'
       });

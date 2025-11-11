@@ -1,4 +1,17 @@
-<div class="saved-links-container">
+<div class="saved-links-container"
+     (dragover)="onDragOver($event)"
+     (dragleave)="onDragLeave($event)"
+     (drop)="onDrop($event)"
+     [class.dragging]="isDragging">
+  <!-- Drag Overlay -->
+  <div class="drag-overlay" *ngIf="isDragging">
+    <div class="drag-content">
+      <mat-icon>link</mat-icon>
+      <h3>Drop URL here to download</h3>
+      <p>The video will be automatically downloaded and added to your library</p>
+    </div>
+  </div>
+
   <div class="header">
     <h2>Saved for Later</h2>
     <div class="stats">

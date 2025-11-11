@@ -46,7 +46,17 @@
               (click)="clearQueue()"
               class="clear-queue-btn">
         <mat-icon>clear_all</mat-icon>
-        Clear
+        Clear Pending
+      </button>
+    </div>
+
+    <!-- Clear All Button (show when there are any jobs) -->
+    <div class="queue-actions" *ngIf="pendingJobs.length > 0 || processingJobs.length > 0">
+      <button mat-stroked-button
+              (click)="clearAll()"
+              class="clear-all-btn">
+        <mat-icon>delete_sweep</mat-icon>
+        Clear All
       </button>
     </div>
 

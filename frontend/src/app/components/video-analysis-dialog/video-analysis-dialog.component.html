@@ -143,8 +143,8 @@
               <mat-icon>download</mat-icon>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Import</h4>
-              <p class="card-description">Add to library without processing</p>
+              <h4 class="card-title">Import Only</h4>
+              <p class="card-description">No transcription or AI analysis</p>
             </div>
             <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'import-only'">
               <mat-icon>check_circle</mat-icon>
@@ -159,8 +159,8 @@
               <mat-icon>subtitles</mat-icon>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Transcribe</h4>
-              <p class="card-description">Import + generate transcript using Whisper</p>
+              <h4 class="card-title">Transcribe Only</h4>
+              <p class="card-description">Generate transcript using Whisper</p>
             </div>
             <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'transcribe-only'">
               <mat-icon>check_circle</mat-icon>
@@ -175,8 +175,8 @@
               <mat-icon>psychology</mat-icon>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Analyze</h4>
-              <p class="card-description">Import + transcript + AI analysis</p>
+              <h4 class="card-title">Transcribe + Analyze</h4>
+              <p class="card-description">Full AI analysis with transcript</p>
             </div>
             <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'full'">
               <mat-icon>check_circle</mat-icon>

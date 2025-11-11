@@ -2200,19 +2200,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Delete a video from the library
    */
   async deleteVideo(video: DatabaseVideo) {
-    // Confirm deletion
-    const confirmed = await this.confirmDeletion(video);
-    if (!confirmed) {
+    // Open delete options dialog
+    const dialogRef = this.dialog.open(DeleteConfirmationDialog, {
+      width: '500px',
+      data: {
+        count: 1,
+        videoName: video.filename
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (!result || result.action === 'cancel') {
       return;
     }
 
+    const deleteFiles = result.action === 'delete-all';
+
     try {
-      await this.databaseLibraryService.deleteVideo(video.id);
+      await this.databaseLibraryService.deleteVideo(video.id, deleteFiles);
 
       this.notificationService.toastOnly(
         'success',
-        'Video Deleted',
-        `${video.filename} has been removed from the library`
+        deleteFiles ? 'Video Deleted' : 'Video Removed',
+        deleteFiles
+          ? `${video.filename} has been permanently deleted`
+          : `${video.filename} has been removed from the library`
       );
 
       // Clear cache and reload
@@ -2302,25 +2315,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Confirm video deletion with a dialog
-   */
-  private async confirmDeletion(video: DatabaseVideo): Promise<boolean> {
-    return new Promise((resolve) => {
-      // Use native confirm for now - can be replaced with Material dialog later
-      const result = confirm(
-        `Are you sure you want to delete "${video.filename}" from the library?\n\n` +
-        `This will permanently delete:\n` +
-        `- Video file from library folder\n` +
-        `- Video metadata\n` +
-        `- Transcript (if exists)\n` +
-        `- Analysis (if exists)\n` +
-        `- All tags\n\n` +
-        `THIS CANNOT BE UNDONE!`
-      );
-      resolve(result);
-    });
-  }
 
   /**
    * Handle drag over event
