@@ -286,11 +286,30 @@ export class VideoAnalysisDialogComponent implements OnInit {
 
   async browseFile(): Promise<void> {
     try {
-      const result = await (window as any).electron?.selectVideoFile();
+      const result = await (window as any).electron?.showOpenDialog({
+        properties: ['openFile', 'openDirectory'],
+        title: 'Select Video File or Folder',
+        filters: [
+          { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'flv', 'wmv', 'mpg', 'mpeg'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+
       if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
-        const filePath = result.filePaths[0];
-        this.analysisForm.patchValue({ input: filePath });
-        this.notificationService.toastOnly('success', 'File Selected', filePath);
+        const selectedPath = result.filePaths[0];
+
+        // Check if it's a directory
+        const electron = (window as any).electron;
+        const isDir = await electron?.isDirectory(selectedPath);
+
+        if (isDir) {
+          // Handle folder selection - scan for videos
+          await this.handleFolderSelection(selectedPath);
+        } else {
+          // Handle single file selection
+          this.analysisForm.patchValue({ input: selectedPath });
+          this.notificationService.toastOnly('success', 'File Selected', selectedPath);
+        }
       }
     } catch (error) {
       console.error('Error selecting file:', error);
@@ -327,18 +346,28 @@ export class VideoAnalysisDialogComponent implements OnInit {
     }
 
     const file = files[0];
-    const validExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
-    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-
-    if (!validExtensions.includes(ext)) {
-      this.notificationService.error('Invalid File Type', 'Please drop a video file (.mp4, .mov, .avi, etc.)');
-      return;
-    }
+    const filePath = electron.getFilePathFromFile(file);
 
     try {
-      const filePath = electron.getFilePathFromFile(file);
-      this.analysisForm.patchValue({ input: filePath });
-      this.notificationService.toastOnly('success', 'File Selected', file.name);
+      // Check if it's a directory
+      const isDir = await electron?.isDirectory(filePath);
+
+      if (isDir) {
+        // Handle folder drop - scan for videos
+        await this.handleFolderSelection(filePath);
+      } else {
+        // Handle single file drop
+        const validExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
+        const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+
+        if (!validExtensions.includes(ext)) {
+          this.notificationService.error('Invalid File Type', 'Please drop a video file or folder');
+          return;
+        }
+
+        this.analysisForm.patchValue({ input: filePath });
+        this.notificationService.toastOnly('success', 'File Selected', file.name);
+      }
     } catch (error) {
       console.error('Failed to get file path:', error);
       this.notificationService.error('Error', 'Failed to process dropped file');
@@ -351,6 +380,102 @@ export class VideoAnalysisDialogComponent implements OnInit {
       this.analysisForm.patchValue({ input: text });
     } catch (error) {
       this.notificationService.error('Paste Failed', 'Could not paste from clipboard');
+    }
+  }
+
+  /**
+   * Handle folder selection - scan for videos and import them
+   */
+  private async handleFolderSelection(folderPath: string): Promise<void> {
+    try {
+      this.notificationService.toastOnly('info', 'Scanning Folder', 'Searching for video files...');
+
+      const scanUrl = await this.backendUrlService.getApiUrl('/database/scan-directory');
+      const response = await fetch(scanUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directoryPath: folderPath })
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        this.notificationService.error('Scan Failed', result.error || 'Failed to scan folder');
+        return;
+      }
+
+      if (result.total === 0) {
+        this.notificationService.toastOnly('info', 'No Videos Found', 'No video files found in the selected folder');
+        return;
+      }
+
+      if (result.videos.length === 0) {
+        this.notificationService.toastOnly(
+          'info',
+          'All Videos Imported',
+          `Found ${result.total} video${result.total !== 1 ? 's' : ''}, but all have already been imported`
+        );
+        return;
+      }
+
+      // Prepare videos for import
+      const videosToImport = result.videos.map((video: any) => ({
+        current_path: video.fullPath,
+        filename: video.filename
+      }));
+
+      // If mode is import-only, import directly
+      const formValue = this.analysisForm.value;
+      if (formValue.mode === 'import-only') {
+        const videoPaths = videosToImport.map((v: any) => v.current_path);
+        const importUrl = await this.backendUrlService.getApiUrl('/database/import');
+
+        const importResponse = await fetch(importUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoPaths })
+        });
+
+        const importResult = await importResponse.json();
+
+        if (importResult.success) {
+          this.notificationService.success(
+            'Videos Imported',
+            `Successfully imported ${importResult.importedCount} video${importResult.importedCount !== 1 ? 's' : ''} from folder`
+          );
+        } else {
+          this.notificationService.error('Import Failed', importResult.error || 'Failed to import videos');
+        }
+
+        this.dialogRef.close({ success: true });
+      } else {
+        // For transcribe/analyze modes, add to analysis queue
+        for (const video of videosToImport) {
+          this.analysisQueueService.addPendingJob({
+            input: video.current_path,
+            inputType: 'file',
+            mode: formValue.mode,
+            aiModel: formValue.aiModel,
+            apiKey: formValue.apiKey,
+            ollamaEndpoint: formValue.ollamaEndpoint,
+            whisperModel: formValue.whisperModel,
+            language: formValue.language,
+            customInstructions: formValue.customInstructions,
+            displayName: video.filename || 'Unknown',
+            loading: false
+          });
+        }
+
+        this.notificationService.success(
+          'Videos Added to Queue',
+          `Added ${videosToImport.length} video${videosToImport.length !== 1 ? 's' : ''} to the analysis queue`
+        );
+
+        this.dialogRef.close({ success: true });
+      }
+    } catch (error: any) {
+      console.error('Error handling folder selection:', error);
+      this.notificationService.error('Folder Scan Failed', error.message || 'Failed to scan folder');
     }
   }
 
