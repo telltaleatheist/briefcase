@@ -387,21 +387,70 @@ export class FileScannerService {
   }
 
   /**
+   * Check for duplicate videos before importing
+   * @param videoPaths - Array of full file paths to check
+   * @returns Information about duplicates found
+   */
+  async checkDuplicates(videoPaths: string[]): Promise<{
+    duplicates: Array<{ path: string; filename: string; existingVideo: any }>;
+    unique: string[];
+  }> {
+    const duplicates: Array<{ path: string; filename: string; existingVideo: any }> = [];
+    const unique: string[] = [];
+
+    for (const fullPath of videoPaths) {
+      try {
+        if (!fs.existsSync(fullPath)) {
+          continue;
+        }
+
+        const fileHash = await this.databaseService.hashFile(fullPath);
+        const existing = this.databaseService.findVideoByHash(fileHash);
+
+        if (existing && existing.id) {
+          duplicates.push({
+            path: fullPath,
+            filename: path.basename(fullPath),
+            existingVideo: {
+              id: existing.id,
+              filename: existing.filename,
+              current_path: existing.current_path,
+              added_at: existing.added_at
+            }
+          });
+        } else {
+          unique.push(fullPath);
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to check ${fullPath}: ${error.message}`);
+        unique.push(fullPath); // Treat errors as unique to allow import attempt
+      }
+    }
+
+    return { duplicates, unique };
+  }
+
+  /**
    * Import selected videos into the database
    * @param videoPaths - Array of full file paths to import
+   * @param duplicateHandling - Optional map of filepath -> action ('skip', 'replace', 'keep-both')
    * @returns Array of imported video IDs
    */
-  async importVideos(videoPaths: string[]): Promise<{ imported: string[]; errors: string[] }> {
+  async importVideos(
+    videoPaths: string[],
+    duplicateHandling?: Map<string, 'skip' | 'replace' | 'keep-both'>
+  ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
     this.logger.log(`Importing ${videoPaths.length} videos...`);
     this.logger.log(`Received paths:`, videoPaths);
     const imported: string[] = [];
+    const skipped: string[] = [];
     const errors: string[] = [];
 
     // Get active library's clips folder
     const activeLibrary = this.libraryManagerService.getActiveLibrary();
     if (!activeLibrary) {
       errors.push('No active library found');
-      return { imported, errors };
+      return { imported, skipped, errors };
     }
 
     const clipsRoot = activeLibrary.clipsFolderPath;
@@ -418,10 +467,33 @@ export class FileScannerService {
         const filename = path.basename(fullPath);
         const stats = fs.statSync(fullPath);
 
-        // Hash the file
+        // Hash the file BEFORE doing anything else
         const fileHash = await this.databaseService.hashFile(fullPath);
 
-        // Check if file is already in the clips folder structure
+        // Check if video already exists in database (by hash) BEFORE copying
+        const existing = this.databaseService.findVideoByHash(fileHash);
+        if (existing && existing.id) {
+          const videoId = String(existing.id);
+          const action = duplicateHandling?.get(fullPath) || 'skip';
+
+          if (action === 'skip') {
+            this.logger.log(`Skipping duplicate: ${filename} (existing ID: ${videoId})`);
+            skipped.push(fullPath);
+            continue;
+          } else if (action === 'replace') {
+            // Delete the existing entry completely and continue to import as new below
+            this.logger.log(`Replacing existing entry for: ${filename} (${videoId})`);
+            this.databaseService.deleteVideo(videoId);
+            // Fall through to import as new
+          } else if (action === 'keep-both') {
+            // Just keep the existing entry, don't copy or import again
+            this.logger.log(`Keeping existing entry: ${filename} (${videoId})`);
+            imported.push(videoId);
+            continue;
+          }
+        }
+
+        // Determine destination path and date folder
         let destinationPath: string;
         let dateFolder: string | null = null;
 
@@ -448,21 +520,18 @@ export class FileScannerService {
             }
           }
         } else {
-          // File is outside clips folder - copy to weekly folder
-          // Use date from filename if available, otherwise use file creation date
-          let weekFolder: string;
-          if (dateFolder) {
-            // Use the date from filename to calculate week folder
-            const filenameDate = new Date(dateFolder);
-            weekFolder = this.getWeekStartDate(filenameDate);
-            this.logger.log(`Using week folder based on filename date: ${weekFolder}`);
-          } else {
-            // Fallback to file creation date
-            const fileDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
-            weekFolder = this.getWeekStartDate(fileDate);
+          // File is outside clips folder - copy to weekly folder based on file creation date
+          // ALWAYS use file creation date for weekly folder (when user downloaded/created it)
+          const fileDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+          const weekFolder = this.getWeekStartDate(fileDate);
+
+          // Store the dateFolder extracted from filename (content date) separately
+          // If no date in filename, use the week folder as dateFolder
+          if (!dateFolder) {
             dateFolder = weekFolder;
-            this.logger.log(`Using week folder based on file date: ${weekFolder}`);
           }
+
+          this.logger.log(`Using week folder based on file creation date: ${weekFolder}${dateFolder !== weekFolder ? ` (filename content date: ${dateFolder})` : ''}`);
 
           const weekFolderPath = path.join(clipsRoot, weekFolder);
 
@@ -477,19 +546,12 @@ export class FileScannerService {
           this.logger.log(`Copied ${filename} to ${weekFolder}/`);
         }
 
-        // Check if video already exists in database (by hash)
-        const existing = this.databaseService.findVideoByHash(fileHash);
-        if (existing && existing.id) {
-          // Re-link the existing video instead of creating a new entry
-          const videoId = String(existing.id);
-          this.logger.log(`Video already in database, re-linking: ${filename} (${videoId})`);
-          this.databaseService.updateVideoPath(videoId, destinationPath, dateFolder || undefined);
-          imported.push(videoId);
-          continue;
-        }
-
         // Create new video entry
         const videoId = uuidv4();
+
+        // Get file creation date for created_at field (when user downloaded/created it)
+        const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+        const createdAt = fileCreationDate.toISOString();
 
         // Insert into database
         this.databaseService.insertVideo({
@@ -497,9 +559,10 @@ export class FileScannerService {
           filename,
           fileHash,
           currentPath: destinationPath,
-          dateFolder: dateFolder || undefined,
+          dateFolder: dateFolder || undefined, // Content date from filename (for chips)
           durationSeconds: undefined, // Will be populated later
           fileSizeBytes: stats.size,
+          createdAt, // File creation timestamp (for dividers and weekly folders)
         });
 
         imported.push(videoId);
@@ -510,8 +573,8 @@ export class FileScannerService {
       }
     }
 
-    this.logger.log(`Import complete: ${imported.length} imported, ${errors.length} errors`);
-    return { imported, errors };
+    this.logger.log(`Import complete: ${imported.length} imported, ${skipped.length} skipped, ${errors.length} errors`);
+    return { imported, skipped, errors };
   }
 }
 

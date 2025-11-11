@@ -1,21 +1,25 @@
 import { Component, Inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MAT_DIALOG_DATA, MatDialogRef, MatDialogModule } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialogRef, MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { HttpClient } from '@angular/common/http';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { DuplicateHandlingDialogComponent, DuplicateHandlingResult } from './duplicate-handling-dialog.component';
 
 interface ImportDialogData {
   filePaths: string[];
+  suppressAutoClose?: boolean; // Don't auto-close on success (for mixed imports)
 }
 
 interface ImportResult {
   success: boolean;
   imported: string[];
   importedCount: number;
+  skipped?: string[];
+  skippedCount?: number;
   errors: string[];
   errorCount: number;
   error?: string;
@@ -40,18 +44,32 @@ interface ImportResult {
 
     <mat-dialog-content>
       <div class="import-status">
-        <!-- Importing state -->
-        <div *ngIf="importing" class="importing-state">
+        <!-- Checking duplicates state -->
+        <div *ngIf="checkingDuplicates" class="importing-state">
           <mat-spinner diameter="50"></mat-spinner>
-          <p class="status-text">Importing {{ data.filePaths.length }} video{{ data.filePaths.length !== 1 ? 's' : '' }}...</p>
+          <p class="status-text">Checking for duplicates...</p>
+          <p class="help-text">Scanning {{ data.filePaths.length }} file{{ data.filePaths.length !== 1 ? 's' : '' }}</p>
+          <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+        </div>
+
+        <!-- Importing state -->
+        <div *ngIf="!checkingDuplicates && importing" class="importing-state">
+          <mat-spinner diameter="50"></mat-spinner>
+          <p class="status-text">Importing {{ data.filePaths.length }} file{{ data.filePaths.length !== 1 ? 's' : '' }}...</p>
           <p class="help-text">This may take a moment while we process the files.</p>
           <mat-progress-bar mode="indeterminate"></mat-progress-bar>
         </div>
 
         <!-- Success state -->
-        <div *ngIf="!importing && importResult?.success" class="success-state">
+        <div *ngIf="!checkingDuplicates && !importing && importResult?.success" class="success-state">
           <mat-icon class="success-icon">check_circle</mat-icon>
-          <p class="status-text">Successfully imported {{ importResult?.importedCount }} video{{ importResult?.importedCount !== 1 ? 's' : '' }}</p>
+          <p class="status-text">Successfully imported {{ importResult?.importedCount }} file{{ importResult?.importedCount !== 1 ? 's' : '' }}</p>
+
+          <!-- Show skipped files if any -->
+          <div *ngIf="importResult && importResult.skippedCount && importResult.skippedCount > 0" class="info-summary">
+            <mat-icon class="info-icon">info</mat-icon>
+            <p>{{ importResult.skippedCount }} file{{ importResult.skippedCount !== 1 ? 's' : '' }} skipped (duplicates)</p>
+          </div>
 
           <!-- Show errors if any -->
           <div *ngIf="importResult && importResult.errorCount > 0" class="error-summary">
@@ -147,6 +165,31 @@ interface ImportResult {
       color: #ff9800;
     }
 
+    .info-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: #2196f3;
+    }
+
+    .info-summary {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 16px;
+      background: rgba(33, 150, 243, 0.15);
+      border: 1px solid rgba(33, 150, 243, 0.3);
+      border-radius: 4px;
+      width: 100%;
+    }
+
+    .info-summary p {
+      color: inherit;
+      margin: 0;
+    }
+
     .error-summary {
       display: flex;
       flex-direction: column;
@@ -199,35 +242,104 @@ interface ImportResult {
 export class ImportProgressDialogComponent implements OnInit {
   importing = true;
   importResult: ImportResult | null = null;
+  checkingDuplicates = true;
 
   constructor(
     private dialogRef: MatDialogRef<ImportProgressDialogComponent>,
     @Inject(MAT_DIALOG_DATA) public data: ImportDialogData,
     private http: HttpClient,
-    private backendUrlService: BackendUrlService
+    private backendUrlService: BackendUrlService,
+    private dialog: MatDialog
   ) {}
 
   async ngOnInit() {
-    await this.startImport();
+    await this.checkDuplicatesAndImport();
   }
 
-  private async startImport() {
+  private async checkDuplicatesAndImport() {
+    try {
+      // First, check for duplicates
+      const checkUrl = await this.backendUrlService.getApiUrl('/database/check-duplicates');
+      const checkResponse = await this.http
+        .post<{
+          success: boolean;
+          duplicates: Array<{ path: string; filename: string; existingVideo: any }>;
+          unique: string[];
+          duplicateCount: number;
+          uniqueCount: number;
+        }>(checkUrl, {
+          videoPaths: this.data.filePaths
+        })
+        .toPromise();
+
+      this.checkingDuplicates = false;
+
+      if (!checkResponse?.success) {
+        throw new Error('Failed to check for duplicates');
+      }
+
+      let duplicateHandling: { [key: string]: 'skip' | 'replace' | 'keep-both' } = {};
+
+      // If duplicates found, show duplicate handling dialog
+      if (checkResponse.duplicateCount > 0) {
+        // Close this dialog temporarily
+        const dialogResult = await this.dialog.open(DuplicateHandlingDialogComponent, {
+          width: '600px',
+          maxHeight: '80vh',
+          disableClose: true,
+          data: {
+            duplicates: checkResponse.duplicates,
+            uniqueCount: checkResponse.uniqueCount
+          }
+        }).afterClosed().toPromise() as DuplicateHandlingResult;
+
+        if (!dialogResult || dialogResult.action === 'cancel') {
+          // User cancelled - close the import dialog
+          this.dialogRef.close({ success: false, cancelled: true });
+          return;
+        }
+
+        duplicateHandling = dialogResult.handling;
+      }
+
+      // Now proceed with import
+      await this.startImport(duplicateHandling);
+    } catch (error: any) {
+      console.error('Duplicate check error:', error);
+      this.importResult = {
+        success: false,
+        imported: [],
+        importedCount: 0,
+        errors: [],
+        errorCount: 0,
+        error: error.error?.message || error.message || 'Failed to check for duplicates'
+      };
+      this.importing = false;
+      this.checkingDuplicates = false;
+    }
+  }
+
+  private async startImport(duplicateHandling?: { [key: string]: 'skip' | 'replace' | 'keep-both' }) {
     try {
       const url = await this.backendUrlService.getApiUrl('/database/import');
       const response = await this.http
         .post<ImportResult>(url, {
-          videoPaths: this.data.filePaths
+          videoPaths: this.data.filePaths,
+          duplicateHandling
         })
         .toPromise();
 
       this.importResult = response || null;
       this.importing = false;
 
-      // Auto-close after 3 seconds if successful and no errors
-      if (response?.success && response.errorCount === 0) {
+      // Auto-close after 2 seconds if successful and no errors (unless suppressed for mixed imports)
+      if (response?.success && response.errorCount === 0 && !this.data.suppressAutoClose) {
         setTimeout(() => {
           this.dialogRef.close(this.importResult);
         }, 2000);
+      } else if (this.data.suppressAutoClose) {
+        // For mixed imports, close immediately on success so the next dialog can show
+        this.dialogRef.close(this.importResult);
       }
     } catch (error: any) {
       console.error('Import error:', error);

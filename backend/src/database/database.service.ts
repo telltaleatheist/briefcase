@@ -505,9 +505,11 @@ export class DatabaseService {
     sourceUrl?: string;
     mediaType?: string;
     fileExtension?: string;
+    createdAt?: string; // File's actual creation timestamp (when downloaded/created)
   }) {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
+    const createdAt = video.createdAt || now;
 
     // Determine media type from file extension if not provided
     let mediaType = video.mediaType;
@@ -538,9 +540,9 @@ export class DatabaseService {
         video.sourceUrl || null,
         mediaType || 'video',
         fileExtension || null,
-        now,
-        now,
-        now,
+        createdAt, // File's creation timestamp (when user downloaded/created it)
+        now, // last_verified
+        now, // added_at (when database entry was created)
       ]
     );
 
@@ -812,14 +814,14 @@ export class DatabaseService {
    */
   getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number }) {
     const db = this.ensureInitialized();
+    // Use subqueries instead of LEFT JOINs to prevent duplicate rows
+    // when there are multiple transcripts or analyses for a video
     let query = `
       SELECT
         v.*,
-        CASE WHEN t.video_id IS NOT NULL THEN 1 ELSE 0 END as has_transcript,
-        CASE WHEN a.video_id IS NOT NULL THEN 1 ELSE 0 END as has_analysis
+        CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
+        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) THEN 1 ELSE 0 END as has_analysis
       FROM videos v
-      LEFT JOIN transcripts t ON v.id = t.video_id
-      LEFT JOIN analyses a ON v.id = a.video_id
     `;
     const params: any[] = [];
 

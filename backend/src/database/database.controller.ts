@@ -88,8 +88,36 @@ export class DatabaseController {
    * POST /api/database/import
    * Import selected videos into the database
    */
+  /**
+   * POST /api/database/check-duplicates
+   * Check for duplicate videos before importing
+   */
+  @Post('check-duplicates')
+  async checkDuplicates(@Body() body: { videoPaths: string[] }) {
+    this.logger.log(`Checking ${body.videoPaths?.length || 0} videos for duplicates`);
+
+    if (!body.videoPaths || !Array.isArray(body.videoPaths)) {
+      return {
+        success: false,
+        error: 'videoPaths array is required',
+      };
+    }
+
+    const result = await this.fileScannerService.checkDuplicates(body.videoPaths);
+    return {
+      success: true,
+      duplicates: result.duplicates,
+      unique: result.unique,
+      duplicateCount: result.duplicates.length,
+      uniqueCount: result.unique.length,
+    };
+  }
+
   @Post('import')
-  async importVideos(@Body() body: { videoPaths: string[] }) {
+  async importVideos(@Body() body: {
+    videoPaths: string[];
+    duplicateHandling?: { [key: string]: 'skip' | 'replace' | 'keep-both' };
+  }) {
     this.logger.log(`Importing ${body.videoPaths?.length || 0} videos`);
 
     if (!body.videoPaths || !Array.isArray(body.videoPaths)) {
@@ -99,11 +127,19 @@ export class DatabaseController {
       };
     }
 
-    const result = await this.fileScannerService.importVideos(body.videoPaths);
+    // Convert duplicateHandling object to Map
+    let handlingMap: Map<string, 'skip' | 'replace' | 'keep-both'> | undefined;
+    if (body.duplicateHandling) {
+      handlingMap = new Map(Object.entries(body.duplicateHandling));
+    }
+
+    const result = await this.fileScannerService.importVideos(body.videoPaths, handlingMap);
     return {
       success: true,
       imported: result.imported,
       importedCount: result.imported.length,
+      skipped: result.skipped,
+      skippedCount: result.skipped.length,
       errors: result.errors,
       errorCount: result.errors.length,
     };
@@ -131,7 +167,9 @@ export class DatabaseController {
   @Get('videos')
   getVideos(
     @Query('tags') tags?: string,
-    @Query('linkedOnly') linkedOnly?: string
+    @Query('linkedOnly') linkedOnly?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string
   ) {
     // Default to linked only unless explicitly set to false
     const shouldFilterLinked = linkedOnly === 'false' ? false : true;
@@ -150,9 +188,19 @@ export class DatabaseController {
       }
     }
 
+    const totalCount = videos.length;
+
+    // Apply pagination if limit/offset provided
+    const limitNum = limit ? parseInt(limit, 10) : undefined;
+    const offsetNum = offset ? parseInt(offset, 10) : 0;
+
+    if (limitNum !== undefined && limitNum > 0) {
+      videos = videos.slice(offsetNum, offsetNum + limitNum);
+    }
+
     return {
       videos,
-      count: videos.length,
+      count: totalCount, // Return total count, not paginated count
     };
   }
 

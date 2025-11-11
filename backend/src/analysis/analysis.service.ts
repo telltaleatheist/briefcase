@@ -57,6 +57,7 @@ export interface AnalysisRequest {
   customInstructions?: string; // Custom instructions for AI analysis
   existingTranscriptText?: string; // For 'analysis-only' mode: plain text transcript
   existingTranscriptSrt?: string; // For 'analysis-only' mode: SRT format transcript
+  videoId?: string; // Video ID if analyzing an existing library video (skips import/search)
 }
 
 // Extended request interface to track job state
@@ -569,76 +570,89 @@ export class AnalysisService {
     const timing = job.timing || {};
     const totalDuration = (new Date().getTime() - job.createdAt.getTime()) / 1000;
 
-    // Auto-import to library if needed
-    let videoId: string | undefined;
+    // Get video ID - if provided in request, use it directly (library videos)
+    let videoId: string | undefined = request.videoId;
     const activeLibrary = this.libraryManagerService.getActiveLibrary();
 
-    if (activeLibrary && request.videoPath) {
-      // Try to import the video regardless of input type (URL or file)
-      try {
-        const importResult = await this.fileScannerService.importVideos([request.videoPath]);
-        if (importResult.imported.length > 0) {
-          videoId = importResult.imported[0];
-          this.logger.log(`Video imported to library with ID: ${videoId}`);
-        }
-      } catch (error) {
-        this.logger.error(`Error during auto-import: ${(error as Error).message}`);
-
-        // Fallback: try to find existing video in database
-        try {
-          const videos = await this.databaseService.getAllVideos();
-          const video = videos.find((v: any) => v.current_path === request.videoPath || v.file_path === request.videoPath);
-          if (video) {
-            videoId = video.id;
-            this.logger.log(`Found existing video in database with ID: ${videoId}`);
-          }
-        } catch (findError) {
-          this.logger.warn(`Could not find video in database: ${(findError as Error).message}`);
-        }
-      }
-    }
-
-    // If no videoId found, create a video record manually
+    // Only search/import if videoId not provided (for batch downloader videos)
     if (!videoId && activeLibrary && request.videoPath) {
+      this.logger.log(`No videoId provided, searching for video by path: ${request.videoPath}`);
+
+      // First, try to find existing video in database by path
       try {
-        const path = require('path');
-        const fs = require('fs');
-
-        // Generate video ID
-        const newVideoId = require('uuid').v4();
-        videoId = newVideoId;
-
-        // Get file stats
-        const stats = fs.statSync(request.videoPath);
-        const filename = path.basename(request.videoPath);
-
-        // Calculate file hash (simple approach - use file size + mtime as pseudo-hash)
-        const crypto = require('crypto');
-        const hash = crypto.createHash('sha256')
-          .update(filename + stats.size + stats.mtime)
-          .digest('hex');
-
-        // Determine date folder from path or use current date
-        let dateFolder = new Date().toISOString().split('T')[0];
-        const dateMatch = request.videoPath.match(/\/(\d{4}-\d{2}-\d{2})\//);
-        if (dateMatch) {
-          dateFolder = dateMatch[1];
+        const videos = await this.databaseService.getAllVideos();
+        const video = videos.find((v: any) => v.current_path === request.videoPath || v.file_path === request.videoPath);
+        if (video) {
+          videoId = video.id;
+          this.logger.log(`Found existing video in database with ID: ${videoId}`);
         }
-
-        // Insert video record
-        this.databaseService.insertVideo({
-          id: newVideoId,
-          filename,
-          fileHash: hash,
-          currentPath: request.videoPath,
-          dateFolder,
-          fileSizeBytes: stats.size,
-        });
-
-        this.logger.log(`Created new video record with ID: ${newVideoId} for ${filename}`);
-      } catch (error) {
-        this.logger.error(`Failed to create video record: ${(error as Error).message}`);
+      } catch (findError) {
+        this.logger.warn(`Could not find video in database: ${(findError as Error).message}`);
       }
+
+      // If not found by path, try to import (for videos downloaded via batch downloader)
+      if (!videoId) {
+        this.logger.log(`Video not found in database, attempting import...`);
+        try {
+          const duplicateHandling = new Map<string, 'skip' | 'replace' | 'keep-both'>();
+          duplicateHandling.set(request.videoPath, 'keep-both');
+
+          const importResult = await this.fileScannerService.importVideos([request.videoPath], duplicateHandling);
+          if (importResult.imported.length > 0) {
+            videoId = importResult.imported[0];
+            this.logger.log(`Video imported to library with ID: ${videoId}`);
+          }
+        } catch (error) {
+          this.logger.error(`Error during auto-import: ${(error as Error).message}`);
+        }
+      }
+
+      // SAFETY CHECK: If no videoId found after import, create a video record manually
+      // This should ONLY happen for videos that failed import but still need analysis saved
+      if (!videoId) {
+        this.logger.warn(`No videoId after import attempt, creating manual record (this should be rare)`);
+        try {
+          const path = require('path');
+          const fs = require('fs');
+
+          // Generate video ID
+          const newVideoId = require('uuid').v4();
+          videoId = newVideoId;
+
+          // Get file stats
+          const stats = fs.statSync(request.videoPath);
+          const filename = path.basename(request.videoPath);
+
+          // Calculate file hash (simple approach - use file size + mtime as pseudo-hash)
+          const crypto = require('crypto');
+          const hash = crypto.createHash('sha256')
+            .update(filename + stats.size + stats.mtime)
+            .digest('hex');
+
+          // Determine date folder from path or use current date
+          let dateFolder = new Date().toISOString().split('T')[0];
+          const dateMatch = request.videoPath.match(/\/(\d{4}-\d{2}-\d{2})\//);
+          if (dateMatch) {
+            dateFolder = dateMatch[1];
+          }
+
+          // Insert video record
+          this.databaseService.insertVideo({
+            id: newVideoId,
+            filename,
+            fileHash: hash,
+            currentPath: request.videoPath,
+            dateFolder,
+            fileSizeBytes: stats.size,
+          });
+
+          this.logger.log(`Created new video record with ID: ${newVideoId} for ${filename}`);
+        } catch (error) {
+          this.logger.error(`Failed to create video record: ${(error as Error).message}`);
+        }
+      }
+    } else if (videoId) {
+      this.logger.log(`Using provided videoId: ${videoId} (skipping import/search)`);
     }
 
     // Save to database if video found or created

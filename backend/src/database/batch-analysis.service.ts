@@ -383,6 +383,7 @@ export class BatchAnalysisService implements OnModuleInit {
       customReportName: `${video.id}.txt`, // Use video ID for report name
       existingTranscriptText: mode === 'analysis-only' ? (existingTranscript?.plain_text as string) : undefined,
       existingTranscriptSrt: mode === 'analysis-only' ? (existingTranscript?.srt_format as string) : undefined,
+      videoId: video.id, // Pass video ID to skip import/search in finalize phase
     };
 
     // Start analysis through existing AnalysisService

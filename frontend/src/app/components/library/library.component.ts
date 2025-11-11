@@ -83,6 +83,8 @@ interface UnimportedVideo {
 export class LibraryComponent implements OnInit, OnDestroy {
   isLoading = false;
   isInitialLoad = true; // Track if this is the first load
+  private cancelBackgroundLoad = false; // Flag to cancel ongoing background loads
+  private backgroundLoadRunning = false; // Track if background load is actually running
   videos: DatabaseVideo[] = [];
   filteredVideos: DatabaseVideo[] = [];
   stats: DatabaseStats | null = null;
@@ -255,7 +257,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Handle preview modal in list view
     if (this.viewMode === 'list' && this.isPreviewModalOpen) {
-      if (event.code === 'Space') {
+      if (event.code === 'Space' && !isFocusedOnInput) {
         event.preventDefault();
         this.togglePreviewPlayPause();
       } else if (event.code === 'Escape') {
@@ -268,7 +270,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
     // Handle detail view
     else if (this.viewMode === 'detail') {
-      if (event.code === 'Space') {
+      if (event.code === 'Space' && !isFocusedOnInput) {
         this.onSpacebarPress(event);
       } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
         event.preventDefault();
@@ -436,14 +438,31 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   async loadVideos() {
     try {
+      // Cancel any ongoing background loads to prevent duplicates
+      this.cancelBackgroundLoad = true;
+
+      // Wait for background load to actually stop (check every 50ms, max 500ms)
+      let waitTime = 0;
+      while (this.backgroundLoadRunning && waitTime < 500) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        waitTime += 50;
+      }
+
+      if (this.backgroundLoadRunning) {
+        console.warn('[loadVideos] Background load still running after 500ms wait, proceeding anyway');
+      }
+
       this.isLoading = true;
 
       // First, load a small batch quickly to show something to the user
       if (this.isInitialLoad) {
+        // Reset cancel flag before starting new background load
+        this.cancelBackgroundLoad = false;
+
         const initialResponse = await this.databaseLibraryService.getVideos(20, 0);
         this.videos = initialResponse.videos;
         this.applyFiltersAndSort();
-        console.log(`Loaded initial ${this.videos.length} videos`);
+        console.log(`[loadVideos] Loaded initial ${this.videos.length} videos`);
 
         // If there are more videos, continue loading in the background
         if (initialResponse.count > 20) {
@@ -454,18 +473,25 @@ export class LibraryComponent implements OnInit, OnDestroy {
           this.isLoading = false;
         }
       } else {
-        // On subsequent loads, load all at once
-        const response = await this.databaseLibraryService.getVideos(1000);
+        // On subsequent loads, load all at once (bypass cache to ensure fresh data)
+        console.log(`[loadVideos] BEFORE fetch: this.videos.length = ${this.videos.length}`);
+        const response = await this.databaseLibraryService.getVideos(1000, 0, false);
+        console.log(`[loadVideos] Fetched ${response.videos.length} videos from API`);
         this.videos = response.videos;
+        console.log(`[loadVideos] AFTER assignment: this.videos.length = ${this.videos.length}`);
         this.applyFiltersAndSort();
-        console.log(`Loaded ${this.videos.length} videos`);
+        console.log(`[loadVideos] Loaded ${this.videos.length} videos (full reload, fresh from DB)`);
         this.isLoading = false;
+
+        // Reset cancel flag after reload is complete
+        this.cancelBackgroundLoad = false;
       }
     } catch (error) {
-      console.error('Failed to load videos:', error);
+      console.error('[loadVideos] Failed to load videos:', error);
       // Don't show error notification - empty library is expected
       this.isLoading = false;
       this.isInitialLoad = false;
+      this.cancelBackgroundLoad = false; // Reset flag on error
     }
   }
 
@@ -473,26 +499,53 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Load remaining videos in the background after initial batch
    */
   private async loadRemainingVideos(totalCount: number) {
+    this.backgroundLoadRunning = true;
+    console.log('[loadRemainingVideos] Starting background load');
+
     try {
       // Load the rest in batches of 100
       const batchSize = 100;
       let offset = 20; // Start after the initial 20
 
       while (offset < totalCount && offset < 1000) {
+        // Check if we should cancel this background load
+        if (this.cancelBackgroundLoad) {
+          console.log('[loadRemainingVideos] Background video loading cancelled');
+          this.backgroundLoadRunning = false;
+          return;
+        }
+
         const response = await this.databaseLibraryService.getVideos(batchSize, offset);
+
+        // Check again after async operation
+        if (this.cancelBackgroundLoad) {
+          console.log('[loadRemainingVideos] Background video loading cancelled after fetch');
+          this.backgroundLoadRunning = false;
+          return;
+        }
+
+        // CRITICAL: Log before appending to detect duplicates
+        console.log(`[loadRemainingVideos] BEFORE append: this.videos.length = ${this.videos.length}`);
+        console.log(`[loadRemainingVideos] About to append ${response.videos.length} videos`);
+
         this.videos = [...this.videos, ...response.videos];
+
+        console.log(`[loadRemainingVideos] AFTER append: this.videos.length = ${this.videos.length}`);
         this.applyFiltersAndSort();
         offset += batchSize;
+        console.log(`[loadRemainingVideos] Loaded ${offset} of ${totalCount} videos`);
 
         // Small delay to prevent overwhelming the UI
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
-      console.log(`Finished loading all ${this.videos.length} videos`);
+      console.log(`[loadRemainingVideos] Finished loading all ${this.videos.length} videos`);
       this.isInitialLoad = false;
+      this.backgroundLoadRunning = false;
     } catch (error) {
-      console.error('Failed to load remaining videos:', error);
+      console.error('[loadRemainingVideos] Failed to load remaining videos:', error);
       this.isInitialLoad = false;
+      this.backgroundLoadRunning = false;
     }
   }
 
@@ -1153,19 +1206,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Group videos by date folder/week
+   * Group videos by date folder/week using file creation date (when downloaded)
    */
   groupVideosByWeek() {
     const groups = new Map<string, DatabaseVideo[]>();
 
     for (const video of this.filteredVideos) {
-      let week = video.date_folder;
-
-      // If no date_folder, generate one from the video's creation date
-      if (!week) {
-        const createdDate = new Date(video.created_at || video.added_at);
-        week = this.getWeekIdentifier(createdDate);
-      }
+      // Use video.created_at (file creation timestamp) for weekly grouping
+      // This represents when YOU downloaded/created the file, not the content date
+      const createdDate = new Date(video.created_at || video.added_at);
+      const week = this.getWeekIdentifier(createdDate);
 
       if (!groups.has(week)) {
         groups.set(week, []);
@@ -1186,9 +1236,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const tempDate = new Date(date.getTime());
     tempDate.setHours(0, 0, 0, 0);
 
-    // Get the Monday of this week
+    // Get the Sunday of this week (start of week)
     const day = tempDate.getDay();
-    const diff = tempDate.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+    const diff = tempDate.getDate() - day; // Sunday is 0, so subtract current day
     tempDate.setDate(diff);
 
     // Format as yyyy-mm-dd
@@ -1265,7 +1315,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
         for (let i = startIndex; i <= endIndex; i++) {
           this.selectedVideos.add(this.filteredVideos[i].id);
           // Also mark the week as selected if all videos in it are selected
-          const videoWeek = this.filteredVideos[i].date_folder || this.getWeekIdentifier(new Date(this.filteredVideos[i].created_at || this.filteredVideos[i].added_at));
+          // Use created_at for weekly grouping (not date_folder which is content date)
+          const videoWeek = this.getWeekIdentifier(new Date(this.filteredVideos[i].created_at || this.filteredVideos[i].added_at));
           const weekGroupForVideo = this.groupedVideos.find(g => g.week === videoWeek);
           if (weekGroupForVideo && weekGroupForVideo.videos.every(v => this.selectedVideos.has(v.id))) {
             this.selectedWeeks.add(videoWeek);
@@ -1512,18 +1563,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
     let currentWeek: string | null = null;
 
     for (const video of this.filteredVideos) {
-      // Extract date from filename (assuming format: YYYY-MM-DD at start)
-      const dateMatch = video.filename.match(/^(\d{4}-\d{2}-\d{2})/);
-      if (dateMatch) {
-        const videoDate = new Date(dateMatch[1]);
-        const weekStart = this.getWeekStartDate(videoDate);
-        const weekLabel = this.formatWeekLabel(weekStart);
+      // Use video.created_at (file creation date) for weekly separators
+      // This represents when you downloaded/created the file, not the content date
+      const createdDate = new Date(video.created_at);
+      const weekStart = this.getWeekStartDate(createdDate);
+      const weekLabel = this.formatWeekLabel(weekStart);
 
-        // Add separator if we're in a new week
-        if (weekLabel !== currentWeek) {
-          grouped.push({ type: 'separator', weekLabel });
-          currentWeek = weekLabel;
-        }
+      // Add separator if we're in a new week
+      if (weekLabel !== currentWeek) {
+        grouped.push({ type: 'separator', weekLabel });
+        currentWeek = weekLabel;
       }
 
       grouped.push({ type: 'video', video });
@@ -2008,6 +2057,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
             'Analysis Complete',
             `Processed ${this.batchProgress.processedVideos} videos`
           );
+          // Clear cache to ensure fresh data
+          this.databaseLibraryService.clearCache();
           await this.loadStats();
           await this.loadVideos();
           clearInterval(this.progressInterval);
@@ -2430,62 +2481,182 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Auto-import non-analyzable files (documents, images, webpages) directly
-    if (importOnlyFiles.length > 0) {
-      try {
-        const importUrl = await this.backendUrlService.getApiUrl('/database/import');
+    // Track results from both imports
+    let totalImportedCount = 0;
+    let nonAnalyzableCount = 0;
+    let analyzableCount = 0;
+    let importAction: 'import-only' | 'import-and-transcribe' | 'import-and-analyze' | null = null;
+    let analyzableVideoIds: string[] = [];
 
-        // Import these files directly via backend API
-        await this.http.post(importUrl, {
-          videoPaths: importOnlyFiles
-        }).toPromise();
+    // If there are analyzable files, ask the user what to do with them
+    if (analyzableFiles.length > 0) {
+      const { ImportOptionsDialogComponent } = await import('./import-options-dialog.component');
 
-        this.notificationService.toastOnly(
-          'success',
-          'Import Completed',
-          `Imported ${importOnlyFiles.length} file${importOnlyFiles.length !== 1 ? 's' : ''} to library`
-        );
+      const optionsDialogRef = this.dialog.open(ImportOptionsDialogComponent, {
+        width: '500px',
+        data: { videoCount: analyzableFiles.length }
+      });
 
-        // Refresh the library view
-        await this.loadVideos();
-      } catch (error: any) {
-        console.error('Error importing files:', error);
-        this.notificationService.error(
-          'Import Failed',
-          error?.error?.message || 'Could not import files'
-        );
+      importAction = await optionsDialogRef.afterClosed().toPromise();
+
+      if (!importAction) {
+        // User cancelled
+        return;
       }
     }
 
-    // Show analysis dialog only for video/audio files
-    if (analyzableFiles.length > 0) {
-      const selectedVideos = analyzableFiles.map((filePath: string) => {
-        const parts = filePath.split(/[/\\]/);
-        const filename = parts[parts.length - 1] || 'Unknown';
-        return {
-          current_path: filePath,
-          filename: filename
-        };
-      });
+    // Import non-analyzable files first (if any)
+    if (importOnlyFiles.length > 0) {
+      const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
 
-      // Open video analysis dialog with import mode and selected videos
-      const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
-        width: '700px',
-        maxWidth: '90vw',
-        maxHeight: '85vh',
-        panelClass: 'video-analysis-dialog-panel',
+      const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
+        width: '500px',
+        disableClose: true,
         data: {
-          mode: 'import',
-          selectedVideos: selectedVideos
-        },
-        disableClose: false
-      });
-
-      dialogRef.afterClosed().subscribe(result => {
-        if (result && result.success) {
-          console.log('Import added to queue');
+          filePaths: importOnlyFiles,
+          suppressAutoClose: analyzableFiles.length > 0 // Suppress if we have more to import
         }
       });
+
+      const importResult = await dialogRef.afterClosed().toPromise();
+
+      if (importResult?.success) {
+        nonAnalyzableCount = importResult.importedCount || 0;
+        totalImportedCount += nonAnalyzableCount;
+      } else if (importResult?.cancelled) {
+        // User cancelled - abort the whole operation
+        return;
+      }
+    }
+
+    // Import analyzable files (if any)
+    if (analyzableFiles.length > 0 && importAction) {
+      const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
+
+      const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
+        width: '500px',
+        disableClose: true,
+        data: {
+          filePaths: analyzableFiles,
+          suppressAutoClose: true // Always suppress for analyzable files
+        }
+      });
+
+      const importResult = await dialogRef.afterClosed().toPromise();
+
+      if (importResult?.success) {
+        analyzableCount = importResult.importedCount || 0;
+        totalImportedCount += analyzableCount;
+        analyzableVideoIds = importResult.imported || [];
+      } else if (importResult?.cancelled) {
+        // User cancelled analyzable files, but non-analyzable were already imported
+        // Show notification for what was imported so far
+        if (totalImportedCount > 0) {
+          this.databaseLibraryService.clearCache();
+          await this.loadVideos();
+          await this.loadStats();
+
+          // Build detailed notification message
+          const parts: string[] = [];
+          if (nonAnalyzableCount > 0) {
+            parts.push(`${nonAnalyzableCount} document${nonAnalyzableCount !== 1 ? 's' : ''}`);
+          }
+          const message = parts.length > 0
+            ? `Imported ${parts.join(' and ')} to library`
+            : `Imported ${totalImportedCount} file${totalImportedCount !== 1 ? 's' : ''} to library`;
+
+          this.notificationService.toastOnly(
+            'success',
+            'Import Completed',
+            message
+          );
+        }
+        return;
+      }
+    }
+
+    // Refresh UI if anything was imported
+    if (totalImportedCount > 0) {
+      this.databaseLibraryService.clearCache();
+      await this.loadVideos();
+      await this.loadStats();
+    }
+
+    // Build detailed notification message
+    const buildImportMessage = () => {
+      const parts: string[] = [];
+      if (nonAnalyzableCount > 0) {
+        parts.push(`${nonAnalyzableCount} document${nonAnalyzableCount !== 1 ? 's' : ''}`);
+      }
+      if (analyzableCount > 0) {
+        parts.push(`${analyzableCount} video${analyzableCount !== 1 ? 's' : ''}`);
+      }
+
+      if (parts.length === 0) {
+        return `Imported ${totalImportedCount} file${totalImportedCount !== 1 ? 's' : ''}`;
+      } else if (parts.length === 1) {
+        return `Imported ${parts[0]}`;
+      } else {
+        return `Imported ${parts.join(' and ')}`;
+      }
+    };
+
+    // Handle post-import actions for analyzable files
+    if (importAction && analyzableVideoIds.length > 0) {
+      if (importAction === 'import-and-transcribe') {
+        try {
+          await this.databaseLibraryService.startBatchAnalysis({
+            videoIds: analyzableVideoIds,
+            transcribeOnly: true
+          });
+          this.notificationService.toastOnly(
+            'success',
+            'Transcription Started',
+            `${buildImportMessage()}. Transcribing ${analyzableVideoIds.length} video${analyzableVideoIds.length !== 1 ? 's' : ''}`
+          );
+          this.startProgressPolling();
+        } catch (error: any) {
+          console.error('Failed to start transcription:', error);
+          this.notificationService.toastOnly(
+            'error',
+            'Error',
+            error.error?.message || 'Failed to start transcription'
+          );
+        }
+      } else if (importAction === 'import-and-analyze') {
+        try {
+          await this.databaseLibraryService.startBatchAnalysis({
+            videoIds: analyzableVideoIds,
+            transcribeOnly: false
+          });
+          this.notificationService.toastOnly(
+            'success',
+            'Analysis Started',
+            `${buildImportMessage()}. Processing ${analyzableVideoIds.length} video${analyzableVideoIds.length !== 1 ? 's' : ''}`
+          );
+          this.startProgressPolling();
+        } catch (error: any) {
+          console.error('Failed to start analysis:', error);
+          this.notificationService.toastOnly(
+            'error',
+            'Error',
+            error.error?.message || 'Failed to start analysis'
+          );
+        }
+      } else if (importAction === 'import-only') {
+        this.notificationService.toastOnly(
+          'success',
+          'Import Completed',
+          buildImportMessage()
+        );
+      }
+    } else if (totalImportedCount > 0) {
+      // Only non-analyzable files were imported
+      this.notificationService.toastOnly(
+        'success',
+        'Import Completed',
+        buildImportMessage()
+      );
     }
   }
 
@@ -3385,33 +3556,53 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Navigate highlighted video without opening preview
    */
   navigateHighlightedVideo(direction: number) {
-    if (!this.highlightedVideo || this.filteredVideos.length === 0) {
-      // No video highlighted, highlight the first one
-      if (this.filteredVideos.length > 0) {
-        this.highlightedVideo = this.filteredVideos[0];
+    // Get the visual order of videos (matches how they appear on screen)
+    const visualOrder = this.getVisualOrderVideos();
+
+    if (!this.highlightedVideo || visualOrder.length === 0) {
+      // No video highlighted, highlight the first one in visual order
+      if (visualOrder.length > 0) {
+        this.highlightedVideo = visualOrder[0];
         // Clear all selections and select only this video
         this.selectedVideos.clear();
         this.selectedWeeks.clear();
-        this.selectedVideos.add(this.filteredVideos[0].id);
+        this.selectedVideos.add(visualOrder[0].id);
         this.updateAllSelectedState();
         this.scrollToHighlightedVideo();
       }
       return;
     }
 
-    const currentIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo!.id);
+    const currentIndex = visualOrder.findIndex(v => v.id === this.highlightedVideo!.id);
     if (currentIndex === -1) return;
 
     const newIndex = currentIndex + direction;
-    if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
-      this.highlightedVideo = this.filteredVideos[newIndex];
+    if (newIndex >= 0 && newIndex < visualOrder.length) {
+      this.highlightedVideo = visualOrder[newIndex];
       // Clear all selections and select only the new video
       this.selectedVideos.clear();
       this.selectedWeeks.clear();
-      this.selectedVideos.add(this.filteredVideos[newIndex].id);
+      this.selectedVideos.add(visualOrder[newIndex].id);
       this.updateAllSelectedState();
       this.scrollToHighlightedVideo();
     }
+  }
+
+  /**
+   * Get videos in the order they appear visually on screen
+   * This flattens the grouped videos, respecting collapsed weeks
+   */
+  private getVisualOrderVideos(): DatabaseVideo[] {
+    const visualOrder: DatabaseVideo[] = [];
+
+    for (const group of this.groupedVideos) {
+      // Skip videos in collapsed weeks
+      if (!this.isWeekCollapsed(group.week)) {
+        visualOrder.push(...group.videos);
+      }
+    }
+
+    return visualOrder;
   }
 
   /**
