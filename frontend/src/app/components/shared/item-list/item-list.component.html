@@ -60,6 +60,25 @@
               {{ getSecondaryText(item) }}
             </div>
           </div>
+
+          <!-- Metadata (duration, size, etc.) - displayed on the right -->
+          <div *ngIf="getMetadata(item)" class="item-metadata">
+            {{ getMetadata(item) }}
+          </div>
+
+          <!-- Progress Bar -->
+          <div *ngIf="getProgress(item)"
+               class="item-progress-bar"
+               [attr.aria-label]="getProgress(item)!.label || 'Progress: ' + getProgress(item)!.value + '%'"
+               role="progressbar"
+               [attr.aria-valuenow]="getProgress(item)!.value"
+               aria-valuemin="0"
+               aria-valuemax="100">
+            <div class="progress-fill"
+                 [style.width.%]="getProgress(item)!.value"
+                 [style.background-color]="getProgress(item)!.color || null">
+            </div>
+          </div>
         </div>
       </div>
     </div>

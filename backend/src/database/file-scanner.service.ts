@@ -1,6 +1,7 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { LibraryManagerService } from './library-manager.service';
+import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -47,6 +48,7 @@ export class FileScannerService {
     private readonly databaseService: DatabaseService,
     @Inject(forwardRef(() => LibraryManagerService))
     private readonly libraryManagerService: LibraryManagerService,
+    private readonly ffmpegService: FfmpegService,
   ) {}
 
   /**
@@ -127,7 +129,7 @@ export class FileScannerService {
         filename: string;
         file_hash: string;
         current_path: string;
-        date_folder: string | null;
+        upload_date: string | null;
       }>;
       this.logger.log(`Checking ${dbVideos.length} database entries...`);
 
@@ -138,7 +140,7 @@ export class FileScannerService {
         // Case 1: Video still exists at same path
         if (foundPaths.has(dbPath)) {
           // Update last_verified timestamp
-          this.databaseService.updateVideoPath(dbVideo.id, dbPath, dbVideo.date_folder || undefined);
+          this.databaseService.updateVideoPath(dbVideo.id, dbPath, dbVideo.upload_date || undefined);
           continue;
         }
 
@@ -146,13 +148,13 @@ export class FileScannerService {
         if (dbHash && foundHashes.has(dbHash)) {
           const newLocation = foundHashes.get(dbHash)!;
           this.logger.log(
-            `Video moved: "${dbVideo.filename}" from ${dbVideo.date_folder || 'unknown'} to ${newLocation.dateFolder}`,
+            `Video moved: "${dbVideo.filename}" from ${dbVideo.upload_date || 'unknown'} to ${newLocation.uploadDate}`,
           );
 
           this.databaseService.updateVideoPath(
             dbVideo.id,
             newLocation.fullPath,
-            newLocation.dateFolder,
+            newLocation.uploadDate,
           );
           result.updatedPaths++;
 
@@ -179,13 +181,15 @@ export class FileScannerService {
 
           try {
             const stats = fs.statSync(file.fullPath);
+            const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
 
             this.databaseService.insertVideo({
               id: videoId,
               filename: file.filename,
               fileHash: file.hash,
               currentPath: file.fullPath,
-              dateFolder: file.dateFolder,
+              uploadDate: file.uploadDate,
+              downloadDate: fileCreationDate.toISOString(),
               fileSizeBytes: stats.size,
               // Duration will be populated later when analyzing
             });
@@ -295,24 +299,24 @@ export class FileScannerService {
             const ext = path.extname(entry.name).toLowerCase();
 
             if (this.ALL_MEDIA_EXTENSIONS.includes(ext)) {
-              // First, try to extract date from filename (format: YYYY-MM-DD Title.ext)
+              // First, try to extract upload date from filename (format: YYYY-MM-DD Title.ext)
               const filenameDateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\s/);
-              let dateFolder: string | undefined;
+              let uploadDate: string | undefined;
 
               if (filenameDateMatch) {
-                dateFolder = filenameDateMatch[1];
+                uploadDate = filenameDateMatch[1];
               } else {
                 // Fallback: Extract date folder from path
                 // e.g., /Volumes/Callisto/clips/2021-08-08/video.mov -> "2021-08-08"
                 const relativePath = fullPath.replace(clipsRoot, '');
                 const pathParts = relativePath.split(path.sep).filter(Boolean);
-                dateFolder = pathParts.length > 1 ? pathParts[0] : undefined;
+                uploadDate = pathParts.length > 1 ? pathParts[0] : undefined;
               }
 
               results.push({
                 filename: entry.name,
                 fullPath,
-                dateFolder,
+                uploadDate,
               });
             }
           }
@@ -339,7 +343,8 @@ export class FileScannerService {
         v.id,
         v.filename,
         v.current_path,
-        v.date_folder,
+        v.upload_date,
+        v.download_date,
         v.duration_seconds,
         v.media_type,
         CASE WHEN t.video_id IS NULL THEN 1 ELSE 0 END as needs_transcript,
@@ -350,7 +355,7 @@ export class FileScannerService {
       WHERE v.is_linked = 1
         AND v.media_type IN ('video', 'audio')
         AND (t.video_id IS NULL OR a.video_id IS NULL)
-      ORDER BY v.created_at DESC
+      ORDER BY v.download_date DESC
     `);
 
     const results: NeedsAnalysisVideo[] = [];
@@ -384,6 +389,82 @@ export class FileScannerService {
     stmt.free();
 
     return result.count;
+  }
+
+  /**
+   * Populate duration for videos that don't have it set
+   * This is useful for migrating existing videos
+   */
+  async populateMissingDurations(): Promise<{
+    total: number;
+    updated: number;
+    failed: number;
+    errors: string[];
+  }> {
+    this.logger.log('Starting to populate missing video durations...');
+    const db = this.databaseService.getDatabase();
+
+    // Find all video/audio files that don't have duration set
+    const stmt = db.prepare(`
+      SELECT id, filename, current_path, media_type
+      FROM videos
+      WHERE duration_seconds IS NULL
+        AND media_type IN ('video', 'audio')
+        AND is_linked = 1
+    `);
+
+    const videosToUpdate: Array<{ id: string; filename: string; current_path: string; media_type: string }> = [];
+    while (stmt.step()) {
+      videosToUpdate.push(stmt.getAsObject() as any);
+    }
+    stmt.free();
+
+    const result = {
+      total: videosToUpdate.length,
+      updated: 0,
+      failed: 0,
+      errors: [] as string[]
+    };
+
+    this.logger.log(`Found ${result.total} videos/audio files without duration`);
+
+    for (const video of videosToUpdate) {
+      try {
+        // Check if file exists
+        if (!fs.existsSync(video.current_path)) {
+          this.logger.warn(`File not found: ${video.current_path}`);
+          result.failed++;
+          result.errors.push(`${video.filename}: File not found`);
+          continue;
+        }
+
+        // Extract duration using ffprobe
+        const metadata = await this.ffmpegService.getVideoMetadata(video.current_path);
+
+        if (metadata.duration) {
+          // Update database
+          db.run(
+            'UPDATE videos SET duration_seconds = ? WHERE id = ?',
+            [metadata.duration, video.id]
+          );
+
+          result.updated++;
+          this.logger.log(`Updated duration for ${video.filename}: ${metadata.duration}s`);
+        } else {
+          result.failed++;
+          result.errors.push(`${video.filename}: No duration in metadata`);
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to extract duration for ${video.filename}: ${error.message}`);
+        result.failed++;
+        result.errors.push(`${video.filename}: ${error.message}`);
+      }
+    }
+
+    this.databaseService.saveDatabaseToDisk();
+
+    this.logger.log(`Duration population complete: ${result.updated} updated, ${result.failed} failed`);
+    return result;
   }
 
   /**
@@ -493,45 +574,43 @@ export class FileScannerService {
           }
         }
 
-        // Determine destination path and date folder
+        // Determine destination path and upload date (content creation date)
         let destinationPath: string;
-        let dateFolder: string | null = null;
+        let uploadDate: string | null = null;
 
-        // First, try to extract date from filename (format: YYYY-MM-DD Title.ext)
+        // First, try to extract upload date from filename (format: YYYY-MM-DD Title.ext)
+        // This is the date the content was created/filmed by the person
         const filenameDateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})\s/);
         if (filenameDateMatch) {
-          dateFolder = filenameDateMatch[1];
-          this.logger.log(`Extracted date from filename: ${dateFolder}`);
+          uploadDate = filenameDateMatch[1];
+          this.logger.log(`Extracted upload date from filename: ${uploadDate}`);
         }
+
+        // Get file creation date (download date - when you downloaded/created the file)
+        const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+        const downloadDate = fileCreationDate.toISOString();
 
         if (fullPath.startsWith(clipsRoot)) {
           // File is already in the clips folder - don't copy, just use it
           destinationPath = fullPath;
           this.logger.log(`Video already in clips folder: ${fullPath}`);
 
-          // If we didn't get date from filename, try to extract from path
-          if (!dateFolder) {
+          // If we didn't get upload date from filename, try to extract from path
+          if (!uploadDate) {
             const relativePath = path.relative(clipsRoot, fullPath);
             const pathParts = relativePath.split(path.sep);
             if (pathParts.length > 1) {
-              // File is in a subfolder - use that as the date folder
-              dateFolder = pathParts[0];
-              this.logger.log(`Extracted date folder from path: ${dateFolder}`);
+              // File is in a subfolder - use that as the upload date
+              uploadDate = pathParts[0];
+              this.logger.log(`Extracted upload date from path: ${uploadDate}`);
             }
           }
         } else {
-          // File is outside clips folder - copy to weekly folder based on file creation date
-          // ALWAYS use file creation date for weekly folder (when user downloaded/created it)
-          const fileDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
-          const weekFolder = this.getWeekStartDate(fileDate);
+          // File is outside clips folder - copy to weekly folder based on download date
+          // Use nearest Sunday to download date for folder organization
+          const weekFolder = this.getWeekStartDate(fileCreationDate);
 
-          // Store the dateFolder extracted from filename (content date) separately
-          // If no date in filename, use the week folder as dateFolder
-          if (!dateFolder) {
-            dateFolder = weekFolder;
-          }
-
-          this.logger.log(`Using week folder based on file creation date: ${weekFolder}${dateFolder !== weekFolder ? ` (filename content date: ${dateFolder})` : ''}`);
+          this.logger.log(`Using week folder based on download date: ${weekFolder}${uploadDate ? ` (upload date: ${uploadDate})` : ''}`);
 
           const weekFolderPath = path.join(clipsRoot, weekFolder);
 
@@ -543,15 +622,32 @@ export class FileScannerService {
 
           destinationPath = path.join(weekFolderPath, filename);
           fs.copyFileSync(fullPath, destinationPath);
-          this.logger.log(`Copied ${filename} to ${weekFolder}/`);
+
+          // Preserve original file timestamps (atime and mtime)
+          // This ensures the file retains its original creation/modification dates
+          fs.utimesSync(destinationPath, stats.atime, stats.mtime);
+
+          this.logger.log(`Copied ${filename} to ${weekFolder}/ (preserved timestamps)`);
         }
 
         // Create new video entry
         const videoId = uuidv4();
 
-        // Get file creation date for created_at field (when user downloaded/created it)
-        const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
-        const createdAt = fileCreationDate.toISOString();
+        // Extract duration for video/audio files
+        let durationSeconds: number | undefined = undefined;
+        const fileExt = path.extname(filename).toLowerCase();
+        const isVideoOrAudio = [...this.VIDEO_EXTENSIONS, ...this.AUDIO_EXTENSIONS].includes(fileExt);
+
+        if (isVideoOrAudio) {
+          try {
+            const metadata = await this.ffmpegService.getVideoMetadata(destinationPath);
+            durationSeconds = metadata.duration;
+            this.logger.log(`Extracted duration: ${durationSeconds}s for ${filename}`);
+          } catch (error: any) {
+            this.logger.warn(`Could not extract duration for ${filename}: ${error.message}`);
+            // Continue with undefined duration - not critical for import
+          }
+        }
 
         // Insert into database
         this.databaseService.insertVideo({
@@ -559,14 +655,14 @@ export class FileScannerService {
           filename,
           fileHash,
           currentPath: destinationPath,
-          dateFolder: dateFolder || undefined, // Content date from filename (for chips)
-          durationSeconds: undefined, // Will be populated later
+          uploadDate: uploadDate || undefined, // Content creation date from filename
+          downloadDate, // File creation timestamp (when you downloaded it)
+          durationSeconds,
           fileSizeBytes: stats.size,
-          createdAt, // File creation timestamp (for dividers and weekly folders)
         });
 
         imported.push(videoId);
-        this.logger.log(`Imported: ${filename} (${videoId})${dateFolder ? ` into ${dateFolder}` : ''}`);
+        this.logger.log(`Imported: ${filename} (${videoId})${uploadDate ? ` with upload date ${uploadDate}` : ''}`);
       } catch (error: any) {
         this.logger.error(`Failed to import ${fullPath}: ${error.message}`);
         errors.push(`${path.basename(fullPath)}: ${error.message}`);
@@ -583,7 +679,7 @@ export class FileScannerService {
 export interface VideoFileInfo {
   filename: string;
   fullPath: string;
-  dateFolder?: string;
+  uploadDate?: string;
   hash?: string;
 }
 
@@ -602,7 +698,8 @@ export interface NeedsAnalysisVideo {
   id: string;
   filename: string;
   current_path: string;
-  date_folder: string | null;
+  upload_date: string | null;
+  download_date: string | null;
   duration_seconds: number | null;
   media_type: string; // 'video', 'audio', 'document', 'image', 'webpage'
   needs_transcript: number; // 0 or 1

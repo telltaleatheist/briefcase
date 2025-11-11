@@ -199,11 +199,19 @@
               </div>
             </div>
 
-            <div class="metadata-item">
-              <mat-icon>calendar_today</mat-icon>
+            <div class="metadata-item" *ngIf="video.upload_date">
+              <mat-icon>upload</mat-icon>
               <div class="metadata-content">
-                <span class="metadata-label">Created</span>
-                <span class="metadata-value">{{ formatDate(video.created_at) }}</span>
+                <span class="metadata-label">Upload Date</span>
+                <span class="metadata-value">{{ formatDate(video.upload_date) }}</span>
+              </div>
+            </div>
+
+            <div class="metadata-item" *ngIf="video.download_date">
+              <mat-icon>download</mat-icon>
+              <div class="metadata-content">
+                <span class="metadata-label">Downloaded</span>
+                <span class="metadata-value">{{ formatDate(video.download_date) }}</span>
               </div>
             </div>
 
@@ -212,14 +220,6 @@
               <div class="metadata-content">
                 <span class="metadata-label">Added</span>
                 <span class="metadata-value">{{ formatDate(video.added_at) }}</span>
-              </div>
-            </div>
-
-            <div class="metadata-item metadata-item-full" *ngIf="video.date_folder">
-              <mat-icon>event</mat-icon>
-              <div class="metadata-content">
-                <span class="metadata-label">Date Folder</span>
-                <span class="metadata-value">{{ video.date_folder }}</span>
               </div>
             </div>
           </div>

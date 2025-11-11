@@ -42,6 +42,7 @@ import {
   KeyboardConfig,
   SelectionMode,
   ItemStatus,
+  ItemProgress,
   ContextMenuAction
 } from '../shared/item-list/item-list.types';
 
@@ -57,7 +58,7 @@ interface ClipLibrary {
 interface UnimportedVideo {
   filename: string;
   fullPath: string;
-  dateFolder?: string;
+  uploadDate?: string;
   hash?: string;
 }
 
@@ -189,6 +190,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }> = [];
   private lastProcessedCount = 0;
 
+  // Track video processing states for progress bars
+  videoProcessingStates = new Map<string, { stage: 'transcribing' | 'analyzing', progress: number }>();
+
   // View mode (list or detail split view)
   viewMode: 'list' | 'detail' = 'list';
   selectedVideo: DatabaseVideo | null = null;
@@ -200,6 +204,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   @ViewChild('previewVideoPlayer') previewVideoPlayer?: ElementRef<HTMLVideoElement>;
   @ViewChild('contextMenuTrigger') contextMenuTrigger?: MatMenuTrigger;
   @ViewChild('managementContextMenuTrigger') managementContextMenuTrigger?: MatMenuTrigger;
+  @ViewChild('fileTypeMenuTrigger') fileTypeMenuTrigger?: MatMenuTrigger;
   videoElement: HTMLVideoElement | null = null;
   isPlaying = false;
 
@@ -220,6 +225,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
   contextMenuPosition = { x: 0, y: 0 };
   contextMenuVideo: DatabaseVideo | null = null;
   managementContextMenuPosition = { x: 0, y: 0 };
+  isContextMenuOpen = false;
+  private contextMenuTimeout: any = null;
 
   // Week grouping state
   collapsedWeeks = new Set<string>(); // Set of collapsed week identifiers
@@ -238,16 +245,31 @@ export class LibraryComponent implements OnInit, OnDestroy {
   listDisplayConfig: ItemDisplayConfig = {
     primaryField: 'filename',
     secondaryField: 'added_at',
+    metadataField: 'duration_seconds',
     iconField: 'media_type',
     // badgeField removed - we show dates in secondary text instead
     renderPrimary: (item) => this.getVideoDisplayName(item as any),
     renderSecondary: (item) => this.formatVideoSecondaryText(item as any),
+    renderMetadata: (item) => this.formatVideoDuration(item as any),
     renderIcon: (item) => this.getMediaIcon(item as any)
+  };
+
+  // Progress mapper for showing analysis/transcription progress
+  videoProgressMapper = (item: DatabaseVideo): ItemProgress | null => {
+    const state = this.videoProcessingStates.get(item.id);
+    if (!state) return null;
+
+    console.log(`[LibraryComponent] Progress for ${item.filename}:`, state);
+
+    return {
+      value: state.progress,
+      label: state.stage === 'transcribing' ? 'Transcribing...' : 'Analyzing...'
+    };
   };
 
   listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
     enabled: true,
-    groupBy: (video) => this.getWeekIdentifier(new Date(video.date_folder || video.added_at)),
+    groupBy: (video) => this.getWeekIdentifier(new Date(video.download_date || video.added_at)),
     groupLabel: (weekKey) => this.formatWeekLabel(weekKey),
     sortDescending: true,
     selectableGroups: true
@@ -335,10 +357,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
       if (event.code === 'Escape') {
         event.preventDefault();
         this.closePreviewModal();
-      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        event.preventDefault();
-        this.navigatePreviewVideos(event.code === 'ArrowUp' ? -1 : 1);
       }
+      // Note: Arrow key navigation is handled by ItemListComponent
+      // which will emit itemHighlighted events that trigger onListItemHighlighted
+      // which will then load the preview video. We don't handle arrow keys here
+      // to avoid double-navigation.
     }
     // Handle detail view
     else if (this.viewMode === 'detail') {
@@ -397,6 +420,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Add document listeners for closing context menu
     document.addEventListener('click', this.handleDocumentClick);
     document.addEventListener('contextmenu', this.handleDocumentContextMenu);
+    document.addEventListener('keydown', this.handleDocumentKeyDown);
 
     // Load backend URL
     this.backendUrl = await this.backendUrlService.getBackendUrl();
@@ -461,10 +485,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
       clearInterval(this.progressInterval);
     }
 
+    // Clear video processing states
+    this.videoProcessingStates.clear();
+
+    // Clear any pending context menu timeout
+    if (this.contextMenuTimeout) {
+      clearTimeout(this.contextMenuTimeout);
+      this.contextMenuTimeout = null;
+    }
+
     // Remove document listeners
     document.removeEventListener('click', this.handleDocumentClick);
     document.removeEventListener('contextmenu', this.handleDocumentContextMenu);
+    document.removeEventListener('keydown', this.handleDocumentKeyDown);
   }
+
+  /**
+   * Handle keydown events to close context menu on Escape (Finder behavior)
+   */
+  private handleDocumentKeyDown = (event: KeyboardEvent) => {
+    if (event.code === 'Escape' && this.isContextMenuOpen) {
+      if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
+        this.contextMenuTrigger.closeMenu();
+        this.isContextMenuOpen = false;
+      }
+    }
+  };
 
   /**
    * Handle document click to close context menu
@@ -472,6 +518,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   private handleDocumentClick = (event: MouseEvent) => {
     if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
       this.contextMenuTrigger.closeMenu();
+      this.isContextMenuOpen = false;
     }
   };
 
@@ -1295,6 +1342,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Close the file type menu
+   */
+  closeFileTypeMenu() {
+    if (this.fileTypeMenuTrigger) {
+      this.fileTypeMenuTrigger.closeMenu();
+    }
+  }
+
+  /**
    * Apply search, tag filters, file type filters, and sorting
    */
   async applyFiltersAndSort() {
@@ -1336,16 +1392,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Group videos by date folder/week using file creation date (when downloaded)
+   * Group videos by date folder/week using download date (when you downloaded it)
    */
   groupVideosByWeek() {
     const groups = new Map<string, DatabaseVideo[]>();
 
     for (const video of this.filteredVideos) {
-      // Use video.created_at (file creation timestamp) for weekly grouping
+      // Use video.download_date (file creation timestamp) for weekly grouping
       // This represents when YOU downloaded/created the file, not the content date
-      const createdDate = new Date(video.created_at || video.added_at);
-      const week = this.getWeekIdentifier(createdDate);
+      const downloadDate = new Date(video.download_date || video.added_at);
+      const week = this.getWeekIdentifier(downloadDate);
 
       if (!groups.has(week)) {
         groups.set(week, []);
@@ -1445,8 +1501,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
         for (let i = startIndex; i <= endIndex; i++) {
           this.selectedVideos.add(this.filteredVideos[i].id);
           // Also mark the week as selected if all videos in it are selected
-          // Use created_at for weekly grouping (not date_folder which is content date)
-          const videoWeek = this.getWeekIdentifier(new Date(this.filteredVideos[i].created_at || this.filteredVideos[i].added_at));
+          // Use download_date for weekly grouping (when you downloaded it)
+          const videoWeek = this.getWeekIdentifier(new Date(this.filteredVideos[i].download_date || this.filteredVideos[i].added_at));
           const weekGroupForVideo = this.groupedVideos.find(g => g.week === videoWeek);
           if (weekGroupForVideo && weekGroupForVideo.videos.every(v => this.selectedVideos.has(v.id))) {
             this.selectedWeeks.add(videoWeek);
@@ -1725,10 +1781,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
     let currentWeek: string | null = null;
 
     for (const video of this.filteredVideos) {
-      // Use video.created_at (file creation date) for weekly separators
+      // Use video.download_date (file creation date) for weekly separators
       // This represents when you downloaded/created the file, not the content date
-      const createdDate = new Date(video.created_at);
-      const weekStart = this.getWeekStartDate(createdDate);
+      const downloadDate = new Date(video.download_date || video.added_at);
+      const weekStart = this.getWeekStartDate(downloadDate);
       const weekLabel = this.formatWeekLabel(weekStart);
 
       // Add separator if we're in a new week
@@ -1791,31 +1847,38 @@ export class LibraryComponent implements OnInit, OnDestroy {
   formatVideoSecondaryText(video: DatabaseVideo): string {
     const parts: string[] = [];
 
-    // Content date (from filename/date_folder) - when video was originally filmed
-    if (video.date_folder) {
-      const contentDate = new Date(video.date_folder);
-      parts.push(`Content: ${contentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
+    // Upload date (from filename) - when content was created/filmed by the person
+    if (video.upload_date) {
+      const uploadDate = new Date(video.upload_date);
+      parts.push(`Uploaded: ${uploadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
     }
 
-    // Creation date (when file was created/downloaded) - when user got the video
-    if (video.created_at) {
-      const createdDate = new Date(video.created_at);
-      parts.push(`Created: ${createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
-    }
-
-    // Duration if available
-    if (video.duration_seconds) {
-      const hours = Math.floor(video.duration_seconds / 3600);
-      const mins = Math.floor((video.duration_seconds % 3600) / 60);
-      const secs = Math.floor(video.duration_seconds % 60);
-      if (hours > 0) {
-        parts.push(`${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`);
-      } else {
-        parts.push(`${mins}:${secs.toString().padStart(2, '0')}`);
-      }
+    // Download date (when file was created/downloaded) - when user downloaded the video
+    if (video.download_date) {
+      const downloadDate = new Date(video.download_date);
+      parts.push(`Downloaded: ${downloadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
     }
 
     return parts.join(' • ');
+  }
+
+  /**
+   * Format duration in hh:mm:ss or mm:ss format
+   */
+  formatVideoDuration(video: DatabaseVideo): string {
+    if (!video.duration_seconds) {
+      return '';
+    }
+
+    const hours = Math.floor(video.duration_seconds / 3600);
+    const mins = Math.floor((video.duration_seconds % 3600) / 60);
+    const secs = Math.floor(video.duration_seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
   }
 
   /**
@@ -1863,6 +1926,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Handle ItemListComponent events
    */
   onListItemClick(video: DatabaseVideo) {
+    // Finder-like behavior: Single click highlights AND selects the item
+    this.highlightedVideo = video;
+
     // Click handling is managed by ItemListComponent for selection
     // For detail view, load video in preview
     if (this.viewMode === 'detail') {
@@ -1880,6 +1946,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
   onListItemsSelected(videos: DatabaseVideo[]) {
     // Add selected videos to the selection set
     videos.forEach(video => this.selectedVideos.add(video.id));
+
+    // Finder-like behavior: The last selected item becomes the highlighted one
+    if (videos.length > 0) {
+      this.highlightedVideo = videos[videos.length - 1];
+    }
   }
 
   onListItemsDeselected(videos: DatabaseVideo[]) {
@@ -1918,8 +1989,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   onListItemHighlighted(video: DatabaseVideo | null) {
+    // Save the previous highlighted video before updating
+    const previousVideo = this.highlightedVideo;
+
+    // Update highlighted video
+    this.highlightedVideo = video;
+
     // Auto-load preview when navigating with arrow keys if preview is already open
-    if (video && this.isPreviewModalOpen && video.id !== this.highlightedVideo?.id) {
+    if (video && this.isPreviewModalOpen && video.id !== previousVideo?.id) {
       this.loadPreviewVideo(video);
     }
   }
@@ -1929,6 +2006,18 @@ export class LibraryComponent implements OnInit, OnDestroy {
     data.event.preventDefault();
     data.event.stopPropagation();
 
+    // Finder-like behavior: If right-clicking on an unselected item, clear selection and select only that item
+    if (!this.selectedVideos.has(data.item.id)) {
+      // Clear all selections
+      this.selectedVideos.clear();
+      // Select only the right-clicked item
+      this.selectedVideos.add(data.item.id);
+      // Highlight the right-clicked item
+      this.highlightedVideo = data.item;
+      this.updateAllSelectedState();
+    }
+    // If right-clicking on a selected item, keep the current selection (allows multi-item operations)
+
     // Set context menu position and video
     this.contextMenuPosition = {
       x: data.event.clientX,
@@ -1936,21 +2025,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
     };
     this.contextMenuVideo = data.item;
 
+    // Clear any pending timeout to avoid race conditions
+    if (this.contextMenuTimeout) {
+      clearTimeout(this.contextMenuTimeout);
+      this.contextMenuTimeout = null;
+    }
+
     // If menu is already open, close it first then reopen at new position
     if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
       this.contextMenuTrigger.closeMenu();
+      this.isContextMenuOpen = false;
       // Reopen after a short delay to allow closing animation
-      setTimeout(() => {
+      this.contextMenuTimeout = setTimeout(() => {
         if (this.contextMenuTrigger) {
           this.contextMenuTrigger.openMenu();
+          this.isContextMenuOpen = true;
         }
+        this.contextMenuTimeout = null;
       }, 50);
     } else {
       // Open the Material menu with a slight delay to ensure it stays open
-      setTimeout(() => {
+      this.contextMenuTimeout = setTimeout(() => {
         if (this.contextMenuTrigger) {
           this.contextMenuTrigger.openMenu();
+          this.isContextMenuOpen = true;
         }
+        this.contextMenuTimeout = null;
       }, 0);
     }
   }
@@ -1973,10 +2073,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
         }
         break;
       case 'analyze':
-        this.analyzeSelected();
+        // Use event.items directly instead of relying on this.selectedVideos
+        if (event.items && event.items.length > 0) {
+          this.analyzeVideos(event.items);
+        }
         break;
       case 'transcribe':
-        this.analyzeSelected(); // Using analyzeSelected since transcribeSelected doesn't exist
+        // Use event.items directly instead of relying on this.selectedVideos
+        if (event.items && event.items.length > 0) {
+          this.analyzeVideos(event.items);
+        }
         break;
       case 'relink':
         // TODO: Implement single video relink
@@ -2109,7 +2215,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Analyze selected videos
+   * Analyze selected videos (from toolbar button)
    */
   async analyzeSelected() {
     console.log('analyzeSelected called, selected count:', this.selectedVideos.size);
@@ -2127,6 +2233,26 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
     console.log('Selected video details:', selectedVideoDetails);
 
+    if (selectedVideoDetails.length === 0) {
+      console.error('No video details found for selected IDs');
+      this.notificationService.toastOnly('error', 'Error', 'Could not find details for selected videos');
+      return;
+    }
+
+    this.analyzeVideos(selectedVideoDetails);
+  }
+
+  /**
+   * Analyze specific videos (can be called from context menu or other sources)
+   */
+  private async analyzeVideos(videos: DatabaseVideo[]) {
+    if (!videos || videos.length === 0) {
+      this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to analyze');
+      return;
+    }
+
+    console.log('analyzeVideos called with', videos.length, 'videos');
+
     // Open dialog without specifying mode - let user choose
     const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
       width: '700px',
@@ -2134,7 +2260,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       maxHeight: '85vh',
       panelClass: 'video-analysis-dialog-panel',
       data: {
-        selectedVideos: selectedVideoDetails
+        selectedVideos: videos
       },
       disableClose: false
     });
@@ -2405,14 +2531,23 @@ export class LibraryComponent implements OnInit, OnDestroy {
       try {
         const newProgress = await this.databaseLibraryService.getBatchProgress();
 
-        // Track newly completed videos
+        // Track video processing states for progress bars
+        // Remove completed video from processing states
         if (newProgress.processedVideos && newProgress.processedVideos > this.lastProcessedCount) {
-          // A video was just completed - add it to the list
-          // Note: We use currentVideoFilename from the previous state as it represents the just-completed video
+          // A video was just completed - remove it from processing states
           if (this.batchProgress?.currentVideoFilename) {
+            // Find and remove the video by filename
+            const completedVideo = this.videos.find(v => v.filename === this.batchProgress?.currentVideoFilename);
+            if (completedVideo) {
+              console.log('[LibraryComponent] Removing completed video from processing states:', completedVideo.id);
+              this.videoProcessingStates.delete(completedVideo.id);
+              // Create a new Map reference to trigger change detection
+              this.videoProcessingStates = new Map(this.videoProcessingStates);
+            }
+
             this.completedVideos.push({
               filename: this.batchProgress.currentVideoFilename,
-              videoId: '', // We don't have the ID readily available, but filename is sufficient
+              videoId: completedVideo?.id || '',
               completedAt: new Date(),
               status: 'success'
             });
@@ -2420,9 +2555,30 @@ export class LibraryComponent implements OnInit, OnDestroy {
           this.lastProcessedCount = newProgress.processedVideos;
         }
 
+        // Track the currently processing video
+        if (newProgress.currentVideoFilename && newProgress.status === 'running') {
+          const currentVideo = this.videos.find(v => v.filename === newProgress.currentVideoFilename);
+          console.log('[LibraryComponent] Current video processing:', newProgress.currentVideoFilename, 'Found:', !!currentVideo);
+          if (currentVideo) {
+            // Determine stage based on video state
+            const stage: 'transcribing' | 'analyzing' = currentVideo.has_transcript ? 'analyzing' : 'transcribing';
+            // Show animated progress - since we don't have per-video progress, show an indeterminate state
+            const progress = 65; // Show at 65% to indicate active processing
+            console.log('[LibraryComponent] Setting progress state for video:', currentVideo.id, 'stage:', stage, 'progress:', progress);
+            this.videoProcessingStates.set(currentVideo.id, { stage, progress });
+
+            // Create a new Map reference to trigger change detection
+            this.videoProcessingStates = new Map(this.videoProcessingStates);
+          }
+        }
+
         // Track errors
         if (newProgress.errors && newProgress.errors.length > 0) {
           newProgress.errors.forEach(error => {
+            // Remove from processing states
+            console.log('[LibraryComponent] Removing failed video from processing states:', error.videoId);
+            this.videoProcessingStates.delete(error.videoId);
+
             const existingError = this.completedVideos.find(v => v.filename === error.filename);
             if (!existingError) {
               this.completedVideos.push({
@@ -2434,12 +2590,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
               });
             }
           });
+          // Create a new Map reference to trigger change detection
+          this.videoProcessingStates = new Map(this.videoProcessingStates);
         }
 
         this.batchProgress = newProgress;
 
         // If batch completed, show notification and reload
         if (this.batchProgress.running && this.batchProgress.status === 'completed') {
+          // Clear all processing states
+          this.videoProcessingStates.clear();
+
           this.notificationService.toastOnly(
             'success',
             'Analysis Complete',
@@ -2460,6 +2621,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
     this.databaseLibraryService.getBatchProgress().then(progress => {
       this.batchProgress = progress;
       this.lastProcessedCount = progress.processedVideos || 0;
+
+      // If there's a batch running, initialize processing state for current video
+      if (progress.status === 'running' && progress.currentVideoFilename) {
+        const currentVideo = this.videos.find(v => v.filename === progress.currentVideoFilename);
+        console.log('[LibraryComponent] Initial batch progress check - Current video:', progress.currentVideoFilename, 'Found:', !!currentVideo);
+        if (currentVideo) {
+          const stage: 'transcribing' | 'analyzing' = currentVideo.has_transcript ? 'analyzing' : 'transcribing';
+          console.log('[LibraryComponent] Setting initial progress state for video:', currentVideo.id, 'stage:', stage);
+          this.videoProcessingStates.set(currentVideo.id, { stage, progress: 65 });
+          // Create a new Map reference to trigger change detection
+          this.videoProcessingStates = new Map(this.videoProcessingStates);
+        }
+      }
     });
   }
 
@@ -2497,6 +2671,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
   async stopBatch() {
     try {
       await this.databaseLibraryService.stopBatch();
+      // Clear all processing states when stopping
+      this.videoProcessingStates.clear();
       this.notificationService.toastOnly('info', 'Batch Stopped', 'Analysis has been stopped');
       this.batchProgress = await this.databaseLibraryService.getBatchProgress();
     } catch (error) {
@@ -3581,52 +3757,88 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // If menu is already open, close it first then reopen at new position
     if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
       this.contextMenuTrigger.closeMenu();
+      this.isContextMenuOpen = false;
       // Reopen after a short delay to allow closing animation
       setTimeout(() => {
         if (this.contextMenuTrigger) {
           this.contextMenuTrigger.openMenu();
+          this.isContextMenuOpen = true;
         }
       }, 50);
     } else {
       // Open the context menu
       if (this.contextMenuTrigger) {
         this.contextMenuTrigger.openMenu();
+        this.isContextMenuOpen = true;
       }
     }
   }
 
   /**
-   * Start renaming a video (opens inline editor for all three parts)
+   * Start renaming a video (opens rename dialog)
    */
   startRenamingVideo(video: DatabaseVideo) {
-    // Initialize editing state for this video if not exists
-    if (!this.editingVideo[video.id]) {
-      this.editingVideo[video.id] = { date: false, title: false, extension: false };
-    }
+    const { RenameDialogComponent } = require('./rename-dialog.component');
 
-    // Initialize edited values if not exists
-    if (!this.editedValues[video.id]) {
-      const parsed = this.parseFilename(video.filename);
-      this.editedValues[video.id] = parsed;
-    }
-
-    // Enable editing for all three parts simultaneously
-    this.editingVideo[video.id].date = true;
-    this.editingVideo[video.id].title = true;
-    this.editingVideo[video.id].extension = true;
-
-    // Auto-focus the title input after it renders
-    setTimeout(() => {
-      const input = document.querySelector('.title-input') as HTMLInputElement;
-      if (input) {
-        input.focus();
-        input.select(); // Select all text for easy replacement
+    const dialogRef = this.dialog.open(RenameDialogComponent, {
+      width: '600px',
+      data: {
+        filename: video.filename,
+        videoId: video.id
       }
-    }, 0);
+    });
+
+    dialogRef.afterClosed().subscribe(async (result) => {
+      if (result?.renamed) {
+        await this.saveRenamedFilename(video, result);
+      }
+    });
   }
 
   /**
-   * Save edited filename
+   * Save renamed filename from dialog result
+   */
+  async saveRenamedFilename(video: DatabaseVideo, result: { date?: string; title?: string; extension?: string }) {
+    // Reconstruct filename
+    let newFilename = '';
+    if (result.date && result.date.trim()) {
+      newFilename = `${result.date.trim()} ${result.title?.trim() || ''}`;
+    } else {
+      newFilename = result.title?.trim() || '';
+    }
+
+    if (result.extension && result.extension.trim()) {
+      newFilename += `.${result.extension.trim()}`;
+    }
+
+    // Skip if unchanged
+    if (newFilename === video.filename) {
+      return;
+    }
+
+    try {
+      // Call backend to rename the file
+      const updateResult = await this.databaseLibraryService.updateVideoFilename(video.id, newFilename);
+
+      if (updateResult.success) {
+        // Update local copy with new filename and path
+        video.filename = newFilename;
+        if (updateResult.newPath) {
+          video.current_path = updateResult.newPath;
+        }
+
+        this.notificationService.toastOnly('success', 'Renamed', `File renamed to: ${newFilename}`);
+      } else {
+        this.notificationService.toastOnly('error', 'Rename Failed', updateResult.error || 'Failed to rename video');
+      }
+    } catch (error: any) {
+      console.error('Failed to rename video:', error);
+      this.notificationService.toastOnly('error', 'Rename Failed', error.error?.message || 'Failed to rename video');
+    }
+  }
+
+  /**
+   * Save edited filename (legacy - for inline editing)
    */
   async saveFilename(video: DatabaseVideo) {
     const edited = this.editedValues[video.id];
@@ -3679,6 +3891,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
     if (this.editingVideo[videoId]) {
       this.editingVideo[videoId] = { date: false, title: false, extension: false };
     }
+  }
+
+  /**
+   * Get position for inline edit overlay in list view
+   */
+  getEditOverlayPosition(videoId: string): { top: number; left: number } {
+    // Find the list item element
+    const itemElement = document.getElementById(`item-${videoId}`);
+    if (itemElement) {
+      const rect = itemElement.getBoundingClientRect();
+      return {
+        top: rect.top + window.scrollY,
+        left: rect.left + window.scrollX
+      };
+    }
+    return { top: 0, left: 0 };
   }
 
   /**
@@ -3945,15 +4173,18 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Navigate between videos in preview modal
    */
   navigatePreviewVideos(direction: number) {
-    if (!this.highlightedVideo || this.filteredVideos.length === 0) {
+    // Use the visual order (same as what's displayed on screen) for navigation
+    const visualOrder = this.getVisualOrderVideos();
+
+    if (!this.highlightedVideo || visualOrder.length === 0) {
       return;
     }
 
-    const currentIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo!.id);
+    const currentIndex = visualOrder.findIndex(v => v.id === this.highlightedVideo!.id);
     if (currentIndex === -1) return;
 
     const newIndex = currentIndex + direction;
-    if (newIndex >= 0 && newIndex < this.filteredVideos.length) {
+    if (newIndex >= 0 && newIndex < visualOrder.length) {
       // Stop and reset current video
       const videoEl = this.previewVideoPlayer?.nativeElement;
       if (videoEl) {
@@ -3962,7 +4193,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
 
       // Update highlighted video (this triggers Angular to update the [src] binding)
-      this.highlightedVideo = this.filteredVideos[newIndex];
+      this.highlightedVideo = visualOrder[newIndex];
 
       // Wait for the new video element to load and then auto-play if enabled
       if (this.previewAutoPlayEnabled) {

@@ -151,35 +151,52 @@ export class FfmpegService {
           return reject(err);
         }
 
+        // Try to find video stream first
         const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
-        if (!videoStream) {
-          return reject(new Error('No video stream found'));
+
+        // If no video stream, try audio stream (for audio-only files)
+        const audioStream = metadata.streams.find(stream => stream.codec_type === 'audio');
+
+        if (!videoStream && !audioStream) {
+          return reject(new Error('No video or audio stream found'));
         }
 
-        const { width, height, r_frame_rate, duration, codec_name, bit_rate } = videoStream;
-        
-        // Calculate FPS from rational frame rate (e.g., "30000/1001")
+        // Prefer video stream, fall back to audio stream (we know at least one exists)
+        const primaryStream = videoStream || audioStream!;
+
+        // Get duration from stream, or fall back to format duration
+        let fileDuration = 0;
+        if (primaryStream.duration) {
+          fileDuration = parseFloat(primaryStream.duration as any);
+        }
+        if (!fileDuration && metadata.format && metadata.format.duration) {
+          fileDuration = typeof metadata.format.duration === 'string'
+            ? parseFloat(metadata.format.duration)
+            : metadata.format.duration;
+        }
+
+        // Calculate FPS from rational frame rate (e.g., "30000/1001") - only for video
         let fps: number | undefined;
-        if (r_frame_rate) {
-          const [numerator, denominator] = r_frame_rate.split('/').map(Number);
+        if (videoStream && videoStream.r_frame_rate) {
+          const [numerator, denominator] = videoStream.r_frame_rate.split('/').map(Number);
           if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
             fps = numerator / denominator;
           }
         }
 
-        // Calculate aspect ratio
+        // Calculate aspect ratio - only for video
         let aspectRatio: string | undefined;
-        if (width && height) {
-          const gcd = this.calculateGCD(width, height);
-          aspectRatio = `${width / gcd}:${height / gcd}`;
+        if (videoStream && videoStream.width && videoStream.height) {
+          const gcd = this.calculateGCD(videoStream.width, videoStream.height);
+          aspectRatio = `${videoStream.width / gcd}:${videoStream.height / gcd}`;
         }
 
         resolve({
-          width,
-          height,
-          duration: parseFloat(duration || '0'),
-          codecName: codec_name,
-          bitrate: bit_rate ? parseInt(bit_rate) : undefined,
+          width: videoStream?.width,
+          height: videoStream?.height,
+          duration: fileDuration,
+          codecName: primaryStream.codec_name,
+          bitrate: primaryStream.bit_rate ? parseInt(primaryStream.bit_rate as any) : undefined,
           fps,
           aspectRatio,
         });

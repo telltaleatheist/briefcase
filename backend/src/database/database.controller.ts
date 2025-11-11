@@ -686,12 +686,12 @@ export class DatabaseController {
 
   /**
    * PATCH /api/database/videos/:id/metadata
-   * Update video metadata (date_folder and added_at)
+   * Update video metadata (upload_date and added_at)
    */
   @Patch('videos/:id/metadata')
   async updateVideoMetadata(
     @Param('id') videoId: string,
-    @Body() body: { dateFolder: string | null; addedAt: string }
+    @Body() body: { uploadDate: string | null; addedAt: string }
   ) {
     try {
       // Verify video exists
@@ -704,9 +704,9 @@ export class DatabaseController {
       }
 
       // Update metadata
-      this.databaseService.updateVideoMetadata(videoId, body.dateFolder, body.addedAt);
+      this.databaseService.updateVideoMetadata(videoId, body.uploadDate, body.addedAt);
 
-      this.logger.log(`Updated metadata for video ${videoId}: dateFolder=${body.dateFolder}, addedAt=${body.addedAt}`);
+      this.logger.log(`Updated metadata for video ${videoId}: uploadDate=${body.uploadDate}, addedAt=${body.addedAt}`);
 
       return {
         success: true,
@@ -1007,6 +1007,27 @@ export class DatabaseController {
       message: result.deletedCount > 0
         ? `Pruned ${result.deletedCount} orphaned video${result.deletedCount > 1 ? 's' : ''} from database`
         : 'No orphaned videos to prune'
+    };
+  }
+
+  /**
+   * POST /api/database/populate-durations
+   * Populate missing video durations for existing videos
+   * Useful for migrating videos that were imported before duration extraction was implemented
+   */
+  @Post('populate-durations')
+  async populateMissingDurations() {
+    this.logger.log('Populating missing video durations');
+    const result = await this.fileScannerService.populateMissingDurations();
+    return {
+      success: true,
+      total: result.total,
+      updated: result.updated,
+      failed: result.failed,
+      errors: result.errors,
+      message: result.total === 0
+        ? 'All videos already have duration information'
+        : `Populated duration for ${result.updated} of ${result.total} videos${result.failed > 0 ? ` (${result.failed} failed)` : ''}`
     };
   }
 

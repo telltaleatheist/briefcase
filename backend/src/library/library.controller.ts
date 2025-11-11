@@ -479,14 +479,40 @@ export class LibraryController {
         // Determine content type from file extension
         const ext = path.extname(videoPath).toLowerCase();
         const contentTypeMap: Record<string, string> = {
+          // Video formats
           '.mp4': 'video/mp4',
           '.webm': 'video/webm',
           '.ogg': 'video/ogg',
-          '.mov': 'video/quicktime', // Use proper QuickTime MIME type
+          '.mov': 'video/quicktime',
           '.avi': 'video/x-msvideo',
           '.mkv': 'video/x-matroska',
+          '.m4v': 'video/x-m4v',
+          '.flv': 'video/x-flv',
+          // Audio formats
+          '.mp3': 'audio/mpeg',
+          '.m4a': 'audio/mp4',
+          '.m4b': 'audio/mp4',
+          '.aac': 'audio/aac',
+          '.flac': 'audio/flac',
+          '.wav': 'audio/wav',
+          '.oga': 'audio/ogg',
+          // Image formats
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.gif': 'image/gif',
+          '.webp': 'image/webp',
+          '.bmp': 'image/bmp',
+          // Document formats
+          '.pdf': 'application/pdf',
+          '.txt': 'text/plain',
+          '.md': 'text/markdown',
+          // Web formats
+          '.html': 'text/html',
+          '.htm': 'text/html',
+          '.mhtml': 'message/rfc822',
         };
-        const contentType = contentTypeMap[ext] || 'video/mp4';
+        const contentType = contentTypeMap[ext] || 'application/octet-stream';
 
         if (range) {
           // Handle range request for seeking

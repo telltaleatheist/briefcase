@@ -263,16 +263,20 @@
         <!-- File Type Filter Button -->
         <button mat-stroked-button
                 [matMenuTriggerFor]="fileTypeMenu"
+                #fileTypeMenuTrigger="matMenuTrigger"
                 matTooltip="Filter by file type">
           <mat-icon>filter_list</mat-icon>
           File Types
         </button>
       </div>
 
-      <mat-menu #fileTypeMenu="matMenu" class="file-type-menu">
+      <mat-menu #fileTypeMenu="matMenu" class="file-type-menu" [hasBackdrop]="true" backdropClass="menu-backdrop">
         <div class="menu-header" (click)="$event.stopPropagation()">
           <span>Show File Types</span>
           <button mat-button (click)="selectAllFileTypes()">All</button>
+          <button mat-icon-button (click)="closeFileTypeMenu()" matTooltip="Close menu">
+            <mat-icon>close</mat-icon>
+          </button>
         </div>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('video')">
@@ -358,6 +362,7 @@
     [selectionMode]="SelectionMode.Multiple"
     [contextMenuActions]="listContextMenuActions"
     [statusMapper]="getVideoStatusMapper"
+    [progressMapper]="videoProgressMapper"
     (itemClick)="onListItemClick($event)"
     (itemDoubleClick)="onListItemDoubleClick($event)"
     (itemsSelected)="onListItemsSelected($event)"
@@ -369,6 +374,39 @@
     (contextMenuAction)="onListContextMenuAction($event)">
   </app-item-list>
 
+  <!-- Inline Editing Overlay for List View (appears over the item being edited) -->
+  <div *ngFor="let video of filteredVideos"
+       class="inline-edit-overlay"
+       [class.active]="editingVideo[video.id] && (editingVideo[video.id].date || editingVideo[video.id].title || editingVideo[video.id].extension)"
+       [attr.data-video-id]="video.id">
+    <div *ngIf="editingVideo[video.id] && (editingVideo[video.id].date || editingVideo[video.id].title || editingVideo[video.id].extension)"
+         class="inline-edit-container">
+      <input *ngIf="editingVideo[video.id].date"
+             type="text"
+             class="inline-edit-input date-input"
+             [(ngModel)]="editedValues[video.id].date"
+             (keydown.enter)="saveFilename(video)"
+             (keydown.escape)="cancelEditing(video.id)"
+             (blur)="onEditBlur(video, 'date')"
+             placeholder="Date">
+      <input *ngIf="editingVideo[video.id].title"
+             type="text"
+             class="inline-edit-input title-input"
+             [(ngModel)]="editedValues[video.id].title"
+             (keydown.enter)="saveFilename(video)"
+             (keydown.escape)="cancelEditing(video.id)"
+             (blur)="onEditBlur(video, 'title')"
+             placeholder="Title">
+      <input *ngIf="editingVideo[video.id].extension"
+             type="text"
+             class="inline-edit-input extension-input"
+             [(ngModel)]="editedValues[video.id].extension"
+             (keydown.enter)="saveFilename(video)"
+             (keydown.escape)="cancelEditing(video.id)"
+             (blur)="onEditBlur(video, 'extension')"
+             placeholder="ext">
+    </div>
+  </div>
 
   <!-- Context Menu (Right-click) - positioned at cursor -->
   <div style="visibility: hidden; position: fixed;"
@@ -615,7 +653,7 @@
                 <div class="file-extension">.{{ parseFilename(video.filename).extension }}</div>
 
                 <!-- Date added -->
-                <div class="date-added">{{ video.dateFolder || 'Unknown' }}</div>
+                <div class="date-added">{{ video.uploadDate || 'Unknown' }}</div>
 
                 <!-- Actions menu -->
                 <button mat-icon-button

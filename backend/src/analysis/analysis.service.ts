@@ -629,12 +629,24 @@ export class AnalysisService {
             .update(filename + stats.size + stats.mtime)
             .digest('hex');
 
-          // Determine date folder from path or use current date
-          let dateFolder = new Date().toISOString().split('T')[0];
-          const dateMatch = request.videoPath.match(/\/(\d{4}-\d{2}-\d{2})\//);
-          if (dateMatch) {
-            dateFolder = dateMatch[1];
+          // Determine upload date from filename or path
+          let uploadDate: string | undefined;
+
+          // Try to extract from filename first (format: YYYY-MM-DD Title.ext)
+          const filenameDateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})\s/);
+          if (filenameDateMatch) {
+            uploadDate = filenameDateMatch[1];
+          } else {
+            // Fallback: extract from path
+            const dateMatch = request.videoPath.match(/\/(\d{4}-\d{2}-\d{2})\//);
+            if (dateMatch) {
+              uploadDate = dateMatch[1];
+            }
           }
+
+          // Get download date from file creation time
+          const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+          const downloadDate = fileCreationDate.toISOString();
 
           // Insert video record
           this.databaseService.insertVideo({
@@ -642,7 +654,8 @@ export class AnalysisService {
             filename,
             fileHash: hash,
             currentPath: request.videoPath,
-            dateFolder,
+            uploadDate,
+            downloadDate,
             fileSizeBytes: stats.size,
           });
 

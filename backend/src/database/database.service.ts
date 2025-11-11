@@ -117,22 +117,26 @@ export class DatabaseService {
    */
   private initializeSchema() {
     const db = this.ensureInitialized();
-    const schema = `
+
+    // First, create all tables WITHOUT indexes (in case they exist with old schema)
+    const tableSchema = `
       -- Videos table: Core metadata for each video file
       CREATE TABLE IF NOT EXISTS videos (
         id TEXT PRIMARY KEY,
         filename TEXT NOT NULL,
         file_hash TEXT,
         current_path TEXT NOT NULL,
-        date_folder TEXT,
+        upload_date TEXT,
+        download_date TEXT NOT NULL,
         duration_seconds REAL,
         file_size_bytes INTEGER,
         ai_description TEXT,
         source_url TEXT,
-        created_at TEXT NOT NULL,
         last_verified TEXT NOT NULL,
         added_at TEXT NOT NULL,
         is_linked INTEGER DEFAULT 1,
+        media_type TEXT DEFAULT 'video',
+        file_extension TEXT,
         CHECK (is_linked IN (0, 1))
       );
 
@@ -216,19 +220,6 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
       );
 
-      -- Indexes for performance
-      CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
-      CREATE INDEX IF NOT EXISTS idx_videos_hash ON videos(file_hash);
-      CREATE INDEX IF NOT EXISTS idx_videos_date_folder ON videos(date_folder);
-      CREATE INDEX IF NOT EXISTS idx_videos_is_linked ON videos(is_linked);
-      CREATE INDEX IF NOT EXISTS idx_tags_video ON tags(video_id);
-      CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
-      CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
-      CREATE INDEX IF NOT EXISTS idx_custom_markers_video ON custom_markers(video_id);
-      CREATE INDEX IF NOT EXISTS idx_saved_links_status ON saved_links(status);
-      CREATE INDEX IF NOT EXISTS idx_saved_links_date_added ON saved_links(date_added);
-      CREATE INDEX IF NOT EXISTS idx_saved_links_url ON saved_links(url);
-
       -- Full-text search tables (using regular tables since sql.js doesn't include FTS5)
       CREATE TABLE IF NOT EXISTS transcripts_fts (
         video_id TEXT NOT NULL,
@@ -241,9 +232,6 @@ export class DatabaseService {
         content TEXT,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
-
-      CREATE INDEX IF NOT EXISTS idx_transcripts_fts_video ON transcripts_fts(video_id);
-      CREATE INDEX IF NOT EXISTS idx_analyses_fts_video ON analyses_fts(video_id);
 
       -- Media relationships: Link multiple files together (e.g. PDF + audiobook)
       CREATE TABLE IF NOT EXISTS media_relationships (
@@ -265,18 +253,39 @@ export class DatabaseService {
         extracted_at TEXT NOT NULL,
         FOREIGN KEY (media_id) REFERENCES videos(id) ON DELETE CASCADE
       );
+    `;
 
+    // Execute table creation
+    db.exec(tableSchema);
+    this.logger.log('Database tables created');
+
+    // Run schema migrations for existing databases BEFORE creating indexes
+    this.runSchemaMigrations();
+
+    // Now create indexes (after migrations have run)
+    const indexSchema = `
+      -- Indexes for performance
+      CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
+      CREATE INDEX IF NOT EXISTS idx_videos_hash ON videos(file_hash);
+      CREATE INDEX IF NOT EXISTS idx_videos_upload_date ON videos(upload_date);
+      CREATE INDEX IF NOT EXISTS idx_videos_download_date ON videos(download_date);
+      CREATE INDEX IF NOT EXISTS idx_videos_is_linked ON videos(is_linked);
+      CREATE INDEX IF NOT EXISTS idx_tags_video ON tags(video_id);
+      CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
+      CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
+      CREATE INDEX IF NOT EXISTS idx_custom_markers_video ON custom_markers(video_id);
+      CREATE INDEX IF NOT EXISTS idx_saved_links_status ON saved_links(status);
+      CREATE INDEX IF NOT EXISTS idx_saved_links_date_added ON saved_links(date_added);
+      CREATE INDEX IF NOT EXISTS idx_saved_links_url ON saved_links(url);
+      CREATE INDEX IF NOT EXISTS idx_transcripts_fts_video ON transcripts_fts(video_id);
+      CREATE INDEX IF NOT EXISTS idx_analyses_fts_video ON analyses_fts(video_id);
       CREATE INDEX IF NOT EXISTS idx_media_relationships_primary ON media_relationships(primary_media_id);
       CREATE INDEX IF NOT EXISTS idx_media_relationships_related ON media_relationships(related_media_id);
       CREATE INDEX IF NOT EXISTS idx_text_content_media ON text_content(media_id);
     `;
 
-    // Execute schema creation
-    db.exec(schema);
+    db.exec(indexSchema);
     this.logger.log('Database schema initialized');
-
-    // Run schema migrations for existing databases
-    this.runSchemaMigrations();
   }
 
   /**
@@ -461,6 +470,85 @@ export class DatabaseService {
         }
       }
     }
+
+    // Migration 8: Check if we need to add created_at column (old databases might have this instead of upload_date)
+    // Check table schema to see which columns exist
+    let hasCreatedAt = false;
+    let hasUploadDate = false;
+    let hasDownloadDate = false;
+
+    try {
+      const stmt = db.prepare("PRAGMA table_info(videos)");
+      const columns: string[] = [];
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        columns.push(row.name);
+      }
+      stmt.free();
+
+      hasCreatedAt = columns.includes('created_at');
+      hasUploadDate = columns.includes('upload_date');
+      hasDownloadDate = columns.includes('download_date');
+
+      this.logger.log(`Migration check: hasCreatedAt=${hasCreatedAt}, hasUploadDate=${hasUploadDate}, hasDownloadDate=${hasDownloadDate}`);
+    } catch (error: any) {
+      this.logger.warn(`Could not check table schema: ${error?.message || 'Unknown error'}`);
+    }
+
+    // If we have created_at but not upload_date/download_date, we need to migrate
+    if (hasCreatedAt && (!hasUploadDate || !hasDownloadDate)) {
+      this.logger.log('Running migration: Renaming created_at to upload_date and adding download_date');
+      try {
+        // SQLite doesn't support column renaming directly, so we need to recreate the table
+        db.exec(`
+          -- Create new table with updated schema
+          CREATE TABLE videos_new (
+            id TEXT PRIMARY KEY,
+            filename TEXT NOT NULL,
+            file_hash TEXT,
+            current_path TEXT NOT NULL,
+            upload_date TEXT,
+            download_date TEXT NOT NULL,
+            duration_seconds REAL,
+            file_size_bytes INTEGER,
+            ai_description TEXT,
+            source_url TEXT,
+            last_verified TEXT NOT NULL,
+            added_at TEXT NOT NULL,
+            is_linked INTEGER DEFAULT 1,
+            media_type TEXT DEFAULT 'video',
+            file_extension TEXT,
+            CHECK (is_linked IN (0, 1))
+          );
+
+          -- Copy data from old table to new table
+          INSERT INTO videos_new (
+            id, filename, file_hash, current_path, upload_date, download_date,
+            duration_seconds, file_size_bytes, ai_description, source_url,
+            last_verified, added_at, is_linked, media_type, file_extension
+          )
+          SELECT
+            id, filename, file_hash, current_path,
+            created_at as upload_date,
+            added_at as download_date,
+            duration_seconds, file_size_bytes, ai_description, source_url,
+            last_verified, added_at, is_linked, media_type, file_extension
+          FROM videos;
+
+          -- Drop old table
+          DROP TABLE videos;
+
+          -- Rename new table to videos
+          ALTER TABLE videos_new RENAME TO videos;
+        `);
+
+        this.saveDatabase();
+        this.logger.log('Migration complete: Renamed created_at to upload_date and added download_date');
+      } catch (migrationError: any) {
+        this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+      }
+    }
   }
 
   /**
@@ -468,6 +556,14 @@ export class DatabaseService {
    */
   getDatabase(): Database {
     return this.ensureInitialized();
+  }
+
+  /**
+   * Save the database to disk
+   * Expose this publicly for services that need to save after raw queries
+   */
+  saveDatabaseToDisk() {
+    this.saveDatabase();
   }
 
   /**
@@ -499,17 +595,17 @@ export class DatabaseService {
     filename: string;
     fileHash: string;
     currentPath: string;
-    dateFolder?: string;
+    uploadDate?: string; // Date from filename - when content was created/filmed
     durationSeconds?: number;
     fileSizeBytes?: number;
     sourceUrl?: string;
     mediaType?: string;
     fileExtension?: string;
-    createdAt?: string; // File's actual creation timestamp (when downloaded/created)
+    downloadDate?: string; // File's creation timestamp (when you downloaded it)
   }) {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
-    const createdAt = video.createdAt || now;
+    const downloadDate = video.downloadDate || now;
 
     // Determine media type from file extension if not provided
     let mediaType = video.mediaType;
@@ -525,22 +621,22 @@ export class DatabaseService {
 
     db.run(
       `INSERT INTO videos (
-        id, filename, file_hash, current_path, date_folder,
+        id, filename, file_hash, current_path, upload_date,
         duration_seconds, file_size_bytes, source_url, media_type, file_extension,
-        created_at, last_verified, added_at, is_linked
+        download_date, last_verified, added_at, is_linked
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         video.id,
         video.filename,
         video.fileHash,
         video.currentPath,
-        video.dateFolder || null,
+        video.uploadDate || null,
         video.durationSeconds || null,
         video.fileSizeBytes || null,
         video.sourceUrl || null,
         mediaType || 'video',
         fileExtension || null,
-        createdAt, // File's creation timestamp (when user downloaded/created it)
+        downloadDate, // File's creation timestamp (when you downloaded it)
         now, // last_verified
         now, // added_at (when database entry was created)
       ]
@@ -628,34 +724,34 @@ export class DatabaseService {
   /**
    * Update video path (for relinking moved files)
    */
-  updateVideoPath(id: string, newPath: string, dateFolder?: string) {
+  updateVideoPath(id: string, newPath: string, uploadDate?: string) {
     const db = this.ensureInitialized();
 
     db.run(
       `UPDATE videos
        SET current_path = ?,
-           date_folder = ?,
+           upload_date = ?,
            last_verified = ?,
            is_linked = 1
        WHERE id = ?`,
-      [newPath, dateFolder || null, new Date().toISOString(), id]
+      [newPath, uploadDate || null, new Date().toISOString(), id]
     );
 
     this.saveDatabase();
   }
 
   /**
-   * Update video metadata (date_folder and added_at)
+   * Update video metadata (upload_date and added_at)
    */
-  updateVideoMetadata(id: string, dateFolder: string | null, addedAt: string) {
+  updateVideoMetadata(id: string, uploadDate: string | null, addedAt: string) {
     const db = this.ensureInitialized();
 
     db.run(
       `UPDATE videos
-       SET date_folder = ?,
+       SET upload_date = ?,
            added_at = ?
        WHERE id = ?`,
-      [dateFolder, addedAt, id]
+      [uploadDate, addedAt, id]
     );
 
     this.saveDatabase();
@@ -833,7 +929,7 @@ export class DatabaseService {
       query += ' WHERE v.is_linked = 1';
     }
 
-    query += ' ORDER BY v.created_at DESC';
+    query += ' ORDER BY v.added_at DESC';
 
     if (options?.limit) {
       query += ' LIMIT ?';

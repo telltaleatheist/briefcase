@@ -116,7 +116,7 @@ export class BatchAnalysisService implements OnModuleInit {
     const openaiApiKey = options?.openaiApiKey;
 
     // Get videos to process
-    let videosToProcess: Array<{ id: string; filename: string; current_path: string; date_folder?: string | null; duration_seconds?: number | null }>;
+    let videosToProcess: Array<{ id: string; filename: string; current_path: string; upload_date?: string | null; download_date?: string | null; duration_seconds?: number | null }>;
 
     if (options?.videoIds && options.videoIds.length > 0) {
       // Process specific videos by ID
@@ -133,7 +133,8 @@ export class BatchAnalysisService implements OnModuleInit {
         id: video.id as string,
         filename: video.filename as string,
         current_path: video.current_path as string,
-        date_folder: video.date_folder as string | null,
+        upload_date: video.upload_date as string | null,
+        download_date: video.download_date as string | null,
         duration_seconds: video.duration_seconds as number | null,
       }));
     } else {

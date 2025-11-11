@@ -25,6 +25,8 @@ export interface ItemDisplayConfig {
   primaryField: string;
   // Secondary field to display (e.g., 'date', 'duration')
   secondaryField?: string;
+  // Metadata field to display on the right side (e.g., 'duration', 'size')
+  metadataField?: string;
   // Icon field (e.g., 'icon', 'mediaType')
   iconField?: string;
   // Status indicator field (e.g., 'status', 'hasTranscript')
@@ -34,7 +36,17 @@ export interface ItemDisplayConfig {
   // Custom renderer functions
   renderPrimary?: (item: ListItem) => string;
   renderSecondary?: (item: ListItem) => string;
+  renderMetadata?: (item: ListItem) => string;
   renderIcon?: (item: ListItem) => string;
+}
+
+/**
+ * Item progress for visual progress bar indicator
+ */
+export interface ItemProgress {
+  value: number; // Progress value 0-100
+  color?: string; // Optional custom color (defaults to accent color)
+  label?: string; // Optional label for accessibility
 }
 
 /**

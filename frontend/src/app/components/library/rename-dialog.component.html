@@ -1,0 +1,85 @@
+<div class="rename-dialog">
+  <h2 mat-dialog-title>
+    <mat-icon>edit</mat-icon>
+    Rename File
+  </h2>
+
+  <mat-dialog-content>
+    <div class="rename-form">
+      <p class="dialog-description">
+        Edit the filename components below. The preview shows how the final filename will appear.
+      </p>
+
+      <div class="form-fields">
+        <!-- Date Field -->
+        <mat-form-field appearance="outline" class="date-field">
+          <mat-label>Date (optional)</mat-label>
+          <input matInput
+                 type="text"
+                 [(ngModel)]="date"
+                 placeholder="YYYY-MM-DD"
+                 (keydown.enter)="handleEnter($event)">
+          <mat-icon matPrefix>calendar_today</mat-icon>
+          <mat-hint>Format: YYYY-MM-DD (e.g., 2024-01-15)</mat-hint>
+        </mat-form-field>
+
+        <!-- Title Field -->
+        <mat-form-field appearance="outline" class="title-field">
+          <mat-label>Title *</mat-label>
+          <input matInput
+                 #titleInput
+                 type="text"
+                 [(ngModel)]="title"
+                 placeholder="Enter video title"
+                 required
+                 (keydown.enter)="handleEnter($event)">
+          <mat-icon matPrefix>title</mat-icon>
+          <mat-error *ngIf="!title.trim()">Title is required</mat-error>
+        </mat-form-field>
+
+        <!-- Extension Field -->
+        <mat-form-field appearance="outline" class="extension-field">
+          <mat-label>Extension</mat-label>
+          <input matInput
+                 type="text"
+                 [(ngModel)]="extension"
+                 placeholder="mp4"
+                 (keydown.enter)="handleEnter($event)">
+          <mat-icon matPrefix>insert_drive_file</mat-icon>
+          <mat-hint>File extension (without dot)</mat-hint>
+        </mat-form-field>
+      </div>
+
+      <!-- Preview Section -->
+      <div class="preview-section">
+        <div class="preview-label">
+          <mat-icon>visibility</mat-icon>
+          Preview
+        </div>
+        <div class="preview-filename">
+          {{ getPreviewFilename() }}
+        </div>
+      </div>
+
+      <!-- Original Filename Reference -->
+      <div class="original-filename">
+        <span class="original-label">Original:</span>
+        <span class="original-value">{{ originalFilename }}</span>
+      </div>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end">
+    <button mat-button (click)="cancel()">
+      <mat-icon>close</mat-icon>
+      Cancel
+    </button>
+    <button mat-raised-button
+            color="primary"
+            (click)="save()"
+            [disabled]="!isValid()">
+      <mat-icon>check</mat-icon>
+      Rename
+    </button>
+  </mat-dialog-actions>
+</div>

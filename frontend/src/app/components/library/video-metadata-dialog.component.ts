@@ -285,7 +285,7 @@ export class VideoMetadataDialogComponent implements OnInit {
   ) {
     this.video = data.video;
     this.filename = data.video.filename;
-    this.weekFolder = data.video.date_folder;
+    this.weekFolder = data.video.upload_date;
     this.addedDate = new Date(data.video.added_at);
 
     // Store originals
@@ -328,7 +328,7 @@ export class VideoMetadataDialogComponent implements OnInit {
       const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/metadata`);
       const response = await this.http
         .patch<any>(url, {
-          dateFolder: this.weekFolder,
+          uploadDate: this.weekFolder,
           addedAt: this.addedDate.toISOString(),
         })
         .toPromise();

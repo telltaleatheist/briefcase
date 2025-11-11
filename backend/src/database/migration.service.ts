@@ -146,7 +146,8 @@ export class MigrationService {
         filename: analysis.video.filename,
         fileHash: fileHash || `legacy-${videoId}`, // Fallback for missing files
         currentPath: analysis.video.currentPath,
-        dateFolder: analysis.video.clipsWeekFolder,
+        uploadDate: analysis.video.clipsWeekFolder, // Legacy field mapping
+        downloadDate: new Date().toISOString(), // Use current time for legacy imports
         durationSeconds: analysis.video.durationSeconds,
         fileSizeBytes,
       });

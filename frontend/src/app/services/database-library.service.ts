@@ -16,14 +16,14 @@ export interface DatabaseVideo {
   filename: string;
   file_hash: string;
   current_path: string;
-  date_folder: string | null;
+  upload_date: string | null; // Date from filename - when content was created/filmed
+  download_date: string | null; // File creation date - when user downloaded it
   duration_seconds: number | null;
   file_size_bytes: number | null;
   ai_description: string | null;
   source_url: string | null;
   media_type: string; // 'video', 'audio', 'document', 'image', 'webpage'
   file_extension: string | null; // '.mp4', '.pdf', '.jpg', etc.
-  created_at: string;
   last_verified: string;
   added_at: string;
   is_linked: number; // 0 or 1 (SQLite boolean)
@@ -460,7 +460,7 @@ export class DatabaseLibraryService {
 
         return (
           (searchFilename && video.filename.toLowerCase().includes(lowerQuery)) ||
-          (searchFilename && video.date_folder && video.date_folder.toLowerCase().includes(lowerQuery)) ||
+          (searchFilename && video.upload_date && video.upload_date.toLowerCase().includes(lowerQuery)) ||
           (searchAiDesc && video.ai_description && video.ai_description.toLowerCase().includes(lowerQuery))
         );
       });
@@ -480,9 +480,9 @@ export class DatabaseLibraryService {
     }
 
     return videos.filter(video => {
-      if (!video.date_folder) return false;
+      if (!video.upload_date) return false;
 
-      const videoDate = new Date(video.date_folder);
+      const videoDate = new Date(video.upload_date);
 
       if (startDate && videoDate < startDate) return false;
       if (endDate && videoDate > endDate) return false;
@@ -504,16 +504,16 @@ export class DatabaseLibraryService {
 
       switch (sortBy) {
         case 'date':
-          // Sort by date_folder (date from video filename - "Date Created")
-          const dateA = a.date_folder ? new Date(a.date_folder).getTime() : 0;
-          const dateB = b.date_folder ? new Date(b.date_folder).getTime() : 0;
+          // Sort by upload_date (date from video filename - "Date Created/Uploaded")
+          const dateA = a.upload_date ? new Date(a.upload_date).getTime() : 0;
+          const dateB = b.upload_date ? new Date(b.upload_date).getTime() : 0;
           comparison = dateA - dateB;
           break;
 
         case 'date-added':
-          // Sort by created_at (date added to database - "Date Added")
-          const addedA = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const addedB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          // Sort by download_date (when file was downloaded - "Date Downloaded")
+          const addedA = a.download_date ? new Date(a.download_date).getTime() : 0;
+          const addedB = b.download_date ? new Date(b.download_date).getTime() : 0;
           comparison = addedA - addedB;
           break;
 

@@ -1313,3 +1313,109 @@ app-video-timeline {
     }
   }
 }
+
+// ==================================================
+// Custom Video & Audio Controls Styling - Creamsicle Theme
+// ==================================================
+
+.native-video-player,
+.native-audio-player {
+  // Control panel background - highly transparent so video shows through
+  &::-webkit-media-controls-panel {
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.3) 70%, rgba(0, 0, 0, 0.5) 100%);
+    border-top: 1px solid rgba(255, 143, 71, 0.3);
+  }
+
+  // Play button styling - translucent orange glow
+  &::-webkit-media-controls-play-button {
+    background-color: rgba(255, 143, 71, 0.2);
+    border-radius: 50%;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background-color: rgba(255, 143, 71, 0.4);
+    }
+  }
+
+  // Mute button styling - subtle with orange accent
+  &::-webkit-media-controls-mute-button {
+    background-color: rgba(255, 143, 71, 0.12);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background-color: rgba(255, 143, 71, 0.3);
+    }
+  }
+
+  // Fullscreen button styling
+  &::-webkit-media-controls-fullscreen-button {
+    background-color: rgba(255, 143, 71, 0.12);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background-color: rgba(255, 143, 71, 0.3);
+    }
+  }
+
+  // Picture-in-picture button styling
+  &::-webkit-media-controls-picture-in-picture-button {
+    background-color: rgba(255, 143, 71, 0.12);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background-color: rgba(255, 143, 71, 0.3);
+    }
+  }
+
+  // Timeline/progress bar - thinner and more subtle
+  &::-webkit-media-controls-timeline {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    height: 4px;
+    margin: 0 10px;
+  }
+
+  // Time displays - bright orange, easy to read
+  &::-webkit-media-controls-current-time-display,
+  &::-webkit-media-controls-time-remaining-display {
+    color: #ff8f47;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.6);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+  }
+}
+
+// Enhanced styling for audio player
+.native-audio-player {
+  &::-webkit-media-controls-panel {
+    background: rgba(30, 30, 30, 0.98);
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 143, 71, 0.25);
+  }
+
+  &::-webkit-media-controls-timeline {
+    height: 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  &::-webkit-media-controls-play-button {
+    background-color: rgba(255, 143, 71, 0.2);
+
+    &:hover {
+      background-color: rgba(255, 143, 71, 0.35);
+    }
+  }
+
+  &::-webkit-media-controls-current-time-display,
+  &::-webkit-media-controls-time-remaining-display {
+    font-size: 13px;
+    font-weight: 600;
+  }
+}

@@ -328,6 +328,65 @@
   }
 }
 
+// Metadata (duration, size, etc.) - displayed on the right
+.item-card .item-metadata {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6c757d;
+  white-space: nowrap;
+  margin-left: auto;
+  padding-left: 16px;
+  font-variant-numeric: tabular-nums; // Use monospace numbers for alignment
+  letter-spacing: 0.5px;
+}
+
+// Progress Bar
+.item-card .item-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+
+  .progress-fill {
+    height: 100%;
+    background-color: #ff6600;
+    transition: width 0.3s ease-out;
+    position: relative;
+
+    // Animated shimmer effect for active progress
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.3) 50%,
+        transparent 100%
+      );
+      animation: shimmer 2s infinite;
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
 // ==================================================
 // Dark Theme Overrides
 // ==================================================
@@ -447,6 +506,14 @@
       .item-secondary {
         color: #999;
       }
+    }
+
+    .item-metadata {
+      color: #999;
+    }
+
+    .item-progress-bar {
+      background-color: rgba(255, 255, 255, 0.05);
     }
   }
 }
