@@ -135,6 +135,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
   showSearchAccordion = false; // For compact search/filter accordion
   searchFiltersExpanded = false; // For main accordion collapsed by default
 
+  // File type filters
+  fileTypeFilters = {
+    video: true,
+    audio: true,
+    document: true,
+    image: true,
+    webpage: true
+  };
+  showFileTypeFilters = false;
+
   // Track open video player dialog to prevent multiple instances
   private openVideoPlayerDialog: any = null;
 
@@ -210,7 +220,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
   private typeAheadBuffer = '';
   private typeAheadTimer: any;
 
-  @HostListener('window:keydown', ['$event'])
   handleKeyDown(event: KeyboardEvent) {
     // Check if user is editing any video field - if so, disable all keyboard shortcuts
     const isEditing = Object.values(this.editingVideo).some(fields =>
@@ -219,7 +228,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Also check if focus is on an input/textarea element
     const activeElement = document.activeElement;
-    const isFocusedOnInput = activeElement && ['INPUT', 'TEXTAREA'].includes(activeElement.tagName);
+    const target = event.target as HTMLElement;
+    const isFocusedOnInput = (activeElement && ['INPUT', 'TEXTAREA'].includes(activeElement.tagName)) ||
+                             target instanceof HTMLInputElement ||
+                             target instanceof HTMLTextAreaElement ||
+                             target.tagName === 'INPUT' ||
+                             target.tagName === 'TEXTAREA' ||
+                             target.closest('input') ||
+                             target.closest('textarea') ||
+                             target.closest('.mat-mdc-input-element') ||
+                             target.classList.contains('mat-mdc-input-element');
 
     // If user is editing, allow only escape key to cancel editing
     if (isEditing || isFocusedOnInput) {
@@ -290,19 +308,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
         this.toggleSelectedSections(event.code === 'ArrowRight');
       }
       // Space opens preview modal
-      else if (event.code === 'Space') {
+      else if (event.code === 'Space' && !isFocusedOnInput) {
         event.preventDefault();
         this.openPreviewModal();
       }
       // Type-ahead search (alphanumeric keys when not editing)
-      else if (!event.metaKey && !event.ctrlKey && !event.altKey &&
+      else if (!isFocusedOnInput && !event.metaKey && !event.ctrlKey && !event.altKey &&
                event.key.length === 1 && event.key.match(/[a-z0-9 ]/i)) {
-        // Check if user is not editing a field
-        const activeElement = document.activeElement;
-        if (!activeElement || !['INPUT', 'TEXTAREA'].includes(activeElement.tagName)) {
-          event.preventDefault();
-          this.handleTypeAhead(event.key);
-        }
+        event.preventDefault();
+        this.handleTypeAhead(event.key);
       }
     }
   }
@@ -1157,6 +1171,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   clearSearch() {
     this.searchQuery = '';
     this.selectedTags = [];
+    // Reset file type filters to show all types
+    this.fileTypeFilters = {
+      video: true,
+      audio: true,
+      document: true,
+      image: true,
+      webpage: true
+    };
     this.onSearchChange();
   }
 
@@ -1168,12 +1190,66 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Apply search, tag filters, and sorting
+   * Apply file type filter to videos
+   */
+  applyFileTypeFilter(videos: DatabaseVideo[]): DatabaseVideo[] {
+    // If all filters are enabled, return all videos
+    if (Object.values(this.fileTypeFilters).every(v => v)) {
+      return videos;
+    }
+
+    // Define file extension categories
+    const VIDEO_EXTENSIONS = ['.mov', '.mp4', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
+    const AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'];
+    const DOCUMENT_EXTENSIONS = ['.pdf', '.epub', '.mobi', '.txt', '.md'];
+    const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+    const WEBPAGE_EXTENSIONS = ['.html', '.htm', '.mhtml'];
+
+    return videos.filter(video => {
+      const ext = '.' + (video.filename.split('.').pop()?.toLowerCase() || '');
+
+      if (this.fileTypeFilters.video && VIDEO_EXTENSIONS.includes(ext)) return true;
+      if (this.fileTypeFilters.audio && AUDIO_EXTENSIONS.includes(ext)) return true;
+      if (this.fileTypeFilters.document && DOCUMENT_EXTENSIONS.includes(ext)) return true;
+      if (this.fileTypeFilters.image && IMAGE_EXTENSIONS.includes(ext)) return true;
+      if (this.fileTypeFilters.webpage && WEBPAGE_EXTENSIONS.includes(ext)) return true;
+
+      return false;
+    });
+  }
+
+  /**
+   * Toggle file type filter
+   */
+  toggleFileTypeFilter(type: 'video' | 'audio' | 'document' | 'image' | 'webpage') {
+    this.fileTypeFilters[type] = !this.fileTypeFilters[type];
+    this.applyFiltersAndSort();
+  }
+
+  /**
+   * Select all file types
+   */
+  selectAllFileTypes() {
+    this.fileTypeFilters = {
+      video: true,
+      audio: true,
+      document: true,
+      image: true,
+      webpage: true
+    };
+    this.applyFiltersAndSort();
+  }
+
+  /**
+   * Apply search, tag filters, file type filters, and sorting
    */
   async applyFiltersAndSort() {
     let filtered = this.videos;
 
-    // Apply tag filter first
+    // Apply file type filter first
+    filtered = this.applyFileTypeFilter(filtered);
+
+    // Apply tag filter
     if (this.selectedTags.length > 0) {
       try {
         const response = await this.databaseLibraryService.getVideosByTags(this.selectedTags);

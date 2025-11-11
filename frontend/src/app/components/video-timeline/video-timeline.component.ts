@@ -167,12 +167,12 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       this.boundMouseMove = (e: MouseEvent) => this.handleMouseMove(e);
       this.boundMouseUp = (e: MouseEvent) => this.handleMouseUp(e);
       this.boundWheel = (e: WheelEvent) => this.handleWheel(e);
-      this.boundKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e);
+      // boundKeyDown no longer needed - handled by component element binding
 
       document.addEventListener('mousemove', this.boundMouseMove);
       document.addEventListener('mouseup', this.boundMouseUp);
       document.addEventListener('wheel', this.boundWheel, { passive: false });
-      document.addEventListener('keydown', this.boundKeyDown);
+      // Keyboard events are now handled via (keydown) binding on component root element
     });
   }
 
@@ -180,7 +180,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     if (this.boundMouseMove) document.removeEventListener('mousemove', this.boundMouseMove);
     if (this.boundMouseUp) document.removeEventListener('mouseup', this.boundMouseUp);
     if (this.boundWheel) document.removeEventListener('wheel', this.boundWheel);
-    if (this.boundKeyDown) document.removeEventListener('keydown', this.boundKeyDown);
+    // boundKeyDown is no longer a global listener
 
     // Cancel any ongoing animation
     if (this.animationFrameId !== null) {
@@ -798,7 +798,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
    */
   handleKeyDown = (event: KeyboardEvent) => {
     // Only handle if not in an input field
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+    const target = event.target as HTMLElement;
+    if (target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.closest('input') ||
+        target.closest('textarea') ||
+        target.closest('.mat-mdc-input-element') ||
+        target.classList.contains('mat-mdc-input-element')) {
       return;
     }
 

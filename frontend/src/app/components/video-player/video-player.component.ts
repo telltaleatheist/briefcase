@@ -292,8 +292,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.videoEl = null;
     }
 
-    // Remove keyboard event listener
-    document.removeEventListener('keydown', this.handleKeyPress);
+    // Keyboard listener is now on component element, no need to remove global listener
 
     // Clear ALL tracked timers
     this.timers.forEach(timer => {
@@ -627,15 +626,23 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   setupKeyboardShortcuts() {
-    // Add spacebar play/pause
-    document.addEventListener('keydown', this.handleKeyPress);
+    // Keyboard shortcuts are now handled via (keydown) binding on the component root element
+    // No need for global document listener
   }
 
   handleKeyPress = (event: KeyboardEvent) => {
     if (!this.videoEl) return;
 
     // Only handle if not typing in an input
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+    const target = event.target as HTMLElement;
+    if (target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.closest('input') ||
+        target.closest('textarea') ||
+        target.closest('.mat-mdc-input-element') ||
+        target.classList.contains('mat-mdc-input-element')) {
       return;
     }
 

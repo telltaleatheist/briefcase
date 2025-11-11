@@ -2,9 +2,11 @@
   <div class="search-input-wrapper">
     <mat-form-field appearance="outline" class="search-field" [class.disabled]="!transcriptExists">
       <input
+        #searchInput
         matInput
         [(ngModel)]="searchQuery"
         (ngModelChange)="onSearchInput()"
+        (keydown)="onInputKeyDown($event)"
         [disabled]="!transcriptExists"
         placeholder="Search transcript"
         autocomplete="off">

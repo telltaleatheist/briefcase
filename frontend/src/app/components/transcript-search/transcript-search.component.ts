@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -49,6 +49,8 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
   @Output() seekToTime = new EventEmitter<number>();
   @Output() runAnalysis = new EventEmitter<void>();
 
+  @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
+
   searchQuery = '';
   matches: TranscriptMatch[] = [];
   isSearching = false;
@@ -84,6 +86,17 @@ export class TranscriptSearchComponent implements OnInit, OnDestroy {
 
   onSearchInput() {
     this.searchSubject.next(this.searchQuery);
+  }
+
+  /**
+   * Handle keyboard events on the search input to prevent interference
+   * from global keyboard handlers
+   */
+  onInputKeyDown(event: KeyboardEvent) {
+    // Stop all keyboard events from propagating up when the search input is focused
+    // This prevents video player shortcuts and other global handlers
+    // from interfering with typing in the search box
+    event.stopPropagation();
   }
 
   performSearch(query: string) {

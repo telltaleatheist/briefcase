@@ -1,4 +1,6 @@
 <div class="library-container"
+     tabindex="0"
+     (keydown)="handleKeyDown($event)"
      (dragover)="onDragOver($event)"
      (dragleave)="onDragLeave($event)"
      (drop)="onDrop($event)">
@@ -245,7 +247,49 @@
           <mat-icon>psychology</mat-icon>
           No Analysis
         </button>
+
+        <!-- File Type Filter Button -->
+        <button mat-stroked-button
+                [matMenuTriggerFor]="fileTypeMenu"
+                matTooltip="Filter by file type">
+          <mat-icon>filter_list</mat-icon>
+          File Types
+        </button>
       </div>
+
+      <mat-menu #fileTypeMenu="matMenu" class="file-type-menu">
+        <div class="menu-header" (click)="$event.stopPropagation()">
+          <span>Show File Types</span>
+          <button mat-button (click)="selectAllFileTypes()">All</button>
+        </div>
+        <mat-divider></mat-divider>
+        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('video')">
+          <mat-checkbox [checked]="fileTypeFilters.video" (change)="toggleFileTypeFilter('video')" (click)="$event.stopPropagation()"></mat-checkbox>
+          <mat-icon>movie</mat-icon>
+          <span>Video (.mov, .mp4, .avi, .mkv, .webm, .m4v, .flv)</span>
+        </button>
+        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('audio')">
+          <mat-checkbox [checked]="fileTypeFilters.audio" (change)="toggleFileTypeFilter('audio')" (click)="$event.stopPropagation()"></mat-checkbox>
+          <mat-icon>audiotrack</mat-icon>
+          <span>Audio (.mp3, .m4a, .aac, .flac, .wav, .ogg)</span>
+        </button>
+        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('document')">
+          <mat-checkbox [checked]="fileTypeFilters.document" (change)="toggleFileTypeFilter('document')" (click)="$event.stopPropagation()"></mat-checkbox>
+          <mat-icon>description</mat-icon>
+          <span>Document (.pdf, .epub, .mobi, .txt, .md)</span>
+        </button>
+        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('image')">
+          <mat-checkbox [checked]="fileTypeFilters.image" (change)="toggleFileTypeFilter('image')" (click)="$event.stopPropagation()"></mat-checkbox>
+          <mat-icon>image</mat-icon>
+          <span>Image (.jpg, .png, .gif, .webp, .bmp)</span>
+        </button>
+        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('webpage')">
+          <mat-checkbox [checked]="fileTypeFilters.webpage" (change)="toggleFileTypeFilter('webpage')" (click)="$event.stopPropagation()"></mat-checkbox>
+          <mat-icon>public</mat-icon>
+          <span>Webpage (.html, .htm, .mhtml)</span>
+        </button>
+      </mat-menu>
+
       <span class="count-text">
         Showing {{ filteredVideos.length }} of {{ videos.length }} videos
         <span *ngIf="selectedTags.length > 0"> (filtered by {{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }})</span>
@@ -501,13 +545,36 @@
       </button>
     </div>
 
-    <!-- Video Player -->
+    <!-- Media Player (Video/Audio/Image) -->
     <div class="preview-panel-video">
+      <!-- Video Player -->
       <video #previewVideoPlayer
+             *ngIf="highlightedVideo.media_type === 'video'"
              [src]="getVideoStreamUrl(highlightedVideo)"
              controls
              class="preview-video-player">
       </video>
+
+      <!-- Audio Player -->
+      <audio *ngIf="highlightedVideo.media_type === 'audio'"
+             [src]="getVideoStreamUrl(highlightedVideo)"
+             controls
+             class="preview-audio-player">
+      </audio>
+
+      <!-- Image Viewer -->
+      <img *ngIf="highlightedVideo.media_type === 'image'"
+           [src]="getVideoStreamUrl(highlightedVideo)"
+           class="preview-image-viewer"
+           [alt]="highlightedVideo.filename">
+
+      <!-- Unsupported Media Type Message -->
+      <div *ngIf="highlightedVideo.media_type !== 'video' && highlightedVideo.media_type !== 'audio' && highlightedVideo.media_type !== 'image'"
+           class="unsupported-preview">
+        <mat-icon>{{ getMediaTypeIcon(highlightedVideo.media_type) }}</mat-icon>
+        <p>{{ getMediaTypeLabel(highlightedVideo.media_type) }} preview not available</p>
+        <p class="hint">Open "View Details" to see more information</p>
+      </div>
     </div>
 
     <!-- Title Section -->

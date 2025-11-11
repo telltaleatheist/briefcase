@@ -778,6 +778,15 @@ export class VideoInfoComponent implements OnInit {
   }
 
   /**
+   * Prevent keyboard events in the search panel from propagating to parent components
+   * This ensures typing in the search box works without interference
+   */
+  onSearchPanelKeyDown(event: KeyboardEvent) {
+    // Stop all keyboard events from bubbling up to the video player
+    event.stopPropagation();
+  }
+
+  /**
    * Handle seeking to a timestamp from search results
    */
   onSeekToTimestamp(timestampSeconds: number) {
@@ -875,5 +884,67 @@ export class VideoInfoComponent implements OnInit {
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+  }
+
+  /**
+   * Get media type icon for a media item
+   */
+  getMediaTypeIcon(mediaType: string): string {
+    switch (mediaType) {
+      case 'video':
+        return 'videocam';
+      case 'audio':
+        return 'audiotrack';
+      case 'document':
+        return 'description';
+      case 'image':
+        return 'image';
+      case 'webpage':
+        return 'public';
+      default:
+        return 'insert_drive_file';
+    }
+  }
+
+  /**
+   * Get media type label for a media item
+   */
+  getMediaTypeLabel(mediaType: string): string {
+    switch (mediaType) {
+      case 'video':
+        return 'Video';
+      case 'audio':
+        return 'Audio';
+      case 'document':
+        return 'Document';
+      case 'image':
+        return 'Image';
+      case 'webpage':
+        return 'Web Page';
+      default:
+        return 'File';
+    }
+  }
+
+  /**
+   * Open the file location in Finder/Explorer
+   */
+  async openFileLocation() {
+    if (!this.video?.current_path) {
+      this.notificationService.error('Error', 'No file path available');
+      return;
+    }
+
+    try {
+      const backendUrl = this.backendUrlService.getBackendUrl();
+      await firstValueFrom(
+        this.http.post(`${backendUrl}/api/database/open-file-location`, {
+          filePath: this.video.current_path
+        })
+      );
+    } catch (error) {
+      console.error('Error opening file location:', error);
+      this.notificationService.error('Error', 'Failed to open file location');
+    }
   }
 }

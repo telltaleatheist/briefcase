@@ -7,6 +7,7 @@
 .library-container {
   padding: 24px;
   display: flex;
+  outline: none; // Remove focus outline since keyboard shortcuts work without visible focus
   flex-direction: column;
   gap: 16px;
   height: 100%;
@@ -1561,6 +1562,48 @@
       height: 100%;
       object-fit: contain;
     }
+
+    .preview-audio-player {
+      width: 100%;
+      margin: auto;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .preview-image-viewer {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .unsupported-preview {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-color);
+      opacity: 0.6;
+
+      mat-icon {
+        font-size: 48px;
+        width: 48px;
+        height: 48px;
+        margin-bottom: 12px;
+      }
+
+      p {
+        margin: 4px 0;
+        font-size: 14px;
+
+        &.hint {
+          font-size: 12px;
+          opacity: 0.7;
+        }
+      }
+    }
   }
 
   .preview-panel-title {
@@ -2675,6 +2718,52 @@
 
       p.secondary {
         color: #999;
+      }
+    }
+  }
+}
+
+// File type filter menu
+::ng-deep .file-type-menu {
+  .menu-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    font-weight: 500;
+
+    button {
+      font-size: 12px;
+      min-width: 0;
+      padding: 4px 8px;
+    }
+  }
+
+  .mat-mdc-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    min-height: 40px;
+
+    mat-checkbox {
+      pointer-events: none;
+    }
+
+    mat-icon {
+      margin-right: 8px;
+      color: var(--text-color);
+      opacity: 0.7;
+    }
+
+    span {
+      flex: 1;
+      font-size: 13px;
+    }
+
+    &:hover {
+      mat-icon {
+        opacity: 1;
       }
     }
   }

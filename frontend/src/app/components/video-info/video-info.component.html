@@ -86,9 +86,10 @@
 
     <!-- Two Column Layout: Video+Description on left, Metadata on right -->
     <div class="video-metadata-grid">
-      <!-- Left Column: Video and AI Description -->
+      <!-- Left Column: Media and AI Description -->
       <div class="video-column">
-        <div class="video-preview" *ngIf="canAnalyzeMedia()">
+        <!-- Video Preview -->
+        <div class="video-preview" *ngIf="video.media_type === 'video'">
           <video #videoPlayer
                  [src]="videoUrl"
                  controls
@@ -106,6 +107,61 @@
           <div class="video-error" *ngIf="videoError">
             <mat-icon>error</mat-icon>
             <p>{{ videoError }}</p>
+          </div>
+        </div>
+
+        <!-- Audio Preview -->
+        <div class="audio-preview" *ngIf="video.media_type === 'audio'">
+          <div class="audio-container">
+            <mat-icon class="audio-icon">audiotrack</mat-icon>
+            <audio [src]="videoUrl"
+                   controls
+                   preload="metadata"
+                   class="audio-player"
+                   (error)="onVideoError($event)"
+                   (loadedmetadata)="onVideoLoaded()"
+                   *ngIf="videoUrl">
+              Your browser does not support the audio tag.
+            </audio>
+            <div class="no-video" *ngIf="!videoUrl">
+              <mat-icon>audiotrack</mat-icon>
+              <p>Loading audio...</p>
+            </div>
+            <div class="video-error" *ngIf="videoError">
+              <mat-icon>error</mat-icon>
+              <p>{{ videoError }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Image Preview -->
+        <div class="image-preview" *ngIf="video.media_type === 'image'">
+          <img [src]="videoUrl"
+               [alt]="video.filename"
+               class="image-viewer"
+               (error)="onVideoError($event)"
+               (load)="onVideoLoaded()"
+               *ngIf="videoUrl">
+          <div class="no-video" *ngIf="!videoUrl">
+            <mat-icon>image</mat-icon>
+            <p>Loading image...</p>
+          </div>
+          <div class="video-error" *ngIf="videoError">
+            <mat-icon>error</mat-icon>
+            <p>{{ videoError }}</p>
+          </div>
+        </div>
+
+        <!-- Other Media Types (Document, Webpage) -->
+        <div class="other-media-preview" *ngIf="video.media_type !== 'video' && video.media_type !== 'audio' && video.media_type !== 'image'">
+          <div class="media-type-display">
+            <mat-icon>{{ getMediaTypeIcon(video.media_type) }}</mat-icon>
+            <h3>{{ getMediaTypeLabel(video.media_type) }}</h3>
+            <p class="media-filename">{{ video.filename }}</p>
+            <button mat-raised-button color="primary" (click)="openFileLocation()" *ngIf="video.current_path">
+              <mat-icon>folder_open</mat-icon>
+              Open File Location
+            </button>
           </div>
         </div>
 
@@ -365,7 +421,8 @@
     [style.top.px]="searchPanelY"
     [style.width.px]="searchPanelWidth"
     [class.dragging]="isDraggingSearchPanel"
-    [class.resizing]="isResizingSearchPanel">
+    [class.resizing]="isResizingSearchPanel"
+    (keydown)="onSearchPanelKeyDown($event)">
 
     <!-- Drag Handle -->
     <div class="search-panel-header" (mousedown)="startDragSearchPanel($event)">

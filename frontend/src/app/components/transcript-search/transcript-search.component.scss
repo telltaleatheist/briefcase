@@ -77,10 +77,71 @@
 }
 
 // ========================================
+// Search Options Accordion - Base (Light Theme Default)
+// ========================================
+.search-options-accordion {
+  margin: 0 12px 12px 12px;
+
+  // Prevent accordion from receiving keyboard focus
+  ::ng-deep .mat-expansion-panel {
+    outline: none !important;
+  }
+
+  ::ng-deep .mat-expansion-panel-header {
+    outline: none !important;
+  }
+
+  .search-options-panel {
+    box-shadow: none;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+
+    ::ng-deep .mat-expansion-panel-header {
+      padding: 0 12px;
+      height: 40px;
+      font-size: 13px;
+
+      &:hover {
+        background-color: rgba(0, 0, 0, 0.02);
+      }
+    }
+
+    ::ng-deep .mat-expansion-panel-body {
+      padding: 0;
+    }
+
+    ::ng-deep .mat-panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #495057;
+      font-weight: 500;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: #ff6600;
+      }
+    }
+  }
+}
+
+// ========================================
 // Saved Searches Accordion - Base (Light Theme Default)
 // ========================================
 .saved-searches-accordion {
   margin: 0 12px 12px 12px;
+
+  // Prevent accordion from receiving keyboard focus
+  ::ng-deep .mat-expansion-panel {
+    outline: none !important;
+  }
+
+  ::ng-deep .mat-expansion-panel-header {
+    outline: none !important;
+  }
 
   .saved-searches-panel {
     box-shadow: none;
@@ -636,6 +697,28 @@
         &:hover:not(:disabled) {
           background-color: rgba(255, 102, 0, 0.1);
           border-color: #ff6600;
+          color: #ff6600;
+        }
+      }
+    }
+  }
+
+  // Search Options Accordion - Dark Mode
+  .search-options-accordion {
+    .search-options-panel {
+      border-color: #2a2a2a;
+      background-color: #0a0a0a;
+
+      ::ng-deep .mat-expansion-panel-header {
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.02);
+        }
+      }
+
+      ::ng-deep .mat-panel-title {
+        color: #aaa;
+
+        mat-icon {
           color: #ff6600;
         }
       }

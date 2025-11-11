@@ -6,6 +6,7 @@
   // Default to light theme colors - will be overridden by dark theme if active
   background-color: #ffffff;
   border-top: 1px solid #dee2e6;
+  outline: none; // Remove focus outline since keyboard shortcuts work without visible focus
 }
 
 .timeline-controls {
