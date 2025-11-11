@@ -98,6 +98,12 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   // Editing state (for inline editing)
   editingItems: { [itemId: string]: { [field: string]: boolean } } = {};
 
+  // Performance caches (cleared on ngOnChanges)
+  private statusCache = new Map<string, ItemStatus | null>();
+  private progressCache = new Map<string, ItemProgress | null>();
+  private iconCache = new Map<string, string>();
+  private badgeCache = new Map<string, string | null>();
+
   // ========================================
   // Lifecycle
   // ========================================
@@ -114,6 +120,29 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   ngOnChanges() {
     this.updateGroupedItems();
+    // Clear performance caches when items change
+    this.statusCache.clear();
+    this.progressCache.clear();
+    this.iconCache.clear();
+    this.badgeCache.clear();
+  }
+
+  // ========================================
+  // TrackBy Functions (Performance Optimization)
+  // ========================================
+
+  /**
+   * TrackBy function for groups to prevent unnecessary DOM recreation
+   */
+  trackByGroupId(index: number, group: ItemGroup<T>): string {
+    return group.id;
+  }
+
+  /**
+   * TrackBy function for items to prevent unnecessary DOM recreation
+   */
+  trackByItemId(index: number, item: T): string {
+    return item.id;
   }
 
   // ========================================
@@ -517,6 +546,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     if (this.keyboardConfig.enableDelete && this.selectedItems.size > 0) {
       if (event.code === 'Delete' || (event.code === 'Backspace' && event.metaKey)) {
         event.preventDefault();
+        event.stopPropagation(); // Prevent event from bubbling to parent handlers
         this.deleteAction.emit(this.getSelectedItems());
         return;
       }
@@ -532,6 +562,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     if (this.keyboardConfig.enableArrowNavigation) {
       if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
         event.preventDefault();
+        event.stopPropagation(); // Stop event from bubbling to parent handlers
         const direction = event.code === 'ArrowUp' ? -1 : 1;
 
         // Shift+Arrow: Extend selection (like Finder)
@@ -746,17 +777,38 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   }
 
   getIcon(item: T): string {
-    if (!this.displayConfig.iconField) return 'description';
-
-    if (this.displayConfig.renderIcon) {
-      return this.displayConfig.renderIcon(item);
+    // Check cache first
+    if (this.iconCache.has(item.id)) {
+      return this.iconCache.get(item.id)!;
     }
-    return item[this.displayConfig.iconField]?.toString() || 'description';
+
+    // Calculate and cache
+    let icon: string;
+    if (!this.displayConfig.iconField) {
+      icon = 'description';
+    } else if (this.displayConfig.renderIcon) {
+      icon = this.displayConfig.renderIcon(item);
+    } else {
+      icon = item[this.displayConfig.iconField]?.toString() || 'description';
+    }
+
+    this.iconCache.set(item.id, icon);
+    return icon;
   }
 
   getBadge(item: T): string | null {
-    if (!this.displayConfig.badgeField) return null;
-    return item[this.displayConfig.badgeField]?.toString() || null;
+    // Check cache first
+    if (this.badgeCache.has(item.id)) {
+      return this.badgeCache.get(item.id)!;
+    }
+
+    // Calculate and cache
+    const badge = this.displayConfig.badgeField
+      ? (item[this.displayConfig.badgeField]?.toString() || null)
+      : null;
+
+    this.badgeCache.set(item.id, badge);
+    return badge;
   }
 
   getMetadata(item: T): string | null {
@@ -770,12 +822,30 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   getStatus(item: T): ItemStatus | null {
     if (!this.statusMapper) return null;
-    return this.statusMapper(item);
+
+    // Check cache first
+    if (this.statusCache.has(item.id)) {
+      return this.statusCache.get(item.id)!;
+    }
+
+    // Calculate and cache
+    const status = this.statusMapper(item);
+    this.statusCache.set(item.id, status);
+    return status;
   }
 
   getProgress(item: T): ItemProgress | null {
     if (!this.progressMapper) return null;
-    return this.progressMapper(item);
+
+    // Check cache first
+    if (this.progressCache.has(item.id)) {
+      return this.progressCache.get(item.id)!;
+    }
+
+    // Calculate and cache
+    const progress = this.progressMapper(item);
+    this.progressCache.set(item.id, progress);
+    return progress;
   }
 
   // ========================================

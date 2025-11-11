@@ -34,6 +34,7 @@ import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
+import { RenameDialogComponent } from './rename-dialog.component';
 import { ItemListComponent } from '../shared/item-list/item-list.component';
 import {
   ListItem,
@@ -172,6 +173,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Inline editing
   editingVideo: { [videoId: string]: { date: boolean; title: boolean; extension: boolean } } = {};
   editedValues: { [videoId: string]: { date: string; title: string; extension: string } } = {};
+  currentlyEditingVideo: DatabaseVideo | null = null; // Track which video is being edited (for performance)
+
+  // Cached selection count (updated when selectedVideos changes, for performance)
+  selectedCount: number = 0;
 
   // Drag and drop
   isDragging = false;
@@ -357,11 +362,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
       if (event.code === 'Escape') {
         event.preventDefault();
         this.closePreviewModal();
+      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        // Note: Arrow keys are usually handled by ItemListComponent which calls stopPropagation()
+        // This code only runs if the event wasn't stopped (e.g., focus is on preview panel)
+        event.preventDefault();
+        this.navigatePreviewVideos(event.code === 'ArrowUp' ? -1 : 1);
       }
-      // Note: Arrow key navigation is handled by ItemListComponent
-      // which will emit itemHighlighted events that trigger onListItemHighlighted
-      // which will then load the preview video. We don't handle arrow keys here
-      // to avoid double-navigation.
     }
     // Handle detail view
     else if (this.viewMode === 'detail') {
@@ -1754,8 +1760,21 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Get video stream URL for playing
    */
   getVideoStreamUrl(video: DatabaseVideo): string {
-    const encodedPath = encodeURIComponent(btoa(video.current_path));
-    return `${this.backendUrl}/api/library/videos/custom?path=${encodedPath}`;
+    // Properly encode Unicode path to base64
+    // Convert string -> UTF-8 bytes -> base64
+    const utf8Bytes = new TextEncoder().encode(video.current_path);
+    const binaryString = Array.from(utf8Bytes, byte => String.fromCharCode(byte)).join('');
+    const encodedPath = btoa(binaryString);
+
+    // Use dedicated image endpoint for images, video endpoint for everything else
+    const endpoint = video.media_type === 'image'
+      ? '/api/library/images/custom'
+      : '/api/library/videos/custom';
+
+    const url = `${this.backendUrl}${endpoint}?path=${encodeURIComponent(encodedPath)}`;
+    console.log(`[Preview] Media type: ${video.media_type}, Path: ${video.current_path}`);
+    console.log(`[Preview] Generated URL: ${url}`);
+    return url;
   }
 
   /**
@@ -1771,6 +1790,43 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   onVideoLoaded(videoEl: HTMLVideoElement) {
     this.videoElement = videoEl;
+  }
+
+  /**
+   * Handle image loaded event
+   */
+  onImageLoaded() {
+    // Image loaded successfully in preview panel
+    console.log('Image loaded successfully in preview');
+  }
+
+  /**
+   * Handle image error event
+   */
+  onImageError(event: Event) {
+    const img = event.target as HTMLImageElement;
+    console.error('=== Image Load Error ===');
+    console.error('Image src:', img.src);
+    console.error('Natural width/height:', img.naturalWidth, img.naturalHeight);
+    console.error('Video being previewed:', this.highlightedVideo);
+    console.error('File path:', this.highlightedVideo?.current_path);
+    console.error('Media type:', this.highlightedVideo?.media_type);
+    console.error('Event:', event);
+
+    // Try to fetch the URL to see the actual error
+    fetch(img.src)
+      .then(response => {
+        console.error('Fetch response status:', response.status, response.statusText);
+        return response.text();
+      })
+      .then(text => {
+        console.error('Response body:', text.substring(0, 500)); // First 500 chars
+      })
+      .catch(fetchError => {
+        console.error('Fetch error:', fetchError);
+      });
+
+    this.notificationService.toastOnly('error', 'Image Load Error', 'Failed to load image preview. Check console for details.');
   }
 
   /**
@@ -1946,6 +2002,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   onListItemsSelected(videos: DatabaseVideo[]) {
     // Add selected videos to the selection set
     videos.forEach(video => this.selectedVideos.add(video.id));
+    this.updateSelectedCount(); // Update cached count
 
     // Finder-like behavior: The last selected item becomes the highlighted one
     if (videos.length > 0) {
@@ -1956,6 +2013,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   onListItemsDeselected(videos: DatabaseVideo[]) {
     // Remove deselected videos from the selection set
     videos.forEach(video => this.selectedVideos.delete(video.id));
+    this.updateSelectedCount(); // Update cached count
   }
 
   onListSpaceAction(video: DatabaseVideo | null) {
@@ -2786,6 +2844,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.selectAll();
       this.isAllSelected = true;
     }
+    this.updateSelectedCount(); // Update cached count
   }
 
   private updateAllSelectedState() {
@@ -2801,7 +2860,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   getSelectedCount(): number {
-    return this.selectedVideos.size;
+    return this.selectedCount; // Use cached value instead of recalculating
+  }
+
+  /**
+   * Update selected count cache (call this whenever selectedVideos changes)
+   */
+  private updateSelectedCount() {
+    this.selectedCount = this.selectedVideos.size;
   }
 
   /**
@@ -2887,32 +2953,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
     try {
       const videoIds = Array.from(this.selectedVideos);
 
-      // Delete videos one by one
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const videoId of videoIds) {
-        try {
-          await this.databaseLibraryService.deleteVideo(videoId, deleteFiles);
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to delete video ${videoId}:`, error);
-          errorCount++;
-        }
-      }
+      // Use batch delete endpoint for better performance
+      const response = await this.databaseLibraryService.deleteVideoBatch(videoIds, deleteFiles);
 
       // Clear selection
       this.selectedVideos.clear();
+      this.updateSelectedCount(); // Update cached count
       this.isAllSelected = false;
 
       // Show result notification
-      if (successCount > 0) {
+      if (response.successCount > 0) {
         this.notificationService.toastOnly(
-          errorCount > 0 ? 'warning' : 'success',
+          response.errorCount > 0 ? 'warning' : 'success',
           deleteFiles ? 'Delete Complete' : 'Removed from Library',
-          `${deleteFiles ? 'Deleted' : 'Removed'} ${successCount} video${successCount > 1 ? 's' : ''}` +
-          (errorCount > 0 ? `. ${errorCount} failed.` : '')
+          response.message
         );
+      } else {
+        this.notificationService.toastOnly(
+          'error',
+          'Delete Failed',
+          response.message
+        );
+      }
+
+      // Log any errors for debugging
+      if (response.errors && response.errors.length > 0) {
+        console.error('Some videos failed to delete:', response.errors);
       }
 
       // Clear cache and reload
@@ -3675,6 +3741,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
   startEditing(video: DatabaseVideo, field: 'date' | 'title' | 'extension', event: Event) {
     event.stopPropagation();
 
+    // Track which video is being edited (for performance - only render one edit overlay)
+    this.currentlyEditingVideo = video;
+
     // Initialize editing state for this video if not exists
     if (!this.editingVideo[video.id]) {
       this.editingVideo[video.id] = { date: false, title: false, extension: false };
@@ -3778,8 +3847,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Start renaming a video (opens rename dialog)
    */
   startRenamingVideo(video: DatabaseVideo) {
-    const { RenameDialogComponent } = require('./rename-dialog.component');
-
     const dialogRef = this.dialog.open(RenameDialogComponent, {
       width: '600px',
       data: {
@@ -3891,6 +3958,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     if (this.editingVideo[videoId]) {
       this.editingVideo[videoId] = { date: false, title: false, extension: false };
     }
+    // Clear currently editing video (performance optimization)
+    this.currentlyEditingVideo = null;
   }
 
   /**

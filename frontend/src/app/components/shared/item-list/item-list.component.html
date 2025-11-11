@@ -7,7 +7,7 @@
 
   <!-- Item Groups -->
   <div *ngIf="!isEmpty" class="item-groups">
-    <div *ngFor="let group of groupedItems" class="item-group">
+    <div *ngFor="let group of groupedItems; trackBy: trackByGroupId" class="item-group">
       <!-- Group Header (only show if grouping is enabled) -->
       <div *ngIf="groupConfig?.enabled"
            class="group-header"
@@ -24,7 +24,7 @@
       <!-- Items List -->
       <div *ngIf="!isGroupCollapsed(group.id)" class="items-list">
         <div
-          *ngFor="let item of group.items; let i = index"
+          *ngFor="let item of group.items; let i = index; trackBy: trackByItemId"
           [id]="'item-' + item.id"
           class="item-card"
           [class.selected]="isItemSelected(item.id)"

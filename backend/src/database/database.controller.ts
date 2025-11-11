@@ -858,6 +858,82 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/videos/delete-batch
+   * Delete multiple videos from the library in a batch operation
+   */
+  @Post('videos/delete-batch')
+  async deleteVideoBatch(
+    @Body() body: { videoIds: string[]; deleteFiles?: boolean }
+  ) {
+    try {
+      if (!body.videoIds || !Array.isArray(body.videoIds) || body.videoIds.length === 0) {
+        return {
+          success: false,
+          error: 'videoIds array is required',
+          successCount: 0,
+          errorCount: 0,
+        };
+      }
+
+      const deleteFiles = body.deleteFiles === true;
+      let successCount = 0;
+      let errorCount = 0;
+      const errors: Array<{ videoId: string; error: string }> = [];
+
+      // Process deletions
+      for (const videoId of body.videoIds) {
+        try {
+          // Delete from database
+          const video = this.databaseService.deleteVideo(videoId);
+
+          // Delete physical file if requested
+          if (deleteFiles && video.current_path) {
+            const fs = require('fs').promises;
+            try {
+              await fs.unlink(video.current_path);
+              this.logger.log(`Deleted physical file: ${video.current_path}`);
+            } catch (fileError: any) {
+              // File might already be deleted - log but don't fail
+              this.logger.warn(`Could not delete physical file ${video.current_path}: ${fileError.message}`);
+            }
+          }
+
+          successCount++;
+        } catch (error: any) {
+          this.logger.error(`Failed to delete video ${videoId}: ${error.message}`);
+          errorCount++;
+          errors.push({
+            videoId,
+            error: error.message || 'Unknown error'
+          });
+        }
+      }
+
+      this.logger.log(
+        `Batch delete complete: ${successCount} succeeded, ${errorCount} failed (deleteFiles: ${deleteFiles})`
+      );
+
+      return {
+        success: successCount > 0,
+        successCount,
+        errorCount,
+        errors: errors.length > 0 ? errors : undefined,
+        message: successCount > 0
+          ? `${deleteFiles ? 'Deleted' : 'Removed'} ${successCount} video${successCount > 1 ? 's' : ''}${errorCount > 0 ? `, ${errorCount} failed` : ''}`
+          : `Failed to delete any videos (${errorCount} errors)`
+      };
+    } catch (error: any) {
+      this.logger.error(`Batch delete operation failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Batch delete operation failed',
+        successCount: 0,
+        errorCount: body.videoIds?.length || 0,
+      };
+    }
+  }
+
+  /**
    * GET /api/database/migration/check
    * Check if migration from library.json is needed/possible
    */

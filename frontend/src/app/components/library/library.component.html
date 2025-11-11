@@ -237,8 +237,10 @@
   <!-- Results count and selection buttons -->
   <div class="results-header" *ngIf="filteredVideos.length > 0 || (!isLoading && filteredVideos.length === 0)">
     <div class="results-count">
-      <div class="selection-buttons" *ngIf="filteredVideos.length > 0">
+      <div class="selection-buttons">
+        <!-- Selection buttons only show when there are videos -->
         <button mat-stroked-button
+                *ngIf="filteredVideos.length > 0"
                 (click)="toggleAllSelection()"
                 [color]="isAllSelected ? 'primary' : undefined"
                 matTooltip="Select all visible videos (Cmd/Ctrl+A)">
@@ -246,6 +248,7 @@
           All
         </button>
         <button mat-stroked-button
+                *ngIf="filteredVideos.length > 0"
                 (click)="selectAllMissingTranscript()"
                 [color]="isMissingTranscriptSelected ? 'primary' : undefined"
                 matTooltip="Select all videos missing transcription">
@@ -253,6 +256,7 @@
           No Transcript
         </button>
         <button mat-stroked-button
+                *ngIf="filteredVideos.length > 0"
                 (click)="selectAllMissingAnalysis()"
                 [color]="isMissingAnalysisSelected ? 'primary' : undefined"
                 matTooltip="Select all videos missing AI analysis">
@@ -260,7 +264,7 @@
           No Analysis
         </button>
 
-        <!-- File Type Filter Button -->
+        <!-- File Type Filter Button - always visible -->
         <button mat-stroked-button
                 [matMenuTriggerFor]="fileTypeMenu"
                 #fileTypeMenuTrigger="matMenuTrigger"
@@ -374,36 +378,34 @@
     (contextMenuAction)="onListContextMenuAction($event)">
   </app-item-list>
 
-  <!-- Inline Editing Overlay for List View (appears over the item being edited) -->
-  <div *ngFor="let video of filteredVideos"
-       class="inline-edit-overlay"
-       [class.active]="editingVideo[video.id] && (editingVideo[video.id].date || editingVideo[video.id].title || editingVideo[video.id].extension)"
-       [attr.data-video-id]="video.id">
-    <div *ngIf="editingVideo[video.id] && (editingVideo[video.id].date || editingVideo[video.id].title || editingVideo[video.id].extension)"
-         class="inline-edit-container">
-      <input *ngIf="editingVideo[video.id].date"
+  <!-- Inline Editing Overlay for List View (single overlay, positioned as needed) -->
+  <div *ngIf="currentlyEditingVideo"
+       class="inline-edit-overlay active"
+       [attr.data-video-id]="currentlyEditingVideo.id">
+    <div class="inline-edit-container">
+      <input *ngIf="editingVideo[currentlyEditingVideo.id]?.date"
              type="text"
              class="inline-edit-input date-input"
-             [(ngModel)]="editedValues[video.id].date"
-             (keydown.enter)="saveFilename(video)"
-             (keydown.escape)="cancelEditing(video.id)"
-             (blur)="onEditBlur(video, 'date')"
+             [(ngModel)]="editedValues[currentlyEditingVideo.id].date"
+             (keydown.enter)="saveFilename(currentlyEditingVideo)"
+             (keydown.escape)="cancelEditing(currentlyEditingVideo.id)"
+             (blur)="onEditBlur(currentlyEditingVideo, 'date')"
              placeholder="Date">
-      <input *ngIf="editingVideo[video.id].title"
+      <input *ngIf="editingVideo[currentlyEditingVideo.id]?.title"
              type="text"
              class="inline-edit-input title-input"
-             [(ngModel)]="editedValues[video.id].title"
-             (keydown.enter)="saveFilename(video)"
-             (keydown.escape)="cancelEditing(video.id)"
-             (blur)="onEditBlur(video, 'title')"
+             [(ngModel)]="editedValues[currentlyEditingVideo.id].title"
+             (keydown.enter)="saveFilename(currentlyEditingVideo)"
+             (keydown.escape)="cancelEditing(currentlyEditingVideo.id)"
+             (blur)="onEditBlur(currentlyEditingVideo, 'title')"
              placeholder="Title">
-      <input *ngIf="editingVideo[video.id].extension"
+      <input *ngIf="editingVideo[currentlyEditingVideo.id]?.extension"
              type="text"
              class="inline-edit-input extension-input"
-             [(ngModel)]="editedValues[video.id].extension"
-             (keydown.enter)="saveFilename(video)"
-             (keydown.escape)="cancelEditing(video.id)"
-             (blur)="onEditBlur(video, 'extension')"
+             [(ngModel)]="editedValues[currentlyEditingVideo.id].extension"
+             (keydown.enter)="saveFilename(currentlyEditingVideo)"
+             (keydown.escape)="cancelEditing(currentlyEditingVideo.id)"
+             (blur)="onEditBlur(currentlyEditingVideo, 'extension')"
              placeholder="ext">
     </div>
   </div>
@@ -514,10 +516,13 @@
       </audio>
 
       <!-- Image Viewer -->
-      <img *ngIf="highlightedVideo.media_type === 'image'"
-           [src]="getVideoStreamUrl(highlightedVideo)"
-           class="preview-image-viewer"
-           [alt]="highlightedVideo.filename">
+      <div *ngIf="highlightedVideo.media_type === 'image'" class="image-viewer-container">
+        <img [src]="getVideoStreamUrl(highlightedVideo)"
+             class="preview-image-viewer"
+             [alt]="highlightedVideo.filename"
+             (error)="onImageError($event)"
+             (load)="onImageLoaded()">
+      </div>
 
       <!-- Unsupported Media Type Message -->
       <div *ngIf="highlightedVideo.media_type !== 'video' && highlightedVideo.media_type !== 'audio' && highlightedVideo.media_type !== 'image'"
@@ -535,11 +540,19 @@
 
     <!-- Action Buttons -->
     <div class="preview-panel-actions">
-      <button mat-raised-button color="primary" (click)="analyzeVideo(highlightedVideo)" class="action-btn">
+      <button mat-raised-button
+              color="primary"
+              (click)="analyzeVideo(highlightedVideo)"
+              class="action-btn"
+              *ngIf="canAnalyzeMedia(highlightedVideo)">
         <mat-icon>psychology</mat-icon>
         Analyze
       </button>
-      <button mat-raised-button color="accent" (click)="openVideoPlayer(highlightedVideo)" class="action-btn">
+      <button mat-raised-button
+              color="accent"
+              (click)="openVideoPlayer(highlightedVideo)"
+              class="action-btn"
+              *ngIf="canAnalyzeMedia(highlightedVideo)">
         <mat-icon>video_settings</mat-icon>
         Video Editor
       </button>

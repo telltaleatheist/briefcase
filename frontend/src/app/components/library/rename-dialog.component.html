@@ -7,7 +7,7 @@
   <mat-dialog-content>
     <div class="rename-form">
       <p class="dialog-description">
-        Edit the filename components below. The preview shows how the final filename will appear.
+        Edit the filename components below.
       </p>
 
       <div class="form-fields">
@@ -18,7 +18,7 @@
                  type="text"
                  [(ngModel)]="date"
                  placeholder="YYYY-MM-DD"
-                 (keydown.enter)="handleEnter($event)">
+                 (keydown.enter)="handleEnter($any($event))">
           <mat-icon matPrefix>calendar_today</mat-icon>
           <mat-hint>Format: YYYY-MM-DD (e.g., 2024-01-15)</mat-hint>
         </mat-form-field>
@@ -32,7 +32,7 @@
                  [(ngModel)]="title"
                  placeholder="Enter video title"
                  required
-                 (keydown.enter)="handleEnter($event)">
+                 (keydown.enter)="handleEnter($any($event))">
           <mat-icon matPrefix>title</mat-icon>
           <mat-error *ngIf="!title.trim()">Title is required</mat-error>
         </mat-form-field>
@@ -44,21 +44,10 @@
                  type="text"
                  [(ngModel)]="extension"
                  placeholder="mp4"
-                 (keydown.enter)="handleEnter($event)">
+                 (keydown.enter)="handleEnter($any($event))">
           <mat-icon matPrefix>insert_drive_file</mat-icon>
           <mat-hint>File extension (without dot)</mat-hint>
         </mat-form-field>
-      </div>
-
-      <!-- Preview Section -->
-      <div class="preview-section">
-        <div class="preview-label">
-          <mat-icon>visibility</mat-icon>
-          Preview
-        </div>
-        <div class="preview-filename">
-          {{ getPreviewFilename() }}
-        </div>
       </div>
 
       <!-- Original Filename Reference -->

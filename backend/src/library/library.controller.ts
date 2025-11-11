@@ -15,7 +15,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
-import { createReadStream, statSync } from 'fs';
+import { createReadStream, statSync, existsSync } from 'fs';
 import * as fs from 'fs';
 import { LibraryService } from './library.service';
 import { Logger } from '@nestjs/common';
@@ -451,6 +451,60 @@ export class LibraryController {
   }
 
   /**
+   * Serve image file by direct file path (encoded in query param)
+   * Uses sendFile for simple, direct image serving
+   * NOTE: This must be defined BEFORE videos/custom to handle images separately
+   */
+  @Get('images/custom')
+  async serveCustomImage(
+    @Query('path') encodedPath: string,
+    @Res() res: Response
+  ) {
+    try {
+      if (!encodedPath) {
+        throw new HttpException('path parameter is required', HttpStatus.BAD_REQUEST);
+      }
+
+      // Decode the base64-encoded path
+      const imagePath = Buffer.from(encodedPath, 'base64').toString('utf-8');
+      this.logger.log(`[Image] Decoded path: ${imagePath}`);
+
+      // Check if file exists
+      if (!existsSync(imagePath)) {
+        throw new HttpException('Image file not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Determine content type from file extension
+      const ext = path.extname(imagePath).toLowerCase();
+      const contentTypeMap: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+      };
+      const contentType = contentTypeMap[ext] || 'application/octet-stream';
+
+      // Set headers and send file
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.sendFile(imagePath);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to serve image: ${(error as Error).message}`);
+      throw new HttpException(
+        `Failed to serve image: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Stream video file by direct file path (encoded in query param)
    * Supports range requests for seeking
    * Allows loading videos without requiring AI analysis
@@ -469,6 +523,7 @@ export class LibraryController {
 
       // Decode the base64-encoded path
       const videoPath = Buffer.from(encodedPath, 'base64').toString('utf-8');
+      this.logger.log(`[Stream] Decoded path: ${videoPath}`);
 
       // Check if file exists
       try {

@@ -721,6 +721,31 @@ export class DatabaseLibraryService {
   }
 
   /**
+   * Delete multiple videos from the library in a batch operation
+   */
+  async deleteVideoBatch(videoIds: string[], deleteFiles: boolean = true): Promise<{
+    success: boolean;
+    successCount: number;
+    errorCount: number;
+    message: string;
+    errors?: Array<{ videoId: string; error: string }>;
+  }> {
+    const baseUrl = await this.getBaseUrl();
+    return firstValueFrom(
+      this.http.post<{
+        success: boolean;
+        successCount: number;
+        errorCount: number;
+        message: string;
+        errors?: Array<{ videoId: string; error: string }>;
+      }>(`${baseUrl}/videos/delete-batch`, {
+        videoIds,
+        deleteFiles
+      })
+    );
+  }
+
+  /**
    * Delete transcript for a video
    */
   async deleteTranscript(videoId: string): Promise<{ success: boolean; message: string }> {
