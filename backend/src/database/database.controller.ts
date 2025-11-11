@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param, Res, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -528,6 +528,19 @@ export class DatabaseController {
         error: (error as Error).message
       };
     }
+  }
+
+  /**
+   * GET /api/database/videos/:id
+   * Get a single video by ID
+   */
+  @Get('videos/:id')
+  getVideoById(@Param('id') videoId: string) {
+    const video = this.databaseService.getVideoById(videoId);
+    if (!video) {
+      throw new NotFoundException(`Video not found: ${videoId}`);
+    }
+    return video;
   }
 
   /**
@@ -1178,6 +1191,68 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/delete-unimported-files
+   * Delete unimported video files from disk
+   */
+  @Post('delete-unimported-files')
+  async deleteUnimportedFiles(@Body() body: { filePaths: string[] }) {
+    this.logger.log(`Deleting ${body.filePaths?.length || 0} unimported video files`);
+
+    if (!body.filePaths || !Array.isArray(body.filePaths) || body.filePaths.length === 0) {
+      return {
+        success: false,
+        error: 'filePaths array is required',
+        deletedCount: 0,
+        failedCount: 0
+      };
+    }
+
+    let deletedCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
+
+    for (const filePath of body.filePaths) {
+      try {
+        // Validate that the file exists
+        if (!fs.existsSync(filePath)) {
+          this.logger.warn(`File does not exist: ${filePath}`);
+          failedCount++;
+          errors.push(`File not found: ${path.basename(filePath)}`);
+          continue;
+        }
+
+        // Safety check: ensure it's a file, not a directory
+        const stats = fs.statSync(filePath);
+        if (!stats.isFile()) {
+          this.logger.warn(`Path is not a file: ${filePath}`);
+          failedCount++;
+          errors.push(`Not a file: ${path.basename(filePath)}`);
+          continue;
+        }
+
+        // Delete the file
+        fs.unlinkSync(filePath);
+        deletedCount++;
+        this.logger.log(`Deleted file: ${filePath}`);
+      } catch (error: any) {
+        this.logger.error(`Failed to delete file ${filePath}: ${error.message}`);
+        failedCount++;
+        errors.push(`${path.basename(filePath)}: ${error.message}`);
+      }
+    }
+
+    return {
+      success: deletedCount > 0,
+      deletedCount,
+      failedCount,
+      errors: errors.length > 0 ? errors : undefined,
+      message: deletedCount > 0
+        ? `Deleted ${deletedCount} file${deletedCount > 1 ? 's' : ''}${failedCount > 0 ? `, ${failedCount} failed` : ''}`
+        : `Could not delete any files (${failedCount} failed)`
+    };
+  }
+
+  /**
    * GET /api/database/libraries
    * Get all clip libraries
    */
@@ -1422,6 +1497,86 @@ export class DatabaseController {
         `Failed to get thumbnail: ${(error as Error).message}`,
         HttpStatus.INTERNAL_SERVER_ERROR
       );
+    }
+  }
+
+  /**
+   * GET /api/database/videos/:id/related
+   * Get all media items related to a video
+   */
+  @Get('videos/:id/related')
+  getRelatedMedia(@Param('id') videoId: string) {
+    try {
+      const relatedMedia = this.databaseService.getRelatedMedia(videoId);
+      return {
+        success: true,
+        relatedMedia
+      };
+    } catch (error) {
+      this.logger.error(`Error getting related media: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message,
+        relatedMedia: []
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/:id/link
+   * Link two media items together
+   */
+  @Post('videos/:id/link')
+  linkMedia(
+    @Param('id') primaryMediaId: string,
+    @Body() body: { relatedMediaId: string; relationshipType?: string }
+  ) {
+    try {
+      if (!body.relatedMediaId) {
+        return {
+          success: false,
+          error: 'Related media ID is required'
+        };
+      }
+
+      this.databaseService.insertMediaRelationship({
+        id: require('uuid').v4(),
+        primaryMediaId: primaryMediaId,
+        relatedMediaId: body.relatedMediaId,
+        relationshipType: body.relationshipType || 'related'
+      });
+
+      return {
+        success: true,
+        message: 'Media files linked successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Error linking media: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * DELETE /api/database/relationships/:relationshipId
+   * Unlink two media items
+   */
+  @Delete('relationships/:relationshipId')
+  unlinkMedia(@Param('relationshipId') relationshipId: string) {
+    try {
+      this.databaseService.deleteMediaRelationship(relationshipId);
+      return {
+        success: true,
+        message: 'Media files unlinked successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Error unlinking media: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
     }
   }
 }

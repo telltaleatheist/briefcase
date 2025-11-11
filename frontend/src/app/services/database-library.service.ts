@@ -21,6 +21,8 @@ export interface DatabaseVideo {
   file_size_bytes: number | null;
   ai_description: string | null;
   source_url: string | null;
+  media_type: string; // 'video', 'audio', 'document', 'image', 'webpage'
+  file_extension: string | null; // '.mp4', '.pdf', '.jpg', etc.
   created_at: string;
   last_verified: string;
   added_at: string;
@@ -574,6 +576,22 @@ export class DatabaseLibraryService {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     } else {
       return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+
+  /**
+   * Get a single video by ID
+   */
+  async getVideoById(videoId: string): Promise<DatabaseVideo | null> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const result = await firstValueFrom(
+        this.http.get<DatabaseVideo>(`${baseUrl}/videos/${videoId}`)
+      );
+      return result;
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error getting video by ID:', error);
+      return null;
     }
   }
 

@@ -244,6 +244,31 @@ export class DatabaseService {
 
       CREATE INDEX IF NOT EXISTS idx_transcripts_fts_video ON transcripts_fts(video_id);
       CREATE INDEX IF NOT EXISTS idx_analyses_fts_video ON analyses_fts(video_id);
+
+      -- Media relationships: Link multiple files together (e.g. PDF + audiobook)
+      CREATE TABLE IF NOT EXISTS media_relationships (
+        id TEXT PRIMARY KEY,
+        primary_media_id TEXT NOT NULL,
+        related_media_id TEXT NOT NULL,
+        relationship_type TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (primary_media_id) REFERENCES videos(id) ON DELETE CASCADE,
+        FOREIGN KEY (related_media_id) REFERENCES videos(id) ON DELETE CASCADE,
+        UNIQUE(primary_media_id, related_media_id)
+      );
+
+      -- Text content: Extracted text from documents (PDFs, EPUBs, etc.) for searching
+      CREATE TABLE IF NOT EXISTS text_content (
+        media_id TEXT PRIMARY KEY,
+        extracted_text TEXT NOT NULL,
+        extraction_method TEXT,
+        extracted_at TEXT NOT NULL,
+        FOREIGN KEY (media_id) REFERENCES videos(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_media_relationships_primary ON media_relationships(primary_media_id);
+      CREATE INDEX IF NOT EXISTS idx_media_relationships_related ON media_relationships(related_media_id);
+      CREATE INDEX IF NOT EXISTS idx_text_content_media ON text_content(media_id);
     `;
 
     // Execute schema creation
@@ -380,6 +405,62 @@ export class DatabaseService {
         this.logger.warn(`Migration check failed: ${error?.message || 'Unknown error'}`);
       }
     }
+
+    try {
+      // Migration 6: Add media_type column to videos table if it doesn't exist
+      db.exec("SELECT media_type FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: media_type')) {
+        this.logger.log('Running migration: Adding media_type column to videos table');
+        try {
+          // Add the column with default value 'video' for existing records
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN media_type TEXT DEFAULT 'video';
+            UPDATE videos SET media_type = 'video' WHERE media_type IS NULL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: media_type column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 7: Add file_extension column to videos table if it doesn't exist
+      db.exec("SELECT file_extension FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: file_extension')) {
+        this.logger.log('Running migration: Adding file_extension column to videos table');
+        try {
+          // Add the column and populate from filename
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN file_extension TEXT;
+          `);
+          // Update existing records to extract extension from filename
+          const stmt = db.prepare('SELECT id, filename FROM videos');
+          const updates: Array<{id: string, ext: string}> = [];
+          while (stmt.step()) {
+            const row = stmt.getAsObject() as any;
+            const ext = row.filename.substring(row.filename.lastIndexOf('.')).toLowerCase();
+            updates.push({id: row.id, ext});
+          }
+          stmt.free();
+
+          // Apply updates
+          for (const update of updates) {
+            db.run('UPDATE videos SET file_extension = ? WHERE id = ?', [update.ext, update.id]);
+          }
+
+          this.saveDatabase();
+          this.logger.log('Migration complete: file_extension column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
   }
 
   /**
@@ -411,7 +492,7 @@ export class DatabaseService {
   }
 
   /**
-   * Insert a new video record
+   * Insert a new video/media record
    */
   insertVideo(video: {
     id: string;
@@ -422,15 +503,30 @@ export class DatabaseService {
     durationSeconds?: number;
     fileSizeBytes?: number;
     sourceUrl?: string;
+    mediaType?: string;
+    fileExtension?: string;
   }) {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
 
+    // Determine media type from file extension if not provided
+    let mediaType = video.mediaType;
+    let fileExtension = video.fileExtension;
+
+    if (!fileExtension && video.filename) {
+      fileExtension = video.filename.substring(video.filename.lastIndexOf('.')).toLowerCase();
+    }
+
+    if (!mediaType && fileExtension) {
+      mediaType = this.getMediaTypeFromExtension(fileExtension);
+    }
+
     db.run(
       `INSERT INTO videos (
         id, filename, file_hash, current_path, date_folder,
-        duration_seconds, file_size_bytes, source_url, created_at, last_verified, added_at, is_linked
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        duration_seconds, file_size_bytes, source_url, media_type, file_extension,
+        created_at, last_verified, added_at, is_linked
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         video.id,
         video.filename,
@@ -440,6 +536,8 @@ export class DatabaseService {
         video.durationSeconds || null,
         video.fileSizeBytes || null,
         video.sourceUrl || null,
+        mediaType || 'video',
+        fileExtension || null,
         now,
         now,
         now,
@@ -447,6 +545,40 @@ export class DatabaseService {
     );
 
     this.saveDatabase();
+  }
+
+  /**
+   * Helper to determine media type from file extension
+   */
+  private getMediaTypeFromExtension(extension: string): string {
+    const ext = extension.toLowerCase();
+
+    // Video extensions
+    if (['.mov', '.mp4', '.avi', '.mkv', '.webm', '.m4v', '.flv'].includes(ext)) {
+      return 'video';
+    }
+
+    // Audio extensions
+    if (['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'].includes(ext)) {
+      return 'audio';
+    }
+
+    // Document extensions
+    if (['.pdf', '.epub', '.mobi', '.txt', '.md'].includes(ext)) {
+      return 'document';
+    }
+
+    // Image extensions
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) {
+      return 'image';
+    }
+
+    // Web archive extensions
+    if (['.html', '.htm', '.mhtml'].includes(ext)) {
+      return 'webpage';
+    }
+
+    return 'video'; // default to video for unknown types
   }
 
   /**
@@ -1644,6 +1776,179 @@ export class DatabaseService {
     stmt.free();
 
     return Number(result.count) || 0;
+  }
+
+  // ============================================================================
+  // MEDIA RELATIONSHIPS OPERATIONS
+  // ============================================================================
+
+  /**
+   * Create a media relationship (link two media items together)
+   */
+  insertMediaRelationship(relationship: {
+    id: string;
+    primaryMediaId: string;
+    relatedMediaId: string;
+    relationshipType: string;
+  }) {
+    const db = this.ensureInitialized();
+    const now = new Date().toISOString();
+
+    db.run(
+      `INSERT INTO media_relationships (
+        id, primary_media_id, related_media_id, relationship_type, created_at
+      ) VALUES (?, ?, ?, ?, ?)`,
+      [
+        relationship.id,
+        relationship.primaryMediaId,
+        relationship.relatedMediaId,
+        relationship.relationshipType,
+        now,
+      ]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Get all related media for a given media item
+   */
+  getRelatedMedia(mediaId: string) {
+    const db = this.ensureInitialized();
+
+    // Get relationships where this item is primary
+    const primaryStmt = db.prepare(`
+      SELECT r.*, v.filename, v.current_path, v.media_type, v.file_extension
+      FROM media_relationships r
+      JOIN videos v ON r.related_media_id = v.id
+      WHERE r.primary_media_id = ?
+    `);
+    primaryStmt.bind([mediaId]);
+
+    const primaryResults: any[] = [];
+    while (primaryStmt.step()) {
+      primaryResults.push(primaryStmt.getAsObject());
+    }
+    primaryStmt.free();
+
+    // Get relationships where this item is related
+    const relatedStmt = db.prepare(`
+      SELECT r.*, v.filename, v.current_path, v.media_type, v.file_extension
+      FROM media_relationships r
+      JOIN videos v ON r.primary_media_id = v.id
+      WHERE r.related_media_id = ?
+    `);
+    relatedStmt.bind([mediaId]);
+
+    const relatedResults: any[] = [];
+    while (relatedStmt.step()) {
+      relatedResults.push(relatedStmt.getAsObject());
+    }
+    relatedStmt.free();
+
+    return [...primaryResults, ...relatedResults];
+  }
+
+  /**
+   * Delete a media relationship
+   */
+  deleteMediaRelationship(relationshipId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM media_relationships WHERE id = ?', [relationshipId]);
+    this.saveDatabase();
+    this.logger.log(`Deleted media relationship ${relationshipId}`);
+  }
+
+  /**
+   * Delete all relationships for a media item
+   */
+  deleteAllMediaRelationships(mediaId: string) {
+    const db = this.ensureInitialized();
+    db.run(
+      'DELETE FROM media_relationships WHERE primary_media_id = ? OR related_media_id = ?',
+      [mediaId, mediaId]
+    );
+    this.saveDatabase();
+    this.logger.log(`Deleted all media relationships for ${mediaId}`);
+  }
+
+  // ============================================================================
+  // TEXT CONTENT OPERATIONS (for documents)
+  // ============================================================================
+
+  /**
+   * Insert extracted text content for a document
+   */
+  insertTextContent(textContent: {
+    mediaId: string;
+    extractedText: string;
+    extractionMethod?: string;
+  }) {
+    const db = this.ensureInitialized();
+    const now = new Date().toISOString();
+
+    db.run(
+      `INSERT OR REPLACE INTO text_content (
+        media_id, extracted_text, extraction_method, extracted_at
+      ) VALUES (?, ?, ?, ?)`,
+      [
+        textContent.mediaId,
+        textContent.extractedText,
+        textContent.extractionMethod || null,
+        now,
+      ]
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Get extracted text content for a document
+   */
+  getTextContent(mediaId: string) {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT * FROM text_content WHERE media_id = ?');
+    stmt.bind([mediaId]);
+
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+
+    return result;
+  }
+
+  /**
+   * Delete text content for a document
+   */
+  deleteTextContent(mediaId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM text_content WHERE media_id = ?', [mediaId]);
+    this.saveDatabase();
+    this.logger.log(`Deleted text content for ${mediaId}`);
+  }
+
+  /**
+   * Search text content (for documents)
+   */
+  searchTextContent(query: string, limit = 50) {
+    const db = this.ensureInitialized();
+    const searchTerm = query.toLowerCase().trim();
+
+    const stmt = db.prepare(`
+      SELECT tc.media_id, tc.extracted_text, v.filename, v.media_type
+      FROM text_content tc
+      JOIN videos v ON tc.media_id = v.id
+      WHERE lower(tc.extracted_text) LIKE ?
+      LIMIT ?
+    `);
+    stmt.bind([`%${searchTerm}%`, limit]);
+
+    const results: any[] = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+
+    return results;
   }
 
   /**

@@ -41,10 +41,14 @@ import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewe
 })
 export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
+  @ViewChild('audioElement', { static: false }) audioElement!: ElementRef<HTMLAudioElement>;
+  @ViewChild('imageElement', { static: false }) imageElement!: ElementRef<HTMLImageElement>;
   @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
   @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
 
   videoEl: HTMLVideoElement | null = null;
+  mediaType: string = 'video'; // 'video', 'audio', 'image', 'document', 'webpage'
+  imageSrc: string | null = null;
   isLoading = true;
   error: string | null = null;
   metadata: ParsedAnalysisMetadata | null = null;
@@ -245,18 +249,30 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    // Get video element reference immediately so keyboard shortcuts work from the start
+    // Get media element reference (video or audio) immediately so keyboard shortcuts work from the start
     if (this.videoElement) {
       this.videoEl = this.videoElement.nativeElement;
+    } else if (this.audioElement) {
+      this.videoEl = this.audioElement.nativeElement as any; // Audio and video elements have same API
     }
 
     // Set up keyboard shortcuts immediately so spacebar works from the start
     this.setupKeyboardShortcuts();
 
-    // Initialize Video.js player after view is ready
+    // Initialize media player after view is ready
     setTimeout(() => {
       this.initializePlayer();
     }, 100);
+  }
+
+  /**
+   * Open document or webpage in external application
+   */
+  openInExternalApp() {
+    const electron = (window as any).electron;
+    if (electron && this.data.videoPath) {
+      electron.shell.openPath(this.data.videoPath);
+    }
   }
 
   ngOnDestroy() {
@@ -372,21 +388,68 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cleanupVideoResources();
 
     try {
-      if (!this.videoElement) {
-        this.error = 'Video element not found';
-        this.isLoading = false;
-        return;
+      // Detect media type from database if we have a videoId
+      if (this.data.videoId) {
+        try {
+          const video = await this.databaseLibraryService.getVideoById(this.data.videoId);
+          if (video) {
+            this.mediaType = video.media_type || 'video';
+            console.log('[initializePlayer] Detected media type:', this.mediaType);
+
+            // For images, set the image source
+            if (this.mediaType === 'image' && video.current_path) {
+              const backendUrl = await this.backendUrlService.getBackendUrl();
+              const encodedPath = btoa(unescape(encodeURIComponent(video.current_path)));
+              this.imageSrc = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+            }
+
+            // For documents/webpages, no player initialization needed
+            if (this.mediaType === 'document' || this.mediaType === 'webpage') {
+              this.isLoading = false;
+              return;
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to detect media type, defaulting to video:', error);
+        }
       }
 
-      // Get native video element
-      this.videoEl = this.videoElement.nativeElement;
-      console.log('[initializePlayer] Video element obtained');
+      // Check for appropriate element based on media type
+      if (this.mediaType === 'image') {
+        if (!this.imageElement) {
+          this.error = 'Image element not found';
+          this.isLoading = false;
+          return;
+        }
+        // Images don't need player initialization
+        this.isLoading = false;
+        return;
+      } else if (this.mediaType === 'audio') {
+        if (!this.audioElement) {
+          this.error = 'Audio element not found';
+          this.isLoading = false;
+          return;
+        }
+        // Get native audio element
+        this.videoEl = this.audioElement.nativeElement as any;
+        console.log('[initializePlayer] Audio element obtained');
+      } else {
+        // Default to video
+        if (!this.videoElement) {
+          this.error = 'Video element not found';
+          this.isLoading = false;
+          return;
+        }
+        // Get native video element
+        this.videoEl = this.videoElement.nativeElement;
+        console.log('[initializePlayer] Video element obtained');
+      }
 
       // Get backend URL first
       const backendUrl = await this.backendUrlService.getBackendUrl();
       console.log('[initializePlayer] Backend URL:', backendUrl);
 
-      // Determine video source based on whether it's an analyzed video, custom video, or library video
+      // Determine media source based on whether it's an analyzed video, custom video, or library video
       let videoUrl: string;
 
       if (this.data.customVideo) {
@@ -412,6 +475,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       }
 
       // Set video source
+      if (!this.videoEl) {
+        this.error = 'Video element not initialized';
+        this.isLoading = false;
+        return;
+      }
       this.videoEl.src = videoUrl;
       console.log('Video source set to:', videoUrl);
 
@@ -1341,10 +1409,14 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
     console.log('Loading existing video from database:', {
       videoId: video.id,
+      mediaType: video.media_type,
       hasAnalysis: !!analysis,
       hasTranscript: !!transcript,
       sectionsCount: sections?.length || 0
     });
+
+    // Set media type from database
+    this.mediaType = video.media_type || 'video';
 
     // Update component data to use the database video
     this.data = {

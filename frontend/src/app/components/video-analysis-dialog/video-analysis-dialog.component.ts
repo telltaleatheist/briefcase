@@ -90,9 +90,10 @@ export class VideoAnalysisDialogComponent implements OnInit {
       this.analysisForm.patchValue({ inputType: 'url' });
     }
 
-    // If videos are from library, change default from 'import-only' to 'transcribe-only'
+    // If videos are from library (not being imported), change default from 'import-only' to 'transcribe-only'
     // since import doesn't make sense for videos already in library
-    if (this.isFromLibrary() && this.analysisForm.get('mode')?.value === 'import-only') {
+    // Check for mode !== 'import' because drag/drop passes both selectedVideos AND mode='import'
+    if (this.isFromLibrary() && this.data.mode !== 'import' && this.analysisForm.get('mode')?.value === 'import-only') {
       this.analysisForm.patchValue({ mode: 'transcribe-only' });
     }
 

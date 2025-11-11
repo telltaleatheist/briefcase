@@ -221,6 +221,14 @@ export class VideoInfoComponent implements OnInit {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
+  /**
+   * Check if the current media can be analyzed (video or audio only)
+   */
+  canAnalyzeMedia(): boolean {
+    if (!this.video) return false;
+    return this.video.media_type === 'video' || this.video.media_type === 'audio';
+  }
+
   async deleteAnalysisSection(section: DatabaseAnalysisSection): Promise<void> {
     if (!this.video || !section.id) return;
 

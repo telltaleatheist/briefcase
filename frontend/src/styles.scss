@@ -35,6 +35,17 @@ body {
       color: #e5e7eb !important;
     }
   }
+
+  // Fix tab text colors in dark mode
+  mat-tab-group {
+    .mdc-tab__text-label {
+      color: rgba(255, 255, 255, 0.7) !important;
+    }
+
+    .mdc-tab--active .mdc-tab__text-label {
+      color: #ff8f47 !important;
+    }
+  }
 }
 
 /* Common utility classes */

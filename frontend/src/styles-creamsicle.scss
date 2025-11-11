@@ -52,6 +52,16 @@
   --border-color: #374151;
   --shadow-color: rgba(0, 0, 0, 0.5);
 
+  // Status colors for dark mode
+  --success-bg: #14532d;
+  --success-text: #86efac;
+  --warning-bg: #713f12;
+  --warning-text: #fcd34d;
+  --danger-bg: #7f1d1d;
+  --danger-text: #fca5a5;
+  --info-bg: #1e3a8a;
+  --info-text: #93c5fd;
+
   // Brighter icons in sidebar
   .app-sidenav .mat-icon {
     color: #e5e7eb !important;

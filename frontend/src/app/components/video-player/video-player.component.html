@@ -56,15 +56,54 @@
       </div>
     </div>
 
-    <!-- Video Player -->
+    <!-- Media Player (Video/Audio/Image) -->
     <div class="video-container" [class.hidden]="isLoading || error">
+      <!-- Video Player -->
       <video
+        *ngIf="mediaType === 'video'"
         #videoElement
         class="native-video-player"
         playsinline
         preload="metadata"
         crossorigin="anonymous">
       </video>
+
+      <!-- Audio Player -->
+      <div *ngIf="mediaType === 'audio'" class="audio-player-container">
+        <audio
+          #audioElement
+          class="native-audio-player"
+          preload="metadata"
+          crossorigin="anonymous">
+        </audio>
+        <div class="audio-visualizer">
+          <mat-icon class="audio-icon">audiotrack</mat-icon>
+          <div class="audio-info">
+            <h3>{{ data.videoTitle || 'Audio File' }}</h3>
+            <p>Playing audio file</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Image Viewer -->
+      <div *ngIf="mediaType === 'image'" class="image-viewer-container">
+        <img
+          #imageElement
+          class="image-viewer"
+          [src]="imageSrc"
+          alt="{{ data.videoTitle || 'Image' }}">
+      </div>
+
+      <!-- Document/Webpage Placeholder -->
+      <div *ngIf="mediaType === 'document' || mediaType === 'webpage'" class="document-placeholder">
+        <mat-icon class="document-icon">{{ mediaType === 'document' ? 'description' : 'public' }}</mat-icon>
+        <h3>{{ data.videoTitle || 'Document' }}</h3>
+        <p>Preview not available for this file type</p>
+        <button mat-raised-button color="primary" (click)="openInExternalApp()">
+          <mat-icon>open_in_new</mat-icon>
+          Open in External App
+        </button>
+      </div>
     </div>
 
     <!-- Analysis Sections Sidebar with Tabs -->

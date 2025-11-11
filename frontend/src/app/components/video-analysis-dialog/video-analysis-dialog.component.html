@@ -133,7 +133,7 @@
         <p class="section-description">Choose how you want to process this video</p>
 
         <div class="mode-cards">
-          <!-- Import Only - only show if videos are NOT already in library -->
+          <!-- Import - only show if videos are NOT already in library -->
           <button type="button"
                   class="mode-card"
                   *ngIf="!isFromLibrary()"
@@ -143,8 +143,8 @@
               <mat-icon>download</mat-icon>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Import Only</h4>
-              <p class="card-description">Download and add to library without any processing</p>
+              <h4 class="card-title">Import</h4>
+              <p class="card-description">Add to library without processing</p>
             </div>
             <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'import-only'">
               <mat-icon>check_circle</mat-icon>
@@ -160,7 +160,7 @@
             </div>
             <div class="card-content">
               <h4 class="card-title">Transcribe</h4>
-              <p class="card-description">Generate searchable text transcript using Whisper</p>
+              <p class="card-description">Import + generate transcript using Whisper</p>
             </div>
             <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'transcribe-only'">
               <mat-icon>check_circle</mat-icon>
@@ -175,8 +175,8 @@
               <mat-icon>psychology</mat-icon>
             </div>
             <div class="card-content">
-              <h4 class="card-title">Transcribe + AI Analysis</h4>
-              <p class="card-description">Full processing with transcript and AI-powered insights</p>
+              <h4 class="card-title">Analyze</h4>
+              <p class="card-description">Import + transcript + AI analysis</p>
             </div>
             <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'full'">
               <mat-icon>check_circle</mat-icon>

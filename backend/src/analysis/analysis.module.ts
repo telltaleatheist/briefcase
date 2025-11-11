@@ -4,6 +4,7 @@ import { AnalysisService } from './analysis.service';
 import { OllamaService } from './ollama.service';
 import { PythonBridgeService } from './python-bridge.service';
 import { AIProviderService } from './ai-provider.service';
+import { TextExtractionService } from './text-extraction.service';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { PathModule } from '../path/path.module';
@@ -21,7 +22,7 @@ import { DatabaseModule } from '../database/database.module';
     forwardRef(() => DatabaseModule),
   ],
   controllers: [AnalysisController],
-  providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService],
-  exports: [AnalysisService, OllamaService, AIProviderService, PythonBridgeService],
+  providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService, TextExtractionService],
+  exports: [AnalysisService, OllamaService, AIProviderService, PythonBridgeService, TextExtractionService],
 })
 export class AnalysisModule {}

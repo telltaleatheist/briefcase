@@ -6,21 +6,42 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
- * FileScannerService - Scans clips folder and maintains video catalog in database
+ * FileScannerService - Scans clips folder and maintains media catalog in database
  *
  * Responsibilities:
- * - Recursively scan /Volumes/Callisto/clips/ for video files
- * - Hash video files for identification
- * - Match videos to existing database entries (by filename or hash)
- * - Detect moved/renamed videos and update paths
- * - Identify new videos that need analysis
- * - Mark missing videos as unlinked
+ * - Recursively scan clips folder for all supported media files
+ * - Hash media files for identification
+ * - Match media to existing database entries (by filename or hash)
+ * - Detect moved/renamed media and update paths
+ * - Identify new media that need analysis
+ * - Mark missing media as unlinked
+ *
+ * Supported media types:
+ * - Videos: .mov, .mp4, .avi, .mkv, .webm, .m4v, .flv
+ * - Audio: .mp3, .m4a, .m4b, .aac, .flac, .wav, .ogg
+ * - Documents: .pdf, .epub, .mobi, .txt, .md
+ * - Images: .jpg, .jpeg, .png, .gif, .webp, .bmp
+ * - Web archives: .html, .htm, .mhtml
  */
 @Injectable()
 export class FileScannerService {
   private readonly logger = new Logger(FileScannerService.name);
   // NO hardcoded paths - clips folder must come from active library
+
+  // All supported file extensions
   private readonly VIDEO_EXTENSIONS = ['.mov', '.mp4', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
+  private readonly AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'];
+  private readonly DOCUMENT_EXTENSIONS = ['.pdf', '.epub', '.mobi', '.txt', '.md'];
+  private readonly IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+  private readonly WEBPAGE_EXTENSIONS = ['.html', '.htm', '.mhtml'];
+
+  private readonly ALL_MEDIA_EXTENSIONS = [
+    ...this.VIDEO_EXTENSIONS,
+    ...this.AUDIO_EXTENSIONS,
+    ...this.DOCUMENT_EXTENSIONS,
+    ...this.IMAGE_EXTENSIONS,
+    ...this.WEBPAGE_EXTENSIONS,
+  ];
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -76,10 +97,10 @@ export class FileScannerService {
     };
 
     try {
-      // Step 1: Scan filesystem and collect all video files
+      // Step 1: Scan filesystem and collect all media files
       const videoFiles = await this.findAllVideoFiles(clipsRoot);
       result.totalFiles = videoFiles.length;
-      this.logger.log(`Found ${videoFiles.length} video files in clips folder`);
+      this.logger.log(`Found ${videoFiles.length} media files in clips folder`);
 
       // Step 2: Build a set of found file paths for quick lookup
       const foundPaths = new Set(videoFiles.map((f) => f.fullPath));
@@ -254,7 +275,7 @@ export class FileScannerService {
   }
 
   /**
-   * Recursively find all video files in clips folder
+   * Recursively find all media files in clips folder
    * @param clipsRoot - Root directory to scan
    */
   private async findAllVideoFiles(clipsRoot: string): Promise<VideoFileInfo[]> {
@@ -273,7 +294,7 @@ export class FileScannerService {
           } else if (entry.isFile()) {
             const ext = path.extname(entry.name).toLowerCase();
 
-            if (this.VIDEO_EXTENSIONS.includes(ext)) {
+            if (this.ALL_MEDIA_EXTENSIONS.includes(ext)) {
               // First, try to extract date from filename (format: YYYY-MM-DD Title.ext)
               const filenameDateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\s/);
               let dateFolder: string | undefined;
@@ -307,7 +328,8 @@ export class FileScannerService {
   }
 
   /**
-   * Get videos that need analysis (have no transcript or analysis)
+   * Get videos/audio that need analysis (have no transcript or analysis)
+   * Only returns video and audio files (not documents, images, or webpages)
    */
   getNeedsAnalysis(): NeedsAnalysisVideo[] {
     const db = this.databaseService.getDatabase();
@@ -319,12 +341,14 @@ export class FileScannerService {
         v.current_path,
         v.date_folder,
         v.duration_seconds,
+        v.media_type,
         CASE WHEN t.video_id IS NULL THEN 1 ELSE 0 END as needs_transcript,
         CASE WHEN a.video_id IS NULL THEN 1 ELSE 0 END as needs_analysis
       FROM videos v
       LEFT JOIN transcripts t ON v.id = t.video_id
       LEFT JOIN analyses a ON v.id = a.video_id
       WHERE v.is_linked = 1
+        AND v.media_type IN ('video', 'audio')
         AND (t.video_id IS NULL OR a.video_id IS NULL)
       ORDER BY v.created_at DESC
     `);
@@ -339,7 +363,8 @@ export class FileScannerService {
   }
 
   /**
-   * Get count of videos needing analysis
+   * Get count of videos/audio needing analysis
+   * Only counts video and audio files (not documents, images, or webpages)
    */
   getNeedsAnalysisCount(): number {
     const db = this.databaseService.getDatabase();
@@ -350,6 +375,7 @@ export class FileScannerService {
       LEFT JOIN transcripts t ON v.id = t.video_id
       LEFT JOIN analyses a ON v.id = a.video_id
       WHERE v.is_linked = 1
+        AND v.media_type IN ('video', 'audio')
         AND (t.video_id IS NULL OR a.video_id IS NULL)
     `);
 
@@ -515,6 +541,7 @@ export interface NeedsAnalysisVideo {
   current_path: string;
   date_folder: string | null;
   duration_seconds: number | null;
+  media_type: string; // 'video', 'audio', 'document', 'image', 'webpage'
   needs_transcript: number; // 0 or 1
   needs_analysis: number; // 0 or 1
 }

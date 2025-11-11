@@ -176,6 +176,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   @ViewChild('detailVideoPlayer') detailVideoPlayer?: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideoPlayer') previewVideoPlayer?: ElementRef<HTMLVideoElement>;
   @ViewChild('contextMenuTrigger') contextMenuTrigger?: MatMenuTrigger;
+  @ViewChild('managementContextMenuTrigger') managementContextMenuTrigger?: MatMenuTrigger;
   videoElement: HTMLVideoElement | null = null;
   isPlaying = false;
 
@@ -195,6 +196,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Context menu state
   contextMenuPosition = { x: 0, y: 0 };
   contextMenuVideo: DatabaseVideo | null = null;
+  managementContextMenuPosition = { x: 0, y: 0 };
 
   // Week grouping state
   collapsedWeeks = new Set<string>(); // Set of collapsed week identifiers
@@ -634,6 +636,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Handle management tab change
+   */
+  onManagementTabChange(event: any) {
+    const selectedIndex = event.index;
+
+    // Tab 0: Orphaned Files, Tab 1: Orphaned Database Entries
+    if (selectedIndex === 0) {
+      this.managementMode = 'unimported';
+      this.loadUnimportedVideos();
+    } else if (selectedIndex === 1) {
+      this.managementMode = 'orphaned';
+      this.loadOrphanedVideos();
+    }
+  }
+
+  /**
    * Load orphaned videos
    */
   async loadOrphanedVideos() {
@@ -728,6 +746,234 @@ export class LibraryComponent implements OnInit, OnDestroy {
     this.isAllUnimportedSelected = this.unimportedVideos.every(video =>
       this.selectedUnimportedVideos.has(video.fullPath)
     );
+  }
+
+  /**
+   * Toggle unimported video selection
+   */
+  toggleUnimportedVideo(videoPath: string) {
+    if (this.selectedUnimportedVideos.has(videoPath)) {
+      this.selectedUnimportedVideos.delete(videoPath);
+    } else {
+      this.selectedUnimportedVideos.add(videoPath);
+    }
+    this.updateAllUnimportedSelectedState();
+  }
+
+  /**
+   * Handle click on management video with modifier keys
+   */
+  onManagementVideoClick(event: MouseEvent, identifier: string, type: 'unimported' | 'orphaned') {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
+    const shift = event.shiftKey;
+
+    if (type === 'unimported') {
+      if (cmdOrCtrl) {
+        // Cmd/Ctrl+click: toggle single selection
+        this.toggleUnimportedVideo(identifier);
+      } else if (shift) {
+        // Shift+click: range select (TODO: implement range selection)
+        this.toggleUnimportedVideo(identifier);
+      } else {
+        // Regular click: clear other selections and select this one
+        this.selectedUnimportedVideos.clear();
+        this.selectedUnimportedVideos.add(identifier);
+        this.updateAllUnimportedSelectedState();
+      }
+    } else {
+      if (cmdOrCtrl) {
+        // Cmd/Ctrl+click: toggle single selection
+        this.toggleOrphanedVideo(identifier);
+      } else if (shift) {
+        // Shift+click: range select (TODO: implement range selection)
+        this.toggleOrphanedVideo(identifier);
+      } else {
+        // Regular click: clear other selections and select this one
+        this.selectedOrphanedVideos.clear();
+        this.selectedOrphanedVideos.add(identifier);
+        this.updateOrphanedSelectionState();
+      }
+    }
+  }
+
+  /**
+   * Handle right-click context menu on management videos
+   */
+  onManagementVideoRightClick(
+    event: MouseEvent,
+    video: any,
+    type: 'unimported' | 'orphaned'
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const identifier = type === 'unimported' ? video.fullPath : video.id;
+    const selectedSet = type === 'unimported' ? this.selectedUnimportedVideos : this.selectedOrphanedVideos;
+
+    // If right-clicked video is not in selection, select only it
+    if (!selectedSet.has(identifier)) {
+      selectedSet.clear();
+      selectedSet.add(identifier);
+
+      if (type === 'unimported') {
+        this.updateAllUnimportedSelectedState();
+      } else {
+        this.updateOrphanedSelectionState();
+      }
+    }
+
+    // Position the context menu at cursor location
+    this.managementContextMenuPosition = {
+      x: event.clientX,
+      y: event.clientY
+    };
+
+    // Open the menu using the positioned trigger
+    if (this.managementContextMenuTrigger) {
+      this.managementContextMenuTrigger.openMenu();
+    }
+  }
+
+  /**
+   * Handle clicks on management view container to close menu
+   */
+  onManagementViewClick(event: MouseEvent) {
+    // Close the menu if it's open and user clicked outside of a menu item
+    if (this.managementContextMenuTrigger?.menuOpen) {
+      const target = event.target as HTMLElement;
+      // Don't close if clicking on menu items or the menu itself
+      if (!target.closest('.mat-mdc-menu-panel') && !target.closest('.actions-menu')) {
+        this.managementContextMenuTrigger.closeMenu();
+      }
+    }
+  }
+
+  /**
+   * Handle right-click on management view background to close menu
+   */
+  onManagementViewRightClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    // If right-clicking outside of a video row, close any open menu
+    if (!target.closest('.management-video-row') && this.managementContextMenuTrigger?.menuOpen) {
+      this.managementContextMenuTrigger.closeMenu();
+    }
+  }
+
+  /**
+   * Delete unimported video file
+   */
+  async deleteUnimportedVideo(video: UnimportedVideo) {
+    // Delete single file - just call the batch method with one item
+    this.selectedUnimportedVideos.clear();
+    this.selectedUnimportedVideos.add(video.fullPath);
+    await this.deleteSelectedUnimportedVideos();
+  }
+
+  /**
+   * Delete selected unimported videos
+   */
+  async deleteSelectedUnimportedVideos() {
+    if (this.selectedUnimportedVideos.size === 0) return;
+
+    const fileCount = this.selectedUnimportedVideos.size;
+
+    // Open delete confirmation dialog
+    const dialogRef = this.dialog.open(DeleteConfirmationDialog, {
+      width: '500px',
+      data: {
+        count: fileCount,
+        videoName: null
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (!result) {
+      return; // User cancelled
+    }
+
+    try {
+      const filePaths = Array.from(this.selectedUnimportedVideos);
+      const deleteUrl = await this.backendUrlService.getApiUrl('/database/delete-unimported-files');
+
+      const response = await this.http.post<{
+        success: boolean;
+        deletedCount: number;
+        failedCount: number;
+        errors?: string[];
+        message: string;
+      }>(deleteUrl, { filePaths }).toPromise();
+
+      if (response?.success) {
+        this.notificationService.toastOnly('success', 'Files Deleted', response.message);
+
+        // Clear selection
+        this.selectedUnimportedVideos.clear();
+        this.updateAllUnimportedSelectedState();
+
+        // Reload the unimported videos list
+        await this.loadUnimportedVideos();
+      } else {
+        const errorMsg = response?.errors?.join('\n') || 'Could not delete files';
+        this.notificationService.error('Delete Failed', errorMsg);
+      }
+    } catch (error: any) {
+      console.error('Error deleting files:', error);
+      this.notificationService.error('Delete Failed', error?.error?.message || 'Could not delete video files');
+    }
+  }
+
+  /**
+   * Relink orphaned videos
+   */
+  async relinkOrphanedVideos() {
+    if (this.selectedOrphanedVideos.size === 0) return;
+
+    const electron = (window as any).electron;
+    if (!electron || !electron.openDirectoryPicker) {
+      this.notificationService.error('Not Available', 'Folder picker only works in Electron app');
+      return;
+    }
+
+    try {
+      // Open folder picker
+      const result = await electron.openDirectoryPicker();
+
+      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return; // User cancelled
+      }
+
+      const newFolder = result.filePaths[0];
+      const selectedIds = Array.from(this.selectedOrphanedVideos);
+
+      // Call backend to relink
+      const relinkUrl = await this.backendUrlService.getApiUrl('/database/relink');
+
+      const response = await this.http.post<{
+        success: boolean;
+        relinkedCount: number;
+        failedCount: number;
+        message: string;
+      }>(relinkUrl, {
+        videoIds: selectedIds,
+        newFolder: newFolder
+      }).toPromise();
+
+      if (response?.success) {
+        this.notificationService.toastOnly('success', 'Videos Relinked', response.message);
+        this.selectedOrphanedVideos.clear();
+        await this.loadOrphanedVideos();
+      } else {
+        this.notificationService.error('Relink Failed', response?.message || 'Could not relink videos');
+      }
+    } catch (error: any) {
+      console.error('Error relinking videos:', error);
+      this.notificationService.error(
+        'Relink Failed',
+        error?.error?.message || 'Could not relink videos'
+      );
+    }
   }
 
   /**
@@ -1106,17 +1352,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
   selectAllMissingTranscript() {
     // Toggle behavior: if already selected, deselect those videos
     if (this.isMissingTranscriptSelected) {
-      // Deselect all videos without transcription
+      // Deselect all videos without transcription (only analyzable media)
       this.filteredVideos.forEach(video => {
-        if (!video.has_transcript) {
+        if (!video.has_transcript && this.canAnalyzeMedia(video)) {
           this.selectedVideos.delete(video.id);
         }
       });
       this.isMissingTranscriptSelected = false;
     } else {
-      // Add videos without transcription to current selection
+      // Add videos without transcription to current selection (only analyzable media)
       this.filteredVideos.forEach(video => {
-        if (!video.has_transcript) {
+        if (!video.has_transcript && this.canAnalyzeMedia(video)) {
           this.selectedVideos.add(video.id);
         }
       });
@@ -1132,17 +1378,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
   selectAllMissingAnalysis() {
     // Toggle behavior: if already selected, deselect those videos
     if (this.isMissingAnalysisSelected) {
-      // Deselect all videos without analysis
+      // Deselect all videos without analysis (only analyzable media)
       this.filteredVideos.forEach(video => {
-        if (!video.has_analysis) {
+        if (!video.has_analysis && this.canAnalyzeMedia(video)) {
           this.selectedVideos.delete(video.id);
         }
       });
       this.isMissingAnalysisSelected = false;
     } else {
-      // Add videos without analysis to current selection
+      // Add videos without analysis to current selection (only analyzable media)
       this.filteredVideos.forEach(video => {
-        if (!video.has_analysis) {
+        if (!video.has_analysis && this.canAnalyzeMedia(video)) {
           this.selectedVideos.add(video.id);
         }
       });
@@ -1485,6 +1731,29 @@ export class LibraryComponent implements OnInit, OnDestroy {
         console.log('Video added to analysis queue');
       }
     });
+  }
+
+  /**
+   * Analyze a single video (used by preview panel)
+   */
+  async analyzeVideo(video: DatabaseVideo) {
+    await this.openAnalyzeDialog(video);
+  }
+
+  /**
+   * Open metadata editor for the selected video (toolbar button)
+   */
+  async openMetadataEditorForSelected() {
+    if (this.selectedVideos.size !== 1) {
+      return;
+    }
+
+    const videoId = Array.from(this.selectedVideos)[0];
+    const video = this.videos.find(v => v.id === videoId);
+
+    if (video) {
+      await this.openMetadataEditor(video);
+    }
   }
 
   /**
@@ -2110,8 +2379,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Extract file paths and filter for video files
-    const validExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
+    // Extract file paths and filter for supported media files
+    const validExtensions = [
+      // Videos
+      '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv',
+      // Audio
+      '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg',
+      // Documents
+      '.pdf', '.epub', '.mobi', '.txt', '.md',
+      // Images
+      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+      // Webpages
+      '.html', '.htm', '.mhtml'
+    ];
     const filePaths: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
@@ -2132,40 +2412,87 @@ export class LibraryComponent implements OnInit, OnDestroy {
     if (filePaths.length === 0) {
       this.notificationService.toastOnly(
         'warning',
-        'No Valid Videos',
-        'Please drop video files (.mp4, .mov, .avi, etc.)'
+        'No Valid Media Files',
+        'Please drop supported media files (videos, audio, documents, images, etc.)'
       );
       return;
     }
 
-    // Create video objects from dropped file paths
-    const selectedVideos = filePaths.map((filePath: string) => {
-      const parts = filePath.split(/[/\\]/);
-      const filename = parts[parts.length - 1] || 'Unknown';
-      return {
-        current_path: filePath,
-        filename: filename
-      };
-    });
+    // Separate files into those that can be transcribed/analyzed vs those that should just be imported
+    const analyzableExtensions = [
+      '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv',  // Videos
+      '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'   // Audio
+    ];
 
-    // Open video analysis dialog with import mode and selected videos
-    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
-      width: '700px',
-      maxWidth: '90vw',
-      maxHeight: '85vh',
-      panelClass: 'video-analysis-dialog-panel',
-      data: {
-        mode: 'import',
-        selectedVideos: selectedVideos
-      },
-      disableClose: false
-    });
+    const analyzableFiles: string[] = [];
+    const importOnlyFiles: string[] = [];
 
-    dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success) {
-        console.log('Import added to queue');
+    for (const filePath of filePaths) {
+      const ext = filePath.toLowerCase().substring(filePath.lastIndexOf('.'));
+      if (analyzableExtensions.includes(ext)) {
+        analyzableFiles.push(filePath);
+      } else {
+        importOnlyFiles.push(filePath);
       }
-    });
+    }
+
+    // Auto-import non-analyzable files (documents, images, webpages) directly
+    if (importOnlyFiles.length > 0) {
+      try {
+        const importUrl = await this.backendUrlService.getApiUrl('/database/import');
+
+        // Import these files directly via backend API
+        await this.http.post(importUrl, {
+          videoPaths: importOnlyFiles
+        }).toPromise();
+
+        this.notificationService.toastOnly(
+          'success',
+          'Import Completed',
+          `Imported ${importOnlyFiles.length} file${importOnlyFiles.length !== 1 ? 's' : ''} to library`
+        );
+
+        // Refresh the library view
+        await this.loadVideos();
+      } catch (error: any) {
+        console.error('Error importing files:', error);
+        this.notificationService.error(
+          'Import Failed',
+          error?.error?.message || 'Could not import files'
+        );
+      }
+    }
+
+    // Show analysis dialog only for video/audio files
+    if (analyzableFiles.length > 0) {
+      const selectedVideos = analyzableFiles.map((filePath: string) => {
+        const parts = filePath.split(/[/\\]/);
+        const filename = parts[parts.length - 1] || 'Unknown';
+        return {
+          current_path: filePath,
+          filename: filename
+        };
+      });
+
+      // Open video analysis dialog with import mode and selected videos
+      const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
+        width: '700px',
+        maxWidth: '90vw',
+        maxHeight: '85vh',
+        panelClass: 'video-analysis-dialog-panel',
+        data: {
+          mode: 'import',
+          selectedVideos: selectedVideos
+        },
+        disableClose: false
+      });
+
+      dialogRef.afterClosed().subscribe(result => {
+        if (result && result.success) {
+          console.log('Import added to queue');
+        }
+      });
+    }
   }
 
   /**
@@ -2397,11 +2724,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
 
     try {
-      // Open file picker for video files
+      // Open file picker for all supported media files
       const result = await electron.ipcRenderer.invoke('dialog:openFiles', {
         properties: ['openFile', 'multiSelections'],
         filters: [
-          { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'flv'] }
+          { name: 'All Media', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'flv', 'mp3', 'm4a', 'm4b', 'aac', 'flac', 'wav', 'ogg', 'pdf', 'epub', 'mobi', 'txt', 'md', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'html', 'htm', 'mhtml'] },
+          { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'flv'] },
+          { name: 'Audio', extensions: ['mp3', 'm4a', 'm4b', 'aac', 'flac', 'wav', 'ogg'] },
+          { name: 'Documents', extensions: ['pdf', 'epub', 'mobi', 'txt', 'md'] },
+          { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] },
+          { name: 'Webpages', extensions: ['html', 'htm', 'mhtml'] }
         ]
       });
 
@@ -2466,7 +2798,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // Call backend to scan directory for unimported videos
       const scanUrl = await this.backendUrlService.getApiUrl('/database/scan-directory');
 
-      this.notificationService.toastOnly('info', 'Scanning Directory', 'Searching for video files...');
+      this.notificationService.toastOnly('info', 'Scanning Directory', 'Searching for media files...');
 
       const response = await this.http.post<{
         videos: Array<{ filename: string; fullPath: string }>;
@@ -2477,7 +2809,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }).toPromise();
 
       if (!response || response.total === 0) {
-        this.notificationService.toastOnly('info', 'No Videos Found', 'No video files found in the selected directory');
+        this.notificationService.toastOnly('info', 'No Media Found', 'No media files found in the selected directory');
         return;
       }
 
@@ -3213,6 +3545,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Get status tooltip for a video
    */
   getStatusTooltip(video: DatabaseVideo): string {
+    // Non-analyzable media types don't need transcript/analysis status
+    if (!this.canAnalyzeMedia(video)) {
+      return `${this.getMediaTypeLabel(video.media_type)} - No analysis needed`;
+    }
+
     if (video.has_transcript && video.has_analysis) {
       return 'Has transcript and analysis';
     } else if (video.has_transcript) {
@@ -3222,6 +3559,65 @@ export class LibraryComponent implements OnInit, OnDestroy {
     } else {
       return 'No transcript or analysis';
     }
+  }
+
+  /**
+   * Get media type icon for a media item
+   */
+  getMediaTypeIcon(mediaType: string): string {
+    switch (mediaType) {
+      case 'video':
+        return 'videocam';
+      case 'audio':
+        return 'audiotrack';
+      case 'document':
+        return 'description';
+      case 'image':
+        return 'image';
+      case 'webpage':
+        return 'public';
+      default:
+        return 'video_library';
+    }
+  }
+
+  /**
+   * Get media type label for a media item
+   */
+  getMediaTypeLabel(mediaType: string): string {
+    switch (mediaType) {
+      case 'video':
+        return 'Video';
+      case 'audio':
+        return 'Audio';
+      case 'document':
+        return 'Document';
+      case 'image':
+        return 'Image';
+      case 'webpage':
+        return 'Web Page';
+      default:
+        return 'Media';
+    }
+  }
+
+  /**
+   * Check if a media item can be analyzed (video or audio only)
+   */
+  canAnalyzeMedia(video: DatabaseVideo | null): boolean {
+    if (!video) return false;
+    return video.media_type === 'video' || video.media_type === 'audio';
+  }
+
+  /**
+   * Check if any selected items can be analyzed
+   */
+  hasAnalyzableSelection(): boolean {
+    const selectedVideoIds = Array.from(this.selectedVideos);
+    return selectedVideoIds.some(videoId => {
+      const video = this.videos.find(v => v.id === videoId);
+      return this.canAnalyzeMedia(video || null);
+    });
   }
 
   /**
@@ -3433,12 +3829,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
   async deleteSelectedOrphans() {
     if (this.selectedOrphanedVideos.size === 0) return;
 
-    const confirmed = confirm(
-      `Are you sure you want to permanently delete ${this.selectedOrphanedVideos.size} selected orphaned entr${this.selectedOrphanedVideos.size !== 1 ? 'ies' : 'y'}?\n\n` +
-      'This will remove these entries from the database. This action cannot be undone.'
-    );
+    const entryCount = this.selectedOrphanedVideos.size;
 
-    if (!confirmed) return;
+    // Open delete confirmation dialog
+    const dialogRef = this.dialog.open(OrphanedDeleteConfirmationDialog, {
+      width: '500px',
+      data: {
+        count: entryCount,
+        videoName: entryCount === 1 ? this.orphanedVideos.find(v => this.selectedOrphanedVideos.has(v.id))?.filename : null
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (!result) {
+      return; // User cancelled
+    }
 
     const selectedIds = Array.from(this.selectedOrphanedVideos);
     try {
@@ -3450,15 +3856,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }>(url, { videoIds: selectedIds }).toPromise();
 
       if (response?.success) {
-        this.snackBar.open(response.message, 'Close', { duration: 3000 });
+        this.notificationService.toastOnly('success', 'Entries Deleted', response.message);
         this.selectedOrphanedVideos.clear();
         await this.loadOrphanedVideos();
       } else {
-        this.snackBar.open('Failed to delete selected entries', 'Close', { duration: 3000 });
+        this.notificationService.error('Delete Failed', 'Failed to delete selected entries');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to delete selected entries:', error);
-      this.snackBar.open('Failed to delete selected entries', 'Close', { duration: 3000 });
+      this.notificationService.error('Delete Failed', error?.error?.message || 'Failed to delete selected entries');
     }
   }
 
@@ -3558,5 +3964,55 @@ export class DeleteConfirmationDialog {
 
   onConfirm(): void {
     this.dialogRef.close(this.selectedOption);
+  }
+}
+
+/**
+ * Orphaned Delete Confirmation Dialog Component
+ * Simpler dialog for deleting orphaned database entries (no file deletion option)
+ */
+@Component({
+  selector: 'orphaned-delete-confirmation-dialog',
+  template: `
+    <h2 mat-dialog-title>Delete {{ data.count > 1 ? data.count + ' Orphaned Entries' : 'Orphaned Entry' }}</h2>
+    <mat-dialog-content>
+      <p *ngIf="data.videoName" style="margin-bottom: 16px; font-weight: 500;">{{ data.videoName }}</p>
+      <p style="margin-bottom: 16px;">Are you sure you want to delete {{ data.count > 1 ? 'these entries' : 'this entry' }} from the database?</p>
+      <div style="background: var(--warning-bg); border: 1px solid var(--warning-text); border-radius: 4px; padding: 12px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: flex-start; gap: 8px;">
+          <mat-icon style="color: var(--warning-text); font-size: 20px; width: 20px; height: 20px;">warning</mat-icon>
+          <div style="flex: 1; font-size: 13px; color: var(--warning-text);">
+            This will permanently remove {{ data.count > 1 ? 'these database entries' : 'this database entry' }} and all associated metadata, transcripts, analyses, and tags. This action cannot be undone.
+          </div>
+        </div>
+      </div>
+    </mat-dialog-content>
+    <mat-dialog-actions align="end">
+      <button mat-button (click)="onCancel()">Cancel</button>
+      <button mat-raised-button color="warn" (click)="onConfirm()">
+        Delete from Database
+      </button>
+    </mat-dialog-actions>
+  `,
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatDialogModule,
+    MatButtonModule,
+    MatIconModule
+  ]
+})
+export class OrphanedDeleteConfirmationDialog {
+  constructor(
+    public dialogRef: MatDialogRef<OrphanedDeleteConfirmationDialog>,
+    @Inject(MAT_DIALOG_DATA) public data: { count: number; videoName: string | null }
+  ) {}
+
+  onCancel(): void {
+    this.dialogRef.close(null);
+  }
+
+  onConfirm(): void {
+    this.dialogRef.close(true);
   }
 }

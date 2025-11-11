@@ -68,13 +68,14 @@
         </div>
 
         <!-- Main Action Buttons -->
-        <button mat-raised-button color="primary" (click)="openClipCreator()" class="primary-action">
+        <button mat-raised-button color="primary" (click)="openClipCreator()" class="primary-action" *ngIf="canAnalyzeMedia()">
           <mat-icon>movie_filter</mat-icon>
           Clip Creator
         </button>
         <button mat-raised-button
                 color="accent"
-                (click)="runAnalysis()">
+                (click)="runAnalysis()"
+                *ngIf="canAnalyzeMedia()">
           <mat-icon>
             {{ analysis || transcript ? 'refresh' : 'psychology' }}
           </mat-icon>
@@ -87,7 +88,7 @@
     <div class="video-metadata-grid">
       <!-- Left Column: Video and AI Description -->
       <div class="video-column">
-        <div class="video-preview">
+        <div class="video-preview" *ngIf="canAnalyzeMedia()">
           <video #videoPlayer
                  [src]="videoUrl"
                  controls
