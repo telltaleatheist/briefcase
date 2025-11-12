@@ -397,6 +397,15 @@ body {
   }
 }
 
+/* Preview dialog: Make overlay non-blocking so keyboard events reach cascade list */
+.cdk-overlay-pane.preview-dialog-panel {
+  pointer-events: none; // Let events pass through the overlay
+
+  .mat-mdc-dialog-container {
+    pointer-events: auto; // But allow interaction with the dialog itself
+  }
+}
+
 /* Custom backdrop for dialogs that need to fully block content */
 .dialog-backdrop {
   background-color: rgba(0, 0, 0, 0.95) !important;

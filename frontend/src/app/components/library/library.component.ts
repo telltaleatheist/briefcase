@@ -4431,6 +4431,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
       hasBackdrop: false,
       autoFocus: false, // Don't steal focus from the list
       restoreFocus: false, // Don't restore focus on close
+      disableClose: false, // Allow closing
+      ariaModal: false, // Disable modal behavior to allow keyboard events to pass through
       position: {
         top: '100px',
         right: '20px'
@@ -4438,9 +4440,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
     });
 
     // Explicitly refocus the cascade list after dialog opens
-    setTimeout(() => {
+    this.currentPreviewDialogRef.afterOpened().subscribe(() => {
+      // Focus immediately after dialog opens
       this.focusCascadeList();
-    }, 100);
+
+      // Also focus again after a short delay to ensure it sticks
+      setTimeout(() => {
+        this.focusCascadeList();
+      }, 50);
+    });
 
     // Handle dialog close
     this.currentPreviewDialogRef.afterClosed().subscribe(() => {

@@ -118,29 +118,8 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  @HostListener('keydown', ['$event'])
-  handleKeyDown(event: KeyboardEvent) {
-    // Spacebar to close dialog (changed from play/pause)
-    if (event.code === 'Space') {
-      event.preventDefault();
-      event.stopPropagation();
-      this.dialogRef.close();
-      return;
-    }
-
-    // Escape to close (already handled by MatDialog, but we can also do it explicitly)
-    if (event.code === 'Escape') {
-      event.stopPropagation();
-      this.dialogRef.close();
-    }
-
-    // Arrow keys - let them pass through to the list component
-    // DON'T handle them in the dialog
-    if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-      // Don't preventDefault - let the event bubble to the list
-      return;
-    }
-  }
+  // Removed @HostListener - let ALL keyboard events pass through to the list
+  // The list will handle everything (arrow keys, space, etc.)
 
   toggleAutoPlay() {
     this.autoPlayEnabled = !this.autoPlayEnabled;

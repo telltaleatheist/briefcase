@@ -6,10 +6,11 @@
     <button mat-icon-button
             (click)="toggleAutoPlay()"
             [color]="autoPlayEnabled ? 'primary' : ''"
-            [matTooltip]="autoPlayEnabled ? 'Auto-play: On' : 'Auto-play: Off'">
+            [matTooltip]="autoPlayEnabled ? 'Auto-play: On' : 'Auto-play: Off'"
+            tabindex="-1">
       <mat-icon>{{ autoPlayEnabled ? 'play_circle' : 'pause_circle' }}</mat-icon>
     </button>
-    <button mat-icon-button class="close-btn" (click)="dialogRef.close()">
+    <button mat-icon-button class="close-btn" (click)="dialogRef.close()" tabindex="-1">
       <mat-icon>close</mat-icon>
     </button>
   </div>
@@ -21,14 +22,16 @@
            *ngIf="data.video.media_type === 'video'"
            [src]="data.videoStreamUrl"
            controls
-           class="media-player">
+           class="media-player"
+           tabindex="-1">
     </video>
 
     <!-- Audio Player -->
     <audio *ngIf="data.video.media_type === 'audio'"
            [src]="data.videoStreamUrl"
            controls
-           class="media-player">
+           class="media-player"
+           tabindex="-1">
     </audio>
 
     <!-- Image Viewer -->
@@ -59,18 +62,20 @@
     <button mat-raised-button
             color="primary"
             (click)="analyze()"
-            *ngIf="data.canAnalyzeMedia(data.video)">
+            *ngIf="data.canAnalyzeMedia(data.video)"
+            tabindex="-1">
       <mat-icon>psychology</mat-icon>
       Analyze
     </button>
     <button mat-raised-button
             color="accent"
             (click)="openVideoEditor()"
-            *ngIf="data.canAnalyzeMedia(data.video)">
+            *ngIf="data.canAnalyzeMedia(data.video)"
+            tabindex="-1">
       <mat-icon>video_settings</mat-icon>
       Video Editor
     </button>
-    <button mat-raised-button (click)="viewDetails()">
+    <button mat-raised-button (click)="viewDetails()" tabindex="-1">
       <mat-icon>info</mat-icon>
       View Details
     </button>

@@ -85,6 +85,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   // Track all subscriptions for cleanup
   private subscriptions: Subscription[] = [];
 
+  // Cached media element to avoid repeated DOM queries
+  private cachedMediaElement?: HTMLVideoElement | HTMLAudioElement;
+
   // Transcript state
   transcriptText: string | null = null;
   transcriptExists = false;
@@ -279,6 +282,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     this.subscriptions.forEach(sub => sub.unsubscribe());
     this.subscriptions = [];
 
+    // Clear cached media element
+    this.cachedMediaElement = undefined;
+
     // Dispose of video.js player (handles all cleanup automatically)
     if (this.player) {
       this.player.dispose();
@@ -314,6 +320,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    */
   private cleanupVideoResources() {
     console.log('[cleanupVideoResources] Cleaning up old resources');
+
+    // Clear cached media element
+    this.cachedMediaElement = undefined;
 
     // Dispose of video.js player
     if (this.player) {
@@ -450,6 +459,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
           type: this.mediaType === 'audio' ? 'audio/mp4' : 'video/mp4'
         }]
       });
+
+      // Cache the media element to avoid repeated DOM queries on every change detection
+      this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
 
       // Start loading timer
       this.loadingStartTime = Date.now();
@@ -1537,11 +1549,19 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Get the current media element (video or audio) for waveform generation
    */
   getMediaElement(): HTMLVideoElement | HTMLAudioElement | undefined {
-    // Return the underlying HTML element from video.js player
-    if (this.player) {
-      return this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
+    // Return cached media element to avoid repeated DOM queries on every change detection
+    // CRITICAL: This method is called from template binding, so it runs on EVERY change detection cycle
+    // Using a cached value prevents thousands of querySelector calls and prevents triggering
+    // unnecessary ngOnChanges in child components
+    if (this.cachedMediaElement) {
+      return this.cachedMediaElement;
     }
-    // Fallback to direct element references if player not initialized
+    // Fallback: If cache is empty but player exists, query and cache it
+    if (this.player) {
+      this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
+      return this.cachedMediaElement;
+    }
+    // Final fallback to direct element references if player not initialized
     if (this.mediaType === 'audio' && this.audioElement) {
       return this.audioElement.nativeElement;
     } else if (this.mediaType === 'video' && this.videoElement) {
