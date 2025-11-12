@@ -137,6 +137,8 @@ export class DatabaseService {
         is_linked INTEGER DEFAULT 1,
         media_type TEXT DEFAULT 'video',
         file_extension TEXT,
+        parent_id TEXT,
+        FOREIGN KEY (parent_id) REFERENCES videos(id) ON DELETE CASCADE,
         CHECK (is_linked IN (0, 1))
       );
 
@@ -270,6 +272,7 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_videos_upload_date ON videos(upload_date);
       CREATE INDEX IF NOT EXISTS idx_videos_download_date ON videos(download_date);
       CREATE INDEX IF NOT EXISTS idx_videos_is_linked ON videos(is_linked);
+      CREATE INDEX IF NOT EXISTS idx_videos_parent_id ON videos(parent_id);
       CREATE INDEX IF NOT EXISTS idx_tags_video ON tags(video_id);
       CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
       CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
@@ -471,7 +474,26 @@ export class DatabaseService {
       }
     }
 
-    // Migration 8: Check if we need to add created_at column (old databases might have this instead of upload_date)
+    try {
+      // Migration 8: Add parent_id column to videos table if it doesn't exist
+      db.exec("SELECT parent_id FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: parent_id')) {
+        this.logger.log('Running migration: Adding parent_id column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN parent_id TEXT;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: parent_id column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    // Migration 9: Check if we need to add created_at column (old databases might have this instead of upload_date)
     // Check table schema to see which columns exist
     let hasCreatedAt = false;
     let hasUploadDate = false;
@@ -519,6 +541,8 @@ export class DatabaseService {
             is_linked INTEGER DEFAULT 1,
             media_type TEXT DEFAULT 'video',
             file_extension TEXT,
+            parent_id TEXT,
+            FOREIGN KEY (parent_id) REFERENCES videos(id) ON DELETE CASCADE,
             CHECK (is_linked IN (0, 1))
           );
 
@@ -526,14 +550,14 @@ export class DatabaseService {
           INSERT INTO videos_new (
             id, filename, file_hash, current_path, upload_date, download_date,
             duration_seconds, file_size_bytes, ai_description, source_url,
-            last_verified, added_at, is_linked, media_type, file_extension
+            last_verified, added_at, is_linked, media_type, file_extension, parent_id
           )
           SELECT
             id, filename, file_hash, current_path,
             created_at as upload_date,
             added_at as download_date,
             duration_seconds, file_size_bytes, ai_description, source_url,
-            last_verified, added_at, is_linked, media_type, file_extension
+            last_verified, added_at, is_linked, media_type, file_extension, NULL as parent_id
           FROM videos;
 
           -- Drop old table
@@ -910,9 +934,9 @@ export class DatabaseService {
   }
 
   /**
-   * Get all videos
+   * Get all videos (excluding children - they are fetched separately via getChildVideos)
    */
-  getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number }) {
+  getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number; includeChildren?: boolean }) {
     const db = this.ensureInitialized();
     // Use subqueries instead of LEFT JOINs to prevent duplicate rows
     // when there are multiple transcripts or analyses for a video
@@ -920,13 +944,26 @@ export class DatabaseService {
       SELECT
         v.*,
         CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
-        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) THEN 1 ELSE 0 END as has_analysis
+        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) THEN 1 ELSE 0 END as has_analysis,
+        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
       FROM videos v
     `;
     const params: any[] = [];
 
+    const conditions: string[] = [];
+
     if (options?.linkedOnly) {
-      query += ' WHERE v.is_linked = 1';
+      conditions.push('v.is_linked = 1');
+    }
+
+    // By default, only show parent/root videos (not children)
+    // Children will be fetched separately via getChildVideos()
+    if (!options?.includeChildren) {
+      conditions.push('v.parent_id IS NULL');
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
     }
 
     query += ' ORDER BY v.added_at DESC';
@@ -949,6 +986,42 @@ export class DatabaseService {
       results.push(stmt.getAsObject());
     }
     stmt.free();
+
+    return results;
+  }
+
+  /**
+   * Get all videos in hierarchical structure (parents with their children)
+   * Returns a flat array with children immediately following their parent
+   */
+  getAllVideosHierarchical(options?: { linkedOnly?: boolean }) {
+    // Get all parent/root videos
+    const parents = this.getAllVideos({
+      linkedOnly: options?.linkedOnly,
+      includeChildren: false
+    });
+
+    const results: any[] = [];
+
+    // For each parent, add it and then its children
+    for (const parent of parents) {
+      results.push({
+        ...parent,
+        isParent: true,
+        isChild: false
+      });
+
+      // Get children for this parent
+      const children = this.getChildVideos(parent.id);
+      for (const child of children) {
+        results.push({
+          ...child,
+          isParent: false,
+          isChild: true,
+          parent_id: parent.id
+        });
+      }
+    }
 
     return results;
   }
@@ -1972,6 +2045,122 @@ export class DatabaseService {
     );
     this.saveDatabase();
     this.logger.log(`Deleted all media relationships for ${mediaId}`);
+  }
+
+  // ============================================================================
+  // PARENT-CHILD OPERATIONS
+  // ============================================================================
+
+  /**
+   * Set a video as a child of another video (parent-child relationship)
+   * @param childId - ID of the child video
+   * @param parentId - ID of the parent video (null to remove parent)
+   */
+  setVideoParent(childId: string, parentId: string | null) {
+    const db = this.ensureInitialized();
+
+    // Validate that the child exists
+    const child = this.getVideoById(childId);
+    if (!child) {
+      throw new Error(`Child video not found: ${childId}`);
+    }
+
+    // Validate that the parent exists (if provided)
+    if (parentId) {
+      const parent = this.getVideoById(parentId);
+      if (!parent) {
+        throw new Error(`Parent video not found: ${parentId}`);
+      }
+
+      // Prevent child from being its own parent
+      if (childId === parentId) {
+        throw new Error('A video cannot be its own parent');
+      }
+
+      // Prevent a child from becoming a parent (children can't have children)
+      if (parent.parent_id) {
+        throw new Error('Cannot set a child video as a parent. Only root-level videos can be parents.');
+      }
+
+      // Prevent circular references - check if parent is already a child of this video
+      const parentRecord = this.getVideoById(parentId);
+      if (parentRecord && parentRecord.parent_id === childId) {
+        throw new Error('Circular parent-child relationship not allowed');
+      }
+    }
+
+    db.run(
+      'UPDATE videos SET parent_id = ? WHERE id = ?',
+      [parentId, childId]
+    );
+
+    this.saveDatabase();
+    this.logger.log(`Set parent for video ${childId}: ${parentId || 'none'}`);
+  }
+
+  /**
+   * Get all children of a parent video
+   * @param parentId - ID of the parent video
+   * @returns Array of child videos
+   */
+  getChildVideos(parentId: string): any[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT * FROM videos
+      WHERE parent_id = ?
+      ORDER BY added_at ASC
+    `);
+    stmt.bind([parentId]);
+
+    const results: any[] = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+
+    return results;
+  }
+
+  /**
+   * Get the parent of a video (if it has one)
+   * @param videoId - ID of the video
+   * @returns Parent video or null
+   */
+  getParentVideo(videoId: string): any | null {
+    const video = this.getVideoById(videoId);
+
+    if (!video || !video.parent_id) {
+      return null;
+    }
+
+    return this.getVideoById(video.parent_id as string);
+  }
+
+  /**
+   * Check if a video has any children
+   * @param videoId - ID of the video
+   * @returns True if video has children
+   */
+  hasChildren(videoId: string): boolean {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM videos WHERE parent_id = ?');
+    stmt.bind([videoId]);
+    stmt.step();
+    const result = stmt.getAsObject() as any;
+    stmt.free();
+
+    return result.count > 0;
+  }
+
+  /**
+   * Remove all children from a parent (set their parent_id to null)
+   * @param parentId - ID of the parent video
+   */
+  removeAllChildren(parentId: string) {
+    const db = this.ensureInitialized();
+    db.run('UPDATE videos SET parent_id = NULL WHERE parent_id = ?', [parentId]);
+    this.saveDatabase();
+    this.logger.log(`Removed all children from parent ${parentId}`);
   }
 
   // ============================================================================

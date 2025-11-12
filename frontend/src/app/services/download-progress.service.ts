@@ -9,6 +9,7 @@ export interface VideoProcessingJob {
   id: string;
   filename: string;
   url?: string;
+  videoId?: string; // Video ID for linking to library videos
   stage: 'downloading' | 'importing' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
   progress: number; // 0-100
   error?: string;
@@ -360,6 +361,7 @@ export class DownloadProgressService {
       id: jobId,
       filename: filename,
       url: analysisJob.input || existingJob?.url,
+      videoId: analysisJob.videoId || existingJob?.videoId,
       stage: stage,
       progress: analysisJob.progress || 0,
       error: analysisJob.error,
@@ -369,7 +371,6 @@ export class DownloadProgressService {
 
     currentJobs.set(jobId, job);
     this.jobs.next(new Map(currentJobs));
-    console.log('[DownloadProgressService] Added/updated analysis job:', job);
   }
 
   /**

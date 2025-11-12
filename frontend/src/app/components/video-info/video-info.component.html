@@ -309,6 +309,74 @@
       </div>
     </div>
 
+    <!-- Linked Files Section -->
+    <div class="linked-files-section" *ngIf="canBeParent()">
+      <h2>
+        <mat-icon>link</mat-icon>
+        Linked Files
+        <span class="file-count" *ngIf="childVideos.length > 0">({{ childVideos.length }})</span>
+      </h2>
+
+      <!-- Drop Zone -->
+      <mat-card class="drop-zone-card"
+                [class.dragging]="isDraggingFiles"
+                (dragenter)="onDragEnter($event)"
+                (dragover)="onDragOver($event)"
+                (dragleave)="onDragLeave($event)"
+                (drop)="onDrop($event)">
+
+        <div class="drop-zone-content" *ngIf="!isDraggingFiles">
+          <mat-icon class="drop-zone-icon">cloud_upload</mat-icon>
+          <h3>Link Related Files</h3>
+          <p>Drag and drop files here to link them to this item, or</p>
+          <button mat-raised-button color="primary" (click)="openFilePicker()">
+            <mat-icon>folder_open</mat-icon>
+            Choose Files
+          </button>
+          <p class="help-text">
+            Link related files like audiobooks with PDFs, or clips with full videos.
+            <br>Files will be added to your library if they're not already imported.
+          </p>
+        </div>
+
+        <div class="drop-zone-active" *ngIf="isDraggingFiles">
+          <mat-icon class="drop-icon">file_download</mat-icon>
+          <h3>Drop files to link them</h3>
+        </div>
+      </mat-card>
+
+      <!-- Linked Children List -->
+      <div class="linked-children-list" *ngIf="childVideos.length > 0">
+        <app-item-list
+          [items]="childVideos"
+          [displayConfig]="childListDisplayConfig"
+          [selectionMode]="SelectionMode.Multiple"
+          [contextMenuActions]="childListContextMenuActions"
+          (itemClick)="onChildItemClick($event)"
+          (itemDoubleClick)="onChildItemDoubleClick($event)"
+          (contextMenuAction)="onChildContextMenuAction($event)">
+
+          <!-- Custom action template for unlink button -->
+          <ng-template #itemActions let-child>
+            <button mat-icon-button
+                    (click)="removeChild(child); $event.stopPropagation()"
+                    matTooltip="Unlink file"
+                    class="unlink-button">
+              <mat-icon>close</mat-icon>
+            </button>
+          </ng-template>
+        </app-item-list>
+      </div>
+    </div>
+
+    <!-- Warning for child items -->
+    <div class="child-warning" *ngIf="!canBeParent() && video?.parent_id">
+      <mat-card class="warning-card">
+        <mat-icon>info</mat-icon>
+        <p>This file is linked to another item. Only root-level items can have linked files.</p>
+      </mat-card>
+    </div>
+
     <!-- Analysis Section -->
     <div class="analysis-section" *ngIf="analysisSections.length > 0" #analysisSection>
       <div class="analysis-header">

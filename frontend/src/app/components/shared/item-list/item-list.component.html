@@ -31,6 +31,8 @@
           [class.highlighted]="isItemHighlighted(item.id)"
           [class.selection-edge-top]="isSelectionEdgeTop(group.items, i)"
           [class.selection-edge-bottom]="isSelectionEdgeBottom(group.items, i)"
+          [class.is-child]="item['isChild']"
+          [class.is-parent]="item['isParent']"
           (click)="handleItemClick(item, $event)"
           (dblclick)="handleItemDoubleClick(item)"
           (contextmenu)="handleContextMenu($event, item)">
@@ -64,6 +66,11 @@
           <!-- Metadata (duration, size, etc.) - displayed on the right -->
           <div *ngIf="getMetadata(item)" class="item-metadata">
             {{ getMetadata(item) }}
+          </div>
+
+          <!-- Custom Action Slot (for buttons like delete, remove, etc.) -->
+          <div class="item-actions" *ngIf="hasItemActions">
+            <ng-container *ngTemplateOutlet="itemActionsTemplate; context: { $implicit: item }"></ng-container>
           </div>
 
           <!-- Progress Bar -->

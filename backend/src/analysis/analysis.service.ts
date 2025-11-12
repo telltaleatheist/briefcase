@@ -22,6 +22,7 @@ export interface AnalysisJob {
   currentPhase: string;
   title?: string; // Video title/filename for display
   error?: string;
+  videoId?: string; // Library video ID for progress tracking
   videoPath?: string;
   audioPath?: string;
   transcriptPath?: string;
@@ -120,6 +121,7 @@ export class AnalysisService {
       progress: 0,
       currentPhase: 'Waiting in queue...',
       title,
+      videoId: request.videoId, // Include videoId for library progress tracking
       createdAt: new Date(),
       timing: {},
     };

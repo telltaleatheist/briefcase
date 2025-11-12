@@ -1274,7 +1274,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    */
   async generateAnalysis() {
     // Get video details
-    const videoId = this.data.videoId || this.data.analysis?.id;
+    // IMPORTANT: Don't use analysis.id as fallback - that's the analysis ID, not video ID!
+    const videoId = this.data.videoId;
     let videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath || this.data.realFilePath;
     const videoTitle = this.data.analysis?.title || this.data.videoTitle || this.data.customVideo?.title || 'Unknown';
 

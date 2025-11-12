@@ -169,14 +169,23 @@ export class DatabaseController {
     @Query('tags') tags?: string,
     @Query('linkedOnly') linkedOnly?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string
+    @Query('offset') offset?: string,
+    @Query('hierarchical') hierarchical?: string
   ) {
     // Default to linked only unless explicitly set to false
     const shouldFilterLinked = linkedOnly === 'false' ? false : true;
 
-    let videos = this.databaseService.getAllVideos({
-      linkedOnly: shouldFilterLinked,
-    });
+    // If hierarchical mode is requested, use getAllVideosHierarchical
+    let videos: any[];
+    if (hierarchical === 'true') {
+      videos = this.databaseService.getAllVideosHierarchical({
+        linkedOnly: shouldFilterLinked,
+      });
+    } else {
+      videos = this.databaseService.getAllVideos({
+        linkedOnly: shouldFilterLinked,
+      });
+    }
 
     // Filter by tags if specified
     if (tags) {
@@ -1758,5 +1767,248 @@ export class DatabaseController {
         error: (error as Error).message
       };
     }
+  }
+
+  /**
+   * POST /api/database/videos/:childId/set-parent
+   * Set a parent for a video (create parent-child relationship)
+   */
+  @Post('videos/:childId/set-parent')
+  setVideoParent(
+    @Param('childId') childId: string,
+    @Body() body: { parentId: string | null }
+  ) {
+    try {
+      this.databaseService.setVideoParent(childId, body.parentId);
+      return {
+        success: true,
+        message: body.parentId
+          ? 'Parent set successfully'
+          : 'Parent removed successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Error setting parent: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * GET /api/database/videos/:parentId/children
+   * Get all children of a parent video
+   */
+  @Get('videos/:parentId/children')
+  getChildVideos(@Param('parentId') parentId: string) {
+    try {
+      const children = this.databaseService.getChildVideos(parentId);
+      return {
+        success: true,
+        children
+      };
+    } catch (error) {
+      this.logger.error(`Error getting children: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/:childId/remove-parent
+   * Remove parent from a video (make it a root video)
+   */
+  @Post('videos/:childId/remove-parent')
+  removeVideoParent(@Param('childId') childId: string) {
+    try {
+      this.databaseService.setVideoParent(childId, null);
+      return {
+        success: true,
+        message: 'Video is now a root-level item'
+      };
+    } catch (error) {
+      this.logger.error(`Error removing parent: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/link-files
+   * Link multiple files to a parent (add them as children)
+   * If files don't exist in library, import them first
+   */
+  @Post('videos/link-files')
+  async linkFilesToParent(
+    @Body() body: {
+      parentId: string;
+      filePaths: string[];
+    }
+  ) {
+    try {
+      const { parentId, filePaths } = body;
+
+      if (!parentId || !filePaths || filePaths.length === 0) {
+        return {
+          success: false,
+          error: 'Parent ID and file paths are required'
+        };
+      }
+
+      // Verify parent exists
+      const parent = this.databaseService.getVideoById(parentId);
+      if (!parent) {
+        return {
+          success: false,
+          error: 'Parent video not found'
+        };
+      }
+
+      // Check if parent is already a child (children can't be parents)
+      if (parent.parent_id) {
+        return {
+          success: false,
+          error: 'Cannot link files to a child video. Only root-level videos can be parents.'
+        };
+      }
+
+      const results = [];
+      const errors = [];
+
+      for (const filePath of filePaths) {
+        try {
+          this.logger.log(`Processing file: ${filePath}`);
+
+          // Check if file exists
+          if (!fs.existsSync(filePath)) {
+            this.logger.error(`File not found: ${filePath}`);
+            errors.push({ filePath, error: 'File not found' });
+            continue;
+          }
+
+          // Calculate file hash
+          this.logger.log(`Calculating hash for: ${filePath}`);
+          const fileHash = await this.databaseService.hashFile(filePath);
+          this.logger.log(`File hash: ${fileHash}`);
+
+          // Check if file is already in library
+          let video = this.databaseService.findVideoByHash(fileHash);
+
+          if (!video) {
+            // Import the file to the library
+            const filename = path.basename(filePath);
+            const stats = fs.statSync(filePath);
+            const fileExtension = path.extname(filename).toLowerCase();
+
+            // Determine media type
+            const mediaType = this.getMediaTypeFromExtension(fileExtension);
+
+            // Get duration for media files
+            let duration = null;
+            if (mediaType === 'video' || mediaType === 'audio') {
+              try {
+                const metadata = await this.ffmpegService.getVideoMetadata(filePath);
+                duration = metadata.duration;
+              } catch (e) {
+                this.logger.warn(`Could not get duration for ${filename}`);
+              }
+            }
+
+            // Create video ID
+            const { v4: uuidv4 } = require('uuid');
+            const videoId = uuidv4();
+
+            // Insert into database
+            this.databaseService.insertVideo({
+              id: videoId,
+              filename,
+              fileHash,
+              currentPath: filePath,
+              durationSeconds: duration || undefined,
+              fileSizeBytes: stats.size,
+              mediaType,
+              fileExtension,
+              downloadDate: stats.birthtime.toISOString()
+            });
+
+            video = this.databaseService.getVideoById(videoId);
+          }
+
+          // Verify video was created/found
+          if (!video) {
+            errors.push({
+              filePath,
+              error: 'Failed to create or find video in database'
+            });
+            continue;
+          }
+
+          // Set the parent
+          this.databaseService.setVideoParent(video.id as string, parentId);
+
+          results.push({
+            filename: video.filename as string,
+            videoId: video.id as string,
+            status: 'linked'
+          });
+
+        } catch (error) {
+          this.logger.error(`Error processing file ${filePath}:`, error);
+          errors.push({
+            filePath,
+            error: (error as Error).message || 'Unknown error'
+          });
+        }
+      }
+
+      this.logger.log(`Link files complete. Success: ${results.length}, Errors: ${errors.length}`);
+
+      return {
+        success: errors.length === 0,
+        message: `Linked ${results.length} file(s) to parent`,
+        results,
+        errors: errors.length > 0 ? errors : undefined
+      };
+
+    } catch (error) {
+      this.logger.error(`Error linking files: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Helper to determine media type from file extension
+   */
+  private getMediaTypeFromExtension(extension: string): string {
+    const ext = extension.toLowerCase();
+
+    if (['.mov', '.mp4', '.avi', '.mkv', '.webm', '.m4v', '.flv'].includes(ext)) {
+      return 'video';
+    }
+
+    if (['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'].includes(ext)) {
+      return 'audio';
+    }
+
+    if (['.pdf', '.epub', '.mobi', '.txt', '.md'].includes(ext)) {
+      return 'document';
+    }
+
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) {
+      return 'image';
+    }
+
+    if (['.html', '.htm', '.mhtml'].includes(ext)) {
+      return 'webpage';
+    }
+
+    return 'video'; // default
   }
 }

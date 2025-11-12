@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, HostListener, ViewChild, ElementRef } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, TemplateRef, ContentChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -58,6 +58,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   // Progress configuration
   @Input() progressMapper?: (item: T) => ItemProgress | null;
+
+  // Custom action template (for buttons like delete, remove, etc.)
+  @ContentChild('itemActions') itemActionsTemplate: TemplateRef<any> | null = null;
 
   // ========================================
   // Outputs
@@ -854,5 +857,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   get isEmpty(): boolean {
     return this.items.length === 0;
+  }
+
+  get hasItemActions(): boolean {
+    return !!this.itemActionsTemplate;
   }
 }

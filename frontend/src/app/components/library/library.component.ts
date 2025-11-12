@@ -33,6 +33,7 @@ import {
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
+import { DownloadProgressService } from '../../services/download-progress.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { ItemListComponent } from '../shared/item-list/item-list.component';
@@ -264,8 +265,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const state = this.videoProcessingStates.get(item.id);
     if (!state) return null;
 
-    console.log(`[LibraryComponent] Progress for ${item.filename}:`, state);
-
     return {
       value: state.progress,
       label: state.stage === 'transcribing' ? 'Transcribing...' : 'Analyzing...'
@@ -413,7 +412,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     private router: Router,
     private route: ActivatedRoute,
     private apiService: ApiService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private downloadProgressService: DownloadProgressService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -452,6 +452,30 @@ export class LibraryComponent implements OnInit, OnDestroy {
     ]);
 
     this.startProgressPolling();
+
+    // Subscribe to analysis queue jobs to show progress bars
+    this.downloadProgressService.jobs$.subscribe(jobsMap => {
+      // Clear existing processing states
+      this.videoProcessingStates.clear();
+
+      // Update processing states from active jobs
+      jobsMap.forEach((job) => {
+        if (job.videoId && job.stage !== 'completed' && job.stage !== 'failed') {
+          let stage: 'transcribing' | 'analyzing' = 'analyzing';
+          if (job.stage === 'transcribing') {
+            stage = 'transcribing';
+          }
+
+          this.videoProcessingStates.set(job.videoId, {
+            stage,
+            progress: job.progress
+          });
+        }
+      });
+
+      // Trigger change detection with new Map reference
+      this.videoProcessingStates = new Map(this.videoProcessingStates);
+    });
 
     // Check for query param to highlight a specific video
     this.route.queryParams.subscribe(params => {

@@ -81,13 +81,11 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Subscribe to processing jobs (analysis jobs only, NOT batch downloads)
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
       this.processingJobs = Array.from(jobsMap.values());
-      console.log('[DownloadQueueComponent] Jobs updated, count:', this.processingJobs.length, 'jobs:', this.processingJobs);
     });
 
     // Subscribe to pending jobs from the queue service
     this.pendingJobsSubscription = this.analysisQueueService.getPendingJobs().subscribe(jobs => {
       this.ngZone.run(() => {
-        console.log('[DownloadQueueComponent] Pending jobs updated:', jobs.length);
         this.pendingJobs = jobs;
         this.cdr.markForCheck();
         this.cdr.detectChanges();
@@ -96,7 +94,6 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
     // Subscribe to job added event to auto-open the queue
     this.jobAddedSubscription = this.analysisQueueService.jobAdded$.subscribe(() => {
-      console.log('[DownloadQueueComponent] Job added, opening queue panel');
       this.isOpen = true;
       this.cdr.detectChanges();
     });
@@ -273,6 +270,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           ollamaEndpoint: job.ollamaEndpoint,
           whisperModel: job.whisperModel,
           language: job.language,
+          videoId: job.videoId, // Include videoId for tracking
         };
 
         const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
@@ -298,6 +296,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           input: job.input,
           customInstructions: job.customInstructions,
           aiModel: job.aiModel,
+          videoId: job.videoId, // Include videoId for progress tracking in library
           expanded: false
         };
 
@@ -476,14 +475,10 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   getJobTitle(job: VideoProcessingJob): string {
-    // Debug: log the job to see what properties are available
-    console.log('[DownloadQueue] getJobTitle called with job:', job);
-
     // Try to extract a clean title from filename or URL
     if (job.filename && job.filename !== 'Video Analysis') {
       // Remove file extension and clean up
       const title = job.filename.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-      console.log('[DownloadQueue] Extracted title from filename:', title);
       return title;
     }
     if (job.url) {
@@ -493,7 +488,6 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         const pathParts = url.pathname.split('/').filter(p => p);
         if (pathParts.length > 0) {
           const title = pathParts[pathParts.length - 1].replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-          console.log('[DownloadQueue] Extracted title from URL:', title);
           return title;
         }
       } catch {
@@ -503,15 +497,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           const filename = parts[parts.length - 1];
           if (filename) {
             const title = filename.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-            console.log('[DownloadQueue] Extracted title from file path:', title);
             return title;
           }
         }
-        console.log('[DownloadQueue] Failed to parse URL, using default');
         return 'Processing Video';
       }
     }
-    console.log('[DownloadQueue] No filename or URL found, using default. Job:', job);
     return 'Processing Video';
   }
 

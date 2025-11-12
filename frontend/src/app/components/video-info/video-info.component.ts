@@ -26,6 +26,13 @@ import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
+import { ItemListComponent } from '../shared/item-list/item-list.component';
+import {
+  ListItem,
+  ItemDisplayConfig,
+  SelectionMode,
+  ContextMenuAction
+} from '../shared/item-list/item-list.types';
 
 interface TranscriptEntry {
   timestamp: string;
@@ -49,7 +56,8 @@ interface TranscriptEntry {
     MatInputModule,
     MatFormFieldModule,
     MatDialogModule,
-    TranscriptSearchComponent
+    TranscriptSearchComponent,
+    ItemListComponent
   ],
   templateUrl: './video-info.component.html',
   styleUrl: './video-info.component.scss'
@@ -73,6 +81,32 @@ export class VideoInfoComponent implements OnInit {
   isAddingTag = false;
   newTagName = '';
   newTagType = 'manual';
+
+  // Linked files (parent-child relationships)
+  childVideos: DatabaseVideo[] = [];
+  isDraggingFiles = false;
+  private dragCounter = 0;
+
+  // Item list configuration for linked children
+  SelectionMode = SelectionMode;
+  childListDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'filename',
+    secondaryField: 'media_type',
+    metadataField: 'duration_seconds',
+    iconField: 'media_type',
+    renderPrimary: (item) => item['filename'] || '',
+    renderSecondary: (item) => this.getMediaTypeLabel(item['media_type'] || 'video'),
+    renderMetadata: (item) => item['duration_seconds'] ? this.formatDuration(item['duration_seconds']) : '',
+    renderIcon: (item) => this.getMediaTypeIcon(item['media_type'] || 'video')
+  };
+
+  childListContextMenuActions: ContextMenuAction[] = [
+    {
+      id: 'unlink',
+      label: 'Unlink File',
+      icon: 'link_off'
+    }
+  ];
 
   // Search panel state
   isSearchPanelOpen = false;
@@ -159,12 +193,29 @@ export class VideoInfoComponent implements OnInit {
       // Load tags
       this.tags = await this.databaseLibraryService.getVideoTags(this.video.id);
 
+      // Load child videos (linked files)
+      await this.loadChildVideos();
+
       // Generate video URL
       this.videoUrl = await this.getVideoUrl();
     } catch (error) {
       console.error('Error loading metadata:', error);
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  /**
+   * Load child videos (files linked to this video)
+   */
+  async loadChildVideos() {
+    if (!this.video) return;
+
+    try {
+      this.childVideos = await this.databaseLibraryService.getChildVideos(this.video.id);
+    } catch (error) {
+      console.error('Error loading child videos:', error);
+      this.childVideos = [];
     }
   }
 
@@ -945,6 +996,269 @@ export class VideoInfoComponent implements OnInit {
     } catch (error) {
       console.error('Error opening file location:', error);
       this.notificationService.error('Error', 'Failed to open file location');
+    }
+  }
+
+  // ============================================================================
+  // LINKED FILES / PARENT-CHILD OPERATIONS
+  // ============================================================================
+
+  /**
+   * Check if this video can be a parent (not already a child)
+   */
+  canBeParent(): boolean {
+    return !this.video?.parent_id;
+  }
+
+  /**
+   * Handle drag enter event (for file drop zone)
+   */
+  onDragEnter(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.dragCounter++;
+
+    if (this.dragCounter === 1) {
+      this.isDraggingFiles = true;
+    }
+  }
+
+  /**
+   * Handle drag over event (required to allow drop)
+   */
+  onDragOver(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  /**
+   * Handle drag leave event
+   */
+  onDragLeave(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.dragCounter--;
+
+    if (this.dragCounter === 0) {
+      this.isDraggingFiles = false;
+    }
+  }
+
+  /**
+   * Handle file drop event
+   * Uses Electron's webUtils.getPathForFile to extract real file paths from dropped files
+   */
+  async onDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.dragCounter = 0;
+    this.isDraggingFiles = false;
+
+    if (!this.video || !this.canBeParent()) {
+      this.notificationService.error(
+        'Cannot Link Files',
+        'Only root-level items can have linked files. This item is already linked to another item.'
+      );
+      return;
+    }
+
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    // Check for Electron API
+    const electron = (window as any).electron;
+    if (!electron || !electron.getFilePathFromFile) {
+      this.notificationService.error(
+        'Not Available',
+        'Drag and drop only works in Electron app'
+      );
+      return;
+    }
+
+    // Extract file paths using Electron API
+    const filePaths: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        // Use Electron's webUtils to get the real file path
+        const filePath = electron.getFilePathFromFile(file);
+        filePaths.push(filePath);
+      } catch (error) {
+        console.error('[VideoInfo] Failed to get file path for:', file.name, error);
+      }
+    }
+
+    if (filePaths.length === 0) {
+      this.notificationService.warning('No Files', 'No valid files were dropped. Make sure you\'re dragging actual files.');
+      return;
+    }
+
+    await this.linkFilesToParent(filePaths);
+  }
+
+  /**
+   * Link multiple files to this video as children
+   */
+  async linkFilesToParent(filePaths: string[]) {
+    if (!this.video) return;
+
+    try {
+      console.log('[VideoInfo] Linking files:', filePaths);
+      this.notificationService.info('Linking Files', `Processing ${filePaths.length} file(s)...`);
+
+      const result = await this.databaseLibraryService.linkFilesToParent(this.video.id, filePaths);
+      console.log('[VideoInfo] Link result:', result);
+
+      if (result.success) {
+        // Reload child videos
+        await this.loadChildVideos();
+
+        const message = result.results && result.results.length > 0
+          ? `Successfully linked ${result.results.length} file(s)`
+          : 'Files linked successfully';
+
+        this.notificationService.success('Files Linked', message);
+
+        // Show any errors
+        if (result.errors && result.errors.length > 0) {
+          console.error('[VideoInfo] Errors while linking:', result.errors);
+          const errorMsg = result.errors.map(e => `${e.filePath}: ${e.error}`).join('\n');
+          this.notificationService.warning('Some Files Failed', errorMsg);
+        }
+      } else {
+        const errorMsg = result.error || 'Failed to link files';
+        console.error('[VideoInfo] Link failed:', errorMsg);
+
+        // Show errors if available
+        if (result.errors && result.errors.length > 0) {
+          const detailedErrors = result.errors.map(e => `${e.filePath}: ${e.error}`).join('\n');
+          this.notificationService.error('Link Failed', detailedErrors);
+        } else {
+          this.notificationService.error('Link Failed', errorMsg);
+        }
+      }
+    } catch (error: any) {
+      console.error('[VideoInfo] Error linking files:', error);
+      const errorMsg = error?.message || error?.error?.error || 'An error occurred while linking files';
+      this.notificationService.error('Link Failed', errorMsg);
+    }
+  }
+
+  /**
+   * Remove a child from this parent
+   */
+  async removeChild(child: DatabaseVideo) {
+    if (!this.video) return;
+
+    try {
+      const result = await this.databaseLibraryService.removeVideoParent(child.id);
+
+      if (result.success) {
+        // Remove from local array
+        this.childVideos = this.childVideos.filter(c => c.id !== child.id);
+        this.notificationService.success('File Unlinked', `${child.filename} is now a standalone item`);
+      } else {
+        this.notificationService.error('Unlink Failed', result.error || 'Failed to unlink file');
+      }
+    } catch (error) {
+      console.error('Error removing child:', error);
+      this.notificationService.error('Unlink Failed', 'An error occurred');
+    }
+  }
+
+  /**
+   * Navigate to a child video's detail page
+   */
+  viewChildVideo(child: DatabaseVideo) {
+    this.router.navigate(['/video-info', child.id], {
+      state: { videoData: child }
+    });
+  }
+
+  /**
+   * Open file picker to select files to link
+   */
+  async openFilePicker() {
+    if (!this.video || !this.canBeParent()) {
+      this.notificationService.error(
+        'Cannot Link Files',
+        'Only root-level items can have linked files'
+      );
+      return;
+    }
+
+    // Check for Electron API
+    const electron = (window as any).electron;
+    if (!electron || !electron.getFilePathFromFile) {
+      this.notificationService.error(
+        'Not Available',
+        'File picker only works in Electron app'
+      );
+      return;
+    }
+
+    // Create a hidden file input element
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.style.display = 'none';
+
+    input.onchange = async (e: any) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      const filePaths: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+          // Use Electron's webUtils to get the real file path
+          const filePath = electron.getFilePathFromFile(file);
+          filePaths.push(filePath);
+        } catch (error) {
+          console.error('[VideoInfo] Failed to get file path for:', file.name, error);
+        }
+      }
+
+      if (filePaths.length > 0) {
+        await this.linkFilesToParent(filePaths);
+      }
+
+      // Cleanup
+      document.body.removeChild(input);
+    };
+
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  // ============================================================================
+  // ITEM LIST CONFIGURATION FOR CHILDREN
+  // ============================================================================
+
+  /**
+   * Handle item click in children list
+   */
+  onChildItemClick(child: DatabaseVideo) {
+    this.viewChildVideo(child);
+  }
+
+  /**
+   * Handle item double click in children list
+   */
+  onChildItemDoubleClick(child: DatabaseVideo) {
+    this.viewChildVideo(child);
+  }
+
+  /**
+   * Handle context menu action in children list
+   */
+  onChildContextMenuAction(event: { action: string; items: DatabaseVideo[] }) {
+    if (event.action === 'unlink' && event.items.length > 0) {
+      // Unlink all selected children (usually just one from context menu)
+      event.items.forEach(child => this.removeChild(child));
     }
   }
 }

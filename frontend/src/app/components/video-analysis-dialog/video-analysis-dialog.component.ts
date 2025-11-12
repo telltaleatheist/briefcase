@@ -243,6 +243,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
           language: formValue.language,
           customInstructions: formValue.customInstructions,
           displayName: video.filename || 'Unknown',
+          videoId: video.id,  // Include video ID for progress tracking
           loading: false
         });
       }
@@ -462,6 +463,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
             language: formValue.language,
             customInstructions: formValue.customInstructions,
             displayName: video.filename || 'Unknown',
+            videoId: video.id,  // Include video ID for progress tracking (if available)
             loading: false
           });
         }

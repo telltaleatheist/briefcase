@@ -29,6 +29,10 @@ export interface DatabaseVideo {
   is_linked: number; // 0 or 1 (SQLite boolean)
   has_transcript: number; // 0 or 1
   has_analysis: number; // 0 or 1
+  has_children?: number; // 0 or 1 - indicates if this video has children
+  parent_id: string | null; // ID of parent video (null if root-level)
+  isParent?: boolean; // Helper flag for UI rendering
+  isChild?: boolean; // Helper flag for UI rendering
   searchScore?: number; // Added by search results
   matchType?: string; // Added by search results (filename, transcript, analysis, etc.)
 }
@@ -277,7 +281,7 @@ export class DatabaseLibraryService {
   /**
    * Get all videos (paginated, uses cache if available)
    */
-  async getVideos(limit = 100, offset = 0, useCache = true): Promise<{ videos: DatabaseVideo[]; count: number }> {
+  async getVideos(limit = 100, offset = 0, useCache = true, hierarchical = true): Promise<{ videos: DatabaseVideo[]; count: number }> {
     // Return cached videos if available and requesting from start
     if (useCache && offset === 0 && this.cachedVideos && this.cachedVideos.videos.length >= limit) {
       return {
@@ -286,7 +290,7 @@ export class DatabaseLibraryService {
       };
     }
 
-    const result = await this.fetchVideos(limit, offset);
+    const result = await this.fetchVideos(limit, offset, hierarchical);
 
     // Cache if this is the initial load
     if (offset === 0) {
@@ -296,11 +300,11 @@ export class DatabaseLibraryService {
     return result;
   }
 
-  private async fetchVideos(limit: number, offset: number): Promise<{ videos: DatabaseVideo[]; count: number }> {
+  private async fetchVideos(limit: number, offset: number, hierarchical = true): Promise<{ videos: DatabaseVideo[]; count: number }> {
     const baseUrl = await this.getBaseUrl();
     return firstValueFrom(
       this.http.get<{ videos: DatabaseVideo[]; count: number }>(
-        `${baseUrl}/videos?limit=${limit}&offset=${offset}`
+        `${baseUrl}/videos?limit=${limit}&offset=${offset}&hierarchical=${hierarchical}`
       )
     );
   }
@@ -873,6 +877,116 @@ export class DatabaseLibraryService {
     } catch (error: any) {
       console.error('[DatabaseLibraryService] Error updating filename:', error);
       return { success: false, error: error.error?.error || 'Failed to update filename' };
+    }
+  }
+
+  // ============================================================================
+  // PARENT-CHILD OPERATIONS
+  // ============================================================================
+
+  /**
+   * Set a parent for a video (create parent-child relationship)
+   */
+  async setVideoParent(childId: string, parentId: string | null): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const result = await firstValueFrom(
+        this.http.post<{ success: boolean; message?: string; error?: string }>(
+          `${baseUrl}/videos/${childId}/set-parent`,
+          { parentId }
+        )
+      );
+
+      // Clear cache if successful since data changed
+      if (result.success) {
+        this.clearCache();
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error('[DatabaseLibraryService] Error setting parent:', error);
+      return { success: false, error: error.error?.error || 'Failed to set parent' };
+    }
+  }
+
+  /**
+   * Remove parent from a video (make it a root video)
+   */
+  async removeVideoParent(childId: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const result = await firstValueFrom(
+        this.http.post<{ success: boolean; message?: string; error?: string }>(
+          `${baseUrl}/videos/${childId}/remove-parent`,
+          {}
+        )
+      );
+
+      // Clear cache if successful since data changed
+      if (result.success) {
+        this.clearCache();
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error('[DatabaseLibraryService] Error removing parent:', error);
+      return { success: false, error: error.error?.error || 'Failed to remove parent' };
+    }
+  }
+
+  /**
+   * Get all children of a parent video
+   */
+  async getChildVideos(parentId: string): Promise<DatabaseVideo[]> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const response = await firstValueFrom(
+        this.http.get<{ success: boolean; children: DatabaseVideo[] }>(
+          `${baseUrl}/videos/${parentId}/children`
+        )
+      );
+      return response.children || [];
+    } catch (error) {
+      console.error('[DatabaseLibraryService] Error getting children:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Link multiple files to a parent video
+   * If files don't exist in library, they will be imported
+   */
+  async linkFilesToParent(parentId: string, filePaths: string[]): Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    results?: Array<{ filename: string; videoId: string; status: string }>;
+    errors?: Array<{ filePath: string; error: string }>;
+  }> {
+    try {
+      const baseUrl = await this.getBaseUrl();
+      const result = await firstValueFrom(
+        this.http.post<{
+          success: boolean;
+          message?: string;
+          error?: string;
+          results?: Array<{ filename: string; videoId: string; status: string }>;
+          errors?: Array<{ filePath: string; error: string }>;
+        }>(
+          `${baseUrl}/videos/link-files`,
+          { parentId, filePaths }
+        )
+      );
+
+      // Clear cache if successful since data changed
+      if (result.success) {
+        this.clearCache();
+      }
+
+      return result;
+    } catch (error: any) {
+      console.error('[DatabaseLibraryService] Error linking files:', error);
+      return { success: false, error: error.error?.error || 'Failed to link files' };
     }
   }
 }

@@ -3,6 +3,166 @@
   box-sizing: border-box;
 }
 
+// ============================================================================
+// LINKED FILES SECTION
+// ============================================================================
+
+.linked-files-section {
+  margin-top: 32px;
+  margin-bottom: 48px;
+
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 600;
+
+    mat-icon {
+      color: var(--primary-color);
+    }
+
+    .file-count {
+      color: var(--text-secondary);
+      font-size: 16px;
+      font-weight: 400;
+    }
+  }
+}
+
+.drop-zone-card {
+  padding: 32px;
+  text-align: center;
+  border: 2px dashed var(--border-color);
+  background-color: var(--surface-elevated);
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--primary-color);
+    background-color: rgba(255, 107, 53, 0.05);
+  }
+
+  &.dragging {
+    border-color: var(--primary-color);
+    background-color: rgba(255, 107, 53, 0.1);
+    transform: scale(1.02);
+  }
+
+  .drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+
+    .drop-zone-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: var(--primary-color);
+      opacity: 0.7;
+    }
+
+    h3 {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    p {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .help-text {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    button {
+      margin-top: 8px;
+    }
+  }
+
+  .drop-zone-active {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 32px;
+
+    .drop-icon {
+      font-size: 64px;
+      width: 64px;
+      height: 64px;
+      color: var(--primary-color);
+      animation: bounce 0.5s ease infinite alternate;
+    }
+
+    h3 {
+      margin: 0;
+      color: var(--primary-color);
+      font-size: 20px;
+      font-weight: 600;
+    }
+  }
+}
+
+@keyframes bounce {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-10px);
+  }
+}
+
+.linked-children-list {
+  margin-top: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: var(--surface);
+
+  // Customize the item-list for children display
+  ::ng-deep app-item-list {
+    .item-list-container {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  }
+}
+
+.child-warning {
+  margin-top: 32px;
+  margin-bottom: 48px;
+
+  .warning-card {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background-color: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+
+    mat-icon {
+      color: #ff9800;
+      flex-shrink: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+  }
+}
+
 .video-info-container {
   min-height: 100%;
   width: 100%;
