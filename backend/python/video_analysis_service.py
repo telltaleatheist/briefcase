@@ -67,7 +67,7 @@ def transcribe_audio(audio_path: str, model: str = "base", language: str = "en")
         import whisper
         import os
 
-        send_progress("transcription", 30, f"Loading Whisper model ({model})...")
+        send_progress("transcription", 0, f"Loading Whisper model ({model})...")
 
         # Set cache directory to use bundled model if available
         # In production, models are bundled in python/cache/whisper/
@@ -97,9 +97,11 @@ def transcribe_audio(audio_path: str, model: str = "base", language: str = "en")
                 in_memory=True
             )
 
-        send_progress("transcription", 40, "Transcribing audio (this may take a few minutes)...")
+        send_progress("transcription", 10, "Transcribing audio (this may take a few minutes)...")
 
         # Transcribe with fastest settings
+        # Whisper automatically outputs progress to stderr via tqdm
+        # The backend (python-bridge.service.ts) parses this output
         result = whisper_model.transcribe(
             audio_path,
             language=language,
@@ -111,10 +113,12 @@ def transcribe_audio(audio_path: str, model: str = "base", language: str = "en")
             temperature=0  # Deterministic output
         )
 
-        send_progress("transcription", 60, "Transcription complete, formatting results...")
+        send_progress("transcription", 95, "Transcription complete, formatting results...")
 
         # Generate SRT content
         srt_content = generate_srt(result['segments'])
+
+        send_progress("transcription", 100, "Transcription complete!")
 
         return {
             "text": result['text'],
@@ -403,7 +407,7 @@ def analyze_with_ai(
     Chunks the transcript and streams analysis results
     """
     try:
-        send_progress("analysis", 60, f"Starting AI analysis with {model}...")
+        send_progress("analysis", 0, f"Starting AI analysis with {model}...")
 
         # Check model availability (only for Ollama)
         if provider == 'ollama':
@@ -411,7 +415,7 @@ def analyze_with_ai(
                 raise Exception(f"Model '{model}' not found in Ollama. Please install it first.")
 
         # Generate video summary FIRST (always runs, even for short/boring videos)
-        send_progress("analysis", 65, "Generating video summary...")
+        send_progress("analysis", 5, "Generating video summary...")
         video_duration = segments[-1]['end'] if segments else 0
         summary = generate_video_summary(provider, endpoint_or_key, model, transcript_text, video_duration, video_title)
 
@@ -428,14 +432,15 @@ def analyze_with_ai(
         # Chunk transcript into time-based segments (5 min chunks for more granular analysis)
         chunks = chunk_transcript(segments, chunk_minutes=5)
 
-        send_progress("analysis", 70, f"Analyzing {len(chunks)} chunks...")
+        send_progress("analysis", 10, f"Analyzing {len(chunks)} chunks...")
 
         analyzed_sections = []
 
         failed_chunks = []
 
         for i, chunk in enumerate(chunks, 1):
-            chunk_progress = round(70 + (i / len(chunks)) * 20)  # 70-90%
+            # Progress from 10% to 85% based on chunk completion
+            chunk_progress = round(10 + (i / len(chunks)) * 75)
             send_progress("analysis", chunk_progress, f"Analyzing chunk {i}/{len(chunks)}...")
 
             # Identify interesting sections - with error handling to skip failed chunks
@@ -486,7 +491,7 @@ def analyze_with_ai(
             send_progress("analysis", 90, f"Analysis complete with {len(failed_chunks)} failed chunks. Found {len(analyzed_sections)} sections.")
             print(f"[WARNING] Analysis completed but {len(failed_chunks)} chunks failed: {failed_chunks}", file=sys.stderr)
         else:
-            send_progress("analysis", 90, f"Analysis complete. Found {len(analyzed_sections)} interesting sections.")
+            send_progress("analysis", 90, f"Analyzing complete. Found {len(analyzed_sections)} sections.")
 
         # Final safety check: if we have NO sections at all, create a default "routine" section
         if len(analyzed_sections) == 0:
@@ -525,8 +530,10 @@ def analyze_with_ai(
                 print(f"[ERROR] Failed to write default section to output file: {e}", file=sys.stderr)
 
         # Extract tags from the full transcript and analysis
-        send_progress("analysis", 92, "Extracting tags (people, topics)...")
+        send_progress("analysis", 95, "Extracting tags (people, topics)...")
         tags = extract_tags(provider, endpoint_or_key, model, transcript_text, analyzed_sections)
+
+        send_progress("analysis", 100, "Analysis complete!")
 
         return {
             "sections_count": len(analyzed_sections),

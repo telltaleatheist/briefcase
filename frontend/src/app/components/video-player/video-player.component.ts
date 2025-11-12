@@ -46,6 +46,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('imageElement', { static: false }) imageElement!: ElementRef<HTMLImageElement>;
   @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
   @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
+  @ViewChild('playerContainer', { static: false }) playerContainer!: ElementRef<HTMLDivElement>;
 
   videoEl: HTMLVideoElement | null = null;
   mediaType: string = 'video'; // 'video', 'audio', 'image', 'document', 'webpage'
@@ -294,7 +295,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.videoEl = null;
     }
 
-    // Keyboard listener is now on component element, no need to remove global listener
+    // Remove global keyboard listener
+    document.removeEventListener('keydown', this.handleKeyPress);
 
     // Clear ALL tracked timers
     this.timers.forEach(timer => {
@@ -628,8 +630,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   setupKeyboardShortcuts() {
-    // Keyboard shortcuts are now handled via (keydown) binding on the component root element
-    // No need for global document listener
+    // Set up global document listener for keyboard shortcuts
+    // This allows shortcuts to work editor-wide, regardless of which element has focus
+    document.addEventListener('keydown', this.handleKeyPress);
   }
 
   handleKeyPress = (event: KeyboardEvent) => {
@@ -651,6 +654,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     switch (event.code) {
       case 'Space':
         event.preventDefault();
+        event.stopPropagation(); // Stop event from bubbling to prevent double-triggering
+        event.stopImmediatePropagation(); // Stop other handlers on same element
         // Spacebar always resets to 1x speed and toggles play/pause
         this.videoEl.playbackRate = 1;
         if (this.videoEl.paused) {

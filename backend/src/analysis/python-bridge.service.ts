@@ -206,17 +206,37 @@ export class PythonBridgeService {
         }
       });
 
-      // Handle stderr - filter out progress bars and only log actual errors
+      // Handle stderr - parse Whisper progress bars and filter out non-errors
       pythonProcess.stderr?.on('data', (data: Buffer) => {
         const errorText = data.toString();
 
-        // Ignore progress bars (containing %, |, frames/s, eta patterns)
-        // and model check info messages (containing [Model Check])
-        const isProgressBar = /\d+%\|.*\|.*frames\/s/.test(errorText);
+        // Check for Whisper progress bars (format: "  0%|          | 0/100 [00:00<?, ?frames/s]")
+        const whisperProgressMatch = errorText.match(/\s*(\d+)%\|.*\|\s*\d+\/\d+\s*\[.*frames\/s/);
+        if (whisperProgressMatch) {
+          // Extract percentage from Whisper's tqdm output
+          const percentage = parseInt(whisperProgressMatch[1], 10);
+          // Map 0-100% from Whisper to 10-90% in our progress system
+          const mappedProgress = Math.round(10 + (percentage * 0.8));
+
+          // Send as a progress update
+          const progressMessage: PythonProgress = {
+            type: 'progress',
+            phase: 'transcription',
+            progress: mappedProgress,
+            message: `Transcribing: ${percentage}%`
+          };
+
+          if (onProgress) {
+            onProgress(progressMessage);
+          }
+          return; // Don't log this as an error
+        }
+
+        // Ignore model check info messages (containing [Model Check])
         const isModelCheckInfo = /\[Model Check\]/.test(errorText);
 
         // Only log if it's not a progress bar or model check info
-        if (!isProgressBar && !isModelCheckInfo) {
+        if (!isModelCheckInfo) {
           this.logger.warn(`Python stderr: ${errorText}`);
         }
       });

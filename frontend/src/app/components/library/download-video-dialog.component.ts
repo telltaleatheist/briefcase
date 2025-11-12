@@ -340,6 +340,8 @@ export class DownloadVideoDialogComponent implements OnInit {
   url = '';
   urlValid = false;
   urlValidationMessage = '';
+  videoTitle = '';
+  fetchingTitle = false;
 
   transcribeAfterDownload = true;
   analyzeAfterDownload = false;
@@ -379,6 +381,7 @@ export class DownloadVideoDialogComponent implements OnInit {
     // Reset validation
     this.urlValidationMessage = '';
     this.urlValid = false;
+    this.videoTitle = '';
 
     if (!this.url) {
       return;
@@ -389,10 +392,58 @@ export class DownloadVideoDialogComponent implements OnInit {
       new URL(this.url);
       this.urlValid = true;
       this.urlValidationMessage = 'Valid URL';
+
+      // Fetch video title in the background
+      this.fetchVideoTitle();
     } catch {
       this.urlValid = false;
       this.urlValidationMessage = 'Invalid URL format';
     }
+  }
+
+  /**
+   * Fetch video title from backend
+   */
+  private async fetchVideoTitle(): Promise<void> {
+    if (!this.url || !this.urlValid) {
+      return;
+    }
+
+    this.fetchingTitle = true;
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/downloader/info?url=${encodeURIComponent(this.url)}`);
+      const response = await firstValueFrom(
+        this.http.get<{ title?: string; error?: string }>(url)
+      );
+
+      if (response.title && !response.error) {
+        // Create a sanitized filename from the title
+        const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        this.videoTitle = `${date} ${this.sanitizeFilename(response.title)}`;
+        this.urlValidationMessage = `Valid URL - ${response.title}`;
+      } else {
+        // Keep as valid URL but couldn't fetch title
+        this.videoTitle = '';
+        this.urlValidationMessage = 'Valid URL';
+      }
+    } catch (error) {
+      console.warn('Could not fetch video title:', error);
+      // Don't change the valid status, just couldn't fetch title
+      this.videoTitle = '';
+    } finally {
+      this.fetchingTitle = false;
+    }
+  }
+
+  /**
+   * Sanitize filename to remove invalid characters
+   */
+  private sanitizeFilename(filename: string): string {
+    return filename
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '') // Remove invalid filename characters
+      .replace(/\s+/g, ' ') // Collapse multiple spaces
+      .trim()
+      .substring(0, 200); // Limit length
   }
 
   async download() {
@@ -403,6 +454,18 @@ export class DownloadVideoDialogComponent implements OnInit {
     if (!this.data.activeLibrary) {
       this.dialogRef.close({ success: false, error: 'No active library selected' });
       return;
+    }
+
+    // Wait for title fetching to complete if it's still in progress
+    if (this.fetchingTitle) {
+      console.log('[DownloadVideoDialog] Waiting for title to finish fetching...');
+      // Wait up to 10 seconds for title fetching
+      const maxWait = 10000;
+      const startTime = Date.now();
+      while (this.fetchingTitle && (Date.now() - startTime) < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      console.log('[DownloadVideoDialog] Title fetching completed or timed out');
     }
 
     // Generate a jobId for tracking
@@ -431,6 +494,9 @@ export class DownloadVideoDialogComponent implements OnInit {
       openaiApiKey: this.openaiApiKey !== '***' ? this.openaiApiKey : undefined
     });
 
+    // Log the displayName being sent
+    console.log('[DownloadVideoDialog] Starting download with displayName:', this.videoTitle || '(empty)');
+
     // Start the download asynchronously - it will be tracked in the download queue
     this.apiService.downloadVideo({
       url: this.url,
@@ -441,7 +507,7 @@ export class DownloadVideoDialogComponent implements OnInit {
       useCookies: false,
       browser: 'auto',
       outputDir: this.data.activeLibrary.clipsFolderPath,
-      displayName: '', // Let yt-dlp determine the name
+      displayName: this.videoTitle || '', // Use fetched video title or empty string
       transcribeVideo: this.transcribeAfterDownload,
       analyzeVideo: this.analyzeAfterDownload,  // Add analyze flag
       shouldImport: true  // Auto-import to library after download

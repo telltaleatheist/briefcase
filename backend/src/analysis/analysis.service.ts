@@ -392,18 +392,14 @@ export class AnalysisService {
         timing: { ...job.timing, downloadEnd: new Date() },
       });
     } else {
+      // Local file - already imported, just set the path
       request.videoPath = request.input;
       request.videoTitle = path.basename(request.input, path.extname(request.input));
 
       this.updateJob(jobId, {
-        status: 'extracting',
         progress: 5,
-        currentPhase: 'Preparing local video...',
         videoPath: request.input,
       });
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      this.updateJob(jobId, { progress: 20 });
     }
   }
 
@@ -428,11 +424,11 @@ export class AnalysisService {
       return;
     }
 
-    // Extract audio
+    // Extract audio (part of transcription process)
     this.updateJob(jobId, {
-      status: 'extracting',
-      progress: 20,
-      currentPhase: 'Extracting audio...',
+      status: 'transcribing',
+      progress: 0,
+      currentPhase: 'Preparing audio for transcription...',
       timing: { ...job.timing, extractionStart: new Date() },
     });
 
@@ -440,7 +436,7 @@ export class AnalysisService {
     request.audioPath = audioPath;
 
     this.updateJob(jobId, {
-      progress: 30,
+      progress: 5,
       audioPath,
       timing: { ...job.timing, extractionEnd: new Date() },
     });

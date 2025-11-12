@@ -223,6 +223,31 @@
   &.is-parent {
     font-weight: 500;
     border-bottom: 1px solid #dee2e6;
+
+    // Ensure parent items can be highlighted and selected
+    &.highlighted,
+    &.selected {
+      background-color: rgba(255, 102, 0, 0.12) !important;
+      border-left: 2px solid rgba(255, 102, 0, 0.6) !important;
+      border-right: 2px solid rgba(255, 102, 0, 0.6) !important;
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    &.highlighted.selection-edge-top,
+    &.selected.selection-edge-top {
+      border-top: 2px solid rgba(255, 102, 0, 0.6) !important;
+    }
+
+    &.highlighted.selection-edge-bottom,
+    &.selected.selection-edge-bottom {
+      border-bottom: 2px solid rgba(255, 102, 0, 0.6) !important;
+    }
+
+    &.highlighted.selection-edge-top.selection-edge-bottom,
+    &.selected.selection-edge-top.selection-edge-bottom {
+      border: 2px solid rgba(255, 102, 0, 0.6) !important;
+    }
   }
 
   // Ghost parent reference (for children in different week groups)
@@ -231,7 +256,8 @@
     background-color: #f8f9fa;
     border-left: 3px solid #adb5bd;
     cursor: pointer;
-    min-height: 36px;
+    min-height: 22px; // Half height
+    padding: 4px 16px; // Reduced padding
     font-style: italic;
 
     &:hover {
@@ -242,10 +268,13 @@
 
     .item-icon {
       opacity: 0.7;
+      font-size: 16px; // Smaller icon
+      width: 16px;
+      height: 16px;
     }
 
     .item-primary {
-      font-size: 13px;
+      font-size: 12px; // Smaller text
       color: #6c757d;
 
       &::before {
@@ -253,6 +282,16 @@
         font-weight: 600;
         margin-right: 4px;
       }
+    }
+
+    // Hide secondary text and metadata for ghosts
+    .item-secondary {
+      display: none;
+    }
+
+    // Hide metadata (duration, etc.) for ghost parents
+    + .item-metadata {
+      display: none;
     }
 
     // Ghost parents cannot be selected
@@ -264,13 +303,19 @@
     }
   }
 
+  // Hide metadata for ghost parents
+  &.is-ghost-parent .item-metadata {
+    display: none;
+  }
+
   // Ghost child reference (for parents showing their children)
   &.is-ghost-child {
     opacity: 0.6;
     background-color: #f8f9fa;
     border-left: 3px solid #adb5bd;
     cursor: pointer;
-    min-height: 36px;
+    min-height: 22px; // Half height
+    padding: 4px 16px 4px 48px; // Reduced padding, maintain indent
     font-style: italic;
 
     &:hover {
@@ -281,10 +326,13 @@
 
     .item-icon {
       opacity: 0.7;
+      font-size: 16px; // Smaller icon
+      width: 16px;
+      height: 16px;
     }
 
     .item-primary {
-      font-size: 13px;
+      font-size: 12px; // Smaller text
       color: #6c757d;
 
       &::before {
@@ -294,6 +342,11 @@
       }
     }
 
+    // Hide secondary text and metadata for ghosts
+    .item-secondary {
+      display: none;
+    }
+
     // Ghost children cannot be selected
     &.selected,
     &.highlighted {
@@ -301,6 +354,11 @@
       opacity: 0.6 !important;
       border: none !important;
     }
+  }
+
+  // Hide metadata for ghost children
+  &.is-ghost-child .item-metadata {
+    display: none;
   }
 
   &:hover {
@@ -687,6 +745,31 @@
     &.is-parent {
       font-weight: 500;
       border-bottom: 1px solid #333;
+
+      // Ensure parent items can be highlighted and selected in dark mode
+      &.highlighted,
+      &.selected {
+        background-color: rgba(255, 102, 0, 0.18) !important;
+        border-left: 2px solid rgba(255, 102, 0, 0.7) !important;
+        border-right: 2px solid rgba(255, 102, 0, 0.7) !important;
+        border-top: none !important;
+        border-bottom: none !important;
+      }
+
+      &.highlighted.selection-edge-top,
+      &.selected.selection-edge-top {
+        border-top: 2px solid rgba(255, 102, 0, 0.7) !important;
+      }
+
+      &.highlighted.selection-edge-bottom,
+      &.selected.selection-edge-bottom {
+        border-bottom: 2px solid rgba(255, 102, 0, 0.7) !important;
+      }
+
+      &.highlighted.selection-edge-top.selection-edge-bottom,
+      &.selected.selection-edge-top.selection-edge-bottom {
+        border: 2px solid rgba(255, 102, 0, 0.7) !important;
+      }
     }
 
     // Ghost parent reference in dark mode
@@ -694,6 +777,8 @@
       opacity: 0.6;
       background-color: #242424;
       border-left: 3px solid #555;
+      min-height: 22px; // Half height
+      padding: 4px 16px; // Reduced padding
 
       &:hover {
         opacity: 0.8;
@@ -703,10 +788,19 @@
 
       .item-icon {
         opacity: 0.7;
+        font-size: 16px; // Smaller icon
+        width: 16px;
+        height: 16px;
       }
 
       .item-primary {
         color: #999;
+        font-size: 12px; // Smaller text
+      }
+
+      // Hide secondary text for ghosts in dark mode
+      .item-secondary {
+        display: none;
       }
 
       // Ghost parents cannot be selected in dark mode
@@ -718,11 +812,18 @@
       }
     }
 
+    // Hide metadata for ghost parents in dark mode
+    &.is-ghost-parent .item-metadata {
+      display: none;
+    }
+
     // Ghost child reference in dark mode
     &.is-ghost-child {
       opacity: 0.6;
       background-color: #242424;
       border-left: 3px solid #555;
+      min-height: 22px; // Half height
+      padding: 4px 16px 4px 48px; // Reduced padding, maintain indent
 
       &:hover {
         opacity: 0.8;
@@ -732,10 +833,19 @@
 
       .item-icon {
         opacity: 0.7;
+        font-size: 16px; // Smaller icon
+        width: 16px;
+        height: 16px;
       }
 
       .item-primary {
         color: #999;
+        font-size: 12px; // Smaller text
+      }
+
+      // Hide secondary text for ghosts in dark mode
+      .item-secondary {
+        display: none;
       }
 
       // Ghost children cannot be selected in dark mode
@@ -745,6 +855,11 @@
         opacity: 0.6 !important;
         border: none !important;
       }
+    }
+
+    // Hide metadata for ghost children in dark mode
+    &.is-ghost-child .item-metadata {
+      display: none;
     }
 
     &:hover {

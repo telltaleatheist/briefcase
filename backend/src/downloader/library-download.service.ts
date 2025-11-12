@@ -42,29 +42,8 @@ export class LibraryDownloadService {
   }
 
   private setupListeners() {
-    // Listen for download progress
-    this.eventService.server?.on('download-progress', (data: { progress: number; task: string; jobId?: string }) => {
-      if (data.jobId) {
-        const job = this.jobs.get(data.jobId);
-        if (job && job.status === 'downloading') {
-          job.progress = data.progress;
-          job.currentTask = data.task;
-          this.emitJobUpdate(job);
-        }
-      }
-    });
-
-    // Listen for transcription progress
-    this.eventService.server?.on('transcription-progress', (data: { progress: number; task: string; jobId?: string }) => {
-      if (data.jobId) {
-        const job = this.jobs.get(data.jobId);
-        if (job && job.status === 'transcribing') {
-          job.progress = data.progress;
-          job.currentTask = data.task || 'Transcribing';
-          this.emitJobUpdate(job);
-        }
-      }
-    });
+    // Note: We don't need to listen for download-progress or transcription-progress here
+    // because we emit those directly in downloadStep and transcribeStep methods
 
     // Listen for user action responses from frontend
     this.eventService.server?.on('library-download-user-action', (data: { jobId: string; action: 'replace' | 'cancel' }) => {
@@ -82,6 +61,8 @@ export class LibraryDownloadService {
    */
   async startLibraryDownload(url: string, displayName?: string, shouldTranscribe: boolean = true, shouldAnalyze: boolean = true): Promise<string> {
     const jobId = `download-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    this.logger.log(`[${jobId}] Starting library download - URL: ${url}, displayName: "${displayName}"`);
 
     const job: LibraryDownloadJob = {
       id: jobId,
@@ -159,7 +140,7 @@ export class LibraryDownloadService {
   private async downloadStep(job: LibraryDownloadJob): Promise<void> {
     job.status = 'downloading';
     job.progress = 0;
-    job.currentTask = 'Downloading video...';
+    job.currentTask = 'Starting download...';
     this.emitJobUpdate(job);
 
     const downloadOptions: DownloadOptions = {
@@ -172,16 +153,39 @@ export class LibraryDownloadService {
       browser: 'auto'
     };
 
-    // Use the downloaderService which has all the complex download logic for YouTube, Rumble, etc.
-    const result = await this.downloaderService.downloadVideo(downloadOptions, job.id);
+    // Set up a listener for download progress events from the downloader service
+    const progressListener = (data: { progress: number; task: string; jobId?: string }) => {
+      if (data.jobId === job.id) {
+        job.progress = Math.min(data.progress, 99); // Cap at 99% until fully complete
+        job.currentTask = data.task || 'Downloading...';
+        this.emitJobUpdate(job);
+      }
+    };
 
-    if (!result.success || !result.outputFile) {
-      throw new Error('Download failed: ' + (result.error || 'Unknown error'));
+    // Subscribe to progress events
+    if (this.eventService.server) {
+      this.eventService.server.on('download-progress', progressListener);
     }
 
-    job.outputFile = result.outputFile;
-    job.progress = 100;
-    this.logger.log(`[${job.id}] Download completed: ${result.outputFile}`);
+    try {
+      // Use the downloaderService which has all the complex download logic for YouTube, Rumble, etc.
+      const result = await this.downloaderService.downloadVideo(downloadOptions, job.id);
+
+      if (!result.success || !result.outputFile) {
+        throw new Error('Download failed: ' + (result.error || 'Unknown error'));
+      }
+
+      job.outputFile = result.outputFile;
+      job.progress = 100;
+      job.currentTask = 'Download complete';
+      this.emitJobUpdate(job);
+      this.logger.log(`[${job.id}] Download completed: ${result.outputFile}`);
+    } finally {
+      // Clean up the progress listener
+      if (this.eventService.server) {
+        this.eventService.server.off('download-progress', progressListener);
+      }
+    }
   }
 
   /**
@@ -190,22 +194,34 @@ export class LibraryDownloadService {
   private async importStep(job: LibraryDownloadJob): Promise<void> {
     job.status = 'importing';
     job.progress = 0;
-    job.currentTask = 'Adding to library...';
+    job.currentTask = 'Preparing to import...';
     this.emitJobUpdate(job);
 
     if (!job.outputFile) {
       throw new Error('No output file available for import');
     }
 
+    // Emit progress during import
+    job.progress = 10;
+    job.currentTask = 'Calculating file hash...';
+    this.emitJobUpdate(job);
+
+    // Note: The importVideos call will hash the file and extract metadata
+    // This can take time for large files, especially the metadata extraction
     const importResult = await this.fileScannerService.importVideos([job.outputFile]);
 
-    // Get the video from database (whether newly imported or already existing)
-    // First try by path, then by hash if not found
+    job.progress = 85;
+    job.currentTask = 'Verifying import...';
+    this.emitJobUpdate(job);
+
     const videos = await this.databaseService.getAllVideos();
     let importedVideo = videos.find((v: any) => v.file_path === job.outputFile || v.current_path === job.outputFile);
 
     // If not found by path, try by hash (in case video was moved or has different path)
     if (!importedVideo && importResult.errors.some(err => err.includes('Already imported'))) {
+      job.currentTask = 'Checking for duplicates...';
+      this.emitJobUpdate(job);
+
       const fileHash = await this.databaseService.hashFile(job.outputFile);
       importedVideo = this.databaseService.findVideoByHash(fileHash);
     }
@@ -291,45 +307,72 @@ export class LibraryDownloadService {
   private async transcribeStep(job: LibraryDownloadJob): Promise<void> {
     job.status = 'transcribing';
     job.progress = 0;
-    job.currentTask = 'Transcribing audio...';
+    job.currentTask = 'Starting transcription...';
     this.emitJobUpdate(job);
 
     if (!job.outputFile || !job.videoId) {
       throw new Error('No output file or video ID available for transcription');
     }
 
-    // Transcribe the video using WhisperService (creates temp files)
-    const transcriptFile = await this.whisperService.transcribeVideo(job.outputFile, job.id);
+    // Set up a listener for transcription progress events
+    const progressListener = (data: { progress: number; task: string; jobId?: string }) => {
+      if (data.jobId === job.id) {
+        job.progress = Math.min(data.progress, 95); // Cap at 95% until fully complete
+        job.currentTask = data.task || 'Transcribing...';
+        this.emitJobUpdate(job);
+      }
+    };
 
-    if (!transcriptFile) {
-      throw new Error('Transcription failed');
+    // Subscribe to progress events
+    if (this.eventService.server) {
+      this.eventService.server.on('transcription-progress', progressListener);
     }
 
-    // Read transcript files
-    const fs = require('fs');
-    const transcriptSrt = fs.readFileSync(transcriptFile, 'utf8');
-    const transcriptTxtFile = transcriptFile.replace('.srt', '.txt');
-    const transcriptText = fs.existsSync(transcriptTxtFile)
-      ? fs.readFileSync(transcriptTxtFile, 'utf8')
-      : transcriptSrt; // Fallback to SRT if .txt doesn't exist
+    try {
+      // Transcribe the video using WhisperService (creates temp files)
+      const transcriptFile = await this.whisperService.transcribeVideo(job.outputFile, job.id);
 
-    // Save transcript to database
-    this.logger.log(`[${job.id}] Saving transcript to database for video ${job.videoId}`);
-    this.databaseService.insertTranscript({
-      videoId: job.videoId,
-      plainText: transcriptText,
-      srtFormat: transcriptSrt,
-      whisperModel: 'base', // TODO: Make this configurable
-      language: 'en', // TODO: Make this configurable
-    });
+      if (!transcriptFile) {
+        throw new Error('Transcription failed');
+      }
 
-    // Clean up temp transcript files
-    if (fs.existsSync(transcriptFile)) fs.unlinkSync(transcriptFile);
-    if (fs.existsSync(transcriptTxtFile)) fs.unlinkSync(transcriptTxtFile);
+      // Read transcript files
+      job.progress = 96;
+      job.currentTask = 'Saving transcript...';
+      this.emitJobUpdate(job);
 
-    job.transcriptFile = undefined; // No longer storing file path
-    job.progress = 100;
-    this.logger.log(`[${job.id}] Transcription saved to database and temp files deleted`);
+      const fs = require('fs');
+      const transcriptSrt = fs.readFileSync(transcriptFile, 'utf8');
+      const transcriptTxtFile = transcriptFile.replace('.srt', '.txt');
+      const transcriptText = fs.existsSync(transcriptTxtFile)
+        ? fs.readFileSync(transcriptTxtFile, 'utf8')
+        : transcriptSrt; // Fallback to SRT if .txt doesn't exist
+
+      // Save transcript to database
+      this.logger.log(`[${job.id}] Saving transcript to database for video ${job.videoId}`);
+      this.databaseService.insertTranscript({
+        videoId: job.videoId,
+        plainText: transcriptText,
+        srtFormat: transcriptSrt,
+        whisperModel: 'base', // TODO: Make this configurable
+        language: 'en', // TODO: Make this configurable
+      });
+
+      // Clean up temp transcript files
+      if (fs.existsSync(transcriptFile)) fs.unlinkSync(transcriptFile);
+      if (fs.existsSync(transcriptTxtFile)) fs.unlinkSync(transcriptTxtFile);
+
+      job.transcriptFile = undefined; // No longer storing file path
+      job.progress = 100;
+      job.currentTask = 'Transcription complete';
+      this.emitJobUpdate(job);
+      this.logger.log(`[${job.id}] Transcription saved to database and temp files deleted`);
+    } finally {
+      // Clean up the progress listener
+      if (this.eventService.server) {
+        this.eventService.server.off('transcription-progress', progressListener);
+      }
+    }
   }
 
   /**

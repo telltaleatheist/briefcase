@@ -98,10 +98,60 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Transform ABC News story URLs to video feed URLs
+   */
+  private async transformAbcNewsUrl(url: string): Promise<string> {
+    // Check if this is an ABC News story URL
+    const abcStoryMatch = url.match(/abcnews\.go\.com\/[^\/]+\/[^\/]+\/story\?id=(\d+)/);
+
+    if (!abcStoryMatch) {
+      // Not an ABC News story URL, return as-is
+      return url;
+    }
+
+    const storyId = abcStoryMatch[1];
+    this.logger.log(`Detected ABC News story URL with ID: ${storyId}`);
+
+    try {
+      // Fetch the story page to extract the video ID
+      const https = require('https');
+      const pageContent = await new Promise<string>((resolve, reject) => {
+        https.get(url, (response: any) => {
+          let data = '';
+          response.on('data', (chunk: any) => data += chunk);
+          response.on('end', () => resolve(data));
+          response.on('error', reject);
+        }).on('error', reject);
+      });
+
+      // Look for video ID in the page content
+      // ABC News embeds video IDs in their "video" object
+      const videoIdMatch = pageContent.match(/"video"[^}]*"id":"(\d{9})"/);
+
+      if (videoIdMatch) {
+        const videoId = videoIdMatch[1];
+        const videoFeedUrl = `https://abcnews.go.com/video/itemfeed?id=${videoId}`;
+        this.logger.log(`Transformed ABC News URL from story ${storyId} to video feed: ${videoFeedUrl} (video ID: ${videoId})`);
+        return videoFeedUrl;
+      }
+
+      this.logger.warn(`Could not find video ID in ABC News story ${storyId}, trying original URL`);
+      return url;
+
+    } catch (error) {
+      this.logger.warn(`Failed to transform ABC News URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return url;
+    }
+  }
+
+  /**
    * Main method to download a video from a URL with automatic retry on different clients
    */
   async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadResult> {
     try {
+      // Transform ABC News URLs if needed
+      options.url = await this.transformAbcNewsUrl(options.url);
+
       this.logger.log(`Starting download for URL: ${options.url}`);
 
       // Capture start time BEFORE starting download
@@ -148,10 +198,12 @@ export class DownloaderService implements OnModuleInit {
         this.logger.log(`Using pre-fetched displayName for output: ${options.displayName}`);
       } else {
         // Fallback to yt-dlp's dynamic title extraction
-        const dateFormat = '%(upload_date>%Y-%m-%d)s ';
+        // Use current date as fallback if upload_date is not available
+        const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        const dateFormat = `%(upload_date>%Y-%m-%d|${currentDate})s `;
         const maxTitleLength = 200; // Conservative limit to stay under 255 total
         outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
-        this.logger.log(`Using yt-dlp title extraction for output template`);
+        this.logger.log(`Using yt-dlp title extraction for output template with date fallback`);
       }
       
       // Create ytDlpManager instance
@@ -889,6 +941,9 @@ export class DownloaderService implements OnModuleInit {
    */
   async getVideoInfo(url: string): Promise<any> {
     try {
+      // Transform ABC News URLs if needed
+      url = await this.transformAbcNewsUrl(url);
+
       const startTime = Date.now();
       this.logger.log(`[TIMING] Fetching video info for URL: ${url}`);
 

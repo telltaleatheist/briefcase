@@ -457,8 +457,26 @@ export class LibraryComponent implements OnInit, OnDestroy {
     this.startProgressPolling();
 
     // Subscribe to analysis queue jobs to show progress bars
+    const previousJobs = new Map<string, any>();
     this.downloadProgressService.jobs$.subscribe(jobsMap => {
       console.log('[LibraryComponent] Jobs update received, job count:', jobsMap.size);
+
+      // Check for newly completed jobs to reload video data
+      previousJobs.forEach((prevJob, jobId) => {
+        const currentJob = jobsMap.get(jobId);
+        // If job was in progress and is now completed/removed, reload videos
+        if (prevJob.stage !== 'completed' && prevJob.stage !== 'failed' &&
+            (!currentJob || currentJob.stage === 'completed' || currentJob.stage === 'failed')) {
+          console.log('[LibraryComponent] Job completed, refreshing video list:', jobId);
+          // Clear cache and reload to show updated has_analysis flag
+          this.databaseLibraryService.clearCache();
+          this.loadVideos();
+        }
+      });
+
+      // Update previous jobs map for next comparison
+      previousJobs.clear();
+      jobsMap.forEach((job, id) => previousJobs.set(id, { ...job }));
 
       // Clear existing processing states
       this.videoProcessingStates.clear();
@@ -2046,19 +2064,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Get status indicator for video
    */
   getVideoStatusMapper = (video: DatabaseVideo): ItemStatus | null => {
-    // Priority: missing both > missing analysis > missing transcript > has both
+    // Priority: missing both > has transcript only > has analysis (complete)
     if (!video.has_transcript && !video.has_analysis) {
       return { color: '#dc3545', tooltip: 'Missing transcript and analysis' }; // Red
     }
     if (!video.has_analysis) {
-      return { color: '#0dcaf0', tooltip: 'Missing analysis' }; // Blue
+      // Has transcript but no analysis
+      return { color: '#ff6600', tooltip: 'Missing analysis' }; // Orange
     }
-    if (!video.has_transcript) {
-      return { color: '#a855f7', tooltip: 'Missing transcript' }; // Purple
-    }
+    // If has_analysis is true, transcript must exist (can't analyze without transcript)
+    // Long videos (>10 min) get blue marker
     if (video.duration_seconds && video.duration_seconds > 600) {
-      return { color: '#ff6600', tooltip: 'Long video (>10 min)' }; // Orange
+      return { color: '#0dcaf0', tooltip: 'Complete (>10 min)' }; // Blue
     }
+    // Short videos (<10 min) get green marker
     return { color: '#198754', tooltip: 'Complete' }; // Green
   };
 
@@ -2105,6 +2124,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Process each week group
     for (const week of sortedWeeks) {
       const videosInWeek = weekGroups.get(week)!;
+      // Track which ghost parents we've already added in this week to avoid duplicates
+      const addedGhostParentsInWeek = new Set<string>();
 
       // Process each video in this week
       for (const video of videosInWeek) {
@@ -2119,16 +2140,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
           if (parent) {
             const parentWeek = getWeekForVideo(parent);
 
-            // Only add ghost parent if parent is in a DIFFERENT week
-            if (parentWeek !== week) {
+            // Only add ghost parent if parent is in a DIFFERENT week and we haven't already added it in this week
+            if (parentWeek !== week && !addedGhostParentsInWeek.has(parent.id)) {
               const ghostParent = {
                 ...parent,
                 isGhostParent: true,
                 isChild: false,
                 isParent: hasChildren.has(parent.id),
-                ghostChildId: video.id
+                ghostChildId: video.id,
+                // Override download_date to keep ghost in current week (child's week)
+                download_date: video.download_date
               } as any;
               result.push(ghostParent);
+              addedGhostParentsInWeek.add(parent.id);
             }
           }
         }
@@ -2158,7 +2182,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
                 isGhostChild: true,
                 isChild: true,  // Ghost children should still be marked as children for indentation
                 isParent: false,
-                ghostParentId: video.id
+                ghostParentId: video.id,
+                // Override download_date to keep ghost in current week (parent's week)
+                download_date: video.download_date
               } as any;
               result.push(ghostChild);
             }
