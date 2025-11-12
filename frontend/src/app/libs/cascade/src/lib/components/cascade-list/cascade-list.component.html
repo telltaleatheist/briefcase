@@ -1,0 +1,156 @@
+<div class="item-list-container" #listContainer tabindex="0">
+  <!-- Empty State -->
+  <div *ngIf="isEmpty" class="empty-state">
+    <mat-icon class="empty-icon">{{ emptyIcon }}</mat-icon>
+    <p class="empty-message">{{ emptyMessage }}</p>
+  </div>
+
+  <!-- Item Groups -->
+  <div *ngIf="!isEmpty" class="item-groups">
+    <div *ngFor="let group of groupedItems; trackBy: trackByGroupId" class="item-group">
+      <!-- Group Header (only show if grouping is enabled) -->
+      <div *ngIf="groupConfig?.enabled"
+           class="group-header"
+           (click)="toggleGroup(group.id)">
+        <mat-icon class="collapse-icon">
+          {{ isGroupCollapsed(group.id) ? 'chevron_right' : 'expand_more' }}
+        </mat-icon>
+        <span class="group-label">{{ group.label }}</span>
+        <span class="group-count">({{ group.items.length }})</span>
+      </div>
+
+      <!-- Items List -->
+      <div *ngIf="!isGroupCollapsed(group.id)" class="items-list">
+        <!-- Item Container (wraps both card and children) -->
+        <div *ngFor="let item of group.items; let i = index; trackBy: trackByItemId">
+        <div
+          [id]="'item-' + item.id"
+          class="item-card"
+          [class.selected]="isItemSelected(item)"
+          [class.highlighted]="isItemHighlighted(item)"
+          [class.selection-edge-top]="isSelectionEdgeTop(group.items, i)"
+          [class.selection-edge-bottom]="isSelectionEdgeBottom(group.items, i)"
+          [class.is-child]="item['isChild']"
+          [class.is-parent]="item['isParent']"
+          [class.is-ghost-parent]="item['isGhostParent']"
+          [class.is-ghost-child]="item['isGhostChild']"
+          (click)="handleItemClick(item, $event)"
+          (dblclick)="handleItemDoubleClick(item)"
+          (contextmenu)="handleContextMenu($event, item)">
+
+          <!-- Status Indicator -->
+          <div *ngIf="getStatus(item)"
+               class="status-indicator"
+               [style.background-color]="getStatus(item)!.color"
+               [matTooltip]="getStatus(item)!.tooltip || ''">
+          </div>
+
+          <!-- Expand/Collapse Button (Cascade Feature) -->
+          <button *ngIf="childrenConfig?.expandable && hasChildren(item)"
+                  class="expand-toggle"
+                  (click)="toggleExpanded(item.id, $event)"
+                  [attr.aria-label]="isExpanded(item) ? 'Collapse' : 'Expand'"
+                  [attr.aria-expanded]="isExpanded(item)"
+                  tabindex="-1">
+            <mat-icon>{{ isExpanded(item) ? 'expand_more' : 'chevron_right' }}</mat-icon>
+          </button>
+
+          <!-- Icon -->
+          <mat-icon class="item-icon">{{ getIcon(item) }}</mat-icon>
+
+          <!-- Content -->
+          <div class="item-content">
+            <!-- Badge -->
+            <span *ngIf="getBadge(item)" class="item-badge">
+              {{ getBadge(item) }}
+            </span>
+
+            <!-- Primary Text -->
+            <div class="item-primary">{{ getPrimaryText(item) }}</div>
+
+            <!-- Secondary Text -->
+            <div *ngIf="getSecondaryText(item)" class="item-secondary">
+              {{ getSecondaryText(item) }}
+            </div>
+          </div>
+
+          <!-- Metadata (duration, size, etc.) - displayed on the right -->
+          <div *ngIf="getMetadata(item)" class="item-metadata">
+            {{ getMetadata(item) }}
+          </div>
+
+          <!-- Custom Action Slot (for buttons like delete, remove, etc.) -->
+          <div class="item-actions" *ngIf="hasItemActions">
+            <ng-container *ngTemplateOutlet="itemActionsTemplate; context: { $implicit: item }"></ng-container>
+          </div>
+
+          <!-- Progress Bar (Regular or Master) -->
+          <!-- Master Progress (if item has children) -->
+          <div *ngIf="hasChildren(item) && getMasterProgress(item) !== null"
+               class="master-progress-bar"
+               [attr.aria-label]="'Master progress: ' + getMasterProgress(item) + '%'"
+               role="progressbar"
+               [attr.aria-valuenow]="getMasterProgress(item)"
+               aria-valuemin="0"
+               aria-valuemax="100">
+            <div class="progress-fill"
+                 [style.width.%]="getMasterProgress(item)"></div>
+          </div>
+
+          <!-- Regular Progress (if no children) -->
+          <div *ngIf="!hasChildren(item) && getProgress(item)"
+               class="item-progress-bar"
+               [attr.aria-label]="getProgress(item)!.label || 'Progress: ' + getProgress(item)!.value + '%'"
+               role="progressbar"
+               [attr.aria-valuenow]="getProgress(item)!.value"
+               aria-valuemin="0"
+               aria-valuemax="100">
+            <div class="progress-fill"
+                 [style.width.%]="getProgress(item)!.value"
+                 [style.background-color]="getProgress(item)!.color || null">
+            </div>
+          </div>
+        </div>
+
+        <!-- CASCADE CHILDREN (Ghost Items) -->
+        <div *ngIf="isExpanded(item) && hasChildren(item)"
+             class="cascade-children"
+             [@expandCollapse]>
+          <div *ngFor="let child of getChildren(item)"
+               class="cascade-child"
+               [class.child-pending]="child.status === 'pending'"
+               [class.child-active]="child.status === 'active'"
+               [class.child-completed]="child.status === 'completed'"
+               [class.child-failed]="child.status === 'failed'"
+               [class.child-skipped]="child.status === 'skipped'"
+               (click)="handleChildClick(item, child, $event)">
+
+            <!-- Child Icon -->
+            <mat-icon class="child-icon">{{ child.icon || 'radio_button_unchecked' }}</mat-icon>
+
+            <!-- Child Label -->
+            <span class="child-label">{{ child.label }}</span>
+
+            <!-- Child Metadata -->
+            <span *ngIf="child.metadata" class="child-metadata">{{ child.metadata }}</span>
+
+            <!-- Child Progress Bar -->
+            <div *ngIf="child.progress" class="child-progress-bar">
+              <div class="progress-fill"
+                   [style.width.%]="child.progress.value"
+                   [style.background-color]="child.progress.color || null"></div>
+            </div>
+
+            <!-- Child Status Icon -->
+            <mat-icon *ngIf="childrenConfig?.showStatus !== false"
+                      class="child-status-icon"
+                      [matTooltip]="child.status || ''">
+              {{ getChildStatusIcon(child.status) }}
+            </mat-icon>
+          </div>
+        </div>
+        </div><!-- Close item container wrapper -->
+      </div>
+    </div>
+  </div>
+</div>

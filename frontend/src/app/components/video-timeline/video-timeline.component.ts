@@ -1,9 +1,16 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, ViewChild, ElementRef, NgZone } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, ViewChild, ElementRef, NgZone, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { TimelineWaveformComponent } from '../../video-editor/components/timeline/timeline-waveform/timeline-waveform.component';
+import { TimelinePlayheadComponent } from '../../video-editor/components/timeline/timeline-playhead/timeline-playhead.component';
+import { TimelineRulerComponent } from '../../video-editor/components/timeline/timeline-ruler/timeline-ruler.component';
+import { TimelineZoomBarComponent } from '../../video-editor/components/timeline/timeline-zoom-bar/timeline-zoom-bar.component';
+import { TimelineSectionsLayerComponent } from '../../video-editor/components/timeline/timeline-sections-layer/timeline-sections-layer.component';
+import { TimelineSelectionComponent } from '../../video-editor/components/timeline/timeline-selection/timeline-selection.component';
+import { ZoomState } from '../../video-editor/models';
 
 export interface TimelineSection {
   startTime: number;
@@ -30,7 +37,7 @@ export interface CategoryFilter {
 @Component({
   selector: 'app-video-timeline',
   standalone: true,
-  imports: [CommonModule, FormsModule, MatIconModule, MatButtonModule, MatTooltipModule],
+  imports: [CommonModule, FormsModule, MatIconModule, MatButtonModule, MatTooltipModule, TimelineWaveformComponent, TimelinePlayheadComponent, TimelineRulerComponent, TimelineZoomBarComponent, TimelineSectionsLayerComponent, TimelineSelectionComponent],
   templateUrl: './video-timeline.component.html',
   styleUrls: ['./video-timeline.component.scss']
 })
@@ -47,7 +54,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
   @ViewChild('timeline', { static: false }) timelineElement!: ElementRef<HTMLDivElement>;
   @ViewChild('selectionWindow', { static: false }) selectionWindowElement!: ElementRef<HTMLDivElement>;
-  @ViewChild('waveformCanvas', { static: false }) waveformCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild(TimelineWaveformComponent, { static: false }) waveformComponent?: TimelineWaveformComponent;
 
   // Tool selection state
   selectedTool: TimelineTool = 'cursor';
@@ -102,9 +109,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   private boundWheel?: (e: WheelEvent) => void;
   private boundKeyDown?: (e: KeyboardEvent) => void;
 
-  // Cache time markers to avoid recalculating on every change detection
-  cachedTimeMarkers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
-  private lastMarkerCacheKey = '';
+  // Time markers now handled by TimelineRulerComponent
 
   // Auto-follow playhead state
   autoFollowPlayhead = true;
@@ -118,11 +123,16 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   private animationStartOffset: number = 0;
   private readonly ANIMATION_DURATION = 300; // ms
 
-  // Waveform state
-  private waveformData: number[] = [];
-  private isGeneratingWaveform = false;
+  // Waveform state (now handled by TimelineWaveformComponent)
+  waveformData: number[] = []; // Keep for passing to component
 
-  constructor(private ngZone: NgZone) {}
+  // Throttle mouse move updates using requestAnimationFrame
+  private rafPending = false;
+  private pendingZoomLevel: number | null = null;
+  private pendingZoomOffset: number | null = null;
+  private updateRafId: number | null = null; // Track RAF ID to cancel it
+
+  constructor(private ngZone: NgZone, private cdr: ChangeDetectorRef) {}
 
   ngOnChanges(changes: SimpleChanges) {
     // When sections change, update category filters
@@ -130,15 +140,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       this.updateCategoryFilters();
     }
 
-    // When mediaElement changes, generate waveform
-    if (changes['mediaElement'] && this.mediaElement) {
-      this.generateWaveform();
-    }
-
-    // When duration changes and we have waveform data, re-render
-    if (changes['duration'] && this.waveformData.length > 0) {
-      requestAnimationFrame(() => this.renderWaveform());
-    }
+    // Waveform generation/rendering is now handled by TimelineWaveformComponent
 
     // Auto-follow playhead logic
     if (changes['isPlaying'] || changes['currentTime']) {
@@ -151,7 +153,13 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       }
       // Center playhead during playback if auto-follow is enabled
       else if (isPlayingAndFollowing && changes['currentTime']) {
-        this.centerPlayheadInViewport();
+        const visibleStart = this.getVisibleStartTime();
+        const visibleEnd = this.getVisibleEndTime();
+
+        // Only center if playhead goes outside visible range
+        if (this.currentTime < visibleStart || this.currentTime > visibleEnd) {
+          this.centerPlayheadInViewport();
+        }
       }
 
       this.previousIsPlaying = this.isPlaying;
@@ -203,6 +211,60 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+
+    // Cancel any pending RAF updates
+    if (this.updateRafId !== null) {
+      cancelAnimationFrame(this.updateRafId);
+      this.updateRafId = null;
+    }
+
+    // Clear any pending RAF updates
+    this.rafPending = false;
+    this.pendingZoomLevel = null;
+    this.pendingZoomOffset = null;
+  }
+
+  /**
+   * Schedule a zoom/pan update using requestAnimationFrame for better performance
+   * This prevents triggering change detection on every mousemove event
+   */
+  private scheduleUpdate(newZoomLevel?: number, newZoomOffset?: number): void {
+    // Store the most recent values
+    if (newZoomLevel !== undefined) {
+      this.pendingZoomLevel = newZoomLevel;
+    }
+    if (newZoomOffset !== undefined) {
+      this.pendingZoomOffset = newZoomOffset;
+    }
+
+    // If we already have a frame pending, don't schedule another
+    if (this.rafPending) {
+      return;
+    }
+
+    this.rafPending = true;
+
+    // Cancel any existing RAF before scheduling new one
+    if (this.updateRafId !== null) {
+      cancelAnimationFrame(this.updateRafId);
+    }
+
+    this.updateRafId = requestAnimationFrame(() => {
+      this.rafPending = false;
+      this.updateRafId = null;
+
+      // Apply the pending updates inside Angular zone for change detection
+      this.ngZone.run(() => {
+        if (this.pendingZoomLevel !== null) {
+          this.zoomLevel = this.pendingZoomLevel;
+          this.pendingZoomLevel = null;
+        }
+        if (this.pendingZoomOffset !== null) {
+          this.zoomOffset = this.pendingZoomOffset;
+          this.pendingZoomOffset = null;
+        }
+      });
+    });
   }
 
   /**
@@ -523,16 +585,14 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       const scrollbarWidth = this.timelineElement?.nativeElement?.clientWidth || 1;
       const deltaTime = (deltaX / scrollbarWidth) * this.duration;
 
-      this.ngZone.run(() => {
-        this.zoomOffset = this.scrollbarDragStartOffset + deltaTime;
+      let newOffset = this.scrollbarDragStartOffset + deltaTime;
 
-        // Clamp offset to valid range
-        const visibleDuration = this.getVisibleDuration();
-        this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+      // Clamp offset to valid range
+      const visibleDuration = this.duration / this.zoomLevel;
+      newOffset = Math.max(0, Math.min(this.duration - visibleDuration, newOffset));
 
-        // Update waveform display for new pan position
-        this.updateWaveformDisplay();
-      });
+      // Schedule update using RAF (no manual waveform update needed - ngOnChanges handles it)
+      this.scheduleUpdate(undefined, newOffset);
       return;
     }
 
@@ -552,18 +612,16 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
       // Calculate new zoom level
       if (newVisibleDuration > 0 && newVisibleDuration <= this.duration) {
-        this.ngZone.run(() => {
-          this.zoomLevel = this.duration / newVisibleDuration;
-          this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
-          this.zoomOffset = newVisibleStart;
+        let newZoomLevel = this.duration / newVisibleDuration;
+        newZoomLevel = Math.max(1, Math.min(200, newZoomLevel));
 
-          // Clamp offset
-          const visibleDuration = this.getVisibleDuration();
-          this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        let newOffset = newVisibleStart;
+        // Clamp offset
+        const visibleDuration = this.duration / newZoomLevel;
+        newOffset = Math.max(0, Math.min(this.duration - visibleDuration, newOffset));
 
-          // Update waveform display for new zoom
-          this.updateWaveformDisplay();
-        });
+        // Schedule update using RAF (no manual waveform update needed)
+        this.scheduleUpdate(newZoomLevel, newOffset);
       }
       return;
     }
@@ -584,17 +642,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
       // Calculate new zoom level
       if (newVisibleDuration > 0 && newVisibleDuration <= this.duration) {
-        this.ngZone.run(() => {
-          this.zoomLevel = this.duration / newVisibleDuration;
-          this.zoomLevel = Math.max(1, Math.min(200, this.zoomLevel));
+        let newZoomLevel = this.duration / newVisibleDuration;
+        newZoomLevel = Math.max(1, Math.min(200, newZoomLevel));
 
-          // Keep the left side fixed, only adjust based on new zoom
-          const actualVisibleDuration = this.getVisibleDuration();
-          this.zoomOffset = Math.max(0, Math.min(this.duration - actualVisibleDuration, this.zoomOffset));
+        // Keep the left side fixed, only adjust based on new zoom
+        const actualVisibleDuration = this.duration / newZoomLevel;
+        const newOffset = Math.max(0, Math.min(this.duration - actualVisibleDuration, this.zoomOffset));
 
-          // Update waveform display for new zoom
-          this.updateWaveformDisplay();
-        });
+        // Schedule update using RAF (no manual waveform update needed)
+        this.scheduleUpdate(newZoomLevel, newOffset);
       }
       return;
     }
@@ -611,19 +667,17 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       // Only pan if user has actually dragged
       if (this.hasDraggedSincePanStart) {
         const rect = this.timelineElement.nativeElement.getBoundingClientRect();
-        const visibleDuration = this.getVisibleDuration();
+        const visibleDuration = this.duration / this.zoomLevel;
         const deltaTime = (deltaX / rect.width) * visibleDuration;
 
-        this.ngZone.run(() => {
-          // Pan in opposite direction of mouse movement
-          this.zoomOffset = this.panStartOffset - deltaTime;
+        // Pan in opposite direction of mouse movement
+        let newOffset = this.panStartOffset - deltaTime;
 
-          // Clamp offset to valid range
-          this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+        // Clamp offset to valid range
+        newOffset = Math.max(0, Math.min(this.duration - visibleDuration, newOffset));
 
-          // Update waveform display for new pan position
-          this.updateWaveformDisplay();
-        });
+        // Schedule update using RAF (no manual waveform update needed)
+        this.scheduleUpdate(undefined, newOffset);
       }
       return;
     }
@@ -633,17 +687,15 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       const x = event.clientX - rect.left;
       const time = Math.max(0, Math.min(this.duration, this.pixelsToTime(x)));
 
-      this.ngZone.run(() => {
-        // Update selection range
-        if (time < this.rangeStartTime) {
-          this.selectionStart = time;
-          this.selectionEnd = this.rangeStartTime;
-        } else {
-          this.selectionStart = this.rangeStartTime;
-          this.selectionEnd = time;
-        }
-        this.emitSelection();
-      });
+      // Update selection range (event emission triggers change detection in parent)
+      if (time < this.rangeStartTime) {
+        this.selectionStart = time;
+        this.selectionEnd = this.rangeStartTime;
+      } else {
+        this.selectionStart = this.rangeStartTime;
+        this.selectionEnd = time;
+      }
+      this.emitSelection();
       return;
     }
 
@@ -676,11 +728,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
         newStart = this.duration - windowDuration;
       }
 
-      this.ngZone.run(() => {
-        this.selectionStart = newStart;
-        this.selectionEnd = newEnd;
-        this.emitSelection();
-      });
+      this.selectionStart = newStart;
+      this.selectionEnd = newEnd;
+      this.emitSelection();
       return;
     }
 
@@ -691,12 +741,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
       // Minimum selection duration: 1 second
       const minDuration = 1;
-      this.ngZone.run(() => {
-        this.selectionStart = Math.max(0, Math.min(time, this.selectionEnd - minDuration));
-        this.emitSelection();
-        // Move playhead to follow the left handle
-        this.emitSeek(this.selectionStart);
-      });
+      this.selectionStart = Math.max(0, Math.min(time, this.selectionEnd - minDuration));
+      this.emitSelection();
+      // Move playhead to follow the left handle
+      this.emitSeek(this.selectionStart);
       return;
     }
 
@@ -707,12 +755,10 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
       // Minimum selection duration: 1 second
       const minDuration = 1;
-      this.ngZone.run(() => {
-        this.selectionEnd = Math.min(this.duration, Math.max(time, this.selectionStart + minDuration));
-        this.emitSelection();
-        // Move playhead to follow the right handle
-        this.emitSeek(this.selectionEnd);
-      });
+      this.selectionEnd = Math.min(this.duration, Math.max(time, this.selectionStart + minDuration));
+      this.emitSelection();
+      // Move playhead to follow the right handle
+      this.emitSeek(this.selectionEnd);
       return;
     }
   };
@@ -774,15 +820,16 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     // If shift key is held, do horizontal panning instead of zooming
     if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       if (this.zoomLevel > 1) {
-        this.ngZone.run(() => {
-          const visibleDuration = this.getVisibleDuration();
-          // Pan by 10% of visible duration per scroll tick
-          const panAmount = (visibleDuration * 0.1) * (event.deltaY > 0 || event.deltaX > 0 ? 1 : -1);
-          this.zoomOffset += panAmount;
+        const visibleDuration = this.duration / this.zoomLevel;
+        // Pan by 10% of visible duration per scroll tick
+        const panAmount = (visibleDuration * 0.1) * (event.deltaY > 0 || event.deltaX > 0 ? 1 : -1);
+        let newOffset = this.zoomOffset + panAmount;
 
-          // Clamp offset to valid range
-          this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
-        });
+        // Clamp offset to valid range
+        newOffset = Math.max(0, Math.min(this.duration - visibleDuration, newOffset));
+
+        // Schedule update using RAF
+        this.scheduleUpdate(undefined, newOffset);
       }
       return;
     }
@@ -795,32 +842,27 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
     if (newZoomLevel !== this.zoomLevel) {
       // Get the current visible start and duration BEFORE the zoom
-      const oldVisibleStart = this.getVisibleStartTime();
-      const oldVisibleDuration = this.getVisibleDuration();
+      const oldVisibleStart = this.zoomOffset;
+      const oldVisibleDuration = this.duration / this.zoomLevel;
 
       // Calculate what time the mouse is pointing at in the OLD zoom level
       const mouseX = event.clientX - rect.left;
       const mouseRatio = mouseX / rect.width;  // 0 to 1, where mouse is in the timeline
       const timeAtMouse = oldVisibleStart + (mouseRatio * oldVisibleDuration);
 
-      this.ngZone.run(() => {
-        // Update zoom level
-        this.zoomLevel = newZoomLevel;
+      // Calculate new visible duration after zoom
+      const newVisibleDuration = this.duration / newZoomLevel;
 
-        // Calculate new visible duration after zoom
-        const newVisibleDuration = this.getVisibleDuration();
+      // Keep the same time under the mouse cursor at the same pixel position
+      // We want: newVisibleStart + (mouseRatio * newVisibleDuration) = timeAtMouse
+      // So: newVisibleStart = timeAtMouse - (mouseRatio * newVisibleDuration)
+      let newOffset = timeAtMouse - (mouseRatio * newVisibleDuration);
 
-        // Keep the same time under the mouse cursor at the same pixel position
-        // We want: newVisibleStart + (mouseRatio * newVisibleDuration) = timeAtMouse
-        // So: newVisibleStart = timeAtMouse - (mouseRatio * newVisibleDuration)
-        this.zoomOffset = timeAtMouse - (mouseRatio * newVisibleDuration);
+      // Clamp offset to valid range
+      newOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, newOffset));
 
-        // Clamp offset to valid range
-        this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
-
-        // Update waveform display for new zoom level
-        this.updateWaveformDisplay();
-      });
+      // Schedule update using RAF (no manual waveform update needed)
+      this.scheduleUpdate(newZoomLevel, newOffset);
     }
   };
 
@@ -943,8 +985,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
           // Clamp offset to valid range
           this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
 
-          // Update waveform display for new zoom
-          this.updateWaveformDisplay();
+          // Waveform will update automatically via ngOnChanges
         });
       }
     }
@@ -966,9 +1007,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
    * Emit seek event
    */
   emitSeek(time: number) {
-    this.ngZone.run(() => {
-      this.seek.emit(Math.max(0, Math.min(this.duration, time)));
-    });
+    this.seek.emit(Math.max(0, Math.min(this.duration, time)));
   }
 
   /**
@@ -1025,7 +1064,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   resetZoom() {
     this.zoomLevel = 1;
     this.zoomOffset = 0;
-    this.updateWaveformDisplay();
+    // Waveform will update automatically via ngOnChanges
   }
 
   /**
@@ -1129,95 +1168,58 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     this.emitSelection();
   }
 
-  /**
-   * Get CSS styles for playhead (accounting for zoom and pan)
-   */
-  getPlayheadStyle() {
-    const visibleStart = this.getVisibleStartTime();
-    const visibleDuration = this.getVisibleDuration();
 
-    // Only show if within visible range
-    if (this.currentTime < visibleStart || this.currentTime > visibleStart + visibleDuration) {
-      return { left: '-100px', display: 'none' };
-    }
-
-    const percentage = ((this.currentTime - visibleStart) / visibleDuration) * 100;
-    return {
-      left: `${percentage}%`,
-      display: 'block'
-    };
-  }
-
-  /**
-   * Get CSS styles for selection window (accounting for zoom and pan)
-   */
-  getSelectionStyle() {
-    // If no selection (both start and end are 0), hide it
-    if (this.selectionStart === 0 && this.selectionEnd === 0) {
-      return { left: '0', width: '0', display: 'none' };
-    }
-
-    const visibleStart = this.getVisibleStartTime();
-    const visibleDuration = this.getVisibleDuration();
-    const visibleEnd = visibleStart + visibleDuration;
-
-    // Calculate visible portion of selection
-    const selStart = Math.max(this.selectionStart, visibleStart);
-    const selEnd = Math.min(this.selectionEnd, visibleEnd);
-
-    // If selection is completely outside visible range, hide it
-    if (this.selectionEnd < visibleStart || this.selectionStart > visibleEnd) {
-      return { left: '0', width: '0', display: 'none' };
-    }
-
-    const startPercentage = ((selStart - visibleStart) / visibleDuration) * 100;
-    const endPercentage = ((selEnd - visibleStart) / visibleDuration) * 100;
-
-    return {
-      left: `${startPercentage}%`,
-      width: `${endPercentage - startPercentage}%`,
-      display: 'block'
-    };
-  }
-
-  /**
-   * Get CSS styles for a section marker (accounting for zoom and pan)
-   */
-  getSectionStyle(section: TimelineSection) {
-    const visibleStart = this.getVisibleStartTime();
-    const visibleDuration = this.getVisibleDuration();
-    const visibleEnd = visibleStart + visibleDuration;
-
-    // Calculate visible portion of section
-    const sectionStart = Math.max(section.startTime, visibleStart);
-    const sectionEnd = Math.min(section.endTime, visibleEnd);
-
-    // If section is completely outside visible range, hide it
-    if (section.endTime < visibleStart || section.startTime > visibleEnd) {
-      return {
-        left: '0',
-        width: '0',
-        backgroundColor: section.color,
-        display: 'none'
-      };
-    }
-
-    const startPercentage = ((sectionStart - visibleStart) / visibleDuration) * 100;
-    const endPercentage = ((sectionEnd - visibleStart) / visibleDuration) * 100;
-
-    return {
-      left: `${startPercentage}%`,
-      width: `${endPercentage - startPercentage}%`,
-      backgroundColor: section.color,
-      display: 'block'
-    };
-  }
 
   /**
    * Select a tool
    */
   selectTool(tool: TimelineTool) {
     this.selectedTool = tool;
+  }
+
+  /**
+   * Handle J key press - Rewind / Slow down playback
+   */
+  handleJKey() {
+    // J key: Slow down playback speed
+    if (this.currentPlaybackSpeed > 1) {
+      // If playing faster than 1x, slow down (8x → 4x → 2x → 1x)
+      this.currentPlaybackSpeed = this.currentPlaybackSpeed / 2;
+    } else {
+      // Already at 1x or slower, reset to 1x
+      this.currentPlaybackSpeed = 1;
+    }
+    this.lastKeyPressed = 'j';
+    this.emitPlaybackSpeed(this.currentPlaybackSpeed);
+  }
+
+  /**
+   * Handle K key press - Pause and reset speed to 1x
+   */
+  handleKKey() {
+    // K key: Pause and reset speed to 1x
+    this.currentPlaybackSpeed = 1;
+    this.lastKeyPressed = 'k';
+    this.emitPlaybackSpeed(0); // 0 means pause
+  }
+
+  /**
+   * Handle L key press - Fast forward / Speed up playback
+   */
+  handleLKey() {
+    // L key: Speed up playback (requires two presses to reach 2x)
+    if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0 && this.currentPlaybackSpeed < 8) {
+      // Already going forward, increase speed (1x → 2x → 4x → 8x)
+      this.currentPlaybackSpeed = this.currentPlaybackSpeed * 2;
+    } else if (this.currentPlaybackSpeed >= 8) {
+      // Already at max speed, stay at 8x
+      this.currentPlaybackSpeed = 8;
+    } else {
+      // Start forward playback at 1x (first press)
+      this.currentPlaybackSpeed = 1;
+    }
+    this.lastKeyPressed = 'l';
+    this.emitPlaybackSpeed(this.currentPlaybackSpeed);
   }
 
   /**
@@ -1230,74 +1232,6 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   /**
    * Get time markers with major and minor ticks - optimized for performance with caching
    */
-  getTimeMarkers(): Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> {
-    const visibleStart = this.getVisibleStartTime();
-    const visibleDuration = this.getVisibleDuration();
-
-    // Create a cache key based on values that affect marker calculation
-    const cacheKey = `${visibleStart.toFixed(2)}_${visibleDuration.toFixed(2)}_${this.duration}`;
-
-    // Return cached markers if the view hasn't changed
-    if (cacheKey === this.lastMarkerCacheKey && this.cachedTimeMarkers.length > 0) {
-      return this.cachedTimeMarkers;
-    }
-
-    this.lastMarkerCacheKey = cacheKey;
-    const markers: Array<{position: number, label: string, isMajor: boolean, showLabel: boolean}> = [];
-
-    // Calculate optimal intervals based on visible duration, not just zoom level
-    // This ensures we don't create too many markers regardless of video length
-    const { majorInterval, minorInterval } = this.calculateOptimalIntervals(visibleDuration);
-
-    // Limit maximum number of markers for performance
-    const maxMajorMarkers = 20;
-    const maxMinorMarkers = 100;
-
-    // Generate major ticks
-    const startMajor = Math.ceil(visibleStart / majorInterval) * majorInterval;
-    const endMajor = visibleStart + visibleDuration;
-    let majorCount = 0;
-
-    for (let time = startMajor; time <= endMajor && majorCount < maxMajorMarkers; time += majorInterval) {
-      const position = ((time - visibleStart) / visibleDuration) * 100;
-      if (position >= 0 && position <= 100) {
-        markers.push({
-          position,
-          label: this.formatDetailedTime(time),
-          isMajor: true,
-          showLabel: true
-        });
-        majorCount++;
-      }
-    }
-
-    // Generate minor ticks only if we have reasonable spacing
-    if (minorInterval > 0 && visibleDuration / minorInterval < maxMinorMarkers) {
-      const startMinor = Math.ceil(visibleStart / minorInterval) * minorInterval;
-      let minorCount = 0;
-
-      for (let time = startMinor; time <= endMajor && minorCount < maxMinorMarkers; time += minorInterval) {
-        // Skip if it's close to a major tick (within 1% of majorInterval)
-        const nearestMajor = Math.round(time / majorInterval) * majorInterval;
-        if (Math.abs(time - nearestMajor) < majorInterval * 0.01) continue;
-
-        const position = ((time - visibleStart) / visibleDuration) * 100;
-        if (position >= 0 && position <= 100) {
-          markers.push({
-            position,
-            label: this.formatDetailedTime(time),
-            isMajor: false,
-            showLabel: false
-          });
-          minorCount++;
-        }
-      }
-    }
-
-    // Cache the markers and return
-    this.cachedTimeMarkers = markers;
-    return markers;
-  }
 
   /**
    * Calculate zoom increment based on current zoom level
@@ -1334,65 +1268,6 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  /**
-   * Calculate optimal marker intervals based on visible duration
-   */
-  private calculateOptimalIntervals(visibleDuration: number): { majorInterval: number, minorInterval: number } {
-    // Define interval thresholds based on visible duration
-    let majorInterval: number;
-    let minorInterval: number;
-
-    if (visibleDuration <= 10) {
-      // Very zoomed in: < 10 seconds visible
-      majorInterval = 1;
-      minorInterval = 0.2;
-    } else if (visibleDuration <= 30) {
-      // Zoomed in: 10-30 seconds visible
-      majorInterval = 2;
-      minorInterval = 0.5;
-    } else if (visibleDuration <= 60) {
-      // 30-60 seconds visible
-      majorInterval = 5;
-      minorInterval = 1;
-    } else if (visibleDuration <= 300) {
-      // 1-5 minutes visible
-      majorInterval = 10;
-      minorInterval = 2;
-    } else if (visibleDuration <= 600) {
-      // 5-10 minutes visible
-      majorInterval = 30;
-      minorInterval = 10;
-    } else if (visibleDuration <= 1800) {
-      // 10-30 minutes visible
-      majorInterval = 60;
-      minorInterval = 30;
-    } else if (visibleDuration <= 3600) {
-      // 30-60 minutes visible
-      majorInterval = 300;
-      minorInterval = 60;
-    } else {
-      // > 1 hour visible
-      majorInterval = 600;
-      minorInterval = 300;
-    }
-
-    return { majorInterval, minorInterval };
-  }
-
-  /**
-   * Format time with frames: HH:MM:SS:FF
-   */
-  formatDetailedTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const frames = Math.floor((seconds % 1) * 30); // Assuming 30fps
-
-    if (h > 0) {
-      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-    }
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-  }
 
   /**
    * Handle scrollbar change
@@ -1438,141 +1313,28 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     this.scrollbarDragStartOffset = this.zoomOffset;
   }
 
-  /**
-   * Get CSS styles for the custom scrollbar viewport window
-   */
-  getScrollbarViewportStyle() {
-    const visibleDuration = this.getVisibleDuration();
-    const startPercentage = (this.zoomOffset / this.duration) * 100;
-    const widthPercentage = (visibleDuration / this.duration) * 100;
-
-    // Ensure minimum width for handles to be visible and clickable
-    const minWidthPercentage = 3; // Minimum 3% width
-    const actualWidthPercentage = Math.max(widthPercentage, minWidthPercentage);
-
-    return {
-      left: `${startPercentage}%`,
-      width: `${actualWidthPercentage}%`
-    };
-  }
 
   /**
-   * Generate waveform from media element using Web Audio API
+   * Waveform generation and rendering is now handled by TimelineWaveformComponent
    */
-  private async generateWaveform() {
-    if (this.isGeneratingWaveform || !this.mediaElement) {
-      return;
-    }
-
-    this.isGeneratingWaveform = true;
-
-    try {
-      // Create audio context
-      const audioContext = new AudioContext();
-
-      // Fetch the audio file separately (don't touch the media element)
-      const response = await fetch(this.mediaElement.src);
-      const arrayBuffer = await response.arrayBuffer();
-
-      // Decode audio data
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-      // Extract audio data from first channel
-      const rawData = audioBuffer.getChannelData(0);
-      const samples = 1000; // Number of samples for waveform visualization
-      const blockSize = Math.floor(rawData.length / samples);
-      const filteredData = [];
-
-      // Downsample the audio data
-      for (let i = 0; i < samples; i++) {
-        let blockStart = blockSize * i;
-        let sum = 0;
-
-        // Calculate RMS (root mean square) for this block
-        for (let j = 0; j < blockSize; j++) {
-          sum += Math.abs(rawData[blockStart + j]);
-        }
-
-        filteredData.push(sum / blockSize);
-      }
-
-      // Normalize the data
-      const max = Math.max(...filteredData);
-      this.waveformData = filteredData.map(n => n / max);
-
-      // Render the waveform
-      this.renderWaveform();
-
-      // Close audio context to free resources
-      await audioContext.close();
-
-    } catch (error) {
-      console.error('Error generating waveform:', error);
-      this.waveformData = [];
-    } finally {
-      this.isGeneratingWaveform = false;
-    }
-  }
-
-  /**
-   * Render waveform on canvas (zoom-aware)
-   */
-  private renderWaveform() {
-    if (!this.waveformCanvas || !this.waveformData.length || !this.duration) {
-      return;
-    }
-
-    const canvas = this.waveformCanvas.nativeElement;
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) {
-      return;
-    }
-
-    // Set canvas size to match container
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-
-    // Clear canvas
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    // Calculate visible time range based on zoom
-    const visibleDuration = this.duration / this.zoomLevel;
-    const startTime = this.zoomOffset;
-    const endTime = Math.min(startTime + visibleDuration, this.duration);
-
-    // Calculate which portion of waveform data to display
-    const startIndex = Math.floor((startTime / this.duration) * this.waveformData.length);
-    const endIndex = Math.ceil((endTime / this.duration) * this.waveformData.length);
-    const visibleData = this.waveformData.slice(startIndex, endIndex);
-
-    if (visibleData.length === 0) {
-      return;
-    }
-
-    // Draw waveform for visible portion
-    const barWidth = rect.width / visibleData.length;
-    const middleY = rect.height / 2;
-
-    ctx.fillStyle = '#ff6600'; // Orange color matching the theme
-
-    visibleData.forEach((value, index) => {
-      const barHeight = value * (rect.height / 2) * 0.8; // 80% of half height
-      const x = index * barWidth;
-      const y = middleY - barHeight / 2;
-
-      ctx.fillRect(x, y, Math.max(barWidth - 1, 1), barHeight);
-    });
-  }
 
   /**
    * Trigger waveform re-render (call this when zoom/pan changes)
+   * Now delegates to TimelineWaveformComponent
    */
   updateWaveformDisplay() {
-    if (this.waveformData.length > 0) {
-      requestAnimationFrame(() => this.renderWaveform());
+    if (this.waveformComponent) {
+      this.waveformComponent.updateDisplay();
     }
+  }
+
+  /**
+   * Get current zoom state for passing to child components
+   */
+  getZoomState(): ZoomState {
+    return {
+      level: this.zoomLevel,
+      offset: this.zoomOffset
+    };
   }
 }

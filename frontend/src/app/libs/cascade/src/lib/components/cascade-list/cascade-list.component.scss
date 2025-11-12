@@ -1,0 +1,1306 @@
+// ==================================================
+// Item List Component - Base Styles (Light Theme)
+// ==================================================
+
+:host {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.item-list-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  outline: none;
+  box-sizing: border-box;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #f8f9fa;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #dee2e6;
+    border-radius: 4px;
+
+    &:hover {
+      background: #adb5bd;
+    }
+  }
+}
+
+// ==================================================
+// Empty State
+// ==================================================
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 16px;
+  color: #6c757d;
+
+  .empty-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    color: #adb5bd;
+    opacity: 0.5;
+  }
+
+  .empty-message {
+    margin: 0;
+    font-size: 14px;
+    text-align: center;
+    color: #6c757d;
+  }
+}
+
+// ==================================================
+// Item Groups
+// ==================================================
+
+.item-groups {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.item-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+// ==================================================
+// Group Header
+// ==================================================
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px;
+  min-height: 22px; // Match ghost item size
+  background-color: transparent;
+  border-bottom: 1px solid #dee2e6;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 1;
+  }
+
+  .collapse-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    color: #6c757d;
+    transition: transform 0.2s;
+  }
+
+  .group-label {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 500;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .group-count {
+    font-size: 10px;
+    color: #adb5bd;
+  }
+}
+
+// ==================================================
+// Items List
+// ==================================================
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+// ==================================================
+// Item Card
+// ==================================================
+
+.item-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  min-height: 44px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+  border: 1px solid transparent; // Add transparent border for smooth transitions
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+
+  // Child items (linked files) - indent and style differently
+  &.is-child {
+    margin-left: 32px;
+    background-color: #f8f9fa;
+    border-left: 3px solid #dee2e6;
+    min-height: 40px;
+
+    &:hover {
+      background-color: #e9ecef;
+      transform: translateX(2px);
+    }
+
+    .item-icon {
+      font-size: 20px;
+      color: #6c757d;
+    }
+
+    .item-primary {
+      font-size: 13px;
+      color: #495057;
+    }
+
+    // Preserve child indent when highlighted/selected
+    &.highlighted,
+    &.selected {
+      background-color: rgba(255, 102, 0, 0.12);
+      border-left: 2px solid rgba(255, 102, 0, 0.6) !important;
+      border-right: 2px solid rgba(255, 102, 0, 0.6) !important;
+      border-top: none !important;
+      border-bottom: none !important;
+      padding-left: 14px !important;
+      padding-right: 14px !important;
+      padding-top: 10px;
+      padding-bottom: 10px;
+      margin-left: 32px !important; // Maintain indent
+    }
+
+    // Child-specific edge styles
+    &.highlighted.selection-edge-top,
+    &.selected.selection-edge-top {
+      border-top: 2px solid rgba(255, 102, 0, 0.6) !important;
+      padding-top: 9px !important;
+      margin-left: 32px !important;
+    }
+
+    &.highlighted.selection-edge-bottom,
+    &.selected.selection-edge-bottom {
+      border-bottom: 2px solid rgba(255, 102, 0, 0.6) !important;
+      padding-bottom: 9px !important;
+      margin-left: 32px !important;
+    }
+
+    &.highlighted.selection-edge-top.selection-edge-bottom,
+    &.selected.selection-edge-top.selection-edge-bottom {
+      border: 2px solid rgba(255, 102, 0, 0.6) !important;
+      padding: 9px 14px !important;
+      margin-left: 32px !important;
+    }
+  }
+
+  // Parent items (items with children)
+  &.is-parent {
+    font-weight: 500;
+    border-bottom: 1px solid #dee2e6;
+
+    // Ensure parent items can be highlighted and selected
+    &.highlighted,
+    &.selected {
+      background-color: rgba(255, 102, 0, 0.12) !important;
+      border-left: 2px solid rgba(255, 102, 0, 0.6) !important;
+      border-right: 2px solid rgba(255, 102, 0, 0.6) !important;
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    &.highlighted.selection-edge-top,
+    &.selected.selection-edge-top {
+      border-top: 2px solid rgba(255, 102, 0, 0.6) !important;
+    }
+
+    &.highlighted.selection-edge-bottom,
+    &.selected.selection-edge-bottom {
+      border-bottom: 2px solid rgba(255, 102, 0, 0.6) !important;
+    }
+
+    &.highlighted.selection-edge-top.selection-edge-bottom,
+    &.selected.selection-edge-top.selection-edge-bottom {
+      border: 2px solid rgba(255, 102, 0, 0.6) !important;
+    }
+  }
+
+  // Ghost parent reference (for children in different week groups)
+  &.is-ghost-parent {
+    opacity: 0.6;
+    background-color: #f8f9fa;
+    border-left: 3px solid #adb5bd;
+    cursor: pointer;
+    min-height: 22px; // Half height
+    padding: 4px 16px; // Reduced padding
+    font-style: italic;
+
+    &:hover {
+      opacity: 0.8;
+      background-color: #e9ecef;
+      border-left-color: #6c757d;
+    }
+
+    .item-icon {
+      opacity: 0.7;
+      font-size: 16px; // Smaller icon
+      width: 16px;
+      height: 16px;
+    }
+
+    .item-primary {
+      font-size: 12px; // Smaller text
+      color: #6c757d;
+
+      &::before {
+        content: '↑ Parent: ';
+        font-weight: 600;
+        margin-right: 4px;
+      }
+    }
+
+    // Hide secondary text and metadata for ghosts
+    .item-secondary {
+      display: none;
+    }
+
+    // Hide metadata (duration, etc.) for ghost parents
+    + .item-metadata {
+      display: none;
+    }
+
+    // Ghost parents cannot be selected
+    &.selected,
+    &.highlighted {
+      background-color: #f8f9fa !important;
+      opacity: 0.6 !important;
+      border: none !important;
+    }
+  }
+
+  // Hide metadata for ghost parents
+  &.is-ghost-parent .item-metadata {
+    display: none;
+  }
+
+  // Ghost child reference (for parents showing their children)
+  &.is-ghost-child {
+    opacity: 0.6;
+    background-color: #f8f9fa;
+    border-left: 3px solid #adb5bd;
+    cursor: pointer;
+    min-height: 22px; // Half height
+    padding: 4px 16px 4px 48px; // Reduced padding, maintain indent
+    font-style: italic;
+
+    &:hover {
+      opacity: 0.8;
+      background-color: #e9ecef;
+      border-left-color: #6c757d;
+    }
+
+    .item-icon {
+      opacity: 0.7;
+      font-size: 16px; // Smaller icon
+      width: 16px;
+      height: 16px;
+    }
+
+    .item-primary {
+      font-size: 12px; // Smaller text
+      color: #6c757d;
+
+      &::before {
+        content: '↓ Child: ';
+        font-weight: 600;
+        margin-right: 4px;
+      }
+    }
+
+    // Hide secondary text and metadata for ghosts
+    .item-secondary {
+      display: none;
+    }
+
+    // Ghost children cannot be selected
+    &.selected,
+    &.highlighted {
+      background-color: #f8f9fa !important;
+      opacity: 0.6 !important;
+      border: none !important;
+    }
+  }
+
+  // Hide metadata for ghost children
+  &.is-ghost-child .item-metadata {
+    display: none;
+  }
+
+  &:hover {
+    background-color: #f8f9fa;
+    transform: translateX(2px);
+  }
+
+  // Highlighted state - show as selected (keyboard navigation cursor)
+  // Highlighted items should be lit up like selections
+  &.highlighted,
+  &.selected {
+    background-color: rgba(255, 102, 0, 0.12);
+    border-left: 2px solid rgba(255, 102, 0, 0.6) !important;
+    border-right: 2px solid rgba(255, 102, 0, 0.6) !important;
+    border-top: none !important;
+    border-bottom: none !important;
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  // Top edge - add top border (for both highlighted and selected)
+  &.highlighted.selection-edge-top,
+  &.selected.selection-edge-top {
+    border-top: 2px solid rgba(255, 102, 0, 0.6) !important;
+    padding-top: 9px !important;
+  }
+
+  // Bottom edge - add bottom border (for both highlighted and selected)
+  &.highlighted.selection-edge-bottom,
+  &.selected.selection-edge-bottom {
+    border-bottom: 2px solid rgba(255, 102, 0, 0.6) !important;
+    padding-bottom: 9px !important;
+  }
+
+  // When an item has both top and bottom edges (single item)
+  &.highlighted.selection-edge-top.selection-edge-bottom,
+  &.selected.selection-edge-top.selection-edge-bottom {
+    border: 2px solid rgba(255, 102, 0, 0.6) !important;
+    padding: 9px 14px !important;
+  }
+}
+
+// Glow pulse animation for light mode (full glow for highlighted items)
+@keyframes glowPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 12px rgba(255, 102, 0, 0.4),
+      0 0 24px rgba(255, 102, 0, 0.25),
+      inset 0 0 10px rgba(255, 102, 0, 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 16px rgba(255, 102, 0, 0.5),
+      0 0 32px rgba(255, 102, 0, 0.35),
+      inset 0 0 12px rgba(255, 102, 0, 0.2);
+  }
+}
+
+// Lighter edge glow animation (for selection edges only)
+@keyframes glowPulseEdge {
+  0%, 100% {
+    box-shadow:
+      -6px 0 16px rgba(255, 102, 0, 0.4),
+      6px 0 16px rgba(255, 102, 0, 0.4),
+      0 0 12px rgba(255, 102, 0, 0.4),
+      inset 0 0 4px rgba(255, 102, 0, 0.1);
+  }
+  50% {
+    box-shadow:
+      -6px 0 20px rgba(255, 102, 0, 0.5),
+      6px 0 20px rgba(255, 102, 0, 0.5),
+      0 0 16px rgba(255, 102, 0, 0.5),
+      inset 0 0 6px rgba(255, 102, 0, 0.15);
+  }
+}
+
+// Glow pulse animation for dark mode (full glow for highlighted items)
+@keyframes glowPulseDark {
+  0%, 100% {
+    box-shadow:
+      0 0 15px rgba(255, 102, 0, 0.5),
+      0 0 30px rgba(255, 102, 0, 0.35),
+      inset 0 0 12px rgba(255, 102, 0, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 20px rgba(255, 102, 0, 0.6),
+      0 0 40px rgba(255, 102, 0, 0.45),
+      inset 0 0 15px rgba(255, 102, 0, 0.25);
+  }
+}
+
+// Lighter edge glow animation for dark mode (for selection edges only)
+@keyframes glowPulseEdgeDark {
+  0%, 100% {
+    box-shadow:
+      -8px 0 20px rgba(255, 102, 0, 0.5),
+      8px 0 20px rgba(255, 102, 0, 0.5),
+      0 0 16px rgba(255, 102, 0, 0.5),
+      inset 0 0 6px rgba(255, 102, 0, 0.15);
+  }
+  50% {
+    box-shadow:
+      -8px 0 24px rgba(255, 102, 0, 0.6),
+      8px 0 24px rgba(255, 102, 0, 0.6),
+      0 0 20px rgba(255, 102, 0, 0.6),
+      inset 0 0 8px rgba(255, 102, 0, 0.2);
+  }
+}
+
+// Status Indicator
+.item-card .status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+// Icon
+.item-card .item-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  color: #6c757d;
+  flex-shrink: 0;
+}
+
+// Content
+.item-card .item-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  position: relative;
+
+  .item-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    background-color: #e9ecef;
+    color: #495057;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .item-primary {
+    font-size: 13px;
+    font-weight: 500;
+    color: #212529;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .item-secondary {
+    font-size: 11px;
+    color: #6c757d;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+// Metadata (duration, size, etc.) - displayed on the right
+.item-card .item-metadata {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6c757d;
+  white-space: nowrap;
+  margin-left: auto;
+  padding-left: 16px;
+  font-variant-numeric: tabular-nums; // Use monospace numbers for alignment
+  letter-spacing: 0.5px;
+}
+
+// Custom action buttons (delete, remove, etc.) - displayed on the right
+.item-card .item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: 8px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+
+  ::ng-deep button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      line-height: 18px;
+    }
+  }
+}
+
+// Show actions on hover
+.item-card:hover .item-actions {
+  opacity: 1;
+}
+
+// Progress Bar
+.item-card .item-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+
+  .progress-fill {
+    height: 100%;
+    background-color: #ff6600;
+    transition: width 0.3s ease-out;
+    position: relative;
+
+    // Animated shimmer effect for active progress
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.3) 50%,
+        transparent 100%
+      );
+      animation: shimmer 2s infinite;
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+// ==================================================
+// CASCADE CHILDREN (Hierarchical Ghost Items)
+// ==================================================
+
+// Expand/collapse toggle button
+.item-card .expand-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-right: -4px; // Pull closer to icon
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #6c757d;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #495057;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+    transition: transform 0.2s ease;
+  }
+}
+
+// Master progress bar (calculated from children)
+.item-card .master-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px; // Slightly taller than regular progress
+  background-color: rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff6600 0%, #ff8833 100%); // Gradient to differentiate
+    transition: width 0.3s ease-out;
+    position: relative;
+
+    // Animated shimmer effect
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 100%
+      );
+      animation: shimmer 2s infinite;
+    }
+  }
+}
+
+// Children container
+.cascade-children {
+  display: flex;
+  flex-direction: column;
+  background-color: #f8f9fa;
+  border-left: 3px solid #dee2e6;
+  margin: 0 0 0 40px; // Indent from parent
+  padding: 4px 0;
+  overflow: hidden; // For animation
+}
+
+// Individual child item
+.cascade-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  min-height: 32px;
+  background-color: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  position: relative;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.03);
+    transform: translateX(2px);
+  }
+
+  // Child icon
+  .child-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    color: #6c757d;
+    flex-shrink: 0;
+    transition: color 0.2s ease;
+  }
+
+  // Child label
+  .child-label {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 500;
+    color: #495057;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // Child metadata
+  .child-metadata {
+    font-size: 11px;
+    color: #6c757d;
+    white-space: nowrap;
+    margin-left: auto;
+    padding-left: 8px;
+  }
+
+  // Child progress bar
+  .child-progress-bar {
+    width: 60px;
+    height: 3px;
+    background-color: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+
+    .progress-fill {
+      height: 100%;
+      background-color: #ff6600;
+      transition: width 0.3s ease-out;
+    }
+  }
+
+  // Child status icon
+  .child-status-icon {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    transition: color 0.2s ease;
+  }
+
+  // Status-based styling
+  &.child-pending {
+    .child-icon,
+    .child-status-icon {
+      color: #adb5bd;
+    }
+
+    .child-label {
+      color: #6c757d;
+    }
+  }
+
+  &.child-active {
+    background-color: rgba(255, 102, 0, 0.08);
+
+    .child-icon,
+    .child-status-icon {
+      color: #ff6600;
+    }
+
+    .child-label {
+      color: #ff6600;
+      font-weight: 600;
+    }
+
+    .child-progress-bar .progress-fill {
+      background-color: #ff6600;
+
+      // Active shimmer animation
+      &::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        right: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255, 255, 255, 0.5) 50%,
+          transparent 100%
+        );
+        animation: shimmer 1.5s infinite;
+      }
+    }
+  }
+
+  &.child-completed {
+    .child-icon,
+    .child-status-icon {
+      color: #28a745;
+    }
+
+    .child-label {
+      color: #495057;
+      text-decoration: line-through;
+      opacity: 0.7;
+    }
+  }
+
+  &.child-failed {
+    .child-icon,
+    .child-status-icon {
+      color: #dc3545;
+    }
+
+    .child-label {
+      color: #dc3545;
+    }
+  }
+
+  &.child-skipped {
+    opacity: 0.5;
+
+    .child-icon,
+    .child-status-icon {
+      color: #adb5bd;
+    }
+
+    .child-label {
+      color: #6c757d;
+      text-decoration: line-through;
+    }
+  }
+}
+
+// ==================================================
+// Dark Theme Overrides
+// ==================================================
+
+:host-context(.dark-theme),
+:host-context([data-theme="dark"]) {
+  .item-list-container {
+    &::-webkit-scrollbar-track {
+      background: #0a0a0a;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: #333;
+
+      &:hover {
+        background: #555;
+      }
+    }
+  }
+
+  .empty-state {
+    color: #999;
+
+    .empty-icon {
+      color: #666;
+    }
+
+    .empty-message {
+      color: #999;
+    }
+  }
+
+  .group-header {
+    background-color: transparent;
+    border-bottom: 1px solid #1a1a1a;
+    opacity: 0.9;
+
+    &:hover {
+      opacity: 1;
+    }
+
+    .collapse-icon {
+      color: #999;
+    }
+
+    .group-label {
+      color: #aaa;
+    }
+
+    .group-count {
+      color: #888;
+    }
+  }
+
+  .item-card {
+    background-color: #1a1a1a;
+    border-bottom: 1px solid #0a0a0a;
+
+    // Child items (linked files) - indent and style differently in dark mode
+    &.is-child {
+      margin-left: 32px;
+      background-color: #242424;
+      border-left: 3px solid #404040;
+
+      &:hover {
+        background-color: #2a2a2a;
+        transform: translateX(2px);
+      }
+
+      .item-icon {
+        font-size: 20px;
+        color: #888;
+      }
+
+      .item-primary {
+        font-size: 13px;
+        color: #bbb;
+      }
+
+      // Preserve child indent when highlighted/selected in dark mode
+      &.highlighted,
+      &.selected {
+        background-color: rgba(255, 102, 0, 0.18);
+        border-left: 2px solid rgba(255, 102, 0, 0.7) !important;
+        border-right: 2px solid rgba(255, 102, 0, 0.7) !important;
+        border-top: none !important;
+        border-bottom: none !important;
+        padding-left: 14px !important;
+        padding-right: 14px !important;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        margin-left: 32px !important; // Maintain indent
+      }
+
+      // Child-specific edge styles in dark mode
+      &.highlighted.selection-edge-top,
+      &.selected.selection-edge-top {
+        border-top: 2px solid rgba(255, 102, 0, 0.7) !important;
+        padding-top: 9px !important;
+        margin-left: 32px !important;
+      }
+
+      &.highlighted.selection-edge-bottom,
+      &.selected.selection-edge-bottom {
+        border-bottom: 2px solid rgba(255, 102, 0, 0.7) !important;
+        padding-bottom: 9px !important;
+        margin-left: 32px !important;
+      }
+
+      &.highlighted.selection-edge-top.selection-edge-bottom,
+      &.selected.selection-edge-top.selection-edge-bottom {
+        border: 2px solid rgba(255, 102, 0, 0.7) !important;
+        padding: 9px 14px !important;
+        margin-left: 32px !important;
+      }
+    }
+
+    // Parent items (items with children) in dark mode
+    &.is-parent {
+      font-weight: 500;
+      border-bottom: 1px solid #333;
+
+      // Ensure parent items can be highlighted and selected in dark mode
+      &.highlighted,
+      &.selected {
+        background-color: rgba(255, 102, 0, 0.18) !important;
+        border-left: 2px solid rgba(255, 102, 0, 0.7) !important;
+        border-right: 2px solid rgba(255, 102, 0, 0.7) !important;
+        border-top: none !important;
+        border-bottom: none !important;
+      }
+
+      &.highlighted.selection-edge-top,
+      &.selected.selection-edge-top {
+        border-top: 2px solid rgba(255, 102, 0, 0.7) !important;
+      }
+
+      &.highlighted.selection-edge-bottom,
+      &.selected.selection-edge-bottom {
+        border-bottom: 2px solid rgba(255, 102, 0, 0.7) !important;
+      }
+
+      &.highlighted.selection-edge-top.selection-edge-bottom,
+      &.selected.selection-edge-top.selection-edge-bottom {
+        border: 2px solid rgba(255, 102, 0, 0.7) !important;
+      }
+    }
+
+    // Ghost parent reference in dark mode
+    &.is-ghost-parent {
+      opacity: 0.6;
+      background-color: #242424;
+      border-left: 3px solid #555;
+      min-height: 22px; // Half height
+      padding: 4px 16px; // Reduced padding
+
+      &:hover {
+        opacity: 0.8;
+        background-color: #2a2a2a;
+        border-left-color: #777;
+      }
+
+      .item-icon {
+        opacity: 0.7;
+        font-size: 16px; // Smaller icon
+        width: 16px;
+        height: 16px;
+      }
+
+      .item-primary {
+        color: #999;
+        font-size: 12px; // Smaller text
+      }
+
+      // Hide secondary text for ghosts in dark mode
+      .item-secondary {
+        display: none;
+      }
+
+      // Ghost parents cannot be selected in dark mode
+      &.selected,
+      &.highlighted {
+        background-color: #242424 !important;
+        opacity: 0.6 !important;
+        border: none !important;
+      }
+    }
+
+    // Hide metadata for ghost parents in dark mode
+    &.is-ghost-parent .item-metadata {
+      display: none;
+    }
+
+    // Ghost child reference in dark mode
+    &.is-ghost-child {
+      opacity: 0.6;
+      background-color: #242424;
+      border-left: 3px solid #555;
+      min-height: 22px; // Half height
+      padding: 4px 16px 4px 48px; // Reduced padding, maintain indent
+
+      &:hover {
+        opacity: 0.8;
+        background-color: #2a2a2a;
+        border-left-color: #777;
+      }
+
+      .item-icon {
+        opacity: 0.7;
+        font-size: 16px; // Smaller icon
+        width: 16px;
+        height: 16px;
+      }
+
+      .item-primary {
+        color: #999;
+        font-size: 12px; // Smaller text
+      }
+
+      // Hide secondary text for ghosts in dark mode
+      .item-secondary {
+        display: none;
+      }
+
+      // Ghost children cannot be selected in dark mode
+      &.selected,
+      &.highlighted {
+        background-color: #242424 !important;
+        opacity: 0.6 !important;
+        border: none !important;
+      }
+    }
+
+    // Hide metadata for ghost children in dark mode
+    &.is-ghost-child .item-metadata {
+      display: none;
+    }
+
+    &:hover {
+      background-color: #222;
+      transform: translateX(2px);
+    }
+
+    // Highlighted and selected state - show as selected in dark mode
+    &.highlighted,
+    &.selected {
+      background-color: rgba(255, 102, 0, 0.18);
+      border-left: 2px solid rgba(255, 102, 0, 0.7) !important;
+      border-right: 2px solid rgba(255, 102, 0, 0.7) !important;
+      border-top: none !important;
+      border-bottom: none !important;
+      padding-left: 14px !important;
+      padding-right: 14px !important;
+      padding-top: 10px;
+      padding-bottom: 10px;
+      transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    // Top edge - add top border (for both highlighted and selected)
+    &.highlighted.selection-edge-top,
+    &.selected.selection-edge-top {
+      border-top: 2px solid rgba(255, 102, 0, 0.7) !important;
+      padding-top: 9px !important;
+    }
+
+    // Bottom edge - add bottom border (for both highlighted and selected)
+    &.highlighted.selection-edge-bottom,
+    &.selected.selection-edge-bottom {
+      border-bottom: 2px solid rgba(255, 102, 0, 0.7) !important;
+      padding-bottom: 9px !important;
+    }
+
+    // When an item has both top and bottom edges (single item)
+    &.highlighted.selection-edge-top.selection-edge-bottom,
+    &.selected.selection-edge-top.selection-edge-bottom {
+      border: 2px solid rgba(255, 102, 0, 0.7) !important;
+      padding: 9px 14px !important;
+    }
+
+    .item-icon {
+      color: #999;
+    }
+
+    .item-content {
+      .item-badge {
+        background-color: #2a2a2a;
+        color: #aaa;
+      }
+
+      .item-primary {
+        color: #fff;
+      }
+
+      .item-secondary {
+        color: #999;
+      }
+    }
+
+    .item-metadata {
+      color: #999;
+    }
+
+    .item-actions {
+      ::ng-deep button mat-icon {
+        color: #999;
+      }
+    }
+
+    .item-progress-bar {
+      background-color: rgba(255, 255, 255, 0.05);
+    }
+  }
+
+  // ==================================================
+  // CASCADE CHILDREN - Dark Theme
+  // ==================================================
+
+  // Expand/collapse toggle in dark mode
+  .item-card .expand-toggle {
+    color: #999;
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+      color: #ccc;
+    }
+  }
+
+  // Master progress bar in dark mode
+  .item-card .master-progress-bar {
+    background-color: rgba(255, 255, 255, 0.08);
+
+    .progress-fill {
+      background: linear-gradient(90deg, #ff6600 0%, #ff8833 100%);
+    }
+  }
+
+  // Children container in dark mode
+  .cascade-children {
+    background-color: #242424;
+    border-left: 3px solid #404040;
+  }
+
+  // Individual child in dark mode
+  .cascade-child {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    .child-icon {
+      color: #999;
+    }
+
+    .child-label {
+      color: #bbb;
+    }
+
+    .child-metadata {
+      color: #888;
+    }
+
+    .child-progress-bar {
+      background-color: rgba(255, 255, 255, 0.08);
+
+      .progress-fill {
+        background-color: #ff6600;
+      }
+    }
+
+    .child-status-icon {
+      color: #888;
+    }
+
+    // Status-based styling in dark mode
+    &.child-pending {
+      .child-icon,
+      .child-status-icon {
+        color: #666;
+      }
+
+      .child-label {
+        color: #888;
+      }
+    }
+
+    &.child-active {
+      background-color: rgba(255, 102, 0, 0.15);
+
+      .child-icon,
+      .child-status-icon {
+        color: #ff8833;
+      }
+
+      .child-label {
+        color: #ff8833;
+      }
+    }
+
+    &.child-completed {
+      .child-icon,
+      .child-status-icon {
+        color: #4caf50;
+      }
+
+      .child-label {
+        color: #bbb;
+      }
+    }
+
+    &.child-failed {
+      .child-icon,
+      .child-status-icon {
+        color: #f44336;
+      }
+
+      .child-label {
+        color: #f44336;
+      }
+    }
+
+    &.child-skipped {
+      opacity: 0.5;
+
+      .child-icon,
+      .child-status-icon {
+        color: #666;
+      }
+
+      .child-label {
+        color: #888;
+      }
+    }
+  }
+}

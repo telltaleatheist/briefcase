@@ -1,0 +1,87 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.playhead {
+  position: absolute;
+  top: -65px; // Extend above timeline
+  height: calc(100% + 65px); // Make taller to extend upward
+  pointer-events: none;
+  z-index: 3;
+}
+
+.playhead-line {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 100%;
+  background-color: #212529; // Light theme default
+  transform: translateX(-50%);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+}
+
+.playhead-handle {
+  position: absolute;
+  top: 0; // Position at very top of the playhead container
+  left: 50%;
+  width: 16px; // Made slightly larger for easier clicking
+  height: 16px;
+  background-color: #ffffff;
+  border: 2px solid #ff6600;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); // Light theme shadow
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  &:hover {
+    transform: translateX(-50%) scale(1.2);
+    box-shadow: 0 0 8px rgba(255, 102, 0, 0.6);
+  }
+}
+
+// ========================================
+// Dark Theme Support
+// ========================================
+:host-context([data-theme="dark"]),
+:host-context(.dark-theme) {
+  .playhead-line {
+    background-color: #fff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+  }
+
+  .playhead-handle {
+    background-color: #fff;
+    border: 2px solid #ff6600;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+
+    &:hover {
+      box-shadow: 0 0 8px rgba(255, 102, 0, 0.8);
+    }
+  }
+}
+
+// ========================================
+// Global Dark Theme Override
+// ========================================
+::ng-deep {
+  [data-theme="dark"],
+  .dark-theme {
+    app-timeline-playhead {
+      .playhead-line {
+        background-color: #fff !important;
+      }
+    }
+  }
+}

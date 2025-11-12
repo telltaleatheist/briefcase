@@ -1,12 +1,10 @@
 import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, HostListener, ViewChild, ElementRef, TemplateRef, ContentChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import { trigger, state, style, transition, animate } from '@angular/animations';
 import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatMenuModule } from '@angular/material/menu';
 import { Subscription } from 'rxjs';
-import { ItemSelectionService } from './item-selection.service';
+import { CascadeSelectionService } from '../../services/cascade-selection.service';
 import {
   ListItem,
   ItemGroup,
@@ -16,25 +14,34 @@ import {
   SelectionMode,
   ItemStatus,
   ItemProgress,
-  ContextMenuAction
-} from './item-list.types';
+  ContextMenuAction,
+  CascadeItem,
+  CascadeChild,
+  CascadeChildStatus,
+  ChildrenConfig
+} from '../../types/cascade.types';
 
 @Component({
-  selector: 'app-item-list',
+  selector: 'cascade-list',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    MatIconModule,
-    MatButtonModule,
-    MatTooltipModule,
-    MatMenuModule
-  ],
-  providers: [ItemSelectionService],
-  templateUrl: './item-list.component.html',
-  styleUrls: ['./item-list.component.scss']
+  imports: [CommonModule, MatIconModule, MatTooltipModule],
+  providers: [CascadeSelectionService],
+  templateUrl: './cascade-list.component.html',
+  styleUrls: ['./cascade-list.component.scss'],
+  animations: [
+    trigger('expandCollapse', [
+      transition(':enter', [
+        style({ height: 0, opacity: 0, overflow: 'hidden' }),
+        animate('200ms ease-out', style({ height: '*', opacity: 1 }))
+      ]),
+      transition(':leave', [
+        style({ height: '*', opacity: 1, overflow: 'hidden' }),
+        animate('150ms ease-in', style({ height: 0, opacity: 0 }))
+      ])
+    ])
+  ]
 })
-export class ItemListComponent<T extends ListItem = ListItem> implements OnInit, OnDestroy, OnChanges {
+export class CascadeListComponent<T extends ListItem = ListItem> implements OnInit, OnDestroy, OnChanges {
   // ========================================
   // Inputs
   // ========================================
@@ -53,6 +60,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   };
   @Input() selectionMode: SelectionMode = SelectionMode.Multiple;
   @Input() selectedItemIds: Set<string> = new Set(); // External selection state to sync with
+  @Input() highlightedItemId: string | null = null; // External highlighted state to sync with
   @Input() contextMenuActions: ContextMenuAction[] = [];
   @Input() emptyMessage = 'No items to display';
   @Input() emptyIcon = 'inbox';
@@ -63,6 +71,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   // Progress configuration
   @Input() progressMapper?: (item: T) => ItemProgress | null;
   @Input() progressVersion: number = 0; // Increment this to force progress cache clear
+
+  // Cascade-specific configuration (hierarchical children)
+  @Input() childrenConfig?: ChildrenConfig<T>;
 
   // Custom action template (for buttons like delete, remove, etc.)
   @ContentChild('itemActions') itemActionsTemplate: TemplateRef<any> | null = null;
@@ -83,6 +94,11 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   @Output() groupToggle = new EventEmitter<{ groupId: string; collapsed: boolean }>();
   @Output() groupSelect = new EventEmitter<{ groupId: string; items: T[] }>();
 
+  // Cascade-specific outputs
+  @Output() childrenExpanded = new EventEmitter<{ item: T }>();
+  @Output() childrenCollapsed = new EventEmitter<{ item: T }>();
+  @Output() childClicked = new EventEmitter<{ parent: T; child: CascadeChild }>();
+
   // ========================================
   // Internal State
   // ========================================
@@ -97,9 +113,12 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   selectedGroups = new Set<string>();
   private subscriptions = new Subscription();
 
+  // Cascade: Track expanded items
+  expandedItems = new Set<string>();
+
   // Type-ahead
   private typeAheadBuffer = '';
-  private typeAheadTimer: any;
+  private typeAheadTimer:  any;
 
   // Editing state (for inline editing)
   editingItems: { [itemId: string]: { [field: string]: boolean } } = {};
@@ -110,7 +129,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   private iconCache = new Map<string, string>();
   private badgeCache = new Map<string, string | null>();
 
-  constructor(private selectionService: ItemSelectionService) {}
+  constructor(private selectionService: CascadeSelectionService) {}
 
   // ========================================
   // Lifecycle
@@ -118,6 +137,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   ngOnInit() {
     this.updateGroupedItems();
+    this.initializeExpandedState(); // Initialize cascade expanded state
 
     // Subscribe to selection changes
     this.subscriptions.add(
@@ -153,6 +173,11 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
       this.syncExternalSelection();
     }
 
+    // Sync external highlighted state
+    if (changes['highlightedItemId']) {
+      this.syncExternalHighlighted();
+    }
+
     // Then update grouped items
     this.updateGroupedItems();
 
@@ -183,6 +208,27 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
       this.selectionService.clear();
       if (externalSelected.size > 0) {
         this.selectionService.selectAll([...externalSelected]);
+      }
+    }
+  }
+
+  /**
+   * Sync highlighted item with external state
+   * This ensures the child's internal state matches the parent's single source of truth
+   */
+  private syncExternalHighlighted() {
+    const currentHighlighted = this.selectionService.getHighlighted();
+    const externalHighlighted = this.highlightedItemId;
+
+    // Only sync if there's a difference (prevents unnecessary updates)
+    if (currentHighlighted !== externalHighlighted) {
+      if (externalHighlighted) {
+        this.selectionService.setHighlighted(externalHighlighted);
+        // Scroll to the highlighted item
+        this.scrollToItem(externalHighlighted);
+      } else {
+        // Clear highlighted state if external is null
+        this.selectionService.setHighlighted(null);
       }
     }
   }
@@ -683,12 +729,6 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
       }
     }
 
-    // Emit the highlighted item change
-    const highlightedItem = this.items.find(i => i.id === newItemId);
-    if (highlightedItem) {
-      this.itemHighlighted.emit(highlightedItem);
-    }
-
     // Scroll into view
     this.scrollToItem(newItemId);
   }
@@ -733,9 +773,6 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     if (deselected.length > 0) {
       this.itemsDeselected.emit(deselected);
     }
-
-    // Emit the highlighted item change
-    this.itemHighlighted.emit(newItem);
 
     // Scroll into view
     this.scrollToItem(newItem.id);
@@ -907,6 +944,158 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     const progress = this.progressMapper(item);
     this.progressCache.set(item.id, progress);
     return progress;
+  }
+
+  // ========================================
+  // Cascade: Hierarchical Children Methods
+  // ========================================
+
+  /**
+   * Check if an item has children (ghost items)
+   */
+  hasChildren(item: T): boolean {
+    if (!this.childrenConfig?.enabled) return false;
+
+    // Check if item has children property
+    const cascadeItem = item as unknown as CascadeItem;
+    if (cascadeItem.children && cascadeItem.children.length > 0) {
+      return true;
+    }
+
+    // Check if generator would create children
+    if (this.childrenConfig.generator) {
+      const generated = this.childrenConfig.generator(item);
+      return generated && generated.length > 0;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get children for an item
+   */
+  getChildren(item: T): CascadeChild[] {
+    if (!this.childrenConfig?.enabled) return [];
+
+    const cascadeItem = item as unknown as CascadeItem;
+
+    // Return existing children if present
+    if (cascadeItem.children && cascadeItem.children.length > 0) {
+      return cascadeItem.children;
+    }
+
+    // Generate children dynamically
+    if (this.childrenConfig.generator) {
+      return this.childrenConfig.generator(item) || [];
+    }
+
+    return [];
+  }
+
+  /**
+   * Check if an item is expanded
+   */
+  isExpanded(item: T): boolean {
+    return this.expandedItems.has(item.id);
+  }
+
+  /**
+   * Toggle expand/collapse state of an item
+   */
+  toggleExpanded(itemId: string, event?: Event): void {
+    if (event) {
+      event.stopPropagation();
+    }
+
+    const item = this.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    if (this.expandedItems.has(itemId)) {
+      this.expandedItems.delete(itemId);
+      this.childrenCollapsed.emit({ item });
+    } else {
+      this.expandedItems.add(itemId);
+      this.childrenExpanded.emit({ item });
+    }
+  }
+
+  /**
+   * Get master progress for an item (calculated from children)
+   */
+  getMasterProgress(item: T): number | null {
+    if (!this.childrenConfig?.showMasterProgress) return null;
+    if (!this.hasChildren(item)) return null;
+
+    const cascadeItem = item as unknown as CascadeItem;
+
+    // Use custom calculator if provided
+    if (this.childrenConfig.masterProgressCalculator) {
+      return this.childrenConfig.masterProgressCalculator(item);
+    }
+
+    // Use pre-calculated master progress if available
+    if (typeof cascadeItem.masterProgress === 'number') {
+      return cascadeItem.masterProgress;
+    }
+
+    // Calculate average from children's progress
+    const children = this.getChildren(item);
+    if (children.length === 0) return null;
+
+    const progressValues = children
+      .map(c => c.progress?.value)
+      .filter((v): v is number => typeof v === 'number');
+
+    if (progressValues.length === 0) return null;
+
+    const sum = progressValues.reduce((a, b) => a + b, 0);
+    return Math.round(sum / progressValues.length);
+  }
+
+  /**
+   * Get Material icon for child status
+   */
+  getChildStatusIcon(status?: CascadeChildStatus): string {
+    switch (status) {
+      case 'completed':
+        return 'check_circle';
+      case 'active':
+        return 'pending';
+      case 'failed':
+        return 'error';
+      case 'skipped':
+        return 'remove_circle_outline';
+      case 'pending':
+      default:
+        return 'radio_button_unchecked';
+    }
+  }
+
+  /**
+   * Handle click on a child item
+   */
+  handleChildClick(parent: T, child: CascadeChild, event: Event): void {
+    event.stopPropagation();
+
+    if (this.childrenConfig?.clickable !== false) {
+      this.childClicked.emit({ parent, child });
+    }
+  }
+
+  /**
+   * Initialize expanded state on component init
+   */
+  private initializeExpandedState(): void {
+    if (!this.childrenConfig?.enabled) return;
+
+    if (this.childrenConfig.defaultExpanded) {
+      // Expand all items that have children
+      this.items.forEach(item => {
+        if (this.hasChildren(item)) {
+          this.expandedItems.add(item.id);
+        }
+      });
+    }
   }
 
   // ========================================

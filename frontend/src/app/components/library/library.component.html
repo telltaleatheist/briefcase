@@ -354,8 +354,9 @@
     <p>Loading video library...</p>
   </div>
 
-  <!-- Video List with ItemListComponent -->
-  <app-item-list
+  <!-- Video List with CascadeListComponent -->
+  <cascade-list
+    #cascadeList
     *ngIf="filteredVideos.length > 0"
     [items]="videosAsListItems"
     [displayConfig]="listDisplayConfig"
@@ -363,6 +364,7 @@
     [keyboardConfig]="listKeyboardConfig"
     [selectionMode]="SelectionMode.Multiple"
     [selectedItemIds]="selectedVideos"
+    [highlightedItemId]="highlightedVideo?.id || null"
     [contextMenuActions]="listContextMenuActions"
     [statusMapper]="getVideoStatusMapper"
     [progressMapper]="videoProgressMapper"
@@ -376,7 +378,7 @@
     (deleteAction)="onListDeleteAction($event)"
     (contextMenu)="onListContextMenu($event)"
     (contextMenuAction)="onListContextMenuAction($event)">
-  </app-item-list>
+  </cascade-list>
 
   <!-- Inline Editing Overlay for List View (single overlay, positioned as needed) -->
   <div *ngIf="currentlyEditingVideo"

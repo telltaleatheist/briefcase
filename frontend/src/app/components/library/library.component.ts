@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -38,7 +38,7 @@ import { SocketService } from '../../services/socket.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/preview-dialog.component';
-import { ItemListComponent } from '../shared/item-list/item-list.component';
+import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
   ListItem,
   ItemDisplayConfig,
@@ -47,8 +47,11 @@ import {
   SelectionMode,
   ItemStatus,
   ItemProgress,
-  ContextMenuAction
-} from '../shared/item-list/item-list.types';
+  ContextMenuAction,
+  CascadeItem,
+  CascadeChild,
+  ChildrenConfig
+} from '../../libs/cascade/src/lib/types/cascade.types';
 
 interface ClipLibrary {
   id: string;
@@ -91,7 +94,7 @@ interface UnimportedVideo {
     MatSnackBarModule,
     ScrollingModule,
     AngularSplitModule,
-    ItemListComponent
+    CascadeListComponent
   ],
   templateUrl: './library.component.html',
   styleUrls: ['./library.component.scss']
@@ -213,6 +216,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   @ViewChild('contextMenuTrigger') contextMenuTrigger?: MatMenuTrigger;
   @ViewChild('managementContextMenuTrigger') managementContextMenuTrigger?: MatMenuTrigger;
   @ViewChild('fileTypeMenuTrigger') fileTypeMenuTrigger?: MatMenuTrigger;
+  @ViewChild('cascadeList') cascadeList?: CascadeListComponent<DatabaseVideo>;
   videoElement: HTMLVideoElement | null = null;
   isPlaying = false;
 
@@ -310,7 +314,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     private apiService: ApiService,
     private snackBar: MatSnackBar,
     private downloadProgressService: DownloadProgressService,
-    private socketService: SocketService
+    private socketService: SocketService,
+    private cdr: ChangeDetectorRef
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -337,6 +342,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const savedAutoPlay = localStorage.getItem('library-auto-play');
     if (savedAutoPlay !== null) {
       this.autoPlayEnabled = savedAutoPlay === 'true';
+    }
+
+    // Load preview auto-play preference from localStorage
+    const savedPreviewAutoPlay = localStorage.getItem('library-preview-auto-play');
+    if (savedPreviewAutoPlay !== null) {
+      this.previewAutoPlayEnabled = savedPreviewAutoPlay === 'true';
     }
 
     // Load all data in parallel for maximum speed
@@ -4404,7 +4415,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
       canAnalyzeMedia: (video: DatabaseVideo) => this.canAnalyzeMedia(video),
       onAnalyze: (video: DatabaseVideo) => this.analyzeVideo(video),
       onOpenVideoEditor: (video: DatabaseVideo) => this.openVideoPlayer(video),
-      onViewDetails: (video: DatabaseVideo) => this.openMetadataEditor(video)
+      onViewDetails: (video: DatabaseVideo) => this.openMetadataEditor(video),
+      onAutoPlayToggle: (enabled: boolean) => {
+        this.previewAutoPlayEnabled = enabled;
+        localStorage.setItem('library-preview-auto-play', String(enabled));
+      }
     };
 
     this.currentPreviewDialogRef = this.dialog.open(PreviewDialogComponent, {
@@ -4414,28 +4429,32 @@ export class LibraryComponent implements OnInit, OnDestroy {
       maxHeight: '85vh',
       panelClass: 'preview-dialog-panel',
       hasBackdrop: false,
+      autoFocus: false, // Don't steal focus from the list
+      restoreFocus: false, // Don't restore focus on close
       position: {
         top: '100px',
         right: '20px'
       }
     });
 
+    // Explicitly refocus the cascade list after dialog opens
+    setTimeout(() => {
+      this.focusCascadeList();
+    }, 100);
+
     // Handle dialog close
-    this.currentPreviewDialogRef.afterClosed().subscribe(result => {
+    this.currentPreviewDialogRef.afterClosed().subscribe(() => {
       this.currentPreviewDialogRef = null;
-
-      // If user navigated with arrow keys, open preview for next/prev video
-      if (result && result.navigate) {
-        const currentIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo?.id);
-        const nextIndex = currentIndex + result.navigate;
-
-        if (nextIndex >= 0 && nextIndex < this.filteredVideos.length) {
-          this.highlightedVideo = this.filteredVideos[nextIndex];
-          // Reopen preview modal
-          setTimeout(() => this.openPreviewModal(), 100);
-        }
-      }
     });
+  }
+
+  /**
+   * Focus the cascade list so keyboard events work
+   */
+  private focusCascadeList() {
+    if (this.cascadeList && this.cascadeList.listContainer) {
+      this.cascadeList.listContainer.nativeElement.focus();
+    }
   }
 
   /**
@@ -4444,10 +4463,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
   loadPreviewVideo(video: DatabaseVideo) {
     this.highlightedVideo = video;
 
-    // Close and reopen dialog with new video
+    // If dialog is open, just update it; don't close/reopen
     if (this.currentPreviewDialogRef) {
-      this.currentPreviewDialogRef.close();
-      setTimeout(() => this.openPreviewModal(), 100);
+      const componentInstance = this.currentPreviewDialogRef.componentInstance;
+      componentInstance.updateVideoData(video, this.getVideoStreamUrl(video));
     }
   }
 
@@ -4459,6 +4478,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.currentPreviewDialogRef.close();
     }
   }
+
 
 
   /**

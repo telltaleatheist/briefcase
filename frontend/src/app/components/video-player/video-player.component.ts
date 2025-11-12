@@ -21,6 +21,7 @@ import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewe
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
 import { HotkeysService } from '@ngneat/hotkeys';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-video-player',
@@ -80,6 +81,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Track all timers for cleanup
   private timers: Set<any> = new Set();
+
+  // Track all subscriptions for cleanup
+  private subscriptions: Subscription[] = [];
 
   // Transcript state
   transcriptText: string | null = null;
@@ -270,6 +274,10 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy() {
     console.log('[ngOnDestroy] Cleaning up video player');
+
+    // Unsubscribe from ALL keyboard shortcuts to prevent memory leaks
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.subscriptions = [];
 
     // Dispose of video.js player (handles all cleanup automatically)
     if (this.player) {
@@ -509,7 +517,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         }
       });
 
-      // Handle timeupdate event with throttling for performance
+      // Handle timeupdate event
       this.player.on('timeupdate', () => {
         this.currentTime = this.player!.currentTime() || 0;
 
@@ -575,63 +583,119 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   setupKeyboardShortcuts() {
     // Use @ngneat/hotkeys for keyboard shortcut management
     // These shortcuts work globally unless user is typing in an input
+    // ALL shortcuts are stored and unsubscribed on component destroy to prevent memory leaks
 
     // Space: Play/Pause (reset to 1x speed)
-    this.hotkeys.addShortcut({ keys: 'space', preventDefault: true }).subscribe(() => {
-      if (!this.player) return;
-      this.player.playbackRate(1);
-      if (this.player.paused()) {
-        this.player.play();
-      } else {
-        this.player.pause();
-      }
-    });
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'space', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        this.player.playbackRate(1);
+        if (this.player.paused()) {
+          this.player.play();
+        } else {
+          this.player.pause();
+        }
+      })
+    );
 
     // Arrow Left: Seek backward 5 seconds
-    this.hotkeys.addShortcut({ keys: 'arrowleft', preventDefault: true }).subscribe(() => {
-      if (!this.player) return;
-      const currentTime = this.player.currentTime();
-      if (currentTime !== undefined) {
-        const newTime = Math.max(0, currentTime - 5);
-        this.player!.currentTime(newTime);
-      }
-    });
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'arrowleft', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        const currentTime = this.player.currentTime();
+        if (currentTime !== undefined) {
+          const newTime = Math.max(0, currentTime - 5);
+          this.player!.currentTime(newTime);
+        }
+      })
+    );
 
     // Arrow Right: Seek forward 5 seconds
-    this.hotkeys.addShortcut({ keys: 'arrowright', preventDefault: true }).subscribe(() => {
-      if (!this.player) return;
-      const currentTime = this.player.currentTime();
-      if (currentTime !== undefined) {
-        const newTime = Math.min(this.duration, currentTime + 5);
-        this.player!.currentTime(newTime);
-      }
-    });
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'arrowright', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        const currentTime = this.player.currentTime();
+        if (currentTime !== undefined) {
+          const newTime = Math.min(this.duration, currentTime + 5);
+          this.player!.currentTime(newTime);
+        }
+      })
+    );
 
     // F: Toggle fullscreen
-    this.hotkeys.addShortcut({ keys: 'f', preventDefault: true }).subscribe(() => {
-      if (!this.player) return;
-      if (this.player.isFullscreen()) {
-        this.player.exitFullscreen();
-      } else {
-        this.player.requestFullscreen();
-      }
-    });
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'f', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        if (this.player.isFullscreen()) {
+          this.player.exitFullscreen();
+        } else {
+          this.player.requestFullscreen();
+        }
+      })
+    );
 
     // I: Set In point (selection start)
-    this.hotkeys.addShortcut({ keys: 'i', preventDefault: true }).subscribe(() => {
-      this.currentSelection = {
-        startTime: this.currentTime,
-        endTime: Math.max(this.currentTime + 1, this.currentSelection.endTime)
-      };
-    });
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'i', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.setSelectionFromPlayhead();
+        }
+      })
+    );
 
     // O: Set Out point (selection end)
-    this.hotkeys.addShortcut({ keys: 'o', preventDefault: true }).subscribe(() => {
-      this.currentSelection = {
-        startTime: Math.min(this.currentSelection.startTime, this.currentTime - 1),
-        endTime: this.currentTime
-      };
-    });
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'o', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.setSelectionToPlayhead();
+        }
+      })
+    );
+
+    // A: Select cursor tool
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'a', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.selectTool('cursor');
+        }
+      })
+    );
+
+    // R: Select highlight/range tool
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'r', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.selectTool('highlight');
+        }
+      })
+    );
+
+    // J: Rewind / Slow down playback
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'j', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.handleJKey();
+        }
+      })
+    );
+
+    // K: Pause and reset speed to 1x
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'k', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.handleKKey();
+        }
+      })
+    );
+
+    // L: Fast forward / Speed up playback
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'l', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.handleLKey();
+        }
+      })
+    );
   }
 
   seekToTime(seconds: number, sectionIndex?: number) {
