@@ -13,6 +13,7 @@ import { LibraryService } from '../library/library.service';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
+import { MediaEventService } from '../media/media-event.service';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -95,6 +96,7 @@ export class AnalysisService {
     private libraryManagerService: LibraryManagerService,
     private fileScannerService: FileScannerService,
     private databaseService: DatabaseService,
+    private mediaEventService: MediaEventService,
   ) {}
 
   /**
@@ -387,10 +389,47 @@ export class AnalysisService {
       request.videoTitle = downloadResult.title;
 
       this.updateJob(jobId, {
-        progress: 20,
+        progress: 15,
         videoPath: downloadResult.path,
         timing: { ...job.timing, downloadEnd: new Date() },
       });
+
+      // Import video to database immediately so it shows up in library
+      this.updateJob(jobId, {
+        progress: 18,
+        currentPhase: 'Importing to library...',
+      });
+
+      try {
+        const duplicateHandling = new Map<string, 'skip' | 'replace' | 'keep-both'>();
+        duplicateHandling.set(request.videoPath, 'keep-both');
+
+        const importResult = await this.fileScannerService.importVideos([request.videoPath], duplicateHandling);
+        if (importResult.imported.length > 0) {
+          const importedVideoId = importResult.imported[0];
+          request.videoId = importedVideoId; // Store videoId for later use
+          this.updateJob(jobId, { videoId: importedVideoId });
+
+          this.logger.log(`Video imported to library with ID: ${importedVideoId}`);
+
+          // Emit WebSocket event so frontend refreshes immediately
+          this.mediaEventService.emitVideoImported(
+            importedVideoId,
+            path.basename(request.videoPath),
+            request.videoPath
+          );
+
+          this.updateJob(jobId, {
+            progress: 20,
+            currentPhase: 'Import complete, preparing for transcription...',
+          });
+        } else {
+          this.logger.warn('Video import returned no imported IDs');
+        }
+      } catch (error: any) {
+        this.logger.error(`Error importing video: ${(error as Error).message}`);
+        // Continue anyway - transcription can still work without database import
+      }
     } else {
       // Local file - already imported, just set the path
       request.videoPath = request.input;
@@ -804,6 +843,30 @@ export class AnalysisService {
     outputDir: string,
     jobId: string,
   ): Promise<{ path: string; title: string }> {
+    // Fetch metadata first to get proper title for filename
+    let displayName: string | undefined;
+    try {
+      this.logger.log(`Fetching metadata for URL: ${url}`);
+      const videoInfo = await this.downloader.getVideoInfo(url);
+
+      // Create display name with upload date if available (matches batch downloader format)
+      if (videoInfo.uploadDate && videoInfo.title) {
+        displayName = `${videoInfo.uploadDate} ${videoInfo.title}`;
+      } else if (videoInfo.title) {
+        displayName = videoInfo.title;
+      }
+
+      // Truncate if too long (max 200 chars to prevent filesystem issues)
+      if (displayName && displayName.length > 200) {
+        displayName = displayName.substring(0, 197) + '...';
+      }
+
+      this.logger.log(`Fetched metadata - title: ${videoInfo.title}, displayName: ${displayName}`);
+    } catch (error: any) {
+      this.logger.warn(`Failed to fetch metadata for ${url}: ${(error as Error).message || 'Unknown error'}. Will use default naming.`);
+      // Continue without metadata - yt-dlp will use its own title extraction during download
+    }
+
     // Use fast download settings - lowest quality for speed
     const result = await this.downloader.downloadVideo({
       url,
@@ -813,6 +876,7 @@ export class AnalysisService {
       useCookies: false,
       browser: 'auto',
       outputDir,
+      displayName, // Pass the fetched title to use for the filename
     });
 
     // Handle the DownloadResult return type

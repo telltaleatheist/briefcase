@@ -528,6 +528,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     });
 
+    // Subscribe to video imported events from WebSocket
+    this.socketService.onVideoImported().subscribe(async event => {
+      console.log('[LibraryComponent] Video imported event received:', event);
+
+      // Reload videos from the database to include the new video
+      await this.loadVideos();
+
+      console.log('[LibraryComponent] Videos reloaded after import. Total videos:', this.videos.length);
+    });
+
     // Check for query param to highlight a specific video
     this.route.queryParams.subscribe(params => {
       console.log('[LibraryComponent] Query params received:', params);
@@ -4403,17 +4413,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Open the preview modal for the highlighted video
    */
-  openPreviewModal() {
-    if (!this.highlightedVideo) {
-      // If no video highlighted, highlight the first one
-      if (this.filteredVideos.length > 0) {
-        this.highlightedVideo = this.filteredVideos[0];
-      } else {
-        return;
-      }
-    }
-
-    // Position panel on the right side of the screen, below the header and search area
+  /**
+   * Get minimum Y position to keep panel below header
+   */
+  private getMinimumYPosition(): number {
     const header = document.querySelector('.library-header');
     const searchBar = document.querySelector('.search-bar-standalone');
     const accordion = document.querySelector('.search-filters-accordion');
@@ -4439,10 +4442,46 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
 
     // Add some padding below the last element
-    minY += 10;
+    return minY + 10;
+  }
 
-    this.previewPanelX = window.innerWidth - this.previewPanelWidth - 20;
-    this.previewPanelY = minY;
+  openPreviewModal() {
+    if (!this.highlightedVideo) {
+      // If no video highlighted, highlight the first one
+      if (this.filteredVideos.length > 0) {
+        this.highlightedVideo = this.filteredVideos[0];
+      } else {
+        return;
+      }
+    }
+
+    // Calculate minimum Y position (below header)
+    const minY = this.getMinimumYPosition();
+
+    // Calculate initial position
+    let panelX = window.innerWidth - this.previewPanelWidth - 20;
+    let panelY = minY;
+
+    // Ensure the panel is fully visible within viewport bounds
+    const maxX = window.innerWidth - this.previewPanelWidth - 10;
+    const maxY = window.innerHeight - this.previewPanelHeight - 10;
+    const minValidX = 10;
+
+    // Constrain position to viewport (with minY already accounting for header)
+    panelX = Math.max(minValidX, Math.min(maxX, panelX));
+    panelY = Math.max(minY, Math.min(maxY, panelY));
+
+    // If panel would still be off-screen (e.g., window too small), center it
+    if (panelX < minValidX ||
+        panelX + this.previewPanelWidth > window.innerWidth - 10 ||
+        panelY + this.previewPanelHeight > window.innerHeight - 10) {
+      // Center the panel as a fallback
+      panelX = Math.max(minValidX, (window.innerWidth - this.previewPanelWidth) / 2);
+      panelY = Math.max(minY, (window.innerHeight - this.previewPanelHeight) / 2);
+    }
+
+    this.previewPanelX = panelX;
+    this.previewPanelY = panelY;
 
     this.isPreviewModalOpen = true;
 
@@ -4821,7 +4860,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Start dragging the preview panel
    */
   startDragPreviewPanel(event: MouseEvent) {
+    // Don't start dragging if clicking on interactive elements
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'BUTTON' || target.closest('button')) {
+      return;
+    }
+
     event.preventDefault();
+    event.stopPropagation();
     this.isDraggingPreviewPanel = true;
 
     const startX = event.clientX;
@@ -4835,13 +4881,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
 
-      // Get header height to prevent dragging above it
-      const header = document.querySelector('.library-header');
-      const minY = header ? header.getBoundingClientRect().bottom + 10 : 10;
+      // Get minimum Y to prevent dragging above header
+      const minY = this.getMinimumYPosition();
 
       // Keep panel within viewport bounds
-      const maxX = window.innerWidth - this.previewPanelWidth - 20;
-      const maxY = window.innerHeight - 200; // approximate panel height
+      const maxX = window.innerWidth - this.previewPanelWidth - 10;
+      const maxY = window.innerHeight - this.previewPanelHeight - 10;
 
       this.previewPanelX = Math.max(10, Math.min(maxX, startPanelX + deltaX));
       this.previewPanelY = Math.max(minY, Math.min(maxY, startPanelY + deltaY));
@@ -4884,10 +4929,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.previewPanelHeight = newHeight;
 
       // Adjust position if panel goes out of bounds
-      const header = document.querySelector('.library-header');
-      const minY = header ? header.getBoundingClientRect().bottom + 10 : 10;
-      const maxX = window.innerWidth - this.previewPanelWidth - 20;
-      const maxY = window.innerHeight - this.previewPanelHeight - 20;
+      const minY = this.getMinimumYPosition();
+      const maxX = window.innerWidth - this.previewPanelWidth - 10;
+      const maxY = window.innerHeight - this.previewPanelHeight - 10;
 
       this.previewPanelX = Math.max(10, Math.min(maxX, this.previewPanelX));
       this.previewPanelY = Math.max(minY, Math.min(maxY, this.previewPanelY));
@@ -4936,9 +4980,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.previewPanelX = Math.max(10, newX);
 
       // Adjust Y position if panel goes out of bounds
-      const header = document.querySelector('.library-header');
-      const minY = header ? header.getBoundingClientRect().bottom + 10 : 10;
-      const maxY = window.innerHeight - this.previewPanelHeight - 20;
+      const minY = this.getMinimumYPosition();
+      const maxY = window.innerHeight - this.previewPanelHeight - 10;
       this.previewPanelY = Math.max(minY, Math.min(maxY, this.previewPanelY));
     };
 

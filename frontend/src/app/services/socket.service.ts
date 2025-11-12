@@ -330,4 +330,11 @@ export class SocketService {
   onVideoRenamed(): Observable<{ videoId: string; oldFilename: string; newFilename: string; newPath: string; timestamp: string }> {
     return this.listenTo<{ videoId: string; oldFilename: string; newFilename: string; newPath: string; timestamp: string }>('video-renamed');
   }
+
+  /**
+   * Listen for video imported events (when a new video is added to the library)
+   */
+  onVideoImported(): Observable<{ videoId: string; filename: string; filePath: string; timestamp: string }> {
+    return this.listenTo<{ videoId: string; filename: string; filePath: string; timestamp: string }>('video-imported');
+  }
 }

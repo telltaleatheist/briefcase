@@ -1656,11 +1656,13 @@
     min-height: 120px;
     position: relative;
     overflow: hidden;
+    cursor: move; // Show drag cursor on the video container
 
     .preview-video-player {
       width: 100%;
       height: 100%;
       object-fit: contain;
+      cursor: default; // Reset cursor on the actual video element
     }
 
     .preview-audio-player {

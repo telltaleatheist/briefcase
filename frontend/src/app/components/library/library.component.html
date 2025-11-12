@@ -364,6 +364,7 @@
     [groupConfig]="listGroupConfig"
     [keyboardConfig]="listKeyboardConfig"
     [selectionMode]="SelectionMode.Multiple"
+    [selectedItemIds]="selectedVideos"
     [contextMenuActions]="listContextMenuActions"
     [statusMapper]="getVideoStatusMapper"
     [progressMapper]="videoProgressMapper"
@@ -500,24 +501,29 @@
     </div>
 
     <!-- Media Player (Video/Audio/Image) -->
-    <div class="preview-panel-video">
+    <div class="preview-panel-video" (mousedown)="startDragPreviewPanel($event)">
       <!-- Video Player -->
       <video #previewVideoPlayer
              *ngIf="highlightedVideo.media_type === 'video'"
              [src]="getVideoStreamUrl(highlightedVideo)"
              controls
-             class="preview-video-player">
+             class="preview-video-player"
+             (mousedown)="$event.stopPropagation()"
+             (keydown)="$event.stopPropagation()">
       </video>
 
       <!-- Audio Player -->
       <audio *ngIf="highlightedVideo.media_type === 'audio'"
              [src]="getVideoStreamUrl(highlightedVideo)"
              controls
-             class="preview-audio-player">
+             class="preview-audio-player"
+             (mousedown)="$event.stopPropagation()">
       </audio>
 
       <!-- Image Viewer -->
-      <div *ngIf="highlightedVideo.media_type === 'image'" class="image-viewer-container">
+      <div *ngIf="highlightedVideo.media_type === 'image'"
+           class="image-viewer-container"
+           (mousedown)="startDragPreviewPanel($event)">
         <img [src]="getVideoStreamUrl(highlightedVideo)"
              class="preview-image-viewer"
              [alt]="highlightedVideo.filename"
@@ -527,7 +533,8 @@
 
       <!-- Unsupported Media Type Message -->
       <div *ngIf="highlightedVideo.media_type !== 'video' && highlightedVideo.media_type !== 'audio' && highlightedVideo.media_type !== 'image'"
-           class="unsupported-preview">
+           class="unsupported-preview"
+           (mousedown)="startDragPreviewPanel($event)">
         <mat-icon>{{ getMediaTypeIcon(highlightedVideo.media_type) }}</mat-icon>
         <p>{{ getMediaTypeLabel(highlightedVideo.media_type) }} preview not available</p>
         <p class="hint">Open "View Details" to see more information</p>
@@ -535,7 +542,7 @@
     </div>
 
     <!-- Title Section -->
-    <div class="preview-panel-title">
+    <div class="preview-panel-title" (mousedown)="startDragPreviewPanel($event)">
       <span class="video-title">{{ parseFilename(highlightedVideo.filename).title }}</span>
     </div>
 
@@ -564,7 +571,7 @@
     </div>
 
     <!-- Keyboard Hints -->
-    <div class="preview-panel-hints">
+    <div class="preview-panel-hints" (mousedown)="startDragPreviewPanel($event)">
       <span><mat-icon>keyboard</mat-icon> Space</span>
       <span><mat-icon>keyboard</mat-icon> ↑↓</span>
       <span><mat-icon>keyboard</mat-icon> Esc</span>

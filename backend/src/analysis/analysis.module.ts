@@ -11,6 +11,7 @@ import { PathModule } from '../path/path.module';
 import { SharedConfigModule } from '../config/shared-config.module';
 import { LibraryModule } from '../library/library.module';
 import { DatabaseModule } from '../database/database.module';
+import { MediaModule } from '../media/media.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { DatabaseModule } from '../database/database.module';
     SharedConfigModule,
     LibraryModule,
     forwardRef(() => DatabaseModule),
+    forwardRef(() => MediaModule),
   ],
   controllers: [AnalysisController],
   providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService, TextExtractionService],

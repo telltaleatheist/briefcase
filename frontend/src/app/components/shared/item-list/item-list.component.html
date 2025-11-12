@@ -11,9 +11,7 @@
       <!-- Group Header (only show if grouping is enabled) -->
       <div *ngIf="groupConfig?.enabled"
            class="group-header"
-           [class.selected]="isGroupSelected(group.id)"
-           (click)="toggleGroup(group.id)"
-           (click)="handleGroupClick(group, $event)">
+           (click)="toggleGroup(group.id)">
         <mat-icon class="collapse-icon">
           {{ isGroupCollapsed(group.id) ? 'chevron_right' : 'expand_more' }}
         </mat-icon>
@@ -27,8 +25,8 @@
           *ngFor="let item of group.items; let i = index; trackBy: trackByItemId"
           [id]="'item-' + item.id"
           class="item-card"
-          [class.selected]="isItemSelected(item.id)"
-          [class.highlighted]="isItemHighlighted(item.id)"
+          [class.selected]="isItemSelected(item)"
+          [class.highlighted]="isItemHighlighted(item)"
           [class.selection-edge-top]="isSelectionEdgeTop(group.items, i)"
           [class.selection-edge-bottom]="isSelectionEdgeBottom(group.items, i)"
           [class.is-child]="item['isChild']"

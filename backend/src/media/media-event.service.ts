@@ -233,4 +233,17 @@ export class MediaEventService {
       timestamp: this.getTimestamp()
     });
   }
+
+  /**
+   * Video imported event (notify frontend when a new video is added to the library)
+   */
+  emitVideoImported(videoId: string, filename: string, filePath: string): void {
+    this.logger.log(`Emitting video-imported event for ${videoId}: ${filename}`);
+    this.emitEvent('video-imported', {
+      videoId,
+      filename,
+      filePath,
+      timestamp: this.getTimestamp()
+    });
+  }
 }

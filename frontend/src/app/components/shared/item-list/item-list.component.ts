@@ -1,10 +1,12 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, TemplateRef, ContentChild } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, HostListener, ViewChild, ElementRef, TemplateRef, ContentChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
+import { Subscription } from 'rxjs';
+import { ItemSelectionService } from './item-selection.service';
 import {
   ListItem,
   ItemGroup,
@@ -28,10 +30,11 @@ import {
     MatTooltipModule,
     MatMenuModule
   ],
+  providers: [ItemSelectionService],
   templateUrl: './item-list.component.html',
   styleUrls: ['./item-list.component.scss']
 })
-export class ItemListComponent<T extends ListItem = ListItem> implements OnInit, OnDestroy {
+export class ItemListComponent<T extends ListItem = ListItem> implements OnInit, OnDestroy, OnChanges {
   // ========================================
   // Inputs
   // ========================================
@@ -49,6 +52,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     enableEscapeDeselect: true
   };
   @Input() selectionMode: SelectionMode = SelectionMode.Multiple;
+  @Input() selectedItemIds: Set<string> = new Set(); // External selection state to sync with
   @Input() contextMenuActions: ContextMenuAction[] = [];
   @Input() emptyMessage = 'No items to display';
   @Input() emptyIcon = 'inbox';
@@ -89,11 +93,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   groupedItems: ItemGroup<T>[] = [];
   collapsedGroups = new Set<string>();
 
-  // Selection
-  selectedItems = new Set<string>();
-  highlightedItemId: string | null = null;
+  // Selection - now managed by service
   selectedGroups = new Set<string>();
-  private selectionAnchorId: string | null = null; // For Shift+Click and Shift+Arrow range selection
+  private subscriptions = new Subscription();
 
   // Type-ahead
   private typeAheadBuffer = '';
@@ -108,27 +110,81 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   private iconCache = new Map<string, string>();
   private badgeCache = new Map<string, string | null>();
 
+  constructor(private selectionService: ItemSelectionService) {}
+
   // ========================================
   // Lifecycle
   // ========================================
 
   ngOnInit() {
     this.updateGroupedItems();
+
+    // Subscribe to selection changes
+    this.subscriptions.add(
+      this.selectionService.selection$.subscribe(selectedIds => {
+        // Emit selection events when selection changes
+        const selected = this.items.filter(i => selectedIds.has(i.id));
+        if (selected.length > 0) {
+          this.itemsSelected.emit(selected);
+        }
+      })
+    );
+
+    // Subscribe to highlighted changes
+    this.subscriptions.add(
+      this.selectionService.highlighted$.subscribe(highlightedId => {
+        const highlightedItem = highlightedId ? this.items.find(i => i.id === highlightedId) : null;
+        this.itemHighlighted.emit(highlightedItem || null);
+      })
+    );
   }
 
   ngOnDestroy() {
     if (this.typeAheadTimer) {
       clearTimeout(this.typeAheadTimer);
     }
+    this.subscriptions.unsubscribe();
+    this.selectionService.destroy();
   }
 
-  ngOnChanges() {
+  ngOnChanges(changes: SimpleChanges) {
+    // Sync external selection state FIRST (before updating groups)
+    if (changes['selectedItemIds']) {
+      this.syncExternalSelection();
+    }
+
+    // Then update grouped items
     this.updateGroupedItems();
+
     // Clear performance caches when items change
-    this.statusCache.clear();
-    this.progressCache.clear();
-    this.iconCache.clear();
-    this.badgeCache.clear();
+    if (changes['items']) {
+      this.statusCache.clear();
+      this.progressCache.clear();
+      this.iconCache.clear();
+      this.badgeCache.clear();
+    }
+  }
+
+  /**
+   * Sync selection service with external selection state
+   * This ensures the child's internal state matches the parent's single source of truth
+   */
+  private syncExternalSelection() {
+    const currentSelected = new Set(this.selectionService.getSelected());
+    const externalSelected = this.selectedItemIds;
+
+    // Only sync if there's a difference (prevents unnecessary updates)
+    const needsSync =
+      currentSelected.size !== externalSelected.size ||
+      ![...currentSelected].every(id => externalSelected.has(id));
+
+    if (needsSync) {
+      // Clear and resync with external state
+      this.selectionService.clear();
+      if (externalSelected.size > 0) {
+        this.selectionService.selectAll([...externalSelected]);
+      }
+    }
   }
 
   // ========================================
@@ -210,22 +266,20 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   // Selection Logic
   // ========================================
 
-  isItemSelected(itemId: string): boolean {
+  isItemSelected(item: T): boolean {
     // Ghost parents and children can never be selected
-    const item = this.items.find(i => i.id === itemId);
-    if (item && (item['isGhostParent'] || item['isGhostChild'])) {
+    if (item['isGhostParent'] || item['isGhostChild']) {
       return false;
     }
-    return this.selectedItems.has(itemId);
+    return this.selectionService.isSelected(item.id);
   }
 
-  isItemHighlighted(itemId: string): boolean {
+  isItemHighlighted(item: T): boolean {
     // Ghost parents and children can never be highlighted
-    const item = this.items.find(i => i.id === itemId);
-    if (item && (item['isGhostParent'] || item['isGhostChild'])) {
+    if (item['isGhostParent'] || item['isGhostChild']) {
       return false;
     }
-    return this.highlightedItemId === itemId;
+    return this.selectionService.getHighlighted() === item.id;
   }
 
   /**
@@ -234,8 +288,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
    */
   isSelectionEdgeTop(items: T[], index: number): boolean {
     const currentItem = items[index];
+    const highlightedId = this.selectionService.getHighlighted();
     // Item must be either selected OR highlighted
-    const isCurrentActive = this.selectedItems.has(currentItem.id) || this.highlightedItemId === currentItem.id;
+    const isCurrentActive = this.selectionService.isSelected(currentItem.id) || highlightedId === currentItem.id;
     if (!isCurrentActive) {
       return false;
     }
@@ -247,7 +302,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
     // Check if previous item is not selected or highlighted
     const prevItem = items[index - 1];
-    const isPrevActive = this.selectedItems.has(prevItem.id) || this.highlightedItemId === prevItem.id;
+    const isPrevActive = this.selectionService.isSelected(prevItem.id) || highlightedId === prevItem.id;
     return !isPrevActive;
   }
 
@@ -257,8 +312,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
    */
   isSelectionEdgeBottom(items: T[], index: number): boolean {
     const currentItem = items[index];
+    const highlightedId = this.selectionService.getHighlighted();
     // Item must be either selected OR highlighted
-    const isCurrentActive = this.selectedItems.has(currentItem.id) || this.highlightedItemId === currentItem.id;
+    const isCurrentActive = this.selectionService.isSelected(currentItem.id) || highlightedId === currentItem.id;
     if (!isCurrentActive) {
       return false;
     }
@@ -270,7 +326,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
     // Check if next item is not selected or highlighted
     const nextItem = items[index + 1];
-    const isNextActive = this.selectedItems.has(nextItem.id) || this.highlightedItemId === nextItem.id;
+    const isNextActive = this.selectionService.isSelected(nextItem.id) || highlightedId === nextItem.id;
     return !isNextActive;
   }
 
@@ -297,81 +353,37 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     // This allows browsing/navigating items without selecting them
     if (this.selectionMode === SelectionMode.None) {
       // Update highlighted item for visual feedback
-      this.highlightedItemId = item.id;
-      this.itemHighlighted.emit(item);
+      this.selectionService.setHighlighted(item.id);
       return;
     }
 
     // Handle multi-select with Cmd/Ctrl (Finder behavior)
     if ((event.metaKey || event.ctrlKey) && this.selectionMode === SelectionMode.Multiple) {
-      // Finder behavior: If there's a highlighted item that's not selected, select it first
-      const itemsToSelect: T[] = [];
-      if (this.highlightedItemId && !this.selectedItems.has(this.highlightedItemId) && this.highlightedItemId !== item.id) {
-        const highlightedItem = this.items.find(i => i.id === this.highlightedItemId);
-        if (highlightedItem) {
-          this.selectedItems.add(this.highlightedItemId);
-          itemsToSelect.push(highlightedItem);
-        }
-      }
+      const previousSelected = this.selectionService.getSelected();
 
       // Toggle the clicked item
-      const wasSelected = this.selectedItems.has(item.id);
+      this.selectionService.toggle(item.id);
+
+      const nowSelected = this.selectionService.getSelected();
+      const wasSelected = previousSelected.includes(item.id);
+
       if (wasSelected) {
-        this.selectedItems.delete(item.id);
+        // Item was deselected
         this.itemsDeselected.emit([item]);
-
-        // When deselecting, update highlight to another selected item or clear it
-        if (this.selectedItems.size > 0) {
-          // Find the last selected item (or any selected item) to highlight
-          const flatItems = this.getFlatItemList();
-          // Find the closest selected item (prefer items near the deselected one)
-          const itemIndex = flatItems.findIndex(i => i.id === item.id);
-          let newHighlight: T | null = null;
-
-          // Try to find a selected item after this one
-          for (let i = itemIndex + 1; i < flatItems.length; i++) {
-            if (this.selectedItems.has(flatItems[i].id)) {
-              newHighlight = flatItems[i];
-              break;
-            }
-          }
-
-          // If none found, try before
-          if (!newHighlight) {
-            for (let i = itemIndex - 1; i >= 0; i--) {
-              if (this.selectedItems.has(flatItems[i].id)) {
-                newHighlight = flatItems[i];
-                break;
-              }
-            }
-          }
-
-          // If still none found, just pick the first selected item
-          if (!newHighlight) {
-            const firstSelectedId = Array.from(this.selectedItems)[0];
-            newHighlight = flatItems.find(i => i.id === firstSelectedId) || null;
-          }
-
-          this.highlightedItemId = newHighlight?.id || null;
-          this.selectionAnchorId = newHighlight?.id || null;
-          if (newHighlight) {
-            this.itemHighlighted.emit(newHighlight);
-          }
-        } else {
-          // No items selected, clear highlight
-          this.highlightedItemId = null;
-          this.selectionAnchorId = null;
-          this.itemHighlighted.emit(null);
-        }
       } else {
-        this.selectedItems.add(item.id);
-        itemsToSelect.push(item);
-        this.highlightedItemId = item.id;
-        this.selectionAnchorId = item.id; // Update anchor
-      }
+        // Item was selected
+        const itemsToSelect = [item];
 
-      // Emit selection events for all newly selected items
-      if (itemsToSelect.length > 0) {
+        // Finder behavior: If there's a highlighted item that's not selected, select it first
+        const highlightedId = this.selectionService.getHighlighted();
+        if (highlightedId && !previousSelected.includes(highlightedId) && highlightedId !== item.id) {
+          const highlightedItem = this.items.find(i => i.id === highlightedId);
+          if (highlightedItem) {
+            this.selectionService.select(highlightedId, false);
+            itemsToSelect.unshift(highlightedItem);
+          }
+        }
+
         this.itemsSelected.emit(itemsToSelect);
       }
 
@@ -380,21 +392,33 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
     // Handle range select with Shift
     if (event.shiftKey && this.selectionMode === SelectionMode.Multiple) {
-      const anchorId = this.selectionAnchorId || this.highlightedItemId;
-      if (anchorId) {
-        this.selectRange(anchorId, item.id);
+      const flatItems = this.getFlatItemList();
+      const allItemIds = flatItems.map(i => i.id);
+      const previousSelected = this.selectionService.getSelected();
+
+      this.selectionService.selectRange(allItemIds, item.id);
+
+      const nowSelected = this.selectionService.getSelected();
+      const newlySelected = this.items.filter(i => nowSelected.includes(i.id) && !previousSelected.includes(i.id));
+      const deselected = this.items.filter(i => previousSelected.includes(i.id) && !nowSelected.includes(i.id));
+
+      if (newlySelected.length > 0) {
+        this.itemsSelected.emit(newlySelected);
       }
+      if (deselected.length > 0) {
+        this.itemsDeselected.emit(deselected);
+      }
+
       return;
     }
 
     // Single selection
-    const wasSelected = this.selectedItems.has(item.id);
-    const previouslySelected = Array.from(this.selectedItems);
+    const previouslySelected = this.selectionService.getSelected();
+    const wasSelected = previouslySelected.includes(item.id);
 
-    this.selectedItems.clear();
+    this.selectionService.select(item.id, true);
 
     if (!wasSelected) {
-      this.selectedItems.add(item.id);
       this.itemsSelected.emit([item]);
     }
 
@@ -404,64 +428,21 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
         this.itemsDeselected.emit(deselected);
       }
     }
-
-    this.highlightedItemId = item.id;
-    this.selectionAnchorId = item.id; // Update anchor
   }
 
   handleItemDoubleClick(item: T) {
     this.itemDoubleClick.emit(item);
   }
 
-  private selectRange(fromId: string, toId: string) {
-    const flatItems = this.getFlatItemList();
-    const fromIndex = flatItems.findIndex(i => i.id === fromId);
-    const toIndex = flatItems.findIndex(i => i.id === toId);
-
-    if (fromIndex === -1 || toIndex === -1) return;
-
-    const start = Math.min(fromIndex, toIndex);
-    const end = Math.max(fromIndex, toIndex);
-
-    // Finder behavior: Deselect all items outside the range
-    const previouslySelected = Array.from(this.selectedItems);
-    this.selectedItems.clear();
-
-    // Select all items in the range
-    const itemsToSelect: T[] = [];
-    const itemsToDeselect: T[] = [];
-
-    for (let i = start; i <= end; i++) {
-      this.selectedItems.add(flatItems[i].id);
-      if (!previouslySelected.includes(flatItems[i].id)) {
-        itemsToSelect.push(flatItems[i]);
-      }
-    }
-
-    // Find items that were deselected
-    for (const id of previouslySelected) {
-      if (!this.selectedItems.has(id)) {
-        const item = this.items.find(i => i.id === id);
-        if (item) {
-          itemsToDeselect.push(item);
-        }
-      }
-    }
-
-    if (itemsToSelect.length > 0) {
-      this.itemsSelected.emit(itemsToSelect);
-    }
-
-    if (itemsToDeselect.length > 0) {
-      this.itemsDeselected.emit(itemsToDeselect);
-    }
-
-    this.highlightedItemId = toId;
-  }
-
   selectAll() {
-    const previousSize = this.selectedItems.size;
-    this.items.forEach(item => this.selectedItems.add(item.id));
+    const previousSelected = this.selectionService.getSelected();
+
+    // Filter out ghost items - they should never be selected
+    const allItemIds = this.items
+      .filter(i => !i['isGhostParent'] && !i['isGhostChild'])
+      .map(i => i.id);
+
+    this.selectionService.selectAll(allItemIds);
 
     if (this.groupConfig?.selectableGroups) {
       this.groupedItems.forEach(group => this.selectedGroups.add(group.id));
@@ -470,20 +451,22 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     // Finder behavior: Set first item as highlighted
     const flatItems = this.getFlatItemList();
     if (flatItems.length > 0) {
-      this.highlightedItemId = flatItems[0].id;
-      this.itemHighlighted.emit(flatItems[0]);
+      this.selectionService.setHighlighted(flatItems[0].id);
     }
 
-    if (this.selectedItems.size > previousSize) {
-      this.itemsSelected.emit(this.items);
+    const nowSelected = this.selectionService.getSelected();
+    if (nowSelected.length > previousSelected.length) {
+      const newlySelected = this.items.filter(i => nowSelected.includes(i.id) && !previousSelected.includes(i.id));
+      if (newlySelected.length > 0) {
+        this.itemsSelected.emit(newlySelected);
+      }
     }
   }
 
   deselectAll() {
     const previouslySelected = this.getSelectedItems();
-    this.selectedItems.clear();
+    this.selectionService.clear();
     this.selectedGroups.clear();
-    this.highlightedItemId = null;
 
     if (previouslySelected.length > 0) {
       this.itemsDeselected.emit(previouslySelected);
@@ -491,7 +474,8 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   }
 
   getSelectedItems(): T[] {
-    return this.items.filter(item => this.selectedItems.has(item.id));
+    const selectedIds = this.selectionService.getSelected();
+    return this.items.filter(item => selectedIds.includes(item.id));
   }
 
   // ========================================
@@ -504,27 +488,33 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     }
 
     const isSelected = this.isGroupSelected(group.id);
+    const groupItemIds = group.items.map(i => i.id);
 
     // Handle multi-select with Cmd/Ctrl
     if (event.metaKey || event.ctrlKey) {
       if (isSelected) {
         this.selectedGroups.delete(group.id);
-        group.items.forEach(item => this.selectedItems.delete(item.id));
+        groupItemIds.forEach(id => this.selectionService.deselect(id));
         this.itemsDeselected.emit(group.items);
       } else {
         this.selectedGroups.add(group.id);
-        group.items.forEach(item => this.selectedItems.add(item.id));
+        this.selectionService.selectAll(groupItemIds);
         this.itemsSelected.emit(group.items);
       }
     } else {
       // Single group selection
+      const previouslySelected = this.getSelectedItems();
       this.selectedGroups.clear();
-      this.selectedItems.clear();
+      this.selectionService.clear();
 
       if (!isSelected) {
         this.selectedGroups.add(group.id);
-        group.items.forEach(item => this.selectedItems.add(item.id));
+        this.selectionService.selectAll(groupItemIds);
         this.itemsSelected.emit(group.items);
+      }
+
+      if (previouslySelected.length > 0) {
+        this.itemsDeselected.emit(previouslySelected);
       }
     }
 
@@ -578,7 +568,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     }
 
     // Handle Delete/Backspace
-    if (this.keyboardConfig.enableDelete && this.selectedItems.size > 0) {
+    if (this.keyboardConfig.enableDelete && this.selectionService.getSelected().length > 0) {
       if (event.code === 'Delete' || (event.code === 'Backspace' && event.metaKey)) {
         event.preventDefault();
         event.stopPropagation(); // Prevent event from bubbling to parent handlers
@@ -615,16 +605,20 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     // Handle Enter/Return to open highlighted or selected items (Finder behavior)
     if ((event.code === 'Enter' || event.code === 'NumpadEnter') && !isFocusedOnInput) {
       event.preventDefault();
+      const selectedIds = this.selectionService.getSelected();
       // If there are selected items, emit double-click for all of them
-      if (this.selectedItems.size > 0) {
+      if (selectedIds.length > 0) {
         const selectedItems = this.getSelectedItems();
         selectedItems.forEach(item => this.itemDoubleClick.emit(item));
       }
       // Otherwise, if there's a highlighted item, emit double-click for it
-      else if (this.highlightedItemId) {
-        const highlightedItem = this.items.find(i => i.id === this.highlightedItemId);
-        if (highlightedItem) {
-          this.itemDoubleClick.emit(highlightedItem);
+      else {
+        const highlightedId = this.selectionService.getHighlighted();
+        if (highlightedId) {
+          const highlightedItem = this.items.find(i => i.id === highlightedId);
+          if (highlightedItem) {
+            this.itemDoubleClick.emit(highlightedItem);
+          }
         }
       }
       return;
@@ -633,8 +627,9 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     // Handle spacebar action
     if (event.code === 'Space' && this.keyboardConfig.enableSpaceAction && !isFocusedOnInput) {
       event.preventDefault();
-      const highlightedItem = this.highlightedItemId
-        ? this.items.find(i => i.id === this.highlightedItemId)
+      const highlightedId = this.selectionService.getHighlighted();
+      const highlightedItem = highlightedId
+        ? this.items.find(i => i.id === highlightedId)
         : null;
       this.spaceAction.emit(highlightedItem || null);
       return;
@@ -652,39 +647,25 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     const flatItems = this.getFlatItemList();
     if (flatItems.length === 0) return;
 
-    let currentIndex = this.highlightedItemId
-      ? flatItems.findIndex(i => i.id === this.highlightedItemId)
-      : -1;
+    const allItemIds = flatItems.map(i => i.id);
+    const previouslySelected = this.selectionService.getSelected();
 
-    if (currentIndex === -1) {
-      currentIndex = direction > 0 ? 0 : flatItems.length - 1;
-    } else {
-      currentIndex += direction;
-      if (currentIndex < 0) currentIndex = 0;
-      if (currentIndex >= flatItems.length) currentIndex = flatItems.length - 1;
-    }
+    // Use the service's navigate method
+    const newItemId = this.selectionService.navigate(allItemIds, direction === 1 ? 1 : -1, false);
 
-    const newItem = flatItems[currentIndex];
+    if (!newItemId) return;
 
-    // Finder behavior: Arrow keys without modifiers clear selection and just highlight
-    const previouslySelected = Array.from(this.selectedItems);
-    this.selectedItems.clear();
-    this.highlightedItemId = newItem.id;
-    this.selectionAnchorId = newItem.id; // Update anchor
-
-    // Emit deselection event if items were previously selected
+    // Finder behavior: Arrow keys without modifiers clear selection
     if (previouslySelected.length > 0) {
+      this.selectionService.clear();
       const deselected = this.items.filter(i => previouslySelected.includes(i.id));
       if (deselected.length > 0) {
         this.itemsDeselected.emit(deselected);
       }
     }
 
-    // Emit highlighted item changed event
-    this.itemHighlighted.emit(newItem);
-
     // Scroll into view
-    this.scrollToItem(newItem.id);
+    this.scrollToItem(newItemId);
   }
 
   /**
@@ -695,17 +676,16 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     const flatItems = this.getFlatItemList();
     if (flatItems.length === 0) return;
 
+    const allItemIds = flatItems.map(i => i.id);
+    const highlightedId = this.selectionService.getHighlighted();
+
     // Find current highlighted index
-    let currentIndex = this.highlightedItemId
-      ? flatItems.findIndex(i => i.id === this.highlightedItemId)
+    let currentIndex = highlightedId
+      ? flatItems.findIndex(i => i.id === highlightedId)
       : -1;
 
     if (currentIndex === -1) {
       currentIndex = direction > 0 ? 0 : flatItems.length - 1;
-      // Set anchor if not set
-      if (!this.selectionAnchorId) {
-        this.selectionAnchorId = flatItems[currentIndex].id;
-      }
     } else {
       currentIndex += direction;
       if (currentIndex < 0) currentIndex = 0;
@@ -713,11 +693,20 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     }
 
     const newItem = flatItems[currentIndex];
+    const previousSelected = this.selectionService.getSelected();
 
-    // Use anchor for range selection (Finder behavior)
-    const anchorId = this.selectionAnchorId || this.highlightedItemId;
-    if (anchorId) {
-      this.selectRange(anchorId, newItem.id);
+    // Use service's selectRange for range selection
+    this.selectionService.selectRange(allItemIds, newItem.id);
+
+    const nowSelected = this.selectionService.getSelected();
+    const newlySelected = this.items.filter(i => nowSelected.includes(i.id) && !previousSelected.includes(i.id));
+    const deselected = this.items.filter(i => previousSelected.includes(i.id) && !nowSelected.includes(i.id));
+
+    if (newlySelected.length > 0) {
+      this.itemsSelected.emit(newlySelected);
+    }
+    if (deselected.length > 0) {
+      this.itemsDeselected.emit(deselected);
     }
 
     // Scroll into view
@@ -743,14 +732,14 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     });
 
     if (match) {
-      this.highlightedItemId = match.id;
+      this.selectionService.setHighlighted(match.id);
       this.scrollToItem(match.id);
     }
   }
 
   private getFlatItemList(): T[] {
     return this.groupedItems.flatMap(group =>
-      group.collapsed ? [] : group.items
+      group.collapsed ? [] : group.items.filter(i => !i['isGhostParent'] && !i['isGhostChild'])
     );
   }
 
@@ -775,11 +764,20 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   handleContextMenu(event: MouseEvent, item: T) {
     event.preventDefault();
 
-    // If item is not selected, select it
-    if (!this.selectedItems.has(item.id)) {
-      this.selectedItems.clear();
-      this.selectedItems.add(item.id);
-      this.highlightedItemId = item.id;
+    // If item is not selected, select it and clear others
+    if (!this.selectionService.isSelected(item.id)) {
+      const previouslySelected = this.getSelectedItems();
+
+      // Clear all selections and select only this item
+      this.selectionService.select(item.id, true);
+
+      // Emit deselection events for previously selected items
+      if (previouslySelected.length > 0) {
+        this.itemsDeselected.emit(previouslySelected);
+      }
+
+      // Emit selection event for the newly selected item
+      this.itemsSelected.emit([item]);
     }
 
     // Emit raw context menu event for custom handling (e.g., Material menu)
