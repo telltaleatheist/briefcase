@@ -33,6 +33,8 @@
           [class.selection-edge-bottom]="isSelectionEdgeBottom(group.items, i)"
           [class.is-child]="item['isChild']"
           [class.is-parent]="item['isParent']"
+          [class.is-ghost-parent]="item['isGhostParent']"
+          [class.is-ghost-child]="item['isGhostChild']"
           (click)="handleItemClick(item, $event)"
           (dblclick)="handleItemDoubleClick(item)"
           (contextmenu)="handleContextMenu($event, item)">

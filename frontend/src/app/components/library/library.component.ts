@@ -198,6 +198,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Track video processing states for progress bars
   videoProcessingStates = new Map<string, { stage: 'transcribing' | 'analyzing', progress: number }>();
+  progressVersion = 0; // Increment to force item-list to refresh progress
 
   // View mode (list or detail split view)
   viewMode: 'list' | 'detail' = 'list';
@@ -455,6 +456,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Subscribe to analysis queue jobs to show progress bars
     this.downloadProgressService.jobs$.subscribe(jobsMap => {
+      console.log('[LibraryComponent] Jobs update received, job count:', jobsMap.size);
+
       // Clear existing processing states
       this.videoProcessingStates.clear();
 
@@ -473,8 +476,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
         }
       });
 
-      // Trigger change detection with new Map reference
+      // Trigger change detection with new Map reference and version increment
       this.videoProcessingStates = new Map(this.videoProcessingStates);
+      this.progressVersion++;
     });
 
     // Check for query param to highlight a specific video
@@ -1449,6 +1453,21 @@ export class LibraryComponent implements OnInit, OnDestroy {
       if (!groups.has(week)) {
         groups.set(week, []);
       }
+
+      // If this is a child video, insert a ghost parent reference first
+      if (video.parent_id) {
+        const parent = this.filteredVideos.find(v => v.id === video.parent_id);
+        if (parent) {
+          // Create a ghost parent reference (marked with a special property)
+          const ghostParent = {
+            ...parent,
+            isGhostParent: true,
+            ghostChildId: video.id  // Track which child this ghost belongs to
+          } as any;
+          groups.get(week)!.push(ghostParent);
+        }
+      }
+
       groups.get(week)!.push(video);
     }
 
@@ -2016,9 +2035,76 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   /**
    * Convert DatabaseVideo array to ListItem compatible array
+   * Injects ghost parent and ghost child references for parent-child relationships
+   * Ghosts only appear when the real item is in a different week group
    */
   get videosAsListItems(): (DatabaseVideo & ListItem)[] {
-    return this.filteredVideos as (DatabaseVideo & ListItem)[];
+    const result: any[] = [];
+
+    // Create a map of all videos by ID for quick lookup
+    const videoMap = new Map(this.filteredVideos.map(v => [v.id, v]));
+
+    // Helper function to get week identifier for a video
+    const getWeekForVideo = (video: any) => {
+      return this.getWeekIdentifier(new Date(video.download_date || video.added_at));
+    };
+
+    // Track which parent IDs we've already added ghost children for in each week
+    const processedParentsInWeek = new Map<string, Set<string>>();
+
+    for (const video of this.filteredVideos) {
+      const currentWeek = getWeekForVideo(video);
+
+      // If this video has a parent, check if parent is in a different week
+      if (video.parent_id) {
+        const parent = videoMap.get(video.parent_id);
+        if (parent) {
+          const parentWeek = getWeekForVideo(parent);
+
+          // Only add ghost parent if parent is in a DIFFERENT week
+          if (parentWeek !== currentWeek) {
+            const ghostParent = {
+              ...parent,
+              isGhostParent: true,
+              ghostChildId: video.id
+            } as any;
+            result.push(ghostParent);
+          }
+        }
+      }
+
+      // Add the actual video
+      result.push(video);
+
+      // If this video is a parent, add ghost children for children in OTHER weeks
+      const weekKey = `${video.id}-${currentWeek}`;
+      if (!processedParentsInWeek.has(weekKey)) {
+        // Mark this parent as processed for this week
+        if (!processedParentsInWeek.has(video.id)) {
+          processedParentsInWeek.set(video.id, new Set());
+        }
+        processedParentsInWeek.get(video.id)!.add(currentWeek);
+
+        // Find all children of this parent
+        const children = this.filteredVideos.filter(v => v.parent_id === video.id);
+
+        for (const child of children) {
+          const childWeek = getWeekForVideo(child);
+
+          // Only add ghost child if child is in a DIFFERENT week
+          if (childWeek !== currentWeek) {
+            const ghostChild = {
+              ...child,
+              isGhostChild: true,
+              ghostParentId: video.id
+            } as any;
+            result.push(ghostChild);
+          }
+        }
+      }
+    }
+
+    return result as (DatabaseVideo & ListItem)[];
   }
 
   /**

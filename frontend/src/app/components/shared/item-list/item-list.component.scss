@@ -225,6 +225,84 @@
     border-bottom: 1px solid #dee2e6;
   }
 
+  // Ghost parent reference (for children in different week groups)
+  &.is-ghost-parent {
+    opacity: 0.6;
+    background-color: #f8f9fa;
+    border-left: 3px solid #adb5bd;
+    cursor: pointer;
+    min-height: 36px;
+    font-style: italic;
+
+    &:hover {
+      opacity: 0.8;
+      background-color: #e9ecef;
+      border-left-color: #6c757d;
+    }
+
+    .item-icon {
+      opacity: 0.7;
+    }
+
+    .item-primary {
+      font-size: 13px;
+      color: #6c757d;
+
+      &::before {
+        content: '↑ Parent: ';
+        font-weight: 600;
+        margin-right: 4px;
+      }
+    }
+
+    // Ghost parents cannot be selected
+    &.selected,
+    &.highlighted {
+      background-color: #f8f9fa !important;
+      opacity: 0.6 !important;
+      border: none !important;
+    }
+  }
+
+  // Ghost child reference (for parents showing their children)
+  &.is-ghost-child {
+    opacity: 0.6;
+    background-color: #f8f9fa;
+    border-left: 3px solid #adb5bd;
+    cursor: pointer;
+    min-height: 36px;
+    font-style: italic;
+
+    &:hover {
+      opacity: 0.8;
+      background-color: #e9ecef;
+      border-left-color: #6c757d;
+    }
+
+    .item-icon {
+      opacity: 0.7;
+    }
+
+    .item-primary {
+      font-size: 13px;
+      color: #6c757d;
+
+      &::before {
+        content: '↓ Child: ';
+        font-weight: 600;
+        margin-right: 4px;
+      }
+    }
+
+    // Ghost children cannot be selected
+    &.selected,
+    &.highlighted {
+      background-color: #f8f9fa !important;
+      opacity: 0.6 !important;
+      border: none !important;
+    }
+  }
+
   &:hover {
     background-color: #f8f9fa;
     transform: translateX(2px);
@@ -609,6 +687,64 @@
     &.is-parent {
       font-weight: 500;
       border-bottom: 1px solid #333;
+    }
+
+    // Ghost parent reference in dark mode
+    &.is-ghost-parent {
+      opacity: 0.6;
+      background-color: #242424;
+      border-left: 3px solid #555;
+
+      &:hover {
+        opacity: 0.8;
+        background-color: #2a2a2a;
+        border-left-color: #777;
+      }
+
+      .item-icon {
+        opacity: 0.7;
+      }
+
+      .item-primary {
+        color: #999;
+      }
+
+      // Ghost parents cannot be selected in dark mode
+      &.selected,
+      &.highlighted {
+        background-color: #242424 !important;
+        opacity: 0.6 !important;
+        border: none !important;
+      }
+    }
+
+    // Ghost child reference in dark mode
+    &.is-ghost-child {
+      opacity: 0.6;
+      background-color: #242424;
+      border-left: 3px solid #555;
+
+      &:hover {
+        opacity: 0.8;
+        background-color: #2a2a2a;
+        border-left-color: #777;
+      }
+
+      .item-icon {
+        opacity: 0.7;
+      }
+
+      .item-primary {
+        color: #999;
+      }
+
+      // Ghost children cannot be selected in dark mode
+      &.selected,
+      &.highlighted {
+        background-color: #242424 !important;
+        opacity: 0.6 !important;
+        border: none !important;
+      }
     }
 
     &:hover {

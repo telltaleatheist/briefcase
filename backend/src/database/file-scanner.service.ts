@@ -515,11 +515,13 @@ export class FileScannerService {
    * Import selected videos into the database
    * @param videoPaths - Array of full file paths to import
    * @param duplicateHandling - Optional map of filepath -> action ('skip', 'replace', 'keep-both')
+   * @param parentVideoId - Optional parent video ID to link imported videos as children
    * @returns Array of imported video IDs
    */
   async importVideos(
     videoPaths: string[],
-    duplicateHandling?: Map<string, 'skip' | 'replace' | 'keep-both'>
+    duplicateHandling?: Map<string, 'skip' | 'replace' | 'keep-both'>,
+    parentVideoId?: string
   ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
     this.logger.log(`Importing ${videoPaths.length} videos...`);
     this.logger.log(`Received paths:`, videoPaths);
@@ -660,6 +662,17 @@ export class FileScannerService {
           durationSeconds,
           fileSizeBytes: stats.size,
         });
+
+        // Link to parent video if specified
+        if (parentVideoId) {
+          try {
+            this.databaseService.setVideoParent(videoId, parentVideoId);
+            this.logger.log(`Linked ${videoId} as child of ${parentVideoId}`);
+          } catch (error: any) {
+            this.logger.error(`Failed to link video to parent: ${error.message}`);
+            // Don't fail the import, just log the error
+          }
+        }
 
         imported.push(videoId);
         this.logger.log(`Imported: ${filename} (${videoId})${uploadDate ? ` with upload date ${uploadDate}` : ''}`);

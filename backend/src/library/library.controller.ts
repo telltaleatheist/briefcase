@@ -24,6 +24,7 @@ import { ClipExtractorService } from './clip-extractor.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { LibraryManagerService } from '../database/library-manager.service';
+import { DatabaseService } from '../database/database.service';
 import {
   CreateLibraryAnalysisRequest,
   UpdateLibraryAnalysisRequest,
@@ -43,7 +44,8 @@ export class LibraryController {
     private clipExtractor: ClipExtractorService,
     private configService: SharedConfigService,
     private fileScannerService: FileScannerService,
-    private libraryManagerService: LibraryManagerService
+    private libraryManagerService: LibraryManagerService,
+    private databaseService: DatabaseService
   ) {}
 
   /**
@@ -787,10 +789,29 @@ export class LibraryController {
       if (extractionResult.outputPath) {
         try {
           this.logger.log(`Importing clip to library: ${extractionResult.outputPath}`);
-          const importResult = await this.fileScannerService.importVideos([extractionResult.outputPath]);
+
+          // Try to find the parent video ID by path to link the clip as a child
+          let parentVideoId: string | undefined;
+          try {
+            const parentVideos = this.databaseService.getAllVideos({ includeChildren: true });
+            const parentVideo = parentVideos.find((v: any) => v.current_path === body.videoPath);
+            if (parentVideo && parentVideo.id) {
+              parentVideoId = String(parentVideo.id);
+              this.logger.log(`Found parent video ID: ${parentVideoId} for path: ${body.videoPath}`);
+            }
+          } catch (error) {
+            this.logger.warn(`Could not find parent video for linking: ${(error as Error).message}`);
+            // Continue without parent linking
+          }
+
+          const importResult = await this.fileScannerService.importVideos(
+            [extractionResult.outputPath],
+            undefined,
+            parentVideoId
+          );
           if (importResult.imported.length > 0) {
             videoId = importResult.imported[0];
-            this.logger.log(`Clip imported to library with ID: ${videoId}`);
+            this.logger.log(`Clip imported to library with ID: ${videoId}${parentVideoId ? ` (linked to parent ${parentVideoId})` : ''}`);
           } else {
             this.logger.warn(`Failed to import clip to library: ${extractionResult.outputPath}`);
           }
@@ -1110,10 +1131,29 @@ export class LibraryController {
       if (extractionResult.outputPath) {
         try {
           this.logger.log(`Importing clip to library: ${extractionResult.outputPath}`);
-          const importResult = await this.fileScannerService.importVideos([extractionResult.outputPath]);
+
+          // Try to find the parent video ID by path to link the clip as a child
+          let parentVideoId: string | undefined;
+          try {
+            const parentVideos = this.databaseService.getAllVideos({ includeChildren: true });
+            const parentVideo = parentVideos.find((v: any) => v.current_path === analysis.video.currentPath);
+            if (parentVideo && parentVideo.id) {
+              parentVideoId = String(parentVideo.id);
+              this.logger.log(`Found parent video ID: ${parentVideoId} for path: ${analysis.video.currentPath}`);
+            }
+          } catch (error) {
+            this.logger.warn(`Could not find parent video for linking: ${(error as Error).message}`);
+            // Continue without parent linking
+          }
+
+          const importResult = await this.fileScannerService.importVideos(
+            [extractionResult.outputPath],
+            undefined,
+            parentVideoId
+          );
           if (importResult.imported.length > 0) {
             videoId = importResult.imported[0];
-            this.logger.log(`Clip imported to library with ID: ${videoId}`);
+            this.logger.log(`Clip imported to library with ID: ${videoId}${parentVideoId ? ` (linked to parent ${parentVideoId})` : ''}`);
           } else {
             this.logger.warn(`Failed to import clip to library: ${extractionResult.outputPath}`);
           }

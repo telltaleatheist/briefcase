@@ -58,6 +58,7 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
   // Progress configuration
   @Input() progressMapper?: (item: T) => ItemProgress | null;
+  @Input() progressVersion: number = 0; // Increment this to force progress cache clear
 
   // Custom action template (for buttons like delete, remove, etc.)
   @ContentChild('itemActions') itemActionsTemplate: TemplateRef<any> | null = null;
@@ -210,10 +211,20 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   // ========================================
 
   isItemSelected(itemId: string): boolean {
+    // Ghost parents and children can never be selected
+    const item = this.items.find(i => i.id === itemId);
+    if (item && (item['isGhostParent'] || item['isGhostChild'])) {
+      return false;
+    }
     return this.selectedItems.has(itemId);
   }
 
   isItemHighlighted(itemId: string): boolean {
+    // Ghost parents and children can never be highlighted
+    const item = this.items.find(i => i.id === itemId);
+    if (item && (item['isGhostParent'] || item['isGhostChild'])) {
+      return false;
+    }
     return this.highlightedItemId === itemId;
   }
 
@@ -264,6 +275,22 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
   }
 
   handleItemClick(item: T, event: MouseEvent) {
+    // Check if this is a ghost parent - if so, scroll to real parent instead
+    if (item['isGhostParent']) {
+      // Scroll to the real parent
+      const realParentId = item.id;  // Ghost has the same ID as the real parent
+      this.scrollToItem(realParentId);
+      return;  // Don't emit click or allow selection
+    }
+
+    // Check if this is a ghost child - if so, scroll to real child instead
+    if (item['isGhostChild']) {
+      // Scroll to the real child
+      const realChildId = item.id;  // Ghost has the same ID as the real child
+      this.scrollToItem(realChildId);
+      return;  // Don't emit click or allow selection
+    }
+
     this.itemClick.emit(item);
 
     if (this.selectionMode === SelectionMode.None) {
