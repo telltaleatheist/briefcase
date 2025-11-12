@@ -694,8 +694,8 @@ export class FfmpegService {
       const fileExt = path.extname(fileName);
       const fileBase = path.parse(fileName).name;
 
-      // Generate output file path with _normalized suffix
-      const outputFile = path.join(fileDir, `${fileBase}_normalized${fileExt}`);
+      // Generate temporary output file path
+      const tempOutputFile = path.join(fileDir, `${fileBase}_temp_normalized${fileExt}`);
 
       return new Promise<string | null>((resolve, reject) => {
         // Use loudnorm filter for professional audio normalization
@@ -713,7 +713,7 @@ export class FfmpegService {
           ])
           .audioCodec('aac')              // Use AAC codec for audio
           .audioBitrate('192k')           // Set audio bitrate
-          .output(outputFile);
+          .output(tempOutputFile);
 
         command.on('start', (cmdline: string) => {
           this.logger.log(`Audio normalization started: ${cmdline}`);
@@ -726,12 +726,32 @@ export class FfmpegService {
         });
 
         command.on('end', () => {
-          this.logger.log(`Successfully normalized audio: ${outputFile}`);
-          resolve(outputFile);
+          this.logger.log(`Successfully normalized audio to temp file: ${tempOutputFile}`);
+
+          // Delete the original file and rename temp file to original name
+          if (this.safeDeleteFile(filePath)) {
+            this.logger.log(`Deleted original file: ${filePath}`);
+
+            try {
+              fs.renameSync(tempOutputFile, filePath);
+              this.logger.log(`Renamed ${tempOutputFile} to ${filePath}`);
+              resolve(filePath);
+            } catch (err: any) {
+              this.logger.error(`Failed to rename file: ${err.message}`);
+              // If rename fails, return the temp file
+              resolve(tempOutputFile);
+            }
+          } else {
+            // If deletion failed, keep the temp file
+            this.logger.warn(`Could not delete original file, keeping temp file: ${tempOutputFile}`);
+            resolve(tempOutputFile);
+          }
         });
 
         command.on('error', (err: any) => {
           this.logger.error(`Error normalizing audio: ${err.message}`);
+          // Clean up temp file if it exists
+          this.safeDeleteFile(tempOutputFile);
           resolve(null);
         });
 

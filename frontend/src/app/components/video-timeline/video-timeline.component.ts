@@ -39,6 +39,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   @Input() currentTime = 0; // Current playback time
   @Input() sections: TimelineSection[] = [];
   @Input() isPlaying = false; // Playback state
+  @Input() mediaElement?: HTMLVideoElement | HTMLAudioElement; // Media element for waveform generation
   @Output() seek = new EventEmitter<number>();
   @Output() selectionChange = new EventEmitter<TimelineSelection>();
   @Output() playPause = new EventEmitter<void>();
@@ -46,6 +47,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
   @ViewChild('timeline', { static: false }) timelineElement!: ElementRef<HTMLDivElement>;
   @ViewChild('selectionWindow', { static: false }) selectionWindowElement!: ElementRef<HTMLDivElement>;
+  @ViewChild('waveformCanvas', { static: false }) waveformCanvas?: ElementRef<HTMLCanvasElement>;
 
   // Tool selection state
   selectedTool: TimelineTool = 'cursor';
@@ -116,12 +118,26 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   private animationStartOffset: number = 0;
   private readonly ANIMATION_DURATION = 300; // ms
 
+  // Waveform state
+  private waveformData: number[] = [];
+  private isGeneratingWaveform = false;
+
   constructor(private ngZone: NgZone) {}
 
   ngOnChanges(changes: SimpleChanges) {
     // When sections change, update category filters
     if (changes['sections'] && !changes['sections'].firstChange) {
       this.updateCategoryFilters();
+    }
+
+    // When mediaElement changes, generate waveform
+    if (changes['mediaElement'] && this.mediaElement) {
+      this.generateWaveform();
+    }
+
+    // When duration changes and we have waveform data, re-render
+    if (changes['duration'] && this.waveformData.length > 0) {
+      requestAnimationFrame(() => this.renderWaveform());
     }
 
     // Auto-follow playhead logic
@@ -513,6 +529,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
         // Clamp offset to valid range
         const visibleDuration = this.getVisibleDuration();
         this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+
+        // Update waveform display for new pan position
+        this.updateWaveformDisplay();
       });
       return;
     }
@@ -541,6 +560,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
           // Clamp offset
           const visibleDuration = this.getVisibleDuration();
           this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+
+          // Update waveform display for new zoom
+          this.updateWaveformDisplay();
         });
       }
       return;
@@ -569,6 +591,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
           // Keep the left side fixed, only adjust based on new zoom
           const actualVisibleDuration = this.getVisibleDuration();
           this.zoomOffset = Math.max(0, Math.min(this.duration - actualVisibleDuration, this.zoomOffset));
+
+          // Update waveform display for new zoom
+          this.updateWaveformDisplay();
         });
       }
       return;
@@ -595,6 +620,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
           // Clamp offset to valid range
           this.zoomOffset = Math.max(0, Math.min(this.duration - visibleDuration, this.zoomOffset));
+
+          // Update waveform display for new pan position
+          this.updateWaveformDisplay();
         });
       }
       return;
@@ -789,6 +817,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
         // Clamp offset to valid range
         this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
+
+        // Update waveform display for new zoom level
+        this.updateWaveformDisplay();
       });
     }
   };
@@ -911,6 +942,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
           // Clamp offset to valid range
           this.zoomOffset = Math.max(0, Math.min(this.duration - newVisibleDuration, this.zoomOffset));
+
+          // Update waveform display for new zoom
+          this.updateWaveformDisplay();
         });
       }
     }
@@ -991,6 +1025,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   resetZoom() {
     this.zoomLevel = 1;
     this.zoomOffset = 0;
+    this.updateWaveformDisplay();
   }
 
   /**
@@ -1419,5 +1454,125 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       left: `${startPercentage}%`,
       width: `${actualWidthPercentage}%`
     };
+  }
+
+  /**
+   * Generate waveform from media element using Web Audio API
+   */
+  private async generateWaveform() {
+    if (this.isGeneratingWaveform || !this.mediaElement) {
+      return;
+    }
+
+    this.isGeneratingWaveform = true;
+
+    try {
+      // Create audio context
+      const audioContext = new AudioContext();
+
+      // Fetch the audio file separately (don't touch the media element)
+      const response = await fetch(this.mediaElement.src);
+      const arrayBuffer = await response.arrayBuffer();
+
+      // Decode audio data
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // Extract audio data from first channel
+      const rawData = audioBuffer.getChannelData(0);
+      const samples = 1000; // Number of samples for waveform visualization
+      const blockSize = Math.floor(rawData.length / samples);
+      const filteredData = [];
+
+      // Downsample the audio data
+      for (let i = 0; i < samples; i++) {
+        let blockStart = blockSize * i;
+        let sum = 0;
+
+        // Calculate RMS (root mean square) for this block
+        for (let j = 0; j < blockSize; j++) {
+          sum += Math.abs(rawData[blockStart + j]);
+        }
+
+        filteredData.push(sum / blockSize);
+      }
+
+      // Normalize the data
+      const max = Math.max(...filteredData);
+      this.waveformData = filteredData.map(n => n / max);
+
+      // Render the waveform
+      this.renderWaveform();
+
+      // Close audio context to free resources
+      await audioContext.close();
+
+    } catch (error) {
+      console.error('Error generating waveform:', error);
+      this.waveformData = [];
+    } finally {
+      this.isGeneratingWaveform = false;
+    }
+  }
+
+  /**
+   * Render waveform on canvas (zoom-aware)
+   */
+  private renderWaveform() {
+    if (!this.waveformCanvas || !this.waveformData.length || !this.duration) {
+      return;
+    }
+
+    const canvas = this.waveformCanvas.nativeElement;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      return;
+    }
+
+    // Set canvas size to match container
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+    // Clear canvas
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    // Calculate visible time range based on zoom
+    const visibleDuration = this.duration / this.zoomLevel;
+    const startTime = this.zoomOffset;
+    const endTime = Math.min(startTime + visibleDuration, this.duration);
+
+    // Calculate which portion of waveform data to display
+    const startIndex = Math.floor((startTime / this.duration) * this.waveformData.length);
+    const endIndex = Math.ceil((endTime / this.duration) * this.waveformData.length);
+    const visibleData = this.waveformData.slice(startIndex, endIndex);
+
+    if (visibleData.length === 0) {
+      return;
+    }
+
+    // Draw waveform for visible portion
+    const barWidth = rect.width / visibleData.length;
+    const middleY = rect.height / 2;
+
+    ctx.fillStyle = '#ff6600'; // Orange color matching the theme
+
+    visibleData.forEach((value, index) => {
+      const barHeight = value * (rect.height / 2) * 0.8; // 80% of half height
+      const x = index * barWidth;
+      const y = middleY - barHeight / 2;
+
+      ctx.fillRect(x, y, Math.max(barWidth - 1, 1), barHeight);
+    });
+  }
+
+  /**
+   * Trigger waveform re-render (call this when zoom/pan changes)
+   */
+  updateWaveformDisplay() {
+    if (this.waveformData.length > 0) {
+      requestAnimationFrame(() => this.renderWaveform());
+    }
   }
 }

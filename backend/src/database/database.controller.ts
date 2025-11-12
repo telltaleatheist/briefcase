@@ -1008,6 +1008,37 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/batch/queue
+   * Queue videos for analysis without starting processing
+   * Note: This currently just starts the batch immediately like /batch/start
+   * TODO: Implement true queueing without auto-start if needed
+   */
+  @Post('batch/queue')
+  async queueVideosForAnalysis(
+    @Body() options: {
+      videoIds: string[];
+      transcribeOnly?: boolean;
+      forceReanalyze?: boolean;
+    },
+  ) {
+    this.logger.log(`Queueing ${options.videoIds.length} videos for ${options?.transcribeOnly ? 'transcription' : 'analysis'}`);
+
+    // For now, use the analysis service's batch start
+    // This adds jobs to the queue system
+    const result = await this.analysisService.startBatchAnalysis({
+      videoIds: options.videoIds,
+      transcribeOnly: options.transcribeOnly,
+      forceReanalyze: options.forceReanalyze,
+    });
+
+    return {
+      success: true,
+      jobId: result.batchId,
+      message: `${options.videoIds.length} video(s) queued for ${options?.transcribeOnly ? 'transcription' : 'analysis'}`,
+    };
+  }
+
+  /**
    * GET /api/database/batch/progress
    * Get batch analysis progress for specific job IDs
    */

@@ -680,17 +680,19 @@ export class AnalysisService {
         });
       }
 
+      // Get analysisResult first so it's accessible for description/tags even if analysis insert fails
+      const analysisResult = (request as any).analysisResult;
+
       if (mode !== 'transcribe-only' && (request as any).analysisText) {
         this.databaseService.insertAnalysis({
           videoId,
           aiAnalysis: (request as any).analysisText,
-          sectionsCount: (request as any).analysisResult?.sections_count || 0,
+          sectionsCount: analysisResult?.sections_count || 0,
           aiModel: request.aiModel,
           aiProvider: request.aiProvider || 'ollama',
         });
 
         // Save analysis sections to database
-        const analysisResult = (request as any).analysisResult;
         if (analysisResult && analysisResult.sections && Array.isArray(analysisResult.sections)) {
           this.logger.log(`Saving ${analysisResult.sections.length} sections to database for video ${videoId}`);
 
@@ -725,56 +727,57 @@ export class AnalysisService {
         } else {
           this.logger.warn(`No sections found in analysisResult for video ${videoId}`);
         }
+      }
 
-        // Save AI description to video if available
-        this.logger.log(`[AI Description Debug] analysisResult exists: ${!!analysisResult}`);
-        this.logger.log(`[AI Description Debug] analysisResult.description exists: ${!!(analysisResult && analysisResult.description)}`);
-        if (analysisResult && analysisResult.description) {
-          this.logger.log(`[AI Description Debug] Description value: ${analysisResult.description.substring(0, 100)}...`);
-          this.logger.log(`Saving AI description for video ${videoId}`);
-          this.databaseService.updateVideoDescription(videoId, analysisResult.description);
-        } else {
-          this.logger.warn(`[AI Description Debug] No description in analysisResult for video ${videoId}. Keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
-        }
+      // Save AI description to video if available (MOVED OUTSIDE analysis block)
+      // This ensures description is always saved when analysisResult exists
+      this.logger.log(`[AI Description Debug] analysisResult exists: ${!!analysisResult}`);
+      this.logger.log(`[AI Description Debug] analysisResult.description exists: ${!!(analysisResult && analysisResult.description)}`);
+      if (analysisResult && analysisResult.description) {
+        this.logger.log(`[AI Description Debug] Description value: ${analysisResult.description.substring(0, 100)}...`);
+        this.logger.log(`Saving AI description for video ${videoId}`);
+        this.databaseService.updateVideoDescription(videoId, analysisResult.description);
+      } else {
+        this.logger.warn(`[AI Description Debug] No description in analysisResult for video ${videoId}. Keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
+      }
 
-        // Save tags (people and topics) if available
-        if (analysisResult && analysisResult.tags) {
-          this.logger.log(`Saving tags for video ${videoId}: ${JSON.stringify(analysisResult.tags)}`);
+      // Save tags (people and topics) if available (MOVED OUTSIDE analysis block)
+      if (analysisResult && analysisResult.tags) {
+        this.logger.log(`Saving tags for video ${videoId}: ${JSON.stringify(analysisResult.tags)}`);
 
-          // Save people tags
-          if (analysisResult.tags.people && Array.isArray(analysisResult.tags.people)) {
-            for (const person of analysisResult.tags.people) {
-              if (person && typeof person === 'string' && person.trim()) {
-                this.databaseService.insertTag({
-                  id: require('uuid').v4(),
-                  videoId,
-                  tagName: person.trim(),
-                  tagType: 'person',
-                  source: 'ai',
-                  confidence: 0.8, // Default confidence for AI-generated tags
-                });
-              }
+        // Save people tags
+        if (analysisResult.tags.people && Array.isArray(analysisResult.tags.people)) {
+          for (const person of analysisResult.tags.people) {
+            if (person && typeof person === 'string' && person.trim()) {
+              this.databaseService.insertTag({
+                id: require('uuid').v4(),
+                videoId,
+                tagName: person.trim(),
+                tagType: 'person',
+                source: 'ai',
+                confidence: 0.8, // Default confidence for AI-generated tags
+              });
             }
           }
+        }
 
-          // Save topic tags
-          if (analysisResult.tags.topics && Array.isArray(analysisResult.tags.topics)) {
-            for (const topic of analysisResult.tags.topics) {
-              if (topic && typeof topic === 'string' && topic.trim()) {
-                this.databaseService.insertTag({
-                  id: require('uuid').v4(),
-                  videoId,
-                  tagName: topic.trim(),
-                  tagType: 'topic',
-                  source: 'ai',
-                  confidence: 0.8, // Default confidence for AI-generated tags
-                });
-              }
+        // Save topic tags
+        if (analysisResult.tags.topics && Array.isArray(analysisResult.tags.topics)) {
+          for (const topic of analysisResult.tags.topics) {
+            if (topic && typeof topic === 'string' && topic.trim()) {
+              this.databaseService.insertTag({
+                id: require('uuid').v4(),
+                videoId,
+                tagName: topic.trim(),
+                tagType: 'topic',
+                source: 'ai',
+                confidence: 0.8, // Default confidence for AI-generated tags
+              });
             }
           }
-
-          this.logger.log(`Successfully saved tags for video ${videoId}`);
         }
+
+        this.logger.log(`Successfully saved tags for video ${videoId}`);
       }
     }
 

@@ -330,6 +330,23 @@ export class DatabaseLibraryService {
   }
 
   /**
+   * Queue videos for analysis without starting processing
+   */
+  async queueVideosForAnalysis(options: {
+    videoIds: string[];
+    transcribeOnly?: boolean;
+    forceReanalyze?: boolean;
+  }): Promise<{ success: boolean; jobId: string; message: string }> {
+    const baseUrl = await this.getBaseUrl();
+    return firstValueFrom(
+      this.http.post<{ success: boolean; jobId: string; message: string }>(
+        `${baseUrl}/batch/queue`,
+        options
+      )
+    );
+  }
+
+  /**
    * Get batch analysis progress
    */
   async getBatchProgress(): Promise<BatchProgress> {

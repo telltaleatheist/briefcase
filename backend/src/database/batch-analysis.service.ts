@@ -196,6 +196,62 @@ export class BatchAnalysisService implements OnModuleInit {
   }
 
   /**
+   * Queue videos for analysis without starting processing
+   * Creates a paused batch job that the user can manually start from the analysis dialog
+   */
+  async queueVideosForAnalysis(options: {
+    videoIds: string[];
+    transcribeOnly?: boolean;
+    forceReanalyze?: boolean;
+  }): Promise<string> {
+    if (this.currentBatchJob && (this.currentBatchJob.status === 'running' || this.currentBatchJob.status === 'paused')) {
+      throw new Error('A batch job already exists. Please complete or stop it first.');
+    }
+
+    const transcribeOnly = options?.transcribeOnly || false;
+    const forceReanalyze = options?.forceReanalyze || false;
+
+    // Get videos to queue
+    const dbVideos = options.videoIds
+      .map(id => this.databaseService.getVideoById(id))
+      .filter(video => video !== null);
+
+    if (dbVideos.length === 0) {
+      throw new Error('None of the specified videos were found in the database');
+    }
+
+    // Convert database objects to expected format
+    const videosToQueue = dbVideos.map(video => ({
+      id: video.id as string,
+      filename: video.filename as string,
+      current_path: video.current_path as string,
+      upload_date: video.upload_date as string | null,
+      download_date: video.download_date as string | null,
+      duration_seconds: video.duration_seconds as number | null,
+    }));
+
+    const batchJobId = uuidv4();
+    this.currentBatchJob = {
+      id: batchJobId,
+      status: 'paused',  // Start as paused so user can manually start
+      totalVideos: videosToQueue.length,
+      processedVideos: 0,
+      failedVideos: 0,
+      skippedVideos: 0,
+      startedAt: new Date().toISOString(),
+      pausedAt: new Date().toISOString(),
+      errors: [],
+    };
+
+    this.logger.log(
+      `Queued ${videosToQueue.length} videos for ${transcribeOnly ? 'transcription' : 'analysis'} (Job ID: ${batchJobId})`,
+    );
+    this.logger.log(`Transcribe-only: ${transcribeOnly}, Force-reanalyze: ${forceReanalyze}`);
+
+    return batchJobId;
+  }
+
+  /**
    * Process batch of videos
    */
   private async processBatch(

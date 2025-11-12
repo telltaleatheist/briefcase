@@ -500,6 +500,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.contextMenuTimeout = null;
     }
 
+    // Close preview modal and stop video playback when leaving the page
+    if (this.isPreviewModalOpen) {
+      this.closePreviewModal();
+    }
+
+    // Also ensure any video/audio players are stopped (belt and suspenders approach)
+    if (this.previewVideoPlayer?.nativeElement) {
+      const videoEl = this.previewVideoPlayer.nativeElement;
+      videoEl.pause();
+      videoEl.src = ''; // Clear the source to fully stop loading
+      videoEl.load(); // Reset the player
+    }
+
     // Remove document listeners
     document.removeEventListener('click', this.handleDocumentClick);
     document.removeEventListener('contextmenu', this.handleDocumentContextMenu);
@@ -1488,6 +1501,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       if (weekGroup.videos.length > 0) {
         this.highlightedVideo = weekGroup.videos[0];
       }
+      this.updateSelectedCount(); // Update cached count
       this.updateAllSelectedState();
       return;
     }
@@ -1514,6 +1528,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
             this.selectedWeeks.add(videoWeek);
           }
         }
+        this.updateSelectedCount(); // Update cached count
         this.updateAllSelectedState();
       }
       return;
@@ -1528,6 +1543,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     if (weekGroup.videos.length > 0) {
       this.highlightedVideo = weekGroup.videos[0];
     }
+    this.updateSelectedCount(); // Update cached count
     this.updateAllSelectedState();
   }
 
@@ -1556,6 +1572,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   selectAll() {
     // Select all videos
     this.filteredVideos.forEach(video => this.selectedVideos.add(video.id));
+    this.updateSelectedCount(); // Update cached count
 
     // Select all weeks
     this.groupedVideos.forEach(group => this.selectedWeeks.add(group.week));
@@ -1633,6 +1650,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.isMissingTranscriptSelected = true;
     }
 
+    this.updateSelectedCount(); // Update cached count
     this.updateAllSelectedState();
   }
 
@@ -1659,6 +1677,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.isMissingAnalysisSelected = true;
     }
 
+    this.updateSelectedCount(); // Update cached count
     this.updateAllSelectedState();
   }
 
@@ -2070,6 +2089,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.selectedVideos.clear();
       // Select only the right-clicked item
       this.selectedVideos.add(data.item.id);
+      // Update cached count
+      this.updateSelectedCount();
       // Highlight the right-clicked item
       this.highlightedVideo = data.item;
       this.updateAllSelectedState();
@@ -2828,6 +2849,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.selectedVideos.add(video.id);
     }
 
+    this.updateSelectedCount(); // Update cached count
     this.updateAllSelectedState();
   }
 
@@ -4160,9 +4182,36 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Position panel on the right side of the screen
+    // Position panel on the right side of the screen, below the header and search area
+    const header = document.querySelector('.library-header');
+    const searchBar = document.querySelector('.search-bar-standalone');
+    const accordion = document.querySelector('.search-filters-accordion');
+    const resultsHeader = document.querySelector('.results-header');
+
+    // Find the bottom-most element to position below
+    let minY = 100; // Default fallback
+
+    if (header) {
+      minY = header.getBoundingClientRect().bottom;
+    }
+    if (searchBar) {
+      const searchBottom = searchBar.getBoundingClientRect().bottom;
+      minY = Math.max(minY, searchBottom);
+    }
+    if (accordion) {
+      const accordionBottom = accordion.getBoundingClientRect().bottom;
+      minY = Math.max(minY, accordionBottom);
+    }
+    if (resultsHeader) {
+      const resultsBottom = resultsHeader.getBoundingClientRect().bottom;
+      minY = Math.max(minY, resultsBottom);
+    }
+
+    // Add some padding below the last element
+    minY += 10;
+
     this.previewPanelX = window.innerWidth - this.previewPanelWidth - 20;
-    this.previewPanelY = 100;
+    this.previewPanelY = minY;
 
     this.isPreviewModalOpen = true;
 
@@ -4555,12 +4604,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
       const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
 
+      // Get header height to prevent dragging above it
+      const header = document.querySelector('.library-header');
+      const minY = header ? header.getBoundingClientRect().bottom + 10 : 10;
+
       // Keep panel within viewport bounds
       const maxX = window.innerWidth - this.previewPanelWidth - 20;
       const maxY = window.innerHeight - 200; // approximate panel height
 
       this.previewPanelX = Math.max(10, Math.min(maxX, startPanelX + deltaX));
-      this.previewPanelY = Math.max(10, Math.min(maxY, startPanelY + deltaY));
+      this.previewPanelY = Math.max(minY, Math.min(maxY, startPanelY + deltaY));
     };
 
     const onMouseUp = () => {
@@ -4600,11 +4653,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.previewPanelHeight = newHeight;
 
       // Adjust position if panel goes out of bounds
+      const header = document.querySelector('.library-header');
+      const minY = header ? header.getBoundingClientRect().bottom + 10 : 10;
       const maxX = window.innerWidth - this.previewPanelWidth - 20;
       const maxY = window.innerHeight - this.previewPanelHeight - 20;
 
       this.previewPanelX = Math.max(10, Math.min(maxX, this.previewPanelX));
-      this.previewPanelY = Math.max(10, Math.min(maxY, this.previewPanelY));
+      this.previewPanelY = Math.max(minY, Math.min(maxY, this.previewPanelY));
     };
 
     const onMouseUp = () => {
@@ -4650,8 +4705,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.previewPanelX = Math.max(10, newX);
 
       // Adjust Y position if panel goes out of bounds
+      const header = document.querySelector('.library-header');
+      const minY = header ? header.getBoundingClientRect().bottom + 10 : 10;
       const maxY = window.innerHeight - this.previewPanelHeight - 20;
-      this.previewPanelY = Math.max(10, Math.min(maxY, this.previewPanelY));
+      this.previewPanelY = Math.max(minY, Math.min(maxY, this.previewPanelY));
     };
 
     const onMouseUp = () => {

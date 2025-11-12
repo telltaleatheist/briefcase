@@ -14,6 +14,7 @@ import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../s
 import { NotificationService } from '../../services/notification.service';
 import { DatabaseLibraryService } from '../../services/database-library.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { AnalysisQueueService } from '../../services/analysis-queue.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewer.component';
@@ -141,7 +142,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     private ngZone: NgZone,
     private cdr: ChangeDetectorRef,
     private backendUrlService: BackendUrlService,
-    private http: HttpClient
+    private http: HttpClient,
+    private analysisQueueService: AnalysisQueueService
   ) {
     // If opened as dialog, use dialog data; otherwise use router state
     if (dialogData) {
@@ -1236,98 +1238,80 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * This directly starts transcription without prompting for AI analysis
    */
   async onRunTranscriptAnalysis() {
-    // Get the video ID
+    // Get video details
     const videoId = this.data.videoId || this.data.analysis?.id;
+    const videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath;
+    const videoTitle = this.data.analysis?.title || this.data.videoTitle || 'Unknown';
 
-    if (!videoId) {
-      this.notificationService.toastOnly('error', 'Error', 'No video ID available for transcription');
+    if (!videoPath) {
+      this.notificationService.toastOnly('error', 'Error', 'No video path available for transcription');
       return;
     }
 
-    // Start transcription directly
-    try {
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [videoId],
-        limit: 1,
-        transcribeOnly: true
-      });
+    // Add to analysis queue (transcribe-only mode)
+    this.analysisQueueService.addPendingJob({
+      input: videoPath,
+      inputType: 'file',
+      mode: 'transcribe-only',
+      aiModel: 'ollama:qwen2.5:7b',
+      whisperModel: 'base',
+      language: 'en',
+      customInstructions: '',
+      displayName: videoTitle,
+      videoId: videoId,
+      loading: false
+    });
 
-      this.notificationService.toastOnly(
-        'success',
-        'Transcription Started',
-        'Video transcription has been queued. You will be notified when it completes.'
-      );
-    } catch (error: any) {
-      console.error('Failed to start transcription:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Error',
-        error.error?.message || 'Failed to start transcription'
-      );
-    }
+    this.notificationService.toastOnly(
+      'success',
+      'Added to Queue',
+      'Video transcription has been added to the analysis queue. Click the queue button in the header to start processing.'
+    );
   }
 
   /**
    * Generate AI analysis and/or transcript for this video
    */
   async generateAnalysis() {
-    // If we have a custom video (dropped file), navigate to analysis page
-    if (this.data.customVideo?.videoPath || (this.data.videoPath && !this.data.videoId)) {
-      // Use the real file path if available, otherwise fall back to videoPath
-      // (realFilePath is the actual file system path, videoPath might be a blob URL)
-      const videoPath = this.data.realFilePath || this.data.videoPath;
-
-      // Check if we have a valid file path (not a blob URL)
-      if (!videoPath || videoPath.startsWith('blob:')) {
-        this.notificationService.toastOnly(
-          'error',
-          'Cannot Analyze',
-          'Unable to get file path for this video. Please import the video to the library first.'
-        );
-        return;
-      }
-
-      // Navigate to analysis page with video path pre-populated
-      this.router.navigate(['/analysis'], {
-        state: {
-          videoPath: videoPath,
-          videoTitle: this.data.videoTitle || this.data.customVideo?.title
-        }
-      });
-      return;
-    }
-
-    // Get the video ID
+    // Get video details
     const videoId = this.data.videoId || this.data.analysis?.id;
+    let videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath || this.data.realFilePath;
+    const videoTitle = this.data.analysis?.title || this.data.videoTitle || this.data.customVideo?.title || 'Unknown';
 
-    if (!videoId) {
-      this.notificationService.toastOnly('error', 'Error', 'No video ID available for analysis');
-      return;
+    // For custom/dropped videos, use the real file path
+    if (this.data.customVideo?.videoPath || (this.data.videoPath && !this.data.videoId)) {
+      videoPath = this.data.realFilePath || this.data.videoPath;
     }
 
-    // Add video to batch analysis queue (full analysis)
-    try {
-      await this.databaseLibraryService.startBatchAnalysis({
-        videoIds: [videoId],
-        transcribeOnly: false
-      });
-
-      this.notificationService.toastOnly(
-        'success',
-        'Analysis Queued',
-        'Video has been added to the analysis queue'
-      );
-
-      // Navigate to analysis page
-      this.router.navigate(['/analysis']);
-    } catch (error: any) {
-      console.error('Failed to queue analysis:', error);
+    // Check if we have a valid file path (not a blob URL)
+    if (!videoPath || videoPath.startsWith('blob:')) {
       this.notificationService.toastOnly(
         'error',
-        'Error',
-        error.error?.message || 'Failed to queue analysis'
+        'Cannot Analyze',
+        'Unable to get file path for this video. Please import the video to the library first.'
       );
+      return;
     }
+
+    // Add to analysis queue (full analysis mode)
+    this.analysisQueueService.addPendingJob({
+      input: videoPath,
+      inputType: 'file',
+      mode: 'full',
+      aiModel: 'ollama:qwen2.5:7b',
+      whisperModel: 'base',
+      language: 'en',
+      customInstructions: '',
+      displayName: videoTitle,
+      videoId: videoId,
+      loading: false
+    });
+
+    this.notificationService.toastOnly(
+      'success',
+      'Added to Queue',
+      'Video has been added to the analysis queue. Click the queue button in the header to start processing.'
+    );
   }
 
   /**
@@ -1689,6 +1673,18 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       // Setup video event listeners
       this.setupVideoEventListeners();
     }
+  }
+
+  /**
+   * Get the current media element (video or audio) for waveform generation
+   */
+  getMediaElement(): HTMLVideoElement | HTMLAudioElement | undefined {
+    if (this.mediaType === 'audio' && this.audioElement) {
+      return this.audioElement.nativeElement;
+    } else if (this.mediaType === 'video' && this.videoElement) {
+      return this.videoElement.nativeElement;
+    }
+    return undefined;
   }
 
   /**

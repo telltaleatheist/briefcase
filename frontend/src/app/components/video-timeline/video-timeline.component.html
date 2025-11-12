@@ -110,6 +110,12 @@
       (click)="onTimelineClick($event)"
       (mousedown)="onTimelineMouseDown($event)">
 
+      <!-- Waveform layer (background) -->
+      <canvas
+        #waveformCanvas
+        class="waveform-canvas">
+      </canvas>
+
       <!-- Section markers (background) -->
       <div class="sections-layer">
         <div

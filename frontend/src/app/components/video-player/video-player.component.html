@@ -240,6 +240,7 @@
     [currentTime]="currentTime"
     [sections]="timelineSections"
     [isPlaying]="isPlaying"
+    [mediaElement]="getMediaElement()"
     (seek)="onTimelineSeek($event)"
     (selectionChange)="onSelectionChange($event)"
     (playPause)="onPlayPause()"

@@ -44,6 +44,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   // Pending queue integration
   pendingJobs: PendingAnalysisJob[] = [];
   private pendingJobsSubscription?: Subscription;
+  private jobAddedSubscription?: Subscription;
   availableOllamaModels: string[] = [];
 
   // Bulk update settings
@@ -94,7 +95,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     });
 
     // Subscribe to job added event to auto-open the queue
-    this.analysisQueueService.jobAdded$.subscribe(() => {
+    this.jobAddedSubscription = this.analysisQueueService.jobAdded$.subscribe(() => {
       console.log('[DownloadQueueComponent] Job added, opening queue panel');
       this.isOpen = true;
       this.cdr.detectChanges();
@@ -116,6 +117,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     }
     if (this.pendingJobsSubscription) {
       this.pendingJobsSubscription.unsubscribe();
+    }
+    if (this.jobAddedSubscription) {
+      this.jobAddedSubscription.unsubscribe();
     }
     this.stopPolling();
   }
