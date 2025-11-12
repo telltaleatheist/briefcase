@@ -167,7 +167,8 @@
 
     &:hover {
       background-color: #e9ecef;
-      transform: translateX(2px);
+      border-left-width: 4px; // Slightly thicker border instead of transform
+      padding-left: 15px; // Compensate for thicker border
     }
 
     .item-icon {
@@ -362,7 +363,7 @@
 
   &:hover {
     background-color: #f8f9fa;
-    transform: translateX(2px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); // Subtle shadow instead of transform
   }
 
   // Highlighted state - show as selected (keyboard navigation cursor)
@@ -591,6 +592,7 @@
     background-color: #ff6600;
     transition: width 0.3s ease-out;
     position: relative;
+    overflow: hidden; // Ensure shimmer stays within bounds
 
     // Animated shimmer effect for active progress
     &::after {
@@ -599,14 +601,17 @@
       top: 0;
       left: 0;
       bottom: 0;
-      right: 0;
+      width: 200%; // Make shimmer element wider for smooth animation
       background: linear-gradient(
         90deg,
         transparent 0%,
-        rgba(255, 255, 255, 0.3) 50%,
+        transparent 40%,
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 60%,
         transparent 100%
       );
-      animation: shimmer 2s infinite;
+      animation: shimmer 3s linear infinite;
+      will-change: transform; // Optimize animation performance
     }
   }
 
@@ -615,7 +620,7 @@
       transform: translateX(-100%);
     }
     100% {
-      transform: translateX(100%);
+      transform: translateX(50%);
     }
   }
 }
@@ -674,6 +679,7 @@
     background: linear-gradient(90deg, #ff6600 0%, #ff8833 100%); // Gradient to differentiate
     transition: width 0.3s ease-out;
     position: relative;
+    overflow: hidden; // Ensure shimmer stays within bounds
 
     // Animated shimmer effect
     &::after {
@@ -682,14 +688,17 @@
       top: 0;
       left: 0;
       bottom: 0;
-      right: 0;
+      width: 200%; // Make shimmer element wider for smooth animation
       background: linear-gradient(
         90deg,
         transparent 0%,
-        rgba(255, 255, 255, 0.4) 50%,
+        transparent 40%,
+        rgba(255, 255, 255, 0.5) 50%,
+        transparent 60%,
         transparent 100%
       );
-      animation: shimmer 2s infinite;
+      animation: shimmer 3s linear infinite;
+      will-change: transform; // Optimize animation performance
     }
   }
 }
@@ -725,7 +734,8 @@
 
   &:hover {
     background-color: rgba(0, 0, 0, 0.03);
-    transform: translateX(2px);
+    border-left-width: 4px; // Slightly thicker border instead of transform
+    padding-left: calc(16px - 1px); // Compensate for thicker border
   }
 
   // Child icon
@@ -810,6 +820,8 @@
 
     .child-progress-bar .progress-fill {
       background-color: #ff6600;
+      position: relative;
+      overflow: hidden;
 
       // Active shimmer animation
       &::after {
@@ -818,14 +830,17 @@
         top: 0;
         left: 0;
         bottom: 0;
-        right: 0;
+        width: 200%; // Make shimmer element wider for smooth animation
         background: linear-gradient(
           90deg,
           transparent 0%,
-          rgba(255, 255, 255, 0.5) 50%,
+          transparent 40%,
+          rgba(255, 255, 255, 0.6) 50%,
+          transparent 60%,
           transparent 100%
         );
-        animation: shimmer 1.5s infinite;
+        animation: shimmer 2s linear infinite;
+        will-change: transform; // Optimize animation performance
       }
     }
   }
@@ -935,7 +950,8 @@
 
       &:hover {
         background-color: #2a2a2a;
-        transform: translateX(2px);
+        border-left-width: 4px; // Slightly thicker border instead of transform
+        padding-left: 15px; // Compensate for thicker border
       }
 
       .item-icon {
@@ -1109,7 +1125,7 @@
 
     &:hover {
       background-color: #222;
-      transform: translateX(2px);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); // Subtle shadow instead of transform
     }
 
     // Highlighted and selected state - show as selected in dark mode

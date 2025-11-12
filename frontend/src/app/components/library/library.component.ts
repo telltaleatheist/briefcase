@@ -257,15 +257,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
     renderIcon: (item) => this.getMediaIcon(item as any)
   };
 
-  // Progress mapper for showing analysis/transcription progress
+  // Progress mapper - return null so master progress bar (from children) is used
   videoProgressMapper = (item: DatabaseVideo): ItemProgress | null => {
-    const state = this.videoProcessingStates.get(item.id);
-    if (!state) return null;
+    // Videos with processing stages will show master progress bar from children
+    return null;
+  };
 
-    return {
-      value: state.progress,
-      label: state.stage === 'transcribing' ? 'Transcribing...' : 'Analyzing...'
-    };
+  // Children config for cascade - shows processing stages as ghost items
+  listChildrenConfig: ChildrenConfig = {
+    enabled: true,
+    expandable: true,
+    defaultExpanded: true,
+    showMasterProgress: true,
+    generator: (item: any) => this.generateVideoProcessingStages(item),
+    masterProgressCalculator: (item: any) => this.calculateVideoMasterProgress(item)
   };
 
   listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
@@ -393,6 +398,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
             stage = 'transcribing';
           }
 
+          // Store raw job progress - master progress will be calculated by cascade children
           this.videoProcessingStates.set(job.videoId, {
             stage,
             progress: job.progress
@@ -2241,17 +2247,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
   onListSpaceAction(video: DatabaseVideo | null) {
     if (!video) return;
 
-    // Set the video and open/update the preview dialog
-    this.highlightedVideo = video;
-
-    // If dialog is already open, close and reopen with new video
+    // Finder-like behavior: If dialog is already open, close it
     if (this.currentPreviewDialogRef) {
-      this.currentPreviewDialogRef.close();
-      setTimeout(() => this.openPreviewModal(), 100);
-    } else {
-      // Open new dialog
-      this.openPreviewModal();
+      this.closePreviewModal();
+      return;
     }
+
+    // Set the video and open the preview dialog
+    this.highlightedVideo = video;
+    this.openPreviewModal();
   }
 
   onListDeleteAction(videos: DatabaseVideo[]) {
@@ -4896,6 +4900,141 @@ export class LibraryComponent implements OnInit, OnDestroy {
       console.error('Failed to prune orphaned entries:', error);
       this.snackBar.open('Failed to prune orphaned entries', 'Close', { duration: 3000 });
     }
+  }
+
+  /**
+   * Calculate master progress for a job based on all its stages
+   * This matches the logic from download-queue.component.ts
+   */
+  private calculateJobMasterProgress(job: any): number {
+    const currentStage = job.stage;
+    const progress = job.progress || 0;
+
+    // Determine all stages this job will go through
+    // For analysis jobs: downloading/importing → transcribing → analyzing
+    const stages = [];
+
+    // Stage 1: Download or Import
+    if (job.url) {
+      stages.push('downloading');
+    } else {
+      stages.push('importing');
+    }
+
+    // Stage 2: Transcribe (always included)
+    stages.push('transcribing');
+
+    // Stage 3: Analyze (only in full mode, which is the default)
+    // We assume full mode unless explicitly transcribe-only
+    stages.push('analyzing');
+
+    // Calculate progress for each stage
+    let totalProgress = 0;
+    const currentStageIndex = stages.indexOf(currentStage);
+
+    stages.forEach((stage, index) => {
+      if (index < currentStageIndex) {
+        // Completed stages
+        totalProgress += 100;
+      } else if (index === currentStageIndex) {
+        // Current stage
+        totalProgress += progress;
+      }
+      // else: pending stages contribute 0
+    });
+
+    // Return average progress
+    return Math.round(totalProgress / stages.length);
+  }
+
+  /**
+   * Generate ghost items (children) for a video based on its processing stages
+   * Similar to download-queue but for library videos
+   */
+  private generateVideoProcessingStages(video: DatabaseVideo): CascadeChild[] {
+    const state = this.videoProcessingStates.get(video.id);
+    if (!state) return []; // No processing, no children
+
+    const children: CascadeChild[] = [];
+
+    // Get the job from the jobs map to determine what stages to show
+    const jobs = Array.from(this.downloadProgressService['jobs'].value.values());
+    const job = jobs.find(j => j.videoId === video.id);
+
+    // Determine stages based on job info
+    const stages: Array<{
+      id: string;
+      label: string;
+      icon: string;
+      stageName: string;
+    }> = [];
+
+    // Add import stage (we don't know if it was from URL or file, so just call it import)
+    stages.push({ id: 'import', label: 'Import', icon: 'input', stageName: 'importing' });
+
+    // Add transcribe stage (always included)
+    stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
+
+    // Add analyze stage (assume it's included unless we know otherwise)
+    stages.push({ id: 'analyze', label: 'Analyze', icon: 'psychology', stageName: 'analyzing' });
+
+    // Map current stage to determine status of each child
+    const currentStage = job?.stage || state.stage;
+    const progress = job?.progress || state.progress;
+
+    stages.forEach((stage, index) => {
+      let status: 'pending' | 'active' | 'completed' | 'failed' | 'skipped' = 'pending';
+      let stageProgress = 0;
+
+      // Determine status based on current stage
+      if (currentStage === 'completed') {
+        status = 'completed';
+        stageProgress = 100;
+      } else if (currentStage === 'failed') {
+        status = index === 0 ? 'failed' : 'pending';
+        stageProgress = status === 'failed' ? progress : 0;
+      } else if (stage.stageName === currentStage || stage.stageName === state.stage) {
+        status = 'active';
+        stageProgress = progress;
+      } else {
+        // Check if this stage is before or after the current stage
+        const currentStageIndex = stages.findIndex(s => s.stageName === currentStage || s.stageName === state.stage);
+        if (currentStageIndex !== -1 && index < currentStageIndex) {
+          status = 'completed';
+          stageProgress = 100;
+        } else {
+          status = 'pending';
+          stageProgress = 0;
+        }
+      }
+
+      children.push({
+        id: `${video.id}-${stage.id}`,
+        parentId: video.id,
+        label: stage.label,
+        icon: stage.icon,
+        status: status,
+        progress: { value: stageProgress }
+      });
+    });
+
+    return children;
+  }
+
+  /**
+   * Calculate master progress for a video from all its stages
+   * Same logic as download-queue: average of all stage progress values
+   */
+  private calculateVideoMasterProgress(video: DatabaseVideo): number {
+    const children = this.generateVideoProcessingStages(video);
+
+    if (children.length === 0) return 0;
+
+    const totalProgress = children.reduce((sum, child) => {
+      return sum + (child.progress?.value || 0);
+    }, 0);
+
+    return Math.round(totalProgress / children.length);
   }
 }
 

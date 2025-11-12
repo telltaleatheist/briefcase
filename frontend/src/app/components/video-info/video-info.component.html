@@ -534,20 +534,20 @@
       </div>
 
       <div class="library-picker-body">
-        <app-item-list
+        <cascade-list
           [items]="availableLibraryVideos"
           [displayConfig]="libraryPickerDisplayConfig"
           [selectionMode]="SelectionMode.Multiple"
           [emptyMessage]="'No videos available to link'"
           [emptyIcon]="'video_library'"
-          (itemsSelected)="onLibraryVideosSelected($event)"
-          (itemsDeselected)="onLibraryVideosDeselected($event)"
-          (itemDoubleClick)="linkSelectedLibraryVideos([$event])">
-        </app-item-list>
+          (itemsSelected)="onLibraryVideosSelected($any($event))"
+          (itemsDeselected)="onLibraryVideosDeselected($any($event))"
+          (itemDoubleClick)="linkSelectedLibraryVideos([$any($event)])">
+        </cascade-list>
       </div>
 
       <div class="library-picker-footer">
-        <button mat-button (click)="closeLibraryPicker()">Cancel</button>
+        <button mat-stroked-button (click)="closeLibraryPicker()">Cancel</button>
         <button mat-raised-button color="primary"
                 (click)="linkSelectedLibraryVideos()"
                 [disabled]="selectedLibraryVideos.size === 0">

@@ -1109,12 +1109,13 @@
   max-height: calc(100vh - 200px);
 }
 
-// Override item-list styles for queue items
-::ng-deep .jobs-list app-item-list {
-  // Make items more compact to match library items
+// Override cascade-list styles for queue items
+::ng-deep .jobs-list cascade-list {
+  // Make parent items match library height
   .item-card {
-    min-height: 40px; // Reduced from 44px
-    padding: 6px 16px; // More compact vertical padding
+    min-height: 44px; // Match library cascade item height
+    padding: 8px 16px; // Compact vertical padding
+    gap: 10px; // Tighter gap between elements
 
     // Disable hover transform to prevent right border going offscreen
     &:hover {
@@ -1127,25 +1128,103 @@
     gap: 2px; // Reduced gap between primary and secondary text
   }
 
-  // Make primary text slightly smaller
+  // Make primary text match library
   .item-primary {
     font-size: 13px;
-    line-height: 1.3;
+    line-height: 1.4;
   }
 
   // Make secondary text more compact
   .item-secondary {
     font-size: 11px;
-    line-height: 1.2;
-    margin-top: 1px;
+    line-height: 1.3;
+  }
+
+  // Make expand toggle button smaller and tighter
+  .expand-toggle {
+    width: 20px;
+    height: 20px;
+    margin-right: -6px; // Pull closer to icon
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  // Make icon slightly smaller
+  .item-icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
   }
 
   // Make item actions always visible (override default opacity: 0)
-  .item-card .item-actions {
+  .item-actions {
     opacity: 1 !important; // Always show the X button
     visibility: visible !important;
     margin-left: auto; // Push to the right
     margin-right: 0;
+  }
+
+  // ==================================
+  // Cascade Children (Ghost Items)
+  // ==================================
+
+  // Make children container more compact
+  .cascade-children {
+    margin: 0 0 0 32px; // Reduced indent
+    padding: 2px 0; // Tighter padding
+    border-left-width: 2px; // Thinner border
+  }
+
+  // Make individual ghost items much shorter to match library ghosts
+  .cascade-child {
+    min-height: 26px; // Much shorter, matching library ghost height
+    padding: 4px 10px; // Tighter padding
+    gap: 6px; // Reduced gap
+
+    // Smaller icon
+    .child-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+    }
+
+    // Smaller label text
+    .child-label {
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    // Smaller metadata text
+    .child-metadata {
+      font-size: 10px;
+    }
+
+    // Smaller progress bar
+    .child-progress-bar {
+      width: 50px; // Narrower progress bar
+      height: 2px; // Thinner progress bar
+    }
+
+    // Smaller status icon
+    .child-status-icon {
+      font-size: 12px;
+      width: 12px;
+      height: 12px;
+    }
+  }
+
+  // Make master progress bar thinner to match compact design
+  .master-progress-bar {
+    height: 3px; // Thinner progress bar
+  }
+
+  // Make regular progress bar thinner too
+  .item-progress-bar {
+    height: 2px; // Thinner progress bar
   }
 }
 

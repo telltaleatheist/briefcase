@@ -56,12 +56,45 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit() {
     // Auto-play video if enabled
-    if (this.autoPlayEnabled && this.data.video.media_type === 'video') {
-      setTimeout(() => {
-        this.videoPlayer?.nativeElement.play().catch(err => {
+    if (this.autoPlayEnabled && this.data.video.media_type === 'video' && this.videoPlayer?.nativeElement) {
+      const videoElement = this.videoPlayer.nativeElement;
+
+      // Wait for video to be ready before playing
+      const playWhenReady = () => {
+        videoElement.play().catch(err => {
           console.error('Auto-play failed:', err);
         });
-      }, 150);
+      };
+
+      // If already loaded, play immediately
+      if (videoElement.readyState >= 2) {
+        playWhenReady();
+      } else {
+        // Otherwise wait for loadeddata event
+        videoElement.addEventListener('loadeddata', playWhenReady, { once: true });
+      }
+    }
+
+    // Auto-play audio if enabled
+    if (this.autoPlayEnabled && this.data.video.media_type === 'audio') {
+      setTimeout(() => {
+        const audioElement = document.querySelector('.preview-dialog-content audio') as HTMLAudioElement;
+        if (audioElement) {
+          const playWhenReady = () => {
+            audioElement.play().catch(err => {
+              console.error('Auto-play failed:', err);
+            });
+          };
+
+          // If already loaded, play immediately
+          if (audioElement.readyState >= 2) {
+            playWhenReady();
+          } else {
+            // Otherwise wait for loadeddata event
+            audioElement.addEventListener('loadeddata', playWhenReady, { once: true });
+          }
+        }
+      }, 50);
     }
   }
 
@@ -89,21 +122,57 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
 
     // If we have a video element, update its source
     if (this.videoPlayer?.nativeElement && video.media_type === 'video') {
-      const video = this.videoPlayer.nativeElement;
+      const videoElement = this.videoPlayer.nativeElement;
 
       // Pause current video
-      video.pause();
+      videoElement.pause();
 
       // Update the source
-      video.src = videoStreamUrl;
-      video.load();
+      videoElement.src = videoStreamUrl;
+      videoElement.load();
 
-      // Auto-play if enabled
+      // Auto-play if enabled - wait for video to be ready
       if (this.autoPlayEnabled) {
-        video.play().catch(err => {
-          console.error('Auto-play failed:', err);
-        });
+        const playWhenReady = () => {
+          videoElement.play().catch(err => {
+            console.error('Auto-play failed:', err);
+          });
+        };
+
+        // If already loaded, play immediately
+        if (videoElement.readyState >= 2) {
+          playWhenReady();
+        } else {
+          // Otherwise wait for loadeddata event
+          videoElement.addEventListener('loadeddata', playWhenReady, { once: true });
+        }
       }
+    }
+
+    // Handle audio element auto-play when navigating
+    if (video.media_type === 'audio' && this.autoPlayEnabled) {
+      setTimeout(() => {
+        const audioElement = document.querySelector('.preview-dialog-content audio') as HTMLAudioElement;
+        if (audioElement) {
+          audioElement.pause();
+          audioElement.src = videoStreamUrl;
+          audioElement.load();
+
+          const playWhenReady = () => {
+            audioElement.play().catch(err => {
+              console.error('Auto-play failed:', err);
+            });
+          };
+
+          // If already loaded, play immediately
+          if (audioElement.readyState >= 2) {
+            playWhenReady();
+          } else {
+            // Otherwise wait for loadeddata event
+            audioElement.addEventListener('loadeddata', playWhenReady, { once: true });
+          }
+        }
+      }, 50);
     }
   }
 

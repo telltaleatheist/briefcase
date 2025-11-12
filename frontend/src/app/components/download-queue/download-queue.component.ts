@@ -15,8 +15,18 @@ import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysi
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { Subscription } from 'rxjs';
-import { ItemListComponent } from '../shared/item-list/item-list.component';
-import { ItemDisplayConfig, ItemProgress, ListItem, SelectionMode, ContextMenuAction } from '../shared/item-list/item-list.types';
+import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
+import {
+  ItemDisplayConfig,
+  ItemProgress,
+  ListItem,
+  SelectionMode,
+  ContextMenuAction,
+  CascadeItem,
+  CascadeChild,
+  CascadeChildStatus,
+  ChildrenConfig
+} from '../../libs/cascade/src/lib/types/cascade.types';
 
 @Component({
   selector: 'app-download-queue',
@@ -32,7 +42,7 @@ import { ItemDisplayConfig, ItemProgress, ListItem, SelectionMode, ContextMenuAc
     MatCheckboxModule,
     MatExpansionModule,
     MatTooltipModule,
-    ItemListComponent
+    CascadeListComponent
   ],
   templateUrl: './download-queue.component.html',
   styleUrls: ['./download-queue.component.scss']
@@ -77,6 +87,16 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     primaryField: 'displayName',
     secondaryField: 'subtitle',
     renderSecondary: (item: any) => this.formatJobSubtitle(item)
+  };
+
+  // Cascade children configuration for showing job stages
+  childrenConfig: ChildrenConfig = {
+    enabled: true,
+    expandable: true,
+    defaultExpanded: true, // Show stages by default
+    showMasterProgress: true,
+    generator: (item: any) => this.generateJobStages(item),
+    masterProgressCalculator: (item: any) => this.calculateMasterProgress(item)
   };
 
   constructor(
@@ -750,16 +770,153 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   // Progress mapper for active jobs
+  // NOTE: Return null so the master progress bar (calculated from children) is shown instead
   jobProgressMapper = (item: any): ItemProgress | null => {
-    // Pending jobs don't have progress
-    if (item.isPending) return null;
-
-    // Completed/failed jobs don't show progress
-    if (item.stage === 'completed' || item.stage === 'failed') return null;
-
-    return {
-      value: item.progress || 0,
-      label: this.getJobStatusText(item)
-    };
+    // All jobs should use master progress bar from their children
+    // Regular progress bar is not used for queue items
+    return null;
   };
+
+  /**
+   * Generate ghost items (children) for a job based on its stages
+   */
+  generateJobStages(job: any): CascadeChild[] {
+    const children: CascadeChild[] = [];
+
+    // Determine what stages this job will go through
+    const isPending = job.isPending === true;
+    const isUrlJob = job.inputType === 'url' || job.url;
+    const mode = job.mode || 'full';
+
+    // For pending jobs, we need to determine stages from the job config
+    // For active jobs, we track actual progress through stages
+
+    if (isPending) {
+      // PENDING JOBS: Show all planned stages
+
+      // Stage 1: Download/Import
+      if (isUrlJob) {
+        children.push({
+          id: `${job.id}-download`,
+          parentId: job.id,
+          label: 'Download & Import',
+          icon: 'download',
+          status: 'pending',
+          progress: { value: 0 }
+        });
+      } else {
+        children.push({
+          id: `${job.id}-import`,
+          parentId: job.id,
+          label: 'Import',
+          icon: 'input',
+          status: 'pending',
+          progress: { value: 0 }
+        });
+      }
+
+      // Stage 2: Transcribe (always included)
+      children.push({
+        id: `${job.id}-transcribe`,
+        parentId: job.id,
+        label: 'Transcribe',
+        icon: 'subtitles',
+        status: 'pending',
+        progress: { value: 0 }
+      });
+
+      // Stage 3: Analyze (only if mode is 'full')
+      if (mode === 'full') {
+        children.push({
+          id: `${job.id}-analyze`,
+          parentId: job.id,
+          label: 'Analyze',
+          icon: 'psychology',
+          status: 'pending',
+          progress: { value: 0 }
+        });
+      }
+    } else {
+      // ACTIVE JOBS: Show stages based on actual progress
+      const currentStage = job.stage;
+      const progress = job.progress || 0;
+
+      // Determine which stages have been completed, which is active, and which are pending
+      const stages: Array<{
+        id: string;
+        label: string;
+        icon: string;
+        stageName: string;
+      }> = [];
+
+      // Add stages based on job type
+      if (isUrlJob) {
+        stages.push({ id: 'download', label: 'Download & Import', icon: 'download', stageName: 'downloading' });
+      } else {
+        stages.push({ id: 'import', label: 'Import', icon: 'input', stageName: 'importing' });
+      }
+
+      stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
+
+      // Add analyze stage if mode is full (we assume full mode unless specified otherwise)
+      if (mode === 'full' || mode === undefined) {
+        stages.push({ id: 'analyze', label: 'Analyze', icon: 'psychology', stageName: 'analyzing' });
+      }
+
+      // Map current stage to determine status of each child
+      stages.forEach((stage, index) => {
+        let status: CascadeChildStatus = 'pending';
+        let stageProgress = 0;
+
+        // Determine status based on current stage
+        if (currentStage === 'completed') {
+          status = 'completed';
+          stageProgress = 100;
+        } else if (currentStage === 'failed') {
+          // If the job failed, mark the current stage as failed, others as pending
+          status = index === 0 || stages[index - 1]?.stageName === currentStage ? 'failed' : 'pending';
+          stageProgress = status === 'failed' ? progress : 0;
+        } else if (stage.stageName === currentStage) {
+          status = 'active';
+          stageProgress = progress;
+        } else {
+          // Check if this stage is before or after the current stage
+          const currentStageIndex = stages.findIndex(s => s.stageName === currentStage);
+          if (currentStageIndex !== -1 && index < currentStageIndex) {
+            status = 'completed';
+            stageProgress = 100;
+          } else {
+            status = 'pending';
+            stageProgress = 0;
+          }
+        }
+
+        children.push({
+          id: `${job.id}-${stage.id}`,
+          parentId: job.id,
+          label: stage.label,
+          icon: stage.icon,
+          status: status,
+          progress: { value: stageProgress }
+        });
+      });
+    }
+
+    return children;
+  }
+
+  /**
+   * Calculate master progress as the average of all child stage progress
+   */
+  calculateMasterProgress(job: any): number {
+    const children = this.generateJobStages(job);
+
+    if (children.length === 0) return 0;
+
+    const totalProgress = children.reduce((sum, child) => {
+      return sum + (child.progress?.value || 0);
+    }, 0);
+
+    return Math.round(totalProgress / children.length);
+  }
 }

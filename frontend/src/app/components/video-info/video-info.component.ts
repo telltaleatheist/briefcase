@@ -27,12 +27,13 @@ import { BackendUrlService } from '../../services/backend-url.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 import { ItemListComponent } from '../shared/item-list/item-list.component';
+import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
   ListItem,
   ItemDisplayConfig,
   SelectionMode,
   ContextMenuAction
-} from '../shared/item-list/item-list.types';
+} from '../../libs/cascade/src/lib/types/cascade.types';
 
 interface TranscriptEntry {
   timestamp: string;
@@ -57,7 +58,8 @@ interface TranscriptEntry {
     MatFormFieldModule,
     MatDialogModule,
     TranscriptSearchComponent,
-    ItemListComponent
+    ItemListComponent,
+    CascadeListComponent
   ],
   templateUrl: './video-info.component.html',
   styleUrl: './video-info.component.scss'
