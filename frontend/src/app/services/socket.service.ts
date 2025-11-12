@@ -323,4 +323,11 @@ export class SocketService {
       });
     });
   }
+
+  /**
+   * Listen for video renamed events
+   */
+  onVideoRenamed(): Observable<{ videoId: string; oldFilename: string; newFilename: string; newPath: string; timestamp: string }> {
+    return this.listenTo<{ videoId: string; oldFilename: string; newFilename: string; newPath: string; timestamp: string }>('video-renamed');
+  }
 }

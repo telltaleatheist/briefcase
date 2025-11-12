@@ -432,14 +432,23 @@ def analyze_with_ai(
 
         analyzed_sections = []
 
+        failed_chunks = []
+
         for i, chunk in enumerate(chunks, 1):
             chunk_progress = round(70 + (i / len(chunks)) * 20)  # 70-90%
             send_progress("analysis", chunk_progress, f"Analyzing chunk {i}/{len(chunks)}...")
 
-            # Identify interesting sections
-            interesting_sections = identify_interesting_sections(
-                provider, endpoint_or_key, model, chunk['text'], i, custom_instructions, video_title
-            )
+            # Identify interesting sections - with error handling to skip failed chunks
+            try:
+                interesting_sections = identify_interesting_sections(
+                    provider, endpoint_or_key, model, chunk['text'], i, custom_instructions, video_title
+                )
+            except Exception as e:
+                # Log the failure but continue with remaining chunks
+                print(f"[WARNING] Chunk {i} failed after retries: {e}", file=sys.stderr)
+                print(f"[WARNING] Skipping chunk {i} and continuing with remaining chunks...", file=sys.stderr)
+                failed_chunks.append(i)
+                continue  # Skip this chunk, move to next one
 
             if interesting_sections:
                 send_progress("analysis", chunk_progress + 0.5, f"Found {len(interesting_sections)} sections in chunk {i}")
@@ -472,7 +481,12 @@ def analyze_with_ai(
                             # Write section immediately to file (streaming, is_first=False since we already wrote header)
                             write_section_to_file(output_file, detailed_analysis, is_first=False)
 
-        send_progress("analysis", 90, f"Analysis complete. Found {len(analyzed_sections)} interesting sections.")
+        # Report completion with chunk failure information
+        if failed_chunks:
+            send_progress("analysis", 90, f"Analysis complete with {len(failed_chunks)} failed chunks. Found {len(analyzed_sections)} sections.")
+            print(f"[WARNING] Analysis completed but {len(failed_chunks)} chunks failed: {failed_chunks}", file=sys.stderr)
+        else:
+            send_progress("analysis", 90, f"Analysis complete. Found {len(analyzed_sections)} interesting sections.")
 
         # Final safety check: if we have NO sections at all, create a default "routine" section
         if len(analyzed_sections) == 0:
@@ -724,10 +738,10 @@ TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
                 print(f"[ERROR] Failed to analyze chunk {chunk_num} after {MAX_RETRIES} attempts: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc(file=sys.stderr)
-                raise Exception(f"FATAL: Chunk {chunk_num} failed after {MAX_RETRIES} attempts. Analysis cannot continue.")
+                raise Exception(f"Chunk {chunk_num} failed after {MAX_RETRIES} attempts")
 
     # Should never reach here
-    raise Exception(f"FATAL: Chunk {chunk_num} failed unexpectedly")
+    raise Exception(f"Chunk {chunk_num} failed unexpectedly")
 
 
 def analyze_section_detail(provider: str, endpoint_or_key: str, model: str, section: Dict, all_segments: List[Dict]) -> Optional[Dict]:

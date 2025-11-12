@@ -78,10 +78,8 @@ export class AnalysisService {
 
   // Queue management for concurrency control
   private pendingQueue: Array<{ jobId: string; request: AnalysisRequestWithState }> = [];
-  private activeTranscriptions = 0;
-  private activeAnalyses = 0;
-  private readonly MAX_CONCURRENT_TRANSCRIPTIONS = 1;
-  private readonly MAX_CONCURRENT_ANALYSES = 1;
+  private activeJobs = 0; // Total active jobs (transcription + analysis)
+  private readonly MAX_CONCURRENT_JOBS = 1; // Only 1 job at a time, period
   private isProcessing = false; // Prevent concurrent processNextInQueue calls
 
   constructor(
@@ -182,47 +180,49 @@ export class AnalysisService {
       }
     }
 
-    // Priority 2: Analyze jobs (complete jobs that finished transcribing)
-    if (this.activeAnalyses < this.MAX_CONCURRENT_ANALYSES) {
-      for (let i = 0; i < this.pendingQueue.length; i++) {
-        const { jobId, request } = this.pendingQueue[i];
-        if ((request.phase || 'download') === 'analyze') {
-          this.activeAnalyses++;
-          this.pendingQueue.splice(i, 1);
-          this.logger.log(`Starting job ${jobId} at phase 'analyze'. Active: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS} transcriptions, ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES} analyses`);
-          this.processJobPhase(jobId, request).catch((error) => {
-            this.logger.error(`Job ${jobId} failed at phase 'analyze': ${(error as Error).message}`);
-            this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
-            this.activeAnalyses--;
-            setImmediate(() => this.processNextInQueue());
-          });
-          return;
-        }
+    // Only start jobs if we have capacity (1 job max at a time)
+    if (this.activeJobs >= this.MAX_CONCURRENT_JOBS) {
+      this.logger.debug(`No jobs can start. Active: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}. Queue: ${this.pendingQueue.length}`);
+      return;
+    }
+
+    // Priority 1: Analyze jobs (jobs that finished transcribing)
+    for (let i = 0; i < this.pendingQueue.length; i++) {
+      const { jobId, request } = this.pendingQueue[i];
+      if ((request.phase || 'download') === 'analyze') {
+        this.activeJobs++;
+        this.pendingQueue.splice(i, 1);
+        this.logger.log(`Starting job ${jobId} at phase 'analyze'. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
+        this.processJobPhase(jobId, request).catch((error) => {
+          this.logger.error(`Job ${jobId} failed at phase 'analyze': ${(error as Error).message}`);
+          this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
+          this.activeJobs--;
+          setImmediate(() => this.processNextInQueue());
+        });
+        return;
       }
     }
 
-    // Priority 3: Transcribe/Download jobs (start new jobs)
-    if (this.activeTranscriptions < this.MAX_CONCURRENT_TRANSCRIPTIONS) {
-      for (let i = 0; i < this.pendingQueue.length; i++) {
-        const { jobId, request } = this.pendingQueue[i];
-        const phase = request.phase || 'download';
-        if (phase === 'download' || phase === 'transcribe') {
-          this.activeTranscriptions++;
-          this.pendingQueue.splice(i, 1);
-          this.logger.log(`Starting job ${jobId} at phase '${phase}'. Active: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS} transcriptions, ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES} analyses`);
-          this.processJobPhase(jobId, request).catch((error) => {
-            this.logger.error(`Job ${jobId} failed at phase '${phase}': ${(error as Error).message}`);
-            this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
-            this.activeTranscriptions--;
-            setImmediate(() => this.processNextInQueue());
-          });
-          return;
-        }
+    // Priority 2: Transcribe/Download jobs (start new jobs)
+    for (let i = 0; i < this.pendingQueue.length; i++) {
+      const { jobId, request } = this.pendingQueue[i];
+      const phase = request.phase || 'download';
+      if (phase === 'download' || phase === 'transcribe') {
+        this.activeJobs++;
+        this.pendingQueue.splice(i, 1);
+        this.logger.log(`Starting job ${jobId} at phase '${phase}'. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
+        this.processJobPhase(jobId, request).catch((error) => {
+          this.logger.error(`Job ${jobId} failed at phase '${phase}': ${(error as Error).message}`);
+          this.updateJob(jobId, { status: 'failed', error: (error as Error).message });
+          this.activeJobs--;
+          setImmediate(() => this.processNextInQueue());
+        });
+        return;
       }
     }
 
-    // No job could be started due to resource constraints
-    this.logger.debug(`No jobs can start. Active: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS} transcriptions, ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES} analyses. Queue: ${this.pendingQueue.length}`);
+    // No jobs in queue
+    this.logger.debug(`Queue empty. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
   }
 
   /**
@@ -294,9 +294,9 @@ export class AnalysisService {
         // Continue directly to transcribe phase without releasing the slot
         await this.processTranscribePhase(jobId, request);
 
-        // NOW release transcription slot after both download and transcribe are done
-        this.activeTranscriptions--;
-        this.logger.log(`Transcription phase complete for job ${jobId}. Active transcriptions: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS}`);
+        // NOW release job slot after both download and transcribe are done
+        this.activeJobs--;
+        this.logger.log(`Transcription phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
 
         // Move to appropriate next phase based on mode
         if (mode === 'transcribe-only') {
@@ -314,9 +314,9 @@ export class AnalysisService {
 
         await this.processTranscribePhase(jobId, request);
 
-        // Release transcription slot
-        this.activeTranscriptions--;
-        this.logger.log(`Transcription phase complete for job ${jobId}. Active transcriptions: ${this.activeTranscriptions}/${this.MAX_CONCURRENT_TRANSCRIPTIONS}`);
+        // Release job slot
+        this.activeJobs--;
+        this.logger.log(`Transcription phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
 
         // Move to appropriate next phase based on mode
         if (mode === 'transcribe-only') {
@@ -328,9 +328,9 @@ export class AnalysisService {
         // Phase 3: AI Analysis
         await this.processAnalyzePhase(jobId, request);
 
-        // Release analysis slot
-        this.activeAnalyses--;
-        this.logger.log(`Analysis phase complete for job ${jobId}. Active analyses: ${this.activeAnalyses}/${this.MAX_CONCURRENT_ANALYSES}`);
+        // Release job slot
+        this.activeJobs--;
+        this.logger.log(`Analysis phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
 
         // Move to finalize
         this.requeueJobForNextPhase(jobId, request, 'finalize');
@@ -345,10 +345,8 @@ export class AnalysisService {
       }
     } catch (error: any) {
       // Release resources on error
-      if (phase === 'download' || phase === 'transcribe') {
-        this.activeTranscriptions--;
-      } else if (phase === 'analyze') {
-        this.activeAnalyses--;
+      if (phase === 'download' || phase === 'transcribe' || phase === 'analyze') {
+        this.activeJobs--;
       }
 
       this.logger.error(`Job ${jobId} failed at phase '${phase}': ${(error as Error).message || 'Unknown error'}`);

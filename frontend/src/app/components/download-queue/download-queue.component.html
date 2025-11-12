@@ -9,27 +9,10 @@
   <div class="queue-panel" *ngIf="isOpen">
     <!-- Queue Header -->
     <div class="panel-header">
-      <mat-checkbox *ngIf="hasPendingJobs()"
-                    [checked]="selectAllChecked"
-                    (change)="toggleSelectAll()"
-                    class="select-all-checkbox"
-                    matTooltip="Select all">
-      </mat-checkbox>
       <h3>
         Analysis Queue
-        <span *ngIf="hasSelection()" class="selection-count">({{ getSelectedCount() }} selected)</span>
+        <span *ngIf="allJobsAsListItems.length > 0" class="selection-count">({{ allJobsAsListItems.length }})</span>
       </h3>
-      <div class="queue-badges">
-        <span class="badge-small pending" *ngIf="pendingJobs.length > 0">
-          {{ pendingJobs.length }} pending
-        </span>
-        <span class="badge-small active" *ngIf="getActiveJobs().length > 0">
-          {{ getActiveJobs().length }} active
-        </span>
-        <span class="badge-small complete" *ngIf="getCompletedJobs().length > 0">
-          {{ getCompletedJobs().length }} done
-        </span>
-      </div>
     </div>
 
     <!-- Queue Actions -->
@@ -60,398 +43,37 @@
       </button>
     </div>
 
-    <!-- Bulk Settings Panel (Accordion) -->
-    <mat-accordion *ngIf="hasPendingJobs()" class="bulk-settings-accordion">
-      <mat-expansion-panel>
-        <mat-expansion-panel-header>
-          <mat-panel-title>
-            <mat-icon>tune</mat-icon>
-            <span>Batch Edit {{ hasSelection() ? '(' + getSelectedCount() + ' selected)' : '(All Items)' }}</span>
-          </mat-panel-title>
-        </mat-expansion-panel-header>
-
-        <div class="bulk-controls">
-          <!-- Processing Mode -->
-          <div class="bulk-control-group">
-            <label class="bulk-label">
-              <mat-icon>psychology</mat-icon>
-              Processing Mode
-            </label>
-            <select class="bulk-select" [(ngModel)]="bulkMode">
-              <option value="full">Transcribe + Analysis</option>
-              <option value="transcribe-only">Transcribe Only</option>
-            </select>
-          </div>
-
-          <!-- AI Model Selection (only if full mode) -->
-          <div class="bulk-control-group" *ngIf="bulkMode === 'full'">
-            <label class="bulk-label">
-              <mat-icon>smart_toy</mat-icon>
-              AI Model
-            </label>
-            <select class="bulk-select"
-                    [(ngModel)]="bulkAIModel"
-                    (change)="onBulkModelChange()">
-              <option value="">Keep current</option>
-              <optgroup label="Claude (API Key Required)">
-                <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
-                <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                <option value="claude:claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-              </optgroup>
-              <optgroup label="ChatGPT / OpenAI (API Key Required)">
-                <option value="openai:gpt-4o">GPT-4o</option>
-                <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
-                <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo</option>
-              </optgroup>
-              <optgroup label="Ollama (Local - Free)">
-                <option *ngIf="availableOllamaModels.length === 0" value="" disabled>No Ollama models installed</option>
-                <option *ngFor="let model of availableOllamaModels" [value]="'ollama:' + model">{{ model }}</option>
-              </optgroup>
-            </select>
-          </div>
-
-          <!-- API Key (for Claude/OpenAI) -->
-          <div class="bulk-control-group" *ngIf="bulkMode === 'full' && bulkNeedsApiKey()">
-            <label class="bulk-label">
-              <mat-icon>vpn_key</mat-icon>
-              {{ getBulkApiKeyLabel() }}
-            </label>
-            <div class="bulk-input-wrapper">
-              <input type="password"
-                     class="bulk-input"
-                     [(ngModel)]="bulkApiKey"
-                     [placeholder]="'Enter ' + getBulkApiKeyLabel()">
-            </div>
-          </div>
-
-          <!-- Ollama Endpoint (for local models) -->
-          <div class="bulk-control-group" *ngIf="bulkMode === 'full' && !bulkNeedsApiKey() && bulkAIModel">
-            <label class="bulk-label">
-              <mat-icon>dns</mat-icon>
-              Ollama Endpoint
-            </label>
-            <div class="bulk-input-wrapper">
-              <input type="text"
-                     class="bulk-input"
-                     [(ngModel)]="bulkOllamaEndpoint"
-                     placeholder="http://localhost:11434">
-            </div>
-          </div>
-
-          <!-- Custom Instructions (only if full mode) -->
-          <div class="bulk-control-group" *ngIf="bulkMode === 'full'">
-            <label class="bulk-label">
-              <mat-icon>edit_note</mat-icon>
-              Custom Instructions
-            </label>
-            <textarea class="bulk-textarea"
-                      [(ngModel)]="bulkCustomInstructions"
-                      rows="3"
-                      placeholder="Add instructions for AI analysis..."></textarea>
-          </div>
-
-          <!-- Whisper Model -->
-          <div class="bulk-control-group">
-            <label class="bulk-label">
-              <mat-icon>mic</mat-icon>
-              Whisper Model
-            </label>
-            <select class="bulk-select" [(ngModel)]="bulkWhisperModel">
-              <option value="tiny">Tiny - Fastest</option>
-              <option value="base">Base - Balanced</option>
-              <option value="small">Small - Better Quality</option>
-              <option value="medium">Medium - Great Quality</option>
-              <option value="large">Large - Best Quality</option>
-            </select>
-          </div>
-
-          <!-- Language -->
-          <div class="bulk-control-group">
-            <label class="bulk-label">
-              <mat-icon>language</mat-icon>
-              Language
-            </label>
-            <input type="text"
-                   class="bulk-input"
-                   [(ngModel)]="bulkLanguage"
-                   placeholder="en">
-          </div>
-
-          <!-- Apply Button -->
-          <button mat-raised-button
-                  color="accent"
-                  class="bulk-apply-btn"
-                  (click)="applyBulkSettings()">
-            <mat-icon>check_circle</mat-icon>
-            Apply to {{ hasSelection() ? getSelectedCount() + ' Selected' : 'All (' + pendingJobs.length + ')' }}
-          </button>
-        </div>
-      </mat-expansion-panel>
-    </mat-accordion>
-
     <!-- Queue List -->
     <div class="jobs-list">
-      <!-- Pending Jobs -->
-      <div *ngFor="let job of pendingJobs" class="job-item-wrapper">
-        <div class="job-item pending"
-             [class.expanded]="isPendingJobExpanded(job.id)"
-             [class.selected]="isJobSelected(job.id)">
+      <!-- All Jobs (Pending + Active) -->
+      <app-item-list
+        *ngIf="allJobsAsListItems.length > 0"
+        [items]="allJobsAsListItems"
+        [displayConfig]="jobDisplayConfig"
+        [selectionMode]="SelectionMode.Multiple"
+        [progressMapper]="jobProgressMapper"
+        emptyMessage="No jobs in queue"
+        emptyIcon="hourglass_empty">
 
-          <!-- Checkbox -->
-          <mat-checkbox [checked]="isJobSelected(job.id)"
-                        (change)="toggleJobSelection(job.id)"
-                        (click)="$event.stopPropagation()"
-                        class="job-checkbox">
-          </mat-checkbox>
-
-          <!-- Icon -->
-          <div class="job-icon">
-            <mat-icon>hourglass_empty</mat-icon>
-          </div>
-
-          <!-- Content -->
-          <div class="job-content" (click)="togglePendingJobExpansion(job.id)">
-            <div class="job-header">
-              <span class="job-name">{{ job.displayName || 'Unknown' }}</span>
-            </div>
-            <p class="job-status-text">{{ getQueueJobSubtitle(job) }}</p>
-          </div>
-
-          <!-- Expand/Collapse Icon -->
-          <button mat-icon-button
-                  (click)="togglePendingJobExpansion(job.id); $event.stopPropagation()"
-                  matTooltip="Configure settings"
-                  class="expand-button">
-            <mat-icon>{{ isPendingJobExpanded(job.id) ? 'expand_less' : 'expand_more' }}</mat-icon>
-          </button>
-
-          <!-- Remove Button -->
-          <button mat-icon-button
-                  (click)="removePendingJob(job.id); $event.stopPropagation()"
+        <!-- Custom action template for X button on pending jobs -->
+        <ng-template #itemActions let-item>
+          <button *ngIf="isJobPending(item)"
+                  mat-icon-button
+                  (click)="removeJob(item.id); $event.stopPropagation()"
                   matTooltip="Remove from queue"
-                  class="remove-job-button">
+                  class="remove-job-btn">
             <mat-icon>close</mat-icon>
           </button>
-        </div>
-
-        <!-- Expandable Settings Panel -->
-        <div class="job-settings-panel" *ngIf="isPendingJobExpanded(job.id)">
-          <div class="settings-content">
-            <!-- Mode Selection -->
-            <div class="setting-group">
-              <label class="setting-label">
-                <mat-icon>psychology</mat-icon>
-                Processing Mode
-              </label>
-              <div class="mode-toggle-compact">
-                <button type="button"
-                        class="mode-btn"
-                        [class.active]="job.mode === 'full'"
-                        (click)="updatePendingJobMode(job.id, 'full')">
-                  <mat-icon>psychology</mat-icon>
-                  <span>Full Analysis</span>
-                </button>
-                <button type="button"
-                        class="mode-btn"
-                        [class.active]="job.mode === 'transcribe-only'"
-                        (click)="updatePendingJobMode(job.id, 'transcribe-only')">
-                  <mat-icon>subtitles</mat-icon>
-                  <span>Transcribe Only</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- AI Model Selection (only if full analysis) -->
-            <div class="setting-group" *ngIf="job.mode === 'full'">
-              <label class="setting-label">
-                <mat-icon>smart_toy</mat-icon>
-                AI Model
-              </label>
-              <select class="compact-select"
-                      [ngModel]="job.aiModel"
-                      (ngModelChange)="updatePendingJobModel(job.id, $event)">
-                <optgroup label="Claude (API Key Required)">
-                  <option value="claude:claude-sonnet-4-20250514">Claude Sonnet 4.5</option>
-                  <option value="claude:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                  <option value="claude:claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                </optgroup>
-                <optgroup label="ChatGPT / OpenAI (API Key Required)">
-                  <option value="openai:gpt-4o">GPT-4o</option>
-                  <option value="openai:gpt-4-turbo">GPT-4 Turbo</option>
-                  <option value="openai:gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                </optgroup>
-                <optgroup label="Ollama (Local - Free)">
-                  <option *ngIf="availableOllamaModels.length === 0" value="" disabled>No Ollama models installed</option>
-                  <option *ngFor="let model of availableOllamaModels" [value]="'ollama:' + model">{{ model }}</option>
-                </optgroup>
-              </select>
-            </div>
-
-            <!-- Custom Instructions (only if full analysis) -->
-            <div class="setting-group" *ngIf="job.mode === 'full'">
-              <label class="setting-label">
-                <mat-icon>edit_note</mat-icon>
-                Custom Instructions
-                <span class="optional-text">(Optional)</span>
-              </label>
-              <textarea class="compact-textarea"
-                        [value]="job.customInstructions || ''"
-                        (input)="updatePendingJobInstructions(job.id, $any($event.target).value)"
-                        rows="3"
-                        placeholder="Add specific instructions for the AI analysis..."></textarea>
-            </div>
-
-            <!-- Whisper Model -->
-            <div class="setting-group">
-              <label class="setting-label">
-                <mat-icon>mic</mat-icon>
-                Whisper Model
-              </label>
-              <select class="compact-select"
-                      [ngModel]="job.whisperModel"
-                      (ngModelChange)="analysisQueueService.updatePendingJob(job.id, { whisperModel: $event })">
-                <option value="tiny">Tiny - Fastest</option>
-                <option value="base">Base - Balanced</option>
-                <option value="small">Small - Better Quality</option>
-                <option value="medium">Medium - Great Quality</option>
-                <option value="large">Large - Best Quality</option>
-              </select>
-            </div>
-
-            <!-- Language -->
-            <div class="setting-group">
-              <label class="setting-label">
-                <mat-icon>language</mat-icon>
-                Language
-              </label>
-              <input type="text"
-                     class="compact-input"
-                     [value]="job.language"
-                     (input)="analysisQueueService.updatePendingJob(job.id, { language: $any($event.target).value })"
-                     placeholder="en">
-            </div>
-
-            <!-- Video Path -->
-            <div class="setting-group">
-              <label class="setting-label">
-                <mat-icon>video_file</mat-icon>
-                Video Path
-              </label>
-              <div class="path-display">{{ job.input }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Active Jobs -->
-      <div *ngFor="let job of getActiveJobs(); trackBy: trackByJobId" class="job-item-wrapper">
-        <div class="job-item active"
-             [class.expanded]="isActiveJobExpanded(job.id)">
-          <!-- Icon -->
-          <div class="job-icon">
-            <mat-icon class="spinning">sync</mat-icon>
-          </div>
-
-          <!-- Content -->
-          <div class="job-content" (click)="toggleActiveJobExpansion(job.id)">
-            <div class="job-header">
-              <span class="job-name">{{ getJobTitle(job) }}</span>
-            </div>
-            <p class="job-status-text">{{ getJobStatusText(job) }}</p>
-          </div>
-
-          <!-- Expand/Collapse Icon -->
-          <button mat-icon-button
-                  (click)="toggleActiveJobExpansion(job.id); $event.stopPropagation()"
-                  matTooltip="View details"
-                  class="expand-button">
-            <mat-icon>{{ isActiveJobExpanded(job.id) ? 'expand_less' : 'expand_more' }}</mat-icon>
-          </button>
-
-          <!-- Progress bar along bottom -->
-          <div class="job-progress-bar" *ngIf="job.progress !== undefined">
-            <mat-progress-bar
-              mode="determinate"
-              [value]="job.progress || 0"
-              color="primary">
-            </mat-progress-bar>
-          </div>
-        </div>
-
-        <!-- Expandable Details Panel -->
-        <div class="job-details-panel" *ngIf="isActiveJobExpanded(job.id)">
-          <div class="details-content">
-            <!-- Current Phase -->
-            <div class="detail-group">
-              <label class="detail-label">
-                <mat-icon>timelapse</mat-icon>
-                Current Phase
-              </label>
-              <div class="detail-value">{{ job.stage || 'Processing' }}</div>
-            </div>
-
-            <!-- Input Source -->
-            <div class="detail-group">
-              <label class="detail-label">
-                <mat-icon>video_file</mat-icon>
-                Source
-              </label>
-              <div class="detail-value path-display">{{ job.url || job.filename || 'Unknown' }}</div>
-            </div>
-
-            <!-- Started At -->
-            <div class="detail-group" *ngIf="job.startedAt">
-              <label class="detail-label">
-                <mat-icon>schedule</mat-icon>
-                Started
-              </label>
-              <div class="detail-value">{{ getRelativeTime(job.startedAt) }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Completed Jobs -->
-      <div *ngFor="let job of getCompletedJobs()" class="job-item-wrapper">
-        <div class="job-item"
-             [class.completed]="job.stage === 'completed'"
-             [class.failed]="job.stage === 'failed'">
-          <!-- Icon -->
-          <div class="job-icon">
-            <mat-icon>{{ job.stage === 'completed' ? 'check_circle' : 'error' }}</mat-icon>
-          </div>
-
-          <!-- Content -->
-          <div class="job-content">
-            <div class="job-header">
-              <span class="job-name">{{ job.filename || job.url || 'Unknown' }}</span>
-            </div>
-            <p class="job-status-text">
-              {{ getJobStatusText(job) }}
-              <span *ngIf="job.completedAt"> • {{ getRelativeTime(job.completedAt) }}</span>
-            </p>
-            <div class="error-message" *ngIf="job.error">
-              <mat-icon>warning</mat-icon>
-              {{ job.error }}
-            </div>
-          </div>
-        </div>
-      </div>
+        </ng-template>
+      </app-item-list>
 
       <!-- Empty state -->
-      <div class="empty-state" *ngIf="pendingJobs.length === 0 && processingJobs.length === 0">
+      <div class="empty-state" *ngIf="allJobsAsListItems.length === 0">
         <svg class="empty-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor" opacity="0.3"/>
         </svg>
         <p>No analysis jobs in queue</p>
       </div>
-    </div>
-
-    <div class="panel-footer" *ngIf="getCompletedJobs().length > 0">
-      <button class="clear-completed-btn" (click)="clearCompleted()">
-        <mat-icon>clear_all</mat-icon>
-        Clear Completed ({{ getCompletedJobs().length }})
-      </button>
     </div>
   </div>
 </div>

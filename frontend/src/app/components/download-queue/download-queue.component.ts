@@ -15,6 +15,8 @@ import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysi
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { Subscription } from 'rxjs';
+import { ItemListComponent } from '../shared/item-list/item-list.component';
+import { ItemDisplayConfig, ItemProgress, ListItem, SelectionMode, ContextMenuAction } from '../shared/item-list/item-list.types';
 
 @Component({
   selector: 'app-download-queue',
@@ -29,7 +31,8 @@ import { Subscription } from 'rxjs';
     MatProgressBarModule,
     MatCheckboxModule,
     MatExpansionModule,
-    MatTooltipModule
+    MatTooltipModule,
+    ItemListComponent
   ],
   templateUrl: './download-queue.component.html',
   styleUrls: ['./download-queue.component.scss']
@@ -67,6 +70,15 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   private pollingInterval: any = null;
   isProcessing = false;
 
+  // Item-list configuration
+  SelectionMode = SelectionMode;
+
+  jobDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'displayName',
+    secondaryField: 'subtitle',
+    renderSecondary: (item: any) => this.formatJobSubtitle(item)
+  };
+
   constructor(
     private databaseLibraryService: DatabaseLibraryService,
     private downloadProgressService: DownloadProgressService,
@@ -81,6 +93,15 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Subscribe to processing jobs (analysis jobs only, NOT batch downloads)
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
       this.processingJobs = Array.from(jobsMap.values());
+
+      // Auto-remove completed/failed jobs after a short delay
+      this.processingJobs.forEach(job => {
+        if (job.stage === 'completed' || job.stage === 'failed') {
+          setTimeout(() => {
+            this.downloadProgressService.removeJob(job.id);
+          }, 2000); // Show for 2 seconds then remove
+        }
+      });
     });
 
     // Subscribe to pending jobs from the queue service
@@ -477,18 +498,36 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   getJobTitle(job: VideoProcessingJob): string {
     // Try to extract a clean title from filename or URL
     if (job.filename && job.filename !== 'Video Analysis') {
-      // Remove file extension and clean up
-      const title = job.filename.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-      return title;
+      let title = job.filename;
+
+      // If it's a file path, extract just the filename
+      if (title.includes('/') || title.includes('\\')) {
+        const parts = title.split(/[/\\]/);
+        title = parts[parts.length - 1] || title;
+      }
+
+      // Remove common video extensions
+      title = title.replace(/\.(mp4|mkv|avi|mov|webm|m4v|flv|wmv|mp3|wav|m4a|aac|ogg)$/i, '');
+
+      // Replace underscores and hyphens with spaces
+      title = title.replace(/[_-]+/g, ' ');
+
+      // Clean up multiple spaces
+      title = title.replace(/\s+/g, ' ').trim();
+
+      return title || 'Processing Video';
     }
+
     if (job.url) {
       // Try to extract title from URL
       try {
         const url = new URL(job.url);
         const pathParts = url.pathname.split('/').filter(p => p);
         if (pathParts.length > 0) {
-          const title = pathParts[pathParts.length - 1].replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-          return title;
+          let title = pathParts[pathParts.length - 1];
+          title = title.replace(/\.(mp4|mkv|avi|mov|webm|m4v|flv|wmv|mp3|wav|m4a|aac|ogg)$/i, '');
+          title = title.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+          return title || 'Processing Video';
         }
       } catch {
         // Not a valid URL, might be a file path
@@ -496,13 +535,14 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           const parts = job.url.split(/[/\\]/);
           const filename = parts[parts.length - 1];
           if (filename) {
-            const title = filename.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-            return title;
+            let title = filename.replace(/\.(mp4|mkv|avi|mov|webm|m4v|flv|wmv|mp3|wav|m4a|aac|ogg)$/i, '');
+            title = title.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+            return title || 'Processing Video';
           }
         }
-        return 'Processing Video';
       }
     }
+
     return 'Processing Video';
   }
 
@@ -637,4 +677,89 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       console.log('[DownloadQueue] Backend not ready yet, skipping active job check');
     }
   }
+
+  // Combine pending and active jobs into one unified list
+  get allJobsAsListItems(): ListItem[] {
+    const pending = this.pendingJobs.map(job => ({
+      ...job,
+      displayName: job.displayName || 'Unknown',
+      isPending: true
+    }));
+
+    const active = this.processingJobs
+      .filter(job => job.stage !== 'completed' && job.stage !== 'failed')
+      .map(job => ({
+        ...job,
+        displayName: this.getJobTitle(job),
+        isPending: false
+      }));
+
+    return [...pending, ...active];
+  }
+
+  // Check if a job is pending (hasn't started yet)
+  isJobPending(item: any): boolean {
+    return item.isPending === true;
+  }
+
+  // Remove a job from the queue
+  removeJob(jobId: string): void {
+    // Check if it's a pending job
+    const pendingJob = this.pendingJobs.find(j => j.id === jobId);
+    if (pendingJob) {
+      this.removePendingJob(jobId);
+    }
+  }
+
+  // Format subtitle for job items
+  formatJobSubtitle(job: any): string {
+    // For pending jobs, show mode and AI model
+    if ('mode' in job && 'aiModel' in job) {
+      const mode = job.mode === 'full' ? 'Full Analysis' : 'Transcribe Only';
+      const model = this.formatModelName(job.aiModel);
+      return `${mode} • ${model}`;
+    }
+
+    // For active jobs, show status
+    if ('stage' in job) {
+      return this.getJobStatusText(job);
+    }
+
+    return 'Processing';
+  }
+
+  // Format AI model name for display
+  formatModelName(modelString: string): string {
+    if (!modelString) return 'Unknown';
+
+    // Remove provider prefix
+    const model = modelString.split(':')[1] || modelString;
+
+    // Format common models
+    if (model.includes('claude')) {
+      if (model.includes('sonnet-4')) return 'Claude Sonnet 4.5';
+      if (model.includes('3-5-sonnet')) return 'Claude 3.5 Sonnet';
+      if (model.includes('3-5-haiku')) return 'Claude 3.5 Haiku';
+      return 'Claude';
+    }
+    if (model.includes('gpt-4')) return 'GPT-4';
+    if (model.includes('gpt-3.5')) return 'GPT-3.5';
+    if (model.includes('qwen')) return 'Qwen';
+
+    return model;
+  }
+
+  // Progress mapper for active jobs
+  jobProgressMapper = (item: any): ItemProgress | null => {
+    // Pending jobs don't have progress
+    if (item.isPending) return null;
+
+    // Completed/failed jobs don't show progress
+    if (item.stage === 'completed' || item.stage === 'failed') return null;
+
+    return {
+      value: item.progress || 0,
+      label: this.getJobStatusText(item)
+    };
+  };
 }

@@ -220,4 +220,17 @@ export class MediaEventService {
       timestamp: this.getTimestamp()
     });
   }
+
+  /**
+   * Video renamed event (notify frontend when a video's filename changes)
+   */
+  emitVideoRenamed(videoId: string, oldFilename: string, newFilename: string, newPath: string): void {
+    this.emitEvent('video-renamed', {
+      videoId,
+      oldFilename,
+      newFilename,
+      newPath,
+      timestamp: this.getTimestamp()
+    });
+  }
 }

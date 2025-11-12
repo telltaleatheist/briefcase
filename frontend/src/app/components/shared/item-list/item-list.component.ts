@@ -293,7 +293,12 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
 
     this.itemClick.emit(item);
 
+    // Handle highlighting even when selection is disabled
+    // This allows browsing/navigating items without selecting them
     if (this.selectionMode === SelectionMode.None) {
+      // Update highlighted item for visual feedback
+      this.highlightedItemId = item.id;
+      this.itemHighlighted.emit(item);
       return;
     }
 

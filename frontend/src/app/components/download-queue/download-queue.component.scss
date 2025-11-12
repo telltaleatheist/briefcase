@@ -78,7 +78,7 @@
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: 500px;
+  width: 550px;  // Increased from 500px to give more room for buttons
   max-width: 90vw;
   max-height: 80vh;
   background: var(--bg-card);
@@ -530,6 +530,28 @@
     height: 36px;
     line-height: 36px;
     white-space: nowrap;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  .clear-all-btn {
+    font-size: 13px;
+    padding: 0 12px;
+    height: 36px;
+    line-height: 36px;
+    white-space: nowrap;
+    border-color: var(--text-secondary, #666);
+    color: var(--text-secondary, #666);
+
+    &:hover {
+      border-color: var(--warn-color, #f44336);
+      color: var(--warn-color, #f44336);
+      background-color: rgba(244, 67, 54, 0.04);
+    }
 
     mat-icon {
       font-size: 18px;
@@ -1076,5 +1098,74 @@
       word-break: break-all;
       line-height: 1.3;
     }
+  }
+}
+
+// Job list container - add padding to prevent cutoff
+.jobs-list {
+  padding: 0 12px 8px 8px;  // Increased right padding from 8px to 12px
+  overflow-y: auto;
+  overflow-x: hidden;  // Prevent horizontal scroll
+  max-height: calc(100vh - 200px);
+}
+
+// Override item-list styles for queue items
+::ng-deep .jobs-list app-item-list {
+  // Make items more compact to match library items
+  .item-card {
+    min-height: 40px; // Reduced from 44px
+    padding: 6px 16px; // More compact vertical padding
+
+    // Disable hover transform to prevent right border going offscreen
+    &:hover {
+      transform: none !important;
+    }
+  }
+
+  // Reduce spacing in item content
+  .item-content {
+    gap: 2px; // Reduced gap between primary and secondary text
+  }
+
+  // Make primary text slightly smaller
+  .item-primary {
+    font-size: 13px;
+    line-height: 1.3;
+  }
+
+  // Make secondary text more compact
+  .item-secondary {
+    font-size: 11px;
+    line-height: 1.2;
+    margin-top: 1px;
+  }
+
+  // Make item actions always visible (override default opacity: 0)
+  .item-card .item-actions {
+    opacity: 1 !important; // Always show the X button
+    visibility: visible !important;
+    margin-left: auto; // Push to the right
+    margin-right: 0;
+  }
+}
+
+// Remove button styling
+.remove-job-btn {
+  opacity: 0.7;
+  transition: opacity 0.2s ease, color 0.2s ease;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  width: 28px;
+  height: 28px;
+
+  &:hover {
+    opacity: 1;
+    color: var(--warn-color, #f44336);
+  }
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
   }
 }

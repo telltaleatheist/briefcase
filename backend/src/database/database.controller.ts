@@ -8,6 +8,7 @@ import { MigrationService } from './migration.service';
 import { AnalysisService } from '../analysis/analysis.service';
 import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
+import { MediaEventService } from '../media/media-event.service';
 
 /**
  * DatabaseController - REST API endpoints for database operations
@@ -30,6 +31,7 @@ export class DatabaseController {
     private readonly analysisService: AnalysisService,
     private readonly libraryManagerService: LibraryManagerService,
     private readonly ffmpegService: FfmpegService,
+    private readonly mediaEventService: MediaEventService,
   ) {}
 
   /**
@@ -803,6 +805,14 @@ export class DatabaseController {
       this.databaseService.updateVideoPath(videoId, newPath);
 
       this.logger.log(`Updated filename for video ${videoId}: ${newFilename}`);
+
+      // Emit WebSocket event to notify frontend of the rename
+      this.mediaEventService.emitVideoRenamed(
+        videoId,
+        video.filename as string,
+        newFilename,
+        newPath
+      );
 
       return {
         success: true,

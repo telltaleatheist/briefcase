@@ -6,6 +6,7 @@ import { LibraryManagerService } from './library-manager.service';
 import { DatabaseController } from './database.controller';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
+import { MediaModule } from '../media/media.module';
 
 /**
  * DatabaseModule - Global module providing database services
@@ -18,6 +19,7 @@ import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
   imports: [
     forwardRef(() => AnalysisModule),
     FfmpegModule,
+    forwardRef(() => MediaModule),
   ],
   controllers: [DatabaseController],
   providers: [

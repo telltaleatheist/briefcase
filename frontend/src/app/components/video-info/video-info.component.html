@@ -329,10 +329,16 @@
           <mat-icon class="drop-zone-icon">cloud_upload</mat-icon>
           <h3>Link Related Files</h3>
           <p>Drag and drop files here to link them to this item, or</p>
-          <button mat-raised-button color="primary" (click)="openFilePicker()">
-            <mat-icon>folder_open</mat-icon>
-            Choose Files
-          </button>
+          <div class="drop-zone-buttons">
+            <button mat-raised-button color="primary" (click)="openFilePicker()">
+              <mat-icon>folder_open</mat-icon>
+              Choose Files
+            </button>
+            <button mat-raised-button color="accent" (click)="openLibraryPicker()">
+              <mat-icon>video_library</mat-icon>
+              Choose from Library
+            </button>
+          </div>
           <p class="help-text">
             Link related files like audiobooks with PDFs, or clips with full videos.
             <br>Files will be added to your library if they're not already imported.
@@ -511,6 +517,44 @@
         [transcriptExists]="!!transcript"
         (seekToTime)="onSeekToTimestamp($event)">
       </app-transcript-search>
+    </div>
+  </div>
+
+  <!-- Library Picker Modal -->
+  <div class="library-picker-modal" *ngIf="isLibraryPickerOpen" (click)="closeLibraryPicker()">
+    <div class="library-picker-content" (click)="$event.stopPropagation()">
+      <div class="library-picker-header">
+        <h2>
+          <mat-icon>video_library</mat-icon>
+          Choose Videos from Library
+        </h2>
+        <button mat-icon-button (click)="closeLibraryPicker()">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+
+      <div class="library-picker-body">
+        <app-item-list
+          [items]="availableLibraryVideos"
+          [displayConfig]="libraryPickerDisplayConfig"
+          [selectionMode]="SelectionMode.Multiple"
+          [emptyMessage]="'No videos available to link'"
+          [emptyIcon]="'video_library'"
+          (itemsSelected)="onLibraryVideosSelected($event)"
+          (itemsDeselected)="onLibraryVideosDeselected($event)"
+          (itemDoubleClick)="linkSelectedLibraryVideos([$event])">
+        </app-item-list>
+      </div>
+
+      <div class="library-picker-footer">
+        <button mat-button (click)="closeLibraryPicker()">Cancel</button>
+        <button mat-raised-button color="primary"
+                (click)="linkSelectedLibraryVideos()"
+                [disabled]="selectedLibraryVideos.size === 0">
+          Link {{ selectedLibraryVideos.size > 0 ? selectedLibraryVideos.size : '' }}
+          {{ selectedLibraryVideos.size === 1 ? 'Video' : 'Videos' }}
+        </button>
+      </div>
     </div>
   </div>
 </div>

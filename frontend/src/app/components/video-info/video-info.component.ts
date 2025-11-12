@@ -87,6 +87,11 @@ export class VideoInfoComponent implements OnInit {
   isDraggingFiles = false;
   private dragCounter = 0;
 
+  // Library picker modal
+  isLibraryPickerOpen = false;
+  availableLibraryVideos: DatabaseVideo[] = [];
+  selectedLibraryVideos = new Set<string>();
+
   // Item list configuration for linked children
   SelectionMode = SelectionMode;
   childListDisplayConfig: ItemDisplayConfig = {
@@ -107,6 +112,22 @@ export class VideoInfoComponent implements OnInit {
       icon: 'link_off'
     }
   ];
+
+  // Library picker display config
+  libraryPickerDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'filename',
+    secondaryField: 'media_type',
+    metadataField: 'duration_seconds',
+    iconField: 'media_type',
+    renderPrimary: (item) => item['filename'] || '',
+    renderSecondary: (item) => {
+      const mediaType = this.getMediaTypeLabel(item['media_type'] || 'video');
+      const date = item['upload_date'] ? new Date(item['upload_date']).toLocaleDateString() : '';
+      return date ? `${mediaType} • ${date}` : mediaType;
+    },
+    renderMetadata: (item) => item['duration_seconds'] ? this.formatDuration(item['duration_seconds']) : '',
+    renderIcon: (item) => this.getMediaTypeIcon(item['media_type'] || 'video')
+  };
 
   // Search panel state
   isSearchPanelOpen = false;
@@ -1179,6 +1200,114 @@ export class VideoInfoComponent implements OnInit {
   }
 
   /**
+   * Open library picker modal to select videos from library
+   */
+  async openLibraryPicker() {
+    if (!this.video || !this.canBeParent()) {
+      this.notificationService.error(
+        'Cannot Link Files',
+        'Only root-level items can have linked files'
+      );
+      return;
+    }
+
+    try {
+      // Fetch all videos from the library (using a high limit to get all)
+      const response = await this.databaseLibraryService.getVideos(10000, 0, true, false);
+      const allVideos = response.videos;
+
+      // Filter out:
+      // 1. The current video itself
+      // 2. Videos that are already linked as children
+      // 3. Videos that have this video as a parent (already linked)
+      // 4. Videos that are already children of another parent
+      const childIds = new Set(this.childVideos.map(c => c.id));
+      this.availableLibraryVideos = allVideos.filter((v: DatabaseVideo) =>
+        v.id !== this.video!.id &&           // Not the current video
+        !childIds.has(v.id) &&               // Not already a child
+        v.parent_id !== this.video!.id &&    // Not already linked to this parent
+        !v.parent_id                          // Not a child of another parent
+      );
+
+      this.selectedLibraryVideos.clear();
+      this.isLibraryPickerOpen = true;
+    } catch (error) {
+      console.error('Error loading library videos:', error);
+      this.notificationService.error('Error', 'Failed to load library videos');
+    }
+  }
+
+  /**
+   * Close library picker modal
+   */
+  closeLibraryPicker() {
+    this.isLibraryPickerOpen = false;
+    this.selectedLibraryVideos.clear();
+    this.availableLibraryVideos = [];
+  }
+
+  /**
+   * Link selected videos from library to this parent
+   */
+  async linkSelectedLibraryVideos(videos?: DatabaseVideo[]) {
+    if (!this.video) return;
+
+    // If videos are provided (from double-click), use those
+    // Otherwise use the selected videos from the item-list
+    const videosToLink = videos || Array.from(this.selectedLibraryVideos)
+      .map(id => this.availableLibraryVideos.find(v => v.id === id))
+      .filter(v => v !== undefined) as DatabaseVideo[];
+
+    if (videosToLink.length === 0) {
+      return;
+    }
+
+    try {
+      this.notificationService.info('Linking Videos', `Linking ${videosToLink.length} video(s)...`);
+
+      // Use the existing linkFilesToParent method which accepts file paths
+      // We need to extract the current_path from each video
+      const filePaths = videosToLink.map(v => v.current_path);
+      const result = await this.databaseLibraryService.linkFilesToParent(this.video.id, filePaths);
+
+      if (result.success) {
+        // Reload child videos
+        await this.loadChildVideos();
+
+        const message = result.results && result.results.length > 0
+          ? `Successfully linked ${result.results.length} video(s)`
+          : 'Videos linked successfully';
+
+        this.notificationService.success('Videos Linked', message);
+
+        // Close the modal
+        this.closeLibraryPicker();
+
+        // Show any errors
+        if (result.errors && result.errors.length > 0) {
+          console.error('[VideoInfo] Errors while linking:', result.errors);
+          const errorMsg = result.errors.map(e => `${e.filePath}: ${e.error}`).join('\n');
+          this.notificationService.warning('Some Videos Failed', errorMsg);
+        }
+      } else {
+        const errorMsg = result.error || 'Failed to link videos';
+        console.error('[VideoInfo] Link failed:', errorMsg);
+
+        if (result.errors && result.errors.length > 0) {
+          const detailedErrors = result.errors.map(e => `${e.filePath}: ${e.error}`).join('\n');
+          this.notificationService.error('Link Failed', detailedErrors);
+        } else {
+          this.notificationService.error('Link Failed', errorMsg);
+        }
+      }
+    } catch (error: any) {
+      console.error('[VideoInfo] Error linking library videos:', error);
+      const errorMsg = error?.message || error?.error?.error || 'An error occurred while linking videos';
+      this.notificationService.error('Link Failed', errorMsg);
+    }
+  }
+
+  /**
    * Open file picker to select files to link
    */
   async openFilePicker() {
@@ -1260,5 +1389,23 @@ export class VideoInfoComponent implements OnInit {
       // Unlink all selected children (usually just one from context menu)
       event.items.forEach(child => this.removeChild(child));
     }
+  }
+
+  // ============================================================================
+  // LIBRARY PICKER SELECTION HANDLERS
+  // ============================================================================
+
+  /**
+   * Handle library videos being selected
+   */
+  onLibraryVideosSelected(videos: DatabaseVideo[]) {
+    videos.forEach(v => this.selectedLibraryVideos.add(v.id));
+  }
+
+  /**
+   * Handle library videos being deselected
+   */
+  onLibraryVideosDeselected(videos: DatabaseVideo[]) {
+    videos.forEach(v => this.selectedLibraryVideos.delete(v.id));
   }
 }
