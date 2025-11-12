@@ -2124,40 +2124,72 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Process each week group
     for (const week of sortedWeeks) {
       const videosInWeek = weekGroups.get(week)!;
-      // Track which ghost parents we've already added in this week to avoid duplicates
-      const addedGhostParentsInWeek = new Set<string>();
 
-      // Process each video in this week
+      // Group children by their parent ID within this week
+      const childrenByParent = new Map<string, any[]>();
+      const orphanedVideos: any[] = []; // Videos without parents or whose parent is in same week
+
       for (const video of videosInWeek) {
-        // Skip if we've already added this video as a real item
-        if (addedRealVideos.has(video.id)) {
-          continue;
-        }
-
-        // If this video is a child, check if we need to add a ghost parent
         if (video.parent_id) {
           const parent = videoMap.get(video.parent_id);
           if (parent) {
             const parentWeek = getWeekForVideo(parent);
 
-            // Only add ghost parent if parent is in a DIFFERENT week and we haven't already added it in this week
-            if (parentWeek !== week && !addedGhostParentsInWeek.has(parent.id)) {
-              const ghostParent = {
-                ...parent,
-                isGhostParent: true,
-                isChild: false,
-                isParent: hasChildren.has(parent.id),
-                ghostChildId: video.id,
-                // Override download_date to keep ghost in current week (child's week)
-                download_date: video.download_date
-              } as any;
-              result.push(ghostParent);
-              addedGhostParentsInWeek.add(parent.id);
+            // Only group children whose parent is in a DIFFERENT week
+            if (parentWeek !== week) {
+              if (!childrenByParent.has(video.parent_id)) {
+                childrenByParent.set(video.parent_id, []);
+              }
+              childrenByParent.get(video.parent_id)!.push(video);
+            } else {
+              // Parent is in same week, add as normal
+              orphanedVideos.push(video);
             }
+          } else {
+            // Parent doesn't exist, add as normal
+            orphanedVideos.push(video);
           }
+        } else {
+          // Not a child, add as normal
+          orphanedVideos.push(video);
         }
+      }
 
-        // Add the real video
+      // First, add all ghost parent groups (parent + all its children)
+      for (const [parentId, children] of childrenByParent.entries()) {
+        const parent = videoMap.get(parentId);
+        if (!parent) continue;
+
+        // Add ghost parent once
+        const ghostParent = {
+          ...parent,
+          isGhostParent: true,
+          isChild: false,
+          isParent: hasChildren.has(parent.id),
+          // Use first child's download_date to keep ghost in current week
+          download_date: children[0].download_date
+        } as any;
+        result.push(ghostParent);
+
+        // Add all children under this ghost parent
+        for (const child of children) {
+          if (addedRealVideos.has(child.id)) continue;
+
+          result.push({
+            ...child,
+            isChild: true,
+            isParent: hasChildren.has(child.id),
+            isGhostParent: false,
+            isGhostChild: false
+          });
+          addedRealVideos.add(child.id);
+        }
+      }
+
+      // Then add all other videos (non-children or children whose parent is in same week)
+      for (const video of orphanedVideos) {
+        if (addedRealVideos.has(video.id)) continue;
+
         result.push({
           ...video,
           isChild: !!video.parent_id,
