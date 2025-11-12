@@ -6,7 +6,7 @@
     <span class="badge" *ngIf="unreadCount > 0">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
   </button>
 
-  <div class="notification-panel" *ngIf="isOpen">
+  <div class="notification-panel" *ngIf="isOpen" #notificationPanel cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
     <div class="panel-header">
       <h3>Notifications</h3>
       <button class="clear-all-btn" *ngIf="notifications.length > 0" (click)="clearAll()">Clear All</button>

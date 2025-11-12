@@ -1,6 +1,4 @@
 <div class="library-container"
-     tabindex="0"
-     (keydown)="handleKeyDown($event)"
      (dragover)="onDragOver($event)"
      (dragleave)="onDragLeave($event)"
      (drop)="onDrop($event)">
@@ -472,119 +470,7 @@
   </div>
 
   <!-- FLOATING PREVIEW PANEL FOR LIST VIEW -->
-  <div
-    class="floating-preview-panel"
-    *ngIf="isPreviewModalOpen && highlightedVideo"
-    [style.left.px]="previewPanelX"
-    [style.top.px]="previewPanelY"
-    [style.width.px]="previewPanelWidth"
-    [style.height.px]="previewPanelHeight"
-    [class.dragging]="isDraggingPreviewPanel"
-    [class.resizing]="isResizingPreviewPanel"
-    tabindex="-1"
-    (keydown)="onPreviewPanelKeyDown($event)">
-
-    <!-- Drag Handle Bar -->
-    <div class="preview-panel-header" (mousedown)="startDragPreviewPanel($event)">
-      <mat-icon class="drag-icon">drag_indicator</mat-icon>
-      <span class="header-title">Preview</span>
-      <button mat-icon-button
-              (click)="togglePreviewAutoPlay()"
-              [color]="previewAutoPlayEnabled ? 'primary' : ''"
-              [matTooltip]="previewAutoPlayEnabled ? 'Auto-play: On' : 'Auto-play: Off'"
-              (mousedown)="$event.stopPropagation()">
-        <mat-icon>{{ previewAutoPlayEnabled ? 'play_circle' : 'pause_circle' }}</mat-icon>
-      </button>
-      <button mat-icon-button class="close-panel-btn" (click)="closePreviewModal()" (mousedown)="$event.stopPropagation()">
-        <mat-icon>close</mat-icon>
-      </button>
-    </div>
-
-    <!-- Media Player (Video/Audio/Image) -->
-    <div class="preview-panel-video" (mousedown)="startDragPreviewPanel($event)">
-      <!-- Video Player -->
-      <video #previewVideoPlayer
-             *ngIf="highlightedVideo.media_type === 'video'"
-             [src]="getVideoStreamUrl(highlightedVideo)"
-             controls
-             class="preview-video-player"
-             (mousedown)="$event.stopPropagation()"
-             (keydown)="$event.stopPropagation()">
-      </video>
-
-      <!-- Audio Player -->
-      <audio *ngIf="highlightedVideo.media_type === 'audio'"
-             [src]="getVideoStreamUrl(highlightedVideo)"
-             controls
-             class="preview-audio-player"
-             (mousedown)="$event.stopPropagation()">
-      </audio>
-
-      <!-- Image Viewer -->
-      <div *ngIf="highlightedVideo.media_type === 'image'"
-           class="image-viewer-container"
-           (mousedown)="startDragPreviewPanel($event)">
-        <img [src]="getVideoStreamUrl(highlightedVideo)"
-             class="preview-image-viewer"
-             [alt]="highlightedVideo.filename"
-             (error)="onImageError($event)"
-             (load)="onImageLoaded()">
-      </div>
-
-      <!-- Unsupported Media Type Message -->
-      <div *ngIf="highlightedVideo.media_type !== 'video' && highlightedVideo.media_type !== 'audio' && highlightedVideo.media_type !== 'image'"
-           class="unsupported-preview"
-           (mousedown)="startDragPreviewPanel($event)">
-        <mat-icon>{{ getMediaTypeIcon(highlightedVideo.media_type) }}</mat-icon>
-        <p>{{ getMediaTypeLabel(highlightedVideo.media_type) }} preview not available</p>
-        <p class="hint">Open "View Details" to see more information</p>
-      </div>
-    </div>
-
-    <!-- Title Section -->
-    <div class="preview-panel-title" (mousedown)="startDragPreviewPanel($event)">
-      <span class="video-title">{{ parseFilename(highlightedVideo.filename).title }}</span>
-    </div>
-
-    <!-- Action Buttons -->
-    <div class="preview-panel-actions">
-      <button mat-raised-button
-              color="primary"
-              (click)="analyzeVideo(highlightedVideo)"
-              class="action-btn"
-              *ngIf="canAnalyzeMedia(highlightedVideo)">
-        <mat-icon>psychology</mat-icon>
-        Analyze
-      </button>
-      <button mat-raised-button
-              color="accent"
-              (click)="openVideoPlayer(highlightedVideo)"
-              class="action-btn"
-              *ngIf="canAnalyzeMedia(highlightedVideo)">
-        <mat-icon>video_settings</mat-icon>
-        Video Editor
-      </button>
-      <button mat-raised-button (click)="openMetadataEditor(highlightedVideo); closePreviewModal()" class="action-btn">
-        <mat-icon>info</mat-icon>
-        View Details
-      </button>
-    </div>
-
-    <!-- Keyboard Hints -->
-    <div class="preview-panel-hints" (mousedown)="startDragPreviewPanel($event)">
-      <span><mat-icon>keyboard</mat-icon> Space</span>
-      <span><mat-icon>keyboard</mat-icon> ↑↓</span>
-      <span><mat-icon>keyboard</mat-icon> Esc</span>
-    </div>
-
-    <!-- Resize Handles -->
-    <div class="preview-panel-resize-handle preview-panel-resize-handle-right" (mousedown)="startResizePreviewPanel($event)">
-      <mat-icon>drag_handle</mat-icon>
-    </div>
-    <div class="preview-panel-resize-handle preview-panel-resize-handle-left" (mousedown)="startResizePreviewPanelLeft($event)">
-      <mat-icon>drag_handle</mat-icon>
-    </div>
-  </div>
+  <!-- Preview dialog is now handled by MatDialog -->
   </div>
 
   <!-- Management View -->

@@ -1,4 +1,4 @@
-<div class="video-player-dialog" #playerContainer [class.route-mode]="!isDialogMode" tabindex="0" (keydown)="handleKeyPress($event)">
+<div class="video-player-dialog" #playerContainer [class.route-mode]="!isDialogMode">
   <!-- Only show header in dialog mode -->
   <div class="dialog-header" *ngIf="isDialogMode">
     <button mat-icon-button (click)="close()" class="back-button" matTooltip="Back to Clip Creator">
@@ -62,19 +62,17 @@
       <video
         *ngIf="mediaType === 'video'"
         #videoElement
-        class="native-video-player"
+        class="video-js native-video-player"
         playsinline
         preload="metadata"
-        crossorigin="anonymous"
-        tabindex="-1"
-        (keydown)="handleKeyPress($event)">
+        crossorigin="anonymous">
       </video>
 
       <!-- Audio Player -->
       <div *ngIf="mediaType === 'audio'" class="audio-player-container">
         <audio
           #audioElement
-          class="native-audio-player"
+          class="video-js native-audio-player"
           preload="metadata"
           crossorigin="anonymous">
         </audio>

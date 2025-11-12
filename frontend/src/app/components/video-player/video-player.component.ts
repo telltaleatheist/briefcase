@@ -18,6 +18,9 @@ import { AnalysisQueueService } from '../../services/analysis-queue.service';
 import { VideoTimelineComponent, TimelineSection, TimelineSelection } from '../video-timeline/video-timeline.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
 import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewer.component';
+import videojs from 'video.js';
+import Player from 'video.js/dist/types/player';
+import { HotkeysService } from '@ngneat/hotkeys';
 
 @Component({
   selector: 'app-video-player',
@@ -48,7 +51,9 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
   @ViewChild('playerContainer', { static: false }) playerContainer!: ElementRef<HTMLDivElement>;
 
-  videoEl: HTMLVideoElement | null = null;
+  // Video.js player instance (replaces manual videoEl)
+  private player: Player | null = null;
+
   mediaType: string = 'video'; // 'video', 'audio', 'image', 'document', 'webpage'
   imageSrc: string | null = null;
   isLoading = true;
@@ -71,16 +76,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   // Throttle timer for performance optimization
   private updateThrottleTimer: any = null;
   private readonly UPDATE_THROTTLE_MS = 200; // Update at most every 200ms (5 times per second)
-  private seekDebounceTimer: any = null;
-  private readonly SEEK_DEBOUNCE_MS = 50; // Debounce seek operations quickly
   private loadingTimeoutTimer: any = null;
-
-  // Event listener references for cleanup
-  private eventListeners: Array<{
-    element: HTMLVideoElement;
-    event: string;
-    handler: EventListener;
-  }> = [];
 
   // Track all timers for cleanup
   private timers: Set<any> = new Set();
@@ -144,7 +140,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     private cdr: ChangeDetectorRef,
     private backendUrlService: BackendUrlService,
     private http: HttpClient,
-    private analysisQueueService: AnalysisQueueService
+    private analysisQueueService: AnalysisQueueService,
+    private hotkeys: HotkeysService
   ) {
     // If opened as dialog, use dialog data; otherwise use router state
     if (dialogData) {
@@ -252,14 +249,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    // Get media element reference (video or audio) immediately so keyboard shortcuts work from the start
-    if (this.videoElement) {
-      this.videoEl = this.videoElement.nativeElement;
-    } else if (this.audioElement) {
-      this.videoEl = this.audioElement.nativeElement as any; // Audio and video elements have same API
-    }
-
-    // Set up keyboard shortcuts immediately so spacebar works from the start
+    // Set up keyboard shortcuts using @ngneat/hotkeys
     this.setupKeyboardShortcuts();
 
     // Initialize media player after view is ready
@@ -281,22 +271,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnDestroy() {
     console.log('[ngOnDestroy] Cleaning up video player');
 
-    // Remove all video event listeners
-    this.eventListeners.forEach(({ element, event, handler }) => {
-      element.removeEventListener(event, handler);
-    });
-    this.eventListeners = [];
-
-    // Clean up video element
-    if (this.videoEl) {
-      this.videoEl.pause();
-      this.videoEl.src = '';
-      this.videoEl.load();
-      this.videoEl = null;
+    // Dispose of video.js player (handles all cleanup automatically)
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
     }
-
-    // Remove global keyboard listener
-    document.removeEventListener('keydown', this.handleKeyPress);
 
     // Clear ALL tracked timers
     this.timers.forEach(timer => {
@@ -311,11 +290,6 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.updateThrottleTimer = null;
     }
 
-    if (this.seekDebounceTimer) {
-      clearTimeout(this.seekDebounceTimer);
-      this.seekDebounceTimer = null;
-    }
-
     if (this.loadingTimeoutTimer) {
       clearTimeout(this.loadingTimeoutTimer);
       this.loadingTimeoutTimer = null;
@@ -328,26 +302,16 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
-   * Add event listener and track it for cleanup
-   */
-  private addVideoEventListener(event: string, handler: EventListener) {
-    if (this.videoEl) {
-      this.videoEl.addEventListener(event, handler);
-      this.eventListeners.push({ element: this.videoEl, event, handler });
-    }
-  }
-
-  /**
-   * Clean up video resources (listeners and timers) but keep the component alive
+   * Clean up video resources (timers and player) but keep the component alive
    */
   private cleanupVideoResources() {
     console.log('[cleanupVideoResources] Cleaning up old resources');
 
-    // Remove all video event listeners
-    this.eventListeners.forEach(({ element, event, handler }) => {
-      element.removeEventListener(event, handler);
-    });
-    this.eventListeners = [];
+    // Dispose of video.js player
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
 
     // Clear all tracked timers
     this.timers.forEach(timer => {
@@ -362,11 +326,6 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.updateThrottleTimer = null;
     }
 
-    if (this.seekDebounceTimer) {
-      clearTimeout(this.seekDebounceTimer);
-      this.seekDebounceTimer = null;
-    }
-
     if (this.loadingTimeoutTimer) {
       clearTimeout(this.loadingTimeoutTimer);
       this.loadingTimeoutTimer = null;
@@ -376,18 +335,12 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       clearInterval(this.loadingProgressInterval);
       this.loadingProgressInterval = null;
     }
-
-    // Pause and reset video element if it exists
-    if (this.videoEl) {
-      this.videoEl.pause();
-      // Don't clear src or set to null - we'll reuse the element
-    }
   }
 
   async initializePlayer() {
     console.log('[initializePlayer] Starting initialization');
 
-    // Clean up any existing listeners and timers from previous video
+    // Clean up any existing player from previous video
     this.cleanupVideoResources();
 
     try {
@@ -427,25 +380,22 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         // Images don't need player initialization
         this.isLoading = false;
         return;
-      } else if (this.mediaType === 'audio') {
-        if (!this.audioElement) {
-          this.error = 'Audio element not found';
-          this.isLoading = false;
-          return;
-        }
-        // Get native audio element
-        this.videoEl = this.audioElement.nativeElement as any;
+      }
+
+      // Get the correct media element reference
+      let mediaElement: HTMLVideoElement | HTMLAudioElement | null = null;
+      if (this.mediaType === 'audio' && this.audioElement) {
+        mediaElement = this.audioElement.nativeElement;
         console.log('[initializePlayer] Audio element obtained');
-      } else {
-        // Default to video
-        if (!this.videoElement) {
-          this.error = 'Video element not found';
-          this.isLoading = false;
-          return;
-        }
-        // Get native video element
-        this.videoEl = this.videoElement.nativeElement;
+      } else if (this.videoElement) {
+        mediaElement = this.videoElement.nativeElement;
         console.log('[initializePlayer] Video element obtained');
+      }
+
+      if (!mediaElement) {
+        this.error = `${this.mediaType === 'audio' ? 'Audio' : 'Video'} element not found`;
+        this.isLoading = false;
+        return;
       }
 
       // Get backend URL first
@@ -477,14 +427,21 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         return;
       }
 
-      // Set video source
-      if (!this.videoEl) {
-        this.error = 'Video element not initialized';
-        this.isLoading = false;
-        return;
-      }
-      this.videoEl.src = videoUrl;
-      console.log('Video source set to:', videoUrl);
+      console.log('Video source:', videoUrl);
+
+      // Initialize video.js player
+      this.player = videojs(mediaElement, {
+        controls: false, // We use custom timeline controls
+        preload: 'metadata',
+        fluid: false, // Don't use fluid mode since we have custom layout
+        responsive: false, // Handle responsive ourselves
+        playsinline: true,
+        crossOrigin: 'anonymous',
+        sources: [{
+          src: videoUrl,
+          type: this.mediaType === 'audio' ? 'audio/mp4' : 'video/mp4'
+        }]
+      });
 
       // Start loading timer
       this.loadingStartTime = Date.now();
@@ -512,23 +469,14 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         if (this.isLoading) {
           console.error('Video loading timeout after 30 seconds');
           this.isLoading = false;
-
-          // Check if video is actually playable despite slow metadata loading
-          if (this.videoEl && this.videoEl.readyState >= 2) {
-            console.log('Video data loaded, forcing playback despite slow metadata');
-            this.duration = this.videoEl.duration || 0;
-            this.currentSelection = { startTime: 0, endTime: this.duration };
-            this.cdr.markForCheck();
-          } else {
-            this.error = 'Video loading timeout. The video file may use an unsupported codec. Try converting to MP4.';
-            this.cdr.markForCheck();
-          }
+          this.error = 'Video loading timeout. The video file may use an unsupported codec. Try converting to MP4.';
+          this.cdr.markForCheck();
         }
       }, 30000);
       this.timers.add(this.loadingTimeoutTimer);
 
-      // Handle loadedmetadata event
-      this.addVideoEventListener('loadedmetadata', () => {
+      // Set up video.js event handlers
+      this.player.on('loadedmetadata', () => {
         if (this.loadingTimeoutTimer) {
           clearTimeout(this.loadingTimeoutTimer);
           this.timers.delete(this.loadingTimeoutTimer);
@@ -536,17 +484,17 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         // Run in NgZone to trigger change detection
         this.ngZone.run(() => {
           this.isLoading = false;
-          this.duration = this.videoEl!.duration;
+          this.duration = this.player!.duration() || 0;
           this.currentSelection = { startTime: 0, endTime: this.duration };
           console.log('Video loaded, duration:', this.duration);
         });
       });
 
       // Handle loadeddata event (fires earlier than loadedmetadata)
-      this.addVideoEventListener('loadeddata', () => {
-        console.log('Video data loaded (readyState:', this.videoEl!.readyState, ')');
+      this.player.on('loadeddata', () => {
+        console.log('Video data loaded');
         // If metadata still not loaded after data is available, try to force it
-        if (this.isLoading && this.videoEl!.duration) {
+        if (this.isLoading && this.player!.duration()) {
           if (this.loadingTimeoutTimer) {
             clearTimeout(this.loadingTimeoutTimer);
             this.timers.delete(this.loadingTimeoutTimer);
@@ -554,7 +502,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
           // Run in NgZone to trigger change detection
           this.ngZone.run(() => {
             this.isLoading = false;
-            this.duration = this.videoEl!.duration;
+            this.duration = this.player!.duration() || 0;
             this.currentSelection = { startTime: 0, endTime: this.duration };
             console.log('Using duration from loadeddata event:', this.duration);
           });
@@ -562,8 +510,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       });
 
       // Handle timeupdate event with throttling for performance
-      this.addVideoEventListener('timeupdate', () => {
-        this.currentTime = this.videoEl!.currentTime;
+      this.player.on('timeupdate', () => {
+        this.currentTime = this.player!.currentTime() || 0;
 
         // Throttle updateActiveSection to avoid excessive DOM operations
         if (!this.updateThrottleTimer) {
@@ -575,24 +523,23 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       });
 
       // Handle play event
-      this.addVideoEventListener('play', () => {
-        this.isPlaying = true;
+      this.player.on('play', () => {
+        this.ngZone.run(() => {
+          this.isPlaying = true;
+        });
       });
 
       // Handle pause event
-      this.addVideoEventListener('pause', () => {
-        this.isPlaying = false;
+      this.player.on('pause', () => {
+        this.ngZone.run(() => {
+          this.isPlaying = false;
+        });
       });
 
       // Handle error event
-      this.addVideoEventListener('error', (e) => {
-        const videoError = this.videoEl?.error;
-        console.error('Video error:', videoError);
-        console.error('Error code:', videoError?.code);
-        console.error('Error message:', videoError?.message);
-        console.error('Video src:', this.videoEl?.src);
-        console.error('Video readyState:', this.videoEl?.readyState);
-        console.error('Video networkState:', this.videoEl?.networkState);
+      this.player.on('error', () => {
+        const error = this.player!.error();
+        console.error('Video error:', error);
 
         // MediaError codes:
         // 1 = MEDIA_ERR_ABORTED - fetching process aborted by user
@@ -601,25 +548,21 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         // 4 = MEDIA_ERR_SRC_NOT_SUPPORTED - video format not supported
 
         let errorMessage = 'Failed to load video';
-        if (videoError?.code === 3) {
+        if (error?.code === 3) {
           errorMessage = 'Video codec not supported by browser. The .MOV file may use a codec (like ProRes or H.265) that HTML5 video cannot decode. Try converting to H.264 MP4.';
-        } else if (videoError?.code === 4) {
+        } else if (error?.code === 4) {
           errorMessage = 'Video format not supported. Try converting to MP4 with H.264 codec.';
-        } else if (videoError?.code === 2) {
+        } else if (error?.code === 2) {
           errorMessage = 'Network error while loading video. Please check the file path and try again.';
-        } else if (videoError?.code === 1) {
+        } else if (error?.code === 1) {
           errorMessage = 'Video loading was aborted.';
         }
 
-        this.error = errorMessage;
-        this.isLoading = false;
-        this.cdr.markForCheck();
-      });
-
-      // Prevent context menu
-      this.addVideoEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        return false;
+        this.ngZone.run(() => {
+          this.error = errorMessage;
+          this.isLoading = false;
+          this.cdr.markForCheck();
+        });
       });
 
     } catch (error) {
@@ -630,102 +573,71 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   setupKeyboardShortcuts() {
-    // Set up global document listener for keyboard shortcuts
-    // This allows shortcuts to work editor-wide, regardless of which element has focus
-    document.addEventListener('keydown', this.handleKeyPress);
+    // Use @ngneat/hotkeys for keyboard shortcut management
+    // These shortcuts work globally unless user is typing in an input
+
+    // Space: Play/Pause (reset to 1x speed)
+    this.hotkeys.addShortcut({ keys: 'space', preventDefault: true }).subscribe(() => {
+      if (!this.player) return;
+      this.player.playbackRate(1);
+      if (this.player.paused()) {
+        this.player.play();
+      } else {
+        this.player.pause();
+      }
+    });
+
+    // Arrow Left: Seek backward 5 seconds
+    this.hotkeys.addShortcut({ keys: 'arrowleft', preventDefault: true }).subscribe(() => {
+      if (!this.player) return;
+      const currentTime = this.player.currentTime();
+      if (currentTime !== undefined) {
+        const newTime = Math.max(0, currentTime - 5);
+        this.player!.currentTime(newTime);
+      }
+    });
+
+    // Arrow Right: Seek forward 5 seconds
+    this.hotkeys.addShortcut({ keys: 'arrowright', preventDefault: true }).subscribe(() => {
+      if (!this.player) return;
+      const currentTime = this.player.currentTime();
+      if (currentTime !== undefined) {
+        const newTime = Math.min(this.duration, currentTime + 5);
+        this.player!.currentTime(newTime);
+      }
+    });
+
+    // F: Toggle fullscreen
+    this.hotkeys.addShortcut({ keys: 'f', preventDefault: true }).subscribe(() => {
+      if (!this.player) return;
+      if (this.player.isFullscreen()) {
+        this.player.exitFullscreen();
+      } else {
+        this.player.requestFullscreen();
+      }
+    });
+
+    // I: Set In point (selection start)
+    this.hotkeys.addShortcut({ keys: 'i', preventDefault: true }).subscribe(() => {
+      this.currentSelection = {
+        startTime: this.currentTime,
+        endTime: Math.max(this.currentTime + 1, this.currentSelection.endTime)
+      };
+    });
+
+    // O: Set Out point (selection end)
+    this.hotkeys.addShortcut({ keys: 'o', preventDefault: true }).subscribe(() => {
+      this.currentSelection = {
+        startTime: Math.min(this.currentSelection.startTime, this.currentTime - 1),
+        endTime: this.currentTime
+      };
+    });
   }
 
-  handleKeyPress = (event: KeyboardEvent) => {
-    if (!this.videoEl) return;
-
-    // Only handle if not typing in an input
-    const target = event.target as HTMLElement;
-    if (target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.closest('input') ||
-        target.closest('textarea') ||
-        target.closest('.mat-mdc-input-element') ||
-        target.classList.contains('mat-mdc-input-element')) {
-      return;
-    }
-
-    switch (event.code) {
-      case 'Space':
-        event.preventDefault();
-        event.stopPropagation(); // Stop event from bubbling to prevent double-triggering
-        event.stopImmediatePropagation(); // Stop other handlers on same element
-        // Spacebar always resets to 1x speed and toggles play/pause
-        this.videoEl.playbackRate = 1;
-        if (this.videoEl.paused) {
-          this.videoEl.play();
-        } else {
-          this.videoEl.pause();
-        }
-        break;
-
-      case 'ArrowLeft':
-        event.preventDefault();
-        // Debounce seeking to prevent freezing during rapid key presses
-        if (this.seekDebounceTimer) {
-          clearTimeout(this.seekDebounceTimer);
-        }
-        const newTimeLeft = Math.max(0, this.videoEl.currentTime - 5);
-        this.seekDebounceTimer = setTimeout(() => {
-          if (this.videoEl) {
-            this.videoEl.currentTime = newTimeLeft;
-          }
-        }, this.SEEK_DEBOUNCE_MS);
-        break;
-
-      case 'ArrowRight':
-        event.preventDefault();
-        // Debounce seeking to prevent freezing during rapid key presses
-        if (this.seekDebounceTimer) {
-          clearTimeout(this.seekDebounceTimer);
-        }
-        const newTimeRight = Math.min(this.duration, this.videoEl.currentTime + 5);
-        this.seekDebounceTimer = setTimeout(() => {
-          if (this.videoEl) {
-            this.videoEl.currentTime = newTimeRight;
-          }
-        }, this.SEEK_DEBOUNCE_MS);
-        break;
-
-      case 'KeyF':
-        event.preventDefault();
-        if (document.fullscreenElement) {
-          document.exitFullscreen();
-        } else {
-          this.videoEl.requestFullscreen();
-        }
-        break;
-
-      case 'KeyI':
-        event.preventDefault();
-        // Set In point (selection start) to current time
-        this.currentSelection = {
-          startTime: this.currentTime,
-          endTime: Math.max(this.currentTime + 1, this.currentSelection.endTime)
-        };
-        break;
-
-      case 'KeyO':
-        event.preventDefault();
-        // Set Out point (selection end) to current time
-        this.currentSelection = {
-          startTime: Math.min(this.currentSelection.startTime, this.currentTime - 1),
-          endTime: this.currentTime
-        };
-        break;
-    }
-  };
-
   seekToTime(seconds: number, sectionIndex?: number) {
-    if (this.videoEl) {
-      this.videoEl.currentTime = seconds;
-      this.videoEl.play();
+    if (this.player) {
+      this.player.currentTime(seconds);
+      this.player.play();
     }
     // Set active section if index provided
     if (sectionIndex !== undefined && this.metadata?.sections) {
@@ -867,8 +779,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle timeline seek event
    */
   onTimelineSeek(time: number) {
-    if (this.videoEl) {
-      this.videoEl.currentTime = time;
+    if (this.player) {
+      this.player.currentTime(time);
     }
   }
 
@@ -884,11 +796,11 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle play/pause toggle from timeline
    */
   onPlayPause() {
-    if (this.videoEl) {
-      if (this.videoEl.paused) {
-        this.videoEl.play();
+    if (this.player) {
+      if (this.player.paused()) {
+        this.player.play();
       } else {
-        this.videoEl.pause();
+        this.player.pause();
       }
     }
   }
@@ -897,24 +809,27 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
    * Handle playback speed change from timeline (J/K/L keys)
    */
   onPlaybackSpeed(speed: number) {
-    if (!this.videoEl) return;
+    if (!this.player) return;
 
     if (speed < 0) {
       // Backwards playback - simulate by jumping backwards repeatedly
       const absSpeed = Math.abs(speed);
-      this.videoEl.pause();
+      this.player.pause();
       // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
       const jumpAmount = 0.5 * absSpeed;
-      this.videoEl.currentTime = Math.max(0, this.videoEl.currentTime - jumpAmount);
+      const currentTime = this.player.currentTime();
+      if (currentTime !== undefined) {
+        this.player.currentTime(Math.max(0, currentTime - jumpAmount));
+      }
     } else if (speed === 0) {
       // Pause (K key)
-      this.videoEl.pause();
-      this.videoEl.playbackRate = 1; // Reset to normal speed
+      this.player.pause();
+      this.player.playbackRate(1); // Reset to normal speed
     } else {
       // Forward playback at specified speed (L key)
-      this.videoEl.playbackRate = speed;
-      if (this.videoEl.paused) {
-        this.videoEl.play();
+      this.player.playbackRate(speed);
+      if (this.player.paused()) {
+        this.player.play();
       }
     }
   }
@@ -1338,10 +1253,10 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.error = null;
       this.isLoading = true;
 
-      // Clear old video element
-      if (this.videoEl) {
-        this.videoEl.pause();
-        this.videoEl.src = '';
+      // Dispose of old player
+      if (this.player) {
+        this.player.dispose();
+        this.player = null;
       }
 
       // Reinitialize the player with new video path
@@ -1474,93 +1389,6 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     this.initializePlayer();
   }
 
-  /**
-   * Setup event listeners for video element
-   */
-  private setupVideoEventListeners(): void {
-    if (!this.videoEl) return;
-
-    // Handle loadedmetadata event
-    this.addVideoEventListener('loadedmetadata', () => {
-      this.cleanupLoadingTimers();
-      // Run in NgZone to trigger change detection
-      this.ngZone.run(() => {
-        this.isLoading = false;
-        this.duration = this.videoEl!.duration;
-        this.currentSelection = { startTime: 0, endTime: this.duration };
-        console.log('Video loaded, duration:', this.duration);
-      });
-    });
-
-    // Handle loadeddata event (fires earlier than loadedmetadata)
-    this.addVideoEventListener('loadeddata', () => {
-      console.log('Video data loaded (readyState:', this.videoEl!.readyState, ')');
-      // If metadata still not loaded after data is available, try to force it
-      if (this.isLoading && this.videoEl!.duration) {
-        this.cleanupLoadingTimers();
-        // Run in NgZone to trigger change detection
-        this.ngZone.run(() => {
-          this.isLoading = false;
-          this.duration = this.videoEl!.duration;
-          this.currentSelection = { startTime: 0, endTime: this.duration };
-          console.log('Using duration from loadeddata event:', this.duration);
-        });
-      }
-    });
-
-    // Handle timeupdate event with throttling for performance
-    this.addVideoEventListener('timeupdate', () => {
-      this.currentTime = this.videoEl!.currentTime;
-
-      // Throttle updateActiveSection to avoid excessive DOM operations
-      if (!this.updateThrottleTimer) {
-        this.updateThrottleTimer = setTimeout(() => {
-          this.updateActiveSection();
-          this.updateThrottleTimer = null;
-        }, this.UPDATE_THROTTLE_MS);
-      }
-    });
-
-    // Handle play event
-    this.addVideoEventListener('play', () => {
-      this.isPlaying = true;
-    });
-
-    // Handle pause event
-    this.addVideoEventListener('pause', () => {
-      this.isPlaying = false;
-    });
-
-    // Handle error event
-    this.addVideoEventListener('error', (e: any) => {
-      console.error('Video error event:', e, this.videoEl?.error);
-      this.cleanupLoadingTimers();
-
-      // Run in NgZone to trigger change detection
-      this.ngZone.run(() => {
-        this.isLoading = false;
-        const errorCode = this.videoEl?.error?.code;
-        const errorMessage = this.videoEl?.error?.message || 'Unknown error';
-
-        switch (errorCode) {
-          case 1: // MEDIA_ERR_ABORTED
-            this.error = 'Video loading was aborted';
-            break;
-          case 2: // MEDIA_ERR_NETWORK
-            this.error = 'Network error while loading video';
-            break;
-          case 3: // MEDIA_ERR_DECODE
-            this.error = 'Video decoding failed. The file may be corrupted or use an unsupported codec.';
-            break;
-          case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
-            this.error = 'Video format not supported';
-            break;
-          default:
-            this.error = `Video error: ${errorMessage}`;
-        }
-      });
-    });
-  }
 
   /**
    * Load a video file from disk
@@ -1636,55 +1464,20 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       realFilePath: filePath || undefined // Real file path for backend processing (if available)
     };
 
-    // Clean up any existing listeners and timers from previous video
-    this.cleanupVideoResources();
-
-    // Initialize video element if not already done
-    if (!this.videoEl && this.videoElement) {
-      this.videoEl = this.videoElement.nativeElement;
-    }
-
-    if (this.videoEl) {
-      // Set video source
-      this.videoEl.src = videoUrl;
-
-      // Start loading timer
-      this.loadingStartTime = Date.now();
-      this.loadingTime = 0;
-      this.loadingMessage = 'Loading video...';
-
-      // Update loading message every second
-      this.loadingProgressInterval = setInterval(() => {
-        if (this.isLoading) {
-          this.loadingTime = Math.floor((Date.now() - this.loadingStartTime) / 1000);
-          this.loadingMessage = `Loading video... (${this.loadingTime}s)`;
-          this.cdr.markForCheck();
-        } else {
-          this.cleanupLoadingTimers();
-        }
-      }, 1000);
-      this.timers.add(this.loadingProgressInterval);
-
-      // Add loading timeout (30 seconds)
-      this.loadingTimeoutTimer = setTimeout(() => {
-        if (this.isLoading) {
-          this.error = 'Video loading timed out. The file may be corrupted or use an unsupported codec.';
-          this.isLoading = false;
-          this.cleanupLoadingTimers();
-          this.cdr.markForCheck();
-        }
-      }, 30000);
-      this.timers.add(this.loadingTimeoutTimer);
-
-      // Setup video event listeners
-      this.setupVideoEventListeners();
-    }
+    // Reinitialize the player with the new video
+    // initializePlayer handles all cleanup and setup
+    await this.initializePlayer();
   }
 
   /**
    * Get the current media element (video or audio) for waveform generation
    */
   getMediaElement(): HTMLVideoElement | HTMLAudioElement | undefined {
+    // Return the underlying HTML element from video.js player
+    if (this.player) {
+      return this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
+    }
+    // Fallback to direct element references if player not initialized
     if (this.mediaType === 'audio' && this.audioElement) {
       return this.audioElement.nativeElement;
     } else if (this.mediaType === 'video' && this.videoElement) {

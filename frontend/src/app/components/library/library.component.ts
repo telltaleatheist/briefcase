@@ -37,6 +37,7 @@ import { DownloadProgressService } from '../../services/download-progress.servic
 import { SocketService } from '../../services/socket.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
+import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/preview-dialog.component';
 import { ItemListComponent } from '../shared/item-list/item-list.component';
 import {
   ListItem,
@@ -209,7 +210,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Video player state
   @ViewChild('detailVideoPlayer') detailVideoPlayer?: ElementRef<HTMLVideoElement>;
-  @ViewChild('previewVideoPlayer') previewVideoPlayer?: ElementRef<HTMLVideoElement>;
   @ViewChild('contextMenuTrigger') contextMenuTrigger?: MatMenuTrigger;
   @ViewChild('managementContextMenuTrigger') managementContextMenuTrigger?: MatMenuTrigger;
   @ViewChild('fileTypeMenuTrigger') fileTypeMenuTrigger?: MatMenuTrigger;
@@ -218,16 +218,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Preview modal state for list view
   highlightedVideo: DatabaseVideo | null = null;
-  isPreviewModalOpen = false;
   previewAutoPlayEnabled = true;
-
-  // Preview panel position and dragging
-  previewPanelWidth = 500;
-  previewPanelHeight = 400;
-  previewPanelX = 100;
-  previewPanelY = 100;
-  isDraggingPreviewPanel = false;
-  isResizingPreviewPanel = false;
 
   // Context menu state
   contextMenuPosition = { x: 0, y: 0 };
@@ -303,107 +294,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
     { id: 'delete', label: 'Delete', icon: 'delete' }
   ];
 
-  handleKeyDown(event: KeyboardEvent) {
-    // Check if user is editing any video field - if so, disable all keyboard shortcuts
-    const isEditing = Object.values(this.editingVideo).some(fields =>
-      fields.date || fields.title || fields.extension
-    );
-
-    // Also check if focus is on an input/textarea element
-    const activeElement = document.activeElement;
-    const target = event.target as HTMLElement;
-    const isFocusedOnInput = (activeElement && ['INPUT', 'TEXTAREA'].includes(activeElement.tagName)) ||
-                             target instanceof HTMLInputElement ||
-                             target instanceof HTMLTextAreaElement ||
-                             target.tagName === 'INPUT' ||
-                             target.tagName === 'TEXTAREA' ||
-                             target.closest('input') ||
-                             target.closest('textarea') ||
-                             target.closest('.mat-mdc-input-element') ||
-                             target.classList.contains('mat-mdc-input-element');
-
-    // If user is editing, allow only escape key to cancel editing
-    if (isEditing || isFocusedOnInput) {
-      if (event.code === 'Escape') {
-        // Cancel all editing
-        for (const videoId in this.editingVideo) {
-          this.editingVideo[videoId] = { date: false, title: false, extension: false };
-        }
-        // Blur the active input
-        if (activeElement && activeElement instanceof HTMLElement) {
-          activeElement.blur();
-        }
-      }
-      // Don't process any other shortcuts while editing
-      return;
-    }
-
-    // Handle Cmd+A / Ctrl+A for select all
-    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyA') {
-      event.preventDefault();
-      this.selectAll();
-      return;
-    }
-
-    // Handle Delete/Backspace to delete selected videos
-    // Delete key on Windows/Linux, or Cmd+Backspace on Mac, or plain Backspace
-    if (event.code === 'Delete' ||
-        (event.code === 'Backspace' && (event.metaKey || !event.target || (event.target as HTMLElement).tagName !== 'INPUT'))) {
-      if (this.selectedVideos.size > 0) {
-        event.preventDefault();
-        this.deleteSelected();
-        return;
-      }
-    }
-
-    // Handle preview modal in list view
-    if (this.viewMode === 'list' && this.isPreviewModalOpen) {
-      // Note: Spacebar is now handled directly on the preview panel element to prevent
-      // conflicts with video controls. See onPreviewPanelSpacePress()
-      if (event.code === 'Escape') {
-        event.preventDefault();
-        this.closePreviewModal();
-      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        // Note: Arrow keys are usually handled by ItemListComponent which calls stopPropagation()
-        // This code only runs if the event wasn't stopped (e.g., focus is on preview panel)
-        event.preventDefault();
-        this.navigatePreviewVideos(event.code === 'ArrowUp' ? -1 : 1);
-      }
-    }
-    // Handle detail view
-    else if (this.viewMode === 'detail') {
-      if (event.code === 'Space' && !isFocusedOnInput) {
-        this.onSpacebarPress(event);
-      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        event.preventDefault();
-        this.navigateVideos(event.code === 'ArrowUp' ? -1 : 1);
-      }
-    }
-    // Handle navigation in list view without modal
-    else if (this.viewMode === 'list' && !this.isPreviewModalOpen) {
-      // Up/Down arrows navigate videos
-      if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        event.preventDefault();
-        this.navigateHighlightedVideo(event.code === 'ArrowUp' ? -1 : 1);
-      }
-      // Left/Right arrows expand/collapse date accordion of highlighted video
-      else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
-        event.preventDefault();
-        this.toggleHighlightedSection(event.code === 'ArrowRight');
-      }
-      // Space opens preview modal
-      else if (event.code === 'Space' && !isFocusedOnInput) {
-        event.preventDefault();
-        this.openPreviewModal();
-      }
-      // Type-ahead search (alphanumeric keys when not editing)
-      else if (!isFocusedOnInput && !event.metaKey && !event.ctrlKey && !event.altKey &&
-               event.key.length === 1 && event.key.match(/[a-z0-9 ]/i)) {
-        event.preventDefault();
-        this.handleTypeAhead(event.key);
-      }
-    }
-  }
+  // Note: Keyboard handling is now fully managed by item-list component
+  // item-list handles: arrow navigation, type-ahead, Cmd+A, Delete, Space, Escape
+  // item-list emits events: spaceAction, deleteAction, itemsSelected, itemHighlighted, etc.
+  // This component just responds to those events (see onListSpaceAction, onListDeleteAction, etc.)
 
   constructor(
     private databaseLibraryService: DatabaseLibraryService,
@@ -429,7 +323,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Add document listeners for closing context menu
     document.addEventListener('click', this.handleDocumentClick);
     document.addEventListener('contextmenu', this.handleDocumentContextMenu);
-    document.addEventListener('keydown', this.handleDocumentKeyDown);
 
     // Load backend URL
     this.backendUrl = await this.backendUrlService.getBackendUrl();
@@ -538,6 +431,83 @@ export class LibraryComponent implements OnInit, OnDestroy {
       console.log('[LibraryComponent] Videos reloaded after import. Total videos:', this.videos.length);
     });
 
+    // Subscribe to transcription completed events to update video has_transcript flag
+    this.socketService.onTranscriptionCompleted().subscribe(event => {
+      console.log('[LibraryComponent] Transcription completed event received:', event);
+
+      // Find the video by path and update its transcript flag
+      const video = this.videos.find(v =>
+        event.outputFile && v.current_path &&
+        (event.outputFile.includes(v.id) || event.outputFile.includes(v.filename.replace(/\.[^/.]+$/, '')))
+      );
+
+      if (video) {
+        // Reload the specific video from database to get updated transcript flag
+        this.databaseLibraryService.getVideoById(video.id).then(updatedVideo => {
+          if (updatedVideo) {
+            // Update in main videos array
+            const videoIndex = this.videos.findIndex(v => v.id === video.id);
+            if (videoIndex !== -1) {
+              this.videos[videoIndex] = { ...this.videos[videoIndex], has_transcript: updatedVideo.has_transcript };
+            }
+
+            // Update in filtered videos array
+            const filteredIndex = this.filteredVideos.findIndex(v => v.id === video.id);
+            if (filteredIndex !== -1) {
+              this.filteredVideos[filteredIndex] = { ...this.filteredVideos[filteredIndex], has_transcript: updatedVideo.has_transcript };
+            }
+
+            console.log('[LibraryComponent] Video transcript flag updated:', video.id);
+          }
+        });
+      }
+    });
+
+    // Subscribe to transcription failed events to handle errors
+    this.socketService.onTranscriptionFailed().subscribe(event => {
+      console.error('[LibraryComponent] Transcription failed:', event);
+      this.notificationService.toastOnly('error', 'Transcription Failed', event.error || 'An error occurred during transcription');
+    });
+
+    // Subscribe to processing completed events to update video has_analysis flag
+    this.socketService.listenTo<any>('processing-completed').subscribe(event => {
+      console.log('[LibraryComponent] Processing completed event received:', event);
+
+      // Find the video by path or jobId and update its analysis flag
+      const video = this.videos.find(v =>
+        (event.outputFile && v.current_path &&
+         (event.outputFile.includes(v.id) || event.outputFile.includes(v.filename.replace(/\.[^/.]+$/, '')))) ||
+        (event.jobId && this.videoProcessingStates.has(v.id))
+      );
+
+      if (video) {
+        // Reload the specific video from database to get updated analysis flag
+        this.databaseLibraryService.getVideoById(video.id).then(updatedVideo => {
+          if (updatedVideo) {
+            // Update in main videos array
+            const videoIndex = this.videos.findIndex(v => v.id === video.id);
+            if (videoIndex !== -1) {
+              this.videos[videoIndex] = { ...this.videos[videoIndex], has_analysis: updatedVideo.has_analysis };
+            }
+
+            // Update in filtered videos array
+            const filteredIndex = this.filteredVideos.findIndex(v => v.id === video.id);
+            if (filteredIndex !== -1) {
+              this.filteredVideos[filteredIndex] = { ...this.filteredVideos[filteredIndex], has_analysis: updatedVideo.has_analysis };
+            }
+
+            console.log('[LibraryComponent] Video analysis flag updated:', video.id);
+          }
+        });
+      }
+    });
+
+    // Subscribe to processing failed events to handle analysis errors
+    this.socketService.onProcessingFailed().subscribe(event => {
+      console.error('[LibraryComponent] Processing failed:', event);
+      this.notificationService.toastOnly('error', 'Analysis Failed', event.error || 'An error occurred during video analysis');
+    });
+
     // Check for query param to highlight a specific video
     this.route.queryParams.subscribe(params => {
       console.log('[LibraryComponent] Query params received:', params);
@@ -585,36 +555,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.contextMenuTimeout = null;
     }
 
-    // Close preview modal and stop video playback when leaving the page
-    if (this.isPreviewModalOpen) {
-      this.closePreviewModal();
-    }
-
-    // Also ensure any video/audio players are stopped (belt and suspenders approach)
-    if (this.previewVideoPlayer?.nativeElement) {
-      const videoEl = this.previewVideoPlayer.nativeElement;
-      videoEl.pause();
-      videoEl.src = ''; // Clear the source to fully stop loading
-      videoEl.load(); // Reset the player
+    // Close preview dialog when leaving the page
+    if (this.currentPreviewDialogRef) {
+      this.currentPreviewDialogRef.close();
     }
 
     // Remove document listeners
     document.removeEventListener('click', this.handleDocumentClick);
     document.removeEventListener('contextmenu', this.handleDocumentContextMenu);
-    document.removeEventListener('keydown', this.handleDocumentKeyDown);
   }
 
-  /**
-   * Handle keydown events to close context menu on Escape (Finder behavior)
-   */
-  private handleDocumentKeyDown = (event: KeyboardEvent) => {
-    if (event.code === 'Escape' && this.isContextMenuOpen) {
-      if (this.contextMenuTrigger && this.contextMenuTrigger.menuOpen) {
-        this.contextMenuTrigger.closeMenu();
-        this.isContextMenuOpen = false;
-      }
-    }
-  };
+  // Note: Context menu Escape handling is now handled by MatMenu's built-in behavior
 
   /**
    * Handle document click to close context menu
@@ -2249,8 +2200,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // For detail view, load video in preview
     if (this.viewMode === 'detail') {
       this.selectVideo(video);
-    } else if (this.viewMode === 'list' && this.isPreviewModalOpen) {
-      // If preview is open, clicking should load that video
+    } else if (this.viewMode === 'list' && this.currentPreviewDialogRef) {
+      // If preview dialog is open, clicking should load that video
       this.loadPreviewVideo(video);
     }
   }
@@ -2277,27 +2228,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   onListSpaceAction(video: DatabaseVideo | null) {
-    if (!video || this.viewMode !== 'list') return;
+    if (!video) return;
 
-    // If preview modal is already open
-    if (this.isPreviewModalOpen) {
-      // If same video, toggle play/pause
-      if (this.highlightedVideo?.id === video.id && this.previewVideoPlayer) {
-        const videoEl = this.previewVideoPlayer.nativeElement;
-        if (videoEl.paused) {
-          videoEl.play();
-        } else {
-          videoEl.pause();
-        }
-      }
-      // If different video, load the new video
-      else {
-        this.loadPreviewVideo(video);
-      }
-    }
-    // If preview modal is closed, open it with the selected video
-    else {
-      this.highlightedVideo = video; // Set the video BEFORE opening modal
+    // Set the video and open/update the preview dialog
+    this.highlightedVideo = video;
+
+    // If dialog is already open, close and reopen with new video
+    if (this.currentPreviewDialogRef) {
+      this.currentPreviewDialogRef.close();
+      setTimeout(() => this.openPreviewModal(), 100);
+    } else {
+      // Open new dialog
       this.openPreviewModal();
     }
   }
@@ -2313,8 +2254,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Update highlighted video
     this.highlightedVideo = video;
 
-    // Auto-load preview when navigating with arrow keys if preview is already open
-    if (video && this.isPreviewModalOpen && video.id !== previousVideo?.id) {
+    // Auto-load preview when navigating with arrow keys if preview dialog is open
+    if (video && this.currentPreviewDialogRef && video.id !== previousVideo?.id) {
       this.loadPreviewVideo(video);
     }
   }
@@ -4356,17 +4297,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     this.selectedVideos.add(video.id); // Add the clicked video to selection
     this.updateAllSelectedState();
 
-    // Auto-play if preview modal is open and auto-play is enabled
-    if (this.isPreviewModalOpen && this.previewAutoPlayEnabled) {
-      setTimeout(() => {
-        const videoEl = this.previewVideoPlayer?.nativeElement;
-        if (videoEl) {
-          videoEl.play().catch(err => {
-            console.error('Auto-play failed:', err);
-          });
-        }
-      }, 150);
-    }
+    // Auto-play is now handled by the PreviewDialogComponent
   }
 
   /**
@@ -4445,6 +4376,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
     return minY + 10;
   }
 
+  private currentPreviewDialogRef: MatDialogRef<PreviewDialogComponent> | null = null;
+
   openPreviewModal() {
     if (!this.highlightedVideo) {
       // If no video highlighted, highlight the first one
@@ -4455,47 +4388,54 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Calculate minimum Y position (below header)
-    const minY = this.getMinimumYPosition();
-
-    // Calculate initial position
-    let panelX = window.innerWidth - this.previewPanelWidth - 20;
-    let panelY = minY;
-
-    // Ensure the panel is fully visible within viewport bounds
-    const maxX = window.innerWidth - this.previewPanelWidth - 10;
-    const maxY = window.innerHeight - this.previewPanelHeight - 10;
-    const minValidX = 10;
-
-    // Constrain position to viewport (with minY already accounting for header)
-    panelX = Math.max(minValidX, Math.min(maxX, panelX));
-    panelY = Math.max(minY, Math.min(maxY, panelY));
-
-    // If panel would still be off-screen (e.g., window too small), center it
-    if (panelX < minValidX ||
-        panelX + this.previewPanelWidth > window.innerWidth - 10 ||
-        panelY + this.previewPanelHeight > window.innerHeight - 10) {
-      // Center the panel as a fallback
-      panelX = Math.max(minValidX, (window.innerWidth - this.previewPanelWidth) / 2);
-      panelY = Math.max(minY, (window.innerHeight - this.previewPanelHeight) / 2);
+    // Close existing dialog if any
+    if (this.currentPreviewDialogRef) {
+      this.currentPreviewDialogRef.close();
     }
 
-    this.previewPanelX = panelX;
-    this.previewPanelY = panelY;
+    // Open new dialog with MatDialog
+    const dialogData: PreviewDialogData = {
+      video: this.highlightedVideo,
+      autoPlay: this.previewAutoPlayEnabled,
+      videoStreamUrl: this.getVideoStreamUrl(this.highlightedVideo),
+      parseFilename: (filename: string) => this.parseFilename(filename),
+      getMediaTypeIcon: (mediaType: string) => this.getMediaTypeIcon(mediaType),
+      getMediaTypeLabel: (mediaType: string) => this.getMediaTypeLabel(mediaType),
+      canAnalyzeMedia: (video: DatabaseVideo) => this.canAnalyzeMedia(video),
+      onAnalyze: (video: DatabaseVideo) => this.analyzeVideo(video),
+      onOpenVideoEditor: (video: DatabaseVideo) => this.openVideoPlayer(video),
+      onViewDetails: (video: DatabaseVideo) => this.openMetadataEditor(video)
+    };
 
-    this.isPreviewModalOpen = true;
+    this.currentPreviewDialogRef = this.dialog.open(PreviewDialogComponent, {
+      data: dialogData,
+      width: '400px',
+      maxWidth: '90vw',
+      maxHeight: '85vh',
+      panelClass: 'preview-dialog-panel',
+      hasBackdrop: false,
+      position: {
+        top: '100px',
+        right: '20px'
+      }
+    });
 
-    // Auto-play the video if enabled
-    if (this.previewAutoPlayEnabled) {
-      setTimeout(() => {
-        const videoEl = this.previewVideoPlayer?.nativeElement;
-        if (videoEl) {
-          videoEl.play().catch(err => {
-            console.error('Auto-play failed:', err);
-          });
+    // Handle dialog close
+    this.currentPreviewDialogRef.afterClosed().subscribe(result => {
+      this.currentPreviewDialogRef = null;
+
+      // If user navigated with arrow keys, open preview for next/prev video
+      if (result && result.navigate) {
+        const currentIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo?.id);
+        const nextIndex = currentIndex + result.navigate;
+
+        if (nextIndex >= 0 && nextIndex < this.filteredVideos.length) {
+          this.highlightedVideo = this.filteredVideos[nextIndex];
+          // Reopen preview modal
+          setTimeout(() => this.openPreviewModal(), 100);
         }
-      }, 150);
-    }
+      }
+    });
   }
 
   /**
@@ -4504,17 +4444,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
   loadPreviewVideo(video: DatabaseVideo) {
     this.highlightedVideo = video;
 
-    // Wait for view to update, then auto-play if enabled
-    if (this.previewAutoPlayEnabled) {
-      setTimeout(() => {
-        const videoEl = this.previewVideoPlayer?.nativeElement;
-        if (videoEl) {
-          videoEl.load(); // Force reload of new video
-          videoEl.play().catch(err => {
-            console.error('Auto-play failed:', err);
-          });
-        }
-      }, 100);
+    // Close and reopen dialog with new video
+    if (this.currentPreviewDialogRef) {
+      this.currentPreviewDialogRef.close();
+      setTimeout(() => this.openPreviewModal(), 100);
     }
   }
 
@@ -4522,86 +4455,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Close the preview modal
    */
   closePreviewModal() {
-    this.isPreviewModalOpen = false;
-
-    // Pause the video when closing
-    const videoEl = this.previewVideoPlayer?.nativeElement;
-    if (videoEl && !videoEl.paused) {
-      videoEl.pause();
+    if (this.currentPreviewDialogRef) {
+      this.currentPreviewDialogRef.close();
     }
   }
 
-  /**
-   * Handle keydown on preview panel (capture spacebar before video element gets it)
-   */
-  onPreviewPanelKeyDown(event: KeyboardEvent) {
-    if (event.code === 'Space') {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      this.togglePreviewPlayPause();
-    }
-  }
-
-  /**
-   * Toggle play/pause in preview modal
-   */
-  togglePreviewPlayPause() {
-    const videoEl = this.previewVideoPlayer?.nativeElement;
-    if (videoEl) {
-      if (videoEl.paused) {
-        videoEl.play();
-      } else {
-        videoEl.pause();
-      }
-    }
-  }
-
-  /**
-   * Navigate between videos in preview modal
-   */
-  navigatePreviewVideos(direction: number) {
-    // Use the visual order (same as what's displayed on screen) for navigation
-    const visualOrder = this.getVisualOrderVideos();
-
-    if (!this.highlightedVideo || visualOrder.length === 0) {
-      return;
-    }
-
-    const currentIndex = visualOrder.findIndex(v => v.id === this.highlightedVideo!.id);
-    if (currentIndex === -1) return;
-
-    const newIndex = currentIndex + direction;
-    if (newIndex >= 0 && newIndex < visualOrder.length) {
-      // Stop and reset current video
-      const videoEl = this.previewVideoPlayer?.nativeElement;
-      if (videoEl) {
-        videoEl.pause();
-        videoEl.currentTime = 0;
-      }
-
-      // Update highlighted video (this triggers Angular to update the [src] binding)
-      this.highlightedVideo = visualOrder[newIndex];
-
-      // Wait for the new video element to load and then auto-play if enabled
-      if (this.previewAutoPlayEnabled) {
-        // Use a longer timeout to ensure Angular has updated the DOM and the new src is loaded
-        setTimeout(() => {
-          const newVideoEl = this.previewVideoPlayer?.nativeElement;
-          if (newVideoEl) {
-            // Load the new video and play when ready
-            newVideoEl.load();
-            const playPromise = newVideoEl.play();
-            if (playPromise) {
-              playPromise.catch(err => {
-                console.error('Auto-play failed:', err);
-              });
-            }
-          }
-        }, 200);
-      }
-    }
-  }
 
   /**
    * Navigate highlighted video without opening preview
@@ -4856,144 +4714,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     });
   }
 
-  /**
-   * Start dragging the preview panel
-   */
-  startDragPreviewPanel(event: MouseEvent) {
-    // Don't start dragging if clicking on interactive elements
-    const target = event.target as HTMLElement;
-    if (target.tagName === 'BUTTON' || target.closest('button')) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    this.isDraggingPreviewPanel = true;
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startPanelX = this.previewPanelX;
-    const startPanelY = this.previewPanelY;
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!this.isDraggingPreviewPanel) return;
-
-      const deltaX = e.clientX - startX;
-      const deltaY = e.clientY - startY;
-
-      // Get minimum Y to prevent dragging above header
-      const minY = this.getMinimumYPosition();
-
-      // Keep panel within viewport bounds
-      const maxX = window.innerWidth - this.previewPanelWidth - 10;
-      const maxY = window.innerHeight - this.previewPanelHeight - 10;
-
-      this.previewPanelX = Math.max(10, Math.min(maxX, startPanelX + deltaX));
-      this.previewPanelY = Math.max(minY, Math.min(maxY, startPanelY + deltaY));
-    };
-
-    const onMouseUp = () => {
-      this.isDraggingPreviewPanel = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }
-
-  /**
-   * Start resizing the preview panel from bottom-right
-   */
-  startResizePreviewPanel(event: MouseEvent) {
-    event.preventDefault();
-    event.stopPropagation();
-    this.isResizingPreviewPanel = true;
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startWidth = this.previewPanelWidth;
-    const startHeight = this.previewPanelHeight;
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!this.isResizingPreviewPanel) return;
-
-      const deltaX = e.clientX - startX;
-      const deltaY = e.clientY - startY;
-
-      // Calculate new dimensions with min/max constraints
-      const newWidth = Math.max(300, Math.min(800, startWidth + deltaX));
-      const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
-
-      this.previewPanelWidth = newWidth;
-      this.previewPanelHeight = newHeight;
-
-      // Adjust position if panel goes out of bounds
-      const minY = this.getMinimumYPosition();
-      const maxX = window.innerWidth - this.previewPanelWidth - 10;
-      const maxY = window.innerHeight - this.previewPanelHeight - 10;
-
-      this.previewPanelX = Math.max(10, Math.min(maxX, this.previewPanelX));
-      this.previewPanelY = Math.max(minY, Math.min(maxY, this.previewPanelY));
-    };
-
-    const onMouseUp = () => {
-      this.isResizingPreviewPanel = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }
-
-  /**
-   * Start resizing the preview panel from bottom-left
-   */
-  startResizePreviewPanelLeft(event: MouseEvent) {
-    event.preventDefault();
-    event.stopPropagation();
-    this.isResizingPreviewPanel = true;
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startWidth = this.previewPanelWidth;
-    const startHeight = this.previewPanelHeight;
-    const startPanelX = this.previewPanelX;
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!this.isResizingPreviewPanel) return;
-
-      const deltaX = e.clientX - startX;
-      const deltaY = e.clientY - startY;
-
-      // Calculate new dimensions with min/max constraints
-      // When resizing from left, we grow in the opposite direction
-      const newWidth = Math.max(300, Math.min(800, startWidth - deltaX));
-      const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
-
-      // Adjust X position to keep the right edge fixed
-      const newX = startPanelX + (startWidth - newWidth);
-
-      this.previewPanelWidth = newWidth;
-      this.previewPanelHeight = newHeight;
-      this.previewPanelX = Math.max(10, newX);
-
-      // Adjust Y position if panel goes out of bounds
-      const minY = this.getMinimumYPosition();
-      const maxY = window.innerHeight - this.previewPanelHeight - 10;
-      this.previewPanelY = Math.max(minY, Math.min(maxY, this.previewPanelY));
-    };
-
-    const onMouseUp = () => {
-      this.isResizingPreviewPanel = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }
 
   /**
    * Toggle selection of an orphaned video

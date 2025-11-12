@@ -288,6 +288,12 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
    */
   isSelectionEdgeTop(items: T[], index: number): boolean {
     const currentItem = items[index];
+
+    // Ghost items can never be selection edges
+    if (currentItem['isGhostParent'] || currentItem['isGhostChild']) {
+      return false;
+    }
+
     const highlightedId = this.selectionService.getHighlighted();
     // Item must be either selected OR highlighted
     const isCurrentActive = this.selectionService.isSelected(currentItem.id) || highlightedId === currentItem.id;
@@ -312,6 +318,12 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
    */
   isSelectionEdgeBottom(items: T[], index: number): boolean {
     const currentItem = items[index];
+
+    // Ghost items can never be selection edges
+    if (currentItem['isGhostParent'] || currentItem['isGhostChild']) {
+      return false;
+    }
+
     const highlightedId = this.selectionService.getHighlighted();
     // Item must be either selected OR highlighted
     const isCurrentActive = this.selectionService.isSelected(currentItem.id) || highlightedId === currentItem.id;
@@ -402,11 +414,12 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
       const newlySelected = this.items.filter(i => nowSelected.includes(i.id) && !previousSelected.includes(i.id));
       const deselected = this.items.filter(i => previousSelected.includes(i.id) && !nowSelected.includes(i.id));
 
-      if (newlySelected.length > 0) {
-        this.itemsSelected.emit(newlySelected);
-      }
+      // Emit deselected BEFORE selected to prevent race condition with parent's state sync
       if (deselected.length > 0) {
         this.itemsDeselected.emit(deselected);
+      }
+      if (newlySelected.length > 0) {
+        this.itemsSelected.emit(newlySelected);
       }
 
       return;
@@ -416,17 +429,20 @@ export class ItemListComponent<T extends ListItem = ListItem> implements OnInit,
     const previouslySelected = this.selectionService.getSelected();
     const wasSelected = previouslySelected.includes(item.id);
 
-    this.selectionService.select(item.id, true);
-
-    if (!wasSelected) {
-      this.itemsSelected.emit([item]);
-    }
-
+    // IMPORTANT: Deselect old items BEFORE selecting new item
+    // This ensures parent's state is cleared before adding new selection
+    // Prevents race condition with syncExternalSelection in ngOnChanges
     if (previouslySelected.length > 0) {
       const deselected = this.items.filter(i => previouslySelected.includes(i.id) && i.id !== item.id);
       if (deselected.length > 0) {
         this.itemsDeselected.emit(deselected);
       }
+    }
+
+    this.selectionService.select(item.id, true);
+
+    if (!wasSelected) {
+      this.itemsSelected.emit([item]);
     }
   }
 
