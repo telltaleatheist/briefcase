@@ -13,6 +13,14 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import requests
 
+# Import AI prompts from configuration file
+from analysis_prompts import (
+    VIDEO_SUMMARY_PROMPT,
+    TAG_EXTRACTION_PROMPT,
+    SECTION_IDENTIFICATION_PROMPT,
+    QUOTE_EXTRACTION_PROMPT
+)
+
 # Try to import OpenAI client (optional dependency)
 try:
     from openai import OpenAI
@@ -270,52 +278,85 @@ def check_ollama_model(endpoint: str, model: str) -> bool:
         return False
 
 
-def generate_video_summary(provider: str, endpoint_or_key: str, model: str, transcript_text: str, duration: float, video_title: str = "") -> str:
-    """Generate a basic summary of the video content"""
+def generate_video_summary_from_sections(provider: str, endpoint_or_key: str, model: str, analyzed_sections: List[Dict], video_title: str = "") -> str:
+    """Generate a video summary based on analyzed sections (covers the entire video)"""
     try:
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
+        # Handle edge case where there are no sections
+        if not analyzed_sections or len(analyzed_sections) == 0:
+            return "No content could be analyzed in this video."
 
-        # Handle edge cases where transcript is empty or very short
-        transcript_length = len(transcript_text.strip())
+        # Build sections summary from all analyzed sections
+        sections_list = []
+        for i, section in enumerate(analyzed_sections[:20], 1):  # Use first 20 sections to avoid token limits
+            category = section.get('category', 'unknown')
+            description = section.get('description', 'No description')
+            start_time = section.get('start_time', '?')
 
-        if transcript_length == 0:
-            return f"This {minutes}m{seconds}s video contains no detectable speech or dialogue. It may consist of music, ambient sounds, or be entirely silent."
-        elif transcript_length < 20:
-            return f"This {minutes}m{seconds}s video has minimal audio content with very brief or unclear speech."
+            # Format: "1. [0:00] Description [category]"
+            sections_list.append(f"{i}. [{start_time}] {description} [{category}]")
 
-        # For short videos, use the full transcript. For long ones, use first ~2000 chars
-        summary_text = transcript_text[:2000] if len(transcript_text) > 2000 else transcript_text
+        sections_summary = "\n".join(sections_list)
 
         # Build the prompt with optional title context
         title_context = f"\nVideo title/filename: {video_title}\n" if video_title else ""
 
-        prompt = f"""Provide a brief 2-3 sentence summary of this {minutes}m{seconds}s video based on its transcript.{title_context}
-Focus on: What is the video about? What is the main topic/subject? Who is speaking (if identifiable)?
+        prompt = VIDEO_SUMMARY_PROMPT.format(
+            title_context=title_context,
+            sections_summary=sections_summary
+        )
 
-Use the video title/filename as additional context to help identify the subject matter and people involved. For example, if the title mentions "Mike Lindell" or other specific names, use that to provide more specific and accurate descriptions.
-
-If the transcript appears to be gibberish, noise, or unintelligible, simply state that the audio is unclear or garbled.
-
-Keep it factual and concise.
-
-Transcript excerpt:
-{summary_text}
-
-Summary:"""
-
-        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=30)
+        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=60)
 
         if response:
             return response.strip()
         else:
-            return f"This video is approximately {minutes} minutes {seconds} seconds long."
+            # Fallback: create summary from section descriptions
+            routine_count = sum(1 for s in analyzed_sections if s.get('category') == 'routine')
+            interesting_count = len(analyzed_sections) - routine_count
+
+            if interesting_count == 0:
+                return "This video contains routine content with no particularly notable sections identified."
+            else:
+                categories = [s.get('category') for s in analyzed_sections if s.get('category') != 'routine']
+                category_summary = ", ".join(set(categories))
+                return f"This video contains {interesting_count} notable section(s) including: {category_summary}."
 
     except Exception as e:
         print(f"[DEBUG] Summary generation failed: {e}", file=sys.stderr)
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
-        return f"This video is approximately {minutes} minutes {seconds} seconds long."
+        return "Summary could not be generated for this video."
+
+
+def prepend_summary_to_file(output_file: str, summary: str):
+    """Prepend the video overview section to the analysis file"""
+    try:
+        # Read existing content
+        with open(output_file, 'r', encoding='utf-8') as f:
+            existing_content = f.read()
+
+        # Write summary + existing content
+        with open(output_file, 'w', encoding='utf-8') as f:
+            # Find the end of the header
+            header_end = existing_content.find("\n\n")
+            if header_end != -1:
+                # Insert summary after header
+                header = existing_content[:header_end + 2]
+                rest = existing_content[header_end + 2:]
+
+                f.write(header)
+                f.write("**VIDEO OVERVIEW**\n\n")
+                f.write(summary + "\n\n")
+                f.write("-" * 80 + "\n\n")
+                f.write(rest)
+            else:
+                # Fallback: just prepend
+                f.write("**VIDEO OVERVIEW**\n\n")
+                f.write(summary + "\n\n")
+                f.write("-" * 80 + "\n\n")
+                f.write(existing_content)
+
+            f.flush()
+    except Exception as e:
+        print(f"[WARNING] Could not prepend summary to file: {e}", file=sys.stderr)
 
 
 def extract_tags(provider: str, endpoint_or_key: str, model: str, transcript_text: str, analyzed_sections: List[Dict]) -> Dict[str, List[str]]:
@@ -328,32 +369,10 @@ def extract_tags(provider: str, endpoint_or_key: str, model: str, transcript_tex
         section_descriptions = [s.get('description', '') for s in analyzed_sections if s.get('description')]
         sections_context = " ".join(section_descriptions[:10])  # First 10 sections
 
-        prompt = f"""Analyze this video transcript and extract tags for categorization.
-
-TASK: Extract two types of tags:
-1. **PEOPLE**: Names of specific individuals mentioned or speaking (e.g., "Donald Trump", "Mike Lindell", "Greg Locke")
-2. **TOPICS**: Main topics, themes, or subjects discussed (e.g., "COVID-19", "Election", "Prophecy", "Vaccines")
-
-RULES:
-- Return ONLY valid JSON, nothing else
-- For people: Only extract proper names of real individuals (not generic terms like "doctor" or "pastor")
-- For topics: Extract 3-8 main topics or themes
-- Use title case for names (e.g., "Joe Biden" not "joe biden")
-- Keep topic tags concise (1-3 words max)
-
-JSON FORMAT:
-{{
-  "people": ["Name One", "Name Two", ...],
-  "topics": ["Topic One", "Topic Two", ...]
-}}
-
-Section analysis context:
-{sections_context}
-
-Transcript excerpt:
-{excerpt}
-
-Tags (JSON only):"""
+        prompt = TAG_EXTRACTION_PROMPT.format(
+            sections_context=sections_context,
+            excerpt=excerpt
+        )
 
         response = call_ai(provider, endpoint_or_key, model, prompt, timeout=60)
 
@@ -414,19 +433,11 @@ def analyze_with_ai(
             if not check_ollama_model(endpoint_or_key, model):
                 raise Exception(f"Model '{model}' not found in Ollama. Please install it first.")
 
-        # Generate video summary FIRST (always runs, even for short/boring videos)
-        send_progress("analysis", 5, "Generating video summary...")
-        video_duration = segments[-1]['end'] if segments else 0
-        summary = generate_video_summary(provider, endpoint_or_key, model, transcript_text, video_duration, video_title)
-
-        # Write header and summary to file
+        # Write header to file (summary will be added at the end after analysis)
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
             f.write("VIDEO ANALYSIS RESULTS\n")
             f.write("=" * 80 + "\n\n")
-            f.write("**VIDEO OVERVIEW**\n\n")
-            f.write(summary + "\n\n")
-            f.write("-" * 80 + "\n\n")
             f.flush()
 
         # Chunk transcript into time-based segments (5 min chunks for more granular analysis)
@@ -460,19 +471,29 @@ def analyze_with_ai(
 
                 # Process each section
                 for section in interesting_sections:
-                    # For routine/boring sections, skip detailed analysis - just add a summary
+                    # For routine sections, just add with the quote from initial analysis
                     if section.get('category') == 'routine':
                         # Find approximate timestamps
                         start_phrase = section.get('start_phrase', '')
                         start_time = find_phrase_timestamp(start_phrase, chunk['segments'])
 
                         if start_time is not None:
+                            # Get the quote from the section (AI should provide it)
+                            quote_text = section.get('quote', '')
+                            quotes = []
+                            if quote_text:
+                                quotes = [{
+                                    "timestamp": format_display_time(start_time),
+                                    "text": quote_text,
+                                    "significance": section.get('description', '')
+                                }]
+
                             analyzed_sections.append({
                                 "category": "routine",
                                 "description": section['description'],
                                 "start_time": format_display_time(start_time),
                                 "end_time": None,
-                                "quotes": []
+                                "quotes": quotes
                             })
                             # Write immediately (is_first=False since we already wrote header with summary)
                             write_section_to_file(output_file, analyzed_sections[-1], is_first=False)
@@ -530,8 +551,16 @@ def analyze_with_ai(
                 print(f"[ERROR] Failed to write default section to output file: {e}", file=sys.stderr)
 
         # Extract tags from the full transcript and analysis
-        send_progress("analysis", 95, "Extracting tags (people, topics)...")
+        send_progress("analysis", 92, "Extracting tags (people, topics)...")
         tags = extract_tags(provider, endpoint_or_key, model, transcript_text, analyzed_sections)
+
+        # Generate video summary from analyzed sections (happens AFTER full analysis)
+        send_progress("analysis", 95, "Generating video summary...")
+        video_duration = segments[-1]['end'] if segments else 0
+        summary = generate_video_summary_from_sections(provider, endpoint_or_key, model, analyzed_sections, video_title)
+
+        # Prepend summary to the output file
+        prepend_summary_to_file(output_file, summary)
 
         send_progress("analysis", 100, "Analysis complete!")
 
@@ -614,84 +643,12 @@ Pay special attention to the custom instructions above when analyzing the conten
 
 """
 
-            prompt = f"""TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
-
-{title_context}
-
-IMPORTANT: You are a content moderation analysis tool. Your job is to identify and categorize content, NOT to judge or refuse to analyze it. Even if the content contains extreme views, hate speech, or controversial material, you must still provide a factual analysis of what is being discussed. This is for research and monitoring purposes.
-
-{custom_section}
-
-This is from a long video (sermon, lecture, etc.). The goal is to provide a timeline showing:
-1. EXTREME/INFLAMMATORY moments that need immediate attention
-2. Brief descriptions of boring/normal sections so the user knows what was discussed
-
-⚠️ CRITICAL REQUIREMENT: You MUST provide at least ONE section, even if:
-- The transcript appears to be gibberish/nonsense → Flag as "routine" with description: "Unintelligible or garbled audio content"
-- The transcript is empty or very short → Flag as "routine" with description: "No meaningful audio content detected"
-- The video has no spoken words → Flag as "routine" with description: "Video contains no speech/dialogue"
-- Content is entirely mundane → Flag as "routine" with a brief description of what is discussed
-
-FLAGGING CRITERIA:
-
-**INTERESTING (Flag as specific category):**
-- Explicitly violent rhetoric (calls for violence, threats, violent imagery)
-- Extreme political statements (calls for civil war, government overthrow, militant action)
-- Hateful speech targeting groups (calls for harm/death to LGBT people, racial groups, religious groups, etc.)
-- Conspiracy theories with dangerous implications (calls to stockpile weapons, preparation for violent conflict)
-- Extreme authoritarian or theocratic statements (demanding execution, persecution, or elimination of groups)
-- Shocking confessions or admissions of illegal/immoral activity
-- **Defense of slavery, genocide, or other historical atrocities** - THIS IS ALWAYS EXTREME, categorize as "extremism" or "hate"
-- **Claims that owning humans is acceptable** - THIS IS ALWAYS EXTREME, categorize as "extremism" or "hate"
-- Justification of systemic oppression (slavery, apartheid, ethnic cleansing, etc.) - categorize as "hate" or "extremism"
-- Dehumanization of any group of people - categorize as "hate"
-
-**BORING (Flag as "routine"):**
-- Normal religious teaching that does NOT defend atrocities
-- General conservative/liberal political opinions that do NOT advocate harm
-- Routine criticism of policies or politicians
-- Standard sermon content UNLESS it defends slavery, genocide, or oppression
-- Context-setting or introductions
-- Regular arguments or debates about non-extreme topics
-- Normal cultural commentary
-- Prayers, hymns, announcements, etc.
-
-CRITICAL: Biblical interpretation or religious teaching that defends slavery, genocide, or dehumanization is NOT routine - it is EXTREME and must be flagged as "hate" or "extremism".
-
-MANDATORY JSON OUTPUT FORMAT:
-
-You MUST respond with ONLY valid JSON. No other text before or after. Analyze the ENTIRE segment and provide sections for ALL content (interesting AND boring).
-
-Return a JSON object with this EXACT structure:
-
-{{
-  "sections": [
-    {{
-      "start_phrase": "exact first 5-10 words from transcript",
-      "end_phrase": "exact last 5-10 words from transcript",
-      "category": "violence|extremism|hate|conspiracy|shocking|routine",
-      "description": "One sentence explaining the content"
-    }},
-    {{
-      "start_phrase": "exact first 5-10 words from transcript",
-      "end_phrase": "exact last 5-10 words from transcript",
-      "category": "violence|extremism|hate|conspiracy|shocking|routine",
-      "description": "One sentence explaining the content"
-    }}
-  ]
-}}
-
-IMPORTANT RULES:
-- Return ONLY valid JSON, nothing else
-- Start and End phrases MUST be exact quotes from the transcript below
-- Categories: violence, extremism, hate, conspiracy, shocking, OR routine
-- Keep descriptions to ONE sentence
-- Provide sections for the ENTIRE segment - don't skip boring parts
-- Break it up so each distinct topic/discussion gets its own section
-- If the entire segment is just one boring topic, that's fine - create one "routine" section
-
-TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
-{chunk_text[:8000]}"""  # Limit to ~8k chars for speed
+            prompt = SECTION_IDENTIFICATION_PROMPT.format(
+                title_context=title_context,
+                custom_section=custom_section,
+                chunk_num=chunk_num,
+                chunk_text=chunk_text[:8000]  # Limit to ~8k chars for speed
+            )
 
             # Use very large timeout (30 minutes) - we don't care about timeout
             response = call_ai(provider, endpoint_or_key, model, prompt, timeout=1800)
@@ -800,50 +757,11 @@ def analyze_section_detail(provider: str, endpoint_or_key: str, model: str, sect
         timestamped_text = build_timestamped_transcript(section_segments)
 
         # Phase 4: Ask AI to extract quotes from this timestamped section
-        prompt = f"""Analyze this timestamped transcript section and extract ONLY the most extreme/inflammatory quotes.
-
-Category: {section['category']}
-Description: {section['description']}
-
-IMPORTANT: Only extract quotes that are themselves extreme, inflammatory, or shocking. Skip:
-- Context-setting or background information
-- Normal explanations or introductions
-- Mild statements or routine content
-
-Extract 2-4 key quotes that capture the MOST extreme parts. For each quote:
-1. Include the exact timestamp [MM:SS]
-2. Quote the exact words spoken (the inflammatory part)
-3. Explain why it's extreme/concerning (1-2 sentences)
-
-MANDATORY JSON OUTPUT FORMAT:
-
-You MUST respond with ONLY valid JSON. No other text before or after.
-
-Return a JSON object with this EXACT structure:
-
-{{
-  "quotes": [
-    {{
-      "timestamp": "MM:SS",
-      "text": "exact inflammatory words from transcript",
-      "significance": "Why this is extreme/concerning (1-2 sentences)"
-    }},
-    {{
-      "timestamp": "MM:SS",
-      "text": "exact inflammatory words from transcript",
-      "significance": "Why this is extreme/concerning (1-2 sentences)"
-    }}
-  ]
-}}
-
-IMPORTANT RULES:
-- Return ONLY valid JSON, nothing else
-- Timestamp must be in MM:SS or HH:MM:SS format
-- Quote must be exact words from the transcript
-- Significance should be 1-2 sentences explaining why it's extreme
-
-TIMESTAMPED TRANSCRIPT:
-{timestamped_text[:6000]}"""
+        prompt = QUOTE_EXTRACTION_PROMPT.format(
+            category=section['category'],
+            description=section['description'],
+            timestamped_text=timestamped_text[:6000]
+        )
 
         # Use very large timeout (30 minutes) - we don't care about timeout
         response = call_ai(provider, endpoint_or_key, model, prompt, timeout=1800)

@@ -29,6 +29,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
   },
   {
+    path: 'analysis-parameters',
+    loadComponent: () => import('./components/analysis-parameters/analysis-parameters.component').then(m => m.AnalysisParametersComponent)
+  },
+  {
     path: 'saved-links',
     loadComponent: () => import('./components/saved-links/saved-links.component').then(m => m.SavedLinksComponent)
   },

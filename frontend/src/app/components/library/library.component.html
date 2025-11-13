@@ -78,22 +78,6 @@
         <mat-icon>arrow_back</mat-icon>
         Back to Library
       </button>
-      <button mat-raised-button
-              color="primary"
-              (click)="relinkSelectedOrphans()"
-              [disabled]="selectedOrphanedVideos.size === 0"
-              matTooltip="Select a new folder that contains the missing files">
-        <mat-icon>link</mat-icon>
-        Relink Selected ({{ selectedOrphanedVideos.size }})
-      </button>
-      <button mat-raised-button
-              color="warn"
-              (click)="deleteSelectedOrphans()"
-              [disabled]="selectedOrphanedVideos.size === 0"
-              matTooltip="Remove selected entries from database">
-        <mat-icon>delete</mat-icon>
-        Delete Selected ({{ selectedOrphanedVideos.size }})
-      </button>
     </div>
   </div>
 
@@ -366,7 +350,6 @@
     [selectionMode]="SelectionMode.Multiple"
     [selectedItemIds]="selectedVideos"
     [highlightedItemId]="highlightedVideo?.id || null"
-    [contextMenuActions]="listContextMenuActions"
     [statusMapper]="getVideoStatusMapper"
     [progressMapper]="videoProgressMapper"
     [progressVersion]="progressVersion"
@@ -377,8 +360,7 @@
     (itemHighlighted)="onListItemHighlighted($event)"
     (spaceAction)="onListSpaceAction($event)"
     (deleteAction)="onListDeleteAction($event)"
-    (contextMenu)="onListContextMenu($event)"
-    (contextMenuAction)="onListContextMenuAction($event)">
+    (contextMenu)="onListContextMenu($event)">
   </cascade-list>
 
   <!-- Inline Editing Overlay for List View (single overlay, positioned as needed) -->
@@ -541,41 +523,22 @@
 
           <!-- Unimported videos list container -->
           <div *ngIf="!loadingUnimported && unimportedVideos.length > 0" class="management-list-container">
-            <div class="management-video-list">
-              <div class="management-video-row"
-                   *ngFor="let video of unimportedVideos"
-                   [class.selected]="selectedUnimportedVideos.has(video.fullPath)"
-                   (click)="onManagementVideoClick($event, video.fullPath, 'unimported')"
-                   (contextmenu)="onManagementVideoRightClick($event, video, 'unimported')">
-
-                <!-- Green status indicator -->
-                <div class="status-dot"></div>
-
-                <!-- Date badge (extract from filename) -->
-                <div class="date-badge" *ngIf="parseFilename(video.filename).date">
-                  {{ formatDateChip(parseFilename(video.filename).date) }}
-                </div>
-
-                <!-- Video title -->
-                <div class="video-title-text">{{ parseFilename(video.filename).title || video.filename }}</div>
-
-                <!-- File extension -->
-                <div class="file-extension">.{{ parseFilename(video.filename).extension }}</div>
-
-                <!-- Date added -->
-                <div class="date-added">{{ video.uploadDate || 'Unknown' }}</div>
-
-                <!-- Actions menu -->
-                <button mat-icon-button
-                        class="actions-menu"
-                        #menuTrigger="matMenuTrigger"
-                        [matMenuTriggerFor]="unimportedVideoMenu"
-                        [matMenuTriggerData]="{video: video}"
-                        (click)="$event.stopPropagation()">
-                  <mat-icon>more_vert</mat-icon>
-                </button>
-              </div>
-            </div>
+            <cascade-list
+              [items]="unimportedVideosAsListItems"
+              [displayConfig]="unimportedVideosDisplayConfig"
+              [keyboardConfig]="listKeyboardConfig"
+              [selectionMode]="SelectionMode.Multiple"
+              [selectedItemIds]="selectedUnimportedVideosSet"
+              [highlightedItemId]="highlightedUnimportedVideo?.fullPath || null"
+              [contextMenuActions]="unimportedVideosContextMenuActions"
+              (itemClick)="onUnimportedItemClick($any($event))"
+              (itemDoubleClick)="onUnimportedItemDoubleClick($any($event))"
+              (itemsSelected)="onUnimportedVideosSelected($any($event))"
+              (itemsDeselected)="onUnimportedVideosDeselected($any($event))"
+              (itemHighlighted)="onUnimportedItemHighlighted($any($event))"
+              (deleteAction)="onUnimportedDeleteAction($any($event))"
+              (contextMenuAction)="onUnimportedContextMenuAction($event)">
+            </cascade-list>
           </div>
 
           <!-- Empty state -->
@@ -599,6 +562,22 @@
                       [disabled]="loadingOrphaned">
                 <mat-icon>search</mat-icon>
                 {{ loadingOrphaned ? 'Scanning...' : 'Scan for Orphaned Entries' }}
+              </button>
+              <button mat-raised-button
+                      color="accent"
+                      (click)="relinkSelectedOrphans()"
+                      [disabled]="selectedOrphanedVideos.size === 0 || loadingOrphaned"
+                      matTooltip="Search for missing files and relink them">
+                <mat-icon>link</mat-icon>
+                Relink Selected ({{ selectedOrphanedVideos.size }})
+              </button>
+              <button mat-raised-button
+                      color="warn"
+                      (click)="deleteSelectedOrphans()"
+                      [disabled]="selectedOrphanedVideos.size === 0 || loadingOrphaned"
+                      matTooltip="Remove selected entries from database">
+                <mat-icon>delete</mat-icon>
+                Delete Selected ({{ selectedOrphanedVideos.size }})
               </button>
               <button mat-raised-button
                       color="warn"
@@ -641,41 +620,22 @@
 
           <!-- Orphaned videos list container -->
           <div *ngIf="!loadingOrphaned && orphanedVideos.length > 0" class="management-list-container">
-            <div class="management-video-list">
-              <div class="management-video-row"
-                   *ngFor="let video of orphanedVideos"
-                   [class.selected]="selectedOrphanedVideos.has(video.id)"
-                   (click)="onManagementVideoClick($event, video.id, 'orphaned')"
-                   (contextmenu)="onManagementVideoRightClick($event, video, 'orphaned')">
-
-                <!-- Green status indicator -->
-                <div class="status-dot"></div>
-
-                <!-- Date badge (extract from filename) -->
-                <div class="date-badge" *ngIf="parseFilename(video.filename).date">
-                  {{ formatDateChip(parseFilename(video.filename).date) }}
-                </div>
-
-                <!-- Video title -->
-                <div class="video-title-text">{{ parseFilename(video.filename).title || video.filename }}</div>
-
-                <!-- File extension -->
-                <div class="file-extension">.{{ parseFilename(video.filename).extension }}</div>
-
-                <!-- File path -->
-                <div class="file-path">{{ video.current_path }}</div>
-
-                <!-- Actions menu -->
-                <button mat-icon-button
-                        class="actions-menu"
-                        #menuTrigger="matMenuTrigger"
-                        [matMenuTriggerFor]="orphanedVideoMenu"
-                        [matMenuTriggerData]="{video: video}"
-                        (click)="$event.stopPropagation()">
-                  <mat-icon>more_vert</mat-icon>
-                </button>
-              </div>
-            </div>
+            <cascade-list
+              [items]="orphanedVideosAsListItems"
+              [displayConfig]="orphanedVideosDisplayConfig"
+              [keyboardConfig]="listKeyboardConfig"
+              [selectionMode]="SelectionMode.Multiple"
+              [selectedItemIds]="selectedOrphanedVideosSet"
+              [highlightedItemId]="highlightedOrphanedVideo?.id || null"
+              [contextMenuActions]="orphanedVideosContextMenuActions"
+              (itemClick)="onOrphanedItemClick($any($event))"
+              (itemDoubleClick)="onOrphanedItemDoubleClick($any($event))"
+              (itemsSelected)="onOrphanedVideosSelected($any($event))"
+              (itemsDeselected)="onOrphanedVideosDeselected($any($event))"
+              (itemHighlighted)="onOrphanedItemHighlighted($any($event))"
+              (deleteAction)="onOrphanedDeleteAction($any($event))"
+              (contextMenuAction)="onOrphanedContextMenuAction($event)">
+            </cascade-list>
           </div>
 
           <!-- Empty state -->

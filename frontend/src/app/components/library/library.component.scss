@@ -685,6 +685,26 @@
     overflow-x: hidden;
     background: var(--bg-card);
     height: auto; // Allow container to size to content
+
+    // Ensure cascade-list items respect parent border radius
+    ::ng-deep cascade-list {
+      .item-list-container {
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      // Round corners on first item (target the ngFor wrapper's first child)
+      .items-list > div:first-child .item-card {
+        border-top-left-radius: 7px;
+        border-top-right-radius: 7px;
+      }
+
+      // Round corners on last item (target the ngFor wrapper's last child)
+      .items-list > div:last-child .item-card {
+        border-bottom-left-radius: 7px;
+        border-bottom-right-radius: 7px;
+      }
+    }
   }
 
   // New horizontal management list layout (matching video-card styling exactly)

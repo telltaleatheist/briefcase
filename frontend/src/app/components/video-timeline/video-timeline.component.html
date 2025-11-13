@@ -40,6 +40,10 @@
         <span class="playhead-label">Current Position:</span>
         <span class="playhead-time">{{ formatTime(currentTime) }}</span>
       </div>
+      <div class="speed-info">
+        <span class="speed-label">Speed:</span>
+        <span class="speed-value">{{ currentPlaybackSpeed === 0 ? 1 : currentPlaybackSpeed }}x</span>
+      </div>
     </div>
 
     <div class="timeline-buttons">

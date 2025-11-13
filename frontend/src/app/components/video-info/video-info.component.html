@@ -353,7 +353,7 @@
 
       <!-- Linked Children List -->
       <div class="linked-children-list" *ngIf="childVideos.length > 0">
-        <app-item-list
+        <cascade-list
           [items]="childVideos"
           [displayConfig]="childListDisplayConfig"
           [selectionMode]="SelectionMode.Multiple"
@@ -371,7 +371,7 @@
               <mat-icon>close</mat-icon>
             </button>
           </ng-template>
-        </app-item-list>
+        </cascade-list>
       </div>
     </div>
 

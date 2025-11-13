@@ -1194,11 +1194,20 @@ export class DatabaseController {
 
   /**
    * POST /api/database/relink
-   * Attempt to relink orphaned videos by searching for them recursively in a new folder
+   * Attempt to relink orphaned videos by searching for them recursively
+   * - autoScan: true -> search in existing library directories
+   * - searchFolder: provided -> search in specified folder recursively
    */
   @Post('relink')
-  async relinkOrphanedVideos(@Body() body: { videoIds: string[]; newFolder: string }) {
-    this.logger.log(`Attempting to relink ${body.videoIds?.length || 0} orphaned videos from folder: ${body.newFolder}`);
+  async relinkOrphanedVideos(@Body() body: {
+    videoIds: string[];
+    searchFolder?: string;
+    newFolder?: string; // Keep for backwards compatibility
+    autoScan?: boolean;
+    recursive?: boolean; // Ignored, always recursive
+  }) {
+    const folder = body.searchFolder || body.newFolder;
+    this.logger.log(`Attempting to relink ${body.videoIds?.length || 0} orphaned videos (autoScan: ${body.autoScan}, folder: ${folder})`);
 
     if (!body.videoIds || !Array.isArray(body.videoIds) || body.videoIds.length === 0) {
       return {
@@ -1209,17 +1218,18 @@ export class DatabaseController {
       };
     }
 
-    if (!body.newFolder || typeof body.newFolder !== 'string') {
+    // If not auto-scanning, folder is required
+    if (!body.autoScan && !folder) {
       return {
         success: false,
-        error: 'newFolder path is required',
+        error: 'searchFolder path is required',
         relinkedCount: 0,
         failedCount: 0,
       };
     }
 
-    // Check if the new folder exists
-    if (!fs.existsSync(body.newFolder)) {
+    // Check if the folder exists (if provided)
+    if (folder && !fs.existsSync(folder)) {
       return {
         success: false,
         error: 'The specified folder does not exist',
@@ -1228,7 +1238,7 @@ export class DatabaseController {
       };
     }
 
-    // Recursively search for video files in the folder
+    // Helper: Recursively search for video files in a folder
     const findVideosRecursively = (dir: string, fileMap: Map<string, string>) => {
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -1251,48 +1261,110 @@ export class DatabaseController {
 
     // Build a map of all video files in the directory tree
     const videoFileMap = new Map<string, string>();
-    findVideosRecursively(body.newFolder, videoFileMap);
 
-    this.logger.log(`Found ${videoFileMap.size} files in ${body.newFolder} (recursive)`);
+    if (body.autoScan) {
+      // Auto-scan: search in existing library directories
+      const allVideos = this.databaseService.getAllVideos();
+      const libraryDirs = new Set<string>();
+
+      // Get all unique directories from existing videos
+      for (const video of allVideos) {
+        if (video.file_path) {
+          const dir = path.dirname(video.file_path);
+          libraryDirs.add(dir);
+        }
+      }
+
+      this.logger.log(`Auto-scanning ${libraryDirs.size} library directories`);
+
+      // Scan each library directory
+      for (const dir of libraryDirs) {
+        if (fs.existsSync(dir)) {
+          findVideosRecursively(dir, videoFileMap);
+        }
+      }
+
+      this.logger.log(`Found ${videoFileMap.size} files in library directories`);
+    } else if (folder) {
+      // Manual folder search
+      findVideosRecursively(folder, videoFileMap);
+      this.logger.log(`Found ${videoFileMap.size} files in ${folder} (recursive)`);
+    }
 
     let relinkedCount = 0;
     let failedCount = 0;
+    const notFoundIds: string[] = [];
+
+    // Create case-insensitive lookup map
+    const caseInsensitiveMap = new Map<string, string>();
+    for (const [filename, fullPath] of videoFileMap.entries()) {
+      caseInsensitiveMap.set(filename.toLowerCase(), fullPath);
+    }
 
     for (const videoId of body.videoIds) {
       try {
         const video = this.databaseService.getVideoById(videoId);
         if (!video) {
           failedCount++;
+          notFoundIds.push(videoId);
           continue;
         }
 
         const filename = video.filename as string;
+        this.logger.log(`Searching for: "${filename}"`);
 
-        // Look for the video file in the map
+        let foundPath: string | undefined;
+
+        // Try 1: Exact match
         if (videoFileMap.has(filename)) {
-          const foundPath = videoFileMap.get(filename)!;
+          foundPath = videoFileMap.get(filename)!;
+          this.logger.log(`Found via exact match`);
+        }
 
+        // Try 2: Case-insensitive match
+        if (!foundPath && caseInsensitiveMap.has(filename.toLowerCase())) {
+          foundPath = caseInsensitiveMap.get(filename.toLowerCase())!;
+          this.logger.log(`Found via case-insensitive match`);
+        }
+
+        // Try 3: Match on basename without extension
+        if (!foundPath) {
+          const baseWithoutExt = path.basename(filename, path.extname(filename));
+          for (const [mapFilename, mapPath] of videoFileMap.entries()) {
+            const mapBaseWithoutExt = path.basename(mapFilename, path.extname(mapFilename));
+            if (baseWithoutExt.toLowerCase() === mapBaseWithoutExt.toLowerCase()) {
+              foundPath = mapPath;
+              this.logger.log(`Found via basename match: "${mapFilename}"`);
+              break;
+            }
+          }
+        }
+
+        if (foundPath) {
           // Update the video path (this also marks it as linked)
           this.databaseService.updateVideoPath(videoId, foundPath);
           relinkedCount++;
           this.logger.log(`Relinked video ${videoId}: ${foundPath}`);
         } else {
           failedCount++;
-          this.logger.warn(`Could not find video ${filename} in ${body.newFolder}`);
+          notFoundIds.push(videoId);
+          this.logger.warn(`Could not find video "${filename}" in ${videoFileMap.size} scanned files`);
         }
       } catch (error: any) {
         this.logger.error(`Failed to relink video ${videoId}: ${error.message}`);
         failedCount++;
+        notFoundIds.push(videoId);
       }
     }
 
     return {
-      success: true,
+      success: relinkedCount > 0 || failedCount === 0,
       relinkedCount,
       failedCount,
+      notFoundIds,
       message: relinkedCount > 0
         ? `Relinked ${relinkedCount} video${relinkedCount > 1 ? 's' : ''}${failedCount > 0 ? `, ${failedCount} failed` : ''}`
-        : `Could not relink any videos (${failedCount} failed)`
+        : `Could not find videos in ${body.autoScan ? 'library' : 'selected folder'}`
     };
   }
 

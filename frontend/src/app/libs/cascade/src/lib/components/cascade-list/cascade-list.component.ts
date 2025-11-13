@@ -1,8 +1,11 @@
 import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, OnChanges, SimpleChanges, HostListener, ViewChild, ElementRef, TemplateRef, ContentChild } from '@angular/core';
+import { MatMenuTrigger } from '@angular/material/menu';
 import { CommonModule } from '@angular/common';
 import { trigger, state, style, transition, animate } from '@angular/animations';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatDividerModule } from '@angular/material/divider';
 import { Subscription } from 'rxjs';
 import { CascadeSelectionService } from '../../services/cascade-selection.service';
 import {
@@ -24,7 +27,7 @@ import {
 @Component({
   selector: 'cascade-list',
   standalone: true,
-  imports: [CommonModule, MatIconModule, MatTooltipModule],
+  imports: [CommonModule, MatIconModule, MatTooltipModule, MatMenuModule, MatDividerModule],
   providers: [CascadeSelectionService],
   templateUrl: './cascade-list.component.html',
   styleUrls: ['./cascade-list.component.scss'],
@@ -104,6 +107,10 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   // ========================================
 
   @ViewChild('listContainer') listContainer?: ElementRef<HTMLDivElement>;
+  @ViewChild('contextMenuTrigger', { read: MatMenuTrigger }) contextMenuTrigger?: MatMenuTrigger;
+
+  // Context menu position
+  contextMenuPosition = { x: 0, y: 0 };
 
   // Grouping
   groupedItems: ItemGroup<T>[] = [];
@@ -751,21 +758,32 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
 
     if (currentIndex === -1) {
       currentIndex = direction > 0 ? 0 : flatItems.length - 1;
-    } else {
-      currentIndex += direction;
-      if (currentIndex < 0) currentIndex = 0;
-      if (currentIndex >= flatItems.length) currentIndex = flatItems.length - 1;
     }
 
-    const newItem = flatItems[currentIndex];
     const previousSelected = this.selectionService.getSelected();
+
+    // If nothing is selected yet, select the current highlighted item first
+    // This sets the anchor for range selection
+    if (previousSelected.length === 0 && highlightedId) {
+      this.selectionService.select(highlightedId, true);
+      const currentItem = flatItems[currentIndex];
+      this.itemsSelected.emit([currentItem]);
+    }
+
+    // Now move to the next item
+    currentIndex += direction;
+    if (currentIndex < 0) currentIndex = 0;
+    if (currentIndex >= flatItems.length) currentIndex = flatItems.length - 1;
+
+    const newItem = flatItems[currentIndex];
+    const previousSelectedAfterAnchor = this.selectionService.getSelected();
 
     // Use service's selectRange for range selection
     this.selectionService.selectRange(allItemIds, newItem.id);
 
     const nowSelected = this.selectionService.getSelected();
-    const newlySelected = this.items.filter(i => nowSelected.includes(i.id) && !previousSelected.includes(i.id));
-    const deselected = this.items.filter(i => previousSelected.includes(i.id) && !nowSelected.includes(i.id));
+    const newlySelected = this.items.filter(i => nowSelected.includes(i.id) && !previousSelectedAfterAnchor.includes(i.id));
+    const deselected = this.items.filter(i => previousSelectedAfterAnchor.includes(i.id) && !nowSelected.includes(i.id));
 
     if (newlySelected.length > 0) {
       this.itemsSelected.emit(newlySelected);
@@ -828,6 +846,7 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
 
   handleContextMenu(event: MouseEvent, item: T) {
     event.preventDefault();
+    event.stopPropagation();
 
     // If item is not selected, select it and clear others
     if (!this.selectionService.isSelected(item.id)) {
@@ -847,6 +866,20 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
 
     // Emit raw context menu event for custom handling (e.g., Material menu)
     this.contextMenu.emit({ event, item });
+
+    // If contextMenuActions are provided, open the built-in menu
+    if (this.contextMenuActions && this.contextMenuActions.length > 0 && this.contextMenuTrigger) {
+      // Position the menu at the mouse position
+      this.contextMenuPosition = {
+        x: event.clientX,
+        y: event.clientY
+      };
+
+      // Open the menu
+      setTimeout(() => {
+        this.contextMenuTrigger?.openMenu();
+      });
+    }
   }
 
   executeContextAction(actionId: string) {

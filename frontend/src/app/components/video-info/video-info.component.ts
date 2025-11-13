@@ -26,7 +26,6 @@ import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
-import { ItemListComponent } from '../shared/item-list/item-list.component';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
   ListItem,
@@ -58,7 +57,6 @@ interface TranscriptEntry {
     MatFormFieldModule,
     MatDialogModule,
     TranscriptSearchComponent,
-    ItemListComponent,
     CascadeListComponent
   ],
   templateUrl: './video-info.component.html',
@@ -98,13 +96,13 @@ export class VideoInfoComponent implements OnInit {
   SelectionMode = SelectionMode;
   childListDisplayConfig: ItemDisplayConfig = {
     primaryField: 'filename',
-    secondaryField: 'media_type',
+    secondaryField: 'added_at',
     metadataField: 'duration_seconds',
     iconField: 'media_type',
-    renderPrimary: (item) => item['filename'] || '',
-    renderSecondary: (item) => this.getMediaTypeLabel(item['media_type'] || 'video'),
-    renderMetadata: (item) => item['duration_seconds'] ? this.formatDuration(item['duration_seconds']) : '',
-    renderIcon: (item) => this.getMediaTypeIcon(item['media_type'] || 'video')
+    renderPrimary: (item) => this.getVideoDisplayName(item as DatabaseVideo),
+    renderSecondary: (item) => this.formatVideoSecondaryText(item as DatabaseVideo),
+    renderMetadata: (item) => this.formatVideoDuration(item as DatabaseVideo),
+    renderIcon: (item) => this.getMediaIcon(item as DatabaseVideo)
   };
 
   childListContextMenuActions: ContextMenuAction[] = [
@@ -997,6 +995,80 @@ export class VideoInfoComponent implements OnInit {
         return 'Web Page';
       default:
         return 'File';
+    }
+  }
+
+  /**
+   * Get display name for video (remove extension and date patterns)
+   */
+  getVideoDisplayName(video: DatabaseVideo): string {
+    let name = video.filename;
+
+    // Remove extension if present
+    if (video.file_extension) {
+      name = name.replace(new RegExp(video.file_extension + '$'), '');
+    }
+
+    // Remove leading date patterns from display:
+    // - YYYY-MM-DD: "2025-11-02 - filename"
+    // - YYYY-MM-TT: "2025-11-T1" or "2025-11-T2" or "2025-11-T3" (trimester format)
+    name = name.replace(/^\d{4}-\d{2}-\d{2}\s*-?\s*/, ''); // Date prefix
+    name = name.replace(/^\d{4}-\d{2}-T\d+\s*-?\s*/, ''); // Trimester prefix
+
+    return name;
+  }
+
+  /**
+   * Format secondary text for video (upload/download dates)
+   */
+  formatVideoSecondaryText(video: DatabaseVideo): string {
+    const parts: string[] = [];
+
+    // Upload date (from filename) - when content was created/filmed by the person
+    if (video.upload_date) {
+      const uploadDate = new Date(video.upload_date);
+      parts.push(`Uploaded: ${uploadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
+    }
+
+    // Download date (when file was created/downloaded) - when user downloaded the video
+    if (video.download_date) {
+      const downloadDate = new Date(video.download_date);
+      parts.push(`Downloaded: ${downloadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
+    }
+
+    return parts.join(' • ');
+  }
+
+  /**
+   * Format duration for video display
+   */
+  formatVideoDuration(video: DatabaseVideo): string {
+    if (!video.duration_seconds) {
+      return '';
+    }
+
+    const hours = Math.floor(video.duration_seconds / 3600);
+    const mins = Math.floor((video.duration_seconds % 3600) / 60);
+    const secs = Math.floor(video.duration_seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+
+  /**
+   * Get media icon for video
+   */
+  getMediaIcon(video: DatabaseVideo): string {
+    switch (video.media_type) {
+      case 'video': return 'movie';
+      case 'audio': return 'audiotrack';
+      case 'document': return 'description';
+      case 'image': return 'image';
+      case 'webpage': return 'language';
+      default: return 'description';
     }
   }
 

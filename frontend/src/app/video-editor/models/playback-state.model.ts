@@ -11,7 +11,7 @@ export interface PlaybackState {
   muted: boolean;
 }
 
-export type PlaybackSpeed = -8 | -4 | -2 | -1 | 0 | 1 | 2 | 4 | 8;
+export type PlaybackSpeed = 0 | 0.125 | 0.25 | 0.5 | 0.75 | 1 | 1.5 | 2 | 3 | 4 | 8;
 
 export interface PlaybackCommand {
   type: 'play' | 'pause' | 'seek' | 'setSpeed' | 'togglePlayPause';

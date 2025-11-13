@@ -114,6 +114,24 @@
   }
 }
 
+.speed-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #212529; // Light theme default
+  font-family: monospace;
+
+  .speed-label {
+    color: #6c757d; // Light theme default
+  }
+
+  .speed-value {
+    color: #ff6600;
+    font-weight: 600;
+  }
+}
+
 .timeline-buttons {
   display: flex;
   gap: 4px;
@@ -379,6 +397,18 @@
     }
   }
 
+  .speed-info {
+    color: #fff;
+
+    .speed-label {
+      color: #999;
+    }
+
+    .speed-value {
+      color: #ff6600;
+    }
+  }
+
   .timeline-buttons {
     .timeline-button {
       color: #fff;
@@ -449,11 +479,13 @@
       }
 
       .selection-info,
-      .playhead-info {
+      .playhead-info,
+      .speed-info {
         color: #fff !important;
 
         .selection-label,
-        .playhead-label {
+        .playhead-label,
+        .speed-label {
           color: #999 !important;
         }
       }

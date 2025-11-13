@@ -94,24 +94,13 @@ export class PlaybackControlService {
   setPlaybackSpeed(speed: PlaybackSpeed): void {
     if (!this.player) return;
 
-    if (speed < 0) {
-      // Backwards playback - simulate by jumping backwards repeatedly
-      const absSpeed = Math.abs(speed);
-      this.player.pause();
-      // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
-      const jumpAmount = 0.5 * absSpeed;
-      const currentTime = this.player.currentTime();
-      if (currentTime !== undefined) {
-        this.player.currentTime(Math.max(0, currentTime - jumpAmount));
-      }
-      this.updateState({ isPlaying: false, playbackRate: speed });
-    } else if (speed === 0) {
-      // Pause (K key)
+    if (speed === 0) {
+      // Pause
       this.player.pause();
       this.player.playbackRate(1);
       this.updateState({ isPlaying: false, playbackRate: 1 });
     } else {
-      // Forward playback at specified speed (L key)
+      // Play at specified speed
       this.player.playbackRate(speed);
       if (this.player.paused()) {
         this.player.play();
@@ -121,41 +110,81 @@ export class PlaybackControlService {
   }
 
   /**
-   * J/K/L key handling (Final Cut Pro style)
+   * J/K/L key handling (Custom style)
+   * K: Pause/Play toggle
+   * L: Speed up (1x -> 1.5x -> 2x -> 3x -> 4x -> 8x)
+   * J: Slow down (1x -> 0.75x -> 0.5x -> 0.25x -> 0.125x)
    */
   handleJKLKey(key: 'j' | 'k' | 'l'): void {
     if (!this.player) return;
 
     const currentSpeed = this.currentState.playbackRate;
+    const isPlaying = this.currentState.isPlaying;
 
     switch (key) {
-      case 'k': // Pause
+      case 'k': // Pause/Play toggle
         this.lastKeyPressed = 'k';
-        this.setPlaybackSpeed(0);
-        break;
-
-      case 'j': // Rewind (increase speed each press)
-        if (this.lastKeyPressed === 'j' && currentSpeed < 0) {
-          // Increase rewind speed: -1 -> -2 -> -4 -> -8
-          const newSpeed = Math.max(-8, currentSpeed * 2) as PlaybackSpeed;
-          this.setPlaybackSpeed(newSpeed);
+        if (isPlaying) {
+          this.pause();
         } else {
-          // Start rewinding at -1x
-          this.setPlaybackSpeed(-1);
+          // Reset to 1x speed when resuming from pause
+          this.player.playbackRate(1);
+          this.play();
         }
-        this.lastKeyPressed = 'j';
         break;
 
-      case 'l': // Fast forward (increase speed each press)
-        if (this.lastKeyPressed === 'l' && currentSpeed > 0) {
-          // Increase forward speed: 1 -> 2 -> 4 -> 8
-          const newSpeed = Math.min(8, currentSpeed * 2) as PlaybackSpeed;
-          this.setPlaybackSpeed(newSpeed);
-        } else {
-          // Start playing forward at 1x
+      case 'l': // Speed up
+        if (!isPlaying) {
+          // Not playing - start playing at 1x
           this.setPlaybackSpeed(1);
+        } else if (this.lastKeyPressed === 'l') {
+          // Already speeding up - increase speed
+          let newSpeed: number;
+          if (currentSpeed >= 1 && currentSpeed < 1.5) {
+            newSpeed = 1.5;
+          } else if (currentSpeed >= 1.5 && currentSpeed < 2) {
+            newSpeed = 2;
+          } else if (currentSpeed >= 2 && currentSpeed < 3) {
+            newSpeed = 3;
+          } else if (currentSpeed >= 3 && currentSpeed < 4) {
+            newSpeed = 4;
+          } else if (currentSpeed >= 4 && currentSpeed < 8) {
+            newSpeed = 8;
+          } else {
+            newSpeed = 8; // Max speed
+          }
+          this.setPlaybackSpeed(newSpeed as PlaybackSpeed);
+        } else {
+          // First L press while playing - go to 1.5x
+          this.setPlaybackSpeed(1.5);
         }
         this.lastKeyPressed = 'l';
+        break;
+
+      case 'j': // Slow down
+        if (!isPlaying) {
+          // Not playing - start playing at 1x
+          this.setPlaybackSpeed(1);
+        } else if (this.lastKeyPressed === 'j') {
+          // Already slowing down - decrease speed
+          let newSpeed: number;
+          if (currentSpeed > 0.75 && currentSpeed <= 1) {
+            newSpeed = 0.75;
+          } else if (currentSpeed > 0.5 && currentSpeed <= 0.75) {
+            newSpeed = 0.5;
+          } else if (currentSpeed > 0.25 && currentSpeed <= 0.5) {
+            newSpeed = 0.25;
+          } else if (currentSpeed > 0.125 && currentSpeed <= 0.25) {
+            newSpeed = 0.125;
+          } else {
+            newSpeed = 0.125; // Min speed
+          }
+          this.setPlaybackSpeed(newSpeed as PlaybackSpeed);
+        } else {
+          // First J press while playing - go to 0.75x
+          this.setPlaybackSpeed(0.75);
+        }
+        this.lastKeyPressed = 'j';
         break;
     }
   }

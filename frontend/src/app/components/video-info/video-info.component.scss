@@ -129,8 +129,8 @@
   overflow: hidden;
   background-color: var(--surface);
 
-  // Customize the item-list for children display
-  ::ng-deep app-item-list {
+  // Customize the cascade-list for children display
+  ::ng-deep cascade-list {
     .item-list-container {
       max-height: 400px;
       overflow-y: auto;

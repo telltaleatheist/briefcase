@@ -604,8 +604,16 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         this.player.playbackRate(1);
         if (this.player.paused()) {
           this.player.play();
+          // Update timeline speed state when resuming
+          if (this.timelineComponent) {
+            this.timelineComponent.currentPlaybackSpeed = 1;
+          }
         } else {
           this.player.pause();
+          // Reset timeline speed state when pausing
+          if (this.timelineComponent) {
+            this.timelineComponent.currentPlaybackSpeed = 0;
+          }
         }
       })
     );

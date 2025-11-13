@@ -127,12 +127,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   loadingUnimported = false;
   selectedUnimportedVideos = new Set<string>(); // Set of file paths
   isAllUnimportedSelected = false;
+  highlightedUnimportedVideo: UnimportedVideo | null = null;
 
   // Orphaned videos
   orphanedVideos: DatabaseVideo[] = [];
   loadingOrphaned = false;
   selectedOrphanedVideos = new Set<string>(); // Set of video IDs
   isAllOrphanedSelected = false;
+  highlightedOrphanedVideo: DatabaseVideo | null = null;
 
   // Tags
   allTags: { people: Array<{ name: string; count: number }>; topic: Array<{ name: string; count: number }> } | null = null;
@@ -244,7 +246,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Expose SelectionMode enum for template
   SelectionMode = SelectionMode;
 
-  // ItemListComponent configuration
+  // CascadeListComponent configuration
   listDisplayConfig: ItemDisplayConfig = {
     primaryField: 'filename',
     secondaryField: 'added_at',
@@ -303,7 +305,63 @@ export class LibraryComponent implements OnInit, OnDestroy {
     { id: 'delete', label: 'Delete', icon: 'delete' }
   ];
 
-  // Note: Keyboard handling is now fully managed by item-list component
+  // Unimported videos display config
+  unimportedVideosDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'filename',
+    secondaryField: 'uploadDate',
+    metadataField: 'fullPath',
+    iconField: 'filename',
+    renderPrimary: (item: any) => {
+      const parsed = this.parseFilename(item.filename);
+      return parsed.title || item.filename;
+    },
+    renderSecondary: (item: any) => {
+      const parts: string[] = [];
+      if (item.uploadDate) {
+        parts.push(`Upload: ${item.uploadDate}`);
+      }
+      const parsed = this.parseFilename(item.filename);
+      if (parsed.extension) {
+        parts.push(`.${parsed.extension}`);
+      }
+      return parts.join(' • ');
+    },
+    renderMetadata: (item: any) => '',
+    renderIcon: (item: any) => {
+      const parsed = this.parseFilename(item.filename);
+      const ext = parsed.extension?.toLowerCase();
+      if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext || '')) return 'movie';
+      if (['mp3', 'wav', 'aac', 'm4a'].includes(ext || '')) return 'audiotrack';
+      if (['pdf', 'doc', 'docx', 'txt'].includes(ext || '')) return 'description';
+      if (['jpg', 'jpeg', 'png', 'gif'].includes(ext || '')) return 'image';
+      return 'insert_drive_file';
+    }
+  };
+
+  unimportedVideosContextMenuActions: ContextMenuAction[] = [
+    { id: 'import', label: 'Import to Library', icon: 'add' },
+    { id: 'openLocation', label: 'Open File Location', icon: 'folder_open' },
+    { id: 'delete', label: 'Delete File', icon: 'delete' }
+  ];
+
+  // Orphaned videos display config
+  orphanedVideosDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'filename',
+    secondaryField: 'added_at',
+    metadataField: 'duration_seconds',
+    iconField: 'media_type',
+    renderPrimary: (item: any) => this.getVideoDisplayName(item as DatabaseVideo),
+    renderSecondary: (item: any) => this.formatVideoSecondaryText(item as DatabaseVideo),
+    renderMetadata: (item: any) => this.formatVideoDuration(item as DatabaseVideo),
+    renderIcon: (item: any) => this.getMediaIcon(item as DatabaseVideo)
+  };
+
+  orphanedVideosContextMenuActions: ContextMenuAction[] = [
+    { id: 'relink', label: 'Relink Video', icon: 'link' },
+    { id: 'delete', label: 'Delete from Database', icon: 'delete' }
+  ];
+
+  // Note: Keyboard handling is now fully managed by cascade-list component
   // item-list handles: arrow navigation, type-ahead, Cmd+A, Delete, Space, Escape
   // item-list emits events: spaceAction, deleteAction, itemsSelected, itemHighlighted, etc.
   // This component just responds to those events (see onListSpaceAction, onListDeleteAction, etc.)
@@ -1168,7 +1226,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Relink orphaned videos
    */
   async relinkOrphanedVideos() {
-    if (this.selectedOrphanedVideos.size === 0) return;
+    if (this.selectedOrphanedVideos.size === 0) {
+      return;
+    }
 
     const electron = (window as any).electron;
     if (!electron || !electron.openDirectoryPicker) {
@@ -1177,6 +1237,45 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }
 
     try {
+      const selectedIds = Array.from(this.selectedOrphanedVideos);
+      const relinkUrl = await this.backendUrlService.getApiUrl('/database/relink');
+
+      // Step 1: Try to auto-scan the library for the missing files
+      const autoScanResponse = await this.http.post<{
+        success: boolean;
+        relinkedCount: number;
+        failedCount: number;
+        message: string;
+        notFoundIds?: string[];
+      }>(relinkUrl, {
+        videoIds: selectedIds,
+        autoScan: true
+      }).toPromise();
+
+      // If all files were found in library, we're done!
+      if (autoScanResponse?.success && autoScanResponse.relinkedCount > 0) {
+        this.notificationService.toastOnly(
+          'success',
+          'Videos Found',
+          `${autoScanResponse.relinkedCount} video${autoScanResponse.relinkedCount !== 1 ? 's' : ''} found and relinked`
+        );
+        this.selectedOrphanedVideos.clear();
+        await this.loadOrphanedVideos();
+
+        // If some weren't found, continue to folder picker
+        if (autoScanResponse.failedCount === 0) {
+          return;
+        }
+      }
+
+      // Step 2: If files not found in library, ask user to select a folder
+      const remainingCount = autoScanResponse?.notFoundIds?.length || selectedIds.length;
+
+      this.notificationService.info(
+        'Select Folder',
+        `${remainingCount} file${remainingCount !== 1 ? 's' : ''} not found. Please select a folder to search.`
+      );
+
       // Open folder picker
       const result = await electron.openDirectoryPicker();
 
@@ -1184,28 +1283,31 @@ export class LibraryComponent implements OnInit, OnDestroy {
         return; // User cancelled
       }
 
-      const newFolder = result.filePaths[0];
-      const selectedIds = Array.from(this.selectedOrphanedVideos);
+      const searchFolder = result.filePaths[0];
 
-      // Call backend to relink
-      const relinkUrl = await this.backendUrlService.getApiUrl('/database/relink');
-
-      const response = await this.http.post<{
+      // Step 3: Scan the selected folder recursively
+      const scanResponse = await this.http.post<{
         success: boolean;
         relinkedCount: number;
         failedCount: number;
         message: string;
       }>(relinkUrl, {
-        videoIds: selectedIds,
-        newFolder: newFolder
+        videoIds: autoScanResponse?.notFoundIds || selectedIds,
+        searchFolder: searchFolder,
+        recursive: true
       }).toPromise();
 
-      if (response?.success) {
-        this.notificationService.toastOnly('success', 'Videos Relinked', response.message);
+      if (scanResponse?.success) {
+        const totalRelinked = (autoScanResponse?.relinkedCount || 0) + (scanResponse.relinkedCount || 0);
+        this.notificationService.toastOnly(
+          'success',
+          'Relink Complete',
+          `${totalRelinked} video${totalRelinked !== 1 ? 's' : ''} relinked successfully`
+        );
         this.selectedOrphanedVideos.clear();
         await this.loadOrphanedVideos();
       } else {
-        this.notificationService.error('Relink Failed', response?.message || 'Could not relink videos');
+        this.notificationService.error('Relink Failed', scanResponse?.message || 'Could not find videos in selected folder');
       }
     } catch (error: any) {
       console.error('Error relinking videos:', error);
@@ -2207,13 +2309,221 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle ItemListComponent events
+   * Convert unimported videos to ListItem format for cascade-list
+   */
+  get unimportedVideosAsListItems(): (UnimportedVideo & ListItem)[] {
+    return this.unimportedVideos.map(video => ({
+      ...video,
+      id: video.fullPath // Use fullPath as unique ID
+    })) as (UnimportedVideo & ListItem)[];
+  }
+
+  /**
+   * Convert orphaned videos to ListItem format for cascade-list
+   */
+  get orphanedVideosAsListItems(): (DatabaseVideo & ListItem)[] {
+    // DatabaseVideo already has id field, so just cast it
+    return this.orphanedVideos as (DatabaseVideo & ListItem)[];
+  }
+
+  /**
+   * Selected unimported videos as Set for cascade-list
+   */
+  get selectedUnimportedVideosSet(): Set<string> {
+    return this.selectedUnimportedVideos;
+  }
+
+  /**
+   * Selected orphaned videos as Set for cascade-list
+   */
+  get selectedOrphanedVideosSet(): Set<string> {
+    return this.selectedOrphanedVideos;
+  }
+
+  /**
+   * Handle unimported videos selection
+   */
+  onUnimportedVideosSelected(videos: UnimportedVideo[]) {
+    videos.forEach(v => this.selectedUnimportedVideos.add(v.fullPath));
+    this.updateUnimportedSelectionState();
+  }
+
+  /**
+   * Handle unimported videos deselection
+   */
+  onUnimportedVideosDeselected(videos: UnimportedVideo[]) {
+    videos.forEach(v => {
+      this.selectedUnimportedVideos.delete(v.fullPath);
+      // Clear highlight if this item was highlighted
+      if (this.highlightedUnimportedVideo?.fullPath === v.fullPath) {
+        this.highlightedUnimportedVideo = null;
+      }
+    });
+    this.updateUnimportedSelectionState();
+  }
+
+  /**
+   * Handle unimported videos context menu actions
+   */
+  onUnimportedContextMenuAction(event: { action: string; items: UnimportedVideo[] }) {
+    // If items are provided from context menu, ensure they're selected
+    if (event.items && event.items.length > 0) {
+      // If right-clicking on an unselected item, select only that item
+      if (event.items.length === 1 && !this.selectedUnimportedVideos.has(event.items[0].fullPath)) {
+        this.selectedUnimportedVideos.clear();
+        this.selectedUnimportedVideos.add(event.items[0].fullPath);
+        this.updateUnimportedSelectionState();
+      }
+      // Otherwise use the provided items (which should be the selected items)
+      else if (event.items.length > 1) {
+        this.selectedUnimportedVideos.clear();
+        event.items.forEach(item => this.selectedUnimportedVideos.add(item.fullPath));
+        this.updateUnimportedSelectionState();
+      }
+    }
+
+    switch (event.action) {
+      case 'import':
+        this.importSelectedVideos();
+        break;
+      case 'openLocation':
+        // TODO: Implement open location for unimported files
+        break;
+      case 'delete':
+        // TODO: Implement delete functionality
+        break;
+    }
+  }
+
+  /**
+   * Update unimported selection state
+   */
+  private updateUnimportedSelectionState() {
+    this.isAllUnimportedSelected = this.unimportedVideos.length > 0 &&
+      this.unimportedVideos.every(video => this.selectedUnimportedVideos.has(video.fullPath));
+  }
+
+  /**
+   * Handle orphaned videos selection
+   */
+  onOrphanedVideosSelected(videos: DatabaseVideo[]) {
+    videos.forEach(v => this.selectedOrphanedVideos.add(v.id));
+    this.updateOrphanedSelectionState();
+  }
+
+  /**
+   * Handle orphaned videos deselection
+   */
+  onOrphanedVideosDeselected(videos: DatabaseVideo[]) {
+    videos.forEach(v => {
+      this.selectedOrphanedVideos.delete(v.id);
+      // Clear highlight if this item was highlighted
+      if (this.highlightedOrphanedVideo?.id === v.id) {
+        this.highlightedOrphanedVideo = null;
+      }
+    });
+    this.updateOrphanedSelectionState();
+  }
+
+  /**
+   * Handle orphaned videos context menu actions
+   */
+  onOrphanedContextMenuAction(event: { action: string; items: DatabaseVideo[] }) {
+    // If items are provided from context menu, ensure they're selected
+    if (event.items && event.items.length > 0) {
+      // If right-clicking on an unselected item, select only that item
+      if (event.items.length === 1 && !this.selectedOrphanedVideos.has(event.items[0].id)) {
+        this.selectedOrphanedVideos.clear();
+        this.selectedOrphanedVideos.add(event.items[0].id);
+        this.updateOrphanedSelectionState();
+      }
+      // Otherwise use the provided items (which should be the selected items)
+      else if (event.items.length > 1) {
+        this.selectedOrphanedVideos.clear();
+        event.items.forEach(item => this.selectedOrphanedVideos.add(item.id));
+        this.updateOrphanedSelectionState();
+      }
+    }
+
+    switch (event.action) {
+      case 'relink':
+        this.relinkOrphanedVideos();
+        break;
+      case 'delete':
+        this.deleteSelectedOrphans();
+        break;
+    }
+  }
+
+  /**
+   * Handle unimported video click
+   */
+  onUnimportedItemClick(video: UnimportedVideo) {
+    this.highlightedUnimportedVideo = video;
+  }
+
+  /**
+   * Handle unimported video double click
+   */
+  onUnimportedItemDoubleClick(video: UnimportedVideo) {
+    // Import the video on double-click
+    this.selectedUnimportedVideos.clear();
+    this.selectedUnimportedVideos.add(video.fullPath);
+    this.importSelectedVideos();
+  }
+
+  /**
+   * Handle unimported video highlighted
+   */
+  onUnimportedItemHighlighted(video: UnimportedVideo | null) {
+    this.highlightedUnimportedVideo = video;
+  }
+
+  /**
+   * Handle unimported delete action
+   */
+  onUnimportedDeleteAction(videos: UnimportedVideo[]) {
+    // TODO: Implement delete functionality
+    console.log('Delete unimported videos:', videos);
+  }
+
+  /**
+   * Handle orphaned video click
+   */
+  onOrphanedItemClick(video: DatabaseVideo) {
+    this.highlightedOrphanedVideo = video;
+  }
+
+  /**
+   * Handle orphaned video double click
+   */
+  onOrphanedItemDoubleClick(video: DatabaseVideo) {
+    // Open video info on double-click
+    this.router.navigate(['/video', video.id]);
+  }
+
+  /**
+   * Handle orphaned video highlighted
+   */
+  onOrphanedItemHighlighted(video: DatabaseVideo | null) {
+    this.highlightedOrphanedVideo = video;
+  }
+
+  /**
+   * Handle orphaned delete action
+   */
+  onOrphanedDeleteAction(videos: DatabaseVideo[]) {
+    this.deleteSelectedOrphans();
+  }
+
+  /**
+   * Handle CascadeListComponent events
    */
   onListItemClick(video: DatabaseVideo) {
     // Finder-like behavior: Single click highlights AND selects the item
     this.highlightedVideo = video;
 
-    // Click handling is managed by ItemListComponent for selection
+    // Click handling is managed by CascadeListComponent for selection
     // For detail view, load video in preview
     if (this.viewMode === 'detail') {
       this.selectVideo(video);
@@ -4783,44 +5093,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Relink selected orphaned videos
    */
   async relinkSelectedOrphans() {
-    if (this.selectedOrphanedVideos.size === 0) return;
-
-    // Open folder selection dialog
-    const result = await (window as any).electron.openFolderDialog();
-    if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
-      return;
-    }
-
-    const newFolder = result.filePaths[0];
-    const selectedIds = Array.from(this.selectedOrphanedVideos);
-
-    try {
-      const url = await this.backendUrlService.getApiUrl('/database/relink');
-      const response = await this.http.post<{
-        success: boolean;
-        relinkedCount: number;
-        failedCount: number;
-        message: string;
-      }>(url, {
-        videoIds: selectedIds,
-        newFolder: newFolder
-      }).toPromise();
-
-      if (response?.success) {
-        this.snackBar.open(
-          `Relinked ${response.relinkedCount} video${response.relinkedCount !== 1 ? 's' : ''}`,
-          'Close',
-          { duration: 3000 }
-        );
-        this.selectedOrphanedVideos.clear();
-        await this.loadOrphanedVideos();
-      } else {
-        this.snackBar.open(response?.message || 'Failed to relink videos', 'Close', { duration: 3000 });
-      }
-    } catch (error) {
-      console.error('Failed to relink videos:', error);
-      this.snackBar.open('Failed to relink videos', 'Close', { duration: 3000 });
-    }
+    // Call the new relink function that does auto-scan first
+    await this.relinkOrphanedVideos();
   }
 
   /**

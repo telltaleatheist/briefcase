@@ -153,4 +153,28 @@
       </div>
     </div>
   </div>
+
+  <!-- Context Menu Trigger (hidden, positioned by JS) -->
+  <div style="visibility: hidden; position: fixed;"
+       [style.left.px]="contextMenuPosition.x"
+       [style.top.px]="contextMenuPosition.y"
+       [matMenuTriggerFor]="contextMenuTemplate"
+       #contextMenuTrigger="matMenuTrigger">
+  </div>
+
+  <!-- Context Menu Template -->
+  <mat-menu #contextMenuTemplate="matMenu" [hasBackdrop]="true" backdropClass="cdk-overlay-transparent-backdrop">
+    <ng-container *ngFor="let action of contextMenuActions">
+      <!-- Divider -->
+      <mat-divider *ngIf="action.divider"></mat-divider>
+
+      <!-- Menu Item -->
+      <button *ngIf="!action.divider"
+              mat-menu-item
+              (click)="executeContextAction(action.id)">
+        <mat-icon *ngIf="action.icon">{{ action.icon }}</mat-icon>
+        <span>{{ action.label }}</span>
+      </button>
+    </ng-container>
+  </mat-menu>
 </div>

@@ -100,7 +100,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   scrollbarDragStartZoom = 1;
 
   // Playback speed state for J/K/L behavior
-  private currentPlaybackSpeed = 1;
+  currentPlaybackSpeed = 1; // Public so it can be displayed in template
   private lastKeyPressed: 'j' | 'k' | 'l' | null = null;
 
   // Store bound event listeners for cleanup
@@ -1178,45 +1178,78 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   /**
-   * Handle J key press - Rewind / Slow down playback
+   * Speed progression for J/L keys
+   */
+  private readonly speedProgression = [0.125, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 8];
+
+  /**
+   * Find closest speed in progression to current speed
+   */
+  private findClosestSpeedIndex(currentSpeed: number): number {
+    // Find the closest speed in our progression
+    let closestIndex = 0;
+    let minDiff = Math.abs(this.speedProgression[0] - currentSpeed);
+
+    for (let i = 1; i < this.speedProgression.length; i++) {
+      const diff = Math.abs(this.speedProgression[i] - currentSpeed);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
+      }
+    }
+
+    return closestIndex;
+  }
+
+  /**
+   * Handle J key press - Decrease playback speed
+   * If not playing: start playing at 1x
+   * If playing: move down one step in speed progression
    */
   handleJKey() {
-    // J key: Slow down playback speed
-    if (this.currentPlaybackSpeed > 1) {
-      // If playing faster than 1x, slow down (8x → 4x → 2x → 1x)
-      this.currentPlaybackSpeed = this.currentPlaybackSpeed / 2;
-    } else {
-      // Already at 1x or slower, reset to 1x
+    if (this.currentPlaybackSpeed === 0) {
+      // Not playing - start playing at 1x
       this.currentPlaybackSpeed = 1;
+    } else {
+      // Find current speed in progression and move down one step
+      const currentIndex = this.findClosestSpeedIndex(this.currentPlaybackSpeed);
+      const newIndex = Math.max(0, currentIndex - 1); // Don't go below minimum
+      this.currentPlaybackSpeed = this.speedProgression[newIndex];
     }
     this.lastKeyPressed = 'j';
     this.emitPlaybackSpeed(this.currentPlaybackSpeed);
   }
 
   /**
-   * Handle K key press - Pause and reset speed to 1x
+   * Handle K key press - Pause/Play toggle
    */
   handleKKey() {
-    // K key: Pause and reset speed to 1x
-    this.currentPlaybackSpeed = 1;
+    if (this.currentPlaybackSpeed === 0) {
+      // Paused - resume at 1x
+      this.currentPlaybackSpeed = 1;
+      this.emitPlaybackSpeed(1);
+    } else {
+      // Playing - pause and reset speed to 0
+      this.currentPlaybackSpeed = 0;
+      this.emitPlaybackSpeed(0); // 0 means pause
+    }
     this.lastKeyPressed = 'k';
-    this.emitPlaybackSpeed(0); // 0 means pause
   }
 
   /**
-   * Handle L key press - Fast forward / Speed up playback
+   * Handle L key press - Increase playback speed
+   * If not playing: start playing at 1x
+   * If playing: move up one step in speed progression
    */
   handleLKey() {
-    // L key: Speed up playback (requires two presses to reach 2x)
-    if (this.lastKeyPressed === 'l' && this.currentPlaybackSpeed > 0 && this.currentPlaybackSpeed < 8) {
-      // Already going forward, increase speed (1x → 2x → 4x → 8x)
-      this.currentPlaybackSpeed = this.currentPlaybackSpeed * 2;
-    } else if (this.currentPlaybackSpeed >= 8) {
-      // Already at max speed, stay at 8x
-      this.currentPlaybackSpeed = 8;
-    } else {
-      // Start forward playback at 1x (first press)
+    if (this.currentPlaybackSpeed === 0) {
+      // Not playing - start playing at 1x
       this.currentPlaybackSpeed = 1;
+    } else {
+      // Find current speed in progression and move up one step
+      const currentIndex = this.findClosestSpeedIndex(this.currentPlaybackSpeed);
+      const newIndex = Math.min(this.speedProgression.length - 1, currentIndex + 1); // Don't go above maximum
+      this.currentPlaybackSpeed = this.speedProgression[newIndex];
     }
     this.lastKeyPressed = 'l';
     this.emitPlaybackSpeed(this.currentPlaybackSpeed);

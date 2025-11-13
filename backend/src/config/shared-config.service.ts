@@ -67,4 +67,8 @@ export class SharedConfigService {
   getConfig(): any {
     return { ...this.config }; // Return a copy to prevent direct mutation
   }
+
+  getConfigDir(): string {
+    return path.dirname(this.configPath);
+  }
 }
