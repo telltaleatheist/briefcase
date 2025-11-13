@@ -46,6 +46,29 @@ export class AISetupWizard {
   private wizardWindow: BrowserWindow | null = null;
 
   /**
+   * Check if AI is already configured (Ollama with models OR API keys)
+   */
+  async isAIConfigured(): Promise<boolean> {
+    try {
+      // Check if Ollama is installed and has models
+      const hasOllama = await this.checkExistingModels();
+      if (hasOllama.length > 0) {
+        log.info(`AI is already configured: Ollama with ${hasOllama.length} models`);
+        return true;
+      }
+
+      // TODO: Check if API keys (Claude/OpenAI) are configured
+      // This would require accessing the backend config
+      // For now, we'll just check Ollama
+
+      return false;
+    } catch (error) {
+      log.error('Error checking AI configuration:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get available AI models
    */
   private getAvailableModels(): AIModelInfo[] {

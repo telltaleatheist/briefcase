@@ -12,18 +12,21 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
+import { MatDialog } from '@angular/material/dialog';
 
 import { SocketService } from './services/socket.service';
 import { SettingsService } from './services/settings.service';
 import { BatchStateService } from './services/batch-state.service';
 import { NotificationService } from './services/notification.service';
 import { DatabaseLibraryService } from './services/database-library.service';
+import { AiSetupHelperService } from './services/ai-setup-helper.service';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
 import { NotificationToastComponent } from './components/notification-toast/notification-toast.component';
 import { NotificationBellComponent } from './components/notification-bell/notification-bell.component';
 import { NotificationModalComponent } from './components/notification-modal/notification-modal.component';
 import { DownloadQueueComponent } from './components/download-queue/download-queue.component';
 import { DownloadProgressService } from './services/download-progress.service';
+import { AiSetupWizardComponent } from './components/ai-setup-wizard/ai-setup-wizard.component';
 
 @Component({
   selector: 'app-root',
@@ -63,8 +66,12 @@ export class AppComponent implements OnInit, OnDestroy {
   private notificationService = inject(NotificationService);  // Inject the NotificationService
   private databaseLibraryService = inject(DatabaseLibraryService);  // Inject the DatabaseLibraryService
   private downloadProgressService = inject(DownloadProgressService);  // CRITICAL: Inject to instantiate on app start
+  private aiSetupHelper = inject(AiSetupHelperService);  // Inject AI setup helper
+  private dialog = inject(MatDialog);  // Inject dialog service
   public router = inject(Router);
   private renderer = inject(Renderer2);
+
+  private hasShownAISetup = false;  // Track if we've shown AI setup this session
 
   ngOnInit(): void {
     // Let theme service handle default (which is dark mode)
@@ -74,6 +81,11 @@ export class AppComponent implements OnInit, OnDestroy {
     this.databaseLibraryService.preloadLibraryData().catch(err => {
       console.log('[AppComponent] Library preload failed (this is expected if library is empty):', err);
     });
+
+    // Check if AI setup is needed on first run (after a short delay to let app initialize)
+    setTimeout(() => {
+      this.checkAndShowAISetup();
+    }, 3000);  // Wait 3 seconds after app loads
 
     // Log router events for debugging
     this.router.events.subscribe(event => {
@@ -132,5 +144,64 @@ export class AppComponent implements OnInit, OnDestroy {
 
   onLibraryClick(): void {
     console.log('[AppComponent] Library link clicked at', new Date().toISOString(), performance.now());
+  }
+
+  /**
+   * Check if AI is configured and show setup wizard if needed
+   * Only shows once per session on first run
+   */
+  private async checkAndShowAISetup(): Promise<void> {
+    // Only show once per session
+    if (this.hasShownAISetup) {
+      return;
+    }
+
+    // Check if we've offered AI setup before
+    const aiSetupOffered = localStorage.getItem('aiSetupOffered');
+
+    if (aiSetupOffered === 'true') {
+      console.log('[AppComponent] AI setup already offered in a previous session');
+      return;
+    }
+
+    try {
+      // Check if AI is already configured
+      const availability = await this.aiSetupHelper.checkAIAvailability();
+
+      const hasOllama = availability.hasOllama && availability.ollamaModels.length > 0;
+      const hasAPIKey = availability.hasClaudeKey || availability.hasOpenAIKey;
+
+      if (hasOllama || hasAPIKey) {
+        console.log('[AppComponent] AI is already configured, skipping setup wizard');
+        // Mark as offered since it's already set up
+        localStorage.setItem('aiSetupOffered', 'true');
+        return;
+      }
+
+      // AI is not configured - show the setup wizard
+      console.log('[AppComponent] AI not configured, showing setup wizard');
+      this.hasShownAISetup = true;
+
+      const dialogRef = this.dialog.open(AiSetupWizardComponent, {
+        width: '800px',
+        maxWidth: '90vw',
+        maxHeight: '80vh',
+        disableClose: false,
+        data: { forceSetup: false }
+      });
+
+      dialogRef.afterClosed().subscribe(result => {
+        // Mark that we've offered the setup
+        localStorage.setItem('aiSetupOffered', 'true');
+
+        if (result?.completed) {
+          this.notificationService.success('AI Setup Complete', 'Your AI providers are now configured!');
+        } else if (result?.skipped) {
+          console.log('[AppComponent] User skipped AI setup');
+        }
+      });
+    } catch (error) {
+      console.error('[AppComponent] Error checking AI availability:', error);
+    }
   }
 }

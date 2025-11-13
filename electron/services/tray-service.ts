@@ -191,9 +191,9 @@ export class TrayService {
 
     // On macOS, we can also update the dock badge
     if (process.platform === 'darwin' && count > 0) {
-      app.dock.setBadge(count.toString());
+      app.dock?.setBadge(count.toString());
     } else if (process.platform === 'darwin') {
-      app.dock.setBadge('');
+      app.dock?.setBadge('');
     }
   }
 

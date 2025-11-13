@@ -261,6 +261,13 @@ export class SetupService {
    * Returns true if setup completed or was skipped, false if user wants to try later
    */
   async runAISetup(checkResult: DependencyCheckResult): Promise<boolean> {
+    // Check if AI is already configured (has Ollama models or API keys)
+    const isConfigured = await this.aiWizard.isAIConfigured();
+    if (isConfigured) {
+      log.info('AI is already configured, skipping setup wizard');
+      return true;
+    }
+
     // Don't offer if already offered before
     if (this.hasOfferedAISetup()) {
       log.info('AI setup already offered in a previous session');
@@ -361,14 +368,17 @@ export class SetupService {
   /**
    * Run optional AI features setup after main app is ready
    * This runs after the main window is created so it doesn't block startup
+   *
+   * NOTE: AI setup is now handled by the Angular frontend via the AI setup dialog
+   * in settings. We no longer show electron dialogs for AI configuration.
    */
   async runOptionalSetups(checkResult: DependencyCheckResult): Promise<void> {
-    log.info('Running optional AI features setup...');
+    log.info('Running optional setups...');
 
-    // Run AI setup first (Ollama)
-    await this.runAISetup(checkResult);
+    // AI setup is now handled by Angular frontend - skip electron wizard
+    log.info('AI setup handled by Angular frontend - skipping electron wizard');
 
-    // Then offer Whisper setup
+    // Run Whisper setup (still uses electron for Python dependency management)
     await this.runWhisperSetup();
 
     log.info('Optional setups complete');

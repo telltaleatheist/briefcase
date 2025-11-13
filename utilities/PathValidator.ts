@@ -209,24 +209,34 @@ export class PathValidator {
         });
       }, 10000);
 
-      // Get the bundled Python to ensure yt-dlp uses the correct Python version
-      const bundledPythonPath = this.getBundledPythonPath();
-
-      // If we have bundled Python, execute yt-dlp with it explicitly
-      // Otherwise, execute yt-dlp directly (which will use the shebang)
+      // Determine how to execute yt-dlp based on the binary type
       let command: string;
       let args: string[];
 
-      if (bundledPythonPath) {
-        // Execute: python3 /path/to/yt-dlp --version
-        command = bundledPythonPath;
-        args = [ytDlpPath!, '--version'];
-        log.info(`Using bundled Python to run yt-dlp: ${bundledPythonPath} ${ytDlpPath}`);
-      } else {
-        // Execute: /path/to/yt-dlp --version (uses shebang)
+      // On Windows, yt-dlp is a compiled .exe that doesn't need Python
+      // On macOS/Linux, yt-dlp is a Python script that needs Python interpreter
+      const isWindowsExe = process.platform === 'win32' && ytDlpPath!.endsWith('.exe');
+
+      if (isWindowsExe) {
+        // Windows .exe - run directly
         command = ytDlpPath!;
         args = ['--version'];
-        log.info(`Running yt-dlp directly (system Python): ${ytDlpPath}`);
+        log.info(`Running yt-dlp.exe directly (Windows executable): ${ytDlpPath}`);
+      } else {
+        // Python script - check for bundled Python
+        const bundledPythonPath = this.getBundledPythonPath();
+
+        if (bundledPythonPath) {
+          // Execute with bundled Python: python3 /path/to/yt-dlp --version
+          command = bundledPythonPath;
+          args = [ytDlpPath!, '--version'];
+          log.info(`Using bundled Python to run yt-dlp: ${bundledPythonPath} ${ytDlpPath}`);
+        } else {
+          // Execute directly (uses shebang): /path/to/yt-dlp --version
+          command = ytDlpPath!;
+          args = ['--version'];
+          log.info(`Running yt-dlp directly (system Python): ${ytDlpPath}`);
+        }
       }
 
       execFile(command, args, (error, stdout, stderr) => {
