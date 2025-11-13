@@ -286,8 +286,8 @@
         Cancel
       </button>
       <button type="submit" mat-raised-button color="primary" [disabled]="analysisForm.invalid">
-        <mat-icon>{{ isImportOnly() ? 'download' : 'play_arrow' }}</mat-icon>
-        {{ isImportOnly() ? 'Import Video' : 'Start Processing' }}
+        <mat-icon>{{ getSubmitButtonIcon() }}</mat-icon>
+        {{ getSubmitButtonText() }}
       </button>
     </mat-dialog-actions>
   </form>

@@ -2926,6 +2926,35 @@
 }
 
 // ==================================================
+// Name Suggestion Styling (Orange Text for Items with Suggestions)
+// ==================================================
+// Make the entire secondary text orange for items with suggestions
+::ng-deep cascade-list .list-item.has-name-suggestion {
+  .item-secondary {
+    color: #ff8c00 !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+  }
+
+  // Add hover effect to make it more obvious it's clickable
+  &:hover .item-secondary {
+    color: #ff6600 !important;
+    text-decoration: underline;
+  }
+}
+
+// Dark mode
+:host-context(.dark-theme) ::ng-deep cascade-list .list-item.has-name-suggestion .item-secondary,
+:host-context([data-theme="dark"]) ::ng-deep cascade-list .list-item.has-name-suggestion .item-secondary {
+  color: #ff9933 !important;
+}
+
+:host-context(.dark-theme) ::ng-deep cascade-list .list-item.has-name-suggestion:hover .item-secondary,
+:host-context([data-theme="dark"]) ::ng-deep cascade-list .list-item.has-name-suggestion:hover .item-secondary {
+  color: #ffaa55 !important;
+}
+
+// ==================================================
 // Inline Editing Overlay (Finder-like)
 // ==================================================
 

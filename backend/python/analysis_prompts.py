@@ -200,7 +200,6 @@ SUGGESTED_TITLE_PROMPT = """Based on the AI analysis of this video, suggest a be
 - NO special characters: no periods, quotes, slashes, or other symbols
 - You may use "etc" at the end without a period if listing many items
 - DO NOT include date or file extension
-- Add "(full)" at the end if this is a complete, unedited video
 - Return ONLY the suggested title, nothing else
 
 **Examples showing proper comma usage:**
@@ -212,7 +211,7 @@ Examples of good titles:
 - "greg locke prophesies that the conservative movement will be split on jew hate, and tucker carlson is where it starts, after interviewing nick fuentes"
 - "joel webbon says women are atrocious today - theyre hoes, stupid, deceitful, wicked, vile, vote for trans people, etc"
 - "joshua haymes says a satanic statue was being erected in the state capitol, but this extremist destroyed one, and he should be honored for that - michael cassidy"
-- "tucker carlson interviews nick fuentes - ben shapiro was not happy - new york times claims fuentes is replacing charlie kirk (full)"
+- "tucker carlson interviews nick fuentes - ben shapiro was not happy - new york times claims fuentes is replacing charlie kirk"
 - "nick fuentes releases antisemitic video praising racist figures - george washington, abraham lincoln, christopher columbus - hate speech promoting discrimination against jews, ethnic minorities, etc"
 
 Bad examples:

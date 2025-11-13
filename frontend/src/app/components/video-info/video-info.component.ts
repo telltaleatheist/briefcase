@@ -170,6 +170,11 @@ export class VideoInfoComponent implements OnInit {
         this.router.navigate(['/library']);
       }
     }
+
+    // If there's no suggested title, mark as accepted to hide the suggestion box
+    if (this.video && !this.video.suggested_title) {
+      this.isSuggestedTitleAccepted = true;
+    }
   }
 
   async loadVideoById(videoId: string) {
@@ -186,6 +191,11 @@ export class VideoInfoComponent implements OnInit {
         return;
       }
       await this.loadVideoMetadata();
+
+      // If there's no suggested title, mark as accepted to hide the suggestion box
+      if (this.video && !this.video.suggested_title) {
+        this.isSuggestedTitleAccepted = true;
+      }
     } catch (error) {
       console.error('Error loading video:', error);
       this.notificationService.error('Load Error', 'Failed to load video');
@@ -751,6 +761,33 @@ export class VideoInfoComponent implements OnInit {
   /**
    * Dismiss the suggested title (doesn't delete it, just hides UI)
    */
+  /**
+   * Reject the suggested title (clears it from the database)
+   */
+  async rejectSuggestedTitle() {
+    if (!this.video || !this.video.suggested_title) return;
+
+    try {
+      // Call backend API to reject/clear the suggested title
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/reject-suggested-title`);
+      const result = await firstValueFrom(
+        this.http.post<{ success: boolean; message?: string; error?: string }>(url, {})
+      );
+
+      if (result.success) {
+        // Clear from local video object
+        this.video.suggested_title = null;
+        this.isSuggestedTitleAccepted = true;
+        this.notificationService.success('Suggestion Rejected', 'The suggested title has been removed');
+      } else {
+        this.notificationService.error('Rejection Failed', result.error || 'Failed to reject suggested title');
+      }
+    } catch (error: any) {
+      console.error('Error rejecting suggested title:', error);
+      this.notificationService.error('Rejection Failed', error.error?.message || 'Failed to reject suggested title');
+    }
+  }
+
   dismissSuggestedTitle() {
     this.isSuggestedTitleAccepted = true;
   }

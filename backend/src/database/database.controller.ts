@@ -929,6 +929,50 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/videos/:id/reject-suggested-title
+   * Reject the AI-suggested title (clear it from the database)
+   */
+  @Post('videos/:id/reject-suggested-title')
+  async rejectSuggestedTitle(
+    @Param('id') videoId: string
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Check if video has a suggested title
+      if (!video.suggested_title) {
+        return {
+          success: false,
+          error: 'No suggested title to reject'
+        };
+      }
+
+      // Clear the suggested_title from the database
+      this.databaseService.updateVideoSuggestedTitle(videoId, null);
+
+      this.logger.log(`Rejected suggested title for video ${videoId}`);
+
+      return {
+        success: true,
+        message: 'Suggested title rejected successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to reject suggested title: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Failed to reject suggested title'
+      };
+    }
+  }
+
+  /**
    * DELETE /api/database/videos/:id
    * Delete a video from the library (both database record AND physical file)
    */

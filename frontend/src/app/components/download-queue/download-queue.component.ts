@@ -376,6 +376,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         progress: 0,
         currentPhase: 'Starting analysis...',
         input: job.input,
+        displayName: job.displayName, // Preserve the fetched title
         customInstructions: job.customInstructions,
         aiModel: job.aiModel,
         videoId: job.videoId, // Include videoId for progress tracking in library
@@ -561,7 +562,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   getJobTitle(job: VideoProcessingJob): string {
-    // Try to extract a clean title from filename or URL
+    // Prefer displayName if available (preserves fetched title)
+    if (job.displayName) {
+      return job.displayName;
+    }
+
+    // Fallback: Try to extract a clean title from filename or URL
     if (job.filename && job.filename !== 'Video Analysis') {
       let title = job.filename;
 

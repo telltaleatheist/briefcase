@@ -37,6 +37,7 @@ import { DownloadProgressService } from '../../services/download-progress.servic
 import { SocketService } from '../../services/socket.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
+import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
 import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/preview-dialog.component';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
@@ -707,6 +708,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
         const initialResponse = await this.databaseLibraryService.getVideos(20, 0);
         this.videos = initialResponse.videos;
         this.applyFiltersAndSort();
+        this.markItemsWithSuggestions(); // Add class to items with suggestions
         console.log(`[loadVideos] Loaded initial ${this.videos.length} videos`);
 
         // If there are more videos, continue loading in the background
@@ -725,6 +727,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
         this.videos = response.videos;
         console.log(`[loadVideos] AFTER assignment: this.videos.length = ${this.videos.length}`);
         this.applyFiltersAndSort();
+        this.markItemsWithSuggestions(); // Add class to items with suggestions
         console.log(`[loadVideos] Loaded ${this.videos.length} videos (full reload, fresh from DB)`);
         this.isLoading = false;
 
@@ -1563,6 +1566,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Group videos by week/folder
     this.groupVideosByWeek();
+
+    // Mark items with suggestions for orange styling
+    this.markItemsWithSuggestions();
   }
 
   /**
@@ -2092,6 +2098,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
   formatVideoSecondaryText(video: DatabaseVideo): string {
     const parts: string[] = [];
 
+    // Name suggestion with preview (orange color will be applied via JavaScript)
+    if (video.suggested_title) {
+      // Show first 60 characters of suggested title
+      const preview = video.suggested_title.length > 60
+        ? video.suggested_title.substring(0, 60) + '...'
+        : video.suggested_title;
+      parts.push(`💡 Suggested: ${preview} - Click to View`);
+    }
+
     // Upload date (from filename) - when content was created/filmed by the person
     if (video.upload_date) {
       const uploadDate = new Date(video.upload_date);
@@ -2523,6 +2538,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Finder-like behavior: Single click highlights AND selects the item
     this.highlightedVideo = video;
 
+    // Normal click handling - name suggestion clicks are handled separately via event listener
     // Click handling is managed by CascadeListComponent for selection
     // For detail view, load video in preview
     if (this.viewMode === 'detail') {
@@ -2535,6 +2551,204 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   onListItemDoubleClick(video: DatabaseVideo) {
     this.openVideoPlayer(video);
+  }
+
+  /**
+   * Show name suggestion dialog with Accept/Reject buttons
+   */
+  async showNameSuggestionDialog(video: DatabaseVideo) {
+    if (!video.suggested_title) return;
+
+    const dialogRef = this.dialog.open(NameSuggestionDialogComponent, {
+      width: '600px',
+      data: {
+        currentFilename: video.filename,
+        suggestedTitle: video.suggested_title,
+        uploadDate: video.upload_date
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result === 'accept') {
+      // Accept and rename
+      await this.acceptVideoSuggestion(video);
+    } else if (result === 'reject') {
+      // Just reject/clear
+      await this.rejectVideoSuggestion(video);
+    }
+  }
+
+  /**
+   * Accept the name suggestion and rename the video
+   */
+  async acceptVideoSuggestion(video: DatabaseVideo) {
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${video.id}/accept-suggested-title`);
+      const result = await this.http.post<{ success: boolean; message?: string; error?: string; newPath?: string; newFilename?: string }>(url, {}).toPromise();
+
+      if (result?.success) {
+        // Update the video object in place
+        video.suggested_title = null;
+        if (result.newFilename) {
+          video.filename = result.newFilename;
+        }
+
+        // Update the DOM element directly
+        this.updateListItemSecondaryText(video);
+
+        this.notificationService.toastOnly('success', 'Renamed', 'File has been renamed successfully');
+      } else {
+        this.notificationService.toastOnly('error', 'Rename Failed', result?.error || 'Failed to rename video');
+      }
+    } catch (error: any) {
+      console.error('Error accepting suggestion:', error);
+      this.notificationService.toastOnly('error', 'Rename Failed', error.error?.message || 'Failed to rename video');
+    }
+  }
+
+  /**
+   * Reject the name suggestion (clear it)
+   */
+  async rejectVideoSuggestion(video: DatabaseVideo) {
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${video.id}/reject-suggested-title`);
+      const result = await this.http.post<{ success: boolean; message?: string; error?: string }>(url, {}).toPromise();
+
+      if (result?.success) {
+        // Update the video object in place
+        video.suggested_title = null;
+
+        // Update the DOM element directly
+        this.updateListItemSecondaryText(video);
+
+        this.notificationService.toastOnly('success', 'Suggestion Rejected', 'The suggestion has been removed');
+      } else {
+        this.notificationService.toastOnly('error', 'Rejection Failed', result?.error || 'Failed to reject suggestion');
+      }
+    } catch (error: any) {
+      console.error('Error rejecting suggestion:', error);
+      this.notificationService.toastOnly('error', 'Rejection Failed', error.error?.message || 'Failed to reject suggestion');
+    }
+  }
+
+  /**
+   * Update a specific list item's text without reloading the entire list
+   */
+  private updateListItemSecondaryText(video: DatabaseVideo) {
+    // Find the DOM element for this video
+    const listItem = document.getElementById(`item-${video.id}`);
+    if (!listItem) {
+      console.warn(`[updateListItemSecondaryText] Could not find list item for video ${video.id}`);
+      return;
+    }
+
+    // Update the primary text (filename)
+    const primaryTextElement = listItem.querySelector('.item-primary') as HTMLElement;
+    if (primaryTextElement) {
+      primaryTextElement.textContent = video.filename;
+    }
+
+    // Update the secondary text
+    const secondaryTextElement = listItem.querySelector('.item-secondary') as HTMLElement;
+    if (secondaryTextElement) {
+      const newSecondaryText = this.formatVideoSecondaryText(video);
+      secondaryTextElement.textContent = newSecondaryText;
+
+      // Remove the styling attribute so it won't try to style it again
+      secondaryTextElement.removeAttribute('data-suggestion-styled');
+    }
+
+    console.log(`[updateListItemSecondaryText] Updated list item for ${video.id}`);
+  }
+
+  /**
+   * Add CSS class to list items that have name suggestions (for orange text)
+   * Also add click handlers to secondary text to open video info
+   */
+  private markItemsWithSuggestions() {
+    // Setup mutation observer to watch for DOM changes
+    const observer = new MutationObserver(() => {
+      this.styleSuggestionTexts();
+    });
+
+    // Observe the cascade list for changes
+    const cascadeList = document.querySelector('cascade-list');
+    if (cascadeList) {
+      observer.observe(cascadeList, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    // Also try immediately and with delays
+    this.styleSuggestionTexts();
+    setTimeout(() => this.styleSuggestionTexts(), 100);
+    setTimeout(() => this.styleSuggestionTexts(), 500);
+    setTimeout(() => this.styleSuggestionTexts(), 1000);
+  }
+
+  private styleSuggestionTexts() {
+    // Use the exact approach that worked in console
+    const allSecondaryElements = Array.from(document.querySelectorAll('.item-secondary'));
+    const suggestionElements = allSecondaryElements.filter(el =>
+      el.textContent && el.textContent.includes('Suggested:') && el.textContent.includes('Click to View')
+    );
+
+    console.log(`[styleSuggestionTexts] Found ${suggestionElements.length} suggestion elements`);
+
+    suggestionElements.forEach((element) => {
+      const secondaryText = element as HTMLElement;
+      if (!secondaryText.getAttribute('data-suggestion-styled')) {
+        console.log('[styleSuggestionTexts] Styling element:', secondaryText.textContent);
+
+        const originalText = secondaryText.textContent || '';
+
+        // Split the text to wrap only "Click to View" in a styled span
+        const parts = originalText.split('Click to View');
+        if (parts.length === 2) {
+          // Clear the element and rebuild with span for "Click to View"
+          secondaryText.innerHTML = '';
+
+          // Add the first part (normal text)
+          const normalText = document.createTextNode(parts[0]);
+          secondaryText.appendChild(normalText);
+
+          // Add "Click to View" as a styled span
+          const clickSpan = document.createElement('span');
+          clickSpan.textContent = 'Click to View';
+          clickSpan.style.setProperty('color', '#ff8c00', 'important');
+          clickSpan.style.cursor = 'pointer';
+          secondaryText.appendChild(clickSpan);
+
+          // Add any text after "Click to View"
+          if (parts[1]) {
+            const endText = document.createTextNode(parts[1]);
+            secondaryText.appendChild(endText);
+          }
+
+          // Add click handler only to the orange span - find which video this belongs to
+          const listItem = secondaryText.closest('.item-card') as HTMLElement;
+          if (listItem) {
+            const itemId = listItem.getAttribute('id');
+            // Extract video ID from "item-{videoId}" format
+            const videoId = itemId ? itemId.replace('item-', '') : null;
+            if (videoId) {
+              const video = this.videos.find(v => v.id === videoId);
+              if (video) {
+                clickSpan.onclick = (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  this.showNameSuggestionDialog(video);
+                };
+              }
+            }
+          }
+        }
+
+        secondaryText.setAttribute('data-suggestion-styled', 'true');
+      }
+    });
   }
 
   onListItemsSelected(videos: DatabaseVideo[]) {

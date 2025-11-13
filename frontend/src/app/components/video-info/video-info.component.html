@@ -185,8 +185,8 @@
                 AI Suggested Title
               </h3>
               <button mat-icon-button
-                      (click)="dismissSuggestedTitle()"
-                      matTooltip="Dismiss suggestion"
+                      (click)="rejectSuggestedTitle()"
+                      matTooltip="Reject suggestion"
                       class="dismiss-btn">
                 <mat-icon>close</mat-icon>
               </button>
@@ -201,6 +201,12 @@
                         [disabled]="isAcceptingSuggestedTitle">
                   <mat-icon>check</mat-icon>
                   {{ isAcceptingSuggestedTitle ? 'Renaming...' : 'Accept & Rename File' }}
+                </button>
+                <button mat-stroked-button
+                        (click)="rejectSuggestedTitle()"
+                        [disabled]="isAcceptingSuggestedTitle">
+                  <mat-icon>close</mat-icon>
+                  Reject
                 </button>
               </div>
             </div>
@@ -230,19 +236,19 @@
               </div>
             </div>
 
-            <div class="metadata-item" *ngIf="video.upload_date">
+            <div class="metadata-item">
               <mat-icon>upload</mat-icon>
               <div class="metadata-content">
                 <span class="metadata-label">Upload Date</span>
-                <span class="metadata-value">{{ formatDate(video.upload_date) }}</span>
+                <span class="metadata-value">{{ video.upload_date ? formatDate(video.upload_date) : 'N/A' }}</span>
               </div>
             </div>
 
-            <div class="metadata-item" *ngIf="video.download_date">
+            <div class="metadata-item">
               <mat-icon>download</mat-icon>
               <div class="metadata-content">
                 <span class="metadata-label">Downloaded</span>
-                <span class="metadata-value">{{ formatDate(video.download_date) }}</span>
+                <span class="metadata-value">{{ video.download_date ? formatDate(video.download_date) : 'N/A' }}</span>
               </div>
             </div>
 

@@ -14,6 +14,8 @@ import { AnalysisQueueService } from '../../services/analysis-queue.service';
 import { AiSetupHelperService, AIAvailability } from '../../services/ai-setup-helper.service';
 import { AiSetupWizardComponent } from '../ai-setup-wizard/ai-setup-wizard.component';
 import { AiSetupTooltipComponent } from '../ai-setup-tooltip/ai-setup-tooltip.component';
+import { BatchApiService } from '../../services/batch-api.service';
+import { catchError, of } from 'rxjs';
 
 export interface VideoAnalysisDialogData {
   mode?: 'analyze' | 'transcribe' | 'import' | 'download';
@@ -47,6 +49,11 @@ export class VideoAnalysisDialogComponent implements OnInit {
   aiAvailability: AIAvailability | null = null;
   showAiSetupPrompt = false;
 
+  // Title fetching for URLs
+  fetchedVideoTitle: string = '';
+  fetchedUploadDate: string = '';
+  isFetchingTitle = false;
+
   constructor(
     private fb: FormBuilder,
     private dialogRef: MatDialogRef<VideoAnalysisDialogComponent>,
@@ -55,7 +62,8 @@ export class VideoAnalysisDialogComponent implements OnInit {
     private backendUrlService: BackendUrlService,
     private analysisQueueService: AnalysisQueueService,
     private aiSetupHelper: AiSetupHelperService,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private batchApiService: BatchApiService
   ) {
     this.analysisForm = this.createForm();
   }
@@ -102,6 +110,15 @@ export class VideoAnalysisDialogComponent implements OnInit {
 
     // Check if we should show AI setup prompt
     this.checkAndPromptAISetup();
+
+    // Watch URL changes to fetch title automatically (for download mode)
+    if (this.data.mode === 'download' || this.data.mode === 'import') {
+      this.analysisForm.get('input')?.valueChanges.subscribe((url: string) => {
+        if (url && url.trim() && this.analysisForm.get('inputType')?.value === 'url') {
+          this.fetchVideoTitle(url);
+        }
+      });
+    }
   }
 
   createForm(): FormGroup {
@@ -156,6 +173,66 @@ export class VideoAnalysisDialogComponent implements OnInit {
       return 'OpenAI API Key';
     }
     return 'API Key';
+  }
+
+  getSubmitButtonText(): string {
+    const mode = this.analysisForm.get('mode')?.value;
+    if (mode === 'import-only') {
+      return 'OK';
+    }
+    return 'Add to Queue';
+  }
+
+  getSubmitButtonIcon(): string {
+    const mode = this.analysisForm.get('mode')?.value;
+    if (mode === 'import-only') {
+      return 'check';
+    }
+    return 'add_to_queue';
+  }
+
+  /**
+   * Fetch video title from URL (reusing logic from batch downloads)
+   */
+  private fetchVideoTitle(url: string): void {
+    if (!url || !url.trim()) {
+      return;
+    }
+
+    this.isFetchingTitle = true;
+    this.batchApiService.getVideoInfo(url)
+      .pipe(
+        catchError(err => {
+          console.warn('Could not fetch video title:', err);
+          return of(null);
+        })
+      )
+      .subscribe(info => {
+        this.isFetchingTitle = false;
+        if (info && info.title) {
+          this.fetchedVideoTitle = info.title;
+          this.fetchedUploadDate = info.uploadDate || '';
+        } else {
+          this.fetchedVideoTitle = '';
+          this.fetchedUploadDate = '';
+        }
+      });
+  }
+
+  /**
+   * Generate sanitized filename (reusing logic from batch downloads)
+   */
+  private generateSanitizedFilename(title: string): string {
+    // Normalize and clean the title
+    const sanitized = title
+      .normalize('NFD')               // Normalize Unicode characters
+      .replace(/[\u0300-\u036f]/g, '') // Remove accent marks
+      .replace(/[^\w\s.-]/g, '')      // Remove filesystem-incompatible characters
+      .replace(/\s+/g, ' ')            // Collapse multiple spaces
+      .trim()
+      .substring(0, 200);             // Limit filename length
+
+    return sanitized;
   }
 
   async onModelChange(): Promise<void> {
@@ -253,11 +330,22 @@ export class VideoAnalysisDialogComponent implements OnInit {
       // Single video/URL
       let displayName = 'Video Analysis';
       if (formValue.inputType === 'url') {
-        try {
-          const url = new URL(formValue.input);
-          displayName = url.hostname.replace('www.', '') + ' video';
-        } catch {
-          displayName = formValue.input.substring(0, 30) + '...';
+        // Use fetched title if available (same logic as batch downloads)
+        if (this.fetchedVideoTitle) {
+          const title = this.generateSanitizedFilename(this.fetchedVideoTitle);
+          if (this.fetchedUploadDate) {
+            displayName = `${this.fetchedUploadDate} ${title}`;
+          } else {
+            displayName = title;
+          }
+        } else {
+          // Fallback to hostname if title not fetched
+          try {
+            const url = new URL(formValue.input);
+            displayName = url.hostname.replace('www.', '') + ' video';
+          } catch {
+            displayName = formValue.input.substring(0, 30) + '...';
+          }
         }
       } else {
         const parts = formValue.input.split(/[/\\]/);

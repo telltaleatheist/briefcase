@@ -8,6 +8,7 @@ import { DuplicateVideoDialogComponent } from '../components/library/duplicate-v
 export interface VideoProcessingJob {
   id: string;
   filename: string;
+  displayName?: string; // User-friendly display name (e.g., fetched title)
   url?: string;
   videoId?: string; // Video ID for linking to library videos
   stage: 'downloading' | 'importing' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
@@ -360,6 +361,7 @@ export class DownloadProgressService {
     const job: VideoProcessingJob = {
       id: jobId,
       filename: filename,
+      displayName: analysisJob.displayName || existingJob?.displayName, // Preserve displayName
       url: analysisJob.input || existingJob?.url,
       videoId: analysisJob.videoId || existingJob?.videoId,
       stage: stage,
