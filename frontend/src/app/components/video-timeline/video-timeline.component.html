@@ -105,7 +105,8 @@
       class="timeline"
       [class.zoomed]="zoomLevel > 1"
       (click)="onTimelineClick($event)"
-      (mousedown)="onTimelineMouseDown($event)">
+      (mousedown)="onTimelineMouseDown($event)"
+      (contextmenu)="onTimelineContextMenu($event)">
 
       <!-- Waveform layer (background) -->
       <app-timeline-waveform

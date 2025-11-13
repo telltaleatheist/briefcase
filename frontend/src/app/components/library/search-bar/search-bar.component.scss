@@ -1,0 +1,304 @@
+// Standalone Search Bar (outside accordion)
+.search-bar-standalone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+
+  &:focus-within {
+    border-color: var(--primary-color, #ff6600);
+    box-shadow: 0 0 0 2px rgba(255, 102, 0, 0.1);
+  }
+
+  .search-icon {
+    font-size: 20px !important;
+    width: 20px !important;
+    height: 20px !important;
+    color: var(--text-secondary, #666) !important;
+    flex-shrink: 0;
+  }
+
+  .standalone-search-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-primary, #333);
+    padding: 4px 0;
+    min-width: 0;
+    font-family: inherit;
+
+    &::placeholder {
+      color: var(--text-secondary, #999);
+    }
+  }
+
+  .clear-search-btn,
+  .expand-filters-btn {
+    flex-shrink: 0;
+    width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    mat-icon {
+      font-size: 18px !important;
+      width: 18px !important;
+      height: 18px !important;
+      line-height: 18px !important;
+      margin: 0 !important;
+    }
+  }
+
+  .active-indicator {
+    font-size: 12px;
+    color: var(--primary-color, #ff6600);
+    font-weight: 500;
+    padding: 4px 10px;
+    background: rgba(255, 102, 0, 0.1);
+    border-radius: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
+
+// Search & Filters Accordion
+.search-filters-accordion {
+  margin-bottom: 12px;
+
+  ::ng-deep .mat-expansion-panel {
+    box-shadow: none;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+  }
+
+  ::ng-deep .mat-expansion-panel-header {
+    padding: 8px 12px;
+    min-height: 56px;
+    height: 56px;
+  }
+
+  ::ng-deep .mat-expansion-panel-body {
+    padding: 16px;
+  }
+
+  ::ng-deep .mat-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  // Make expansion arrow visible
+  ::ng-deep .mat-expansion-indicator::after {
+    color: var(--text-primary) !important;
+  }
+}
+
+// Filter sections
+.filter-section {
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  .filter-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary, #666);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+// Compact filter checkboxes
+.filter-checkboxes-compact {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+
+  mat-checkbox {
+    ::ng-deep .mdc-label {
+      font-size: 13px;
+    }
+  }
+}
+
+// Compact sort buttons
+.sort-buttons-compact {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  button {
+    font-size: 12px;
+    padding: 4px 12px;
+    min-width: auto;
+  }
+}
+
+// Compact tag chips
+.tag-chips-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .tag-group {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+
+    .tag-group-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary, #666);
+      min-width: 60px;
+      padding-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .compact-chip-set {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+
+      ::ng-deep .mdc-evolution-chip-set__chips {
+        gap: 4px;
+      }
+    }
+
+    .compact-chip {
+      height: 24px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+      background-color: rgba(255, 107, 53, 0.08) !important;
+      border: 1px solid rgba(255, 107, 53, 0.2);
+
+      ::ng-deep .mdc-evolution-chip__text-label {
+        color: var(--text-primary) !important;
+        font-size: 11px;
+      }
+
+      .chip-count {
+        opacity: 0.6;
+        margin-left: 2px;
+      }
+
+      &:hover {
+        transform: scale(1.05);
+        background-color: rgba(255, 107, 53, 0.15) !important;
+      }
+
+      &.selected {
+        background-color: var(--primary-orange) !important;
+        border-color: var(--primary-orange);
+
+        ::ng-deep .mdc-evolution-chip__text-label {
+          color: white !important;
+          font-weight: 600;
+        }
+
+        .chip-count {
+          opacity: 0.9;
+        }
+      }
+    }
+  }
+}
+
+// Dark mode styling
+:host-context(.dark-theme),
+:host-context(.theme-dark) {
+  .search-bar-standalone {
+    background: #2a2a2a;
+    border-color: #444;
+
+    &:focus-within {
+      border-color: var(--primary-color, #ff6600);
+      box-shadow: 0 0 0 2px rgba(255, 102, 0, 0.2);
+    }
+
+    .search-icon {
+      color: rgba(255, 255, 255, 0.6) !important;
+    }
+
+    .standalone-search-input {
+      color: rgba(255, 255, 255, 0.87);
+
+      &::placeholder {
+        color: rgba(255, 255, 255, 0.5);
+      }
+    }
+
+    .active-indicator {
+      background: rgba(255, 102, 0, 0.2);
+    }
+  }
+
+  .search-filters-accordion {
+    ::ng-deep .mat-expansion-panel {
+      background-color: #2a2a2a;
+      border-color: #444;
+    }
+
+    ::ng-deep .mat-expansion-panel-header {
+      background-color: #2a2a2a;
+    }
+  }
+
+  .filter-section-title {
+    color: #999;
+  }
+
+  .filter-checkboxes-compact {
+    mat-checkbox {
+      ::ng-deep .mdc-label {
+        color: rgba(255, 255, 255, 0.87);
+      }
+    }
+  }
+
+  .tag-chips-compact {
+    .tag-group-label {
+      color: #999;
+    }
+
+    .compact-chip {
+      background-color: rgba(255, 107, 53, 0.15) !important;
+      border-color: rgba(255, 107, 53, 0.3);
+
+      ::ng-deep .mdc-evolution-chip__text-label {
+        color: rgba(255, 255, 255, 0.87) !important;
+      }
+
+      &:hover {
+        background-color: rgba(255, 107, 53, 0.25) !important;
+      }
+
+      &.selected {
+        background-color: var(--primary-orange) !important;
+        border-color: var(--primary-orange);
+
+        ::ng-deep .mdc-evolution-chip__text-label {
+          color: white !important;
+        }
+      }
+    }
+  }
+}

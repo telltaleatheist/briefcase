@@ -10,6 +10,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
 import { MatExpansionModule } from '@angular/material/expansion';
+import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
 import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { DatabaseLibraryService } from '../../services/database-library.service';
@@ -36,6 +37,7 @@ import { Subscription } from 'rxjs';
     MatSnackBarModule,
     MatTabsModule,
     MatExpansionModule,
+    MatMenuModule,
     VideoTimelineComponent,
     TranscriptSearchComponent,
     TranscriptViewerComponent,
@@ -51,6 +53,7 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
   @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
   @ViewChild('playerContainer', { static: false }) playerContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('contextMenuTrigger', { static: false }) contextMenuTrigger!: MatMenuTrigger;
 
   // Video.js player instance (replaces manual videoEl)
   private player: Player | null = null;
@@ -96,11 +99,28 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   autoScrollEnabled = true;
   currentTabIndex = 0; // Track which tab is active (0=Analysis, 1=Search, 2=Transcript)
 
+  // Fullscreen controls state
+  isFullscreen = false;
+  isMouseOverPlayer = false;
+  private controlsHideTimer: any = null;
+  showControlsInFullscreen = false; // Controls visibility in fullscreen
+
+  // Document-level mouse event handlers for fullscreen
+  private boundDocumentMouseMove: any = null;
+  private boundDocumentMouseEnter: any = null;
+
   // Track if opened as dialog or route
   isDialogMode = false;
 
   // Drag and drop state
   isDragOver = false;
+
+  // Context menu state
+  private contextMenuClickTime = 0; // Store the time where user right-clicked
+  contextMenuPosition = { x: 0, y: 0 }; // Position for context menu
+
+  // Dialog state tracking
+  private exportDialogOpen = false;
 
   // Category filter state (exposed from timeline component)
   get categoryFilters() {
@@ -191,39 +211,39 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         hasTranscript = transcriptCheck;
       }
 
-      // Load analysis metadata from database if this video has been analyzed
-      if (videoId && hasAnalysis) {
+      // Load sections (custom markers and AI analysis sections) from database
+      // Load sections regardless of whether there's an analysis - custom markers should always show
+      if (videoId) {
         try {
-          const dbAnalysis = await this.databaseLibraryService.getAnalysis(videoId);
-          if (dbAnalysis) {
-            // Parse analysis sections from the database
-            const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
+          // Parse analysis sections from the database
+          const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
 
-            // Convert database sections to timeline format
-            if (sections && sections.length > 0) {
-              this.timelineSections = sections.map(section => ({
-                startTime: section.start_seconds,
-                endTime: section.end_seconds || (section.start_seconds + 30),
-                category: section.category || 'General',
-                description: section.description || section.title || '',
-                color: this.getCategoryColor(section.category || 'General')
-              }));
+          // Convert database sections to timeline format
+          if (sections && sections.length > 0) {
+            this.timelineSections = sections.map(section => ({
+              startTime: section.start_seconds,
+              endTime: section.end_seconds || (section.start_seconds + 30),
+              category: section.category || 'General',
+              description: section.description || section.title || '',
+              color: this.getCategoryColor(section.category || 'General')
+            }));
 
-              // Build metadata object for display
-              this.metadata = {
-                sections: sections.map(s => ({
-                  startSeconds: s.start_seconds,
-                  endSeconds: s.end_seconds,
-                  timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
-                  category: s.category || 'General',
-                  description: s.description || s.title || '',
-                  quotes: [] // Database doesn't store quotes separately
-                }))
-              } as any;
-            }
+            // Build metadata object for display
+            this.metadata = {
+              sections: sections.map(s => ({
+                startSeconds: s.start_seconds,
+                endSeconds: s.end_seconds,
+                timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
+                category: s.category || 'General',
+                description: s.description || s.title || '',
+                quotes: [] // Database doesn't store quotes separately
+              }))
+            } as any;
+
+            console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and AI analysis)');
           }
         } catch (error) {
-          console.warn('Failed to load analysis metadata (video may only have transcript):', error);
+          console.warn('Failed to load sections:', error);
           this.metadata = null;
         }
       }
@@ -275,12 +295,108 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * Handle mouse movement over player in fullscreen
+   */
+  private onPlayerMouseMove() {
+    if (!this.isFullscreen) return;
+
+    this.isMouseOverPlayer = true;
+    this.updateFullscreenControlsVisibility();
+
+    // Hide controls after 3 seconds of no movement (only when playing)
+    if (this.controlsHideTimer) {
+      clearTimeout(this.controlsHideTimer);
+      this.timers.delete(this.controlsHideTimer);
+    }
+
+    if (this.isPlaying) {
+      this.controlsHideTimer = setTimeout(() => {
+        // Only hide if still playing - don't hide when paused
+        if (this.isPlaying) {
+          this.ngZone.run(() => {
+            this.showControlsInFullscreen = false;
+            this.cdr.detectChanges();
+          });
+        }
+      }, 3000);
+      this.timers.add(this.controlsHideTimer);
+    }
+  }
+
+  /**
+   * Handle mouse entering player area
+   */
+  private onPlayerMouseEnter() {
+    this.isMouseOverPlayer = true;
+    if (this.isFullscreen) {
+      this.updateFullscreenControlsVisibility();
+    }
+  }
+
+  /**
+   * Handle mouse leaving player area
+   */
+  private onPlayerMouseLeave() {
+    this.isMouseOverPlayer = false;
+    if (this.isFullscreen && this.isPlaying) {
+      // Hide controls when mouse leaves and video is playing
+      this.ngZone.run(() => {
+        this.showControlsInFullscreen = false;
+        this.cdr.detectChanges();
+      });
+    }
+  }
+
+  /**
+   * Attach document-level mouse listeners for fullscreen mode
+   * This ensures we capture mouse movements anywhere in the fullscreen area
+   */
+  private attachFullscreenMouseListeners() {
+    // Create bound versions of handlers to ensure proper 'this' context and enable removal
+    this.boundDocumentMouseMove = this.onPlayerMouseMove.bind(this);
+
+    // Attach to document to capture all mouse movements in fullscreen
+    document.addEventListener('mousemove', this.boundDocumentMouseMove);
+  }
+
+  /**
+   * Detach document-level mouse listeners when exiting fullscreen
+   */
+  private detachFullscreenMouseListeners() {
+    if (this.boundDocumentMouseMove) {
+      document.removeEventListener('mousemove', this.boundDocumentMouseMove);
+      this.boundDocumentMouseMove = null;
+    }
+  }
+
+  /**
+   * Update visibility of controls in fullscreen mode
+   * Controls show when: paused OR hovering
+   */
+  private updateFullscreenControlsVisibility() {
+    if (!this.isFullscreen) {
+      this.showControlsInFullscreen = false;
+      this.cdr.detectChanges();
+      return;
+    }
+
+    // Show controls if paused OR if mouse is over player
+    const shouldShow = !this.isPlaying || this.isMouseOverPlayer;
+
+    this.showControlsInFullscreen = shouldShow;
+    this.cdr.detectChanges(); // Force immediate update
+  }
+
   ngOnDestroy() {
     console.log('[ngOnDestroy] Cleaning up video player');
 
     // Unsubscribe from ALL keyboard shortcuts to prevent memory leaks
     this.subscriptions.forEach(sub => sub.unsubscribe());
     this.subscriptions = [];
+
+    // Remove document-level mouse listeners if they exist
+    this.detachFullscreenMouseListeners();
 
     // Clear cached media element
     this.cachedMediaElement = undefined;
@@ -457,8 +573,51 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         sources: [{
           src: videoUrl,
           type: this.mediaType === 'audio' ? 'audio/mp4' : 'video/mp4'
-        }]
+        }],
+        // Use the player container for fullscreen so our timeline/controls are included
+        fullscreen: {
+          navigationUI: 'hide'
+        }
       });
+
+      // Override fullscreen methods to use our player container
+      // This ensures timeline and controls are visible in fullscreen
+      this.player.requestFullscreen = () => {
+        const container = this.playerContainer.nativeElement;
+        if (container.requestFullscreen) {
+          return container.requestFullscreen();
+        } else if ((container as any).webkitRequestFullscreen) {
+          return (container as any).webkitRequestFullscreen();
+        } else if ((container as any).mozRequestFullScreen) {
+          return (container as any).mozRequestFullScreen();
+        } else if ((container as any).msRequestFullscreen) {
+          return (container as any).msRequestFullscreen();
+        }
+        return Promise.reject('Fullscreen not supported');
+      };
+
+      // Override exitFullscreen
+      this.player.exitFullscreen = () => {
+        if (document.exitFullscreen) {
+          return document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          return (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          return (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          return (document as any).msExitFullscreen();
+        }
+        return Promise.resolve();
+      };
+
+      // Override isFullscreen to check our container
+      this.player.isFullscreen = () => {
+        const fullscreenElement = document.fullscreenElement ||
+                                  (document as any).webkitFullscreenElement ||
+                                  (document as any).mozFullScreenElement ||
+                                  (document as any).msFullscreenElement;
+        return fullscreenElement === this.playerContainer.nativeElement;
+      };
 
       // Cache the media element to avoid repeated DOM queries on every change detection
       this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
@@ -546,6 +705,10 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.player.on('play', () => {
         this.ngZone.run(() => {
           this.isPlaying = true;
+          // Hide controls when playing starts in fullscreen (unless mouse is hovering)
+          if (this.isFullscreen) {
+            this.updateFullscreenControlsVisibility();
+          }
         });
       });
 
@@ -553,8 +716,64 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       this.player.on('pause', () => {
         this.ngZone.run(() => {
           this.isPlaying = false;
+          // Clear any pending hide timer since we're paused
+          if (this.controlsHideTimer) {
+            clearTimeout(this.controlsHideTimer);
+            this.timers.delete(this.controlsHideTimer);
+            this.controlsHideTimer = null;
+          }
+          // Show controls when paused in fullscreen
+          if (this.isFullscreen) {
+            this.updateFullscreenControlsVisibility();
+          }
         });
       });
+
+      // Handle fullscreen change events
+      this.player.on('fullscreenchange', () => {
+        this.ngZone.run(() => {
+          this.isFullscreen = !!this.player!.isFullscreen();
+
+          // Attach/detach document-level mouse listeners for fullscreen
+          if (this.isFullscreen) {
+            this.attachFullscreenMouseListeners();
+            // Assume mouse is over player when entering fullscreen
+            // This ensures controls show immediately
+            this.isMouseOverPlayer = true;
+          } else {
+            this.detachFullscreenMouseListeners();
+            this.isMouseOverPlayer = false;
+          }
+
+          this.updateFullscreenControlsVisibility();
+        });
+      });
+
+      // Also listen to native fullscreen events as backup
+      document.addEventListener('fullscreenchange', () => {
+        this.ngZone.run(() => {
+          this.isFullscreen = !!document.fullscreenElement;
+
+          // Attach/detach document-level mouse listeners for fullscreen
+          if (this.isFullscreen) {
+            this.attachFullscreenMouseListeners();
+            // Assume mouse is over player when entering fullscreen
+            // This ensures controls show immediately
+            this.isMouseOverPlayer = true;
+          } else {
+            this.detachFullscreenMouseListeners();
+            this.isMouseOverPlayer = false;
+          }
+
+          this.updateFullscreenControlsVisibility();
+        });
+      });
+
+      // Add mouse movement tracking for fullscreen controls
+      const playerEl = this.player.el();
+      playerEl.addEventListener('mousemove', this.onPlayerMouseMove.bind(this));
+      playerEl.addEventListener('mouseenter', this.onPlayerMouseEnter.bind(this));
+      playerEl.addEventListener('mouseleave', this.onPlayerMouseLeave.bind(this));
 
       // Handle error event
       this.player.on('error', () => {
@@ -716,6 +935,96 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
         }
       })
     );
+
+    // M: Add marker at playhead or from selection
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'm', preventDefault: true }).subscribe(() => {
+        this.openAddMarkerDialog();
+      })
+    );
+
+    // Cmd+E: Export clip
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'meta.e', preventDefault: true }).subscribe(() => {
+        this.openExportDialog();
+      })
+    );
+
+    // ?: Show keyboard shortcuts help
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'shift./', preventDefault: true }).subscribe(() => {
+        this.showKeyboardShortcuts();
+      })
+    );
+  }
+
+  /**
+   * Show keyboard shortcuts help dialog
+   */
+  showKeyboardShortcuts() {
+    const shortcuts = `
+Keyboard Shortcuts:
+
+Space - Play/Pause (resets to 1x speed)
+J - Rewind / Slow down playback
+K - Pause and reset speed
+L - Fast forward / Speed up playback
+← - Seek backward 5 seconds
+→ - Seek forward 5 seconds
+F - Toggle fullscreen
+I - Set In point (selection start)
+O - Set Out point (selection end)
+A - Select cursor tool
+R - Select range/highlight tool
+M - Add marker at playhead or from selection
+⌘E - Export clip(s)
+? - Show keyboard shortcuts
+
+Tip: Right-click on the timeline for additional options.
+    `.trim();
+
+    alert(shortcuts);
+  }
+
+  /**
+   * Handle timeline context menu (right-click)
+   */
+  onTimelineContextMenu(event: { event: MouseEvent, time: number }) {
+    // Store the time where the user clicked for context menu actions
+    this.contextMenuClickTime = event.time;
+
+    // Set menu position
+    this.contextMenuPosition = {
+      x: event.event.clientX,
+      y: event.event.clientY
+    };
+
+    // Open the context menu
+    if (this.contextMenuTrigger) {
+      this.contextMenuTrigger.openMenu();
+    }
+  }
+
+  /**
+   * Handle "Add Marker" from context menu
+   */
+  onContextMenuAddMarker() {
+    // Temporarily set current time to the context menu click time
+    const originalTime = this.currentTime;
+    this.currentTime = this.contextMenuClickTime;
+
+    // Open marker dialog (which will use currentTime if no selection)
+    this.openAddMarkerDialog().then(() => {
+      // Restore original time
+      this.currentTime = originalTime;
+    });
+  }
+
+  /**
+   * Handle "Export Clip" from context menu
+   */
+  onContextMenuExport() {
+    this.openExportDialog();
   }
 
   seekToTime(seconds: number, sectionIndex?: number) {
@@ -1004,6 +1313,18 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
+    // Determine start and end time:
+    // If there's a selection (range > 1 second), use it
+    // Otherwise, use playhead position with 1 second duration
+    let startTime = this.currentSelection.startTime;
+    let endTime = this.currentSelection.endTime;
+
+    if (endTime - startTime < 1) {
+      // No valid selection, use current playhead position
+      startTime = this.currentTime;
+      endTime = Math.min(startTime + 1, this.duration); // 1 second marker or until end
+    }
+
     // Import and open the AddMarkerDialogComponent as a modal
     const { AddMarkerDialogComponent } = await import('../add-marker-dialog/add-marker-dialog.component');
 
@@ -1012,8 +1333,8 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       data: {
         videoId: videoId,
         videoTitle: this.data.videoTitle || 'Video',
-        startTime: this.currentSelection.startTime,
-        endTime: this.currentSelection.endTime
+        startTime: startTime,
+        endTime: endTime
       }
     });
 
@@ -1121,9 +1442,15 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   formatTime(seconds: number): string {
-    const mins = Math.floor(seconds / 60);
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
   }
 
   formatTimeRange(startSeconds: number, endSeconds: number): string {
@@ -1142,6 +1469,121 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
   /**
    * Open bulk export dialog with filtered sections
    */
+  /**
+   * Open export dialog with options for selected range or specific markers/sections
+   */
+  async openExportDialog() {
+    // Prevent opening multiple export dialogs
+    if (this.exportDialogOpen) {
+      return;
+    }
+
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      return;
+    }
+
+    const videoPath = this.data.videoPath || this.data.analysis?.video.currentPath;
+    if (!videoPath) {
+      this.notificationService.toastOnly('error', 'Error', 'No video path available');
+      return;
+    }
+
+    // Get all sections from database
+    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+    // Import and open the ExportDialogComponent
+    const { ExportDialogComponent } = await import('../export-dialog/export-dialog.component');
+
+    // Mark dialog as open
+    this.exportDialogOpen = true;
+
+    const dialogRef = this.dialog.open(ExportDialogComponent, {
+      width: '800px',
+      maxHeight: '90vh',
+      data: {
+        sections: dbSections.map(section => ({
+          id: section.id,
+          category: section.category || 'Other',
+          description: section.description || section.title || '',
+          startSeconds: section.start_seconds,
+          endSeconds: section.end_seconds || (section.start_seconds + 30),
+          timeRange: this.formatTimeRange(section.start_seconds, section.end_seconds)
+        })),
+        selectionStart: this.currentSelection.startTime,
+        selectionEnd: this.currentSelection.endTime,
+        videoId: videoId,
+        videoPath: videoPath,
+        videoTitle: this.data.videoTitle || 'Video'
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    // Mark dialog as closed
+    this.exportDialogOpen = false;
+
+    if (result?.export) {
+      // Handle the export
+      await this.processExport(result.data);
+    }
+  }
+
+  /**
+   * Process the export request
+   */
+  private async processExport(exportData: any) {
+    const sections: any[] = [];
+
+    // Add selection if included
+    if (exportData.includeSelection) {
+      sections.push({
+        start_seconds: exportData.selectionStart,
+        end_seconds: exportData.selectionEnd,
+        category: 'Selection',
+        description: 'Timeline Selection'
+      });
+    }
+
+    // Add selected sections
+    exportData.sections.forEach((section: any) => {
+      sections.push({
+        start_seconds: section.startSeconds,
+        end_seconds: section.endSeconds,
+        category: section.category,
+        description: section.description
+      });
+    });
+
+    if (sections.length === 0) {
+      this.notificationService.toastOnly('info', 'No Clips', 'No sections selected for export');
+      return;
+    }
+
+    // Call the existing bulk export dialog with the selected sections
+    await this.processBulkExport(exportData.videoId, exportData.videoPath, sections);
+  }
+
+  /**
+   * Process bulk export with given sections
+   */
+  private async processBulkExport(videoId: string, videoPath: string, sections: any[]) {
+    // Import and open the BulkExportDialogComponent
+    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
+
+    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: videoId,
+        videoPath: videoPath,
+        sections: sections
+      }
+    });
+
+    await dialogRef.afterClosed().toPromise();
+  }
+
   async openBulkExport() {
     const videoId = this.data.videoId || this.data.analysis?.id;
     if (!videoId) {
@@ -1423,36 +1865,40 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
       hasTranscript: !!transcript
     };
 
-    // Parse and load analysis metadata if available
-    if (analysis) {
+    // Load sections (custom markers and analysis sections)
+    // Load sections regardless of whether there's an analysis - custom markers should always show
+    if (sections && sections.length > 0) {
       try {
         // Convert database sections to timeline format
-        if (sections && sections.length > 0) {
-          this.timelineSections = sections.map((section: any) => ({
-            startTime: section.start_seconds,
-            endTime: section.end_seconds || (section.start_seconds + 30),
-            category: section.category || 'General',
-            description: section.description || section.title || '',
-            color: this.getCategoryColor(section.category || 'General')
-          }));
+        this.timelineSections = sections.map((section: any) => ({
+          startTime: section.start_seconds,
+          endTime: section.end_seconds || (section.start_seconds + 30),
+          category: section.category || 'General',
+          description: section.description || section.title || '',
+          color: this.getCategoryColor(section.category || 'General')
+        }));
 
-          // Build metadata object for display
-          this.metadata = {
-            sections: sections.map((s: any) => ({
-              startSeconds: s.start_seconds,
-              endSeconds: s.end_seconds,
-              timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
-              category: s.category || 'General',
-              description: s.description || s.title || '',
-              quotes: [] // Database doesn't store quotes separately
-            }))
-          } as any;
-        }
+        // Build metadata object for display
+        this.metadata = {
+          sections: sections.map((s: any) => ({
+            startSeconds: s.start_seconds,
+            endSeconds: s.end_seconds,
+            timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
+            category: s.category || 'General',
+            description: s.description || s.title || '',
+            quotes: [] // Database doesn't store quotes separately
+          }))
+        } as any;
 
-        console.log('Loaded analysis with', this.timelineSections.length, 'sections');
+        console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and analysis)');
       } catch (error) {
-        console.error('Failed to parse analysis metadata:', error);
+        console.error('Failed to load sections:', error);
       }
+    }
+
+    // Parse and load analysis metadata if available
+    if (analysis) {
+      console.log('Analysis metadata available');
     }
 
     // Load transcript if available

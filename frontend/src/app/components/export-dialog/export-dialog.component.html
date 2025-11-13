@@ -1,0 +1,57 @@
+<div class="export-dialog">
+  <h2 mat-dialog-title>
+    <mat-icon>file_download</mat-icon>
+    Export Clips
+  </h2>
+
+  <mat-dialog-content class="export-content">
+    <!-- Category Sections (includes selection if available) -->
+    <div class="categories-container" *ngIf="sections.length > 0">
+      <div class="export-header">
+        <p class="hint-text">Select clips to export:</p>
+        <div class="collapse-controls">
+          <button mat-icon-button
+                  (click)="allCollapsed ? expandAll() : collapseAll()"
+                  [matTooltip]="allCollapsed ? 'Expand All' : 'Collapse All'"
+                  class="collapse-toggle">
+            <mat-icon>{{ allCollapsed ? 'unfold_more' : 'unfold_less' }}</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <cascade-list
+        [items]="sections"
+        [displayConfig]="displayConfig"
+        [groupConfig]="groupConfig"
+        [selectionMode]="selectionMode"
+        [selectedItemIds]="selectedSectionIds"
+        [statusMapper]="getItemStatus"
+        (itemsSelected)="onSectionsSelected($event)"
+        (itemsDeselected)="onSectionsDeselected($event)"
+        (groupToggle)="onGroupToggle($event)"
+        emptyMessage="No markers or sections available"
+        emptyIcon="bookmark_border">
+      </cascade-list>
+    </div>
+
+    <!-- No Sections Message -->
+    <div class="no-sections" *ngIf="sections.length === 0">
+      <mat-icon class="no-sections-icon">info</mat-icon>
+      <p>No markers or sections available to export.</p>
+      <p class="hint">Add markers using <kbd>M</kbd> or right-click on the timeline.</p>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions class="export-actions">
+    <button mat-button (click)="cancel()" [disabled]="isExporting">Cancel</button>
+    <button
+      mat-raised-button
+      color="primary"
+      (click)="export()"
+      [disabled]="getSelectedCount() === 0 || isExporting">
+      <mat-spinner diameter="20" *ngIf="isExporting" style="display: inline-block; margin-right: 8px;"></mat-spinner>
+      <mat-icon *ngIf="!isExporting">file_download</mat-icon>
+      Export {{ getSelectedCount() }} {{ getSelectedCount() === 1 ? 'Clip' : 'Clips' }}
+    </button>
+  </mat-dialog-actions>
+</div>

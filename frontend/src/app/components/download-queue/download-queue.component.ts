@@ -115,15 +115,20 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   async ngOnInit() {
     // Subscribe to processing jobs (analysis jobs only, NOT batch downloads)
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
-      this.processingJobs = Array.from(jobsMap.values());
+      this.ngZone.run(() => {
+        this.processingJobs = Array.from(jobsMap.values());
 
-      // Auto-remove completed/failed jobs after a short delay
-      this.processingJobs.forEach(job => {
-        if (job.stage === 'completed' || job.stage === 'failed') {
-          setTimeout(() => {
-            this.downloadProgressService.removeJob(job.id);
-          }, 2000); // Show for 2 seconds then remove
-        }
+        // Auto-remove completed/failed jobs after a short delay
+        this.processingJobs.forEach(job => {
+          if (job.stage === 'completed' || job.stage === 'failed') {
+            setTimeout(() => {
+              this.downloadProgressService.removeJob(job.id);
+            }, 2000); // Show for 2 seconds then remove
+          }
+        });
+
+        // Force change detection to update UI
+        this.cdr.detectChanges();
       });
     });
 
@@ -693,6 +698,11 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
               const errorMessage = data.job.error || 'Unknown error occurred during analysis';
               this.notificationService.error('Analysis Failed', errorMessage);
             }
+
+            // Force change detection after job update
+            this.ngZone.run(() => {
+              this.cdr.detectChanges();
+            });
           }
         }
       } catch (error: any) {

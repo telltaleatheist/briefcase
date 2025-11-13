@@ -1,0 +1,155 @@
+<!-- Standalone Search Bar -->
+<div class="search-bar-standalone">
+  <mat-icon class="search-icon">search</mat-icon>
+  <input
+    class="standalone-search-input"
+    type="text"
+    [(ngModel)]="searchQuery"
+    (ngModelChange)="onSearchQueryChange()"
+    (keydown)="onSearchInputKeyDown($event)"
+    placeholder="Search videos..."
+    [matTooltip]="filtersExpanded ? '' : 'Expand filters below for advanced search options'">
+  <button mat-icon-button
+          class="clear-search-btn"
+          *ngIf="hasActiveFilters()"
+          (click)="clearSearch()"
+          matTooltip="Clear search">
+    <mat-icon>clear</mat-icon>
+  </button>
+  <button mat-icon-button
+          class="expand-filters-btn"
+          (click)="toggleFiltersExpanded()"
+          [matTooltip]="filtersExpanded ? 'Hide filters' : 'Show filters'">
+    <mat-icon>{{ filtersExpanded ? 'expand_less' : 'expand_more' }}</mat-icon>
+  </button>
+  <span *ngIf="selectedTags.length > 0" class="active-indicator">
+    {{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }}
+  </span>
+</div>
+
+<!-- Search Filters Accordion -->
+<mat-accordion class="search-filters-accordion">
+  <mat-expansion-panel
+    [expanded]="filtersExpanded"
+    (opened)="onFiltersOpened()"
+    (closed)="onFiltersClosed()">
+    <mat-expansion-panel-header>
+      <mat-panel-title>
+        <mat-icon>filter_list</mat-icon>
+        <span>Search Filters & Sorting</span>
+      </mat-panel-title>
+    </mat-expansion-panel-header>
+
+    <!-- Search Filters -->
+    <div class="filter-section">
+      <div class="filter-section-title">Search in:</div>
+      <div class="filter-checkboxes-compact">
+        <mat-checkbox
+          [(ngModel)]="searchFilters.filename"
+          (change)="onSearchFilterChange()">
+          Filename
+        </mat-checkbox>
+        <mat-checkbox
+          [(ngModel)]="searchFilters.aiDescription"
+          (change)="onSearchFilterChange()">
+          AI Description
+        </mat-checkbox>
+        <mat-checkbox
+          [(ngModel)]="searchFilters.transcript"
+          (change)="onSearchFilterChange()">
+          Transcript
+        </mat-checkbox>
+        <mat-checkbox
+          [(ngModel)]="searchFilters.analysis"
+          (change)="onSearchFilterChange()">
+          Analysis
+        </mat-checkbox>
+        <mat-checkbox
+          [(ngModel)]="searchFilters.tags"
+          (change)="onSearchFilterChange()">
+          Tags
+        </mat-checkbox>
+      </div>
+    </div>
+
+    <!-- Sort buttons -->
+    <div class="filter-section">
+      <div class="filter-section-title">Sort by:</div>
+      <div class="sort-buttons-compact">
+        <button mat-stroked-button
+                (click)="changeSortBy('date')"
+                [color]="sortBy === 'date' ? 'primary' : undefined">
+          Date {{ getSortArrow('date') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('date-added')"
+                [color]="sortBy === 'date-added' ? 'primary' : undefined">
+          Added {{ getSortArrow('date-added') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('filename')"
+                [color]="sortBy === 'filename' ? 'primary' : undefined">
+          Name {{ getSortArrow('filename') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('size')"
+                [color]="sortBy === 'size' ? 'primary' : undefined">
+          Size {{ getSortArrow('size') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('no-transcript')"
+                [color]="sortBy === 'no-transcript' ? 'primary' : undefined">
+          No Transcript {{ getSortArrow('no-transcript') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('no-analysis')"
+                [color]="sortBy === 'no-analysis' ? 'primary' : undefined">
+          No Analysis {{ getSortArrow('no-analysis') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Tag Filters -->
+    <div class="filter-section" *ngIf="allTags && (allTags.people.length > 0 || allTags.topic.length > 0)">
+      <div class="filter-section-title">
+        Filter by Tags
+        <button mat-button
+                *ngIf="selectedTags.length > 0"
+                color="warn"
+                (click)="clearTagFilters()"
+                style="margin-left: 8px; font-size: 12px; padding: 0 8px; min-width: auto; line-height: 24px;">
+          Clear ({{ selectedTags.length }})
+        </button>
+      </div>
+
+      <!-- Compact Tag Chips -->
+      <div class="tag-chips-compact">
+        <div class="tag-group" *ngIf="allTags?.people && allTags.people.length > 0">
+          <span class="tag-group-label">People:</span>
+          <mat-chip-set class="compact-chip-set">
+            <mat-chip
+              *ngFor="let tag of allTags.people.slice(0, 15)"
+              (click)="toggleTag(tag.name)"
+              [class.selected]="isTagSelected(tag.name)"
+              class="compact-chip">
+              {{ tag.name }} <span class="chip-count">({{ tag.count }})</span>
+            </mat-chip>
+          </mat-chip-set>
+        </div>
+
+        <div class="tag-group" *ngIf="allTags?.topic && allTags.topic.length > 0">
+          <span class="tag-group-label">Topics:</span>
+          <mat-chip-set class="compact-chip-set">
+            <mat-chip
+              *ngFor="let tag of allTags.topic.slice(0, 15)"
+              (click)="toggleTag(tag.name)"
+              [class.selected]="isTagSelected(tag.name)"
+              class="compact-chip">
+              {{ tag.name }} <span class="chip-count">({{ tag.count }})</span>
+            </mat-chip>
+          </mat-chip-set>
+        </div>
+      </div>
+    </div>
+  </mat-expansion-panel>
+</mat-accordion>

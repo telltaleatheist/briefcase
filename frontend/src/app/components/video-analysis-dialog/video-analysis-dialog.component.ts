@@ -305,27 +305,26 @@ export class VideoAnalysisDialogComponent implements OnInit {
       return;
     }
 
-    // For transcribe/analyze modes, add to analysis queue
-    // If we have selected videos from library, add each one
-    if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
-      for (const video of this.data.selectedVideos) {
-        this.analysisQueueService.addPendingJob({
-          input: video.current_path,
-          inputType: 'file',
-          mode: formValue.mode,
-          aiModel: formValue.aiModel,
-          apiKey: formValue.apiKey,
-          ollamaEndpoint: formValue.ollamaEndpoint,
-          whisperModel: formValue.whisperModel,
-          language: formValue.language,
-          customInstructions: formValue.customInstructions,
-          displayName: video.filename || 'Unknown',
-          videoId: video.id,  // Include video ID for progress tracking
-          loading: false
-        });
-      }
+    // For transcribe/analyze modes, prepare job data to return
+    // Don't add to queue here - let parent component do it after dialog closes
+    let jobsToAdd: any[] = [];
 
-      // Toast notification removed - download queue dialog shows the status
+    // If we have selected videos from library, prepare each one
+    if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
+      jobsToAdd = this.data.selectedVideos.map(video => ({
+        input: video.current_path,
+        inputType: 'file',
+        mode: formValue.mode,
+        aiModel: formValue.aiModel,
+        apiKey: formValue.apiKey,
+        ollamaEndpoint: formValue.ollamaEndpoint,
+        whisperModel: formValue.whisperModel,
+        language: formValue.language,
+        customInstructions: formValue.customInstructions,
+        displayName: video.filename || 'Unknown',
+        videoId: video.id,  // Include video ID for progress tracking
+        loading: false
+      }));
     } else {
       // Single video/URL
       let displayName = 'Video Analysis';
@@ -352,7 +351,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
         displayName = parts[parts.length - 1] || 'Local video';
       }
 
-      this.analysisQueueService.addPendingJob({
+      jobsToAdd = [{
         input: formValue.input,
         inputType: formValue.inputType,
         mode: formValue.mode,
@@ -364,13 +363,11 @@ export class VideoAnalysisDialogComponent implements OnInit {
         customInstructions: formValue.customInstructions,
         displayName: displayName,
         loading: false
-      });
-
-      // Toast notification removed - download queue dialog shows the status
+      }];
     }
 
-    // Close the dialog
-    this.dialogRef.close({ success: true });
+    // Close the dialog and return job data for parent to add
+    this.dialogRef.close({ success: true, jobsToAdd });
   }
 
   async browseFile(): Promise<void> {

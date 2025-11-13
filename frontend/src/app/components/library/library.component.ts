@@ -35,10 +35,16 @@ import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
 import { DownloadProgressService } from '../../services/download-progress.service';
 import { SocketService } from '../../services/socket.service';
+import { LibraryStateService, ClipLibrary as LibraryStateClipLibrary } from '../../services/library-state.service';
+import { VideoFilterService, FilterCriteria } from '../../services/video-filter.service';
+import { VideoOperationsService } from '../../services/video-operations.service';
+import { AnalysisQueueService } from '../../services/analysis-queue.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
 import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/preview-dialog.component';
+import { SearchBarComponent, SearchCriteriaChange, TagData } from './search-bar/search-bar.component';
+import { LibraryHeaderComponent } from './library-header/library-header.component';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
   ListItem,
@@ -95,6 +101,8 @@ interface UnimportedVideo {
     MatSnackBarModule,
     ScrollingModule,
     AngularSplitModule,
+    SearchBarComponent,
+    LibraryHeaderComponent,
     CascadeListComponent
   ],
   templateUrl: './library.component.html',
@@ -109,6 +117,18 @@ export class LibraryComponent implements OnInit, OnDestroy {
   filteredVideos: DatabaseVideo[] = [];
   stats: DatabaseStats | null = null;
   batchProgress: BatchProgress | null = null;
+
+  // Reactive observables from services (Phase 4 - Reactive Pattern)
+  videos$ = this.libraryStateService.videos$;
+  filteredVideos$ = this.libraryStateService.filteredVideos$;
+  selectedVideoIds$ = this.libraryStateService.selectedVideoIds$;
+  selectedCount$ = this.libraryStateService.selectedCount$;
+  hasSelection$ = this.libraryStateService.hasSelection$;
+  stats$ = this.libraryStateService.stats$;
+  allTags$ = this.libraryStateService.allTags$;
+  currentLibrary$ = this.libraryStateService.currentLibrary$;
+  libraries$ = this.libraryStateService.libraries$;
+  isLoadingLibraries$ = this.libraryStateService.isLoadingLibraries$;
 
   // Libraries
   libraries: ClipLibrary[] = [];
@@ -362,6 +382,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
     { id: 'delete', label: 'Delete from Database', icon: 'delete' }
   ];
 
+  // Subscription management for cleanup
+  private subscriptions: any[] = [];
+
   // Note: Keyboard handling is now fully managed by cascade-list component
   // item-list handles: arrow navigation, type-ahead, Cmd+A, Delete, Space, Escape
   // item-list emits events: spaceAction, deleteAction, itemsSelected, itemHighlighted, etc.
@@ -379,7 +402,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
     private snackBar: MatSnackBar,
     private downloadProgressService: DownloadProgressService,
     private socketService: SocketService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private libraryStateService: LibraryStateService,
+    private videoFilterService: VideoFilterService,
+    private videoOperationsService: VideoOperationsService,
+    private analysisQueueService: AnalysisQueueService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -426,7 +453,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Subscribe to analysis queue jobs to show progress bars
     const previousJobs = new Map<string, any>();
-    this.downloadProgressService.jobs$.subscribe(jobsMap => {
+    this.subscriptions.push(this.downloadProgressService.jobs$.subscribe(jobsMap => {
       console.log('[LibraryComponent] Jobs update received, job count:', jobsMap.size);
 
       // Check for newly completed jobs to reload video data
@@ -438,7 +465,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
           console.log('[LibraryComponent] Job completed, refreshing video list:', jobId);
           // Clear cache and reload to show updated has_analysis flag
           this.databaseLibraryService.clearCache();
-          this.loadVideos();
+          this.loadVideos().then(() => {
+            // Force change detection after reload
+            this.cdr.detectChanges();
+          });
         }
       });
 
@@ -468,10 +498,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // Trigger change detection with new Map reference and version increment
       this.videoProcessingStates = new Map(this.videoProcessingStates);
       this.progressVersion++;
-    });
+
+      // DON'T call detectChanges() here - it causes cascade with download-queue component
+      // Angular's default change detection will pick up the Map reference change
+      // Only the download-queue component should trigger change detection for job updates
+    }));
 
     // Subscribe to video renamed events from WebSocket
-    this.socketService.onVideoRenamed().subscribe(event => {
+    this.subscriptions.push(this.socketService.onVideoRenamed().subscribe(event => {
       console.log('[LibraryComponent] Video renamed event received:', event);
 
       // Find the video in our local list and update it
@@ -495,20 +529,20 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
         console.log('[LibraryComponent] Video updated in UI:', event.videoId, event.newFilename);
       }
-    });
+    }));
 
     // Subscribe to video imported events from WebSocket
-    this.socketService.onVideoImported().subscribe(async event => {
+    this.subscriptions.push(this.socketService.onVideoImported().subscribe(async event => {
       console.log('[LibraryComponent] Video imported event received:', event);
 
       // Reload videos from the database to include the new video
       await this.loadVideos();
 
       console.log('[LibraryComponent] Videos reloaded after import. Total videos:', this.videos.length);
-    });
+    }));
 
     // Subscribe to transcription completed events to update video has_transcript flag
-    this.socketService.onTranscriptionCompleted().subscribe(event => {
+    this.subscriptions.push(this.socketService.onTranscriptionCompleted().subscribe(event => {
       console.log('[LibraryComponent] Transcription completed event received:', event);
 
       // Find the video by path and update its transcript flag
@@ -537,16 +571,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
           }
         });
       }
-    });
+    }));
 
     // Subscribe to transcription failed events to handle errors
-    this.socketService.onTranscriptionFailed().subscribe(event => {
+    this.subscriptions.push(this.socketService.onTranscriptionFailed().subscribe(event => {
       console.error('[LibraryComponent] Transcription failed:', event);
       this.notificationService.toastOnly('error', 'Transcription Failed', event.error || 'An error occurred during transcription');
-    });
+    }));
 
     // Subscribe to processing completed events to update video has_analysis flag
-    this.socketService.listenTo<any>('processing-completed').subscribe(event => {
+    this.subscriptions.push(this.socketService.listenTo<any>('processing-completed').subscribe(event => {
       console.log('[LibraryComponent] Processing completed event received:', event);
 
       // Find the video by path or jobId and update its analysis flag
@@ -576,16 +610,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
           }
         });
       }
-    });
+    }));
 
     // Subscribe to processing failed events to handle analysis errors
-    this.socketService.onProcessingFailed().subscribe(event => {
+    this.subscriptions.push(this.socketService.onProcessingFailed().subscribe(event => {
       console.error('[LibraryComponent] Processing failed:', event);
       this.notificationService.toastOnly('error', 'Analysis Failed', event.error || 'An error occurred during video analysis');
-    });
+    }));
 
     // Check for query param to highlight a specific video
-    this.route.queryParams.subscribe(params => {
+    this.subscriptions.push(this.route.queryParams.subscribe(params => {
       console.log('[LibraryComponent] Query params received:', params);
       const videoIdToHighlight = params['highlightVideo'];
       if (videoIdToHighlight) {
@@ -598,7 +632,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
           replaceUrl: true
         });
       }
-    });
+    }));
 
     console.log(`[LibraryComponent] Total load time: ${(performance.now() - startTime).toFixed(0)}ms`);
 
@@ -618,6 +652,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    // Unsubscribe from all subscriptions to prevent memory leaks
+    this.subscriptions.forEach(sub => {
+      if (sub && typeof sub.unsubscribe === 'function') {
+        sub.unsubscribe();
+      }
+    });
+    this.subscriptions = [];
+
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
     }
@@ -673,6 +715,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
     try {
       this.stats = await this.databaseLibraryService.getStats();
       console.log('Database stats:', this.stats);
+
+      // Update state service
+      this.libraryStateService.setStats(this.stats);
     } catch (error) {
       console.error('Failed to load stats:', error);
       // Don't show error notification - empty library is expected
@@ -707,6 +752,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
         const initialResponse = await this.databaseLibraryService.getVideos(20, 0);
         this.videos = initialResponse.videos;
+
+        // Update state service
+        this.libraryStateService.setVideos(this.videos);
+
         this.applyFiltersAndSort();
         this.markItemsWithSuggestions(); // Add class to items with suggestions
         console.log(`[loadVideos] Loaded initial ${this.videos.length} videos`);
@@ -726,6 +775,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
         console.log(`[loadVideos] Fetched ${response.videos.length} videos from API`);
         this.videos = response.videos;
         console.log(`[loadVideos] AFTER assignment: this.videos.length = ${this.videos.length}`);
+
+        // Update state service
+        this.libraryStateService.setVideos(this.videos);
+
         this.applyFiltersAndSort();
         this.markItemsWithSuggestions(); // Add class to items with suggestions
         console.log(`[loadVideos] Loaded ${this.videos.length} videos (full reload, fresh from DB)`);
@@ -778,6 +831,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
         this.videos = [...this.videos, ...response.videos];
 
+        // Update state service
+        this.libraryStateService.setVideos(this.videos);
+
         console.log(`[loadRemainingVideos] AFTER append: this.videos.length = ${this.videos.length}`);
         this.applyFiltersAndSort();
         offset += batchSize;
@@ -804,6 +860,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
     try {
       this.allTags = await this.databaseLibraryService.getTags();
       console.log('Loaded tags:', this.allTags);
+
+      // Update state service
+      this.libraryStateService.setAllTags(this.allTags);
     } catch (error) {
       console.error('Failed to load tags:', error);
     }
@@ -816,6 +875,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
     try {
       this.isLoadingLibraries = true;
 
+      // Update state service
+      this.libraryStateService.setLoadingLibraries(true);
+
       const url = await this.backendUrlService.getApiUrl('/database/libraries');
       const response = await this.http.get<{
         libraries: ClipLibrary[];
@@ -827,6 +889,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
         this.activeLibrary = response.activeLibrary;
         this.selectedLibraryId = response.activeLibrary?.id || '';
         console.log(`[loadLibraries] Loaded ${this.libraries.length} libraries`);
+
+        // Update state service
+        this.libraryStateService.setLibraries(this.libraries);
+        this.libraryStateService.setCurrentLibrary(this.activeLibrary);
       }
     } catch (error) {
       const errorStatus = (error as any)?.status;
@@ -845,6 +911,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     } finally {
       this.isLoadingLibraries = false;
+
+      // Update state service
+      this.libraryStateService.setLoadingLibraries(false);
     }
   }
 
@@ -1470,31 +1539,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Apply file type filter to videos
    */
-  applyFileTypeFilter(videos: DatabaseVideo[]): DatabaseVideo[] {
-    // If all filters are enabled, return all videos
-    if (Object.values(this.fileTypeFilters).every(v => v)) {
-      return videos;
-    }
-
-    // Define file extension categories
-    const VIDEO_EXTENSIONS = ['.mov', '.mp4', '.avi', '.mkv', '.webm', '.m4v', '.flv'];
-    const AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'];
-    const DOCUMENT_EXTENSIONS = ['.pdf', '.epub', '.mobi', '.txt', '.md'];
-    const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
-    const WEBPAGE_EXTENSIONS = ['.html', '.htm', '.mhtml'];
-
-    return videos.filter(video => {
-      const ext = '.' + (video.filename.split('.').pop()?.toLowerCase() || '');
-
-      if (this.fileTypeFilters.video && VIDEO_EXTENSIONS.includes(ext)) return true;
-      if (this.fileTypeFilters.audio && AUDIO_EXTENSIONS.includes(ext)) return true;
-      if (this.fileTypeFilters.document && DOCUMENT_EXTENSIONS.includes(ext)) return true;
-      if (this.fileTypeFilters.image && IMAGE_EXTENSIONS.includes(ext)) return true;
-      if (this.fileTypeFilters.webpage && WEBPAGE_EXTENSIONS.includes(ext)) return true;
-
-      return false;
-    });
-  }
+  // Removed: applyFileTypeFilter - now handled by VideoFilterService
 
   /**
    * Toggle file type filter
@@ -1530,39 +1575,22 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Apply search, tag filters, file type filters, and sorting
    */
-  async applyFiltersAndSort() {
-    let filtered = this.videos;
+  applyFiltersAndSort() {
+    // Use VideoFilterService for all filtering/sorting
+    const criteria: FilterCriteria = {
+      searchQuery: this.searchQuery,
+      searchFilters: this.searchFilters,
+      selectedTags: this.selectedTags,
+      fileTypeFilters: this.fileTypeFilters,
+      sortBy: this.sortBy,
+      sortOrder: this.sortOrder
+    };
 
-    // Apply file type filter first
-    filtered = this.applyFileTypeFilter(filtered);
-
-    // Apply tag filter
-    if (this.selectedTags.length > 0) {
-      try {
-        const response = await this.databaseLibraryService.getVideosByTags(this.selectedTags);
-        // Filter current videos to only include those in the tag-filtered results
-        const tagFilteredIds = new Set(response.videos.map(v => v.id));
-        filtered = filtered.filter(v => tagFilteredIds.has(v.id));
-      } catch (error) {
-        console.error('Failed to filter by tags:', error);
-      }
-    }
-
-    // Then apply search with filters
-    filtered = await this.databaseLibraryService.searchVideos(
-      this.searchQuery,
-      filtered,
-      this.searchFilters
-    );
-
-    // Sort
-    filtered = this.databaseLibraryService.sortVideos(
-      filtered,
-      this.sortBy,
-      this.sortOrder
-    );
-
+    const filtered = this.videoFilterService.applyFilters(this.videos, criteria);
     this.filteredVideos = filtered;
+
+    // Update state service
+    this.libraryStateService.setFilteredVideos(filtered);
 
     // Group videos by week/folder
     this.groupVideosByWeek();
@@ -1746,13 +1774,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Select all videos and weeks
    */
   selectAll() {
-    // Select all videos
-    this.filteredVideos.forEach(video => this.selectedVideos.add(video.id));
-    this.updateSelectedCount(); // Update cached count
+    // Use LibraryStateService to select all filtered videos
+    this.libraryStateService.selectAllVideos();
 
-    // Select all weeks
+    // Also update local state for weeks
+    this.selectedVideos = this.libraryStateService.getSelectedVideoIds();
     this.groupedVideos.forEach(group => this.selectedWeeks.add(group.week));
-
+    this.updateSelectedCount();
     this.updateAllSelectedState();
   }
 
@@ -1809,19 +1837,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
   selectAllMissingTranscript() {
     // Toggle behavior: if already selected, deselect those videos
     if (this.isMissingTranscriptSelected) {
-      // Deselect all videos without transcription (only analyzable media)
-      this.filteredVideos.forEach(video => {
-        if (!video.has_transcript && this.canAnalyzeMedia(video)) {
-          this.selectedVideos.delete(video.id);
-        }
+      // Use service to get videos missing transcript, then deselect them
+      const videosToDeselect = this.videoFilterService.getVideosMissingTranscript(this.filteredVideos);
+      videosToDeselect.forEach(video => {
+        this.libraryStateService.deselectVideo(video.id);
+        this.selectedVideos.delete(video.id);
       });
       this.isMissingTranscriptSelected = false;
     } else {
-      // Add videos without transcription to current selection (only analyzable media)
-      this.filteredVideos.forEach(video => {
-        if (!video.has_transcript && this.canAnalyzeMedia(video)) {
-          this.selectedVideos.add(video.id);
-        }
+      // Use service to get and select videos missing transcript
+      const videosToSelect = this.videoFilterService.getVideosMissingTranscript(this.filteredVideos);
+      videosToSelect.forEach(video => {
+        this.libraryStateService.selectVideo(video.id);
+        this.selectedVideos.add(video.id);
       });
       this.isMissingTranscriptSelected = true;
     }
@@ -1836,19 +1864,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
   selectAllMissingAnalysis() {
     // Toggle behavior: if already selected, deselect those videos
     if (this.isMissingAnalysisSelected) {
-      // Deselect all videos without analysis (only analyzable media)
-      this.filteredVideos.forEach(video => {
-        if (!video.has_analysis && this.canAnalyzeMedia(video)) {
-          this.selectedVideos.delete(video.id);
-        }
+      // Use service to get videos missing analysis, then deselect them
+      const videosToDeselect = this.videoFilterService.getVideosMissingAnalysis(this.filteredVideos);
+      videosToDeselect.forEach(video => {
+        this.libraryStateService.deselectVideo(video.id);
+        this.selectedVideos.delete(video.id);
       });
       this.isMissingAnalysisSelected = false;
     } else {
-      // Add videos without analysis to current selection (only analyzable media)
-      this.filteredVideos.forEach(video => {
-        if (!video.has_analysis && this.canAnalyzeMedia(video)) {
-          this.selectedVideos.add(video.id);
-        }
+      // Use service to get and select videos missing analysis
+      const videosToSelect = this.videoFilterService.getVideosMissingAnalysis(this.filteredVideos);
+      videosToSelect.forEach(video => {
+        this.libraryStateService.selectVideo(video.id);
+        this.selectedVideos.add(video.id);
       });
       this.isMissingAnalysisSelected = true;
     }
@@ -1862,6 +1890,27 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   onSearchChange() {
     this.applyFiltersAndSort();
+  }
+
+  /**
+   * Handle search criteria change from SearchBarComponent
+   */
+  onSearchCriteriaChange(criteria: SearchCriteriaChange): void {
+    this.searchQuery = criteria.searchQuery;
+    this.searchFilters = criteria.searchFilters;
+    this.selectedTags = criteria.selectedTags;
+    this.fileTypeFilters = criteria.fileTypeFilters;
+    this.sortBy = criteria.sortBy;
+    this.sortOrder = criteria.sortOrder;
+
+    this.applyFiltersAndSort();
+  }
+
+  /**
+   * Handle clear all search filters
+   */
+  onClearAllSearch(): void {
+    this.clearSearch();
   }
 
   /**
@@ -2961,6 +3010,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
         },
         disableClose: false
       });
+
+      dialogRef.afterClosed().subscribe(result => {
+        if (result && result.success && result.jobsToAdd) {
+          setTimeout(() => {
+            for (const jobData of result.jobsToAdd) {
+              this.analysisQueueService.addPendingJob(jobData);
+            }
+            console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
+          }, 0);
+        }
+      });
     }
   }
 
@@ -3067,6 +3127,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     dialogRef.afterClosed().subscribe(result => {
       if (result && result.success) {
+        // Add jobs to queue AFTER dialog has closed to prevent UI freeze
+        if (result.jobsToAdd) {
+          setTimeout(() => {
+            for (const jobData of result.jobsToAdd) {
+              this.analysisQueueService.addPendingJob(jobData);
+            }
+            console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
+          }, 0);
+        }
+
         // Clear selection after adding to queue
         this.selectedVideos.clear();
         this.updateAllSelectedState();
@@ -3090,8 +3160,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
     });
 
     dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success) {
-        console.log('Video added to analysis queue');
+      if (result && result.success && result.jobsToAdd) {
+        setTimeout(() => {
+          for (const jobData of result.jobsToAdd) {
+            this.analysisQueueService.addPendingJob(jobData);
+          }
+          console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
+        }, 0);
       }
     });
   }
@@ -3135,8 +3210,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
     });
 
     dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success) {
-        console.log('URL download added to queue');
+      if (result && result.success && result.jobsToAdd) {
+        // Add jobs to queue AFTER dialog has closed to prevent UI freeze
+        // Use setTimeout to defer until next tick, ensuring dialog animations complete
+        setTimeout(() => {
+          for (const jobData of result.jobsToAdd) {
+            this.analysisQueueService.addPendingJob(jobData);
+          }
+          console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
+        }, 0);
       }
     });
   }
@@ -3576,8 +3658,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   toggleAllSelection() {
     if (this.isAllSelected) {
-      // Deselect all
-      this.selectedVideos.clear();
+      // Deselect all using service
+      this.libraryStateService.clearSelection();
+      this.selectedVideos = new Set();
       this.selectedWeeks.clear();
       this.isAllSelected = false;
       this.isMissingTranscriptSelected = false;
@@ -3699,9 +3782,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
       // Use batch delete endpoint for better performance
       const response = await this.databaseLibraryService.deleteVideoBatch(videoIds, deleteFiles);
 
+      // Update state service - remove deleted videos
+      this.libraryStateService.removeVideos(videoIds);
+
       // Clear selection
       this.selectedVideos.clear();
-      this.updateSelectedCount(); // Update cached count
+      this.updateSelectedCount();
       this.isAllSelected = false;
 
       // Show result notification
@@ -4303,8 +4389,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
       });
 
       dialogRef.afterClosed().subscribe(result => {
-        if (result && result.success) {
-          console.log('Import added to queue');
+        if (result && result.success && result.jobsToAdd) {
+          setTimeout(() => {
+            for (const jobData of result.jobsToAdd) {
+              this.analysisQueueService.addPendingJob(jobData);
+            }
+            console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
+          }, 0);
         }
       });
     } catch (error) {
@@ -4387,7 +4478,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
       dialogRef.afterClosed().subscribe(result => {
         if (result && result.success) {
-          console.log('Import added to queue');
+          if (result.jobsToAdd) {
+            setTimeout(() => {
+              for (const jobData of result.jobsToAdd) {
+                this.analysisQueueService.addPendingJob(jobData);
+              }
+              console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
+            }, 0);
+          }
           this.loadVideos(); // Refresh the video list
         }
       });
@@ -5144,16 +5242,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Copy filename to clipboard
    */
   copyFilename(video: DatabaseVideo) {
-    navigator.clipboard.writeText(video.filename).then(() => {
-      this.snackBar.open('Filename copied to clipboard', 'Close', {
-        duration: 2000
-      });
-    }).catch(err => {
-      console.error('Failed to copy filename:', err);
-      this.snackBar.open('Failed to copy filename', 'Close', {
-        duration: 2000
-      });
-    });
+    // Use VideoOperationsService for clipboard operations
+    this.videoOperationsService.copyFilename(video.filename);
   }
 
   /**
@@ -5161,27 +5251,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   openFileLocation(video: DatabaseVideo) {
     if (!video.current_path) {
-      this.snackBar.open('File path not available', 'Close', {
-        duration: 2000
-      });
+      this.notificationService.toastOnly('warning', 'File Path Not Available', 'The file path is not available for this video');
       return;
     }
 
-    this.http.post(`${this.backendUrl}/api/path/open-file-location`, {
-      filePath: video.current_path
-    }).subscribe({
-      next: () => {
-        this.snackBar.open('Opened file location', 'Close', {
-          duration: 2000
-        });
-      },
-      error: (error) => {
-        console.error('Failed to open file location:', error);
-        this.snackBar.open('Failed to open file location', 'Close', {
-          duration: 2000
-        });
-      }
-    });
+    // Use VideoOperationsService for file system operations
+    this.videoOperationsService.openFileLocation(video.current_path);
   }
 
   /**

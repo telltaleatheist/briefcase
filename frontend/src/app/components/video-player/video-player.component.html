@@ -107,7 +107,9 @@
     </div>
 
     <!-- Analysis Sections Sidebar with Tabs -->
-    <div class="sections-sidebar" *ngIf="!error && !isLoading && duration > 0">
+    <div class="sections-sidebar"
+         *ngIf="!error && !isLoading && duration > 0"
+         [class.hide-in-fullscreen]="isFullscreen">
       <!-- Auto-scroll toggle button - Always visible -->
       <div class="sidebar-toolbar">
         <button
@@ -146,14 +148,6 @@
                       <span class="filter-label">{{ filter.label }}</span>
                     </label>
                   </div>
-                  <button
-                    mat-stroked-button
-                    class="export-filtered-btn"
-                    (click)="openBulkExport()"
-                    [disabled]="filteredMetadataSections.length === 0">
-                    <mat-icon>video_library</mat-icon>
-                    Export Filtered Clips ({{ filteredMetadataSections.length }})
-                  </button>
                 </mat-expansion-panel>
               </mat-accordion>
 
@@ -236,6 +230,8 @@
   <!-- Timeline with Range Selection -->
   <app-video-timeline
     *ngIf="!error && !isLoading && duration > 0"
+    [class.fullscreen-controls]="isFullscreen"
+    [class.show-in-fullscreen]="isFullscreen && showControlsInFullscreen"
     [duration]="duration"
     [currentTime]="currentTime"
     [sections]="timelineSections"
@@ -244,28 +240,26 @@
     (seek)="onTimelineSeek($event)"
     (selectionChange)="onSelectionChange($event)"
     (playPause)="onPlayPause()"
-    (playbackSpeed)="onPlaybackSpeed($event)">
+    (playbackSpeed)="onPlaybackSpeed($event)"
+    (contextMenu)="onTimelineContextMenu($event)">
   </app-video-timeline>
 
-  <!-- Clip Creation Actions -->
-  <div class="clip-actions" *ngIf="!error && !isLoading">
-    <button
-      mat-raised-button
-      color="primary"
-      (click)="openCreateClipDialog()"
-      [disabled]="currentSelection.endTime - currentSelection.startTime < 1"
-      matTooltip="Keyboard: A (Cursor) • R (Range) • J/K/L (Playback) • Space (Play/Pause) • I/O (In/Out)">
-      <mat-icon>content_cut</mat-icon>
-      Create Clip ({{ formatTime(currentSelection.startTime) }} - {{ formatTime(currentSelection.endTime) }})
-    </button>
-    <button
-      mat-raised-button
-      color="accent"
-      (click)="openAddMarkerDialog()"
-      [disabled]="currentSelection.endTime - currentSelection.startTime < 1"
-      matTooltip="Add a custom marker/note to this time range">
+  <!-- Timeline Context Menu -->
+  <div [style.left.px]="contextMenuPosition.x" [style.top.px]="contextMenuPosition.y"
+       [style.position]="'fixed'" [style.visibility]="'hidden'"
+       #contextMenuTrigger="matMenuTrigger" [matMenuTriggerFor]="timelineContextMenu"></div>
+  <mat-menu #timelineContextMenu="matMenu">
+    <button mat-menu-item (click)="onContextMenuAddMarker()">
       <mat-icon>bookmark_add</mat-icon>
-      Add Marker ({{ formatTime(currentSelection.startTime) }} - {{ formatTime(currentSelection.endTime) }})
+      <span>Add Marker</span>
     </button>
+    <button mat-menu-item (click)="onContextMenuExport()" [disabled]="currentSelection.endTime - currentSelection.startTime < 1">
+      <mat-icon>file_download</mat-icon>
+      <span>Export Clip</span>
+    </button>
+  </mat-menu>
+
+  <!-- Clip Creation Actions - HIDDEN FOR NOW, will be replaced with better UI -->
+  <div class="clip-actions" *ngIf="false">
   </div>
 </div>

@@ -405,6 +405,11 @@
   padding: 0 !important; // Zero padding on parent
   margin: 0 !important;
 
+  // Hide sidebar in fullscreen mode
+  &.hide-in-fullscreen {
+    display: none;
+  }
+
   .sidebar-toolbar {
     display: flex;
     align-items: center;
@@ -921,6 +926,25 @@
 app-video-timeline {
   width: 100%;
   position: relative;
+
+  // Fullscreen mode: position timeline at bottom with overlay
+  &.fullscreen-controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    opacity: 0;
+    transform: translateY(100%);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+
+    &.show-in-fullscreen {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+  }
 }
 
 .clip-actions {
@@ -929,18 +953,48 @@ app-video-timeline {
   gap: 16px; // Add spacing between buttons
   padding: 16px 24px;
   background-color: #000;
-  border-top: 1px solid #333;
-  width: 100%;
-  position: relative;
 
+  // Add padding to buttons for better click targets
   button {
+    padding: 12px 24px;
+    min-height: 48px;
+
     mat-icon {
-      font-size: 20px;
-      width: 20px;
-      height: 20px;
       margin-right: 8px;
     }
   }
+
+  // Fullscreen mode: position actions above timeline
+  &.fullscreen-controls {
+    position: fixed;
+    bottom: 80px; // Above timeline
+    left: 50%;
+    transform: translateX(-50%) translateY(100%);
+    z-index: 101;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+    background-color: rgba(0, 0, 0, 0.8);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+
+    &.show-in-fullscreen {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
+    }
+
+    // Larger buttons in fullscreen for easier clicking
+    button {
+      padding: 16px 28px;
+      min-height: 56px;
+      font-size: 16px;
+    }
+  }
+
+  border-top: 1px solid #333;
+  width: 100%;
+  position: relative;
 }
 
 // Responsive adjustments

@@ -13,208 +13,39 @@
     </div>
   </div>
 
-  <!-- Header with stats and actions -->
-  <div class="library-header">
-    <div class="header-content">
-      <div class="title-and-selector">
-        <h1>
-          <mat-icon>video_library</mat-icon>
-          Video Library
-        </h1>
-
-        <!-- Library Selector -->
-        <div class="library-selector">
-          <!-- Loading state -->
-          <div *ngIf="isLoadingLibraries" class="library-loading">
-            <mat-spinner diameter="24"></mat-spinner>
-            <span style="margin-left: 8px;">Connecting to library service...</span>
-          </div>
-
-          <!-- Library dropdown when loaded -->
-          <mat-form-field appearance="outline" class="library-dropdown" *ngIf="!isLoadingLibraries && libraries.length > 0">
-            <mat-label>Library</mat-label>
-            <mat-select [(ngModel)]="selectedLibraryId" (selectionChange)="onLibraryChange()">
-              <mat-option *ngFor="let library of libraries" [value]="library.id">
-                {{ library.name }}
-              </mat-option>
-            </mat-select>
-          </mat-form-field>
-
-          <!-- Create library button when no libraries exist -->
-          <button mat-raised-button color="accent" (click)="openManageLibraries()" *ngIf="!isLoadingLibraries && libraries.length === 0">
-            <mat-icon>add</mat-icon>
-            Create Library
-          </button>
-
-          <!-- Manage button -->
-          <button mat-icon-button (click)="openManageLibraries()" matTooltip="Manage Libraries" *ngIf="!isLoadingLibraries && libraries.length > 0">
-            <mat-icon>settings</mat-icon>
-          </button>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Action buttons - Library View -->
-    <div class="header-actions" *ngIf="pageMode === 'library'">
-      <button mat-raised-button color="primary" (click)="openImportManager()" matTooltip="Import specific videos from clips folder">
-        <mat-icon>file_download</mat-icon>
-        Import Videos
-      </button>
-      <button mat-raised-button color="primary" (click)="downloadFromUrl()" matTooltip="Download video from URL and add to queue">
-        <mat-icon>link</mat-icon>
-        Download from URL
-      </button>
-      <button mat-raised-button color="accent" (click)="viewUnimportedVideos()" matTooltip="Scan for new videos, find orphaned entries, and manage your library">
-        <mat-icon>manage_search</mat-icon>
-        Video Management
-        <span class="badge" *ngIf="stats && stats.unlinkedVideos > 0">{{ stats.unlinkedVideos }}</span>
-      </button>
-    </div>
-
-    <!-- Action buttons - Management View -->
-    <div class="header-actions" *ngIf="pageMode === 'management'">
-      <button mat-raised-button (click)="backToLibrary()">
-        <mat-icon>arrow_back</mat-icon>
-        Back to Library
-      </button>
-    </div>
-  </div>
+  <!-- Library Header Component -->
+  <app-library-header
+    [libraries]="libraries"
+    [selectedLibraryId]="selectedLibraryId"
+    [isLoadingLibraries]="isLoadingLibraries"
+    [pageMode]="pageMode"
+    [stats]="stats"
+    (libraryChange)="onLibraryChange()"
+    (manageLibraries)="openManageLibraries()"
+    (importVideos)="openImportManager()"
+    (downloadFromUrl)="downloadFromUrl()"
+    (openVideoManagement)="viewUnimportedVideos()"
+    (backToLibrary)="backToLibrary()">
+  </app-library-header>
 
   <!-- Main Content -->
 
   <!-- Library View -->
   <div *ngIf="pageMode === 'library'">
-    <!-- Standalone Search Bar -->
-    <div class="search-bar-standalone">
-      <mat-icon class="search-icon">search</mat-icon>
-      <input
-        class="standalone-search-input"
-        type="text"
-        [(ngModel)]="searchQuery"
-        (ngModelChange)="onSearchChange()"
-        (keydown)="onSearchInputKeyDown($event)"
-        placeholder="Search videos..."
-        [matTooltip]="searchFiltersExpanded ? '' : 'Expand filters below for advanced search options'">
-      <button mat-icon-button
-              class="clear-search-btn"
-              *ngIf="searchQuery || selectedTags.length > 0"
-              (click)="clearSearch()"
-              matTooltip="Clear search">
-        <mat-icon>clear</mat-icon>
-      </button>
-      <button mat-icon-button
-              class="expand-filters-btn"
-              (click)="searchFiltersExpanded = !searchFiltersExpanded"
-              [matTooltip]="searchFiltersExpanded ? 'Hide filters' : 'Show filters'">
-        <mat-icon>{{ searchFiltersExpanded ? 'expand_less' : 'expand_more' }}</mat-icon>
-      </button>
-      <span *ngIf="selectedTags.length > 0" class="active-indicator">{{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }}</span>
-    </div>
-
-    <!-- Search Filters Accordion -->
-    <mat-accordion class="search-filters-accordion">
-      <mat-expansion-panel [expanded]="searchFiltersExpanded" (opened)="searchFiltersExpanded = true" (closed)="searchFiltersExpanded = false">
-        <mat-expansion-panel-header>
-          <mat-panel-title>
-            <mat-icon>filter_list</mat-icon>
-            <span>Search Filters & Sorting</span>
-          </mat-panel-title>
-        </mat-expansion-panel-header>
-
-        <!-- Search Filters -->
-        <div class="filter-section">
-          <div class="filter-section-title">Search in:</div>
-          <div class="filter-checkboxes-compact">
-            <mat-checkbox [(ngModel)]="searchFilters.filename" (change)="onSearchChange()">Filename</mat-checkbox>
-            <mat-checkbox [(ngModel)]="searchFilters.aiDescription" (change)="onSearchChange()">AI Description</mat-checkbox>
-            <mat-checkbox [(ngModel)]="searchFilters.transcript" (change)="onSearchChange()">Transcript</mat-checkbox>
-            <mat-checkbox [(ngModel)]="searchFilters.analysis" (change)="onSearchChange()">Analysis</mat-checkbox>
-            <mat-checkbox [(ngModel)]="searchFilters.tags" (change)="onSearchChange()">Tags</mat-checkbox>
-          </div>
-        </div>
-
-        <!-- Sort buttons -->
-        <div class="filter-section">
-          <div class="filter-section-title">Sort by:</div>
-          <div class="sort-buttons-compact">
-            <button mat-stroked-button
-                    (click)="changeSortBy('date')"
-                    [color]="sortBy === 'date' ? 'primary' : undefined">
-              Date {{ sortBy === 'date' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-            </button>
-            <button mat-stroked-button
-                    (click)="changeSortBy('date-added')"
-                    [color]="sortBy === 'date-added' ? 'primary' : undefined">
-              Added {{ sortBy === 'date-added' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-            </button>
-            <button mat-stroked-button
-                    (click)="changeSortBy('filename')"
-                    [color]="sortBy === 'filename' ? 'primary' : undefined">
-              Name {{ sortBy === 'filename' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-            </button>
-            <button mat-stroked-button
-                    (click)="changeSortBy('size')"
-                    [color]="sortBy === 'size' ? 'primary' : undefined">
-              Size {{ sortBy === 'size' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-            </button>
-            <button mat-stroked-button
-                    (click)="changeSortBy('no-transcript')"
-                    [color]="sortBy === 'no-transcript' ? 'primary' : undefined">
-              No Transcript {{ sortBy === 'no-transcript' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-            </button>
-            <button mat-stroked-button
-                    (click)="changeSortBy('no-analysis')"
-                    [color]="sortBy === 'no-analysis' ? 'primary' : undefined">
-              No Analysis {{ sortBy === 'no-analysis' ? (sortOrder === 'desc' ? '↓' : '↑') : '' }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Tag Filters -->
-        <div class="filter-section" *ngIf="allTags && (allTags.people.length > 0 || allTags.topic.length > 0)">
-          <div class="filter-section-title">
-            Filter by Tags
-            <button mat-button
-                    *ngIf="selectedTags.length > 0"
-                    color="warn"
-                    (click)="clearTagFilters()"
-                    style="margin-left: 8px; font-size: 12px; padding: 0 8px; min-width: auto; line-height: 24px;">
-              Clear ({{ selectedTags.length }})
-            </button>
-          </div>
-
-          <!-- Compact Tag Chips -->
-          <div class="tag-chips-compact">
-            <div class="tag-group" *ngIf="allTags?.people && allTags.people.length > 0">
-              <span class="tag-group-label">People:</span>
-              <mat-chip-set class="compact-chip-set">
-                <mat-chip
-                  *ngFor="let tag of allTags.people.slice(0, 15)"
-                  (click)="toggleTag(tag.name)"
-                  [class.selected]="isTagSelected(tag.name)"
-                  class="compact-chip">
-                  {{ tag.name }} <span class="chip-count">({{ tag.count }})</span>
-                </mat-chip>
-              </mat-chip-set>
-            </div>
-
-            <div class="tag-group" *ngIf="allTags?.topic && allTags.topic.length > 0">
-              <span class="tag-group-label">Topics:</span>
-              <mat-chip-set class="compact-chip-set">
-                <mat-chip
-                  *ngFor="let tag of allTags.topic.slice(0, 15)"
-                  (click)="toggleTag(tag.name)"
-                  [class.selected]="isTagSelected(tag.name)"
-                  class="compact-chip">
-                  {{ tag.name }} <span class="chip-count">({{ tag.count }})</span>
-                </mat-chip>
-              </mat-chip-set>
-            </div>
-          </div>
-        </div>
-      </mat-expansion-panel>
-    </mat-accordion>
+    <!-- Search Bar Component -->
+    <app-search-bar
+      [searchQuery]="searchQuery"
+      [searchFilters]="searchFilters"
+      [selectedTags]="selectedTags"
+      [fileTypeFilters]="fileTypeFilters"
+      [sortBy]="sortBy"
+      [sortOrder]="sortOrder"
+      [allTags]="allTags"
+      [filtersExpanded]="searchFiltersExpanded"
+      (criteriaChange)="onSearchCriteriaChange($event)"
+      (clearAll)="onClearAllSearch()"
+      (filtersExpandedChange)="searchFiltersExpanded = $event">
+    </app-search-bar>
 
   <!-- Results count and selection buttons -->
   <div class="results-header" *ngIf="filteredVideos.length > 0 || (!isLoading && filteredVideos.length === 0)">

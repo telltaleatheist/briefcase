@@ -51,6 +51,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
   @Output() selectionChange = new EventEmitter<TimelineSelection>();
   @Output() playPause = new EventEmitter<void>();
   @Output() playbackSpeed = new EventEmitter<number>(); // Emit playback speed changes
+  @Output() contextMenu = new EventEmitter<{ event: MouseEvent, time: number }>(); // Emit context menu events
 
   @ViewChild('timeline', { static: false }) timelineElement!: ElementRef<HTMLDivElement>;
   @ViewChild('selectionWindow', { static: false }) selectionWindowElement!: ElementRef<HTMLDivElement>;
@@ -428,6 +429,21 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     const x = event.clientX - rect.left;
     const time = this.pixelsToTime(x);
     this.emitSeek(time);
+  }
+
+  /**
+   * Handle right-click context menu on timeline
+   */
+  onTimelineContextMenu(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = this.timelineElement.nativeElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const time = this.pixelsToTime(x);
+
+    // Emit context menu event to parent component
+    this.contextMenu.emit({ event, time });
   }
 
   /**

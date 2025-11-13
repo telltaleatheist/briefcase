@@ -74,3 +74,7 @@ utilities/bin/yt-dlp_linux.backup.*
 utilities/bin/yt-dlp.exe.backup.*
 backend/python/*.md
 backend/python/__pycache__/*
+REFACTORING_COMPLETE_SUMMARY.md
+REFACTORING_PROGRESS.md
+REFACTORING_SESSION_2_SUMMARY.md
+REFACTORING_SESSION_3_SUMMARY.md
