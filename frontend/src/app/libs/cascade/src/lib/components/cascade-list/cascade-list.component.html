@@ -20,12 +20,18 @@
       </div>
 
       <!-- Items List -->
-      <div *ngIf="!isGroupCollapsed(group.id)" class="items-list">
+      <div *ngIf="!isGroupCollapsed(group.id)"
+           class="items-list"
+           cdkDropList
+           [cdkDropListDisabled]="!enableDragDrop"
+           (cdkDropListDropped)="onDrop($event)">
         <!-- Item Container (wraps both card and children) -->
         <div *ngFor="let item of group.items; let i = index; trackBy: trackByItemId">
         <div
           [id]="'item-' + item.id"
           class="item-card"
+          cdkDrag
+          [cdkDragDisabled]="!enableDragDrop"
           [class.selected]="isItemSelected(item)"
           [class.highlighted]="isItemHighlighted(item)"
           [class.selection-edge-top]="isSelectionEdgeTop(group.items, i)"
@@ -49,6 +55,7 @@
           <button *ngIf="childrenConfig?.expandable && hasChildren(item)"
                   class="expand-toggle"
                   (click)="toggleExpanded(item.id, $event)"
+                  (mousedown)="$event.stopPropagation()"
                   [attr.aria-label]="isExpanded(item) ? 'Collapse' : 'Expand'"
                   [attr.aria-expanded]="isExpanded(item)"
                   tabindex="-1">

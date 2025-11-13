@@ -463,6 +463,15 @@ export class AnalysisService {
       return;
     }
 
+    // Clear existing transcript if re-transcribing
+    if (request.videoId) {
+      const existingTranscript = this.databaseService.getTranscript(request.videoId);
+      if (existingTranscript) {
+        this.logger.log(`Clearing existing transcript for video ${request.videoId} before re-transcribing`);
+        this.databaseService.deleteTranscript(request.videoId);
+      }
+    }
+
     // Extract audio (part of transcription process)
     this.updateJob(jobId, {
       status: 'transcribing',
@@ -522,6 +531,24 @@ export class AnalysisService {
   private async processAnalyzePhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job) throw new Error('Job not found');
+
+    // Clear existing analysis data if re-analyzing
+    if (request.videoId) {
+      const existingAnalysis = this.databaseService.getAnalysis(request.videoId);
+      if (existingAnalysis) {
+        this.logger.log(`Clearing existing analysis data for video ${request.videoId} before re-analyzing`);
+
+        // Delete analysis record and AI-generated sections
+        this.databaseService.deleteAnalysis(request.videoId);
+
+        // Delete AI-generated tags only (preserve user-created tags)
+        this.databaseService.deleteAITagsForVideo(request.videoId);
+
+        // Clear AI description and suggested title
+        this.databaseService.updateVideoDescription(request.videoId, null);
+        this.databaseService.updateVideoSuggestedTitle(request.videoId, null);
+      }
+    }
 
     this.updateJob(jobId, {
       status: 'analyzing',
@@ -774,6 +801,12 @@ export class AnalysisService {
         this.databaseService.updateVideoDescription(videoId, analysisResult.description);
       } else {
         this.logger.warn(`[AI Description Debug] No description in analysisResult for video ${videoId}. Keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
+      }
+
+      // Save suggested title if available
+      if (analysisResult && analysisResult.suggested_title) {
+        this.logger.log(`Saving suggested title for video ${videoId}: ${analysisResult.suggested_title}`);
+        this.databaseService.updateVideoSuggestedTitle(videoId, analysisResult.suggested_title);
       }
 
       // Save tags (people and topics) if available (MOVED OUTSIDE analysis block)

@@ -81,6 +81,8 @@ export class VideoInfoComponent implements OnInit {
   isAddingTag = false;
   newTagName = '';
   newTagType = 'manual';
+  isSuggestedTitleAccepted = false;
+  isAcceptingSuggestedTitle = false;
 
   // Linked files (parent-child relationships)
   childVideos: DatabaseVideo[] = [];
@@ -681,6 +683,76 @@ export class VideoInfoComponent implements OnInit {
       event.preventDefault();
       this.cancelEditingTitle();
     }
+  }
+
+  /**
+   * Format suggested title for display (adds upload date if available)
+   */
+  formatSuggestedTitle(suggestedTitle: string | null): string {
+    if (!this.video || !suggestedTitle) return suggestedTitle || '';
+
+    // Get upload date from video
+    const uploadDate = this.video.upload_date;
+    if (!uploadDate) {
+      // No upload date, just return the suggested title with extension
+      const extension = this.video.file_extension || '.mp4';
+      return `${suggestedTitle}${extension}`;
+    }
+
+    // Format: YYYY-MM-DD [title].ext
+    const extension = this.video.file_extension || '.mp4';
+    return `${uploadDate} ${suggestedTitle}${extension}`;
+  }
+
+  /**
+   * Accept the AI-suggested title and rename the file
+   */
+  async acceptSuggestedTitle() {
+    if (!this.video || !this.video.suggested_title || this.isAcceptingSuggestedTitle) return;
+
+    this.isAcceptingSuggestedTitle = true;
+
+    try {
+      // Format the new filename with upload date
+      const newFilename = this.formatSuggestedTitle(this.video.suggested_title);
+
+      // Call backend API to accept suggested title (which will rename the file)
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/accept-suggested-title`);
+      const result = await firstValueFrom(
+        this.http.post<{ success: boolean; message?: string; error?: string; newPath?: string; newFilename?: string }>(url, {})
+      );
+
+      if (result.success) {
+        // Update local video object
+        if (result.newFilename) {
+          this.video.filename = result.newFilename;
+        }
+        if (result.newPath) {
+          this.video.current_path = result.newPath;
+          // Regenerate the video URL since the path changed
+          this.videoUrl = await this.getVideoUrl();
+        }
+
+        // Mark as accepted so UI disappears
+        this.isSuggestedTitleAccepted = true;
+
+        this.notificationService.success('Title Accepted', 'File has been renamed successfully');
+      } else {
+        this.notificationService.error('Rename Failed', result.error || 'Failed to rename file');
+      }
+    } catch (error) {
+      console.error('Error accepting suggested title:', error);
+      this.notificationService.error('Rename Failed', 'Failed to rename file');
+    } finally {
+      this.isAcceptingSuggestedTitle = false;
+    }
+  }
+
+  /**
+   * Dismiss the suggested title (doesn't delete it, just hides UI)
+   */
+  dismissSuggestedTitle() {
+    this.isSuggestedTitleAccepted = true;
   }
 
   /**

@@ -175,6 +175,37 @@
             <p>{{ video.ai_description }}</p>
           </mat-card>
         </div>
+
+        <!-- Suggested Title (Under AI Description) -->
+        <div class="suggested-title-main" *ngIf="video?.suggested_title && !isSuggestedTitleAccepted">
+          <mat-card class="suggested-title-card">
+            <div class="suggested-title-header">
+              <h3>
+                <mat-icon>auto_awesome</mat-icon>
+                AI Suggested Title
+              </h3>
+              <button mat-icon-button
+                      (click)="dismissSuggestedTitle()"
+                      matTooltip="Dismiss suggestion"
+                      class="dismiss-btn">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+            <div class="suggested-title-content">
+              <p class="suggested-title-text">{{ formatSuggestedTitle(video.suggested_title) }}</p>
+              <p class="suggested-title-hint">This will rename the file to: {{ formatSuggestedTitle(video.suggested_title) }}</p>
+              <div class="suggested-title-actions">
+                <button mat-raised-button
+                        color="primary"
+                        (click)="acceptSuggestedTitle()"
+                        [disabled]="isAcceptingSuggestedTitle">
+                  <mat-icon>check</mat-icon>
+                  {{ isAcceptingSuggestedTitle ? 'Renaming...' : 'Accept & Rename File' }}
+                </button>
+              </div>
+            </div>
+          </mat-card>
+        </div>
       </div>
 
       <!-- Right Column: Metadata -->

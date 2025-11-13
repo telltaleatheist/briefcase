@@ -829,6 +829,106 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/videos/:id/accept-suggested-title
+   * Accept the AI-suggested title and rename the file
+   */
+  @Post('videos/:id/accept-suggested-title')
+  async acceptSuggestedTitle(
+    @Param('id') videoId: string
+  ) {
+    const fs = require('fs').promises;
+    const path = require('path');
+
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Check if video has a suggested title
+      if (!video.suggested_title) {
+        return {
+          success: false,
+          error: 'No suggested title available for this video'
+        };
+      }
+
+      // Format the new filename: YYYY-MM-DD [suggested-title].ext
+      const uploadDate = video.upload_date || '';
+      const extension = video.file_extension || '.mp4';
+      const suggestedTitle = String(video.suggested_title || '').trim();
+
+      let newFilename: string;
+      if (uploadDate) {
+        newFilename = `${uploadDate} ${suggestedTitle}${extension}`;
+      } else {
+        newFilename = `${suggestedTitle}${extension}`;
+      }
+
+      const oldPath = video.current_path as string;
+      const directory = path.dirname(oldPath);
+      const newPath = path.join(directory, newFilename);
+
+      // Check if new path already exists
+      try {
+        await fs.access(newPath);
+        return {
+          success: false,
+          error: 'A file with this name already exists in the library'
+        };
+      } catch {
+        // File doesn't exist, which is what we want
+      }
+
+      // Rename the physical file
+      try {
+        await fs.rename(oldPath, newPath);
+        this.logger.log(`Renamed physical file (suggested title): ${oldPath} -> ${newPath}`);
+      } catch (error: any) {
+        this.logger.error(`Failed to rename physical file: ${error.message}`);
+        return {
+          success: false,
+          error: `Failed to rename file: ${error.message}`
+        };
+      }
+
+      // Update database with new filename and path
+      this.databaseService.updateVideoFilename(videoId, newFilename);
+      this.databaseService.updateVideoPath(videoId, newPath);
+
+      // Clear the suggested_title since it's been accepted
+      this.databaseService.updateVideoSuggestedTitle(videoId, null);
+
+      this.logger.log(`Accepted suggested title for video ${videoId}: ${newFilename}`);
+
+      // Emit WebSocket event to notify frontend of the rename
+      this.mediaEventService.emitVideoRenamed(
+        videoId,
+        video.filename as string,
+        newFilename,
+        newPath
+      );
+
+      return {
+        success: true,
+        message: 'Video renamed successfully with suggested title',
+        newPath: newPath,
+        newFilename: newFilename
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to accept suggested title: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Failed to accept suggested title'
+      };
+    }
+  }
+
+  /**
    * DELETE /api/database/videos/:id
    * Delete a video from the library (both database record AND physical file)
    */

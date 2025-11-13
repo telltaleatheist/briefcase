@@ -169,6 +169,62 @@ TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 
 
 # =============================================================================
+# SUGGESTED TITLE PROMPT
+# =============================================================================
+# Used to generate a suggested filename based on analysis results
+# Variables:
+#   - current_title: current video title/filename (str)
+#   - description: AI-generated video description (str)
+#   - people_tags: comma-separated list of people mentioned (str)
+#   - topic_tags: comma-separated list of topics discussed (str)
+# =============================================================================
+
+SUGGESTED_TITLE_PROMPT = """Based on the AI analysis of this video, suggest a better, more descriptive filename.
+
+**Current Title:** {current_title}
+
+**Video Description:** {description}
+
+**People Mentioned:** {people_tags}
+
+**Topics Discussed:** {topic_tags}
+
+**Requirements:**
+- Use lowercase with spaces (NOT hyphens) between words
+- Be descriptive and keyword-rich to aid in searching
+- Include the most important person's name if applicable
+- Describe the main topic, action, or claim
+- **IMPORTANT: Use commas (,) to separate lists of names, items, or topics**
+- Use dashes (single hyphen with spaces around it " - ") for elaboration or additional context
+- Can be long and detailed (no strict character limit, but keep it reasonable)
+- NO special characters: no periods, quotes, slashes, or other symbols
+- You may use "etc" at the end without a period if listing many items
+- DO NOT include date or file extension
+- Add "(full)" at the end if this is a complete, unedited video
+- Return ONLY the suggested title, nothing else
+
+**Examples showing proper comma usage:**
+- When listing people: "george washington, abraham lincoln, christopher columbus"
+- When listing groups: "jews, ethnic minorities, lgbtq people"
+- When listing topics: "election fraud, qanon, deep state conspiracy"
+
+Examples of good titles:
+- "greg locke prophesies that the conservative movement will be split on jew hate, and tucker carlson is where it starts, after interviewing nick fuentes"
+- "joel webbon says women are atrocious today - theyre hoes, stupid, deceitful, wicked, vile, vote for trans people, etc"
+- "joshua haymes says a satanic statue was being erected in the state capitol, but this extremist destroyed one, and he should be honored for that - michael cassidy"
+- "tucker carlson interviews nick fuentes - ben shapiro was not happy - new york times claims fuentes is replacing charlie kirk (full)"
+- "nick fuentes releases antisemitic video praising racist figures - george washington, abraham lincoln, christopher columbus - hate speech promoting discrimination against jews, ethnic minorities, etc"
+
+Bad examples:
+- "greg-locke-election-fraud" (uses hyphens instead of spaces)
+- "Video about politics" (too generic, has capital letter)
+- "Greg Locke's speech." (has capitals and period)
+- "2021-08-15 sermon.mp4" (includes date and extension)
+
+Suggested title:"""
+
+
+# =============================================================================
 # QUOTE EXTRACTION PROMPT
 # =============================================================================
 # Used to extract specific inflammatory quotes from flagged sections

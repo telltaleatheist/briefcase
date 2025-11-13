@@ -18,7 +18,8 @@ from analysis_prompts import (
     VIDEO_SUMMARY_PROMPT,
     TAG_EXTRACTION_PROMPT,
     SECTION_IDENTIFICATION_PROMPT,
-    QUOTE_EXTRACTION_PROMPT
+    QUOTE_EXTRACTION_PROMPT,
+    SUGGESTED_TITLE_PROMPT
 )
 
 # Try to import OpenAI client (optional dependency)
@@ -411,6 +412,69 @@ def extract_tags(provider: str, endpoint_or_key: str, model: str, transcript_tex
         return {'people': [], 'topics': []}
 
 
+def generate_suggested_title(provider: str, endpoint_or_key: str, model: str, current_title: str, description: str, tags: Dict[str, List[str]]) -> Optional[str]:
+    """Generate a suggested filename based on analysis results"""
+    try:
+        # Format tags for the prompt
+        people_tags = ', '.join(tags.get('people', [])[:5]) if tags.get('people') else 'None'
+        topic_tags = ', '.join(tags.get('topics', [])[:5]) if tags.get('topics') else 'None'
+
+        prompt = SUGGESTED_TITLE_PROMPT.format(
+            current_title=current_title,
+            description=description[:500],  # Limit description length
+            people_tags=people_tags,
+            topic_tags=topic_tags
+        )
+
+        response = call_ai(provider, endpoint_or_key, model, prompt, timeout=30)
+
+        if response:
+            # Clean up the response
+            suggested_title = response.strip()
+
+            # Remove any quotes or extra text
+            if suggested_title.startswith('"') and suggested_title.endswith('"'):
+                suggested_title = suggested_title[1:-1]
+
+            # Remove any file extension if AI added it
+            if '.' in suggested_title:
+                suggested_title = suggested_title.split('.')[0]
+
+            # Remove any date prefix if AI added it
+            import re
+            suggested_title = re.sub(r'^\d{4}-\d{2}-\d{2}[-\s]*', '', suggested_title)
+
+            # Ensure it's lowercase and clean
+            suggested_title = suggested_title.lower().strip()
+
+            # Remove invalid filesystem characters but keep spaces, commas, dashes, and parentheses
+            # Invalid chars on most filesystems: / \ : * ? " < > |
+            suggested_title = re.sub(r'[/\\:*?"<>|]', '', suggested_title)
+
+            # Remove periods except in "(full)" or "etc"
+            suggested_title = re.sub(r'\.(?!\s|$)', '', suggested_title)  # Remove periods not at end
+            suggested_title = re.sub(r'\.$', '', suggested_title)  # Remove trailing period
+
+            # Clean up multiple spaces
+            suggested_title = re.sub(r'\s+', ' ', suggested_title)
+            suggested_title = suggested_title.strip()
+
+            # Reasonable length limit (200 chars to avoid filesystem issues)
+            if len(suggested_title) > 200:
+                suggested_title = suggested_title[:200].rsplit(',', 1)[0]  # Cut at last comma
+                if len(suggested_title) > 200:  # Still too long, cut at last space
+                    suggested_title = suggested_title[:200].rsplit(' ', 1)[0]
+
+            print(f"[DEBUG] Generated suggested title: {suggested_title}", file=sys.stderr)
+            return suggested_title if suggested_title else None
+        else:
+            return None
+
+    except Exception as e:
+        print(f"[WARNING] Suggested title generation failed: {e}", file=sys.stderr)
+        return None
+
+
 def analyze_with_ai(
     provider: str,
     endpoint_or_key: str,
@@ -562,13 +626,18 @@ def analyze_with_ai(
         # Prepend summary to the output file
         prepend_summary_to_file(output_file, summary)
 
+        # Generate suggested title based on analysis
+        send_progress("analysis", 98, "Generating suggested title...")
+        suggested_title = generate_suggested_title(provider, endpoint_or_key, model, video_title, summary, tags)
+
         send_progress("analysis", 100, "Analysis complete!")
 
         return {
             "sections_count": len(analyzed_sections),
             "sections": analyzed_sections,
             "tags": tags,
-            "description": summary  # Add the summary as description for the video
+            "description": summary,  # Add the summary as description for the video
+            "suggested_title": suggested_title  # Add the suggested title
         }
 
     except Exception as e:

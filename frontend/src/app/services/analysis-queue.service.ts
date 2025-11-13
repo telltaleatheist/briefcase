@@ -177,4 +177,11 @@ export class AnalysisQueueService {
 
     this.pendingJobs.next(updatedJobs);
   }
+
+  /**
+   * Reorder pending jobs based on new order
+   */
+  reorderJobs(reorderedJobs: PendingAnalysisJob[]): void {
+    this.pendingJobs.next(reorderedJobs);
+  }
 }

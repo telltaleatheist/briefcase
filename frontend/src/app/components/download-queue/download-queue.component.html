@@ -53,6 +53,8 @@
         [childrenConfig]="childrenConfig"
         [selectionMode]="SelectionMode.Multiple"
         [progressMapper]="jobProgressMapper"
+        [enableDragDrop]="true"
+        (itemsReordered)="onJobsReordered($event)"
         emptyMessage="No jobs in queue"
         emptyIcon="hourglass_empty">
 

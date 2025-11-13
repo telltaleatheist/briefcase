@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
+import { DragDropModule, CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import { Subscription } from 'rxjs';
 import { CascadeSelectionService } from '../../services/cascade-selection.service';
 import {
@@ -27,7 +28,7 @@ import {
 @Component({
   selector: 'cascade-list',
   standalone: true,
-  imports: [CommonModule, MatIconModule, MatTooltipModule, MatMenuModule, MatDividerModule],
+  imports: [CommonModule, MatIconModule, MatTooltipModule, MatMenuModule, MatDividerModule, DragDropModule],
   providers: [CascadeSelectionService],
   templateUrl: './cascade-list.component.html',
   styleUrls: ['./cascade-list.component.scss'],
@@ -78,6 +79,9 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   // Cascade-specific configuration (hierarchical children)
   @Input() childrenConfig?: ChildrenConfig<T>;
 
+  // Drag and drop configuration
+  @Input() enableDragDrop: boolean = false;
+
   // Custom action template (for buttons like delete, remove, etc.)
   @ContentChild('itemActions') itemActionsTemplate: TemplateRef<any> | null = null;
 
@@ -101,6 +105,9 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   @Output() childrenExpanded = new EventEmitter<{ item: T }>();
   @Output() childrenCollapsed = new EventEmitter<{ item: T }>();
   @Output() childClicked = new EventEmitter<{ parent: T; child: CascadeChild }>();
+
+  // Drag and drop output
+  @Output() itemsReordered = new EventEmitter<T[]>();
 
   // ========================================
   // Internal State
@@ -433,7 +440,9 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
       const wasSelected = previousSelected.includes(item.id);
 
       if (wasSelected) {
-        // Item was deselected
+        // Item was deselected - clear highlight
+        this.selectionService.setHighlighted(null);
+        this.itemHighlighted.emit(null);
         this.itemsDeselected.emit([item]);
       } else {
         // Item was selected
@@ -1141,5 +1150,25 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
 
   get hasItemActions(): boolean {
     return !!this.itemActionsTemplate;
+  }
+
+  // ========================================
+  // Drag and Drop
+  // ========================================
+
+  /**
+   * Handle drop event for drag-and-drop reordering
+   */
+  onDrop(event: CdkDragDrop<T[]>) {
+    if (!this.enableDragDrop) return;
+
+    // Get the flat list of items (all items across all groups)
+    const flatItems = this.getFlatItemList();
+
+    // Reorder the items array
+    moveItemInArray(flatItems, event.previousIndex, event.currentIndex);
+
+    // Emit the reordered items
+    this.itemsReordered.emit(flatItems);
   }
 }

@@ -158,9 +158,8 @@
               transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 
-  // Child items (linked files) - indent and style differently
+  // Child items (linked files) - style differently (no indent)
   &.is-child {
-    margin-left: 32px;
     background-color: #f8f9fa;
     border-left: 3px solid #dee2e6;
     min-height: 40px;
@@ -181,7 +180,7 @@
       color: #495057;
     }
 
-    // Preserve child indent when highlighted/selected
+    // Child highlighted/selected (no indent)
     &.highlighted,
     &.selected {
       background-color: rgba(255, 102, 0, 0.12);
@@ -193,7 +192,6 @@
       padding-right: 14px !important;
       padding-top: 10px;
       padding-bottom: 10px;
-      margin-left: 32px !important; // Maintain indent
     }
 
     // Child-specific edge styles
@@ -201,21 +199,18 @@
     &.selected.selection-edge-top {
       border-top: 2px solid rgba(255, 102, 0, 0.6) !important;
       padding-top: 9px !important;
-      margin-left: 32px !important;
     }
 
     &.highlighted.selection-edge-bottom,
     &.selected.selection-edge-bottom {
       border-bottom: 2px solid rgba(255, 102, 0, 0.6) !important;
       padding-bottom: 9px !important;
-      margin-left: 32px !important;
     }
 
     &.highlighted.selection-edge-top.selection-edge-bottom,
     &.selected.selection-edge-top.selection-edge-bottom {
       border: 2px solid rgba(255, 102, 0, 0.6) !important;
       padding: 9px 14px !important;
-      margin-left: 32px !important;
     }
   }
 
@@ -315,7 +310,7 @@
     border-left: 3px solid #adb5bd;
     cursor: pointer;
     min-height: 22px; // Half height
-    padding: 4px 16px 4px 48px; // Reduced padding, maintain indent
+    padding: 4px 16px; // Reduced padding, no indent
     font-style: italic;
 
     &:hover {
@@ -703,14 +698,14 @@
   }
 }
 
-// Children container
+// Children container (with indent)
 .cascade-children {
   display: flex;
   flex-direction: column;
   background-color: #f8f9fa;
   border-left: 3px solid #dee2e6;
-  margin: 0 0 0 40px; // Indent from parent
   padding: 4px 0;
+  margin-left: 24px; // Indent children
   overflow: hidden; // For animation
 }
 
@@ -734,8 +729,6 @@
 
   &:hover {
     background-color: rgba(0, 0, 0, 0.03);
-    border-left-width: 4px; // Slightly thicker border instead of transform
-    padding-left: calc(16px - 1px); // Compensate for thicker border
   }
 
   // Child icon
@@ -885,6 +878,93 @@
 }
 
 // ==================================================
+// Drag & Drop Styles (CDK)
+// ==================================================
+
+// The item being dragged (drag preview)
+.cdk-drag-preview {
+  box-sizing: border-box;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  opacity: 0.9;
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+
+  // Ensure the preview maintains proper styling
+  .item-card {
+    cursor: grabbing !important;
+  }
+
+  // Hide cascade children in drag preview
+  .cascade-children {
+    display: none !important;
+  }
+}
+
+// The placeholder space left behind when dragging
+.cdk-drag-placeholder {
+  opacity: 0.4;
+  background: rgba(255, 102, 0, 0.05);
+  border: 2px dashed rgba(255, 102, 0, 0.3);
+  border-radius: 8px;
+  box-shadow: inset 0 0 10px rgba(255, 102, 0, 0.1); // Orange hint for drop zone
+
+  // Also hide children in placeholder
+  .cascade-children {
+    display: none !important;
+  }
+}
+
+// Smooth animation when dropping
+.cdk-drag-animating {
+  transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+// Ensure drop list animates items smoothly
+.items-list.cdk-drop-list-dragging .item-card:not(.cdk-drag-placeholder) {
+  transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+// Dramatic hover effect when hovering over an item during drag (light mode)
+.items-list.cdk-drop-list-dragging .item-card:not(.cdk-drag-placeholder):hover {
+  background-color: rgba(255, 102, 0, 0.2) !important;
+  border: 2px solid rgba(255, 102, 0, 0.8) !important;
+  box-shadow: 0 0 20px rgba(255, 102, 0, 0.5),
+              0 0 40px rgba(255, 102, 0, 0.3),
+              inset 0 0 16px rgba(255, 102, 0, 0.15) !important;
+  transform: scale(1.02);
+  z-index: 10;
+  padding: 9px 14px !important;
+}
+
+// Show grab cursor when items are draggable
+.item-card.cdk-drag:not([cdkdragdisabled]) {
+  cursor: grab;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+// Prevent expand toggle from interfering with drag
+.expand-toggle {
+  pointer-events: auto;
+  z-index: 10;
+  position: relative;
+  cursor: pointer !important; // Override drag cursor
+
+  // Prevent drag cursor from showing on hover
+  &:hover {
+    cursor: pointer !important;
+  }
+
+  // Ensure mat-icon inside also has pointer cursor
+  mat-icon {
+    cursor: pointer !important;
+  }
+}
+
+// ==================================================
 // Dark Theme Overrides
 // ==================================================
 
@@ -942,9 +1022,8 @@
     background-color: #1a1a1a;
     border-bottom: 1px solid #0a0a0a;
 
-    // Child items (linked files) - indent and style differently in dark mode
+    // Child items (linked files) - style differently in dark mode (no indent)
     &.is-child {
-      margin-left: 32px;
       background-color: #242424;
       border-left: 3px solid #404040;
 
@@ -964,7 +1043,7 @@
         color: #bbb;
       }
 
-      // Preserve child indent when highlighted/selected in dark mode
+      // Child highlighted/selected in dark mode (no indent)
       &.highlighted,
       &.selected {
         background-color: rgba(255, 102, 0, 0.18);
@@ -976,7 +1055,6 @@
         padding-right: 14px !important;
         padding-top: 10px;
         padding-bottom: 10px;
-        margin-left: 32px !important; // Maintain indent
       }
 
       // Child-specific edge styles in dark mode
@@ -984,21 +1062,18 @@
       &.selected.selection-edge-top {
         border-top: 2px solid rgba(255, 102, 0, 0.7) !important;
         padding-top: 9px !important;
-        margin-left: 32px !important;
       }
 
       &.highlighted.selection-edge-bottom,
       &.selected.selection-edge-bottom {
         border-bottom: 2px solid rgba(255, 102, 0, 0.7) !important;
         padding-bottom: 9px !important;
-        margin-left: 32px !important;
       }
 
       &.highlighted.selection-edge-top.selection-edge-bottom,
       &.selected.selection-edge-top.selection-edge-bottom {
         border: 2px solid rgba(255, 102, 0, 0.7) !important;
         padding: 9px 14px !important;
-        margin-left: 32px !important;
       }
     }
 
@@ -1084,7 +1159,7 @@
       background-color: #242424;
       border-left: 3px solid #555;
       min-height: 22px; // Half height
-      padding: 4px 16px 4px 48px; // Reduced padding, maintain indent
+      padding: 4px 16px; // Reduced padding, no indent
 
       &:hover {
         opacity: 0.8;
@@ -1225,6 +1300,7 @@
   .cascade-children {
     background-color: #242424;
     border-left: 3px solid #404040;
+    margin-left: 24px; // Indent children
   }
 
   // Individual child in dark mode
@@ -1318,5 +1394,88 @@
         color: #888;
       }
     }
+  }
+
+  // ==================================================
+  // Dark Theme Drag & Drop Overrides
+  // ==================================================
+
+  // The item being dragged (drag preview) - dark theme
+  .cdk-drag-preview {
+    background-color: rgba(26, 26, 26, 0.7) !important; // Dark background with transparency
+    border: 1px solid rgba(255, 102, 0, 0.5) !important; // Orange border hint
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8),
+                0 0 20px rgba(255, 102, 0, 0.4) !important; // Dramatic shadow with orange glow
+    opacity: 0.85 !important; // More transparent overall
+
+    // Ensure all child elements are dark in dark mode
+    .item-card {
+      background-color: rgba(26, 26, 26, 0.95) !important; // Dark background for the card itself
+      color: #e0e0e0 !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+
+    .item-icon {
+      color: #90caf9 !important;
+    }
+
+    .item-primary {
+      color: #e0e0e0 !important;
+    }
+
+    .item-secondary {
+      color: #aaa !important;
+    }
+
+    .item-metadata {
+      color: #888 !important;
+    }
+
+    .item-badge {
+      background: rgba(144, 202, 249, 0.2) !important;
+      color: #90caf9 !important;
+    }
+
+    .status-indicator {
+      // Maintain status colors
+    }
+
+    .item-progress-bar,
+    .master-progress-bar {
+      background-color: rgba(255, 255, 255, 0.1) !important;
+
+      .progress-fill {
+        // Maintain progress colors
+      }
+    }
+
+    // Hide cascade children in drag preview (dark theme)
+    .cascade-children {
+      display: none !important;
+    }
+  }
+
+  // The placeholder space left behind when dragging - dark theme
+  .cdk-drag-placeholder {
+    background: rgba(255, 102, 0, 0.08);
+    border: 2px dashed rgba(255, 102, 0, 0.4);
+    box-shadow: inset 0 0 12px rgba(255, 102, 0, 0.15); // Orange glow for drop zone
+
+    // Also hide children in placeholder (dark theme)
+    .cascade-children {
+      display: none !important;
+    }
+  }
+
+  // Dramatic hover effect when hovering over an item during drag (dark mode)
+  .items-list.cdk-drop-list-dragging .item-card:not(.cdk-drag-placeholder):hover {
+    background-color: rgba(255, 102, 0, 0.3) !important;
+    border: 2px solid rgba(255, 102, 0, 1.0) !important;
+    box-shadow: 0 0 24px rgba(255, 102, 0, 0.6),
+                0 0 48px rgba(255, 102, 0, 0.4),
+                inset 0 0 20px rgba(255, 102, 0, 0.2) !important;
+    transform: scale(1.02);
+    z-index: 10;
+    padding: 9px 14px !important;
   }
 }

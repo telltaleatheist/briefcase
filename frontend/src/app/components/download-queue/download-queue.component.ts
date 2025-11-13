@@ -80,6 +80,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   private pollingInterval: any = null;
   isProcessing = false;
 
+  // Auto-queue processing (sequential, one-at-a-time)
+  private autoProcessQueue = false;
+
   // Item-list configuration
   SelectionMode = SelectionMode;
 
@@ -281,72 +284,13 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const jobs = this.analysisQueueService.getCurrentPendingJobs();
+    // Enable auto-processing mode (sequential, one-at-a-time)
+    this.autoProcessQueue = true;
 
-    for (const job of jobs) {
-      try {
-        const fullModel = job.aiModel || '';
-        let provider = 'ollama';
-        let modelName = fullModel;
+    // Start only the first pending job
+    await this.startNextPendingJob();
 
-        if (fullModel.startsWith('claude:')) {
-          provider = 'claude';
-          modelName = fullModel.replace('claude:', '');
-        } else if (fullModel.startsWith('openai:')) {
-          provider = 'openai';
-          modelName = fullModel.replace('openai:', '');
-        } else if (fullModel.startsWith('ollama:')) {
-          provider = 'ollama';
-          modelName = fullModel.replace('ollama:', '');
-        }
-
-        const requestData = {
-          inputType: job.inputType,
-          input: job.input,
-          mode: job.mode,
-          customInstructions: job.customInstructions,
-          aiProvider: provider,
-          aiModel: modelName,
-          apiKey: job.apiKey,
-          ollamaEndpoint: job.ollamaEndpoint,
-          whisperModel: job.whisperModel,
-          language: job.language,
-          videoId: job.videoId, // Include videoId for tracking
-        };
-
-        const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
-        const response = await fetch(startUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestData),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to start analysis');
-        }
-
-        const result = await response.json();
-        this.analysisQueueService.removePendingJob(job.id);
-
-        const analysisJob: any = {
-          id: result.jobId,
-          status: 'pending',
-          progress: 0,
-          currentPhase: 'Starting analysis...',
-          input: job.input,
-          customInstructions: job.customInstructions,
-          aiModel: job.aiModel,
-          videoId: job.videoId, // Include videoId for progress tracking in library
-          expanded: false
-        };
-
-        this.downloadProgressService.addOrUpdateAnalysisJob(analysisJob);
-      } catch (error: any) {
-        this.notificationService.error('Failed to Start Job', error.message || `Failed to start analysis for ${job.displayName}`);
-      }
-    }
-
+    // Start polling to track progress
     if (!this.pollingInterval) {
       this.isProcessing = true;
       this.startPolling();
@@ -354,6 +298,103 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
     // Toast notification removed - dialog is already visible showing queue status
     this.cdr.detectChanges();
+  }
+
+  /**
+   * Start the next pending job in the queue (used for sequential processing)
+   */
+  private async startNextPendingJob(): Promise<void> {
+    const jobs = this.analysisQueueService.getCurrentPendingJobs();
+
+    if (jobs.length === 0) {
+      console.log('[DownloadQueue] No more pending jobs to start');
+      this.autoProcessQueue = false;
+      return;
+    }
+
+    // Only start if there are no active jobs (ensures one-at-a-time)
+    const activeJobs = this.processingJobs.filter(job =>
+      job.stage !== 'completed' && job.stage !== 'failed'
+    );
+
+    if (activeJobs.length > 0) {
+      console.log('[DownloadQueue] Job already processing, waiting for completion');
+      return;
+    }
+
+    const job = jobs[0]; // Always take the first pending job
+
+    try {
+      const fullModel = job.aiModel || '';
+      let provider = 'ollama';
+      let modelName = fullModel;
+
+      if (fullModel.startsWith('claude:')) {
+        provider = 'claude';
+        modelName = fullModel.replace('claude:', '');
+      } else if (fullModel.startsWith('openai:')) {
+        provider = 'openai';
+        modelName = fullModel.replace('openai:', '');
+      } else if (fullModel.startsWith('ollama:')) {
+        provider = 'ollama';
+        modelName = fullModel.replace('ollama:', '');
+      }
+
+      const requestData = {
+        inputType: job.inputType,
+        input: job.input,
+        mode: job.mode,
+        customInstructions: job.customInstructions,
+        aiProvider: provider,
+        aiModel: modelName,
+        apiKey: job.apiKey,
+        ollamaEndpoint: job.ollamaEndpoint,
+        whisperModel: job.whisperModel,
+        language: job.language,
+        videoId: job.videoId, // Include videoId for tracking
+      };
+
+      console.log('[DownloadQueue] Starting job:', job.displayName);
+      const startUrl = await this.backendUrlService.getApiUrl('/analysis/start');
+      const response = await fetch(startUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to start analysis');
+      }
+
+      const result = await response.json();
+      this.analysisQueueService.removePendingJob(job.id);
+
+      const analysisJob: any = {
+        id: result.jobId,
+        status: 'pending',
+        progress: 0,
+        currentPhase: 'Starting analysis...',
+        input: job.input,
+        customInstructions: job.customInstructions,
+        aiModel: job.aiModel,
+        videoId: job.videoId, // Include videoId for progress tracking in library
+        expanded: false
+      };
+
+      this.downloadProgressService.addOrUpdateAnalysisJob(analysisJob);
+    } catch (error: any) {
+      console.error('[DownloadQueue] Failed to start job:', error);
+      this.notificationService.error('Failed to Start Job', error.message || `Failed to start analysis for ${job.displayName}`);
+
+      // Remove the failed job from pending and try the next one
+      this.analysisQueueService.removePendingJob(job.id);
+
+      // Try starting the next job if auto-processing is enabled
+      if (this.autoProcessQueue && jobs.length > 1) {
+        setTimeout(() => this.startNextPendingJob(), 1000);
+      }
+    }
   }
 
   removePendingJob(jobId: string): void {
@@ -369,6 +410,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   clearQueue(): void {
     this.analysisQueueService.clearPendingJobs();
+    // Disable auto-processing when user manually clears the queue
+    this.autoProcessQueue = false;
     // Notification removed - user is already in the queue panel
   }
 
@@ -376,6 +419,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Clear both pending and completed jobs
     this.analysisQueueService.clearPendingJobs();
     this.downloadProgressService.clearCompletedJobs();
+    // Disable auto-processing when user manually clears all
+    this.autoProcessQueue = false;
     // Notification removed - user is already in the queue panel
   }
 
@@ -602,9 +647,16 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         );
 
         if (activeJobs.length === 0) {
-          console.log('[DownloadQueue] No active jobs, stopping polling');
-          this.stopPolling();
-          this.isProcessing = false;
+          // If auto-processing is enabled and there are pending jobs, start the next one
+          if (this.autoProcessQueue && this.hasPendingJobs()) {
+            console.log('[DownloadQueue] Job completed, starting next pending job');
+            await this.startNextPendingJob();
+          } else {
+            console.log('[DownloadQueue] No active jobs, stopping polling');
+            this.stopPolling();
+            this.isProcessing = false;
+            this.autoProcessQueue = false;
+          }
           return;
         }
 
@@ -621,11 +673,17 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           const data = await response.json();
 
           if (data.success && data.job) {
+            const previousStatus = job.stage;
             this.downloadProgressService.addOrUpdateAnalysisJob(data.job);
 
-            if (data.job.status === 'completed') {
+            // Show notification on completion or failure (only when status changes)
+            const newStatus = data.job.status?.toLowerCase() || '';
+            const isNewCompletion = (newStatus === 'completed' && previousStatus !== 'completed');
+            const isNewFailure = (newStatus === 'failed' && previousStatus !== 'failed');
+
+            if (isNewCompletion) {
               this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
-            } else if (data.job.status === 'failed') {
+            } else if (isNewFailure) {
               const errorMessage = data.job.error || 'Unknown error occurred during analysis';
               this.notificationService.error('Analysis Failed', errorMessage);
             }
@@ -728,6 +786,23 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     const pendingJob = this.pendingJobs.find(j => j.id === jobId);
     if (pendingJob) {
       this.removePendingJob(jobId);
+    }
+  }
+
+  /**
+   * Handle reordering of jobs via drag and drop
+   */
+  onJobsReordered(reorderedItems: any[]): void {
+    // Filter to only get the pending jobs (processing jobs can't be reordered)
+    const pendingJobIds = new Set(this.pendingJobs.map(j => j.id));
+    const reorderedPendingJobs = reorderedItems
+      .filter(item => pendingJobIds.has(item.id))
+      .map(item => this.pendingJobs.find(j => j.id === item.id)!)
+      .filter(job => job !== undefined);
+
+    // Update the order in the analysis queue service
+    if (reorderedPendingJobs.length > 0) {
+      this.analysisQueueService.reorderJobs(reorderedPendingJobs);
     }
   }
 

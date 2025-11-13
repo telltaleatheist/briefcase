@@ -150,6 +150,7 @@ export class DatabaseService {
         whisper_model TEXT,
         language TEXT,
         transcribed_at TEXT NOT NULL,
+        transcription_time_seconds REAL,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -162,6 +163,7 @@ export class DatabaseService {
         ai_model TEXT NOT NULL,
         ai_provider TEXT,
         analyzed_at TEXT NOT NULL,
+        analysis_time_seconds REAL,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -573,6 +575,63 @@ export class DatabaseService {
         this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
       }
     }
+
+    try {
+      // Migration 10: Add suggested_title column to videos table if it doesn't exist
+      db.exec("SELECT suggested_title FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: suggested_title')) {
+        this.logger.log('Running migration: Adding suggested_title column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN suggested_title TEXT;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: suggested_title column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 11: Add transcription_time_seconds column to transcripts table if it doesn't exist
+      db.exec("SELECT transcription_time_seconds FROM transcripts LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: transcription_time_seconds')) {
+        this.logger.log('Running migration: Adding transcription_time_seconds column to transcripts table');
+        try {
+          db.exec(`
+            ALTER TABLE transcripts ADD COLUMN transcription_time_seconds REAL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: transcription_time_seconds column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 12: Add analysis_time_seconds column to analyses table if it doesn't exist
+      db.exec("SELECT analysis_time_seconds FROM analyses LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: analysis_time_seconds')) {
+        this.logger.log('Running migration: Adding analysis_time_seconds column to analyses table');
+        try {
+          db.exec(`
+            ALTER TABLE analyses ADD COLUMN analysis_time_seconds REAL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: analysis_time_seconds column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
   }
 
   /**
@@ -831,6 +890,32 @@ export class DatabaseService {
     }
   }
 
+  updateVideoSuggestedTitle(id: string, suggestedTitle: string | null) {
+    const db = this.ensureInitialized();
+
+    this.logger.log(`[Suggested Title] Updating suggested title for video ${id}: ${suggestedTitle || 'null'}`);
+
+    try {
+      db.run(
+        `UPDATE videos
+         SET suggested_title = ?
+         WHERE id = ?`,
+        [suggestedTitle, id]
+      );
+
+      this.saveDatabase();
+      this.logger.log(`[Suggested Title] Successfully updated suggested title for video ${id}`);
+    } catch (error: any) {
+      // If column doesn't exist yet (pre-migration), just log and continue
+      if (error.message && error.message.includes('no such column: suggested_title')) {
+        this.logger.warn('suggested_title column does not exist yet - skipping suggested title update');
+      } else {
+        this.logger.error(`[Suggested Title] Failed to update suggested title: ${error.message}`);
+        throw error;
+      }
+    }
+  }
+
   /**
    * Update video's filename
    */
@@ -1035,13 +1120,14 @@ export class DatabaseService {
     srtFormat: string;
     whisperModel?: string;
     language?: string;
+    transcriptionTimeSeconds?: number;
   }) {
     const db = this.ensureInitialized();
 
     db.run(
       `INSERT OR REPLACE INTO transcripts (
-        video_id, plain_text, srt_format, whisper_model, language, transcribed_at
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
+        video_id, plain_text, srt_format, whisper_model, language, transcribed_at, transcription_time_seconds
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         transcript.videoId,
         transcript.plainText,
@@ -1049,6 +1135,7 @@ export class DatabaseService {
         transcript.whisperModel || null,
         transcript.language || null,
         new Date().toISOString(),
+        transcript.transcriptionTimeSeconds || null,
       ]
     );
 
@@ -1085,13 +1172,14 @@ export class DatabaseService {
     sectionsCount?: number;
     aiModel: string;
     aiProvider?: string;
+    analysisTimeSeconds?: number;
   }) {
     const db = this.ensureInitialized();
 
     db.run(
       `INSERT OR REPLACE INTO analyses (
-        video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at, analysis_time_seconds
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         analysis.videoId,
         analysis.aiAnalysis,
@@ -1100,6 +1188,7 @@ export class DatabaseService {
         analysis.aiModel,
         analysis.aiProvider || null,
         new Date().toISOString(),
+        analysis.analysisTimeSeconds || null,
       ]
     );
 
@@ -1173,6 +1262,16 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     db.run('DELETE FROM tags WHERE video_id = ?', [videoId]);
     this.logger.log(`Deleted tags for video ${videoId}`);
+  }
+
+  /**
+   * Delete only AI-generated tags for a video (preserves user-created tags)
+   */
+  deleteAITagsForVideo(videoId: string) {
+    const db = this.ensureInitialized();
+    db.run('DELETE FROM tags WHERE video_id = ? AND source = ?', [videoId, 'ai']);
+    this.saveDatabase();
+    this.logger.log(`Deleted AI-generated tags for video ${videoId}`);
   }
 
   /**

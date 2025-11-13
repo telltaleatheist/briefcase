@@ -21,6 +21,7 @@ export interface DatabaseVideo {
   duration_seconds: number | null;
   file_size_bytes: number | null;
   ai_description: string | null;
+  suggested_title: string | null; // AI-generated suggested filename
   source_url: string | null;
   media_type: string; // 'video', 'audio', 'document', 'image', 'webpage'
   file_extension: string | null; // '.mp4', '.pdf', '.jpg', etc.
