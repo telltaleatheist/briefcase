@@ -5,7 +5,7 @@ export interface PendingAnalysisJob {
   id: string;
   input: string;
   inputType: 'url' | 'file';
-  mode: 'full' | 'transcribe-only';
+  mode: 'full' | 'transcribe-only' | 'process-only';
   aiModel: string;
   apiKey?: string;
   ollamaEndpoint?: string;
@@ -104,7 +104,7 @@ export class AnalysisQueueService {
     videoId?: string;
     videoPath: string;
     filename: string;
-    mode?: 'full' | 'transcribe-only';
+    mode?: 'full' | 'transcribe-only' | 'process-only';
     aiProvider?: 'ollama' | 'claude' | 'openai';
     aiModel?: string;
     customInstructions?: string;
@@ -183,5 +183,12 @@ export class AnalysisQueueService {
    */
   reorderJobs(reorderedJobs: PendingAnalysisJob[]): void {
     this.pendingJobs.next(reorderedJobs);
+  }
+
+  /**
+   * Update custom instructions for a specific job
+   */
+  updateJobCustomInstructions(jobId: string, customInstructions: string): void {
+    this.updatePendingJob(jobId, { customInstructions });
   }
 }

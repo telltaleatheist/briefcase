@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { DatabaseVideo } from './database-library.service';
 
-export type SortField = 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis';
+export type SortField = 'date' | 'upload-date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis';
 export type SortOrder = 'asc' | 'desc';
 
 export interface SearchFilters {
@@ -162,10 +162,17 @@ export class VideoFilterService {
 
       switch (sortBy) {
         case 'date':
+          // Download date - when the user downloaded the file
           comparison = this.compareDates(a.download_date, b.download_date);
           break;
 
+        case 'upload-date':
+          // Upload date - when the content was originally posted/created
+          comparison = this.compareDates(a.upload_date, b.upload_date);
+          break;
+
         case 'date-added':
+          // Added to library date
           comparison = this.compareDates(a.added_at, b.added_at);
           break;
 

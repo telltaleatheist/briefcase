@@ -834,7 +834,8 @@ export class DatabaseController {
    */
   @Post('videos/:id/accept-suggested-title')
   async acceptSuggestedTitle(
-    @Param('id') videoId: string
+    @Param('id') videoId: string,
+    @Body() body?: { customFilename?: string }
   ) {
     const fs = require('fs').promises;
     const path = require('path');
@@ -857,16 +858,23 @@ export class DatabaseController {
         };
       }
 
-      // Format the new filename: YYYY-MM-DD [suggested-title].ext
-      const uploadDate = video.upload_date || '';
-      const extension = video.file_extension || '.mp4';
-      const suggestedTitle = String(video.suggested_title || '').trim();
-
+      // Use custom filename if provided, otherwise format from suggested title
       let newFilename: string;
-      if (uploadDate) {
-        newFilename = `${uploadDate} ${suggestedTitle}${extension}`;
+      if (body?.customFilename) {
+        // Use the custom filename provided by the user
+        newFilename = body.customFilename;
+        this.logger.log(`Using custom filename: ${newFilename}`);
       } else {
-        newFilename = `${suggestedTitle}${extension}`;
+        // Format the new filename: YYYY-MM-DD [suggested-title].ext
+        const uploadDate = video.upload_date || '';
+        const extension = video.file_extension || '.mp4';
+        const suggestedTitle = String(video.suggested_title || '').trim();
+
+        if (uploadDate) {
+          newFilename = `${uploadDate} ${suggestedTitle}${extension}`;
+        } else {
+          newFilename = `${suggestedTitle}${extension}`;
+        }
       }
 
       const oldPath = video.current_path as string;

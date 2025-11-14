@@ -27,10 +27,10 @@ export class SavedLinksController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async addLink(
-    @Body() body: { url: string; title?: string; libraryId?: string }
+    @Body() body: { url: string; title?: string; libraryId?: string; shouldDownload?: boolean }
   ): Promise<SavedLink> {
-    this.logger.log(`Adding new link: ${body.url} (library: ${body.libraryId || 'default'})`);
-    return await this.savedLinksService.addLink(body.url, body.title, body.libraryId);
+    this.logger.log(`Adding new link: ${body.url} (library: ${body.libraryId || 'default'}, download: ${body.shouldDownload !== false})`);
+    return await this.savedLinksService.addLink(body.url, body.title, body.libraryId, body.shouldDownload);
   }
 
   /**

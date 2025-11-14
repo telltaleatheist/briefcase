@@ -19,7 +19,7 @@ export interface AnalyzeDialogData {
   videosWithExistingAnalysis?: number; // Number of selected videos that already have analysis
 }
 
-export type AnalysisOption = 'transcribe-only' | 'transcribe-analyze' | 'skip';
+export type AnalysisOption = 'transcribe-only' | 'transcribe-analyze' | 'fix-aspect-ratio' | 'skip';
 export type AIProvider = 'ollama' | 'claude' | 'openai';
 
 interface ApiKeysConfig {
@@ -80,6 +80,13 @@ interface OllamaModel {
           <div class="option-content">
             <strong>Transcribe + AI Analysis</strong>
             <span class="option-description">Generate transcript and perform AI analysis (recommended)</span>
+          </div>
+        </mat-radio-button>
+
+        <mat-radio-button value="fix-aspect-ratio">
+          <div class="option-content">
+            <strong>Fix Aspect Ratio</strong>
+            <span class="option-description">Process vertical/non-16:9 videos with blurred background</span>
           </div>
         </mat-radio-button>
 
@@ -588,7 +595,7 @@ export class AnalyzeSelectedDialogComponent implements OnInit {
    */
   canConfirm(): boolean {
     if (!this.selectedOption) return false;
-    if (this.selectedOption === 'skip' || this.selectedOption === 'transcribe-only') {
+    if (this.selectedOption === 'skip' || this.selectedOption === 'transcribe-only' || this.selectedOption === 'fix-aspect-ratio') {
       return true;
     }
 

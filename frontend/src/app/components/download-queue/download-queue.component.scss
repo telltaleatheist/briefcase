@@ -1228,6 +1228,60 @@
   }
 }
 
+// Job actions container
+.job-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// Notes button styling
+.notes-btn {
+  background: linear-gradient(135deg, #ff8c42 0%, var(--primary-orange) 100%) !important;
+  color: white !important;
+  font-weight: 500 !important;
+  font-size: 0.8125rem !important;
+  padding: 6px 14px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 6px rgba(255, 107, 53, 0.3) !important;
+  transition: all 0.2s ease !important;
+
+  &:hover {
+    background: linear-gradient(135deg, #ff9d5c 0%, #ff7c42 100%) !important;
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4) !important;
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(255, 107, 53, 0.3) !important;
+  }
+
+  // When notes are present, add a subtle glow
+  &.has-notes {
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%) !important;
+    box-shadow: 0 2px 6px rgba(76, 175, 80, 0.4), 0 0 0 2px rgba(76, 175, 80, 0.2) !important;
+
+    &:hover {
+      background: linear-gradient(135deg, #5cb860 0%, #4caf50 100%) !important;
+      box-shadow: 0 4px 12px rgba(76, 175, 80, 0.5), 0 0 0 2px rgba(76, 175, 80, 0.3) !important;
+    }
+  }
+
+  mat-icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    margin-right: 4px;
+  }
+
+  span {
+    vertical-align: middle;
+  }
+}
+
 // Remove button styling
 .remove-job-btn {
   opacity: 0.7;

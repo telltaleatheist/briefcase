@@ -153,7 +153,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Search and filter
   searchQuery = '';
-  sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date';
+  sortBy: 'date' | 'upload-date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis' = 'date';
   sortOrder: 'asc' | 'desc' = 'desc';
   searchFilters = {
     filename: true,
@@ -289,8 +289,24 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
     enabled: true,
-    groupBy: (video) => this.getWeekIdentifier(new Date(video.download_date || video.added_at)),
-    groupLabel: (weekKey) => this.formatWeekLabel(weekKey),
+    groupBy: (video) => {
+      const downloadDate = new Date(video.download_date || video.added_at);
+      const now = new Date();
+      const hoursSinceDownload = (now.getTime() - downloadDate.getTime()) / (1000 * 60 * 60);
+
+      // Videos from last 24 hours go in "New" group
+      if (hoursSinceDownload < 24) {
+        return 'NEW_VIDEOS_24H';
+      }
+
+      return this.getWeekIdentifier(downloadDate);
+    },
+    groupLabel: (weekKey) => {
+      if (weekKey === 'NEW_VIDEOS_24H') {
+        return '🆕 New (Last 24 Hours)';
+      }
+      return this.formatWeekLabel(weekKey);
+    },
     sortDescending: true,
     selectableGroups: true
   };
@@ -430,19 +446,29 @@ export class LibraryComponent implements OnInit, OnDestroy {
       if (videoIndex !== -1) {
         this.videos[videoIndex].filename = event.newFilename;
         this.videos[videoIndex].current_path = event.newPath;
+        this.videos[videoIndex].file_extension = event.newFilename.split('.').pop() || '';
 
         // Also update in filteredVideos if needed
         const filteredIndex = this.filteredVideos.findIndex(v => v.id === event.videoId);
         if (filteredIndex !== -1) {
           this.filteredVideos[filteredIndex].filename = event.newFilename;
           this.filteredVideos[filteredIndex].current_path = event.newPath;
+          this.filteredVideos[filteredIndex].file_extension = event.newFilename.split('.').pop() || '';
         }
 
         // If this is the selected/highlighted video, update that too
         if (this.selectedVideo && this.selectedVideo.id === event.videoId) {
           this.selectedVideo.filename = event.newFilename;
           this.selectedVideo.current_path = event.newPath;
+          this.selectedVideo.file_extension = event.newFilename.split('.').pop() || '';
         }
+
+        // Force re-render by creating new array references
+        this.videos = [...this.videos];
+        this.filteredVideos = [...this.filteredVideos];
+
+        // Trigger change detection
+        this.cdr.detectChanges();
 
         console.log('[LibraryComponent] Video updated in UI:', event.videoId, event.newFilename);
       }
@@ -538,13 +564,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Check for query param to highlight a specific video
     this.subscriptions.push(this.route.queryParams.subscribe(params => {
       console.log('[LibraryComponent] Query params received:', params);
-      const videoIdToHighlight = params['highlightVideo'];
+      const videoIdToHighlight = params['highlightVideo'] || params['highlight'];
       if (videoIdToHighlight) {
         console.log('[LibraryComponent] Highlighting video with ID:', videoIdToHighlight);
         this.highlightVideoById(videoIdToHighlight);
         // Clear the query param after handling it
         this.router.navigate([], {
-          queryParams: { highlightVideo: null },
+          queryParams: { highlightVideo: null, highlight: null },
           queryParamsHandling: 'merge',
           replaceUrl: true
         });
@@ -1498,9 +1524,10 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     const result = await dialogRef.afterClosed().toPromise();
 
-    if (result === 'accept') {
-      // Accept and rename
-      await this.acceptVideoSuggestion(video);
+    if (result?.action === 'accept' || result === 'accept') {
+      // Accept and rename (support both old and new dialog format)
+      const customFilename = result?.filename;
+      await this.acceptVideoSuggestion(video, customFilename);
     } else if (result === 'reject') {
       // Just reject/clear
       await this.rejectVideoSuggestion(video);
@@ -1510,10 +1537,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Accept the name suggestion and rename the video
    */
-  async acceptVideoSuggestion(video: DatabaseVideo) {
+  async acceptVideoSuggestion(video: DatabaseVideo, customFilename?: string) {
     try {
       const url = await this.backendUrlService.getApiUrl(`/database/videos/${video.id}/accept-suggested-title`);
-      const result = await this.http.post<{ success: boolean; message?: string; error?: string; newPath?: string; newFilename?: string }>(url, {}).toPromise();
+      const body = customFilename ? { customFilename } : {};
+      const result = await this.http.post<{ success: boolean; message?: string; error?: string; newPath?: string; newFilename?: string }>(url, body).toPromise();
 
       if (result?.success) {
         // Update the video object in place
@@ -1994,6 +2022,52 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Process selected videos (from context menu)
+   */
+  async processSelectedVideos() {
+    if (this.selectedVideos.size === 0) {
+      this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to process');
+      return;
+    }
+
+    // Convert Set to array of video IDs
+    const videoIds = Array.from(this.selectedVideos);
+
+    // Get video details for selected videos
+    const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
+
+    this.processVideos(selectedVideoDetails);
+  }
+
+  /**
+   * Process videos to fix aspect ratio (add to analysis queue with process-only mode)
+   */
+  private async processVideos(videos: DatabaseVideo[]) {
+    for (const video of videos) {
+      try {
+        // Add to analysis queue with process-only mode
+        this.analysisQueueService.addToPendingQueue({
+          videoId: video.id,
+          videoPath: video.current_path,
+          filename: video.filename,
+          mode: 'process-only'
+        });
+      } catch (error: any) {
+        console.error(`Failed to add video ${video.filename} to processing queue:`, error);
+        this.notificationService.toastOnly('error', 'Failed to Process', `Could not add ${video.filename} to queue`);
+      }
+    }
+
+    // Clear selection after adding to queue
+    this.selectedVideos.clear();
+    this.updateAllSelectedState();
+
+    // Show success notification
+    const count = videos.length;
+    this.notificationService.toastOnly('success', 'Added to Queue', `${count} video${count > 1 ? 's' : ''} added to processing queue`);
+  }
+
+  /**
    * Open analyze dialog for a single video
    */
   async openAnalyzeDialog(video: DatabaseVideo) {
@@ -2060,7 +2134,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     });
 
     dialogRef.afterClosed().subscribe(async (result: {
-      option: 'transcribe-only' | 'transcribe-analyze' | 'skip';
+      option: 'transcribe-only' | 'transcribe-analyze' | 'fix-aspect-ratio' | 'skip';
       forceReanalyze: boolean;
       aiProvider?: 'ollama' | 'claude' | 'openai';
       aiModel?: string;
@@ -2076,6 +2150,13 @@ export class LibraryComponent implements OnInit, OnDestroy {
         this.notificationService.toastOnly('info', 'Videos Imported', `${videoIds.length} videos added to library`);
         this.selectedVideos.clear();
         this.updateAllSelectedState();
+        return;
+      }
+
+      if (result.option === 'fix-aspect-ratio') {
+        // Process videos to fix aspect ratio
+        const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
+        this.processVideos(selectedVideoDetails);
         return;
       }
 

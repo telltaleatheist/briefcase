@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -14,14 +14,16 @@ import { LibraryManagerService } from '../database/library-manager.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
 import { MediaEventService } from '../media/media-event.service';
+import { MediaProcessingService } from '../media/media-processing.service';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
   id: string;
-  status: 'pending' | 'downloading' | 'extracting' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
+  status: 'pending' | 'downloading' | 'extracting' | 'transcribing' | 'analyzing' | 'processing' | 'completed' | 'failed';
   progress: number;
   currentPhase: string;
   title?: string; // Video title/filename for display
+  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only'; // Processing mode
   error?: string;
   videoId?: string; // Library video ID for progress tracking
   videoPath?: string;
@@ -47,7 +49,7 @@ export interface AnalysisJob {
 export interface AnalysisRequest {
   input: string; // URL or file path
   inputType: 'url' | 'file';
-  mode?: 'full' | 'transcribe-only' | 'analysis-only'; // Analysis mode: full, transcription only, or analysis only (using existing transcript)
+  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only'; // Analysis mode: full, transcription only, analysis only (using existing transcript), or process only (fix aspect ratio)
   aiModel: string;
   aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
   apiKey?: string; // API key for Claude/OpenAI
@@ -69,11 +71,11 @@ interface AnalysisRequestWithState extends AnalysisRequest {
   videoPath?: string;
   videoTitle?: string;
   audioPath?: string;
-  phase?: 'download' | 'transcribe' | 'analyze' | 'finalize';
+  phase?: 'download' | 'transcribe' | 'analyze' | 'process' | 'finalize';
 }
 
 @Injectable()
-export class AnalysisService {
+export class AnalysisService implements OnModuleInit {
   private readonly logger = new Logger(AnalysisService.name);
   private jobs = new Map<string, AnalysisJob>();
 
@@ -97,7 +99,29 @@ export class AnalysisService {
     private fileScannerService: FileScannerService,
     private databaseService: DatabaseService,
     private mediaEventService: MediaEventService,
+    private mediaProcessingService: MediaProcessingService,
   ) {}
+
+  /**
+   * Initialize event listeners on module initialization
+   */
+  onModuleInit() {
+    // Listen for FFmpeg processing progress events
+    this.eventEmitter.on('processing-progress', (data: { jobId: string; progress: number; task: string }) => {
+      this.logger.log(`[FFmpeg Progress] Job ${data.jobId}: ${data.progress}% - ${data.task}`);
+
+      // Update the job progress
+      const job = this.jobs.get(data.jobId);
+      if (job && job.status === 'processing') {
+        this.updateJob(data.jobId, {
+          progress: data.progress,
+          currentPhase: data.task,
+        });
+      }
+    });
+
+    this.logger.log('Analysis service event listeners initialized');
+  }
 
   /**
    * Start a new analysis job (adds to queue)
@@ -115,12 +139,16 @@ export class AnalysisService {
       title = 'Downloaded Video';
     }
 
+    // Determine mode
+    const mode = request.mode || 'full';
+
     const job: AnalysisJob = {
       id: jobId,
       status: 'pending',
       progress: 0,
       currentPhase: 'Waiting in queue...',
       title,
+      mode: mode, // Store mode for frontend to determine which stages to show
       videoId: request.videoId, // Include videoId for library progress tracking
       createdAt: new Date(),
       timing: {},
@@ -129,10 +157,11 @@ export class AnalysisService {
     this.jobs.set(jobId, job);
 
     // Determine initial phase based on mode and input type
-    const mode = request.mode || 'full';
-    let initialPhase: 'download' | 'transcribe' | 'analyze' | 'finalize';
+    let initialPhase: 'download' | 'transcribe' | 'analyze' | 'process' | 'finalize';
 
-    if (mode === 'analysis-only') {
+    if (mode === 'process-only') {
+      initialPhase = 'process';
+    } else if (mode === 'analysis-only') {
       initialPhase = 'analyze';
     } else if (request.inputType === 'file') {
       // Local files skip download and go straight to transcribe
@@ -205,11 +234,11 @@ export class AnalysisService {
       }
     }
 
-    // Priority 2: Transcribe/Download jobs (start new jobs)
+    // Priority 2: Transcribe/Download/Process jobs (start new jobs)
     for (let i = 0; i < this.pendingQueue.length; i++) {
       const { jobId, request } = this.pendingQueue[i];
       const phase = request.phase || 'download';
-      if (phase === 'download' || phase === 'transcribe') {
+      if (phase === 'download' || phase === 'transcribe' || phase === 'process') {
         this.activeJobs++;
         this.pendingQueue.splice(i, 1);
         this.logger.log(`Starting job ${jobId} at phase '${phase}'. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
@@ -262,7 +291,7 @@ export class AnalysisService {
   /**
    * Re-add job to queue at the next phase
    */
-  private requeueJobForNextPhase(jobId: string, request: AnalysisRequestWithState, nextPhase: 'download' | 'transcribe' | 'analyze' | 'finalize'): void {
+  private requeueJobForNextPhase(jobId: string, request: AnalysisRequestWithState, nextPhase: 'download' | 'transcribe' | 'analyze' | 'process' | 'finalize'): void {
     request.phase = nextPhase;
     this.pendingQueue.push({ jobId, request });
     this.logger.log(`Job ${jobId} re-queued for phase '${nextPhase}'. Queue length: ${this.pendingQueue.length}`);
@@ -336,6 +365,16 @@ export class AnalysisService {
 
         // Move to finalize
         this.requeueJobForNextPhase(jobId, request, 'finalize');
+      } else if (phase === 'process') {
+        // Process-only mode: Fix aspect ratio for vertical videos
+        await this.processProcessPhase(jobId, request);
+
+        // Release job slot
+        this.activeJobs--;
+        this.logger.log(`Processing phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
+
+        // Move to finalize
+        this.requeueJobForNextPhase(jobId, request, 'finalize');
       } else if (phase === 'finalize') {
         // Phase 4: Finalize
         await this.processFinalizePhase(jobId, request);
@@ -347,7 +386,7 @@ export class AnalysisService {
       }
     } catch (error: any) {
       // Release resources on error
-      if (phase === 'download' || phase === 'transcribe' || phase === 'analyze') {
+      if (phase === 'download' || phase === 'transcribe' || phase === 'analyze' || phase === 'process') {
         this.activeJobs--;
       }
 
@@ -615,6 +654,91 @@ export class AnalysisService {
   }
 
   /**
+   * Process video aspect ratio (process-only mode)
+   */
+  private async processProcessPhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error('Job not found');
+
+    // For process-only mode, input should be a file path
+    const videoPath = request.input;
+    if (!videoPath) {
+      throw new Error('No video path provided for processing');
+    }
+
+    // Get video ID from request
+    const videoId = request.videoId;
+    if (!videoId) {
+      throw new Error('Video ID is required for process-only mode');
+    }
+
+    this.updateJob(jobId, {
+      status: 'processing',
+      progress: 5,
+      currentPhase: 'Analyzing video dimensions...',
+      timing: { ...job.timing },
+    });
+
+    this.logger.log(`Processing video aspect ratio for job ${jobId}: ${videoPath}`);
+
+    // Process the video with fixAspectRatio option
+    const processingOptions = {
+      fixAspectRatio: true,
+    };
+
+    try {
+      const processingResult = await this.mediaProcessingService.processMedia(
+        videoPath,
+        processingOptions,
+        jobId
+      );
+
+      if (processingResult.success && processingResult.outputFile) {
+        this.updateJob(jobId, {
+          progress: 80,
+          currentPhase: 'Video processing complete',
+        });
+
+        // Update the video record with the new path
+        if (processingResult.outputFile !== videoPath) {
+          this.logger.log(`Updating video ${videoId} path from ${videoPath} to ${processingResult.outputFile}`);
+
+          // Update database with new path and filename
+          const newFilename = path.basename(processingResult.outputFile);
+          this.databaseService.updateVideoPath(videoId, processingResult.outputFile);
+          this.databaseService.updateVideoFilename(videoId, newFilename);
+
+          // Delete original file if different from output
+          try {
+            await fs.unlink(videoPath);
+            this.logger.log(`Deleted original file: ${videoPath}`);
+          } catch (error: any) {
+            this.logger.warn(`Failed to delete original file: ${error.message}`);
+          }
+
+          // Emit event for UI update
+          this.mediaEventService.emitVideoRenamed(
+            videoId,
+            path.basename(videoPath),
+            newFilename,
+            processingResult.outputFile
+          );
+        }
+
+        this.updateJob(jobId, {
+          progress: 95,
+          currentPhase: 'Processing complete',
+        });
+      } else {
+        throw new Error(processingResult.error || 'Video processing failed');
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to process video: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Process finalize phase
    */
   private async processFinalizePhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
@@ -722,6 +846,13 @@ export class AnalysisService {
           });
 
           this.logger.log(`Created new video record with ID: ${newVideoId} for ${filename}`);
+
+          // Emit WebSocket event so frontend refreshes immediately
+          this.mediaEventService.emitVideoImported(
+            newVideoId,
+            filename,
+            request.videoPath
+          );
         } catch (error) {
           this.logger.error(`Failed to create video record: ${(error as Error).message}`);
         }

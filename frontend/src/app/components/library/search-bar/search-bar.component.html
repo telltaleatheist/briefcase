@@ -72,43 +72,6 @@
       </div>
     </div>
 
-    <!-- Sort buttons -->
-    <div class="filter-section">
-      <div class="filter-section-title">Sort by:</div>
-      <div class="sort-buttons-compact">
-        <button mat-stroked-button
-                (click)="changeSortBy('date')"
-                [color]="sortBy === 'date' ? 'primary' : undefined">
-          Date {{ getSortArrow('date') }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('date-added')"
-                [color]="sortBy === 'date-added' ? 'primary' : undefined">
-          Added {{ getSortArrow('date-added') }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('filename')"
-                [color]="sortBy === 'filename' ? 'primary' : undefined">
-          Name {{ getSortArrow('filename') }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('size')"
-                [color]="sortBy === 'size' ? 'primary' : undefined">
-          Size {{ getSortArrow('size') }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('no-transcript')"
-                [color]="sortBy === 'no-transcript' ? 'primary' : undefined">
-          No Transcript {{ getSortArrow('no-transcript') }}
-        </button>
-        <button mat-stroked-button
-                (click)="changeSortBy('no-analysis')"
-                [color]="sortBy === 'no-analysis' ? 'primary' : undefined">
-          No Analysis {{ getSortArrow('no-analysis') }}
-        </button>
-      </div>
-    </div>
-
     <!-- Tag Filters -->
     <div class="filter-section" *ngIf="allTags && (allTags.people.length > 0 || allTags.topic.length > 0)">
       <div class="filter-section-title">
@@ -149,6 +112,51 @@
             </mat-chip>
           </mat-chip-set>
         </div>
+      </div>
+    </div>
+
+    <!-- Sort buttons (moved to end) -->
+    <div class="filter-section">
+      <div class="filter-section-title">Sort by:</div>
+      <div class="sort-buttons-compact">
+        <button mat-stroked-button
+                (click)="changeSortBy('upload-date')"
+                [color]="sortBy === 'upload-date' ? 'primary' : undefined"
+                matTooltip="Sort by when content was originally posted">
+          Uploaded {{ getSortArrow('upload-date') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('date')"
+                [color]="sortBy === 'date' ? 'primary' : undefined"
+                matTooltip="Sort by when you downloaded the file">
+          Downloaded {{ getSortArrow('date') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('date-added')"
+                [color]="sortBy === 'date-added' ? 'primary' : undefined"
+                matTooltip="Sort by when added to library">
+          Added {{ getSortArrow('date-added') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('filename')"
+                [color]="sortBy === 'filename' ? 'primary' : undefined">
+          Name {{ getSortArrow('filename') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('size')"
+                [color]="sortBy === 'size' ? 'primary' : undefined">
+          Size {{ getSortArrow('size') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('no-transcript')"
+                [color]="sortBy === 'no-transcript' ? 'primary' : undefined">
+          No Transcript {{ getSortArrow('no-transcript') }}
+        </button>
+        <button mat-stroked-button
+                (click)="changeSortBy('no-analysis')"
+                [color]="sortBy === 'no-analysis' ? 'primary' : undefined">
+          No Analysis {{ getSortArrow('no-analysis') }}
+        </button>
       </div>
     </div>
   </mat-expansion-panel>

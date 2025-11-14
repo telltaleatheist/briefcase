@@ -823,6 +823,31 @@
       height: 100%;
       background-color: #ff6600;
       transition: width 0.3s ease-out;
+
+      &.indeterminate {
+        width: 100%;
+        animation: indeterminate-progress 1.5s ease-in-out infinite;
+        transform-origin: left;
+      }
+    }
+  }
+
+  @keyframes indeterminate-progress {
+    0% {
+      transform: scaleX(0);
+      transform-origin: left;
+    }
+    50% {
+      transform: scaleX(1);
+      transform-origin: left;
+    }
+    50.1% {
+      transform: scaleX(1);
+      transform-origin: right;
+    }
+    100% {
+      transform: scaleX(0);
+      transform-origin: right;
     }
   }
 

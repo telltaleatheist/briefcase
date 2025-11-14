@@ -47,6 +47,7 @@ export interface ItemProgress {
   value: number; // Progress value 0-100
   color?: string; // Optional custom color (defaults to accent color)
   label?: string; // Optional label for accessibility
+  indeterminate?: boolean; // Show spinner/indeterminate progress instead of bar
 }
 
 /**

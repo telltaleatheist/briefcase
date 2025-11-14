@@ -1,6 +1,7 @@
 // clippy/frontend/src/app/components/saved-links/saved-links.component.ts
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatChipsModule } from '@angular/material/chips';
@@ -10,6 +11,14 @@ import { ApiService } from '../../services/api.service';
 import { SocketService } from '../../services/socket.service';
 import { NotificationService } from '../../services/notification.service';
 import { SavedLink } from '../../models/saved-link.model';
+import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
+import {
+  ItemDisplayConfig,
+  ItemProgress,
+  ListItem,
+  SelectionMode,
+  ContextMenuAction
+} from '../../libs/cascade/src/lib/types/cascade.types';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -23,13 +32,15 @@ import { Subscription } from 'rxjs';
     MatButtonModule,
     MatChipsModule,
     MatProgressSpinnerModule,
-    MatTooltipModule
+    MatTooltipModule,
+    CascadeListComponent
   ]
 })
 export class SavedLinksComponent implements OnInit, OnDestroy {
   private apiService = inject(ApiService);
   private socketService = inject(SocketService);
   private notificationService = inject(NotificationService);
+  private router = inject(Router);
 
   savedLinks: SavedLink[] = [];
   isLoading = true;
@@ -38,6 +49,34 @@ export class SavedLinksComponent implements OnInit, OnDestroy {
   private dragCounter = 0;
 
   private subscriptions: Subscription[] = [];
+
+  // Cascade list configuration
+  SelectionMode = SelectionMode;
+
+  displayConfig: ItemDisplayConfig = {
+    primaryField: 'title',
+    secondaryField: 'subtitle',
+    renderSecondary: (item: any) => this.formatSecondary(item)
+  };
+
+  contextActions: ContextMenuAction[] = [
+    {
+      id: 'open-url',
+      label: 'Open URL in Browser',
+      icon: 'open_in_new'
+    },
+    {
+      id: 'retry',
+      label: 'Retry Download',
+      icon: 'refresh',
+      disabled: (items: ListItem[]) => !items.every((item: any) => item.status === 'failed')
+    },
+    {
+      id: 'delete',
+      label: 'Delete',
+      icon: 'delete'
+    }
+  ];
 
   ngOnInit(): void {
     this.loadSavedLinks();
@@ -337,6 +376,129 @@ export class SavedLinksComponent implements OnInit, OnDestroy {
       return url.protocol === 'http:' || url.protocol === 'https:';
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Convert saved links to list items for cascade
+   */
+  get savedLinksAsListItems(): ListItem[] {
+    return this.savedLinks.map(link => ({
+      id: link.id,
+      title: link.title || 'Untitled',
+      subtitle: this.formatSecondary(link),
+      url: link.url,
+      status: link.status,
+      date_added: link.date_added,
+      video_id: link.video_id,
+      error_message: link.error_message,
+      download_path: link.download_path,
+      progress: this.getProgress(link)
+    }));
+  }
+
+  /**
+   * Format secondary text for list item
+   */
+  formatSecondary(item: any): string {
+    const parts: string[] = [];
+
+    parts.push(this.formatDate(item.date_added));
+
+    if (item.url) {
+      parts.push(this.truncateUrl(item.url));
+    }
+
+    if (item.error_message) {
+      parts.push(`⚠️ ${item.error_message}`);
+    } else if (item.status === 'completed' && item.download_path) {
+      parts.push('✓ Downloaded');
+    }
+
+    return parts.join(' • ');
+  }
+
+  /**
+   * Get progress for downloading items
+   */
+  getProgress(link: SavedLink): ItemProgress | undefined {
+    if (link.status === 'downloading') {
+      return {
+        value: 50, // Indeterminate progress
+        color: '#2196f3',
+        label: 'Downloading...'
+      };
+    } else if (link.status === 'completed') {
+      return {
+        value: 100,
+        color: '#4caf50',
+        label: 'Complete'
+      };
+    } else if (link.status === 'failed') {
+      return {
+        value: 100,
+        color: '#f44336',
+        label: 'Failed'
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * Handle list item click - navigate to library if video exists
+   */
+  onItemClick(item: any): void {
+    if (item.video_id && item.status === 'completed') {
+      // Navigate to library and highlight this video
+      this.router.navigate(['/library'], {
+        queryParams: { highlight: item.video_id }
+      });
+    } else if (item.url) {
+      // Open URL if no video yet
+      window.open(item.url, '_blank');
+    }
+  }
+
+  /**
+   * Handle context menu actions
+   */
+  onContextMenuAction(data: { action: string; items: ListItem[] }): void {
+    const { action, items } = data;
+
+    switch (action) {
+      case 'open-url':
+        items.forEach(item => {
+          if ((item as any).url) {
+            window.open((item as any).url, '_blank');
+          }
+        });
+        break;
+
+      case 'retry':
+        items.forEach(item => {
+          const link = this.savedLinks.find(l => l.id === item.id);
+          if (link && link.status === 'failed') {
+            const mockEvent = new Event('click');
+            this.retryLink(link, mockEvent);
+          }
+        });
+        break;
+
+      case 'delete':
+        if (confirm(`Delete ${items.length} saved link${items.length > 1 ? 's' : ''}?`)) {
+          items.forEach(item => {
+            this.apiService.deleteSavedLink(item.id).subscribe({
+              next: () => {
+                this.savedLinks = this.savedLinks.filter(l => l.id !== item.id);
+              },
+              error: (error) => {
+                console.error('Error deleting saved link:', error);
+              }
+            });
+          });
+          this.notificationService.toastOnly('success', 'Deleted', 'Saved links deleted');
+        }
+        break;
     }
   }
 }

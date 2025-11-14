@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener, ChangeDetectorRef, NgZone } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener, ChangeDetectorRef, NgZone, ViewChild, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -9,6 +9,7 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialog } from '@angular/material/dialog';
 import { BatchProgress, DatabaseLibraryService } from '../../services/database-library.service';
 import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
 import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysis-queue.service';
@@ -16,6 +17,7 @@ import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { Subscription, interval } from 'rxjs';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
+import { AnalysisNotesDialogComponent } from './analysis-notes-dialog.component';
 import {
   ItemDisplayConfig,
   ItemProgress,
@@ -60,6 +62,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   private jobAddedSubscription?: Subscription;
   availableOllamaModels: string[] = [];
 
+  // ViewChild for cascade list to control expansion
+  @ViewChild(CascadeListComponent) cascadeList?: CascadeListComponent<any>;
+
   // Bulk update settings
   bulkAIModel = '';
   bulkApiKey = '';
@@ -100,7 +105,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   childrenConfig: ChildrenConfig = {
     enabled: true,
     expandable: true,
-    defaultExpanded: true, // Show stages by default
+    defaultExpanded: false, // Don't expand all by default
     showMasterProgress: true,
     generator: (item: any) => this.generateJobStages(item),
     masterProgressCalculator: (item: any) => this.calculateMasterProgress(item)
@@ -113,7 +118,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
     private cdr: ChangeDetectorRef,
-    private ngZone: NgZone
+    private ngZone: NgZone,
+    private dialog: MatDialog
   ) {}
 
   async ngOnInit() {
@@ -130,6 +136,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Subscribe to pending jobs from the queue service
     this.pendingJobsSubscription = this.analysisQueueService.getPendingJobs().subscribe(jobs => {
       this.pendingJobs = jobs;
+
+      // Expand only the first item after the view updates
+      setTimeout(() => {
+        this.expandFirstItemOnly();
+      }, 0);
+
       // Angular will automatically detect changes - no manual trigger needed
     });
 
@@ -387,6 +399,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         displayName: job.displayName, // Preserve the fetched title
         customInstructions: job.customInstructions,
         aiModel: job.aiModel,
+        mode: job.mode, // Preserve mode to show correct progress bar children
         videoId: job.videoId, // Include videoId for progress tracking in library
         expanded: false
       };
@@ -557,9 +570,14 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   getQueueJobSubtitle(job: any): string {
-    const mode = job.mode === 'transcribe-only' ? 'Transcribe Only' : 'Full Analysis';
+    let mode = 'Full Analysis';
+    if (job.mode === 'transcribe-only') {
+      mode = 'Transcribe Only';
+    } else if (job.mode === 'process-only') {
+      mode = 'Process Video';
+    }
 
-    if (job.aiModel) {
+    if (job.aiModel && job.mode !== 'process-only') {
       const modelParts = job.aiModel.split(':');
       const modelName = modelParts.length > 1 ? modelParts[1] : job.aiModel;
       return `${mode} • ${modelName}`;
@@ -822,6 +840,51 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     return item.isPending === true;
   }
 
+  /**
+   * Expand only the first item in the queue, collapse all others
+   */
+  private expandFirstItemOnly(): void {
+    if (!this.cascadeList) return;
+
+    const allJobs = this.allJobsAsListItems;
+    if (allJobs.length === 0) return;
+
+    // Clear all expanded items first
+    this.cascadeList.expandedItems.clear();
+
+    // Expand only the first item if it has children
+    const firstJob = allJobs[0];
+    if (this.cascadeList.hasChildren(firstJob)) {
+      this.cascadeList.expandedItems.add(firstJob.id);
+    }
+  }
+
+  /**
+   * Open notes dialog to edit custom instructions for a pending job
+   */
+  openNotesDialog(job: any): void {
+    const dialogRef = this.dialog.open(AnalysisNotesDialogComponent, {
+      width: '600px',
+      data: {
+        jobTitle: job.displayName || 'Analysis Job',
+        currentNotes: job.customInstructions || ''
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(notes => {
+      if (notes !== undefined) {
+        // Update the job's custom instructions
+        this.analysisQueueService.updateJobCustomInstructions(job.id, notes);
+
+        if (notes) {
+          this.notificationService.toastOnly('success', 'Notes Saved', 'Custom instructions updated');
+        } else {
+          this.notificationService.toastOnly('info', 'Notes Cleared', 'Custom instructions removed');
+        }
+      }
+    });
+  }
+
   // Remove a job from the queue
   removeJob(jobId: string): void {
     // Check if it's a pending job
@@ -852,7 +915,17 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   formatJobSubtitle(job: any): string {
     // For pending jobs, show mode and AI model
     if ('mode' in job && 'aiModel' in job) {
-      const mode = job.mode === 'full' ? 'Full Analysis' : 'Transcribe Only';
+      let mode = 'Full Analysis';
+      if (job.mode === 'transcribe-only') {
+        mode = 'Transcribe Only';
+      } else if (job.mode === 'process-only') {
+        mode = 'Process Video';
+      }
+
+      if (job.mode === 'process-only') {
+        return mode;
+      }
+
       const model = this.formatModelName(job.aiModel);
       return `${mode} • ${model}`;
     }
@@ -922,41 +995,66 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // For active jobs, we track actual progress through stages
 
     if (isPending) {
-      // PENDING JOBS: Show all planned stages
+      // PENDING JOBS: Show all planned stages based on mode
 
-      // Stage 1: Download/Import
-      if (isUrlJob) {
+      if (mode === 'process-only') {
+        // Process-only mode: Only show processing stage
         children.push({
-          id: `${job.id}-download`,
+          id: `${job.id}-process`,
           parentId: job.id,
-          label: 'Download & Import',
-          icon: 'download',
+          label: 'Process Video',
+          icon: 'aspect_ratio',
+          status: 'pending',
+          progress: { value: 0 }
+        });
+      } else if (mode === 'transcribe-only') {
+        // Transcribe-only mode
+        // Stage 1: Download/Import (only if URL)
+        if (isUrlJob) {
+          children.push({
+            id: `${job.id}-download`,
+            parentId: job.id,
+            label: 'Download & Import',
+            icon: 'download',
+            status: 'pending',
+            progress: { value: 0 }
+          });
+        }
+
+        // Stage 2: Transcribe
+        children.push({
+          id: `${job.id}-transcribe`,
+          parentId: job.id,
+          label: 'Transcribe',
+          icon: 'subtitles',
           status: 'pending',
           progress: { value: 0 }
         });
       } else {
+        // Full mode (transcribe + analyze)
+        // Stage 1: Download/Import (only if URL)
+        if (isUrlJob) {
+          children.push({
+            id: `${job.id}-download`,
+            parentId: job.id,
+            label: 'Download & Import',
+            icon: 'download',
+            status: 'pending',
+            progress: { value: 0 }
+          });
+        }
+
+        // Stage 2: Transcribe
         children.push({
-          id: `${job.id}-import`,
+          id: `${job.id}-transcribe`,
           parentId: job.id,
-          label: 'Import',
-          icon: 'input',
+          label: 'Transcribe',
+          icon: 'subtitles',
           status: 'pending',
           progress: { value: 0 }
         });
-      }
 
-      // Stage 2: Transcribe (always included)
-      children.push({
-        id: `${job.id}-transcribe`,
-        parentId: job.id,
-        label: 'Transcribe',
-        icon: 'subtitles',
-        status: 'pending',
-        progress: { value: 0 }
-      });
-
-      // Stage 3: Analyze (only if mode is 'full')
-      if (mode === 'full') {
+        // Stage 3: Analyze
         children.push({
           id: `${job.id}-analyze`,
           parentId: job.id,
@@ -979,17 +1077,22 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         stageName: string;
       }> = [];
 
-      // Add stages based on job type
-      if (isUrlJob) {
-        stages.push({ id: 'download', label: 'Download & Import', icon: 'download', stageName: 'downloading' });
+      // Add stages based on mode
+      if (mode === 'process-only') {
+        // Process-only mode: Only show processing stage
+        stages.push({ id: 'process', label: 'Process Video', icon: 'aspect_ratio', stageName: 'processing' });
+      } else if (mode === 'transcribe-only') {
+        // Transcribe-only mode
+        if (isUrlJob) {
+          stages.push({ id: 'download', label: 'Download & Import', icon: 'download', stageName: 'downloading' });
+        }
+        stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
       } else {
-        stages.push({ id: 'import', label: 'Import', icon: 'input', stageName: 'importing' });
-      }
-
-      stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
-
-      // Add analyze stage if mode is full (we assume full mode unless specified otherwise)
-      if (mode === 'full' || mode === undefined) {
+        // Full mode (default if mode not specified)
+        if (isUrlJob) {
+          stages.push({ id: 'download', label: 'Download & Import', icon: 'download', stageName: 'downloading' });
+        }
+        stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
         stages.push({ id: 'analyze', label: 'Analyze', icon: 'psychology', stageName: 'analyzing' });
       }
 
@@ -1027,7 +1130,10 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           label: stage.label,
           icon: stage.icon,
           status: status,
-          progress: { value: stageProgress }
+          progress: {
+            value: stageProgress,
+            indeterminate: status === 'active' && stageProgress < 5 // Show spinner when active but no progress yet
+          }
         });
       });
     }

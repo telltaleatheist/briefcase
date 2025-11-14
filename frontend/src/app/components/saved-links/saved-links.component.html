@@ -49,50 +49,17 @@
     <p class="hint">Visit: <strong>http://owens-mac-studio.local:3000/saved</strong></p>
   </div>
 
-  <!-- Links List -->
+  <!-- Links List (Cascade Format) -->
   <div *ngIf="!isLoading && savedLinks.length > 0" class="links-list">
-    <div *ngFor="let link of savedLinks" class="link-row" [class]="'status-' + link.status">
-      <!-- Status Icon -->
-      <div class="card-icon">
-        <mat-icon [matTooltip]="link.status">
-          {{ getStatusIcon(link.status) }}
-        </mat-icon>
-      </div>
-
-      <!-- Content (clickable) - single line -->
-      <div class="card-content" (click)="openUrl(link, $event)">
-        <span class="link-title">{{ link.title || 'Untitled' }}</span>
-        <span class="link-subtitle">
-          <span>{{ formatDate(link.date_added) }}</span>
-          <span *ngIf="link.url"> • {{ truncateUrl(link.url) }}</span>
-          <span *ngIf="link.error_message" class="error-text"> • {{ link.error_message }}</span>
-          <span *ngIf="link.status === 'completed' && link.download_path" class="success-text"> • Downloaded successfully</span>
-        </span>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="card-actions">
-        <button mat-icon-button (click)="openUrl(link, $event)" matTooltip="Open URL in browser">
-          <mat-icon>open_in_new</mat-icon>
-        </button>
-
-        <button
-          *ngIf="link.status === 'failed'"
-          mat-icon-button
-          color="primary"
-          (click)="retryLink(link, $event)"
-          matTooltip="Retry download">
-          <mat-icon>refresh</mat-icon>
-        </button>
-
-        <button
-          mat-icon-button
-          color="warn"
-          (click)="deleteLink(link, $event)"
-          matTooltip="Delete this saved link">
-          <mat-icon>delete</mat-icon>
-        </button>
-      </div>
-    </div>
+    <cascade-list
+      [items]="savedLinksAsListItems"
+      [displayConfig]="displayConfig"
+      [selectionMode]="SelectionMode.Multiple"
+      [contextMenuActions]="contextActions"
+      (itemClick)="onItemClick($event)"
+      (contextMenuAction)="onContextMenuAction($event)"
+      emptyMessage="No saved links"
+      emptyIcon="link_off">
+    </cascade-list>
   </div>
 </div>

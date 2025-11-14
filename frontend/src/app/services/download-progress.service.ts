@@ -11,6 +11,7 @@ export interface VideoProcessingJob {
   displayName?: string; // User-friendly display name (e.g., fetched title)
   url?: string;
   videoId?: string; // Video ID for linking to library videos
+  mode?: 'full' | 'transcribe-only' | 'process-only'; // Processing mode
   stage: 'downloading' | 'importing' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
   progress: number; // 0-100
   error?: string;
@@ -35,6 +36,14 @@ export class DownloadProgressService {
 
   private setupListeners() {
     console.log('[DownloadProgressService] Setting up WebSocket listeners');
+
+    // Listen for analysis job progress updates (includes FFmpeg processing progress)
+    this.socketService.onAnalysisProgress().subscribe(data => {
+      console.log('[DownloadProgressService] Analysis progress event received:', data);
+      if (data.jobId) {
+        this.addOrUpdateAnalysisJob(data);
+      }
+    });
 
     // NOTE: Download events are for batch downloads, not analysis jobs
     // Analysis jobs are tracked via addOrUpdateAnalysisJob() method
@@ -379,6 +388,7 @@ export class DownloadProgressService {
       displayName: analysisJob.displayName || existingJob?.displayName,
       url: analysisJob.input || existingJob?.url,
       videoId: analysisJob.videoId || existingJob?.videoId,
+      mode: analysisJob.mode || existingJob?.mode, // Preserve mode for determining which children to show
       stage: stage,
       progress: progress,
       error: analysisJob.error,

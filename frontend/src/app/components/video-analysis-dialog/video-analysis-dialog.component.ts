@@ -663,7 +663,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
     const mode = this.analysisForm.get('mode')?.value;
 
     // Only check if mode requires AI (full analysis or transcription)
-    if (mode === 'import-only') {
+    if (mode === 'import-only' || mode === 'process-only') {
       return;
     }
 

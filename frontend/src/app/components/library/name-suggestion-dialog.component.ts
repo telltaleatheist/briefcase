@@ -1,8 +1,11 @@
 import { Component, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
+import { MatFormFieldModule } from '@angular/material/form-field';
 
 export interface NameSuggestionDialogData {
   currentFilename: string;
@@ -15,9 +18,12 @@ export interface NameSuggestionDialogData {
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     MatDialogModule,
     MatButtonModule,
-    MatIconModule
+    MatIconModule,
+    MatInputModule,
+    MatFormFieldModule
   ],
   template: `
     <div class="dialog-container">
@@ -33,9 +39,14 @@ export interface NameSuggestionDialogData {
         <div class="arrow-container">
           <mat-icon class="arrow-icon">arrow_downward</mat-icon>
         </div>
-        <div class="filename-section">
-          <div class="label">Suggested filename</div>
-          <div class="suggested-filename">{{ formatSuggestedFilename() }}</div>
+        <div class="filename-section editable-section">
+          <div class="label">Suggested filename (editable)</div>
+          <mat-form-field appearance="outline" class="filename-input">
+            <input matInput
+                   [(ngModel)]="editableFilename"
+                   placeholder="Enter filename"
+                   class="suggested-filename-input">
+          </mat-form-field>
         </div>
       </mat-dialog-content>
       <mat-dialog-actions class="dialog-actions">
@@ -130,6 +141,35 @@ export interface NameSuggestionDialogData {
       font-family: 'Courier New', monospace;
     }
 
+    .editable-section {
+      background: rgba(255, 140, 0, 0.1);
+      border: 1px solid rgba(255, 140, 0, 0.3);
+    }
+
+    .filename-input {
+      width: 100%;
+      margin: 0;
+    }
+
+    .suggested-filename-input {
+      font-size: 14px;
+      color: #ff8c00;
+      font-weight: 500;
+      font-family: 'Courier New', monospace;
+    }
+
+    ::ng-deep .editable-section .mat-mdc-form-field {
+      width: 100%;
+    }
+
+    ::ng-deep .editable-section .mat-mdc-text-field-wrapper {
+      padding: 0;
+    }
+
+    ::ng-deep .editable-section .mat-mdc-form-field-infix {
+      min-height: 40px;
+    }
+
     .dialog-actions {
       padding: 16px 24px;
       border-top: 1px solid #e0e0e0;
@@ -167,10 +207,15 @@ export interface NameSuggestionDialogData {
   `]
 })
 export class NameSuggestionDialogComponent {
+  editableFilename: string;
+
   constructor(
     public dialogRef: MatDialogRef<NameSuggestionDialogComponent>,
     @Inject(MAT_DIALOG_DATA) public data: NameSuggestionDialogData
-  ) {}
+  ) {
+    // Initialize editable filename with the formatted suggestion
+    this.editableFilename = this.formatSuggestedFilename();
+  }
 
   formatSuggestedFilename(): string {
     const extension = this.data.currentFilename.split('.').pop() || 'mp4';
@@ -181,7 +226,7 @@ export class NameSuggestionDialogComponent {
   }
 
   accept() {
-    this.dialogRef.close('accept');
+    this.dialogRef.close({ action: 'accept', filename: this.editableFilename });
   }
 
   reject() {

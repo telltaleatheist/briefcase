@@ -653,6 +653,21 @@
             autocomplete="off"
           >
         </div>
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;">
+            <input
+              type="checkbox"
+              id="shouldDownload"
+              name="shouldDownload"
+              checked
+              style="width: 20px; height: 20px; cursor: pointer;"
+            >
+            <span>Download video (if found)</span>
+          </label>
+          <p style="margin-top: 8px; font-size: 0.85em; color: var(--text-secondary); margin-left: 30px;">
+            If unchecked, the page will be saved for reference only without downloading any videos
+          </p>
+        </div>
         <button type="submit" class="btn" id="submitBtn">
           Save Link
         </button>
@@ -682,6 +697,7 @@
     const urlInput = document.getElementById('url');
     const titleInput = document.getElementById('title');
     const librarySelect = document.getElementById('library');
+    const shouldDownloadCheckbox = document.getElementById('shouldDownload');
     const submitBtn = document.getElementById('submitBtn');
     const statusMessage = document.getElementById('statusMessage');
     const linksList = document.getElementById('linksList');
@@ -698,6 +714,7 @@
       const url = urlInput.value.trim();
       const title = titleInput.value.trim();
       const libraryId = librarySelect.value;
+      const shouldDownload = shouldDownloadCheckbox.checked;
 
       if (!url) return;
 
@@ -711,12 +728,16 @@
           body: JSON.stringify({
             url,
             title: title || undefined,
-            libraryId: libraryId || undefined
+            libraryId: libraryId || undefined,
+            shouldDownload
           })
         });
 
         if (response.ok) {
-          showStatus('Link saved! Download starting...', 'success');
+          const message = shouldDownload
+            ? 'Link saved! Download starting...'
+            : 'Link saved for reference!';
+          showStatus(message, 'success');
           urlInput.value = '';
           titleInput.value = '';
           loadLinks();

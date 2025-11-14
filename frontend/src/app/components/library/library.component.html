@@ -260,7 +260,7 @@
       <!-- Multi-selection actions -->
       <button mat-menu-item (click)="analyzeSelected()" *ngIf="hasAnalyzableSelection()">
         <mat-icon>psychology</mat-icon>
-        <span>Analyze{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
+        <span>Process{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
       </button>
       <button mat-menu-item (click)="moveToLibrary()">
         <mat-icon>drive_file_move</mat-icon>

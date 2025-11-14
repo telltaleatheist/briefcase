@@ -5,6 +5,7 @@ import { BatchDownloaderService } from '../downloader/batch-downloader.service';
 import { MediaEventService } from '../media/media-event.service';
 import { SavedLinksGateway } from './saved-links.gateway';
 import { FileScannerService } from '../database/file-scanner.service';
+import { LibraryManagerService } from '../database/library-manager.service';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
 
@@ -32,6 +33,7 @@ export class SavedLinksService implements OnModuleInit {
     private readonly mediaEventService: MediaEventService,
     private readonly savedLinksGateway: SavedLinksGateway,
     private readonly fileScannerService: FileScannerService,
+    private readonly libraryManagerService: LibraryManagerService,
   ) {}
 
   /**
@@ -136,7 +138,7 @@ export class SavedLinksService implements OnModuleInit {
   /**
    * Add a new link to be saved for later
    */
-  async addLink(url: string, title?: string, libraryId?: string): Promise<SavedLink> {
+  async addLink(url: string, title?: string, libraryId?: string, shouldDownload?: boolean): Promise<SavedLink> {
     // Check if URL already exists
     const existing = this.databaseService.findSavedLinkByUrl(url);
     if (existing) {
@@ -144,13 +146,16 @@ export class SavedLinksService implements OnModuleInit {
       return existing as unknown as SavedLink;
     }
 
+    // Default to download if not specified
+    const doDownload = shouldDownload !== false;
+
     // Create new saved link
     const id = uuidv4();
     const savedLink: any = {
       id,
       url,
       title: title || url,
-      status: 'pending' as const,
+      status: doDownload ? 'pending' as const : 'completed' as const,
     };
 
     // Add library_id if provided
@@ -160,7 +165,7 @@ export class SavedLinksService implements OnModuleInit {
 
     // Insert into database
     this.databaseService.insertSavedLink(savedLink);
-    this.logger.log(`Added new saved link: ${url} (library: ${libraryId || 'default'})`);
+    this.logger.log(`Added new saved link: ${url} (library: ${libraryId || 'default'}, download: ${doDownload})`);
 
     // Get the full record
     const fullRecord = this.databaseService.findSavedLinkById(id) as unknown as SavedLink;
@@ -168,8 +173,10 @@ export class SavedLinksService implements OnModuleInit {
     // Emit update to websocket clients
     this.savedLinksGateway.emitLinkAdded(fullRecord);
 
-    // Start download immediately with library ID
-    this.startDownload(id, libraryId);
+    // Start download immediately with library ID (only if shouldDownload is true)
+    if (doDownload) {
+      this.startDownload(id, libraryId);
+    }
 
     return fullRecord;
   }
@@ -193,11 +200,32 @@ export class SavedLinksService implements OnModuleInit {
 
     try {
       // Determine output directory based on library ID
-      let outputDir = 'saved-links'; // Default folder
+      let outputDir: string;
+
       if (libraryId) {
-        // TODO: Look up the library's clips folder path and use that
-        // For now, we'll use a subdirectory within saved-links
-        outputDir = `saved-links/${libraryId}`;
+        // Look up the library's clips folder path
+        const libraries = this.libraryManagerService.getAllLibraries();
+        const targetLibrary = libraries.find(lib => lib.id === libraryId);
+
+        if (targetLibrary) {
+          outputDir = targetLibrary.clipsFolderPath;
+          this.logger.log(`Using library clips folder: ${outputDir}`);
+        } else {
+          this.logger.warn(`Library not found: ${libraryId}, using active library instead`);
+          const activeLibrary = this.libraryManagerService.getActiveLibrary();
+          outputDir = activeLibrary?.clipsFolderPath || 'saved-links';
+        }
+      } else {
+        // No library ID provided, use active library's clips folder
+        const activeLibrary = this.libraryManagerService.getActiveLibrary();
+        if (activeLibrary) {
+          outputDir = activeLibrary.clipsFolderPath;
+          this.logger.log(`Using active library clips folder: ${outputDir}`);
+        } else {
+          // Fallback to saved-links if no active library
+          outputDir = 'saved-links';
+          this.logger.warn('No active library found, using fallback folder: saved-links');
+        }
       }
 
       // Add to batch downloader with skipProcessing flag

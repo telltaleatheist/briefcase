@@ -143,8 +143,10 @@
 
             <!-- Child Progress Bar -->
             <div *ngIf="child.progress" class="child-progress-bar">
-              <div class="progress-fill"
+              <div *ngIf="!child.progress.indeterminate" class="progress-fill"
                    [style.width.%]="child.progress.value"
+                   [style.background-color]="child.progress.color || null"></div>
+              <div *ngIf="child.progress.indeterminate" class="progress-fill indeterminate"
                    [style.background-color]="child.progress.color || null"></div>
             </div>
 

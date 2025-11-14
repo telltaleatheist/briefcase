@@ -2,6 +2,7 @@ import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
+import { MediaEventService } from '../media/media-event.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -49,6 +50,7 @@ export class FileScannerService {
     @Inject(forwardRef(() => LibraryManagerService))
     private readonly libraryManagerService: LibraryManagerService,
     private readonly ffmpegService: FfmpegService,
+    private readonly mediaEventService: MediaEventService,
   ) {}
 
   /**
@@ -673,6 +675,9 @@ export class FileScannerService {
             // Don't fail the import, just log the error
           }
         }
+
+        // Emit WebSocket event so frontend refreshes immediately
+        this.mediaEventService.emitVideoImported(videoId, filename, destinationPath);
 
         imported.push(videoId);
         this.logger.log(`Imported: ${filename} (${videoId})${uploadDate ? ` with upload date ${uploadDate}` : ''}`);

@@ -182,6 +182,22 @@
               <mat-icon>check_circle</mat-icon>
             </div>
           </button>
+
+          <button type="button"
+                  class="mode-card"
+                  [class.active]="analysisForm.get('mode')?.value === 'process-only'"
+                  (click)="analysisForm.patchValue({mode: 'process-only'})">
+            <div class="card-icon">
+              <mat-icon>aspect_ratio</mat-icon>
+            </div>
+            <div class="card-content">
+              <h4 class="card-title">Fix Aspect Ratio</h4>
+              <p class="card-description">Process vertical/non-16:9 videos with blurred background</p>
+            </div>
+            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'process-only'">
+              <mat-icon>check_circle</mat-icon>
+            </div>
+          </button>
         </div>
       </div>
 
