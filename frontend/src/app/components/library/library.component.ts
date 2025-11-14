@@ -2669,6 +2669,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.isImporting = true;
 
+    // Defer heavy file processing to next frame so UI stays responsive
+    await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+
     // Check for Electron API
     const electron = (window as any).electron;
     if (!electron || !electron.getFilePathFromFile) {
@@ -2748,6 +2751,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     console.log(`[LibraryComponent] Importing ${filteredPaths.length} files`);
+
+    // Defer dialog open slightly to ensure smooth drop zone hide animation
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     // Use new queue-based import dialog (non-blocking)
     const { ImportQueueDialogComponent } = await import('./import-queue-dialog.component');

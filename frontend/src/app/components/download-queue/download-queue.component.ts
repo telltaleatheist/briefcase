@@ -718,12 +718,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
                 this.ngZone.run(() => {
                   this.downloadProgressService.addOrUpdateAnalysisJob(data.job);
 
-                  const isNewCompletion = (newStatus === 'completed' && previousStatus !== 'completed');
                   const isNewFailure = (newStatus === 'failed' && previousStatus !== 'failed');
 
-                  if (isNewCompletion) {
-                    this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
-                  } else if (isNewFailure) {
+                  if (isNewFailure) {
                     const errorMessage = data.job.error || 'Unknown error occurred during analysis';
                     this.notificationService.error('Analysis Failed', errorMessage);
                   }
@@ -961,7 +958,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   // Progress mapper for active jobs
   // NOTE: Return null so the master progress bar (calculated from children) is shown instead
-  jobProgressMapper = (item: any): ItemProgress | null => {
+  jobProgressMapper = (_item: any): ItemProgress | null => {
     // All jobs should use master progress bar from their children
     // Regular progress bar is not used for queue items
     return null;

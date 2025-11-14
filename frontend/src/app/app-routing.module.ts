@@ -13,6 +13,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/batch-download/batch-download.component').then(m => m.BatchDownloadComponent)
   },
   {
+    path: 'bulk-analysis',
+    loadComponent: () => import('./components/bulk-analysis/bulk-analysis.component').then(m => m.BulkAnalysisComponent)
+  },
+  {
     path: 'reports',
     loadComponent: () => import('./components/analysis-reports/analysis-reports.component').then(m => m.AnalysisReportsComponent)
   },

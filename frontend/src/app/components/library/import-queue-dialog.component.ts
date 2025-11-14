@@ -252,7 +252,8 @@ import { Subject, takeUntil } from 'rxjs';
         background: white;
         border: 1px solid #e0e0e0;
         border-radius: 6px;
-        transition: all 0.2s;
+        transition: all 0.3s ease-out;
+        animation: slideIn 0.3s ease-out;
 
         &.importing {
           background: #fff8e1;
@@ -341,6 +342,17 @@ import { Subject, takeUntil } from 'rxjs';
       }
     }
 
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
     /* Dark mode */
     :host-context(.dark-theme),
     :host-context(.theme-dark) {
@@ -418,6 +430,7 @@ export class ImportQueueDialogComponent implements OnInit, OnDestroy {
 
   private destroy$ = new Subject<void>();
   private readonly MAX_VISIBLE_ITEMS = 20;
+  private readonly COMPLETED_ITEMS_TO_KEEP = 5; // Show last 5 completed items
 
   constructor(
     private dialogRef: MatDialogRef<ImportQueueDialogComponent>,
@@ -467,11 +480,41 @@ export class ImportQueueDialogComponent implements OnInit, OnDestroy {
   }
 
   get visibleItems(): ImportItem[] {
-    return this.state.items.slice(0, this.MAX_VISIBLE_ITEMS);
+    // Show a rolling window: last N completed + all importing + next pending items
+    const items = this.state.items;
+
+    // Find indices
+    const completedItems = items.filter(i => i.status === 'completed' || i.status === 'error');
+    const importingItems = items.filter(i => i.status === 'importing');
+    const pendingItems = items.filter(i => i.status === 'pending');
+
+    // Build rolling window
+    const visible: ImportItem[] = [];
+
+    // Add last N completed items (most recent ones)
+    const recentCompleted = completedItems.slice(-this.COMPLETED_ITEMS_TO_KEEP);
+    visible.push(...recentCompleted);
+
+    // Add all importing items
+    visible.push(...importingItems);
+
+    // Add next pending items (up to max limit)
+    const remainingSlots = this.MAX_VISIBLE_ITEMS - visible.length;
+    const nextPending = pendingItems.slice(0, Math.max(remainingSlots, 5)); // Show at least 5 pending
+    visible.push(...nextPending);
+
+    return visible;
   }
 
   get hiddenItemCount(): number {
-    return Math.max(0, this.state.items.length - this.MAX_VISIBLE_ITEMS);
+    const completed = this.state.items.filter(i => i.status === 'completed' || i.status === 'error').length;
+    const pending = this.state.items.filter(i => i.status === 'pending').length;
+
+    // Hidden = old completed items + pending items not shown
+    const hiddenCompleted = Math.max(0, completed - this.COMPLETED_ITEMS_TO_KEEP);
+    const hiddenPending = Math.max(0, pending - this.visibleItems.filter(i => i.status === 'pending').length);
+
+    return hiddenCompleted + hiddenPending;
   }
 
   minimize() {

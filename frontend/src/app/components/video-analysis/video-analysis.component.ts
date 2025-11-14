@@ -399,7 +399,8 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
             // Check if job is complete
             if (data.job.status === 'completed') {
-              this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
+              // Removed: batch analysis completion notification
+              // this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
             } else if (data.job.status === 'failed') {
               const errorMessage = data.job.error || 'Unknown error occurred during analysis';
               this.notificationService.error('Analysis Failed', errorMessage);

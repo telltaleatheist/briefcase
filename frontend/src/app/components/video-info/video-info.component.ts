@@ -446,7 +446,8 @@ export class VideoInfoComponent implements OnInit {
         // Clear cache to ensure fresh data when navigating between videos
         this.databaseLibraryService.clearCache();
 
-        this.notificationService.success('Analysis Complete', 'Analysis has been completed successfully');
+        // Removed: batch analysis completion notification
+        // this.notificationService.success('Analysis Complete', 'Analysis has been completed successfully');
         return;
       }
     }

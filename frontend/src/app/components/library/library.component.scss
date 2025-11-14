@@ -16,7 +16,7 @@
   position: relative; // For drop zone overlay and FAB positioning
 }
 
-// Drag and drop overlay
+// Drag and drop overlay (always in DOM, toggle visibility for performance)
 .drop-zone-overlay {
   position: fixed;
   top: 0;
@@ -31,7 +31,21 @@
   border-radius: 0;
   border: 8px dashed rgba(255, 255, 255, 0.9);
   pointer-events: none;
-  animation: fadeIn 0.15s ease-out;
+
+  // Hidden by default
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.98);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out, visibility 0s linear 0.12s;
+  will-change: opacity, transform;
+
+  // Show when active
+  &.show {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1);
+    transition: opacity 0.12s ease-out, transform 0.12s ease-out, visibility 0s linear 0s;
+  }
 
   .drop-zone-content {
     text-align: center;
