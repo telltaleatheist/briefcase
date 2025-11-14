@@ -82,6 +82,13 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   // Drag and drop configuration
   @Input() enableDragDrop: boolean = false;
 
+  // Input for initially collapsed groups
+  @Input() set initialCollapsedGroups(groups: Set<string> | null) {
+    if (groups && groups.size > 0) {
+      this.collapsedGroups = new Set(groups);
+    }
+  }
+
   // Custom action template (for buttons like delete, remove, etc.)
   @ContentChild('itemActions') itemActionsTemplate: TemplateRef<any> | null = null;
 
@@ -707,6 +714,52 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
           this.navigateItems(direction);
         }
         return;
+      }
+
+      // Handle Left/Right arrows for collapsing/expanding groups
+      if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+        if (!this.groupConfig?.enabled) return;
+
+        const selectedIds = this.selectionService.getSelected();
+        const groupsToToggle = new Set<string>();
+
+        // Priority 1: If groups themselves are selected, use those
+        if (this.selectedGroups.size > 0) {
+          this.selectedGroups.forEach(groupId => groupsToToggle.add(groupId));
+        }
+        // Priority 2: If items are selected, use their containing groups
+        else if (selectedIds.length > 0) {
+          selectedIds.forEach(id => {
+            const item = this.items.find(i => i.id === id);
+            if (item && this.groupConfig?.groupBy) {
+              const groupKey = this.groupConfig.groupBy(item);
+              groupsToToggle.add(groupKey);
+            }
+          });
+        }
+
+        // If we found groups to toggle, do it
+        if (groupsToToggle.size > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+
+          // Collapse or expand the groups
+          groupsToToggle.forEach(groupKey => {
+            if (event.code === 'ArrowLeft') {
+              // Left arrow: collapse the group
+              if (!this.collapsedGroups.has(groupKey)) {
+                this.collapsedGroups.add(groupKey);
+              }
+            } else {
+              // Right arrow: expand the group
+              if (this.collapsedGroups.has(groupKey)) {
+                this.collapsedGroups.delete(groupKey);
+              }
+            }
+          });
+
+          return;
+        }
       }
     }
 

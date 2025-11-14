@@ -1,4 +1,5 @@
 <div class="library-container"
+     (dragenter)="onDragEnter($event)"
      (dragover)="onDragOver($event)"
      (dragleave)="onDragLeave($event)"
      (drop)="onDrop($event)">
@@ -7,9 +8,9 @@
   <div class="drop-zone-overlay" *ngIf="isDragging">
     <div class="drop-zone-content">
       <mat-icon>cloud_upload</mat-icon>
-      <h2>Drop media files here</h2>
+      <h2>Drop media files or folders here</h2>
       <p>Choose: Import, Transcribe, or Analyze</p>
-      <p class="hint">Default: Import (no processing)</p>
+      <p class="hint">Folders will be scanned recursively</p>
     </div>
   </div>
 
@@ -73,6 +74,22 @@
                 matTooltip="Select all videos missing AI analysis">
           <mat-icon>psychology</mat-icon>
           No Analysis
+        </button>
+
+        <!-- Section collapse/expand buttons -->
+        <button mat-stroked-button
+                *ngIf="filteredVideos.length > 0"
+                (click)="collapseAllSections()"
+                matTooltip="Collapse all week sections">
+          <mat-icon>unfold_less</mat-icon>
+          Collapse All
+        </button>
+        <button mat-stroked-button
+                *ngIf="filteredVideos.length > 0"
+                (click)="expandAllSections()"
+                matTooltip="Expand all week sections">
+          <mat-icon>unfold_more</mat-icon>
+          Expand All
         </button>
 
         <!-- File Type Filter Button - always visible -->
@@ -182,6 +199,7 @@
     [statusMapper]="getVideoStatusMapper"
     [progressMapper]="videoProgressMapper"
     [progressVersion]="progressVersion"
+    [initialCollapsedGroups]="collapsedWeeks"
     (itemClick)="onListItemClick($event)"
     (itemDoubleClick)="onListItemDoubleClick($event)"
     (itemsSelected)="onListItemsSelected($event)"

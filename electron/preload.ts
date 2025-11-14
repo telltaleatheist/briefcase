@@ -7,6 +7,7 @@ interface ElectronAPI {
   openDirectoryPicker: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   showOpenDialog: (options: any) => Promise<any>; // Use 'any' for now to avoid type conflicts
   isDirectory: (filePath: string) => Promise<boolean>;
+  scanDirectoryForMedia: (directoryPath: string) => Promise<string[]>;
   getAppVersion: () => Promise<string>;
   getBinaryPaths: () => Promise<{
     ytDlpPath: string;
@@ -56,6 +57,7 @@ contextBridge.exposeInMainWorld('electron', {
   openDirectoryPicker: () => ipcRenderer.invoke('open-directory-picker'),
   showOpenDialog: (options: any) => ipcRenderer.invoke('show-open-dialog', options),
   isDirectory: (filePath: string) => ipcRenderer.invoke('is-directory', filePath),
+  scanDirectoryForMedia: (directoryPath: string) => ipcRenderer.invoke('scan-directory-for-media', directoryPath),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getBinaryPaths: () => ipcRenderer.invoke('get-binary-paths'),
   getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),

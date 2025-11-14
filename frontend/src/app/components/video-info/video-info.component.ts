@@ -124,7 +124,17 @@ export class VideoInfoComponent implements OnInit {
     renderPrimary: (item) => item['filename'] || '',
     renderSecondary: (item) => {
       const mediaType = this.getMediaTypeLabel(item['media_type'] || 'video');
-      const date = item['upload_date'] ? new Date(item['upload_date']).toLocaleDateString() : '';
+      let date = '';
+      if (item['upload_date']) {
+        // Parse date-only strings (YYYY-MM-DD) as local dates to avoid timezone shifting
+        const dateString = item['upload_date'];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+          const [year, month, day] = dateString.split('-').map(Number);
+          date = new Date(year, month - 1, day).toLocaleDateString();
+        } else {
+          date = new Date(dateString).toLocaleDateString();
+        }
+      }
       return date ? `${mediaType} • ${date}` : mediaType;
     },
     renderMetadata: (item) => item['duration_seconds'] ? this.formatDuration(item['duration_seconds']) : '',
@@ -296,7 +306,30 @@ export class VideoInfoComponent implements OnInit {
 
   formatDate(dateString: string | null): string {
     if (!dateString) return 'Unknown';
+
+    // If it's a date-only string (YYYY-MM-DD), display it as-is to avoid timezone issues
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      // Parse as local date to avoid UTC timezone shifting
+      const [year, month, day] = dateString.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+      return date.toLocaleDateString();
+    }
+
+    // Otherwise it's a full timestamp, format normally
     return new Date(dateString).toLocaleString();
+  }
+
+  /**
+   * Parse date string safely, handling YYYY-MM-DD format without timezone shifting
+   */
+  private parseDateSafely(dateString: string): Date {
+    // If it's a date-only string (YYYY-MM-DD), parse as local date to avoid timezone shifting
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const [year, month, day] = dateString.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    // Otherwise parse normally (full timestamp)
+    return new Date(dateString);
   }
 
   formatTimestamp(seconds: number): string {
@@ -1135,7 +1168,7 @@ export class VideoInfoComponent implements OnInit {
 
     // Upload date (from filename) - when content was created/filmed by the person
     if (video.upload_date) {
-      const uploadDate = new Date(video.upload_date);
+      const uploadDate = this.parseDateSafely(video.upload_date);
       parts.push(`Uploaded: ${uploadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
     }
 

@@ -231,52 +231,35 @@ export class LibraryDownloadService {
       const alreadyImportedError = importResult.errors.some(err => err.includes('Already imported'));
 
       if (alreadyImportedError && importedVideo) {
-        // Video already exists in database - ask user what to do
+        // Video already exists in database - keep the old one, update download date
         const fs = require('fs');
         const path = require('path');
         const filename = path.basename(job.outputFile);
 
-        this.logger.log(`[${job.id}] Video already in library with ID: ${importedVideo.id}. Waiting for user action...`);
+        this.logger.log(`[${job.id}] Video already in library with ID: ${importedVideo.id}. Keeping old video, updating download date...`);
 
-        // Emit duplicate detection event to frontend
-        this.eventService.emitLibraryDownloadDuplicate(job.id, importedVideo.id, filename);
-
-        // Update job status to indicate waiting for user
-        job.currentTask = 'Video already exists - waiting for user action...';
+        // Update job status
+        job.currentTask = 'Video already exists - updating download date...';
         this.emitJobUpdate(job);
 
-        // Wait for user response (replace or cancel)
-        const userAction = await this.waitForUserAction(job.id);
+        // Update the download date to now
+        const now = new Date().toISOString();
+        this.databaseService.updateVideoDownloadDate(importedVideo.id, now);
+        this.logger.log(`[${job.id}] Updated download date for video ID: ${importedVideo.id}`);
 
-        if (userAction === 'cancel') {
-          // User chose to cancel - fail the job
-          throw new Error('User cancelled: Video already exists in library');
-        } else if (userAction === 'replace') {
-          // User chose to replace - delete entire database entry (transcript/analysis are in DB, will be cascade deleted)
-          this.logger.log(`[${job.id}] User chose to replace existing video. Deleting database entry and all data...`);
-
-          // Delete the database entry completely (cascade deletes transcript/analysis)
-          await this.databaseService.deleteVideo(importedVideo.id);
-          this.logger.log(`[${job.id}] Deleted database entry for video ID: ${importedVideo.id}`);
-
-          // Now re-import as a fresh video
-          const reimportResult = await this.fileScannerService.importVideos([job.outputFile]);
-
-          if (reimportResult.imported.length > 0) {
-            // Get the newly imported video
-            const videos = await this.databaseService.getAllVideos();
-            const newVideo = videos.find((v: any) => v.file_path === job.outputFile || v.current_path === job.outputFile);
-
-            if (newVideo) {
-              job.videoId = newVideo.id;
-              this.logger.log(`[${job.id}] Re-imported video with new ID: ${job.videoId}`);
-            } else {
-              throw new Error('Failed to find re-imported video in database');
-            }
-          } else {
-            throw new Error('Failed to re-import video: ' + (reimportResult.errors.join(', ') || 'Unknown error'));
+        // Delete the newly downloaded file since we're keeping the old one
+        try {
+          if (fs.existsSync(job.outputFile)) {
+            fs.unlinkSync(job.outputFile);
+            this.logger.log(`[${job.id}] Deleted newly downloaded duplicate file: ${job.outputFile}`);
           }
+        } catch (error: any) {
+          this.logger.warn(`[${job.id}] Failed to delete duplicate file: ${error.message}`);
         }
+
+        // Use the existing video ID
+        job.videoId = importedVideo.id;
+        this.logger.log(`[${job.id}] Using existing video ID: ${job.videoId}`);
       } else {
         // Actual error - fail the import
         throw new Error('Failed to import video: ' + (importResult.errors.join(', ') || 'Unknown error'));

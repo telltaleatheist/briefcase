@@ -221,6 +221,57 @@ function setupFileSystemHandlers(): void {
     }
   });
 
+  // Recursively scan directory for media files
+  ipcMain.handle('scan-directory-for-media', async (_, directoryPath) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const validExtensions = [
+        // Videos
+        '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv',
+        // Audio
+        '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg',
+        // Documents
+        '.pdf', '.epub', '.mobi', '.txt', '.md',
+        // Images
+        '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+        // Webpages
+        '.html', '.htm', '.mhtml'
+      ];
+
+      const mediaFiles: string[] = [];
+
+      function scanDirectory(dirPath: string) {
+        try {
+          const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+          for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name);
+
+            if (entry.isDirectory()) {
+              // Recursively scan subdirectories
+              scanDirectory(fullPath);
+            } else if (entry.isFile()) {
+              // Check if file has valid media extension
+              const ext = path.extname(entry.name).toLowerCase();
+              if (validExtensions.includes(ext)) {
+                mediaFiles.push(fullPath);
+              }
+            }
+          }
+        } catch (err) {
+          log.error(`Error scanning directory ${dirPath}:`, err);
+        }
+      }
+
+      scanDirectory(directoryPath);
+      return mediaFiles;
+    } catch (error) {
+      log.error('Error scanning directory for media:', error);
+      return [];
+    }
+  });
+
   // Get downloads path
   ipcMain.handle('get-downloads-path', () => {
     return require('electron').app.getPath('downloads');

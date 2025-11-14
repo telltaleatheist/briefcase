@@ -6,6 +6,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { TextFieldModule } from '@angular/cdk/text-field';
 
 export interface NameSuggestionDialogData {
   currentFilename: string;
@@ -23,7 +24,8 @@ export interface NameSuggestionDialogData {
     MatButtonModule,
     MatIconModule,
     MatInputModule,
-    MatFormFieldModule
+    MatFormFieldModule,
+    TextFieldModule
   ],
   template: `
     <div class="dialog-container">
@@ -42,10 +44,13 @@ export interface NameSuggestionDialogData {
         <div class="filename-section editable-section">
           <div class="label">Suggested filename (editable)</div>
           <mat-form-field appearance="outline" class="filename-input">
-            <input matInput
-                   [(ngModel)]="editableFilename"
-                   placeholder="Enter filename"
-                   class="suggested-filename-input">
+            <textarea matInput
+                      [(ngModel)]="editableFilename"
+                      placeholder="Enter filename"
+                      class="suggested-filename-input"
+                      cdkTextareaAutosize
+                      cdkAutosizeMinRows="3"
+                      cdkAutosizeMaxRows="8"></textarea>
           </mat-form-field>
         </div>
       </mat-dialog-content>
@@ -152,10 +157,12 @@ export interface NameSuggestionDialogData {
     }
 
     .suggested-filename-input {
-      font-size: 14px;
+      font-size: 15px;
       color: #ff8c00;
       font-weight: 500;
       font-family: 'Courier New', monospace;
+      line-height: 1.6;
+      resize: vertical;
     }
 
     ::ng-deep .editable-section .mat-mdc-form-field {
@@ -167,7 +174,14 @@ export interface NameSuggestionDialogData {
     }
 
     ::ng-deep .editable-section .mat-mdc-form-field-infix {
-      min-height: 40px;
+      min-height: auto;
+      padding-top: 8px;
+      padding-bottom: 8px;
+    }
+
+    ::ng-deep .editable-section textarea.mat-mdc-input-element {
+      margin: 0;
+      padding: 8px;
     }
 
     .dialog-actions {
@@ -219,10 +233,21 @@ export class NameSuggestionDialogComponent {
 
   formatSuggestedFilename(): string {
     const extension = this.data.currentFilename.split('.').pop() || 'mp4';
-    if (this.data.uploadDate) {
-      return `${this.data.uploadDate} ${this.data.suggestedTitle}.${extension}`;
+
+    // Strip any date prefix that the AI might have included (format: YYYY-MM-DD)
+    // This ensures we don't duplicate dates
+    let cleanTitle = this.data.suggestedTitle;
+    const datePattern = /^\d{4}-\d{2}-\d{2}\s+/;
+    if (datePattern.test(cleanTitle)) {
+      cleanTitle = cleanTitle.replace(datePattern, '').trim();
     }
-    return `${this.data.suggestedTitle}.${extension}`;
+
+    // Always prepend upload date if available
+    if (this.data.uploadDate) {
+      return `${this.data.uploadDate} ${cleanTitle}.${extension}`;
+    }
+
+    return `${cleanTitle}.${extension}`;
   }
 
   accept() {

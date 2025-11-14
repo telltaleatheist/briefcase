@@ -504,7 +504,7 @@ export class DatabaseLibraryService {
     return videos.filter(video => {
       if (!video.upload_date) return false;
 
-      const videoDate = new Date(video.upload_date);
+      const videoDate = this.parseDateSafely(video.upload_date);
 
       if (startDate && videoDate < startDate) return false;
       if (endDate && videoDate > endDate) return false;
@@ -527,8 +527,8 @@ export class DatabaseLibraryService {
       switch (sortBy) {
         case 'date':
           // Sort by upload_date (date from video filename - "Date Created/Uploaded")
-          const dateA = a.upload_date ? new Date(a.upload_date).getTime() : 0;
-          const dateB = b.upload_date ? new Date(b.upload_date).getTime() : 0;
+          const dateA = a.upload_date ? this.parseDateSafely(a.upload_date).getTime() : 0;
+          const dateB = b.upload_date ? this.parseDateSafely(b.upload_date).getTime() : 0;
           comparison = dateA - dateB;
           break;
 
@@ -989,5 +989,18 @@ export class DatabaseLibraryService {
       console.error('[DatabaseLibraryService] Error linking files:', error);
       return { success: false, error: error.error?.error || 'Failed to link files' };
     }
+  }
+
+  /**
+   * Parse date string safely, handling YYYY-MM-DD format without timezone shifting
+   */
+  private parseDateSafely(dateString: string): Date {
+    // If it's a date-only string (YYYY-MM-DD), parse as local date to avoid timezone shifting
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const [year, month, day] = dateString.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    // Otherwise parse normally (full timestamp)
+    return new Date(dateString);
   }
 }

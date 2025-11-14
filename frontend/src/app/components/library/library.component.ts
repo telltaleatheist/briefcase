@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Inject, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, AfterViewInit, OnDestroy, HostListener, ViewChild, ElementRef, Inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { combineLatest } from 'rxjs';
@@ -103,7 +103,7 @@ interface ClipLibrary {
   templateUrl: './library.component.html',
   styleUrls: ['./library.component.scss']
 })
-export class LibraryComponent implements OnInit, OnDestroy {
+export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   isLoading = false;
   isInitialLoad = true; // Track if this is the first load
   private cancelBackgroundLoad = false; // Flag to cancel ongoing background loads
@@ -290,7 +290,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
     enabled: true,
     groupBy: (video) => {
-      const downloadDate = new Date(video.download_date || video.added_at);
+      const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
       const now = new Date();
       const hoursSinceDownload = (now.getTime() - downloadDate.getTime()) / (1000 * 60 * 60);
 
@@ -592,6 +592,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
         this.openManageLibraries();
       }, 500); // Small delay to let the UI settle
     }
+  }
+
+  ngAfterViewInit() {
+    // Auto-collapse sections older than 6 weeks after view is initialized
+    // Use setTimeout to ensure the cascade-list ViewChild is available
+    setTimeout(() => {
+      console.log('[LibraryComponent] ngAfterViewInit timeout - calling autoCollapseOldSections');
+      this.autoCollapseOldSections();
+    }, 500);
   }
 
   ngOnDestroy() {
@@ -991,7 +1000,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     for (const video of this.filteredVideos) {
       // Use video.download_date (file creation timestamp) for weekly grouping
       // This represents when YOU downloaded/created the file, not the content date
-      const downloadDate = new Date(video.download_date || video.added_at);
+      const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
       const week = this.getWeekIdentifier(downloadDate);
 
       if (!groups.has(week)) {
@@ -1065,7 +1074,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Format week label for display
    */
   private formatWeekLabel(weekStart: string | Date): string {
-    const date = typeof weekStart === 'string' ? new Date(weekStart) : weekStart;
+    const date = typeof weekStart === 'string' ? this.parseDateSafely(weekStart) : weekStart;
     const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
     return `Week of ${date.toLocaleDateString('en-US', options)}`;
   }
@@ -1304,17 +1313,30 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Upload date (from filename) - when content was created/filmed by the person
     if (video.upload_date) {
-      const uploadDate = new Date(video.upload_date);
+      const uploadDate = this.parseDateSafely(video.upload_date);
       parts.push(`Uploaded: ${uploadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
     }
 
     // Download date (when file was created/downloaded) - when user downloaded the video
     if (video.download_date) {
-      const downloadDate = new Date(video.download_date);
+      const downloadDate = this.parseDateSafely(video.download_date);
       parts.push(`Downloaded: ${downloadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
     }
 
     return parts.join(' • ');
+  }
+
+  /**
+   * Parse date string safely, handling YYYY-MM-DD format without timezone shifting
+   */
+  private parseDateSafely(dateString: string): Date {
+    // If it's a date-only string (YYYY-MM-DD), parse as local date to avoid timezone shifting
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const [year, month, day] = dateString.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+    // Otherwise parse normally (full timestamp)
+    return new Date(dateString);
   }
 
   /**
@@ -1380,7 +1402,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
     const videoMap = new Map(this.filteredVideos.map(v => [v.id, v]));
 
     const getWeekForVideo = (video: any) => {
-      return this.getWeekIdentifier(new Date(video.download_date || video.added_at));
+      return this.getWeekIdentifier(this.parseDateSafely(video.download_date || video.added_at));
     };
 
     const hasChildren = new Set<string>();
@@ -2571,17 +2593,25 @@ export class LibraryComponent implements OnInit, OnDestroy {
   /**
    * Handle drag over event
    */
+  onDragEnter(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Increment counter on drag enter
+    this.dragCounter++;
+
+    // Show overlay if not already showing
+    if (!this.isDragging) {
+      this.isDragging = true;
+    }
+  }
+
   onDragOver(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
 
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy';
-    }
-
-    if (!this.isDragging) {
-      this.isDragging = true;
-      this.dragCounter = 1;
     }
   }
 
@@ -2592,8 +2622,12 @@ export class LibraryComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
 
+    // Decrement counter on drag leave
     this.dragCounter--;
-    if (this.dragCounter === 0) {
+
+    // Only hide overlay when counter reaches 0 (meaning we've left the container)
+    if (this.dragCounter <= 0) {
+      this.dragCounter = 0;
       this.isDragging = false;
     }
   }
@@ -2642,16 +2676,29 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
 
-      if (validExtensions.includes(ext)) {
-        try {
-          // Use Electron's webUtils to get the real file path
-          const filePath = electron.getFilePathFromFile(file);
-          filePaths.push(filePath);
-        } catch (error) {
-          console.error('Failed to get file path for:', file.name, error);
+      try {
+        // Use Electron's webUtils to get the real file path
+        const filePath = electron.getFilePathFromFile(file);
+
+        // Check if this is a directory
+        const isDir = await electron.isDirectory(filePath);
+
+        if (isDir) {
+          // Scan directory recursively for media files
+          console.log(`Scanning directory: ${filePath}`);
+          const mediaFiles = await electron.scanDirectoryForMedia(filePath);
+          console.log(`Found ${mediaFiles.length} media files in directory`);
+          filePaths.push(...mediaFiles);
+        } else {
+          // It's a file, check if it has a valid extension
+          const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+          if (validExtensions.includes(ext)) {
+            filePaths.push(filePath);
+          }
         }
+      } catch (error) {
+        console.error('Failed to process:', file.name, error);
       }
     }
 
@@ -2659,7 +2706,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.notificationService.toastOnly(
         'warning',
         'No Valid Media Files',
-        'Please drop supported media files (videos, audio, documents, images, etc.)'
+        'Please drop supported media files or folders containing media (videos, audio, documents, images, etc.)'
       );
       return;
     }
@@ -4211,6 +4258,86 @@ export class LibraryComponent implements OnInit, OnDestroy {
     }, 0);
 
     return Math.round(totalProgress / children.length);
+  }
+
+  /**
+   * Auto-collapse sections older than 6 weeks on startup
+   */
+  private autoCollapseOldSections() {
+    console.log('[LibraryComponent] autoCollapseOldSections called');
+    console.log('[LibraryComponent] Videos count:', this.videos.length);
+    console.log('[LibraryComponent] Cascade-list available:', !!this.cascadeList);
+
+    const sixWeeksAgo = new Date();
+    sixWeeksAgo.setDate(sixWeeksAgo.getDate() - 42); // 6 weeks = 42 days
+    console.log('[LibraryComponent] Six weeks ago date:', sixWeeksAgo.toISOString());
+
+    // Iterate through all videos and collapse their week groups if older than 6 weeks
+    this.videos.forEach(video => {
+      const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
+
+      // If video is older than 6 weeks, collapse its week section
+      if (downloadDate < sixWeeksAgo) {
+        const weekKey = this.listGroupConfig.groupBy(video);
+        if (weekKey !== 'NEW_VIDEOS_24H') {
+          console.log('[LibraryComponent] Collapsing week:', weekKey, 'for video from', downloadDate.toISOString());
+          this.collapsedWeeks.add(weekKey);
+        }
+      }
+    });
+
+    console.log(`[LibraryComponent] Total sections to collapse: ${this.collapsedWeeks.size}`);
+    console.log('[LibraryComponent] Week keys to collapse:', Array.from(this.collapsedWeeks));
+
+    // Apply collapsed state to the cascade-list component
+    if (this.cascadeList) {
+      this.cascadeList.collapsedGroups = new Set(this.collapsedWeeks);
+      console.log('[LibraryComponent] Applied collapsed state to cascade-list');
+      console.log('[LibraryComponent] Cascade-list collapsedGroups size:', this.cascadeList.collapsedGroups.size);
+
+      // Trigger change detection
+      this.cdr.detectChanges();
+    } else {
+      console.error('[LibraryComponent] CASCADE-LIST NOT AVAILABLE!');
+    }
+
+    console.log(`[LibraryComponent] Auto-collapsed ${this.collapsedWeeks.size} sections older than 6 weeks`);
+  }
+
+  /**
+   * Collapse all week sections
+   */
+  collapseAllSections() {
+    // Get all unique week keys from videos
+    const weekKeys = new Set<string>();
+    this.videos.forEach(video => {
+      const weekKey = this.listGroupConfig.groupBy(video);
+      weekKeys.add(weekKey);
+    });
+
+    // Add all to collapsed set
+    weekKeys.forEach(key => this.collapsedWeeks.add(key));
+
+    // Apply to cascade-list component
+    if (this.cascadeList) {
+      this.cascadeList.collapsedGroups = new Set(this.collapsedWeeks);
+    }
+
+    console.log(`[LibraryComponent] Collapsed all ${weekKeys.size} sections`);
+  }
+
+  /**
+   * Expand all week sections
+   */
+  expandAllSections() {
+    this.collapsedWeeks.clear();
+
+    // Apply to cascade-list component
+    if (this.cascadeList) {
+      this.cascadeList.collapsedGroups.clear();
+    }
+
+    console.log('[LibraryComponent] Expanded all sections');
   }
 }
 

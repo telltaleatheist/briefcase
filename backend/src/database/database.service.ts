@@ -938,6 +938,27 @@ export class DatabaseService {
   }
 
   /**
+   * Update video's download date
+   */
+  updateVideoDownloadDate(id: string, downloadDate: string) {
+    const db = this.ensureInitialized();
+
+    try {
+      db.run(
+        `UPDATE videos
+         SET download_date = ?
+         WHERE id = ?`,
+        [downloadDate, id]
+      );
+
+      this.saveDatabase();
+    } catch (error) {
+      this.logger.error(`Failed to update download date for video ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get video by ID
    */
   getVideoById(id: string) {

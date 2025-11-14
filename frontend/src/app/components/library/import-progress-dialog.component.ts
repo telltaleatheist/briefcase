@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit } from '@angular/core';
+import { Component, Inject, OnInit, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MAT_DIALOG_DATA, MatDialogRef, MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
@@ -8,6 +8,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { HttpClient } from '@angular/common/http';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { DuplicateHandlingDialogComponent, DuplicateHandlingResult } from './duplicate-handling-dialog.component';
+import { timeout } from 'rxjs/operators';
 
 interface ImportDialogData {
   filePaths: string[];
@@ -97,8 +98,15 @@ interface ImportResult {
         mat-raised-button
         color="primary"
         [mat-dialog-close]="importResult"
-        [disabled]="importing">
+        [disabled]="importing && !forceEnableClose">
         {{ importing ? 'Importing...' : 'Close' }}
+      </button>
+      <button
+        *ngIf="importing && forceEnableClose"
+        mat-button
+        [mat-dialog-close]="{ success: true, timeout: true }"
+        style="margin-left: 8px;">
+        Force Close
       </button>
     </mat-dialog-actions>
   `,
@@ -243,16 +251,23 @@ export class ImportProgressDialogComponent implements OnInit {
   importing = true;
   importResult: ImportResult | null = null;
   checkingDuplicates = true;
+  forceEnableClose = false;
 
   constructor(
     private dialogRef: MatDialogRef<ImportProgressDialogComponent>,
     @Inject(MAT_DIALOG_DATA) public data: ImportDialogData,
     private http: HttpClient,
     private backendUrlService: BackendUrlService,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private cdr: ChangeDetectorRef
   ) {}
 
   async ngOnInit() {
+    // Enable force close after 30 seconds in case of timeout
+    setTimeout(() => {
+      this.forceEnableClose = true;
+    }, 30000);
+
     await this.checkDuplicatesAndImport();
   }
 
@@ -273,6 +288,7 @@ export class ImportProgressDialogComponent implements OnInit {
         .toPromise();
 
       this.checkingDuplicates = false;
+      this.cdr.detectChanges();
 
       if (!checkResponse?.success) {
         throw new Error('Failed to check for duplicates');
@@ -316,33 +332,63 @@ export class ImportProgressDialogComponent implements OnInit {
       };
       this.importing = false;
       this.checkingDuplicates = false;
+      this.cdr.detectChanges();
     }
   }
 
   private async startImport(duplicateHandling?: { [key: string]: 'skip' | 'replace' | 'keep-both' }) {
     try {
       const url = await this.backendUrlService.getApiUrl('/database/import');
+
+      // Use a longer timeout for large imports (10 minutes)
+      const timeoutMs = 600000; // 10 minutes
+
+      console.log(`[ImportProgressDialog] Starting import of ${this.data.filePaths.length} files...`);
+
       const response = await this.http
         .post<ImportResult>(url, {
           videoPaths: this.data.filePaths,
           duplicateHandling
         })
+        .pipe(
+          timeout(timeoutMs)
+        )
         .toPromise();
 
-      this.importResult = response || null;
-      this.importing = false;
+      console.log('[ImportProgressDialog] Import response received:', response);
 
-      // Auto-close after 2 seconds if successful and no errors (unless suppressed for mixed imports)
-      if (response?.success && response.errorCount === 0 && !this.data.suppressAutoClose) {
+      // Ensure we have a valid result object
+      this.importResult = response || {
+        success: false,
+        imported: [],
+        importedCount: 0,
+        errors: ['No response from server'],
+        errorCount: 1
+      };
+      this.importing = false;
+      this.checkingDuplicates = false;
+
+      // Force Angular to detect changes and update the UI
+      this.cdr.detectChanges();
+
+      console.log('[ImportProgressDialog] Final state - importing:', this.importing, 'result:', this.importResult);
+
+      // Auto-close after 1 second if successful
+      if (this.importResult.success && !this.data.suppressAutoClose) {
+        console.log('[ImportProgressDialog] Import successful, auto-closing in 1 second...');
         setTimeout(() => {
+          console.log('[ImportProgressDialog] Closing dialog now');
           this.dialogRef.close(this.importResult);
-        }, 2000);
+        }, 1000);
       } else if (this.data.suppressAutoClose) {
         // For mixed imports, close immediately on success so the next dialog can show
+        console.log('[ImportProgressDialog] Closing dialog immediately (suppressAutoClose)');
         this.dialogRef.close(this.importResult);
+      } else {
+        console.log('[ImportProgressDialog] Import completed but not auto-closing (success:', this.importResult.success, ')');
       }
     } catch (error: any) {
-      console.error('Import error:', error);
+      console.error('[ImportProgressDialog] Import error:', error);
       this.importResult = {
         success: false,
         imported: [],
@@ -352,6 +398,8 @@ export class ImportProgressDialogComponent implements OnInit {
         error: error.error?.message || error.message || 'Failed to import videos'
       };
       this.importing = false;
+      this.checkingDuplicates = false;
+      this.cdr.detectChanges();
     }
   }
 }
