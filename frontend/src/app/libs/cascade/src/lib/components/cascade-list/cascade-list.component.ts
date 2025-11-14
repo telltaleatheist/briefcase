@@ -515,6 +515,33 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
     this.itemDoubleClick.emit(item);
   }
 
+  /**
+   * Handle clicks on the container (empty space) to deselect all items
+   */
+  handleContainerClick(event: MouseEvent) {
+    // Only deselect if clicking directly on the container (empty space)
+    // not on items or their children
+    const target = event.target as HTMLElement;
+
+    // Check if the click was on the container itself or the empty state
+    if (target.classList.contains('item-list-container') ||
+        target.classList.contains('empty-state') ||
+        target.classList.contains('item-groups') ||
+        target.classList.contains('items-list')) {
+      // Clear selection when clicking empty space
+      const previousSelected = this.selectionService.getSelected();
+      if (previousSelected.length > 0) {
+        const deselected = this.items.filter(i => previousSelected.includes(i.id));
+        this.selectionService.clear();
+        this.selectionService.setHighlighted(null);
+        this.itemHighlighted.emit(null);
+        if (deselected.length > 0) {
+          this.itemsDeselected.emit(deselected);
+        }
+      }
+    }
+  }
+
   selectAll() {
     const previousSelected = this.selectionService.getSelected();
 

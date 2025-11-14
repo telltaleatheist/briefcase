@@ -247,9 +247,13 @@ export class VideoFilterService {
   /**
    * Check if a file type can be analyzed (transcribed/AI analyzed)
    */
-  canAnalyzeMedia(filename: string): boolean {
-    const mediaType = this.getMediaType(filename);
-    return mediaType === 'video' || mediaType === 'audio';
+  canAnalyzeMedia(input: string | DatabaseVideo): boolean {
+    if (typeof input === 'string') {
+      const mediaType = this.getMediaType(input);
+      return mediaType === 'video' || mediaType === 'audio';
+    } else {
+      return input.media_type === 'video' || input.media_type === 'audio';
+    }
   }
 
   /**

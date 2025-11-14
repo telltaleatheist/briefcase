@@ -1,0 +1,189 @@
+<div class="management-view" (click)="onManagementViewClick($event)" (contextmenu)="onManagementViewRightClick($event)">
+  <!-- Header -->
+  <div class="management-header">
+    <button mat-icon-button (click)="backToLibrary()" matTooltip="Back to Library">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+    <h2>
+      <mat-icon>settings</mat-icon>
+      Video Management
+    </h2>
+    <p class="description">Manage orphaned files and database entries</p>
+  </div>
+
+  <mat-tab-group (selectedTabChange)="onManagementTabChange($event)">
+    <!-- Tab 1: Orphaned Files -->
+    <mat-tab label="Orphaned Files">
+      <div class="tab-content">
+        <div class="tab-header">
+          <p class="tab-description">Video files in the clips folder that haven't been imported to the database yet.</p>
+          <div class="tab-actions">
+            <button mat-raised-button
+                    color="primary"
+                    (click)="loadUnimportedVideos()"
+                    [disabled]="loadingUnimported">
+              <mat-icon>search</mat-icon>
+              {{ loadingUnimported ? 'Scanning...' : 'Scan for Orphaned Files' }}
+            </button>
+            <button mat-raised-button
+                    color="accent"
+                    (click)="importSelectedUnimportedVideos()"
+                    [disabled]="selectedUnimportedVideos.size === 0 || loadingUnimported"
+                    matTooltip="Import selected videos to database">
+              <mat-icon>add</mat-icon>
+              Import Selected ({{ selectedUnimportedVideos.size }})
+            </button>
+          </div>
+          <p class="count-info" *ngIf="!loadingUnimported && unimportedVideos.length > 0">
+            <mat-icon class="warning-icon">warning</mat-icon>
+            {{ unimportedVideos.length }} orphaned file{{ unimportedVideos.length !== 1 ? 's' : '' }} found
+          </p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="loading-container" *ngIf="loadingUnimported">
+          <mat-spinner></mat-spinner>
+          <p>Scanning for orphaned files...</p>
+        </div>
+
+        <!-- Selection header -->
+        <div class="results-header" *ngIf="!loadingUnimported && unimportedVideos.length > 0">
+          <div class="results-count">
+            <div class="selection-buttons">
+              <button mat-stroked-button
+                      (click)="toggleAllUnimportedSelection()"
+                      [color]="isAllUnimportedSelected ? 'primary' : undefined"
+                      matTooltip="Select all orphaned files">
+                <mat-icon>select_all</mat-icon>
+                All
+              </button>
+            </div>
+            <span class="count-text">
+              {{ selectedUnimportedVideos.size > 0 ? selectedUnimportedVideos.size + ' selected of ' : '' }}{{ unimportedVideos.length }} file{{ unimportedVideos.length !== 1 ? 's' : '' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Unimported videos list container -->
+        <div *ngIf="!loadingUnimported && unimportedVideos.length > 0" class="management-list-container">
+          <cascade-list
+            [items]="unimportedVideosAsListItems"
+            [displayConfig]="unimportedVideosDisplayConfig"
+            [selectedItemIds]="selectedUnimportedVideosSet"
+            [highlightedItemId]="highlightedUnimportedVideo?.fullPath || null"
+            [contextMenuActions]="unimportedVideosContextMenuActions"
+            (itemClick)="onUnimportedItemClick($any($event))"
+            (itemDoubleClick)="onUnimportedItemDoubleClick($any($event))"
+            (itemsSelected)="onUnimportedVideosSelected($any($event))"
+            (itemsDeselected)="onUnimportedVideosDeselected($any($event))"
+            (itemHighlighted)="onUnimportedItemHighlighted($any($event))"
+            (deleteAction)="onUnimportedDeleteAction($any($event))"
+            (contextMenuAction)="onUnimportedContextMenuAction($event)">
+          </cascade-list>
+        </div>
+
+        <!-- Empty state -->
+        <div class="empty-state" *ngIf="!loadingUnimported && unimportedVideos.length === 0">
+          <mat-icon>check_circle</mat-icon>
+          <p>No orphaned files found</p>
+          <p class="secondary">All video files in the clips folder have been imported</p>
+        </div>
+      </div>
+    </mat-tab>
+
+    <!-- Tab 2: Orphaned Database Entries -->
+    <mat-tab label="Orphaned Database Entries">
+      <div class="tab-content">
+        <div class="tab-header">
+          <p class="tab-description">Database entries where the video file no longer exists on disk.</p>
+          <div class="tab-actions">
+            <button mat-raised-button
+                    color="primary"
+                    (click)="loadOrphanedVideos()"
+                    [disabled]="loadingOrphaned">
+              <mat-icon>search</mat-icon>
+              {{ loadingOrphaned ? 'Scanning...' : 'Scan for Orphaned Entries' }}
+            </button>
+            <button mat-raised-button
+                    color="accent"
+                    (click)="relinkSelectedOrphanedVideos()"
+                    [disabled]="selectedOrphanedVideos.size === 0 || loadingOrphaned"
+                    matTooltip="Search for missing files and relink them">
+              <mat-icon>link</mat-icon>
+              Relink Selected ({{ selectedOrphanedVideos.size }})
+            </button>
+            <button mat-raised-button
+                    color="warn"
+                    (click)="deleteSelectedOrphanedVideos()"
+                    [disabled]="selectedOrphanedVideos.size === 0 || loadingOrphaned"
+                    matTooltip="Remove selected entries from database">
+              <mat-icon>delete</mat-icon>
+              Delete Selected ({{ selectedOrphanedVideos.size }})
+            </button>
+            <button mat-raised-button
+                    color="warn"
+                    (click)="pruneAllOrphanedVideos()"
+                    [disabled]="orphanedVideos.length === 0 || loadingOrphaned"
+                    matTooltip="Remove all orphaned entries from database">
+              <mat-icon>delete_sweep</mat-icon>
+              Prune All ({{ orphanedVideos.length }})
+            </button>
+          </div>
+          <p class="count-info" *ngIf="!loadingOrphaned && orphanedVideos.length > 0">
+            <mat-icon class="warning-icon">warning</mat-icon>
+            {{ orphanedVideos.length }} orphaned entr{{ orphanedVideos.length !== 1 ? 'ies' : 'y' }} found
+          </p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="loading-container" *ngIf="loadingOrphaned">
+          <mat-spinner></mat-spinner>
+          <p>Scanning for orphaned entries...</p>
+        </div>
+
+        <!-- Selection header -->
+        <div class="results-header" *ngIf="!loadingOrphaned && orphanedVideos.length > 0">
+          <div class="results-count">
+            <div class="selection-buttons">
+              <button mat-stroked-button
+                      (click)="toggleAllOrphanedSelection()"
+                      [color]="isAllOrphanedSelected ? 'primary' : undefined"
+                      matTooltip="Select all orphaned videos">
+                <mat-icon>select_all</mat-icon>
+                All
+              </button>
+            </div>
+            <span class="count-text">
+              {{ selectedOrphanedVideos.size > 0 ? selectedOrphanedVideos.size + ' selected of ' : '' }}{{ orphanedVideos.length }} video{{ orphanedVideos.length !== 1 ? 's' : '' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Orphaned videos list container -->
+        <div *ngIf="!loadingOrphaned && orphanedVideos.length > 0" class="management-list-container">
+          <cascade-list
+            [items]="orphanedVideosAsListItems"
+            [displayConfig]="orphanedVideosDisplayConfig"
+            [selectedItemIds]="selectedOrphanedVideosSet"
+            [highlightedItemId]="highlightedOrphanedVideo?.id || null"
+            [contextMenuActions]="orphanedVideosContextMenuActions"
+            (itemClick)="onOrphanedItemClick($any($event))"
+            (itemDoubleClick)="onOrphanedItemDoubleClick($any($event))"
+            (itemsSelected)="onOrphanedVideosSelected($any($event))"
+            (itemsDeselected)="onOrphanedVideosDeselected($any($event))"
+            (itemHighlighted)="onOrphanedItemHighlighted($any($event))"
+            (deleteAction)="onOrphanedDeleteAction($any($event))"
+            (contextMenuAction)="onOrphanedContextMenuAction($event)">
+          </cascade-list>
+        </div>
+
+        <!-- Empty state -->
+        <div class="empty-state" *ngIf="!loadingOrphaned && orphanedVideos.length === 0">
+          <mat-icon>check_circle</mat-icon>
+          <p>No orphaned entries found</p>
+          <p class="secondary">All database entries have valid video files</p>
+        </div>
+      </div>
+    </mat-tab>
+  </mat-tab-group>
+</div>

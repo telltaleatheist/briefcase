@@ -1248,3 +1248,58 @@
     height: 20px;
   }
 }
+
+// Completed section styling
+.completed-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+
+  .completed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px 12px 16px;
+
+    h4 {
+      margin: 0;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: var(--success-color, #4caf50);
+      }
+
+      .completed-count {
+        opacity: 0.6;
+      }
+    }
+
+    .clear-completed-btn {
+      font-size: 0.8125rem;
+      padding: 4px 12px;
+      height: 32px;
+      line-height: 32px;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        margin-right: 4px;
+      }
+    }
+  }
+
+  .completed-list {
+    opacity: 0.8;
+  }
+}

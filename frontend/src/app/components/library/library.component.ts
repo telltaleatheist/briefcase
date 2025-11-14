@@ -1,6 +1,8 @@
 import { Component, OnInit, OnDestroy, HostListener, ViewChild, ElementRef, Inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { combineLatest } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
 import { Router, ActivatedRoute } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -69,13 +71,6 @@ interface ClipLibrary {
   lastAccessedAt: string;
 }
 
-interface UnimportedVideo {
-  filename: string;
-  fullPath: string;
-  uploadDate?: string;
-  hash?: string;
-}
-
 @Component({
   selector: 'app-library',
   standalone: true,
@@ -129,6 +124,18 @@ export class LibraryComponent implements OnInit, OnDestroy {
   currentLibrary$ = this.libraryStateService.currentLibrary$;
   libraries$ = this.libraryStateService.libraries$;
   isLoadingLibraries$ = this.libraryStateService.isLoadingLibraries$;
+  isInitialLoad$ = this.libraryStateService.isInitialLoad$;
+  highlightedVideoId$ = this.libraryStateService.highlightedVideoId$;
+
+  // Computed observable for highlighted video (combines ID with video list)
+  highlightedVideo$ = combineLatest([
+    this.videos$,
+    this.highlightedVideoId$
+  ]).pipe(
+    map(([videos, highlightedId]) =>
+      highlightedId ? videos.find(v => v.id === highlightedId) || null : null
+    )
+  );
 
   // Libraries
   libraries: ClipLibrary[] = [];
@@ -138,24 +145,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Tabs
   selectedTabIndex = 0;
-
-  // Page mode: 'library' or 'management'
-  pageMode: 'library' | 'management' = 'library';
-  managementMode: 'unimported' | 'orphaned' | 'scan' = 'orphaned';
-
-  // Unimported videos
-  unimportedVideos: UnimportedVideo[] = [];
-  loadingUnimported = false;
-  selectedUnimportedVideos = new Set<string>(); // Set of file paths
-  isAllUnimportedSelected = false;
-  highlightedUnimportedVideo: UnimportedVideo | null = null;
-
-  // Orphaned videos
-  orphanedVideos: DatabaseVideo[] = [];
-  loadingOrphaned = false;
-  selectedOrphanedVideos = new Set<string>(); // Set of video IDs
-  isAllOrphanedSelected = false;
-  highlightedOrphanedVideo: DatabaseVideo | null = null;
 
   // Tags
   allTags: { people: Array<{ name: string; count: number }>; topic: Array<{ name: string; count: number }> } | null = null;
@@ -198,6 +187,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   // Virtual scrolling
   itemSize = 44; // Height of each video card (compact single-line design)
+
+  // Processed list items (cached to avoid recomputation on every change detection)
+  videosAsListItems: (DatabaseVideo & ListItem)[] = [];
 
   // Inline editing
   editingVideo: { [videoId: string]: { date: boolean; title: boolean; extension: boolean } } = {};
@@ -250,7 +242,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
   // Context menu state
   contextMenuPosition = { x: 0, y: 0 };
   contextMenuVideo: DatabaseVideo | null = null;
-  managementContextMenuPosition = { x: 0, y: 0 };
   isContextMenuOpen = false;
   private contextMenuTimeout: any = null;
 
@@ -326,62 +317,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     { id: 'delete', label: 'Delete', icon: 'delete' }
   ];
 
-  // Unimported videos display config
-  unimportedVideosDisplayConfig: ItemDisplayConfig = {
-    primaryField: 'filename',
-    secondaryField: 'uploadDate',
-    metadataField: 'fullPath',
-    iconField: 'filename',
-    renderPrimary: (item: any) => {
-      const parsed = this.parseFilename(item.filename);
-      return parsed.title || item.filename;
-    },
-    renderSecondary: (item: any) => {
-      const parts: string[] = [];
-      if (item.uploadDate) {
-        parts.push(`Upload: ${item.uploadDate}`);
-      }
-      const parsed = this.parseFilename(item.filename);
-      if (parsed.extension) {
-        parts.push(`.${parsed.extension}`);
-      }
-      return parts.join(' • ');
-    },
-    renderMetadata: (item: any) => '',
-    renderIcon: (item: any) => {
-      const parsed = this.parseFilename(item.filename);
-      const ext = parsed.extension?.toLowerCase();
-      if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext || '')) return 'movie';
-      if (['mp3', 'wav', 'aac', 'm4a'].includes(ext || '')) return 'audiotrack';
-      if (['pdf', 'doc', 'docx', 'txt'].includes(ext || '')) return 'description';
-      if (['jpg', 'jpeg', 'png', 'gif'].includes(ext || '')) return 'image';
-      return 'insert_drive_file';
-    }
-  };
-
-  unimportedVideosContextMenuActions: ContextMenuAction[] = [
-    { id: 'import', label: 'Import to Library', icon: 'add' },
-    { id: 'openLocation', label: 'Open File Location', icon: 'folder_open' },
-    { id: 'delete', label: 'Delete File', icon: 'delete' }
-  ];
-
-  // Orphaned videos display config
-  orphanedVideosDisplayConfig: ItemDisplayConfig = {
-    primaryField: 'filename',
-    secondaryField: 'added_at',
-    metadataField: 'duration_seconds',
-    iconField: 'media_type',
-    renderPrimary: (item: any) => this.getVideoDisplayName(item as DatabaseVideo),
-    renderSecondary: (item: any) => this.formatVideoSecondaryText(item as DatabaseVideo),
-    renderMetadata: (item: any) => this.formatVideoDuration(item as DatabaseVideo),
-    renderIcon: (item: any) => this.getMediaIcon(item as DatabaseVideo)
-  };
-
-  orphanedVideosContextMenuActions: ContextMenuAction[] = [
-    { id: 'relink', label: 'Relink Video', icon: 'link' },
-    { id: 'delete', label: 'Delete from Database', icon: 'delete' }
-  ];
-
   // Subscription management for cleanup
   private subscriptions: any[] = [];
 
@@ -454,32 +389,11 @@ export class LibraryComponent implements OnInit, OnDestroy {
     // Subscribe to analysis queue jobs to show progress bars
     const previousJobs = new Map<string, any>();
     this.subscriptions.push(this.downloadProgressService.jobs$.subscribe(jobsMap => {
-      console.log('[LibraryComponent] Jobs update received, job count:', jobsMap.size);
+      // Only update processing states when they actually change
+      let hasChanges = false;
 
-      // Check for newly completed jobs to reload video data
-      previousJobs.forEach((prevJob, jobId) => {
-        const currentJob = jobsMap.get(jobId);
-        // If job was in progress and is now completed/removed, reload videos
-        if (prevJob.stage !== 'completed' && prevJob.stage !== 'failed' &&
-            (!currentJob || currentJob.stage === 'completed' || currentJob.stage === 'failed')) {
-          console.log('[LibraryComponent] Job completed, refreshing video list:', jobId);
-          // Clear cache and reload to show updated has_analysis flag
-          this.databaseLibraryService.clearCache();
-          this.loadVideos().then(() => {
-            // Force change detection after reload
-            this.cdr.detectChanges();
-          });
-        }
-      });
-
-      // Update previous jobs map for next comparison
-      previousJobs.clear();
-      jobsMap.forEach((job, id) => previousJobs.set(id, { ...job }));
-
-      // Clear existing processing states
-      this.videoProcessingStates.clear();
-
-      // Update processing states from active jobs
+      // Build new processing states
+      const newStates = new Map<string, { stage: 'transcribing' | 'analyzing', progress: number }>();
       jobsMap.forEach((job) => {
         if (job.videoId && job.stage !== 'completed' && job.stage !== 'failed') {
           let stage: 'transcribing' | 'analyzing' = 'analyzing';
@@ -487,21 +401,24 @@ export class LibraryComponent implements OnInit, OnDestroy {
             stage = 'transcribing';
           }
 
-          // Store raw job progress - master progress will be calculated by cascade children
-          this.videoProcessingStates.set(job.videoId, {
-            stage,
-            progress: job.progress
-          });
+          newStates.set(job.videoId, { stage, progress: job.progress });
+
+          // Check if this state actually changed
+          const oldState = this.videoProcessingStates.get(job.videoId);
+          if (!oldState || oldState.stage !== stage || oldState.progress !== job.progress) {
+            hasChanges = true;
+          }
         }
       });
 
-      // Trigger change detection with new Map reference and version increment
-      this.videoProcessingStates = new Map(this.videoProcessingStates);
-      this.progressVersion++;
+      // Only update Map reference if something actually changed
+      if (hasChanges || newStates.size !== this.videoProcessingStates.size) {
+        this.videoProcessingStates = newStates;
+      }
 
-      // DON'T call detectChanges() here - it causes cascade with download-queue component
-      // Angular's default change detection will pick up the Map reference change
-      // Only the download-queue component should trigger change detection for job updates
+      // Update previous jobs for next iteration
+      previousJobs.clear();
+      jobsMap.forEach((job, id) => previousJobs.set(id, { ...job }));
     }));
 
     // Subscribe to video renamed events from WebSocket
@@ -869,6 +786,35 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Reload library data with cache clear
+   * Consolidates the common pattern of clearCache + loadVideos + loadStats + loadTags
+   */
+  async reloadLibrary(options: { videos?: boolean; stats?: boolean; tags?: boolean } = {}) {
+    // Default to reloading everything
+    const { videos = true, stats = true, tags = true } = options;
+
+    // Clear cache first
+    this.databaseLibraryService.clearCache();
+
+    // Reload requested data in parallel
+    const promises: Promise<any>[] = [];
+
+    if (videos) {
+      promises.push(this.loadVideos());
+    }
+
+    if (stats) {
+      promises.push(this.loadStats());
+    }
+
+    if (tags) {
+      promises.push(this.loadTags());
+    }
+
+    await Promise.all(promises);
+  }
+
+  /**
    * Load all libraries with minimal retry logic
    */
   async loadLibraries(retryCount = 0, maxRetries = 3): Promise<void> {
@@ -973,607 +919,15 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle tab change
-   */
-  async onTabChange(index: number) {
-    this.selectedTabIndex = index;
-    if (index === 1) {
-      // Unimported tab selected
-      await this.loadUnimportedVideos();
-    }
-  }
-
-  /**
    * Open video management dialog
    */
-  async viewUnimportedVideos() {
-    // Switch to management page mode
-    this.pageMode = 'management';
-    this.managementMode = 'orphaned';
-    await this.loadOrphanedVideos();
+  viewUnimportedVideos() {
+    // Navigate to library management view
+    this.router.navigate(['/library-management']);
   }
 
   /**
-   * Switch back to library view
-   */
-  backToLibrary() {
-    this.pageMode = 'library';
-    // Reload library data in case anything changed
-    this.databaseLibraryService.clearCache();
-    this.loadVideos();
-    this.loadStats();
-    this.loadTags();
-  }
-
-  /**
-   * Handle management tab change
-   */
-  onManagementTabChange(event: any) {
-    const selectedIndex = event.index;
-
-    // Tab 0: Orphaned Files, Tab 1: Orphaned Database Entries
-    if (selectedIndex === 0) {
-      this.managementMode = 'unimported';
-      this.loadUnimportedVideos();
-    } else if (selectedIndex === 1) {
-      this.managementMode = 'orphaned';
-      this.loadOrphanedVideos();
-    }
-  }
-
-  /**
-   * Load orphaned videos
-   */
-  async loadOrphanedVideos() {
-    this.loadingOrphaned = true;
-    try {
-      // First run a full scan to mark missing videos
-      const scanUrl = await this.backendUrlService.getApiUrl('/database/scan');
-      await this.http.post(scanUrl, {}).toPromise();
-
-      // Get the actual orphaned video details (is_linked = 0)
-      const videosUrl = await this.backendUrlService.getApiUrl('/database/videos?linkedOnly=false');
-      const response = await this.http.get<{ videos: DatabaseVideo[] }>(videosUrl).toPromise();
-
-      this.orphanedVideos = response?.videos.filter(v => v.is_linked === 0) || [];
-      this.selectedOrphanedVideos.clear();
-    } catch (error) {
-      console.error('Failed to load orphaned videos:', error);
-      this.snackBar.open('Failed to load orphaned videos', 'Close', { duration: 3000 });
-      this.orphanedVideos = [];
-    } finally {
-      this.loadingOrphaned = false;
-    }
-  }
-
-  /**
-   * Load unimported videos from clips folder
-   */
-  async loadUnimportedVideos() {
-    if (!this.activeLibrary) {
-      this.unimportedVideos = [];
-      return;
-    }
-
-    this.loadingUnimported = true;
-    try {
-      const url = await this.backendUrlService.getApiUrl('/database/unimported');
-      const response = await this.http.get<{
-        success: boolean;
-        count: number;
-        videos: UnimportedVideo[];
-        error?: string;
-      }>(url).toPromise();
-
-      if (response?.success) {
-        this.unimportedVideos = response.videos;
-        console.log(`Found ${response.count} unimported videos`);
-      } else {
-        console.error('Failed to load unimported videos:', response?.error);
-        this.unimportedVideos = [];
-      }
-    } catch (error) {
-      console.error('Failed to load unimported videos:', error);
-      this.unimportedVideos = [];
-    } finally {
-      this.loadingUnimported = false;
-    }
-  }
-
-  /**
-   * Toggle unimported video selection
-   */
-  toggleUnimportedSelection(video: UnimportedVideo) {
-    if (this.selectedUnimportedVideos.has(video.fullPath)) {
-      this.selectedUnimportedVideos.delete(video.fullPath);
-    } else {
-      this.selectedUnimportedVideos.add(video.fullPath);
-    }
-    this.updateAllUnimportedSelectedState();
-  }
-
-  /**
-   * Toggle all unimported selection
-   */
-  toggleAllUnimportedSelection() {
-    if (this.isAllUnimportedSelected) {
-      this.selectedUnimportedVideos.clear();
-      this.isAllUnimportedSelected = false;
-    } else {
-      this.unimportedVideos.forEach(video => this.selectedUnimportedVideos.add(video.fullPath));
-      this.isAllUnimportedSelected = true;
-    }
-  }
-
-  /**
-   * Update all unimported selected state
-   */
-  private updateAllUnimportedSelectedState() {
-    if (this.unimportedVideos.length === 0) {
-      this.isAllUnimportedSelected = false;
-      return;
-    }
-    this.isAllUnimportedSelected = this.unimportedVideos.every(video =>
-      this.selectedUnimportedVideos.has(video.fullPath)
-    );
-  }
-
-  /**
-   * Toggle unimported video selection
-   */
-  toggleUnimportedVideo(videoPath: string) {
-    if (this.selectedUnimportedVideos.has(videoPath)) {
-      this.selectedUnimportedVideos.delete(videoPath);
-    } else {
-      this.selectedUnimportedVideos.add(videoPath);
-    }
-    this.updateAllUnimportedSelectedState();
-  }
-
-  /**
-   * Handle click on management video with modifier keys
-   */
-  onManagementVideoClick(event: MouseEvent, identifier: string, type: 'unimported' | 'orphaned') {
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey;
-    const shift = event.shiftKey;
-
-    if (type === 'unimported') {
-      if (cmdOrCtrl) {
-        // Cmd/Ctrl+click: toggle single selection
-        this.toggleUnimportedVideo(identifier);
-      } else if (shift) {
-        // Shift+click: range select (TODO: implement range selection)
-        this.toggleUnimportedVideo(identifier);
-      } else {
-        // Regular click: clear other selections and select this one
-        this.selectedUnimportedVideos.clear();
-        this.selectedUnimportedVideos.add(identifier);
-        this.updateAllUnimportedSelectedState();
-      }
-    } else {
-      if (cmdOrCtrl) {
-        // Cmd/Ctrl+click: toggle single selection
-        this.toggleOrphanedVideo(identifier);
-      } else if (shift) {
-        // Shift+click: range select (TODO: implement range selection)
-        this.toggleOrphanedVideo(identifier);
-      } else {
-        // Regular click: clear other selections and select this one
-        this.selectedOrphanedVideos.clear();
-        this.selectedOrphanedVideos.add(identifier);
-        this.updateOrphanedSelectionState();
-      }
-    }
-  }
-
-  /**
-   * Handle right-click context menu on management videos
-   */
-  onManagementVideoRightClick(
-    event: MouseEvent,
-    video: any,
-    type: 'unimported' | 'orphaned'
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const identifier = type === 'unimported' ? video.fullPath : video.id;
-    const selectedSet = type === 'unimported' ? this.selectedUnimportedVideos : this.selectedOrphanedVideos;
-
-    // If right-clicked video is not in selection, select only it
-    if (!selectedSet.has(identifier)) {
-      selectedSet.clear();
-      selectedSet.add(identifier);
-
-      if (type === 'unimported') {
-        this.updateAllUnimportedSelectedState();
-      } else {
-        this.updateOrphanedSelectionState();
-      }
-    }
-
-    // Position the context menu at cursor location
-    this.managementContextMenuPosition = {
-      x: event.clientX,
-      y: event.clientY
-    };
-
-    // Open the menu using the positioned trigger
-    if (this.managementContextMenuTrigger) {
-      this.managementContextMenuTrigger.openMenu();
-    }
-  }
-
-  /**
-   * Handle clicks on management view container to close menu
-   */
-  onManagementViewClick(event: MouseEvent) {
-    // Close the menu if it's open and user clicked outside of a menu item
-    if (this.managementContextMenuTrigger?.menuOpen) {
-      const target = event.target as HTMLElement;
-      // Don't close if clicking on menu items or the menu itself
-      if (!target.closest('.mat-mdc-menu-panel') && !target.closest('.actions-menu')) {
-        this.managementContextMenuTrigger.closeMenu();
-      }
-    }
-  }
-
-  /**
-   * Handle right-click on management view background to close menu
-   */
-  onManagementViewRightClick(event: MouseEvent) {
-    const target = event.target as HTMLElement;
-    // If right-clicking outside of a video row, close any open menu
-    if (!target.closest('.management-video-row') && this.managementContextMenuTrigger?.menuOpen) {
-      this.managementContextMenuTrigger.closeMenu();
-    }
-  }
-
-  /**
-   * Delete unimported video file
-   */
-  async deleteUnimportedVideo(video: UnimportedVideo) {
-    // Delete single file - just call the batch method with one item
-    this.selectedUnimportedVideos.clear();
-    this.selectedUnimportedVideos.add(video.fullPath);
-    await this.deleteSelectedUnimportedVideos();
-  }
-
-  /**
-   * Delete selected unimported videos
-   */
-  async deleteSelectedUnimportedVideos() {
-    if (this.selectedUnimportedVideos.size === 0) return;
-
-    const fileCount = this.selectedUnimportedVideos.size;
-
-    // Open delete confirmation dialog
-    const dialogRef = this.dialog.open(DeleteConfirmationDialog, {
-      width: '500px',
-      data: {
-        count: fileCount,
-        videoName: null
-      }
-    });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (!result) {
-      return; // User cancelled
-    }
-
-    try {
-      const filePaths = Array.from(this.selectedUnimportedVideos);
-      const deleteUrl = await this.backendUrlService.getApiUrl('/database/delete-unimported-files');
-
-      const response = await this.http.post<{
-        success: boolean;
-        deletedCount: number;
-        failedCount: number;
-        errors?: string[];
-        message: string;
-      }>(deleteUrl, { filePaths }).toPromise();
-
-      if (response?.success) {
-        this.notificationService.toastOnly('success', 'Files Deleted', response.message);
-
-        // Clear selection
-        this.selectedUnimportedVideos.clear();
-        this.updateAllUnimportedSelectedState();
-
-        // Reload the unimported videos list
-        await this.loadUnimportedVideos();
-      } else {
-        const errorMsg = response?.errors?.join('\n') || 'Could not delete files';
-        this.notificationService.error('Delete Failed', errorMsg);
-      }
-    } catch (error: any) {
-      console.error('Error deleting files:', error);
-      this.notificationService.error('Delete Failed', error?.error?.message || 'Could not delete video files');
-    }
-  }
-
-  /**
-   * Relink orphaned videos
-   */
-  async relinkOrphanedVideos() {
-    if (this.selectedOrphanedVideos.size === 0) {
-      return;
-    }
-
-    const electron = (window as any).electron;
-    if (!electron || !electron.openDirectoryPicker) {
-      this.notificationService.error('Not Available', 'Folder picker only works in Electron app');
-      return;
-    }
-
-    try {
-      const selectedIds = Array.from(this.selectedOrphanedVideos);
-      const relinkUrl = await this.backendUrlService.getApiUrl('/database/relink');
-
-      // Step 1: Try to auto-scan the library for the missing files
-      const autoScanResponse = await this.http.post<{
-        success: boolean;
-        relinkedCount: number;
-        failedCount: number;
-        message: string;
-        notFoundIds?: string[];
-      }>(relinkUrl, {
-        videoIds: selectedIds,
-        autoScan: true
-      }).toPromise();
-
-      // If all files were found in library, we're done!
-      if (autoScanResponse?.success && autoScanResponse.relinkedCount > 0) {
-        this.notificationService.toastOnly(
-          'success',
-          'Videos Found',
-          `${autoScanResponse.relinkedCount} video${autoScanResponse.relinkedCount !== 1 ? 's' : ''} found and relinked`
-        );
-        this.selectedOrphanedVideos.clear();
-        await this.loadOrphanedVideos();
-
-        // If some weren't found, continue to folder picker
-        if (autoScanResponse.failedCount === 0) {
-          return;
-        }
-      }
-
-      // Step 2: If files not found in library, ask user to select a folder
-      const remainingCount = autoScanResponse?.notFoundIds?.length || selectedIds.length;
-
-      this.notificationService.info(
-        'Select Folder',
-        `${remainingCount} file${remainingCount !== 1 ? 's' : ''} not found. Please select a folder to search.`
-      );
-
-      // Open folder picker
-      const result = await electron.openDirectoryPicker();
-
-      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return; // User cancelled
-      }
-
-      const searchFolder = result.filePaths[0];
-
-      // Step 3: Scan the selected folder recursively
-      const scanResponse = await this.http.post<{
-        success: boolean;
-        relinkedCount: number;
-        failedCount: number;
-        message: string;
-      }>(relinkUrl, {
-        videoIds: autoScanResponse?.notFoundIds || selectedIds,
-        searchFolder: searchFolder,
-        recursive: true
-      }).toPromise();
-
-      if (scanResponse?.success) {
-        const totalRelinked = (autoScanResponse?.relinkedCount || 0) + (scanResponse.relinkedCount || 0);
-        this.notificationService.toastOnly(
-          'success',
-          'Relink Complete',
-          `${totalRelinked} video${totalRelinked !== 1 ? 's' : ''} relinked successfully`
-        );
-        this.selectedOrphanedVideos.clear();
-        await this.loadOrphanedVideos();
-      } else {
-        this.notificationService.error('Relink Failed', scanResponse?.message || 'Could not find videos in selected folder');
-      }
-    } catch (error: any) {
-      console.error('Error relinking videos:', error);
-      this.notificationService.error(
-        'Relink Failed',
-        error?.error?.message || 'Could not relink videos'
-      );
-    }
-  }
-
-  /**
-   * Check if unimported video is selected
-   */
-  isUnimportedVideoSelected(video: UnimportedVideo): boolean {
-    return this.selectedUnimportedVideos.has(video.fullPath);
-  }
-
-  /**
-   * Import selected unimported videos
-   */
-  async importSelectedVideos() {
-    if (this.selectedUnimportedVideos.size === 0) {
-      return;
-    }
-
-    const videoPaths = Array.from(this.selectedUnimportedVideos);
-
-    // First, show options dialog
-    const { ImportOptionsDialogComponent } = await import('./import-options-dialog.component');
-
-    const optionsDialogRef = this.dialog.open(ImportOptionsDialogComponent, {
-      width: '500px',
-      data: { videoCount: videoPaths.length }
-    });
-
-    const importAction = await optionsDialogRef.afterClosed().toPromise();
-
-    if (!importAction) {
-      // User cancelled
-      return;
-    }
-
-    // Open import progress dialog
-    const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
-
-    const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
-      width: '500px',
-      disableClose: true,
-      data: { filePaths: videoPaths }
-    });
-
-    const importResult = await dialogRef.afterClosed().toPromise();
-
-    if (importResult?.success) {
-      // Clear cache since data changed
-      this.databaseLibraryService.clearCache();
-
-      this.selectedUnimportedVideos.clear();
-      this.updateAllUnimportedSelectedState();
-      await this.loadUnimportedVideos();
-      await this.loadVideos();
-      await this.loadStats();
-
-      // Get the imported video IDs
-      const importedVideoIds = importResult.imported || [];
-
-      // Start batch analysis if requested
-      if (importAction === 'import-and-transcribe' && importedVideoIds.length > 0) {
-        try {
-          await this.databaseLibraryService.startBatchAnalysis({
-            videoIds: importedVideoIds,
-            transcribeOnly: true
-          });
-          this.notificationService.toastOnly(
-            'success',
-            'Transcription Started',
-            `Transcribing ${importedVideoIds.length} video${importedVideoIds.length !== 1 ? 's' : ''}`
-          );
-          this.startProgressPolling();
-        } catch (error: any) {
-          console.error('Failed to start transcription:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Error',
-            error.error?.message || 'Failed to start transcription'
-          );
-        }
-      } else if (importAction === 'import-and-analyze' && importedVideoIds.length > 0) {
-        try {
-          await this.databaseLibraryService.startBatchAnalysis({
-            videoIds: importedVideoIds,
-            transcribeOnly: false
-          });
-          this.notificationService.toastOnly(
-            'success',
-            'Analysis Started',
-            `Processing ${importedVideoIds.length} video${importedVideoIds.length !== 1 ? 's' : ''}`
-          );
-          this.startProgressPolling();
-        } catch (error: any) {
-          console.error('Failed to start analysis:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Error',
-            error.error?.message || 'Failed to start analysis'
-          );
-        }
-      }
-    }
-  }
-
-  /**
-   * Toggle tag filter
-   */
-  toggleTag(tagName: string) {
-    const index = this.selectedTags.indexOf(tagName);
-    if (index > -1) {
-      this.selectedTags.splice(index, 1);
-    } else {
-      this.selectedTags.push(tagName);
-    }
-    this.applyFiltersAndSort();
-  }
-
-  /**
-   * Clear all tag filters
-   */
-  clearTagFilters() {
-    this.selectedTags = [];
-    this.applyFiltersAndSort();
-  }
-
-  /**
-   * Clear search query and tag filters
-   */
-  clearSearch() {
-    this.searchQuery = '';
-    this.selectedTags = [];
-    // Reset file type filters to show all types
-    this.fileTypeFilters = {
-      video: true,
-      audio: true,
-      document: true,
-      image: true,
-      webpage: true
-    };
-    this.onSearchChange();
-  }
-
-  /**
-   * Check if tag is selected
-   */
-  isTagSelected(tagName: string): boolean {
-    return this.selectedTags.includes(tagName);
-  }
-
-  /**
-   * Apply file type filter to videos
-   */
-  // Removed: applyFileTypeFilter - now handled by VideoFilterService
-
-  /**
-   * Toggle file type filter
-   */
-  toggleFileTypeFilter(type: 'video' | 'audio' | 'document' | 'image' | 'webpage') {
-    this.fileTypeFilters[type] = !this.fileTypeFilters[type];
-    this.applyFiltersAndSort();
-  }
-
-  /**
-   * Select all file types
-   */
-  selectAllFileTypes() {
-    this.fileTypeFilters = {
-      video: true,
-      audio: true,
-      document: true,
-      image: true,
-      webpage: true
-    };
-    this.applyFiltersAndSort();
-  }
-
-  /**
-   * Close the file type menu
-   */
-  closeFileTypeMenu() {
-    if (this.fileTypeMenuTrigger) {
-      this.fileTypeMenuTrigger.closeMenu();
-    }
-  }
-
-  /**
-   * Apply search, tag filters, file type filters, and sorting
+   * Apply filters and sorting to videos
    */
   applyFiltersAndSort() {
     // Use VideoFilterService for all filtering/sorting
@@ -1594,6 +948,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Group videos by week/folder
     this.groupVideosByWeek();
+
+    // Update cached list items (avoid recomputation on every change detection)
+    this.updateVideosAsListItems();
 
     // Mark items with suggestions for orange styling
     this.markItemsWithSuggestions();
@@ -1639,7 +996,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Get week identifier in yyyy-mm-dd format (date of Monday of that week)
+   * Get week identifier for a date
    */
   private getWeekIdentifier(date: Date): string {
     const tempDate = new Date(date.getTime());
@@ -1679,99 +1036,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Select a week section (clicking the week header selects all videos in that week)
+   * Format week label for display
    */
-  selectWeekSection(week: string, event?: Event) {
-    if (event) {
-      event.stopPropagation();
-    }
-
-    const mouseEvent = event as MouseEvent | undefined;
-    const weekGroup = this.groupedVideos.find(g => g.week === week);
-    if (!weekGroup) return;
-
-    // Handle Cmd/Ctrl+Click for individual multi-select of weeks
-    if (mouseEvent && (mouseEvent.metaKey || mouseEvent.ctrlKey)) {
-      if (this.selectedWeeks.has(week)) {
-        this.selectedWeeks.delete(week);
-        // Deselect all videos in this week
-        weekGroup.videos.forEach(v => this.selectedVideos.delete(v.id));
-      } else {
-        this.selectedWeeks.add(week);
-        // Select all videos in this week
-        weekGroup.videos.forEach(v => this.selectedVideos.add(v.id));
-      }
-      // Also highlight the first video in this week
-      if (weekGroup.videos.length > 0) {
-        this.highlightedVideo = weekGroup.videos[0];
-      }
-      this.updateSelectedCount(); // Update cached count
-      this.updateAllSelectedState();
-      return;
-    }
-
-    // Handle Shift+Click for range selection (select videos from last highlighted to first in this week)
-    if (mouseEvent && mouseEvent.shiftKey && this.highlightedVideo) {
-      const lastVideoIndex = this.filteredVideos.findIndex(v => v.id === this.highlightedVideo!.id);
-      // Find the first video in this week
-      const firstVideoInWeek = weekGroup.videos[0];
-      const currentIndex = this.filteredVideos.findIndex(v => v.id === firstVideoInWeek.id);
-
-      if (currentIndex !== -1 && lastVideoIndex !== -1) {
-        const startIndex = Math.min(currentIndex, lastVideoIndex);
-        const endIndex = Math.max(currentIndex, lastVideoIndex);
-
-        // Select all videos in the range
-        for (let i = startIndex; i <= endIndex; i++) {
-          this.selectedVideos.add(this.filteredVideos[i].id);
-          // Also mark the week as selected if all videos in it are selected
-          // Use download_date for weekly grouping (when you downloaded it)
-          const videoWeek = this.getWeekIdentifier(new Date(this.filteredVideos[i].download_date || this.filteredVideos[i].added_at));
-          const weekGroupForVideo = this.groupedVideos.find(g => g.week === videoWeek);
-          if (weekGroupForVideo && weekGroupForVideo.videos.every(v => this.selectedVideos.has(v.id))) {
-            this.selectedWeeks.add(videoWeek);
-          }
-        }
-        this.updateSelectedCount(); // Update cached count
-        this.updateAllSelectedState();
-      }
-      return;
-    }
-
-    // Normal click - select all videos in this week (clear other selections)
-    this.selectedVideos.clear();
-    this.selectedWeeks.clear();
-    this.selectedWeeks.add(week);
-    weekGroup.videos.forEach(v => this.selectedVideos.add(v.id));
-    // Highlight the first video in this week
-    if (weekGroup.videos.length > 0) {
-      this.highlightedVideo = weekGroup.videos[0];
-    }
-    this.updateSelectedCount(); // Update cached count
-    this.updateAllSelectedState();
+  private formatWeekLabel(weekStart: string | Date): string {
+    const date = typeof weekStart === 'string' ? new Date(weekStart) : weekStart;
+    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+    return `Week of ${date.toLocaleDateString('en-US', options)}`;
   }
 
   /**
-   * Check if week is highlighted
-   */
-  isWeekHighlighted(week: string): boolean {
-    return this.highlightedWeek === week;
-  }
-
-  /**
-   * Check if week is selected
-   */
-  isWeekSelected(week: string): boolean {
-    // Week is only selected if ALL videos in that week are selected
-    const weekGroup = this.groupedVideos.find(g => g.week === week);
-    if (!weekGroup || weekGroup.videos.length === 0) {
-      return false;
-    }
-    return weekGroup.videos.every(v => this.selectedVideos.has(v.id));
-  }
-
-  /**
-   * Select all videos and weeks
+   * Select all filtered videos
    */
   selectAll() {
     // Use LibraryStateService to select all filtered videos
@@ -1779,56 +1053,37 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Also update local state for weeks
     this.selectedVideos = this.libraryStateService.getSelectedVideoIds();
-    this.groupedVideos.forEach(group => this.selectedWeeks.add(group.week));
-    this.updateSelectedCount();
-    this.updateAllSelectedState();
   }
 
   /**
-   * Toggle expand/collapse for the date section of the currently highlighted video
-   * @param expand true to expand, false to collapse
+   * Toggle file type filter
    */
-  toggleHighlightedSection(expand: boolean) {
-    if (!this.highlightedVideo) return;
+  toggleFileTypeFilter(type: 'video' | 'audio' | 'document' | 'image' | 'webpage') {
+    this.fileTypeFilters[type] = !this.fileTypeFilters[type];
+    this.applyFiltersAndSort();
+  }
 
-    // Find the week/date group that contains the highlighted video
-    const group = this.groupedVideos.find(g =>
-      g.videos.some(v => v.id === this.highlightedVideo!.id)
-    );
+  /**
+   * Select all file types
+   */
+  selectAllFileTypes() {
+    this.fileTypeFilters = {
+      video: true,
+      audio: true,
+      document: true,
+      image: true,
+      webpage: true
+    };
+    this.applyFiltersAndSort();
+  }
 
-    if (group) {
-      if (expand) {
-        this.collapsedWeeks.delete(group.week);
-      } else {
-        this.collapsedWeeks.add(group.week);
-      }
+  /**
+   * Close the file type menu
+   */
+  closeFileTypeMenu() {
+    if (this.fileTypeMenuTrigger) {
+      this.fileTypeMenuTrigger.closeMenu();
     }
-  }
-
-  /**
-   * Toggle expand/collapse for sections with selected videos
-   * @param expand true to expand, false to collapse
-   */
-  toggleSelectedSections(expand: boolean) {
-    if (this.selectedVideos.size === 0) return;
-
-    // Find all weeks that have selected videos
-    const weeksWithSelectedVideos = new Set<string>();
-    this.groupedVideos.forEach(group => {
-      const hasSelectedVideo = group.videos.some(v => this.selectedVideos.has(v.id));
-      if (hasSelectedVideo) {
-        weeksWithSelectedVideos.add(group.week);
-      }
-    });
-
-    // Expand or collapse those weeks
-    weeksWithSelectedVideos.forEach(week => {
-      if (expand) {
-        this.collapsedWeeks.delete(week);
-      } else {
-        this.collapsedWeeks.add(week);
-      }
-    });
   }
 
   /**
@@ -1886,13 +1141,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle search input
-   */
-  onSearchChange() {
-    this.applyFiltersAndSort();
-  }
-
-  /**
    * Handle search criteria change from SearchBarComponent
    */
   onSearchCriteriaChange(criteria: SearchCriteriaChange): void {
@@ -1914,54 +1162,24 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Handle keyboard events on the search input to prevent interference
-   * from global keyboard handlers
+   * Clear all search filters
    */
-  onSearchInputKeyDown(event: KeyboardEvent) {
-    // Stop all keyboard events from propagating up when the search input is focused
-    // This prevents video player shortcuts and other global handlers
-    // from interfering with typing in the search box
-    event.stopPropagation();
-  }
-
-  /**
-   * Change sort criteria
-   */
-  changeSortBy(sortBy: 'date' | 'date-added' | 'filename' | 'size' | 'no-transcript' | 'no-analysis') {
-    if (this.sortBy === sortBy) {
-      // Toggle order if same criteria
-      this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-    } else {
-      this.sortBy = sortBy;
-      // For missing transcript/analysis, default to showing missing first (desc)
-      this.sortOrder = (sortBy === 'no-transcript' || sortBy === 'no-analysis') ? 'desc' : 'desc';
-    }
+  clearSearch() {
+    this.searchQuery = '';
+    this.selectedTags = [];
+    // Reset file type filters to show all types
+    this.fileTypeFilters = {
+      video: true,
+      audio: true,
+      document: true,
+      image: true,
+      webpage: true
+    };
     this.applyFiltersAndSort();
   }
 
   /**
-   * Toggle between list and detail view modes
-   */
-  toggleViewMode() {
-    this.viewMode = this.viewMode === 'list' ? 'detail' : 'list';
-    localStorage.setItem('library-view-mode', this.viewMode);
-
-    // If switching to detail view and there are videos, select the first one
-    if (this.viewMode === 'detail' && this.filteredVideos.length > 0 && !this.selectedVideo) {
-      this.selectVideo(this.filteredVideos[0]);
-    }
-  }
-
-  /**
-   * Toggle auto-play feature
-   */
-  toggleAutoPlay() {
-    this.autoPlayEnabled = !this.autoPlayEnabled;
-    localStorage.setItem('library-auto-play', String(this.autoPlayEnabled));
-  }
-
-  /**
-   * Select a video in detail view
+   * Select a video for playback
    */
   selectVideo(video: DatabaseVideo) {
     console.log('[selectVideo] Selecting video:', video.id, video.filename);
@@ -2001,7 +1219,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Get video stream URL for playing
+   * Get streaming URL for a video
    */
   getVideoStreamUrl(video: DatabaseVideo): string {
     // Properly encode Unicode path to base64
@@ -2019,104 +1237,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     console.log(`[Preview] Media type: ${video.media_type}, Path: ${video.current_path}`);
     console.log(`[Preview] Generated URL: ${url}`);
     return url;
-  }
-
-  /**
-   * Handle thumbnail loading error
-   */
-  onThumbnailError(event: Event) {
-    const img = event.target as HTMLImageElement;
-    img.src = '/assets/video-placeholder.png';
-  }
-
-  /**
-   * Handle video loaded event
-   */
-  onVideoLoaded(videoEl: HTMLVideoElement) {
-    this.videoElement = videoEl;
-  }
-
-  /**
-   * Handle image loaded event
-   */
-  onImageLoaded() {
-    // Image loaded successfully in preview panel
-    console.log('Image loaded successfully in preview');
-  }
-
-  /**
-   * Handle image error event
-   */
-  onImageError(event: Event) {
-    const img = event.target as HTMLImageElement;
-    console.error('=== Image Load Error ===');
-    console.error('Image src:', img.src);
-    console.error('Natural width/height:', img.naturalWidth, img.naturalHeight);
-    console.error('Video being previewed:', this.highlightedVideo);
-    console.error('File path:', this.highlightedVideo?.current_path);
-    console.error('Media type:', this.highlightedVideo?.media_type);
-    console.error('Event:', event);
-
-    // Try to fetch the URL to see the actual error
-    fetch(img.src)
-      .then(response => {
-        console.error('Fetch response status:', response.status, response.statusText);
-        return response.text();
-      })
-      .then(text => {
-        console.error('Response body:', text.substring(0, 500)); // First 500 chars
-      })
-      .catch(fetchError => {
-        console.error('Fetch error:', fetchError);
-      });
-
-    this.notificationService.toastOnly('error', 'Image Load Error', 'Failed to load image preview. Check console for details.');
-  }
-
-  /**
-   * Group videos by week for display with separators
-   */
-  getGroupedVideos(): Array<{type: 'separator', weekLabel: string} | {type: 'video', video: DatabaseVideo}> {
-    const grouped: Array<{type: 'separator', weekLabel: string} | {type: 'video', video: DatabaseVideo}> = [];
-    let currentWeek: string | null = null;
-
-    for (const video of this.filteredVideos) {
-      // Use video.download_date (file creation date) for weekly separators
-      // This represents when you downloaded/created the file, not the content date
-      const downloadDate = new Date(video.download_date || video.added_at);
-      const weekStart = this.getWeekStartDate(downloadDate);
-      const weekLabel = this.formatWeekLabel(weekStart);
-
-      // Add separator if we're in a new week
-      if (weekLabel !== currentWeek) {
-        grouped.push({ type: 'separator', weekLabel });
-        currentWeek = weekLabel;
-      }
-
-      grouped.push({ type: 'video', video });
-    }
-
-    return grouped;
-  }
-
-  /**
-   * Get the start date (Sunday) of the week for a given date
-   */
-  private getWeekStartDate(date: Date): Date {
-    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    const sunday = new Date(date);
-    sunday.setDate(date.getDate() - dayOfWeek);
-    sunday.setHours(0, 0, 0, 0);
-    return sunday;
-  }
-
-  /**
-   * Format week label (e.g., "Week of Nov 4, 2025")
-   */
-  private formatWeekLabel(weekStart: string | Date): string {
-    const date = typeof weekStart === 'string' ? new Date(weekStart) : weekStart;
-    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
-    return `Week of ${date.toLocaleDateString('en-US', options)}`;
   }
 
   /**
@@ -2142,7 +1262,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Format secondary text for video (shows both content date and creation date)
+   * Format secondary text for video display
    */
   formatVideoSecondaryText(video: DatabaseVideo): string {
     const parts: string[] = [];
@@ -2172,7 +1292,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Format duration in hh:mm:ss or mm:ss format
+   * Format video duration for display
    */
   formatVideoDuration(video: DatabaseVideo): string {
     if (!video.duration_seconds) {
@@ -2191,7 +1311,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Get media icon based on type
+   * Get media type icon
    */
   getMediaIcon(video: DatabaseVideo): string {
     switch (video.media_type) {
@@ -2205,7 +1325,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Get status indicator for video
+   * Map video status to visual indicator
    */
   getVideoStatusMapper = (video: DatabaseVideo): ItemStatus | null => {
     // Priority: missing both > has transcript only > has analysis (complete)
@@ -2227,21 +1347,16 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
   /**
    * Convert DatabaseVideo array to ListItem compatible array
-   * Injects ghost parent and ghost child references for parent-child relationships
-   * Ghosts only appear when the real item is in a different week group
+   * Updates the cached videosAsListItems property
    */
-  get videosAsListItems(): (DatabaseVideo & ListItem)[] {
+  private updateVideosAsListItems(): void {
     const result: any[] = [];
-
-    // Create a map of all videos by ID for quick lookup
     const videoMap = new Map(this.filteredVideos.map(v => [v.id, v]));
 
-    // Helper function to get week identifier for a video
     const getWeekForVideo = (video: any) => {
       return this.getWeekIdentifier(new Date(video.download_date || video.added_at));
     };
 
-    // First pass: determine which videos have children
     const hasChildren = new Set<string>();
     for (const video of this.filteredVideos) {
       if (video.parent_id) {
@@ -2249,7 +1364,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Group videos by week
     const weekGroups = new Map<string, any[]>();
     for (const video of this.filteredVideos) {
       const week = getWeekForVideo(video);
@@ -2259,66 +1373,50 @@ export class LibraryComponent implements OnInit, OnDestroy {
       weekGroups.get(week)!.push(video);
     }
 
-    // Sort weeks (descending - newest first)
     const sortedWeeks = Array.from(weekGroups.keys()).sort((a, b) => b.localeCompare(a));
-
-    // Track which videos we've added as real items (to avoid duplicates)
     const addedRealVideos = new Set<string>();
 
-    // Process each week group
     for (const week of sortedWeeks) {
       const videosInWeek = weekGroups.get(week)!;
-
-      // Group children by their parent ID within this week
       const childrenByParent = new Map<string, any[]>();
-      const orphanedVideos: any[] = []; // Videos without parents or whose parent is in same week
+      const orphanedVideos: any[] = [];
 
       for (const video of videosInWeek) {
         if (video.parent_id) {
           const parent = videoMap.get(video.parent_id);
           if (parent) {
             const parentWeek = getWeekForVideo(parent);
-
-            // Only group children whose parent is in a DIFFERENT week
             if (parentWeek !== week) {
               if (!childrenByParent.has(video.parent_id)) {
                 childrenByParent.set(video.parent_id, []);
               }
               childrenByParent.get(video.parent_id)!.push(video);
             } else {
-              // Parent is in same week, add as normal
               orphanedVideos.push(video);
             }
           } else {
-            // Parent doesn't exist, add as normal
             orphanedVideos.push(video);
           }
         } else {
-          // Not a child, add as normal
           orphanedVideos.push(video);
         }
       }
 
-      // First, add all ghost parent groups (parent + all its children)
       for (const [parentId, children] of childrenByParent.entries()) {
         const parent = videoMap.get(parentId);
         if (!parent) continue;
 
-        // Add ghost parent once
         const ghostParent = {
           ...parent,
           isGhostParent: true,
           isChild: false,
           isParent: hasChildren.has(parent.id),
-          // Use first child's download_date to keep ghost in current week
           download_date: children[0].download_date
         } as any;
         result.push(ghostParent);
 
-        // Add all children under this ghost parent
         for (const child of children) {
           if (addedRealVideos.has(child.id)) continue;
-
           result.push({
             ...child,
             isChild: true,
@@ -2330,10 +1428,8 @@ export class LibraryComponent implements OnInit, OnDestroy {
         }
       }
 
-      // Then add all other videos (non-children or children whose parent is in same week)
       for (const video of orphanedVideos) {
         if (addedRealVideos.has(video.id)) continue;
-
         result.push({
           ...video,
           isChild: !!video.parent_id,
@@ -2343,23 +1439,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
         });
         addedRealVideos.add(video.id);
 
-        // If this video is a parent, add ghost children for children in OTHER weeks
         if (hasChildren.has(video.id)) {
-          // Find all children of this parent
           const children = this.filteredVideos.filter(v => v.parent_id === video.id);
-
           for (const child of children) {
             const childWeek = getWeekForVideo(child);
-
-            // Only add ghost child if child is in a DIFFERENT week than parent
             if (childWeek !== week) {
               const ghostChild = {
                 ...child,
                 isGhostChild: true,
-                isChild: true,  // Ghost children should still be marked as children for indentation
+                isChild: true,
                 isParent: false,
                 ghostParentId: video.id,
-                // Override download_date to keep ghost in current week (parent's week)
                 download_date: video.download_date
               } as any;
               result.push(ghostChild);
@@ -2369,235 +1459,24 @@ export class LibraryComponent implements OnInit, OnDestroy {
       }
     }
 
-    return result as (DatabaseVideo & ListItem)[];
+    this.videosAsListItems = result as (DatabaseVideo & ListItem)[];
   }
 
   /**
-   * Convert unimported videos to ListItem format for cascade-list
-   */
-  get unimportedVideosAsListItems(): (UnimportedVideo & ListItem)[] {
-    return this.unimportedVideos.map(video => ({
-      ...video,
-      id: video.fullPath // Use fullPath as unique ID
-    })) as (UnimportedVideo & ListItem)[];
-  }
-
-  /**
-   * Convert orphaned videos to ListItem format for cascade-list
-   */
-  get orphanedVideosAsListItems(): (DatabaseVideo & ListItem)[] {
-    // DatabaseVideo already has id field, so just cast it
-    return this.orphanedVideos as (DatabaseVideo & ListItem)[];
-  }
-
-  /**
-   * Selected unimported videos as Set for cascade-list
-   */
-  get selectedUnimportedVideosSet(): Set<string> {
-    return this.selectedUnimportedVideos;
-  }
-
-  /**
-   * Selected orphaned videos as Set for cascade-list
-   */
-  get selectedOrphanedVideosSet(): Set<string> {
-    return this.selectedOrphanedVideos;
-  }
-
-  /**
-   * Handle unimported videos selection
-   */
-  onUnimportedVideosSelected(videos: UnimportedVideo[]) {
-    videos.forEach(v => this.selectedUnimportedVideos.add(v.fullPath));
-    this.updateUnimportedSelectionState();
-  }
-
-  /**
-   * Handle unimported videos deselection
-   */
-  onUnimportedVideosDeselected(videos: UnimportedVideo[]) {
-    videos.forEach(v => {
-      this.selectedUnimportedVideos.delete(v.fullPath);
-      // Clear highlight if this item was highlighted
-      if (this.highlightedUnimportedVideo?.fullPath === v.fullPath) {
-        this.highlightedUnimportedVideo = null;
-      }
-    });
-    this.updateUnimportedSelectionState();
-  }
-
-  /**
-   * Handle unimported videos context menu actions
-   */
-  onUnimportedContextMenuAction(event: { action: string; items: UnimportedVideo[] }) {
-    // If items are provided from context menu, ensure they're selected
-    if (event.items && event.items.length > 0) {
-      // If right-clicking on an unselected item, select only that item
-      if (event.items.length === 1 && !this.selectedUnimportedVideos.has(event.items[0].fullPath)) {
-        this.selectedUnimportedVideos.clear();
-        this.selectedUnimportedVideos.add(event.items[0].fullPath);
-        this.updateUnimportedSelectionState();
-      }
-      // Otherwise use the provided items (which should be the selected items)
-      else if (event.items.length > 1) {
-        this.selectedUnimportedVideos.clear();
-        event.items.forEach(item => this.selectedUnimportedVideos.add(item.fullPath));
-        this.updateUnimportedSelectionState();
-      }
-    }
-
-    switch (event.action) {
-      case 'import':
-        this.importSelectedVideos();
-        break;
-      case 'openLocation':
-        // TODO: Implement open location for unimported files
-        break;
-      case 'delete':
-        // TODO: Implement delete functionality
-        break;
-    }
-  }
-
-  /**
-   * Update unimported selection state
-   */
-  private updateUnimportedSelectionState() {
-    this.isAllUnimportedSelected = this.unimportedVideos.length > 0 &&
-      this.unimportedVideos.every(video => this.selectedUnimportedVideos.has(video.fullPath));
-  }
-
-  /**
-   * Handle orphaned videos selection
-   */
-  onOrphanedVideosSelected(videos: DatabaseVideo[]) {
-    videos.forEach(v => this.selectedOrphanedVideos.add(v.id));
-    this.updateOrphanedSelectionState();
-  }
-
-  /**
-   * Handle orphaned videos deselection
-   */
-  onOrphanedVideosDeselected(videos: DatabaseVideo[]) {
-    videos.forEach(v => {
-      this.selectedOrphanedVideos.delete(v.id);
-      // Clear highlight if this item was highlighted
-      if (this.highlightedOrphanedVideo?.id === v.id) {
-        this.highlightedOrphanedVideo = null;
-      }
-    });
-    this.updateOrphanedSelectionState();
-  }
-
-  /**
-   * Handle orphaned videos context menu actions
-   */
-  onOrphanedContextMenuAction(event: { action: string; items: DatabaseVideo[] }) {
-    // If items are provided from context menu, ensure they're selected
-    if (event.items && event.items.length > 0) {
-      // If right-clicking on an unselected item, select only that item
-      if (event.items.length === 1 && !this.selectedOrphanedVideos.has(event.items[0].id)) {
-        this.selectedOrphanedVideos.clear();
-        this.selectedOrphanedVideos.add(event.items[0].id);
-        this.updateOrphanedSelectionState();
-      }
-      // Otherwise use the provided items (which should be the selected items)
-      else if (event.items.length > 1) {
-        this.selectedOrphanedVideos.clear();
-        event.items.forEach(item => this.selectedOrphanedVideos.add(item.id));
-        this.updateOrphanedSelectionState();
-      }
-    }
-
-    switch (event.action) {
-      case 'relink':
-        this.relinkOrphanedVideos();
-        break;
-      case 'delete':
-        this.deleteSelectedOrphans();
-        break;
-    }
-  }
-
-  /**
-   * Handle unimported video click
-   */
-  onUnimportedItemClick(video: UnimportedVideo) {
-    this.highlightedUnimportedVideo = video;
-  }
-
-  /**
-   * Handle unimported video double click
-   */
-  onUnimportedItemDoubleClick(video: UnimportedVideo) {
-    // Import the video on double-click
-    this.selectedUnimportedVideos.clear();
-    this.selectedUnimportedVideos.add(video.fullPath);
-    this.importSelectedVideos();
-  }
-
-  /**
-   * Handle unimported video highlighted
-   */
-  onUnimportedItemHighlighted(video: UnimportedVideo | null) {
-    this.highlightedUnimportedVideo = video;
-  }
-
-  /**
-   * Handle unimported delete action
-   */
-  onUnimportedDeleteAction(videos: UnimportedVideo[]) {
-    // TODO: Implement delete functionality
-    console.log('Delete unimported videos:', videos);
-  }
-
-  /**
-   * Handle orphaned video click
-   */
-  onOrphanedItemClick(video: DatabaseVideo) {
-    this.highlightedOrphanedVideo = video;
-  }
-
-  /**
-   * Handle orphaned video double click
-   */
-  onOrphanedItemDoubleClick(video: DatabaseVideo) {
-    // Open video info on double-click
-    this.router.navigate(['/video', video.id]);
-  }
-
-  /**
-   * Handle orphaned video highlighted
-   */
-  onOrphanedItemHighlighted(video: DatabaseVideo | null) {
-    this.highlightedOrphanedVideo = video;
-  }
-
-  /**
-   * Handle orphaned delete action
-   */
-  onOrphanedDeleteAction(videos: DatabaseVideo[]) {
-    this.deleteSelectedOrphans();
-  }
-
-  /**
-   * Handle CascadeListComponent events
+   * Handle list item click
    */
   onListItemClick(video: DatabaseVideo) {
-    // Finder-like behavior: Single click highlights AND selects the item
     this.highlightedVideo = video;
-
-    // Normal click handling - name suggestion clicks are handled separately via event listener
-    // Click handling is managed by CascadeListComponent for selection
-    // For detail view, load video in preview
     if (this.viewMode === 'detail') {
       this.selectVideo(video);
     } else if (this.viewMode === 'list' && this.currentPreviewDialogRef) {
-      // If preview dialog is open, clicking should load that video
       this.loadPreviewVideo(video);
     }
   }
 
+  /**
+   * Handle list item double click
+   */
   onListItemDoubleClick(video: DatabaseVideo) {
     this.openVideoPlayer(video);
   }
@@ -3106,69 +1985,19 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Analyze specific videos (can be called from context menu or other sources)
    */
   private async analyzeVideos(videos: DatabaseVideo[]) {
-    if (!videos || videos.length === 0) {
-      this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to analyze');
-      return;
-    }
+    // Delegate to VideoOperationsService
+    await this.videoOperationsService.analyzeVideos(videos, this.analysisQueueService);
 
-    console.log('analyzeVideos called with', videos.length, 'videos');
-
-    // Open dialog without specifying mode - let user choose
-    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
-      width: '700px',
-      maxWidth: '90vw',
-      maxHeight: '85vh',
-      panelClass: 'video-analysis-dialog-panel',
-      data: {
-        selectedVideos: videos
-      },
-      disableClose: false
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success) {
-        // Add jobs to queue AFTER dialog has closed to prevent UI freeze
-        if (result.jobsToAdd) {
-          setTimeout(() => {
-            for (const jobData of result.jobsToAdd) {
-              this.analysisQueueService.addPendingJob(jobData);
-            }
-            console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
-          }, 0);
-        }
-
-        // Clear selection after adding to queue
-        this.selectedVideos.clear();
-        this.updateAllSelectedState();
-      }
-    });
+    // Clear selection after adding to queue
+    this.selectedVideos.clear();
+    this.updateAllSelectedState();
   }
 
   /**
    * Open analyze dialog for a single video
    */
   async openAnalyzeDialog(video: DatabaseVideo) {
-    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
-      width: '700px',
-      maxWidth: '90vw',
-      maxHeight: '85vh',
-      panelClass: 'video-analysis-dialog-panel',
-      data: {
-        selectedVideos: [video]
-      },
-      disableClose: false
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success && result.jobsToAdd) {
-        setTimeout(() => {
-          for (const jobData of result.jobsToAdd) {
-            this.analysisQueueService.addPendingJob(jobData);
-          }
-          console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
-        }, 0);
-      }
-    });
+    await this.videoOperationsService.analyzeVideo(video, this.analysisQueueService);
   }
 
   /**
@@ -3198,29 +2027,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Download from URL - open dialog for importing URL
    */
   async downloadFromUrl() {
-    const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
-      width: '700px',
-      maxWidth: '90vw',
-      maxHeight: '85vh',
-      panelClass: 'video-analysis-dialog-panel',
-      data: {
-        mode: 'download'
-      },
-      disableClose: false
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      if (result && result.success && result.jobsToAdd) {
-        // Add jobs to queue AFTER dialog has closed to prevent UI freeze
-        // Use setTimeout to defer until next tick, ensuring dialog animations complete
-        setTimeout(() => {
-          for (const jobData of result.jobsToAdd) {
-            this.analysisQueueService.addPendingJob(jobData);
-          }
-          console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
-        }, 0);
-      }
-    });
+    await this.videoOperationsService.downloadFromUrl(this.analysisQueueService);
   }
 
   async analyzeSelectedOld() {
@@ -3315,9 +2122,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
     try {
       const result = await this.databaseLibraryService.scanLibrary();
 
-      // Clear cache since data changed
-      this.databaseLibraryService.clearCache();
-
       // Only show notification if new videos were found
       if (result.newVideos > 0) {
         this.notificationService.toastOnly(
@@ -3327,72 +2131,24 @@ export class LibraryComponent implements OnInit, OnDestroy {
         );
       }
 
-      await this.loadStats();
-      await this.loadVideos();
+      await this.reloadLibrary({ videos: true, stats: true, tags: false });
     } catch (error) {
       console.error('Scan failed:', error);
       this.notificationService.toastOnly('error', 'Error', 'Failed to scan library');
     }
   }
 
-  /**
-   * Prune orphaned videos from database
-   */
-  async pruneOrphanedVideos() {
-    if (!this.stats || this.stats.unlinkedVideos === 0) {
-      this.notificationService.toastOnly('info', 'No Orphaned Videos', 'There are no orphaned videos to prune');
-      return;
-    }
-
-    // Confirm with user
-    const confirmed = confirm(
-      `This will permanently delete ${this.stats.unlinkedVideos} orphaned video${this.stats.unlinkedVideos > 1 ? 's' : ''} from the database.\n\n` +
-      `These are videos that were deleted from your clips folder but their metadata is still in the database.\n\n` +
-      `This action cannot be undone. Continue?`
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      const result = await this.databaseLibraryService.pruneOrphanedVideos();
-
-      // Clear cache since data changed
-      this.databaseLibraryService.clearCache();
-
-      this.notificationService.toastOnly(
-        'success',
-        'Prune Complete',
-        result.message
-      );
-
-      await this.loadStats();
-      await this.loadVideos();
-    } catch (error) {
-      console.error('Prune failed:', error);
-      this.notificationService.toastOnly('error', 'Error', 'Failed to prune orphaned videos');
-    }
-  }
 
   /**
    * Start batch analysis
    */
   async startBatchAnalysis(limit?: number) {
     try {
-      const options = limit ? { limit } : undefined;
-      const result = await this.databaseLibraryService.startBatchAnalysis(options);
-
-      // Don't show "batch started" notification - progress bar is visible
+      await this.videoOperationsService.startBatchAnalysis(limit);
       // Start polling for progress
       this.startProgressPolling();
-    } catch (error: any) {
-      console.error('Failed to start batch:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Error',
-        error.error?.message || 'Failed to start batch analysis'
-      );
+    } catch (error) {
+      // Error already handled by service
     }
   }
 
@@ -3489,9 +2245,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
             `Processed ${this.batchProgress.processedVideos} videos`
           );
           // Clear cache to ensure fresh data
-          this.databaseLibraryService.clearCache();
-          await this.loadStats();
-          await this.loadVideos();
+          await this.reloadLibrary({ videos: true, stats: true, tags: false });
           clearInterval(this.progressInterval);
         }
       } catch (error) {
@@ -3524,12 +2278,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   async pauseBatch() {
     try {
-      await this.databaseLibraryService.pauseBatch();
-      // Don't show notification - progress bar shows paused state
-      this.batchProgress = await this.databaseLibraryService.getBatchProgress();
+      this.batchProgress = await this.videoOperationsService.pauseBatch();
     } catch (error) {
-      console.error('Failed to pause:', error);
-      this.notificationService.toastOnly('error', 'Error', 'Failed to pause batch');
+      // Error already handled by service
     }
   }
 
@@ -3538,12 +2289,9 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   async resumeBatch() {
     try {
-      await this.databaseLibraryService.resumeBatch();
-      // Don't show notification - progress bar shows running state
-      this.batchProgress = await this.databaseLibraryService.getBatchProgress();
+      this.batchProgress = await this.videoOperationsService.resumeBatch();
     } catch (error) {
-      console.error('Failed to resume:', error);
-      this.notificationService.toastOnly('error', 'Error', 'Failed to resume batch');
+      // Error already handled by service
     }
   }
 
@@ -3552,28 +2300,17 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   async stopBatch() {
     try {
-      await this.databaseLibraryService.stopBatch();
       // Clear all processing states when stopping
       this.videoProcessingStates.clear();
-      this.notificationService.toastOnly('info', 'Batch Stopped', 'Analysis has been stopped');
-      this.batchProgress = await this.databaseLibraryService.getBatchProgress();
+      this.batchProgress = await this.videoOperationsService.stopBatch();
     } catch (error) {
-      console.error('Failed to stop:', error);
-      this.notificationService.toastOnly('error', 'Error', 'Failed to stop batch');
+      // Error already handled by service
     }
   }
 
   /**
    * Format helpers
    */
-  formatFileSize(bytes: number | null): string {
-    return this.databaseLibraryService.formatFileSize(bytes);
-  }
-
-  formatDuration(seconds: number | null): string {
-    return this.databaseLibraryService.formatDuration(seconds);
-  }
-
   formatDate(dateString: string | null): string {
     if (!dateString) return 'Unknown';
     try {
@@ -3707,46 +2444,14 @@ export class LibraryComponent implements OnInit, OnDestroy {
    * Delete a video from the library
    */
   async deleteVideo(video: DatabaseVideo) {
-    // Open delete options dialog
-    const dialogRef = this.dialog.open(DeleteConfirmationDialog, {
-      width: '500px',
-      data: {
-        count: 1,
-        videoName: video.filename
-      }
+    // Delegate to VideoOperationsService with success callback
+    const success = await this.videoOperationsService.deleteVideo(video, async () => {
+      await this.reloadLibrary();
     });
 
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (!result || result.action === 'cancel') {
-      return;
-    }
-
-    const deleteFiles = result.action === 'delete-all';
-
-    try {
-      await this.databaseLibraryService.deleteVideo(video.id, deleteFiles);
-
-      this.notificationService.toastOnly(
-        'success',
-        deleteFiles ? 'Video Deleted' : 'Video Removed',
-        deleteFiles
-          ? `${video.filename} has been permanently deleted`
-          : `${video.filename} has been removed from the library`
-      );
-
-      // Clear cache and reload
-      this.databaseLibraryService.clearCache();
-      await this.loadVideos();
-      await this.loadStats();
-      await this.loadTags();
-    } catch (error: any) {
-      console.error('Failed to delete video:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Delete Failed',
-        error.error?.message || 'Failed to delete video'
-      );
+    // Update state if successful
+    if (success) {
+      this.libraryStateService.removeVideos([video.id]);
     }
   }
 
@@ -3759,69 +2464,25 @@ export class LibraryComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Open delete options dialog
-    const dialogRef = this.dialog.open(DeleteConfirmationDialog, {
-      width: '500px',
-      data: {
-        count: selectedCount,
-        videoName: selectedCount === 1 ? this.videos.find(v => this.selectedVideos.has(v.id))?.filename : null
+    const videoIds = Array.from(this.selectedVideos);
+
+    // Delegate to VideoOperationsService with success callback
+    const result = await this.videoOperationsService.deleteVideoBatch(
+      videoIds,
+      this.videos,
+      async () => {
+        await this.reloadLibrary();
       }
-    });
+    );
 
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (!result) {
-      return; // User cancelled
-    }
-
-    const deleteFiles = result === 'everything';
-
-    try {
-      const videoIds = Array.from(this.selectedVideos);
-
-      // Use batch delete endpoint for better performance
-      const response = await this.databaseLibraryService.deleteVideoBatch(videoIds, deleteFiles);
-
-      // Update state service - remove deleted videos
+    // Update state if successful
+    if (result.success) {
       this.libraryStateService.removeVideos(videoIds);
 
       // Clear selection
       this.selectedVideos.clear();
       this.updateSelectedCount();
       this.isAllSelected = false;
-
-      // Show result notification
-      if (response.successCount > 0) {
-        this.notificationService.toastOnly(
-          response.errorCount > 0 ? 'warning' : 'success',
-          deleteFiles ? 'Delete Complete' : 'Removed from Library',
-          response.message
-        );
-      } else {
-        this.notificationService.toastOnly(
-          'error',
-          'Delete Failed',
-          response.message
-        );
-      }
-
-      // Log any errors for debugging
-      if (response.errors && response.errors.length > 0) {
-        console.error('Some videos failed to delete:', response.errors);
-      }
-
-      // Clear cache and reload
-      this.databaseLibraryService.clearCache();
-      await this.loadVideos();
-      await this.loadStats();
-      await this.loadTags();
-    } catch (error: any) {
-      console.error('Delete operation failed:', error);
-      this.notificationService.toastOnly(
-        'error',
-        'Delete Failed',
-        error.error?.message || 'Failed to delete videos'
-      );
     }
   }
 
@@ -4011,9 +2672,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
         // User cancelled analyzable files, but non-analyzable were already imported
         // Show notification for what was imported so far
         if (totalImportedCount > 0) {
-          this.databaseLibraryService.clearCache();
-          await this.loadVideos();
-          await this.loadStats();
+          await this.reloadLibrary({ videos: true, stats: true, tags: false });
 
           // Build detailed notification message
           const parts: string[] = [];
@@ -4036,9 +2695,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
 
     // Refresh UI if anything was imported
     if (totalImportedCount > 0) {
-      this.databaseLibraryService.clearCache();
-      await this.loadVideos();
-      await this.loadStats();
+      await this.reloadLibrary({ videos: true, stats: true, tags: false });
     }
 
     // Build detailed notification message
@@ -4329,9 +2986,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
       this.isAllSelected = false;
 
       // Clear cache and reload data
-      this.databaseLibraryService.clearCache();
-      await this.loadVideos();
-      await this.loadStats();
+      await this.reloadLibrary({ videos: true, stats: true, tags: false });
       await this.loadTags();
     }
   }
@@ -5331,7 +3986,7 @@ export class LibraryComponent implements OnInit, OnDestroy {
    */
   canAnalyzeMedia(video: DatabaseVideo | null): boolean {
     if (!video) return false;
-    return video.media_type === 'video' || video.media_type === 'audio';
+    return this.videoFilterService.canAnalyzeMedia(video);
   }
 
   /**
@@ -5346,129 +4001,6 @@ export class LibraryComponent implements OnInit, OnDestroy {
   }
 
 
-  /**
-   * Toggle selection of an orphaned video
-   */
-  toggleOrphanedVideo(videoId: string) {
-    if (this.selectedOrphanedVideos.has(videoId)) {
-      this.selectedOrphanedVideos.delete(videoId);
-    } else {
-      this.selectedOrphanedVideos.add(videoId);
-    }
-    this.updateOrphanedSelectionState();
-  }
-
-  /**
-   * Toggle all orphaned videos selection
-   */
-  toggleAllOrphanedSelection() {
-    if (this.isAllOrphanedSelected) {
-      this.selectedOrphanedVideos.clear();
-    } else {
-      this.orphanedVideos.forEach(v => this.selectedOrphanedVideos.add(v.id));
-    }
-    this.updateOrphanedSelectionState();
-  }
-
-  /**
-   * Update orphaned selection state
-   */
-  private updateOrphanedSelectionState() {
-    this.isAllOrphanedSelected = this.orphanedVideos.length > 0 &&
-      this.orphanedVideos.every(v => this.selectedOrphanedVideos.has(v.id));
-  }
-
-  /**
-   * Relink selected orphaned videos
-   */
-  async relinkSelectedOrphans() {
-    // Call the new relink function that does auto-scan first
-    await this.relinkOrphanedVideos();
-  }
-
-  /**
-   * Delete selected orphaned videos
-   */
-  async deleteSelectedOrphans() {
-    if (this.selectedOrphanedVideos.size === 0) return;
-
-    const entryCount = this.selectedOrphanedVideos.size;
-
-    // Open delete confirmation dialog
-    const dialogRef = this.dialog.open(OrphanedDeleteConfirmationDialog, {
-      width: '500px',
-      data: {
-        count: entryCount,
-        videoName: entryCount === 1 ? this.orphanedVideos.find(v => this.selectedOrphanedVideos.has(v.id))?.filename : null
-      }
-    });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (!result) {
-      return; // User cancelled
-    }
-
-    const selectedIds = Array.from(this.selectedOrphanedVideos);
-    try {
-      const url = await this.backendUrlService.getApiUrl('/database/prune-selected');
-      const response = await this.http.post<{
-        success: boolean;
-        deletedCount: number;
-        message: string;
-      }>(url, { videoIds: selectedIds }).toPromise();
-
-      if (response?.success) {
-        this.notificationService.toastOnly('success', 'Entries Deleted', response.message);
-        this.selectedOrphanedVideos.clear();
-        await this.loadOrphanedVideos();
-      } else {
-        this.notificationService.error('Delete Failed', 'Failed to delete selected entries');
-      }
-    } catch (error: any) {
-      console.error('Failed to delete selected entries:', error);
-      this.notificationService.error('Delete Failed', error?.error?.message || 'Failed to delete selected entries');
-    }
-  }
-
-  /**
-   * Prune all orphaned videos
-   */
-  async pruneAllOrphans() {
-    if (this.orphanedVideos.length === 0) return;
-
-    const confirmed = confirm(
-      `Are you sure you want to permanently delete ${this.orphanedVideos.length} orphaned database entr${this.orphanedVideos.length !== 1 ? 'ies' : 'y'}?\n\n` +
-      'This will remove these entries from the database. This action cannot be undone.'
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const url = await this.backendUrlService.getApiUrl('/database/prune');
-      const response = await this.http.post<{
-        success: boolean;
-        deletedCount: number;
-        message: string;
-      }>(url, {}).toPromise();
-
-      if (response?.success) {
-        this.snackBar.open(response.message, 'Close', { duration: 3000 });
-        this.orphanedVideos = [];
-        this.selectedOrphanedVideos.clear();
-      } else {
-        this.snackBar.open('Failed to prune orphaned entries', 'Close', { duration: 3000 });
-      }
-    } catch (error) {
-      console.error('Failed to prune orphaned entries:', error);
-      this.snackBar.open('Failed to prune orphaned entries', 'Close', { duration: 3000 });
-    }
-  }
-
-  /**
-   * Calculate master progress for a job based on all its stages
-   * This matches the logic from download-queue.component.ts
-   */
   private calculateJobMasterProgress(job: any): number {
     const currentStage = job.stage;
     const progress = job.progress || 0;
@@ -5665,52 +4197,3 @@ export class DeleteConfirmationDialog {
   }
 }
 
-/**
- * Orphaned Delete Confirmation Dialog Component
- * Simpler dialog for deleting orphaned database entries (no file deletion option)
- */
-@Component({
-  selector: 'orphaned-delete-confirmation-dialog',
-  template: `
-    <h2 mat-dialog-title>Delete {{ data.count > 1 ? data.count + ' Orphaned Entries' : 'Orphaned Entry' }}</h2>
-    <mat-dialog-content>
-      <p *ngIf="data.videoName" style="margin-bottom: 16px; font-weight: 500;">{{ data.videoName }}</p>
-      <p style="margin-bottom: 16px;">Are you sure you want to delete {{ data.count > 1 ? 'these entries' : 'this entry' }} from the database?</p>
-      <div style="background: var(--warning-bg); border: 1px solid var(--warning-text); border-radius: 4px; padding: 12px; margin-bottom: 16px;">
-        <div style="display: flex; align-items: flex-start; gap: 8px;">
-          <mat-icon style="color: var(--warning-text); font-size: 20px; width: 20px; height: 20px;">warning</mat-icon>
-          <div style="flex: 1; font-size: 13px; color: var(--warning-text);">
-            This will permanently remove {{ data.count > 1 ? 'these database entries' : 'this database entry' }} and all associated metadata, transcripts, analyses, and tags. This action cannot be undone.
-          </div>
-        </div>
-      </div>
-    </mat-dialog-content>
-    <mat-dialog-actions align="end">
-      <button mat-button (click)="onCancel()">Cancel</button>
-      <button mat-raised-button color="warn" (click)="onConfirm()">
-        Delete from Database
-      </button>
-    </mat-dialog-actions>
-  `,
-  standalone: true,
-  imports: [
-    CommonModule,
-    MatDialogModule,
-    MatButtonModule,
-    MatIconModule
-  ]
-})
-export class OrphanedDeleteConfirmationDialog {
-  constructor(
-    public dialogRef: MatDialogRef<OrphanedDeleteConfirmationDialog>,
-    @Inject(MAT_DIALOG_DATA) public data: { count: number; videoName: string | null }
-  ) {}
-
-  onCancel(): void {
-    this.dialogRef.close(null);
-  }
-
-  onConfirm(): void {
-    this.dialogRef.close(true);
-  }
-}

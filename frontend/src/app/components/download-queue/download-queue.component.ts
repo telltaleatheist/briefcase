@@ -14,7 +14,7 @@ import { DownloadProgressService, VideoProcessingJob } from '../../services/down
 import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysis-queue.service';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
-import { Subscription } from 'rxjs';
+import { Subscription, interval } from 'rxjs';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
   ItemDisplayConfig,
@@ -77,11 +77,15 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   private expandedActiveJobIds = new Set<string>();
 
   // Polling
-  private pollingInterval: any = null;
+  private pollingSubscription: Subscription | null = null;
   isProcessing = false;
 
   // Auto-queue processing (sequential, one-at-a-time)
   private autoProcessQueue = false;
+
+  // Memoization caches for expensive calculations
+  private jobStagesCache = new Map<string, { key: string; stages: CascadeChild[] }>();
+  private masterProgressCache = new Map<string, { key: string; progress: number }>();
 
   // Item-list configuration
   SelectionMode = SelectionMode;
@@ -115,36 +119,24 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   async ngOnInit() {
     // Subscribe to processing jobs (analysis jobs only, NOT batch downloads)
     this.jobsSubscription = this.downloadProgressService.jobs$.subscribe(jobsMap => {
-      this.ngZone.run(() => {
-        this.processingJobs = Array.from(jobsMap.values());
+      console.log('[DownloadQueue] jobs$ emission received, count:', jobsMap.size);
+      this.processingJobs = Array.from(jobsMap.values());
+      console.log('[DownloadQueue] processingJobs updated, count:', this.processingJobs.length);
 
-        // Auto-remove completed/failed jobs after a short delay
-        this.processingJobs.forEach(job => {
-          if (job.stage === 'completed' || job.stage === 'failed') {
-            setTimeout(() => {
-              this.downloadProgressService.removeJob(job.id);
-            }, 2000); // Show for 2 seconds then remove
-          }
-        });
-
-        // Force change detection to update UI
-        this.cdr.detectChanges();
-      });
+      // The observable subscription should automatically run in Angular zone
+      // and trigger change detection when processingJobs array reference changes
     });
 
     // Subscribe to pending jobs from the queue service
     this.pendingJobsSubscription = this.analysisQueueService.getPendingJobs().subscribe(jobs => {
-      this.ngZone.run(() => {
-        this.pendingJobs = jobs;
-        this.cdr.markForCheck();
-        this.cdr.detectChanges();
-      });
+      this.pendingJobs = jobs;
+      // Angular will automatically detect changes - no manual trigger needed
     });
 
     // Subscribe to job added event to auto-open the queue
     this.jobAddedSubscription = this.analysisQueueService.jobAdded$.subscribe(() => {
       this.isOpen = true;
-      this.cdr.detectChanges();
+      // Angular will detect the change automatically
     });
 
     // Load available Ollama models
@@ -168,6 +160,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       this.jobAddedSubscription.unsubscribe();
     }
     this.stopPolling();
+    if (this.pollingSubscription) {
+      this.pollingSubscription.unsubscribe();
+    }
   }
 
   @HostListener('document:click', ['$event'])
@@ -180,18 +175,20 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   private startProgressPolling() {
-    // Poll every 3 seconds
+    // Poll every 5 seconds (less aggressive)
     this.progressInterval = setInterval(async () => {
       try {
         this.batchProgress = await this.databaseLibraryService.getBatchProgress();
       } catch (error) {
         console.error('Failed to fetch batch progress:', error);
       }
-    }, 3000);
+    }, 5000);
 
     // Also fetch immediately
     this.databaseLibraryService.getBatchProgress().then(progress => {
       this.batchProgress = progress;
+    }).catch(error => {
+      console.error('Failed to fetch initial batch progress:', error);
     });
   }
 
@@ -226,6 +223,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   clearCompleted() {
+    // Clean up caches for completed jobs before removing them
+    const completedJobs = this.getCompletedJobs();
+    completedJobs.forEach(job => {
+      this.jobStagesCache.delete(job.id);
+      this.masterProgressCache.delete(job.id);
+    });
     this.downloadProgressService.clearCompletedJobs();
   }
 
@@ -296,13 +299,13 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     await this.startNextPendingJob();
 
     // Start polling to track progress
-    if (!this.pollingInterval) {
+    if (!this.pollingSubscription) {
       this.isProcessing = true;
       this.startPolling();
     }
 
     // Toast notification removed - dialog is already visible showing queue status
-    this.cdr.detectChanges();
+    // Angular change detection will automatically update the UI
   }
 
   /**
@@ -405,17 +408,18 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   removePendingJob(jobId: string): void {
     this.analysisQueueService.removePendingJob(jobId);
+    // Clean up caches for removed job
+    this.jobStagesCache.delete(jobId);
+    this.masterProgressCache.delete(jobId);
     // Notification removed - user is already in the queue panel
-
-    this.ngZone.run(() => {
-      this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
-      this.cdr.markForCheck();
-      this.cdr.detectChanges();
-    });
+    // The subscription to getPendingJobs() will automatically update pendingJobs
   }
 
   clearQueue(): void {
     this.analysisQueueService.clearPendingJobs();
+    // Clear caches for all jobs
+    this.jobStagesCache.clear();
+    this.masterProgressCache.clear();
     // Disable auto-processing when user manually clears the queue
     this.autoProcessQueue = false;
     // Notification removed - user is already in the queue panel
@@ -425,6 +429,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Clear both pending and completed jobs
     this.analysisQueueService.clearPendingJobs();
     this.downloadProgressService.clearCompletedJobs();
+    // Clear caches for all jobs
+    this.jobStagesCache.clear();
+    this.masterProgressCache.clear();
     // Disable auto-processing when user manually clears all
     this.autoProcessQueue = false;
     // Notification removed - user is already in the queue panel
@@ -505,12 +512,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       language: this.bulkLanguage || undefined,
     });
 
-    this.ngZone.run(() => {
-      this.pendingJobs = this.analysisQueueService.getCurrentPendingJobs();
-      this.cdr.markForCheck();
-      this.cdr.detectChanges();
-    });
-
+    // The subscription to getPendingJobs() will automatically update pendingJobs
     this.selectedJobIds.clear();
     this.selectAllChecked = false;
 
@@ -630,8 +632,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       this.expandedActiveJobIds.add(jobId);
       console.log('[DownloadQueue] Expanded job:', jobId);
     }
-    // Manually trigger change detection to update the view
-    this.cdr.detectChanges();
+    // Angular will automatically detect the Set mutation
   }
 
   isActiveJobExpanded(jobId: string): boolean {
@@ -651,71 +652,84 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
     console.log('[DownloadQueue] Starting REST polling for all active jobs');
 
-    this.pollingInterval = setInterval(async () => {
-      try {
+    // Run polling OUTSIDE Angular zone to avoid triggering change detection every 2s
+    this.ngZone.runOutsideAngular(() => {
+      const intervalId = setInterval(async () => {
         const activeJobs = this.processingJobs.filter(job =>
           job.stage !== 'completed' && job.stage !== 'failed'
         );
 
         if (activeJobs.length === 0) {
-          // If auto-processing is enabled and there are pending jobs, start the next one
-          if (this.autoProcessQueue && this.hasPendingJobs()) {
-            console.log('[DownloadQueue] Job completed, starting next pending job');
-            await this.startNextPendingJob();
-          } else {
-            console.log('[DownloadQueue] No active jobs, stopping polling');
-            this.stopPolling();
-            this.isProcessing = false;
-            this.autoProcessQueue = false;
-          }
+          // Re-enter zone for these operations
+          this.ngZone.run(() => {
+            if (this.autoProcessQueue && this.hasPendingJobs()) {
+              console.log('[DownloadQueue] Job completed, starting next pending job');
+              this.startNextPendingJob();
+            } else {
+              console.log('[DownloadQueue] No active jobs, stopping polling');
+              this.stopPolling();
+              this.isProcessing = false;
+              this.autoProcessQueue = false;
+            }
+          });
           return;
         }
 
         for (const job of activeJobs) {
-          const backendJobId = job.id.replace('analysis-', '');
-          const jobUrl = await this.backendUrlService.getApiUrl(`/analysis/job/${backendJobId}`);
-          const response = await fetch(jobUrl);
+          try {
+            const backendJobId = job.id.replace('analysis-', '');
+            const jobUrl = await this.backendUrlService.getApiUrl(`/analysis/job/${backendJobId}`);
+            const response = await fetch(jobUrl);
 
-          if (!response.ok) {
-            console.error('[DownloadQueue] Failed to fetch job status for', job.id, ':', response.status);
-            continue;
-          }
-
-          const data = await response.json();
-
-          if (data.success && data.job) {
-            const previousStatus = job.stage;
-            this.downloadProgressService.addOrUpdateAnalysisJob(data.job);
-
-            // Show notification on completion or failure (only when status changes)
-            const newStatus = data.job.status?.toLowerCase() || '';
-            const isNewCompletion = (newStatus === 'completed' && previousStatus !== 'completed');
-            const isNewFailure = (newStatus === 'failed' && previousStatus !== 'failed');
-
-            if (isNewCompletion) {
-              this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
-            } else if (isNewFailure) {
-              const errorMessage = data.job.error || 'Unknown error occurred during analysis';
-              this.notificationService.error('Analysis Failed', errorMessage);
+            if (!response.ok) {
+              console.error('[DownloadQueue] Failed to fetch job status for', job.id, ':', response.status);
+              continue;
             }
 
-            // Force change detection after job update
-            this.ngZone.run(() => {
-              this.cdr.detectChanges();
-            });
+            const data = await response.json();
+
+            if (data.success && data.job) {
+              const previousStatus = job.stage;
+
+              // Only update and trigger change detection if status actually changed
+              const newStatus = data.job.status?.toLowerCase() || '';
+              const statusChanged = previousStatus !== newStatus || job.progress !== data.job.progress;
+
+              if (statusChanged) {
+                // Re-enter Angular zone only when we have actual updates
+                this.ngZone.run(() => {
+                  this.downloadProgressService.addOrUpdateAnalysisJob(data.job);
+
+                  const isNewCompletion = (newStatus === 'completed' && previousStatus !== 'completed');
+                  const isNewFailure = (newStatus === 'failed' && previousStatus !== 'failed');
+
+                  if (isNewCompletion) {
+                    this.notificationService.success('Analysis Complete', `Finished: ${job.filename || 'Video'}`);
+                  } else if (isNewFailure) {
+                    const errorMessage = data.job.error || 'Unknown error occurred during analysis';
+                    this.notificationService.error('Analysis Failed', errorMessage);
+                  }
+                });
+              }
+            }
+          } catch (error: any) {
+            console.error('[DownloadQueue] Polling error for job', job.id, ':', error);
           }
         }
-      } catch (error: any) {
-        console.error('[DownloadQueue] Polling error:', error);
-      }
-    }, 500);
+      }, 2000);
+
+      // Store the interval ID for cleanup
+      this.pollingSubscription = {
+        unsubscribe: () => clearInterval(intervalId)
+      } as Subscription;
+    });
   }
 
   private stopPolling(): void {
-    if (this.pollingInterval) {
+    if (this.pollingSubscription) {
       console.log('[DownloadQueue] Stopping REST polling');
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+      this.pollingSubscription.unsubscribe();
+      this.pollingSubscription = null;
     }
   }
 
@@ -789,6 +803,18 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       }));
 
     return [...pending, ...active];
+  }
+
+  /**
+   * Get completed jobs formatted as list items
+   */
+  getCompletedJobsAsListItems(): ListItem[] {
+    return this.getCompletedJobs().map(job => ({
+      ...job,
+      displayName: this.getJobTitle(job),
+      isPending: false,
+      isCompleted: true
+    }));
   }
 
   // Check if a job is pending (hasn't started yet)
@@ -870,14 +896,27 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   /**
    * Generate ghost items (children) for a job based on its stages
+   * Uses memoization to avoid expensive recalculations on every change detection cycle
    */
   generateJobStages(job: any): CascadeChild[] {
-    const children: CascadeChild[] = [];
-
-    // Determine what stages this job will go through
+    // Create a cache key based on properties that affect the stages
     const isPending = job.isPending === true;
     const isUrlJob = job.inputType === 'url' || job.url;
     const mode = job.mode || 'full';
+    const currentStage = job.stage || 'pending';
+    const progress = job.progress || 0;
+
+    const cacheKey = `${job.id}|${isPending}|${isUrlJob}|${mode}|${currentStage}|${progress}`;
+
+    // Check cache first
+    const cached = this.jobStagesCache.get(job.id);
+    if (cached && cached.key === cacheKey) {
+      return cached.stages;
+    }
+
+    const children: CascadeChild[] = [];
+
+    // Determine what stages this job will go through
 
     // For pending jobs, we need to determine stages from the job config
     // For active jobs, we track actual progress through stages
@@ -993,21 +1032,49 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       });
     }
 
+    // Store in cache before returning
+    this.jobStagesCache.set(job.id, { key: cacheKey, stages: children });
+
     return children;
   }
 
   /**
    * Calculate master progress as the average of all child stage progress
+   * Uses memoization to avoid expensive recalculations on every change detection cycle
    */
   calculateMasterProgress(job: any): number {
+    // Create a cache key (same as generateJobStages since it depends on the same properties)
+    const isPending = job.isPending === true;
+    const isUrlJob = job.inputType === 'url' || job.url;
+    const mode = job.mode || 'full';
+    const currentStage = job.stage || 'pending';
+    const progress = job.progress || 0;
+
+    const cacheKey = `${job.id}|${isPending}|${isUrlJob}|${mode}|${currentStage}|${progress}`;
+
+    // Check cache first
+    const cached = this.masterProgressCache.get(job.id);
+    if (cached && cached.key === cacheKey) {
+      return cached.progress;
+    }
+
+    // Calculate progress
     const children = this.generateJobStages(job);
 
-    if (children.length === 0) return 0;
+    if (children.length === 0) {
+      this.masterProgressCache.set(job.id, { key: cacheKey, progress: 0 });
+      return 0;
+    }
 
     const totalProgress = children.reduce((sum, child) => {
       return sum + (child.progress?.value || 0);
     }, 0);
 
-    return Math.round(totalProgress / children.length);
+    const result = Math.round(totalProgress / children.length);
+
+    // Store in cache before returning
+    this.masterProgressCache.set(job.id, { key: cacheKey, progress: result });
+
+    return result;
   }
 }

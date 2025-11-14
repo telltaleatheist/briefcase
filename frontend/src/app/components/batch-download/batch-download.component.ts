@@ -31,6 +31,16 @@ import { BatchQueueStatus, DownloadOptions, VideoInfo, DownloadProgress, BatchJo
 import { Settings } from '../../models/settings.model';
 import { Subscription, catchError, of, interval, forkJoin } from 'rxjs';
 import { ErrorDialogComponent } from '../error-dialog/error-dialog.component';
+import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
+import {
+  ItemDisplayConfig,
+  ItemProgress,
+  ListItem,
+  SelectionMode,
+  CascadeChild,
+  CascadeChildStatus,
+  ChildrenConfig
+} from '../../libs/cascade/src/lib/types/cascade.types';
 
 interface ClipLibrary {
   id: string;
@@ -63,7 +73,8 @@ interface ClipLibrary {
     MatDividerModule,
     MatTooltipModule,
     MatDialogModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    CascadeListComponent
   ],
   templateUrl: './batch-download.component.html',
   styleUrls: ['./batch-download.component.scss']
@@ -106,8 +117,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   private pendingJobsSubscription: Subscription | null = null;
   private pendingJobIdCounter = 0;
 
-  // Track if we're waiting to start the queue
-  private isWaitingToStart = false;
   private startQueueSubscription: Subscription | null = null;
 
   // Libraries
@@ -115,6 +124,24 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   selectedLibraryId: string = '';
   isLoadingLibraries = false;
   private readonly LAST_LIBRARY_KEY = 'batch_download_last_library';
+
+  // Cascade list configuration
+  SelectionMode = SelectionMode;
+
+  jobDisplayConfig: ItemDisplayConfig = {
+    primaryField: 'displayName',
+    secondaryField: 'subtitle',
+    renderSecondary: (item: any) => this.formatJobSubtitle(item)
+  };
+
+  childrenConfig: ChildrenConfig = {
+    enabled: true,
+    expandable: true,
+    defaultExpanded: true,
+    showMasterProgress: true,
+    generator: (item: any) => this.generateJobStages(item),
+    masterProgressCalculator: (item: any) => this.calculateMasterProgress(item)
+  };
 
   constructor(
     private fb: FormBuilder,
@@ -834,9 +861,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       uploadDate: job.uploadDate,
       status: 'pending' as JobStatus,
       progress: 0,
-      currentTask: job.loading ? 'Loading video info...' : 'Pending - waiting to start',
+      currentTask: 'Pending - waiting to start',
       createdAt: new Date().toISOString(),
-      loading: job.loading
+      loading: false
     }));
 
     // If no batch queue status, just return pending jobs
@@ -1147,7 +1174,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Add all URLs to pending jobs immediately with loading state
+    // Add all URLs to pending jobs immediately without loading state
     urls.forEach(url => {
       const downloadOptions: DownloadOptions = {
         url,
@@ -1168,21 +1195,21 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         libraryId: this.selectedLibraryId // Pass library ID for database import
       };
 
-      // Add job to the service with loading state (service generates ID)
+      // Add job to the service without loading state
       const pendingJobId = this.batchStateService.addPendingJob({
         url,
         displayName: this.getShortUrl(url),
         uploadDate: '',
         options: downloadOptions,
-        loading: true // Show loading state while fetching metadata
+        loading: false // No loading spinner
       });
 
-      // Fetch metadata in parallel (fast now with fixed binary!)
+      // Silently fetch metadata in background
       this.batchApiService.getVideoInfo(url)
         .pipe(
           catchError(err => {
             console.error(`Error fetching video info for ${url}:`, err);
-            // Use fallback name
+            // Use fallback name - no notification needed
             return of({ title: this.getShortUrl(url), uploadDate: '' });
           })
         )
@@ -1194,7 +1221,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             uploadDate ? `${uploadDate} ${title}` : title
           );
 
-          // Update the pending job with the fetched metadata
+          // Silently update the pending job with the fetched metadata
           this.batchStateService.updatePendingJob(pendingJobId, {
             displayName,
             uploadDate,
@@ -1205,12 +1232,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
             }
           });
           this.cdr.detectChanges();
-
-          // If we're waiting to start and all metadata is now loaded, start automatically
-          if (this.isWaitingToStart && !this.isLoadingPendingJobs()) {
-            console.log('All metadata loaded, starting queue automatically');
-            this.executeStartQueue();
-          }
         });
     });
   }
@@ -1219,27 +1240,12 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    * Start processing the queue - submit all pending jobs to backend
    */
   startQueue(): void {
-    // If already waiting to start, cancel the operation
-    if (this.isWaitingToStart) {
-      this.cancelStartQueue();
-      return;
-    }
-
     if (!this.hasPendingJobs()) {
       this.notificationService.toastOnly('info', 'No Jobs', 'No pending jobs to start');
       return;
     }
 
-    // Check if any jobs are still loading metadata
-    if (this.isLoadingPendingJobs()) {
-      // Set waiting flag and let the user know
-      this.isWaitingToStart = true;
-      this.notificationService.toastOnly('info', 'Waiting', 'Waiting for video metadata to load. Click again to cancel.');
-      this.cdr.detectChanges();
-      return;
-    }
-
-    // All metadata is loaded, start immediately
+    // Start immediately without waiting for metadata
     this.executeStartQueue();
   }
 
@@ -1247,8 +1253,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
    * Execute the actual queue start operation
    */
   private executeStartQueue(): void {
-    this.isWaitingToStart = false;
-
     // Extract download options from pending jobs
     const downloadOptions: DownloadOptions[] = this.pendingJobs.map(job => job.options);
 
@@ -1271,25 +1275,9 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error starting queue:', error);
         this.notificationService.error('Queue Error', 'Failed to start processing queue');
-        this.isWaitingToStart = false;
         this.startQueueSubscription = null;
       }
     });
-  }
-
-  /**
-   * Cancel the start queue operation
-   */
-  private cancelStartQueue(): void {
-    this.isWaitingToStart = false;
-
-    if (this.startQueueSubscription) {
-      this.startQueueSubscription.unsubscribe();
-      this.startQueueSubscription = null;
-    }
-
-    this.notificationService.toastOnly('info', 'Cancelled', 'Queue start cancelled');
-    this.cdr.detectChanges();
   }
 
   /**
@@ -1300,24 +1288,10 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Check if any pending jobs are currently loading metadata
-   */
-  isLoadingPendingJobs(): boolean {
-    return this.pendingJobs.some(job => job.loading);
-  }
-
-  /**
    * Check if the queue can be started (has pending jobs)
    */
   canStartQueue(): boolean {
     return this.hasPendingJobs();
-  }
-
-  /**
-   * Check if we're waiting to start the queue
-   */
-  isWaitingToStartQueue(): boolean {
-    return this.isWaitingToStart;
   }
 
   /**
@@ -2004,6 +1978,169 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
         fullError: fullError
       }
     });
+  }
+
+  // ==================== Cascade List Methods ====================
+
+  /**
+   * Get all jobs as list items for cascade display
+   */
+  get allJobsAsListItems(): ListItem[] {
+    const pending = this.pendingJobs.map(job => ({
+      ...job,
+      displayName: job.displayName || 'Unknown',
+      isPending: true
+    }));
+
+    const active = this.getAllJobsForDisplay()
+      .filter(job => job.status !== 'pending')
+      .map(job => ({
+        ...job,
+        displayName: this.getDisplayName(job),
+        isPending: false
+      }));
+
+    return [...pending, ...active];
+  }
+
+  /**
+   * Check if a job is pending
+   */
+  isJobPending(item: any): boolean {
+    return item.isPending === true;
+  }
+
+  /**
+   * Format subtitle for job items
+   */
+  formatJobSubtitle(job: any): string {
+    // For pending jobs
+    if (this.isJobPending(job)) {
+      return 'Waiting to start';
+    }
+
+    // For active/completed jobs, show status
+    if (job.status) {
+      return this.getDefaultTaskForStatus(job.status);
+    }
+
+    return 'Processing';
+  }
+
+  /**
+   * Progress mapper - return null to use master progress from children
+   */
+  jobProgressMapper = (item: any): ItemProgress | null => {
+    return null;
+  };
+
+  /**
+   * Generate ghost items (children) for a job based on its stages
+   */
+  generateJobStages(job: any): CascadeChild[] {
+    const children: CascadeChild[] = [];
+    const isPending = this.isJobPending(job);
+    const currentStatus = job.status as JobStatus;
+
+    // Define stages for download jobs
+    const stages = [
+      { id: 'download', label: 'Download', icon: 'download', status: 'downloading' as JobStatus },
+      { id: 'process', label: 'Process', icon: 'settings', status: 'processing' as JobStatus }
+    ];
+
+    stages.forEach((stage, index) => {
+      let childStatus: CascadeChildStatus = 'pending';
+      let progress = 0;
+
+      if (isPending) {
+        // All stages are pending for jobs that haven't started
+        childStatus = 'pending';
+        progress = 0;
+      } else {
+        // Determine status based on current job status
+        if (currentStatus === 'completed') {
+          childStatus = 'completed';
+          progress = 100;
+        } else if (currentStatus === 'failed') {
+          // Mark all as failed or show which stage failed
+          const failedStageIndex = this.getStageIndexForStatus(currentStatus);
+          childStatus = index <= failedStageIndex ? 'failed' : 'pending';
+          progress = childStatus === 'failed' ? (job.progress || 0) : 0;
+        } else if (stage.status === currentStatus || this.statusMatchesStage(currentStatus, stage.status)) {
+          childStatus = 'active';
+          progress = job.progress || 0;
+        } else {
+          // Check if this stage has been completed
+          const currentStageIndex = this.getStageIndexForStatus(currentStatus);
+          const stageIndex = stages.findIndex(s => s.status === stage.status);
+          if (currentStageIndex > stageIndex) {
+            childStatus = 'completed';
+            progress = 100;
+          } else {
+            childStatus = 'pending';
+            progress = 0;
+          }
+        }
+      }
+
+      children.push({
+        id: `${job.id}-${stage.id}`,
+        parentId: job.id,
+        label: stage.label,
+        icon: stage.icon,
+        status: childStatus,
+        progress: { value: progress }
+      });
+    });
+
+    return children;
+  }
+
+  /**
+   * Helper to determine if a status matches a stage
+   */
+  private statusMatchesStage(currentStatus: JobStatus, stageStatus: JobStatus): boolean {
+    // Map certain statuses to stages
+    if (currentStatus === 'downloaded' || currentStatus === 'queued') {
+      return stageStatus === 'downloading';
+    }
+    if (currentStatus === 'transcribing') {
+      return stageStatus === 'processing';
+    }
+    return currentStatus === stageStatus;
+  }
+
+  /**
+   * Get stage index for a given status
+   */
+  private getStageIndexForStatus(status: JobStatus): number {
+    const statusToStageMap: Record<JobStatus, number> = {
+      'pending': -1,
+      'queued': 0,
+      'downloading': 0,
+      'downloaded': 0,
+      'processing': 1,
+      'transcribing': 1,
+      'completed': 2,
+      'failed': -1
+    };
+
+    return statusToStageMap[status] ?? -1;
+  }
+
+  /**
+   * Calculate master progress as average of child stages
+   */
+  calculateMasterProgress(job: any): number {
+    const children = this.generateJobStages(job);
+
+    if (children.length === 0) return 0;
+
+    const totalProgress = children.reduce((sum, child) => {
+      return sum + (child.progress?.value || 0);
+    }, 0);
+
+    return Math.round(totalProgress / children.length);
   }
 }
 

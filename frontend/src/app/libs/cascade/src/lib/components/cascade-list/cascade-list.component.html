@@ -1,4 +1,4 @@
-<div class="item-list-container" #listContainer tabindex="0">
+<div class="item-list-container" #listContainer tabindex="0" (click)="handleContainerClick($event)">
   <!-- Empty State -->
   <div *ngIf="isEmpty" class="empty-state">
     <mat-icon class="empty-icon">{{ emptyIcon }}</mat-icon>
@@ -40,7 +40,7 @@
           [class.is-parent]="item['isParent']"
           [class.is-ghost-parent]="item['isGhostParent']"
           [class.is-ghost-child]="item['isGhostChild']"
-          (click)="handleItemClick(item, $event)"
+          (click)="handleItemClick(item, $event); $event.stopPropagation()"
           (dblclick)="handleItemDoubleClick(item)"
           (contextmenu)="handleContextMenu($event, item)">
 

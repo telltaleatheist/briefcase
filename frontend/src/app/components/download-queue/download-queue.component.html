@@ -43,7 +43,7 @@
       </button>
     </div>
 
-    <!-- Queue List -->
+    <!-- Active Queue List -->
     <div class="jobs-list">
       <!-- All Jobs (Pending + Active) with Cascade Children -->
       <cascade-list
@@ -76,6 +76,34 @@
           <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor" opacity="0.3"/>
         </svg>
         <p>No analysis jobs in queue</p>
+      </div>
+    </div>
+
+    <!-- Completed Jobs Section -->
+    <div class="completed-section" *ngIf="getCompletedJobs().length > 0">
+      <div class="completed-header">
+        <h4>
+          <mat-icon>check_circle</mat-icon>
+          Completed
+          <span class="completed-count">({{ getCompletedJobs().length }})</span>
+        </h4>
+        <button mat-stroked-button
+                (click)="clearCompleted()"
+                class="clear-completed-btn">
+          <mat-icon>clear</mat-icon>
+          Clear Completed
+        </button>
+      </div>
+
+      <div class="completed-list">
+        <cascade-list
+          [items]="getCompletedJobsAsListItems()"
+          [displayConfig]="jobDisplayConfig"
+          [childrenConfig]="childrenConfig"
+          [selectionMode]="SelectionMode.None"
+          emptyMessage="No completed jobs"
+          emptyIcon="check_circle">
+        </cascade-list>
       </div>
     </div>
   </div>

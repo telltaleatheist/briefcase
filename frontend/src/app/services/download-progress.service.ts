@@ -358,14 +358,29 @@ export class DownloadProgressService {
       filename = existingJob.filename;
     }
 
+    const progress = analysisJob.progress || 0;
+
+    // Check if anything actually changed
+    if (existingJob) {
+      const noChanges =
+        existingJob.stage === stage &&
+        existingJob.progress === progress &&
+        existingJob.error === analysisJob.error;
+
+      if (noChanges) {
+        // Nothing changed, don't emit
+        return;
+      }
+    }
+
     const job: VideoProcessingJob = {
       id: jobId,
       filename: filename,
-      displayName: analysisJob.displayName || existingJob?.displayName, // Preserve displayName
+      displayName: analysisJob.displayName || existingJob?.displayName,
       url: analysisJob.input || existingJob?.url,
       videoId: analysisJob.videoId || existingJob?.videoId,
       stage: stage,
-      progress: analysisJob.progress || 0,
+      progress: progress,
       error: analysisJob.error,
       startedAt: existingJob?.startedAt || new Date(),
       completedAt: (stage === 'completed' || stage === 'failed') ? new Date() : undefined
