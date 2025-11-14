@@ -135,7 +135,9 @@ export class DatabaseController {
       handlingMap = new Map(Object.entries(body.duplicateHandling));
     }
 
+    // Always use standard import (batching is handled by frontend queue now)
     const result = await this.fileScannerService.importVideos(body.videoPaths, handlingMap);
+
     return {
       success: true,
       imported: result.imported,

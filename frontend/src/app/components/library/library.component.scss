@@ -566,9 +566,15 @@
 // Management view styles
 .management-view {
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 
   .management-header {
     margin-bottom: 20px;
+    flex-shrink: 0;
 
     h2 {
       display: flex;
@@ -595,6 +601,11 @@
 
   mat-tab-group {
     margin-top: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
 
     // Override Material tab colors to match orange theme
     ::ng-deep .mat-mdc-tab:not(.mat-mdc-tab-disabled) {
@@ -626,6 +637,7 @@
     ::ng-deep .mat-mdc-tab-header {
       background-color: transparent;
       border-bottom: none;
+      flex-shrink: 0;
     }
 
     ::ng-deep .mdc-tab-indicator__content--underline {
@@ -633,17 +645,39 @@
       border-top-width: 2px;
     }
 
+    ::ng-deep .mat-mdc-tab-body-wrapper {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    ::ng-deep .mat-mdc-tab-body {
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+
     ::ng-deep .mat-mdc-tab-body-content {
-      overflow: visible;
+      height: 100%;
+      overflow: auto;
     }
   }
 
   .tab-content {
     padding: 20px 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .tab-header {
     margin-bottom: 16px;
+    flex-shrink: 0;
 
     .tab-description {
       margin: 0 0 12px 0;
@@ -685,16 +719,21 @@
     }
   }
 
+  // Results header stays at top
+  .results-header {
+    flex-shrink: 0;
+    margin-bottom: 12px;
+  }
+
   // Container for management lists (matches video-list-container)
   .management-list-container {
     border: 1px solid var(--border-color, #e0e0e0);
     border-radius: 8px;
-    margin-bottom: 24px;
-    max-height: 440px; // Roughly 10 items (44px per item)
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     background: var(--bg-card);
-    height: auto; // Allow container to size to content
 
     // Ensure cascade-list items respect parent border radius
     ::ng-deep cascade-list {
@@ -843,7 +882,18 @@
     }
   }
 
+  .loading-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    min-height: 200px;
+  }
+
   .empty-state {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -851,6 +901,7 @@
     padding: 60px 20px;
     text-align: center;
     color: #666;
+    min-height: 200px;
 
     mat-icon {
       font-size: 64px;

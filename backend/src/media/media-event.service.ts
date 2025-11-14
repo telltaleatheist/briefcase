@@ -246,4 +246,17 @@ export class MediaEventService {
       timestamp: this.getTimestamp()
     });
   }
+
+  /**
+   * Import complete event (notify frontend when batch import finishes)
+   */
+  emitImportComplete(importedCount: number, skippedCount: number, errorCount: number): void {
+    this.logger.log(`Emitting import-complete event: ${importedCount} imported, ${skippedCount} skipped, ${errorCount} errors`);
+    this.emitEvent('import-complete', {
+      importedCount,
+      skippedCount,
+      errorCount,
+      timestamp: this.getTimestamp()
+    });
+  }
 }

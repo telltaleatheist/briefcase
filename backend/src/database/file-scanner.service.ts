@@ -6,6 +6,9 @@ import { MediaEventService } from '../media/media-event.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { pipeline } from 'stream/promises';
+import { createReadStream, createWriteStream } from 'fs';
+import * as crypto from 'crypto';
 
 /**
  * FileScannerService - Scans clips folder and maintains media catalog in database
@@ -44,6 +47,12 @@ export class FileScannerService {
     ...this.IMAGE_EXTENSIONS,
     ...this.WEBPAGE_EXTENSIONS,
   ];
+
+  // Memory optimization constants
+  private readonly IMPORT_BATCH_SIZE = 5; // Process 5 files at a time
+  private readonly HASH_SAMPLE_SIZE = 1024 * 1024; // 1MB sample for quick hash
+  private readonly STREAM_CHUNK_SIZE = 64 * 1024; // 64KB chunks for streaming
+  private readonly MAX_DURATION_EXTRACT_SIZE = 500 * 1024 * 1024; // Only extract duration for files < 500MB
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -487,7 +496,8 @@ export class FileScannerService {
           continue;
         }
 
-        const fileHash = await this.databaseService.hashFile(fullPath);
+        const stats = fs.statSync(fullPath);
+        const fileHash = await this.quickHashFile(fullPath, stats.size);
         const existing = this.databaseService.findVideoByHash(fileHash);
 
         if (existing && existing.id) {
@@ -525,8 +535,18 @@ export class FileScannerService {
     duplicateHandling?: Map<string, 'skip' | 'replace' | 'keep-both'>,
     parentVideoId?: string
   ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
-    this.logger.log(`Importing ${videoPaths.length} videos...`);
-    this.logger.log(`Received paths:`, videoPaths);
+    // Filter out macOS resource fork files (._*)
+    const filteredPaths = videoPaths.filter(filePath => {
+      const filename = path.basename(filePath);
+      return !filename.startsWith('._');
+    });
+
+    if (filteredPaths.length < videoPaths.length) {
+      this.logger.log(`Filtered out ${videoPaths.length - filteredPaths.length} ._ files`);
+    }
+
+    this.logger.log(`Importing ${filteredPaths.length} videos...`);
+    this.logger.log(`Received paths:`, filteredPaths);
     const imported: string[] = [];
     const skipped: string[] = [];
     const errors: string[] = [];
@@ -540,7 +560,7 @@ export class FileScannerService {
 
     const clipsRoot = activeLibrary.clipsFolderPath;
 
-    for (const fullPath of videoPaths) {
+    for (const fullPath of filteredPaths) {
       try {
         // Check if file exists
         if (!fs.existsSync(fullPath)) {
@@ -552,8 +572,8 @@ export class FileScannerService {
         const filename = path.basename(fullPath);
         const stats = fs.statSync(fullPath);
 
-        // Hash the file BEFORE doing anything else
-        const fileHash = await this.databaseService.hashFile(fullPath);
+        // Use quick hash instead of full file hash for better performance
+        const fileHash = await this.quickHashFile(fullPath, stats.size);
 
         // Check if video already exists in database (by hash) BEFORE copying
         const existing = this.databaseService.findVideoByHash(fileHash);
@@ -625,7 +645,9 @@ export class FileScannerService {
           }
 
           destinationPath = path.join(weekFolderPath, filename);
-          fs.copyFileSync(fullPath, destinationPath);
+
+          // Use streaming copy to avoid loading entire file into memory
+          await this.streamCopyFile(fullPath, destinationPath);
 
           // Preserve original file timestamps (atime and mtime)
           // This ensures the file retains its original creation/modification dates
@@ -637,12 +659,12 @@ export class FileScannerService {
         // Create new video entry
         const videoId = uuidv4();
 
-        // Extract duration for video/audio files
+        // Extract duration for video/audio files (skip for very large files to save memory)
         let durationSeconds: number | undefined = undefined;
         const fileExt = path.extname(filename).toLowerCase();
         const isVideoOrAudio = [...this.VIDEO_EXTENSIONS, ...this.AUDIO_EXTENSIONS].includes(fileExt);
 
-        if (isVideoOrAudio) {
+        if (isVideoOrAudio && stats.size < this.MAX_DURATION_EXTRACT_SIZE) {
           try {
             const metadata = await this.ffmpegService.getVideoMetadata(destinationPath);
             durationSeconds = metadata.duration;
@@ -651,6 +673,8 @@ export class FileScannerService {
             this.logger.warn(`Could not extract duration for ${filename}: ${error.message}`);
             // Continue with undefined duration - not critical for import
           }
+        } else if (isVideoOrAudio && stats.size >= this.MAX_DURATION_EXTRACT_SIZE) {
+          this.logger.log(`Skipping duration extraction for large file (${(stats.size / 1024 / 1024).toFixed(1)}MB): ${filename}`);
         }
 
         // Insert into database
@@ -688,7 +712,142 @@ export class FileScannerService {
     }
 
     this.logger.log(`Import complete: ${imported.length} imported, ${skipped.length} skipped, ${errors.length} errors`);
+
+    // Emit WebSocket event so frontend knows import is complete
+    this.mediaEventService.emitImportComplete(imported.length, skipped.length, errors.length);
+
     return { imported, skipped, errors };
+  }
+
+  /**
+   * Import videos with progress updates (for large batches)
+   * Uses batching and memory optimization
+   */
+  async importVideosWithProgress(
+    videoPaths: string[],
+    duplicateHandling?: Map<string, 'skip' | 'replace' | 'keep-both'>
+  ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
+    const imported: string[] = [];
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    // Filter out macOS resource fork files (._*)
+    const filteredPaths = videoPaths.filter(filePath => {
+      const filename = path.basename(filePath);
+      return !filename.startsWith('._');
+    });
+
+    const total = filteredPaths.length;
+    this.logger.log(`Starting batched import of ${total} videos (filtered ${videoPaths.length - total} ._ files)`);
+
+    // Emit start event
+    this.mediaEventService.emitEvent('import-progress', {
+      current: 0,
+      total: total,
+      imported: 0,
+      skipped: 0,
+      errors: 0
+    });
+
+    // Process in batches to limit memory usage
+    for (let i = 0; i < filteredPaths.length; i += this.IMPORT_BATCH_SIZE) {
+      const batch = filteredPaths.slice(i, i + this.IMPORT_BATCH_SIZE);
+      this.logger.log(`Processing batch ${Math.floor(i / this.IMPORT_BATCH_SIZE) + 1}/${Math.ceil(filteredPaths.length / this.IMPORT_BATCH_SIZE)}`);
+
+      // Import batch sequentially to maintain control over memory
+      for (const fullPath of batch) {
+        try {
+          const result = await this.importVideos([fullPath], duplicateHandling);
+
+          if (result.imported.length > 0) {
+            imported.push(...result.imported);
+          } else if (result.skipped.length > 0) {
+            skipped.push(fullPath);
+          }
+          if (result.errors.length > 0) {
+            errors.push(...result.errors);
+          }
+        } catch (error: any) {
+          this.logger.error(`Failed to import ${fullPath}: ${error.message}`);
+          errors.push(`${path.basename(fullPath)}: ${error.message}`);
+        }
+      }
+
+      // Force garbage collection between batches if available
+      if (global.gc) {
+        global.gc();
+      }
+
+      // Emit progress after each batch
+      this.mediaEventService.emitEvent('import-progress', {
+        current: Math.min(i + this.IMPORT_BATCH_SIZE, filteredPaths.length),
+        total: total,
+        imported: imported.length,
+        skipped: skipped.length,
+        errors: errors.length
+      });
+    }
+
+    this.logger.log(`Import complete: ${imported.length} imported, ${skipped.length} skipped, ${errors.length} errors`);
+
+    // Emit final complete event
+    this.mediaEventService.emitImportComplete(imported.length, skipped.length, errors.length);
+
+    return { imported, skipped, errors };
+  }
+
+  /**
+   * Quick hash using file size + samples from beginning/middle/end
+   * Much faster and memory-efficient than hashing entire file
+   */
+  private async quickHashFile(filePath: string, fileSize: number): Promise<string> {
+    const hash = crypto.createHash('sha256');
+
+    // Add file size to hash
+    hash.update(fileSize.toString());
+
+    // Sample from beginning, middle, and end of file
+    const sampleSize = Math.min(this.HASH_SAMPLE_SIZE, Math.floor(fileSize / 3));
+
+    if (fileSize <= this.HASH_SAMPLE_SIZE * 3) {
+      // Small file - just hash the whole thing
+      const buffer = fs.readFileSync(filePath);
+      hash.update(buffer);
+    } else {
+      // Large file - sample three sections
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const buffer = Buffer.allocUnsafe(sampleSize);
+
+        // Beginning
+        fs.readSync(fd, buffer, 0, sampleSize, 0);
+        hash.update(buffer);
+
+        // Middle
+        const middlePos = Math.floor(fileSize / 2) - Math.floor(sampleSize / 2);
+        fs.readSync(fd, buffer, 0, sampleSize, middlePos);
+        hash.update(buffer);
+
+        // End
+        const endPos = fileSize - sampleSize;
+        fs.readSync(fd, buffer, 0, sampleSize, endPos);
+        hash.update(buffer);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+
+    return hash.digest('hex');
+  }
+
+  /**
+   * Stream copy file instead of loading entire file into memory
+   */
+  private async streamCopyFile(source: string, destination: string): Promise<void> {
+    const readStream = createReadStream(source, { highWaterMark: this.STREAM_CHUNK_SIZE });
+    const writeStream = createWriteStream(destination, { highWaterMark: this.STREAM_CHUNK_SIZE });
+
+    await pipeline(readStream, writeStream);
   }
 }
 

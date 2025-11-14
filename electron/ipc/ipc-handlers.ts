@@ -246,6 +246,11 @@ function setupFileSystemHandlers(): void {
           const entries = fs.readdirSync(dirPath, { withFileTypes: true });
 
           for (const entry of entries) {
+            // Skip macOS resource fork files (._*)
+            if (entry.name.startsWith('._')) {
+              continue;
+            }
+
             const fullPath = path.join(dirPath, entry.name);
 
             if (entry.isDirectory()) {

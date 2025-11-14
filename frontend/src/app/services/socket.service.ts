@@ -337,4 +337,18 @@ export class SocketService {
   onVideoImported(): Observable<{ videoId: string; filename: string; filePath: string; timestamp: string }> {
     return this.listenTo<{ videoId: string; filename: string; filePath: string; timestamp: string }>('video-imported');
   }
+
+  /**
+   * Listen for import complete events
+   */
+  onImportComplete(): Observable<{ importedCount: number; skippedCount: number; errorCount: number; timestamp: string }> {
+    return this.listenTo<{ importedCount: number; skippedCount: number; errorCount: number; timestamp: string }>('import-complete');
+  }
+
+  /**
+   * Listen for import progress events (for large batches)
+   */
+  onImportProgress(): Observable<{ current: number; total: number; imported: number; skipped: number; errors: number }> {
+    return this.listenTo<{ current: number; total: number; imported: number; skipped: number; errors: number }>('import-progress');
+  }
 }

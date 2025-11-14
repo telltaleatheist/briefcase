@@ -277,16 +277,20 @@ export class ImportManagerDialogComponent {
           `Successfully imported ${response.importedCount} videos`,
         );
 
-        // Refresh after delay
+        // Close dialog after short delay to show success message
         setTimeout(() => {
-          this.dialogRef.close(true); // true = refresh library
-        }, 2000);
+          if (this.dialogRef) {
+            this.dialogRef.close(true); // true = refresh library
+          }
+        }, 1500);
       } else {
         this.notificationService.error('Import Failed', response.error || 'Unknown error');
+        this.importResult = { success: false, errorCount: 1, errors: [response.error || 'Unknown error'] };
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error importing videos:', error);
-      this.notificationService.error('Import Failed', 'Could not import videos');
+      this.notificationService.error('Import Failed', error?.message || 'Could not import videos');
+      this.importResult = { success: false, errorCount: 1, errors: [error?.message || 'Could not import videos'] };
     } finally {
       this.importing = false;
     }

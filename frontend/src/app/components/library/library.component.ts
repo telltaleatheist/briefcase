@@ -41,12 +41,14 @@ import { LibraryStateService, ClipLibrary as LibraryStateClipLibrary } from '../
 import { VideoFilterService, FilterCriteria } from '../../services/video-filter.service';
 import { VideoOperationsService } from '../../services/video-operations.service';
 import { AnalysisQueueService } from '../../services/analysis-queue.service';
+import { ImportQueueService } from '../../services/import-queue.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
 import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/preview-dialog.component';
 import { SearchBarComponent, SearchCriteriaChange, TagData } from './search-bar/search-bar.component';
 import { LibraryHeaderComponent } from './library-header/library-header.component';
+import { ImportIndicatorComponent } from './import-indicator.component';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
   ListItem,
@@ -98,6 +100,7 @@ interface ClipLibrary {
     AngularSplitModule,
     SearchBarComponent,
     LibraryHeaderComponent,
+    ImportIndicatorComponent,
     CascadeListComponent
   ],
   templateUrl: './library.component.html',
@@ -357,7 +360,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     private libraryStateService: LibraryStateService,
     private videoFilterService: VideoFilterService,
     private videoOperationsService: VideoOperationsService,
-    private analysisQueueService: AnalysisQueueService
+    private analysisQueueService: AnalysisQueueService,
+    private importQueueService: ImportQueueService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -595,12 +599,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    // Auto-collapse sections older than 6 weeks after view is initialized
-    // Use setTimeout to ensure the cascade-list ViewChild is available
-    setTimeout(() => {
-      console.log('[LibraryComponent] ngAfterViewInit timeout - calling autoCollapseOldSections');
-      this.autoCollapseOldSections();
-    }, 500);
+    // Auto-collapse is now handled in loadVideos() after videos are loaded
+    // This ensures the collapse happens at the right time with actual video data
   }
 
   ngOnDestroy() {
@@ -712,6 +712,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         this.markItemsWithSuggestions(); // Add class to items with suggestions
         console.log(`[loadVideos] Loaded initial ${this.videos.length} videos`);
 
+        // Auto-collapse old sections after videos are loaded
+        this.autoCollapseOldSections();
+
         // If there are more videos, continue loading in the background
         if (initialResponse.count > 20) {
           this.isLoading = false; // Show the initial results while loading more
@@ -734,6 +737,10 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         this.applyFiltersAndSort();
         this.markItemsWithSuggestions(); // Add class to items with suggestions
         console.log(`[loadVideos] Loaded ${this.videos.length} videos (full reload, fresh from DB)`);
+
+        // Auto-collapse old sections after videos are loaded
+        this.autoCollapseOldSections();
+
         this.isLoading = false;
 
         // Reset cancel flag after reload is complete
@@ -796,6 +803,10 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       }
 
       console.log(`[loadRemainingVideos] Finished loading all ${this.videos.length} videos`);
+
+      // Auto-collapse old sections after all videos are loaded
+      this.autoCollapseOldSections();
+
       this.isInitialLoad = false;
       this.backgroundLoadRunning = false;
     } catch (error) {
@@ -2632,6 +2643,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
+  private isImporting = false;
+
   /**
    * Handle drop event
    * Uses Electron's webUtils.getPathForFile to extract real file paths from dropped files
@@ -2643,10 +2656,18 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     this.isDragging = false;
     this.dragCounter = 0;
 
+    // Prevent multiple simultaneous imports
+    if (this.isImporting) {
+      console.warn('[LibraryComponent] Import already in progress, ignoring drop event');
+      return;
+    }
+
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) {
       return;
     }
+
+    this.isImporting = true;
 
     // Check for Electron API
     const electron = (window as any).electron;
@@ -2677,6 +2698,12 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
+      // Skip macOS resource fork files (._*)
+      if (file.name.startsWith('._')) {
+        console.log(`Skipping macOS resource fork file: ${file.name}`);
+        continue;
+      }
+
       try {
         // Use Electron's webUtils to get the real file path
         const filePath = electron.getFilePathFromFile(file);
@@ -2702,7 +2729,16 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }
 
-    if (filePaths.length === 0) {
+    // Filter out any ._ files that may have been added from directory scans
+    const filteredPaths = filePaths.filter(path => {
+      const filename = path.substring(path.lastIndexOf('/') + 1);
+      return !filename.startsWith('._');
+    });
+
+    console.log(`[LibraryComponent] Filtered ${filePaths.length - filteredPaths.length} ._ files, ${filteredPaths.length} valid files remaining`);
+
+    if (filteredPaths.length === 0) {
+      this.isImporting = false;
       this.notificationService.toastOnly(
         'warning',
         'No Valid Media Files',
@@ -2711,195 +2747,49 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    // Separate files into those that can be transcribed/analyzed vs those that should just be imported
-    const analyzableExtensions = [
-      '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv',  // Videos
-      '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg'   // Audio
-    ];
+    console.log(`[LibraryComponent] Importing ${filteredPaths.length} files`);
 
-    const analyzableFiles: string[] = [];
-    const importOnlyFiles: string[] = [];
+    // Use new queue-based import dialog (non-blocking)
+    const { ImportQueueDialogComponent } = await import('./import-queue-dialog.component');
 
-    for (const filePath of filePaths) {
-      const ext = filePath.toLowerCase().substring(filePath.lastIndexOf('.'));
-      if (analyzableExtensions.includes(ext)) {
-        analyzableFiles.push(filePath);
-      } else {
-        importOnlyFiles.push(filePath);
+    const dialogRef = this.dialog.open(ImportQueueDialogComponent, {
+      width: '500px',
+      disableClose: false, // Allow closing/minimizing
+      hasBackdrop: true,
+      data: {
+        filePaths: filteredPaths
       }
+    });
+
+    // Handle backdrop click as minimize
+    dialogRef.backdropClick().subscribe(() => {
+      this.importQueueService.setMinimized(true);
+    });
+
+    const importResult = await dialogRef.afterClosed().toPromise();
+
+    // Reset flag
+    this.isImporting = false;
+
+    if (importResult?.cancelled || importResult?.minimized) {
+      console.log('[LibraryComponent] Import cancelled or minimized');
+      // Still refresh since some files may have imported
+      await this.reloadLibrary({ videos: true, stats: true, tags: false });
+      return;
     }
 
-    // Track results from both imports
-    let totalImportedCount = 0;
-    let nonAnalyzableCount = 0;
-    let analyzableCount = 0;
-    let importAction: 'import-only' | 'import-and-transcribe' | 'import-and-analyze' | null = null;
-    let analyzableVideoIds: string[] = [];
+    const totalImportedCount = importResult?.success || 0;
+    console.log(`[LibraryComponent] Import complete: ${totalImportedCount} files imported`);
 
-    // If there are analyzable files, ask the user what to do with them
-    if (analyzableFiles.length > 0) {
-      const { ImportOptionsDialogComponent } = await import('./import-options-dialog.component');
-
-      const optionsDialogRef = this.dialog.open(ImportOptionsDialogComponent, {
-        width: '500px',
-        data: { videoCount: analyzableFiles.length }
-      });
-
-      importAction = await optionsDialogRef.afterClosed().toPromise();
-
-      if (!importAction) {
-        // User cancelled
-        return;
-      }
-    }
-
-    // Import non-analyzable files first (if any)
-    if (importOnlyFiles.length > 0) {
-      const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
-
-      const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
-        width: '500px',
-        disableClose: true,
-        data: {
-          filePaths: importOnlyFiles,
-          suppressAutoClose: analyzableFiles.length > 0 // Suppress if we have more to import
-        }
-      });
-
-      const importResult = await dialogRef.afterClosed().toPromise();
-
-      if (importResult?.success) {
-        nonAnalyzableCount = importResult.importedCount || 0;
-        totalImportedCount += nonAnalyzableCount;
-      } else if (importResult?.cancelled) {
-        // User cancelled - abort the whole operation
-        return;
-      }
-    }
-
-    // Import analyzable files (if any)
-    if (analyzableFiles.length > 0 && importAction) {
-      const { ImportProgressDialogComponent } = await import('./import-progress-dialog.component');
-
-      const dialogRef = this.dialog.open(ImportProgressDialogComponent, {
-        width: '500px',
-        disableClose: true,
-        data: {
-          filePaths: analyzableFiles,
-          suppressAutoClose: true // Always suppress for analyzable files
-        }
-      });
-
-      const importResult = await dialogRef.afterClosed().toPromise();
-
-      if (importResult?.success) {
-        analyzableCount = importResult.importedCount || 0;
-        totalImportedCount += analyzableCount;
-        analyzableVideoIds = importResult.imported || [];
-      } else if (importResult?.cancelled) {
-        // User cancelled analyzable files, but non-analyzable were already imported
-        // Show notification for what was imported so far
-        if (totalImportedCount > 0) {
-          await this.reloadLibrary({ videos: true, stats: true, tags: false });
-
-          // Build detailed notification message
-          const parts: string[] = [];
-          if (nonAnalyzableCount > 0) {
-            parts.push(`${nonAnalyzableCount} document${nonAnalyzableCount !== 1 ? 's' : ''}`);
-          }
-          const message = parts.length > 0
-            ? `Imported ${parts.join(' and ')} to library`
-            : `Imported ${totalImportedCount} file${totalImportedCount !== 1 ? 's' : ''} to library`;
-
-          this.notificationService.toastOnly(
-            'success',
-            'Import Completed',
-            message
-          );
-        }
-        return;
-      }
-    }
-
-    // Refresh UI if anything was imported
+    // Refresh UI
     if (totalImportedCount > 0) {
       await this.reloadLibrary({ videos: true, stats: true, tags: false });
-    }
 
-    // Build detailed notification message
-    const buildImportMessage = () => {
-      const parts: string[] = [];
-      if (nonAnalyzableCount > 0) {
-        parts.push(`${nonAnalyzableCount} document${nonAnalyzableCount !== 1 ? 's' : ''}`);
-      }
-      if (analyzableCount > 0) {
-        parts.push(`${analyzableCount} video${analyzableCount !== 1 ? 's' : ''}`);
-      }
-
-      if (parts.length === 0) {
-        return `Imported ${totalImportedCount} file${totalImportedCount !== 1 ? 's' : ''}`;
-      } else if (parts.length === 1) {
-        return `Imported ${parts[0]}`;
-      } else {
-        return `Imported ${parts.join(' and ')}`;
-      }
-    };
-
-    // Handle post-import actions for analyzable files
-    if (importAction && analyzableVideoIds.length > 0) {
-      if (importAction === 'import-and-transcribe') {
-        try {
-          await this.databaseLibraryService.startBatchAnalysis({
-            videoIds: analyzableVideoIds,
-            transcribeOnly: true
-          });
-          this.notificationService.toastOnly(
-            'success',
-            'Transcription Started',
-            `${buildImportMessage()}. Transcribing ${analyzableVideoIds.length} video${analyzableVideoIds.length !== 1 ? 's' : ''}`
-          );
-          this.startProgressPolling();
-        } catch (error: any) {
-          console.error('Failed to start transcription:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Error',
-            error.error?.message || 'Failed to start transcription'
-          );
-        }
-      } else if (importAction === 'import-and-analyze') {
-        try {
-          await this.databaseLibraryService.startBatchAnalysis({
-            videoIds: analyzableVideoIds,
-            transcribeOnly: false
-          });
-          this.notificationService.toastOnly(
-            'success',
-            'Analysis Started',
-            `${buildImportMessage()}. Processing ${analyzableVideoIds.length} video${analyzableVideoIds.length !== 1 ? 's' : ''}`
-          );
-          this.startProgressPolling();
-        } catch (error: any) {
-          console.error('Failed to start analysis:', error);
-          this.notificationService.toastOnly(
-            'error',
-            'Error',
-            error.error?.message || 'Failed to start analysis'
-          );
-        }
-      } else if (importAction === 'import-only') {
-        this.notificationService.toastOnly(
-          'success',
-          'Import Completed',
-          buildImportMessage()
-        );
-      }
-    } else if (totalImportedCount > 0) {
-      // Only non-analyzable files were imported
+      // Notification already shown by queue service
       this.notificationService.toastOnly(
         'success',
         'Import Completed',
-        buildImportMessage()
+        `Imported ${totalImportedCount} file${totalImportedCount !== 1 ? 's' : ''} to library`
       );
     }
   }
@@ -3184,6 +3074,50 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     } catch (error) {
       console.error('Error importing videos:', error);
       this.notificationService.error('Import Failed', 'Could not open import dialog');
+    }
+  }
+
+  /**
+   * Reopen import dialog when user clicks the floating indicator
+   */
+  async reopenImportDialog() {
+    // Get current import state
+    const state = await new Promise<any>((resolve) => {
+      this.importQueueService.getQueueState().subscribe(s => resolve(s)).unsubscribe();
+    });
+
+    if (!state || state.items.length === 0) {
+      return; // No active import
+    }
+
+    // Reopen the import dialog
+    const { ImportQueueDialogComponent } = await import('./import-queue-dialog.component');
+
+    this.importQueueService.setMinimized(false);
+
+    const dialogRef = this.dialog.open(ImportQueueDialogComponent, {
+      width: '500px',
+      disableClose: false,
+      hasBackdrop: true,
+      data: {
+        filePaths: [] // Already queued, no need to pass paths
+      }
+    });
+
+    // Handle backdrop click as minimize
+    dialogRef.backdropClick().subscribe(() => {
+      this.importQueueService.setMinimized(true);
+    });
+
+    const importResult = await dialogRef.afterClosed().toPromise();
+
+    if (importResult?.minimized) {
+      return; // User minimized again
+    }
+
+    // Refresh library if import completed
+    if (importResult && !importResult.cancelled) {
+      await this.reloadLibrary({ videos: true, stats: true, tags: false });
     }
   }
 
@@ -4261,47 +4195,60 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
-   * Auto-collapse sections older than 6 weeks on startup
+   * Auto-collapse sections older than 4 weeks on startup
    */
   private autoCollapseOldSections() {
-    console.log('[LibraryComponent] autoCollapseOldSections called');
-    console.log('[LibraryComponent] Videos count:', this.videos.length);
-    console.log('[LibraryComponent] Cascade-list available:', !!this.cascadeList);
+    // Use setTimeout to ensure cascade-list ViewChild is ready
+    setTimeout(() => {
+      console.log('[LibraryComponent] autoCollapseOldSections called');
+      console.log('[LibraryComponent] Videos count:', this.videos.length);
+      console.log('[LibraryComponent] Cascade-list available:', !!this.cascadeList);
 
-    const sixWeeksAgo = new Date();
-    sixWeeksAgo.setDate(sixWeeksAgo.getDate() - 42); // 6 weeks = 42 days
-    console.log('[LibraryComponent] Six weeks ago date:', sixWeeksAgo.toISOString());
-
-    // Iterate through all videos and collapse their week groups if older than 6 weeks
-    this.videos.forEach(video => {
-      const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
-
-      // If video is older than 6 weeks, collapse its week section
-      if (downloadDate < sixWeeksAgo) {
-        const weekKey = this.listGroupConfig.groupBy(video);
-        if (weekKey !== 'NEW_VIDEOS_24H') {
-          console.log('[LibraryComponent] Collapsing week:', weekKey, 'for video from', downloadDate.toISOString());
-          this.collapsedWeeks.add(weekKey);
-        }
+      if (this.videos.length === 0) {
+        console.log('[LibraryComponent] No videos to process, skipping auto-collapse');
+        return;
       }
-    });
 
-    console.log(`[LibraryComponent] Total sections to collapse: ${this.collapsedWeeks.size}`);
-    console.log('[LibraryComponent] Week keys to collapse:', Array.from(this.collapsedWeeks));
+      const fourWeeksAgo = new Date();
+      fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28); // 4 weeks = 28 days
+      console.log('[LibraryComponent] Four weeks ago date:', fourWeeksAgo.toISOString());
 
-    // Apply collapsed state to the cascade-list component
-    if (this.cascadeList) {
-      this.cascadeList.collapsedGroups = new Set(this.collapsedWeeks);
-      console.log('[LibraryComponent] Applied collapsed state to cascade-list');
-      console.log('[LibraryComponent] Cascade-list collapsedGroups size:', this.cascadeList.collapsedGroups.size);
+      // Clear existing collapsed weeks to start fresh
+      this.collapsedWeeks.clear();
 
-      // Trigger change detection
-      this.cdr.detectChanges();
-    } else {
-      console.error('[LibraryComponent] CASCADE-LIST NOT AVAILABLE!');
-    }
+      // Iterate through all videos and collapse their week groups if older than 4 weeks
+      this.videos.forEach(video => {
+        const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
 
-    console.log(`[LibraryComponent] Auto-collapsed ${this.collapsedWeeks.size} sections older than 6 weeks`);
+        // If video is older than 4 weeks, collapse its week section
+        if (downloadDate < fourWeeksAgo) {
+          const weekKey = this.listGroupConfig.groupBy(video);
+          if (weekKey !== 'NEW_VIDEOS_24H') {
+            console.log('[LibraryComponent] Collapsing week:', weekKey, 'for video from', downloadDate.toISOString());
+            this.collapsedWeeks.add(weekKey);
+          }
+        }
+      });
+
+      console.log(`[LibraryComponent] Total sections to collapse: ${this.collapsedWeeks.size}`);
+      console.log('[LibraryComponent] Week keys to collapse:', Array.from(this.collapsedWeeks));
+
+      // Apply collapsed state to the cascade-list component
+      if (this.cascadeList) {
+        this.cascadeList.collapsedGroups = new Set(this.collapsedWeeks);
+        console.log('[LibraryComponent] Applied collapsed state to cascade-list');
+        console.log('[LibraryComponent] Cascade-list collapsedGroups size:', this.cascadeList.collapsedGroups.size);
+
+        // Trigger change detection to update the display
+        this.cdr.detectChanges();
+
+        console.log('[LibraryComponent] Triggered change detection');
+      } else {
+        console.error('[LibraryComponent] CASCADE-LIST NOT AVAILABLE - will be applied via [initialCollapsedGroups] binding');
+      }
+
+      console.log(`[LibraryComponent] Auto-collapsed ${this.collapsedWeeks.size} sections older than 4 weeks`);
+    }, 100); // Small delay to ensure ViewChild is ready
   }
 
   /**
