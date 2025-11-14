@@ -65,8 +65,7 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden; // Let the viewport handle scrolling
   outline: none;
   box-sizing: border-box;
 
@@ -125,6 +124,40 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  // Virtual scroll viewport
+  &.cdk-virtual-scroll-viewport {
+    height: 100%;
+    contain: strict; // Performance optimization for virtual scrolling
+  }
+
+  .cdk-virtual-scroll-content-wrapper {
+    width: 100%;
+  }
+
+  // Scrollbar styling for virtual viewport
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+
+    &:hover {
+      background: #555;
+    }
+  }
 }
 
 .item-group {

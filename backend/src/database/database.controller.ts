@@ -699,12 +699,17 @@ export class DatabaseController {
 
   /**
    * PATCH /api/database/videos/:id/metadata
-   * Update video metadata (upload_date and added_at)
+   * Update video metadata (upload_date, download_date, added_at, ai_description)
    */
   @Patch('videos/:id/metadata')
   async updateVideoMetadata(
     @Param('id') videoId: string,
-    @Body() body: { uploadDate: string | null; addedAt: string }
+    @Body() body: {
+      uploadDate?: string | null;
+      downloadDate?: string;
+      addedAt?: string;
+      aiDescription?: string | null;
+    }
   ) {
     try {
       // Verify video exists
@@ -717,9 +722,15 @@ export class DatabaseController {
       }
 
       // Update metadata
-      this.databaseService.updateVideoMetadata(videoId, body.uploadDate, body.addedAt);
+      this.databaseService.updateVideoMetadata(
+        videoId,
+        body.uploadDate,
+        body.downloadDate,
+        body.addedAt,
+        body.aiDescription
+      );
 
-      this.logger.log(`Updated metadata for video ${videoId}: uploadDate=${body.uploadDate}, addedAt=${body.addedAt}`);
+      this.logger.log(`Updated metadata for video ${videoId}`);
 
       return {
         success: true,

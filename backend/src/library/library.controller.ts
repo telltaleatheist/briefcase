@@ -25,6 +25,8 @@ import { SharedConfigService } from '../config/shared-config.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { DatabaseService } from '../database/database.service';
+import { AIProviderService } from '../analysis/ai-provider.service';
+import { buildAnalyticsInsightsPrompt } from './prompts/analytics-insights.prompt';
 import {
   CreateLibraryAnalysisRequest,
   UpdateLibraryAnalysisRequest,
@@ -45,7 +47,8 @@ export class LibraryController {
     private configService: SharedConfigService,
     private fileScannerService: FileScannerService,
     private libraryManagerService: LibraryManagerService,
-    private databaseService: DatabaseService
+    private databaseService: DatabaseService,
+    private aiProviderService: AIProviderService
   ) {}
 
   /**
@@ -1182,6 +1185,544 @@ export class LibraryController {
         `Failed to create clip: ${(error as Error).message}`,
         HttpStatus.INTERNAL_SERVER_ERROR
       );
+    }
+  }
+
+  /**
+   * ==================================================================
+   * ANALYTICS ENDPOINTS
+   * ==================================================================
+   */
+
+  /**
+   * Get library health metrics (completion stats)
+   */
+  @Get('analytics/health')
+  async getLibraryHealth() {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      // Get stats directly from database
+      const videos = this.databaseService.getAllVideos({ includeChildren: false });
+      const totalVideos = videos.length;
+
+      // Count videos with transcripts and analyses
+      let videosWithTranscripts = 0;
+      let videosWithAnalyses = 0;
+      let totalDurationSeconds = 0;
+      let totalFileSizeBytes = 0;
+
+      for (const video of videos) {
+        if (video.duration_seconds) {
+          totalDurationSeconds += parseFloat(String(video.duration_seconds));
+        }
+        if (video.file_size_bytes) {
+          totalFileSizeBytes += parseInt(String(video.file_size_bytes), 10);
+        }
+
+        // Check if video has transcript
+        const transcript = this.databaseService.getTranscript(video.id);
+        if (transcript) {
+          videosWithTranscripts++;
+        }
+
+        // Check if video has analysis
+        const analysis = this.databaseService.getAnalysis(video.id);
+        if (analysis) {
+          videosWithAnalyses++;
+        }
+      }
+
+      return {
+        success: true,
+        health: {
+          totalVideos,
+          videosWithTranscripts,
+          videosWithAnalyses,
+          videosNeedingTranscripts: totalVideos - videosWithTranscripts,
+          videosNeedingAnalysis: totalVideos - videosWithAnalyses,
+          completionRate: totalVideos > 0 ? Math.round((videosWithAnalyses / totalVideos) * 100) : 0,
+          totalDurationSeconds,
+          totalFileSizeBytes,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get library health: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Get topic analytics (tag frequency, distributions)
+   */
+  @Get('analytics/topics')
+  async getTopicAnalytics(@Query('limit') limit?: string) {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      const maxResults = limit ? parseInt(limit, 10) : 50;
+
+      // Get all tags grouped by name and type
+      const allTags = this.databaseService.getAllTags();
+
+      // Group by tag_name and tag_type
+      const tagCounts = new Map<string, { count: number; type: string; videoIds: Set<string> }>();
+
+      for (const tag of allTags) {
+        const key = `${tag.tag_name}|${tag.tag_type || 'other'}`;
+        if (!tagCounts.has(key)) {
+          tagCounts.set(key, {
+            count: 0,
+            type: tag.tag_type || 'other',
+            videoIds: new Set(),
+          });
+        }
+        const entry = tagCounts.get(key)!;
+        entry.count++;
+        entry.videoIds.add(tag.video_id);
+      }
+
+      // Convert to array and sort by count
+      const topicList = Array.from(tagCounts.entries())
+        .map(([key, data]) => {
+          const [name, type] = key.split('|');
+          return {
+            name,
+            type,
+            count: data.count,
+            videoCount: data.videoIds.size,
+          };
+        })
+        .sort((a, b) => b.count - a.count)
+        .slice(0, maxResults);
+
+      // Group by type for statistics
+      const byType = {
+        topic: topicList.filter(t => t.type === 'topic'),
+        person: topicList.filter(t => t.type === 'person'),
+        other: topicList.filter(t => t.type !== 'topic' && t.type !== 'person'),
+      };
+
+      return {
+        success: true,
+        topics: topicList,
+        byType,
+        totalUniqueTags: tagCounts.size,
+        totalTagInstances: allTags.length,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get topic analytics: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Get trend analytics (topics over time)
+   */
+  @Get('analytics/trends')
+  async getTrendAnalytics(@Query('groupBy') groupBy?: string) {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      const grouping = groupBy || 'month'; // month, week, quarter, year
+
+      // Get all videos with tags
+      const videos = this.databaseService.getAllVideos({ includeChildren: false });
+      const allTags = this.databaseService.getAllTags();
+
+      // Create tag lookup
+      const tagsByVideo = new Map<string, any[]>();
+      for (const tag of allTags) {
+        if (!tagsByVideo.has(tag.video_id)) {
+          tagsByVideo.set(tag.video_id, []);
+        }
+        tagsByVideo.get(tag.video_id)!.push(tag);
+      }
+
+      // Group videos by time period
+      const timeGroups = new Map<string, { videos: any[]; tagCounts: Map<string, number> }>();
+
+      for (const video of videos) {
+        const date = video.download_date || video.upload_date;
+        if (!date) continue;
+
+        const period = this.getTimePeriod(new Date(date), grouping);
+        if (!timeGroups.has(period)) {
+          timeGroups.set(period, { videos: [], tagCounts: new Map() });
+        }
+
+        const group = timeGroups.get(period)!;
+        group.videos.push(video);
+
+        // Count tags in this period
+        const videoTags = tagsByVideo.get(video.id) || [];
+        for (const tag of videoTags) {
+          const tagKey = `${tag.tag_name}|${tag.tag_type || 'other'}`;
+          group.tagCounts.set(tagKey, (group.tagCounts.get(tagKey) || 0) + 1);
+        }
+      }
+
+      // Convert to timeline format
+      const timeline = Array.from(timeGroups.entries())
+        .map(([period, data]) => ({
+          period,
+          videoCount: data.videos.length,
+          topTags: Array.from(data.tagCounts.entries())
+            .map(([tagKey, count]) => {
+              const [name, type] = tagKey.split('|');
+              return { name, type, count };
+            })
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10), // Top 10 tags for this period
+        }))
+        .sort((a, b) => a.period.localeCompare(b.period));
+
+      return {
+        success: true,
+        timeline,
+        grouping,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get trend analytics: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Get co-occurrence network data (which tags appear together)
+   */
+  @Get('analytics/network')
+  async getNetworkAnalytics(@Query('minConnections') minConnections?: string) {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      const minConn = minConnections ? parseInt(minConnections, 10) : 2;
+
+      // Get all tags
+      const allTags = this.databaseService.getAllTags();
+
+      // Group tags by video
+      const tagsByVideo = new Map<string, any[]>();
+      for (const tag of allTags) {
+        if (!tagsByVideo.has(tag.video_id)) {
+          tagsByVideo.set(tag.video_id, []);
+        }
+        tagsByVideo.get(tag.video_id)!.push(tag);
+      }
+
+      // Build co-occurrence matrix
+      const coOccurrence = new Map<string, Map<string, number>>();
+
+      for (const [videoId, videoTags] of tagsByVideo.entries()) {
+        // For each pair of tags in the same video
+        for (let i = 0; i < videoTags.length; i++) {
+          for (let j = i + 1; j < videoTags.length; j++) {
+            const tag1Key = `${videoTags[i].tag_name}|${videoTags[i].tag_type || 'other'}`;
+            const tag2Key = `${videoTags[j].tag_name}|${videoTags[j].tag_type || 'other'}`;
+
+            // Add bidirectional connection
+            if (!coOccurrence.has(tag1Key)) {
+              coOccurrence.set(tag1Key, new Map());
+            }
+            if (!coOccurrence.has(tag2Key)) {
+              coOccurrence.set(tag2Key, new Map());
+            }
+
+            const tag1Connections = coOccurrence.get(tag1Key)!;
+            const tag2Connections = coOccurrence.get(tag2Key)!;
+
+            tag1Connections.set(tag2Key, (tag1Connections.get(tag2Key) || 0) + 1);
+            tag2Connections.set(tag1Key, (tag2Connections.get(tag1Key) || 0) + 1);
+          }
+        }
+      }
+
+      // Build nodes and edges for network graph
+      const nodes = Array.from(coOccurrence.keys()).map(tagKey => {
+        const [name, type] = tagKey.split('|');
+        const connections = coOccurrence.get(tagKey)!;
+        const totalConnections = Array.from(connections.values()).reduce((sum, count) => sum + count, 0);
+
+        return {
+          id: tagKey,
+          name,
+          type,
+          connectionCount: totalConnections,
+        };
+      });
+
+      const edges: any[] = [];
+      const processedPairs = new Set<string>();
+
+      for (const [tag1Key, connections] of coOccurrence.entries()) {
+        for (const [tag2Key, count] of connections.entries()) {
+          if (count < minConn) continue;
+
+          const pairKey = [tag1Key, tag2Key].sort().join('---');
+          if (processedPairs.has(pairKey)) continue;
+          processedPairs.add(pairKey);
+
+          edges.push({
+            source: tag1Key,
+            target: tag2Key,
+            weight: count,
+          });
+        }
+      }
+
+      return {
+        success: true,
+        network: {
+          nodes,
+          edges,
+        },
+        stats: {
+          totalNodes: nodes.length,
+          totalEdges: edges.length,
+          minConnections: minConn,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get network analytics: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Generate AI insights about the library
+   */
+  @Post('analytics/generate-insights')
+  async generateAIInsights(@Body() body: { aiProvider?: string; aiModel?: string }) {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      const startTime = Date.now();
+
+      // Gather all analytics data
+      const videos = this.databaseService.getAllVideos({ includeChildren: false });
+      const allTags = this.databaseService.getAllTags();
+      const totalVideos = videos.length;
+
+      // Count analyzed videos
+      let analyzedCount = 0;
+      for (const video of videos) {
+        const analysis = this.databaseService.getAnalysis(video.id);
+        if (analysis) analyzedCount++;
+      }
+
+      // Get top topics
+      const tagCounts = new Map<string, { count: number; type: string }>();
+      for (const tag of allTags) {
+        const key = `${tag.tag_name}|${tag.tag_type || 'other'}`;
+        if (!tagCounts.has(key)) {
+          tagCounts.set(key, { count: 0, type: tag.tag_type || 'other' });
+        }
+        tagCounts.get(key)!.count++;
+      }
+
+      const topTopics = Array.from(tagCounts.entries())
+        .map(([key, data]) => {
+          const [name, type] = key.split('|');
+          return { name, type, count: data.count };
+        })
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 30);
+
+      // Build prompt using prompt builder
+      const prompt = buildAnalyticsInsightsPrompt({
+        totalVideos,
+        analyzedCount,
+        tagCount: tagCounts.size,
+        topTopics,
+      });
+
+      this.logger.log('[AI Insights] Sending prompt to AI...');
+
+      // Call AI service
+      const aiProvider = (body.aiProvider || 'ollama') as 'ollama' | 'claude' | 'openai';
+      const aiModel = body.aiModel || 'qwen2.5:7b';
+      const aiResponse = await this.aiProviderService.generateText(
+        prompt,
+        {
+          provider: aiProvider,
+          model: aiModel,
+        }
+      );
+
+      const aiResponseText = aiResponse.text;
+      this.logger.log('[AI Insights] Received AI response');
+
+      // Try to parse JSON from the response
+      let insights: any;
+      try {
+        // Try direct parse
+        insights = JSON.parse(aiResponseText);
+      } catch (e) {
+        // Try to extract JSON from markdown code blocks
+        const jsonMatch = aiResponseText.match(/```json\s*([\s\S]*?)\s*```/) ||
+                          aiResponseText.match(/```\s*([\s\S]*?)\s*```/) ||
+                          aiResponseText.match(/\{[\s\S]*\}/);
+
+        if (jsonMatch) {
+          insights = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+        } else {
+          // Fallback: use raw text
+          insights = {
+            overview: aiResponseText.substring(0, 500),
+            keyFindings: ['Unable to parse structured insights'],
+            recommendations: [],
+            contentGaps: [],
+          };
+        }
+      }
+
+      const generationTimeSeconds = (Date.now() - startTime) / 1000;
+
+      // Save to database
+      const analyticsId = this.databaseService.saveLibraryAnalytics({
+        libraryId: activeLibrary.id,
+        videosAnalyzedCount: analyzedCount,
+        aiInsights: JSON.stringify(insights),
+        aiModel,
+        generationTimeSeconds,
+      });
+
+      // Cleanup old analytics (keep last 5)
+      this.databaseService.cleanupOldAnalytics(activeLibrary.id, 5);
+
+      return {
+        success: true,
+        insights,
+        metadata: {
+          generatedAt: new Date().toISOString(),
+          videosAnalyzed: analyzedCount,
+          totalVideos,
+          aiModel,
+          generationTimeSeconds,
+          analyticsId,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to generate AI insights: ${(error as Error).message}`);
+      throw new HttpException(
+        `Failed to generate AI insights: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Get cached AI insights
+   */
+  @Get('analytics/insights')
+  async getCachedInsights() {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      const cached = this.databaseService.getLatestLibraryAnalytics(activeLibrary.id);
+
+      if (!cached) {
+        return {
+          success: true,
+          hasInsights: false,
+          insights: null,
+        };
+      }
+
+      // Parse insights JSON
+      let insights: any;
+      try {
+        insights = JSON.parse(cached.ai_insights as string);
+      } catch (e) {
+        insights = { overview: cached.ai_insights };
+      }
+
+      return {
+        success: true,
+        hasInsights: true,
+        insights,
+        metadata: {
+          generatedAt: cached.generated_at,
+          videosAnalyzed: cached.videos_analyzed_count,
+          aiModel: cached.ai_model,
+          generationTimeSeconds: cached.generation_time_seconds,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to get cached insights: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * Helper: Get time period string for grouping
+   */
+  private getTimePeriod(date: Date, groupBy: string): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    switch (groupBy) {
+      case 'year':
+        return `${year}`;
+      case 'quarter':
+        const quarter = Math.floor(date.getMonth() / 3) + 1;
+        return `${year}-Q${quarter}`;
+      case 'month':
+        return `${year}-${month}`;
+      case 'week':
+        // Get ISO week number
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay());
+        return `${year}-W${String(Math.ceil(weekStart.getDate() / 7)).padStart(2, '0')}`;
+      default:
+        return `${year}-${month}`;
     }
   }
 }

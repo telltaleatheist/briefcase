@@ -3,6 +3,40 @@
   box-sizing: border-box;
 }
 
+// Force AI description textarea to be full width
+:host ::ng-deep {
+  .ai-description-main {
+    width: 100% !important;
+
+    .edit-section {
+      width: 100% !important;
+
+      mat-form-field,
+      .mat-mdc-form-field {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+      }
+
+      .mdc-text-field,
+      .mat-mdc-text-field-wrapper,
+      .mat-mdc-form-field-flex,
+      .mat-mdc-form-field-infix {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+
+      textarea {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 100% !important;
+        min-height: 150px !important;
+        box-sizing: border-box !important;
+      }
+    }
+  }
+}
+
 // ============================================================================
 // LINKED FILES SECTION
 // ============================================================================
@@ -666,14 +700,31 @@
 }
 
 .ai-description-main {
+  width: 100%;
+
   .ai-description-card {
     padding: 20px !important;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 200px;
+    transition: none;
+
+    .header-with-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      min-height: 24px;
+
+      h3 {
+        margin: 0;
+      }
+    }
 
     h3 {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin: 0 0 12px 0;
       font-size: 14px;
       font-weight: 500;
       color: var(--text-primary);
@@ -693,6 +744,49 @@
       font-size: 14px;
       line-height: 1.8;
       color: var(--text-primary);
+      min-height: 150px;
+    }
+
+    .edit-section {
+      width: 100%;
+      display: block;
+
+      mat-form-field.full-width {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+        margin-bottom: 0 !important;
+
+        ::ng-deep {
+          .mdc-text-field,
+          .mat-mdc-text-field-wrapper,
+          .mat-mdc-form-field-flex,
+          .mat-mdc-form-field-infix {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+
+          textarea.mat-mdc-input-element {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-height: 150px !important;
+            resize: vertical !important;
+            box-sizing: border-box !important;
+            padding: 12px !important;
+          }
+
+          .mat-mdc-form-field-subscript-wrapper {
+            margin-bottom: 0 !important;
+          }
+        }
+      }
+
+      .edit-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        margin-top: 8px;
+      }
     }
   }
 }

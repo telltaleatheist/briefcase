@@ -257,6 +257,17 @@ export class DatabaseService {
         extracted_at TEXT NOT NULL,
         FOREIGN KEY (media_id) REFERENCES videos(id) ON DELETE CASCADE
       );
+
+      -- Library analytics: Cached AI-generated insights about the entire library
+      CREATE TABLE IF NOT EXISTS library_analytics (
+        id TEXT PRIMARY KEY,
+        library_id TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        videos_analyzed_count INTEGER NOT NULL,
+        ai_insights TEXT NOT NULL,
+        ai_model TEXT NOT NULL,
+        generation_time_seconds REAL
+      );
     `;
 
     // Execute table creation
@@ -287,6 +298,8 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_media_relationships_primary ON media_relationships(primary_media_id);
       CREATE INDEX IF NOT EXISTS idx_media_relationships_related ON media_relationships(related_media_id);
       CREATE INDEX IF NOT EXISTS idx_text_content_media ON text_content(media_id);
+      CREATE INDEX IF NOT EXISTS idx_library_analytics_library ON library_analytics(library_id);
+      CREATE INDEX IF NOT EXISTS idx_library_analytics_generated ON library_analytics(generated_at);
     `;
 
     db.exec(indexSchema);
@@ -824,20 +837,46 @@ export class DatabaseService {
   }
 
   /**
-   * Update video metadata (upload_date and added_at)
+   * Update video metadata (upload_date, download_date, added_at, ai_description)
    */
-  updateVideoMetadata(id: string, uploadDate: string | null, addedAt: string) {
+  updateVideoMetadata(
+    id: string,
+    uploadDate?: string | null,
+    downloadDate?: string,
+    addedAt?: string,
+    aiDescription?: string | null
+  ) {
     const db = this.ensureInitialized();
 
-    db.run(
-      `UPDATE videos
-       SET upload_date = ?,
-           added_at = ?
-       WHERE id = ?`,
-      [uploadDate, addedAt, id]
-    );
+    // Build dynamic UPDATE query based on provided fields
+    const updates: string[] = [];
+    const values: any[] = [];
 
-    this.saveDatabase();
+    if (uploadDate !== undefined) {
+      updates.push('upload_date = ?');
+      values.push(uploadDate);
+    }
+    if (downloadDate !== undefined) {
+      updates.push('download_date = ?');
+      values.push(downloadDate);
+    }
+    if (addedAt !== undefined) {
+      updates.push('added_at = ?');
+      values.push(addedAt);
+    }
+    if (aiDescription !== undefined) {
+      updates.push('ai_description = ?');
+      values.push(aiDescription);
+    }
+
+    if (updates.length > 0) {
+      values.push(id);
+      db.run(
+        `UPDATE videos SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+      this.saveDatabase();
+    }
   }
 
   /**
@@ -1529,6 +1568,22 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM tags WHERE video_id = ?');
     stmt.bind([videoId]);
+
+    const results: any[] = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+
+    return results;
+  }
+
+  /**
+   * Get all tags across all videos
+   */
+  getAllTags() {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT * FROM tags');
 
     const results: any[] = [];
     while (stmt.step()) {
@@ -2360,6 +2415,79 @@ export class DatabaseService {
     stmt.free();
 
     return results;
+  }
+
+  /**
+   * Get the latest library analytics for a library
+   */
+  getLatestLibraryAnalytics(libraryId: string) {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT * FROM library_analytics
+      WHERE library_id = ?
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `);
+    stmt.bind([libraryId]);
+
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+
+    return result;
+  }
+
+  /**
+   * Save library analytics
+   */
+  saveLibraryAnalytics(analytics: {
+    libraryId: string;
+    videosAnalyzedCount: number;
+    aiInsights: string;
+    aiModel: string;
+    generationTimeSeconds?: number;
+  }) {
+    const db = this.ensureInitialized();
+    const id = `analytics_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    db.run(
+      `INSERT INTO library_analytics (
+        id, library_id, generated_at, videos_analyzed_count,
+        ai_insights, ai_model, generation_time_seconds
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        analytics.libraryId,
+        new Date().toISOString(),
+        analytics.videosAnalyzedCount,
+        analytics.aiInsights,
+        analytics.aiModel,
+        analytics.generationTimeSeconds || null,
+      ]
+    );
+
+    this.saveDatabase();
+    return id;
+  }
+
+  /**
+   * Delete old library analytics (keep only the most recent N)
+   */
+  cleanupOldAnalytics(libraryId: string, keepCount: number = 5) {
+    const db = this.ensureInitialized();
+
+    // Delete all but the most recent N entries
+    db.run(`
+      DELETE FROM library_analytics
+      WHERE library_id = ?
+      AND id NOT IN (
+        SELECT id FROM library_analytics
+        WHERE library_id = ?
+        ORDER BY generated_at DESC
+        LIMIT ?
+      )
+    `, [libraryId, libraryId, keepCount]);
+
+    this.saveDatabase();
   }
 
   /**

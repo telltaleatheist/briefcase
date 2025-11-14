@@ -52,10 +52,15 @@ interface VideoMetadataDialogData {
         </mat-form-field>
 
         <!-- AI Description Section -->
-        <div class="info-section ai-description" *ngIf="video.ai_description">
-          <h3><mat-icon>smart_toy</mat-icon> AI-Generated Description</h3>
-          <p class="description-text">{{ video.ai_description }}</p>
-        </div>
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>AI Description</mat-label>
+          <textarea matInput
+                    [(ngModel)]="aiDescription"
+                    rows="4"
+                    placeholder="AI-generated description of the content"></textarea>
+          <mat-icon matSuffix>smart_toy</mat-icon>
+          <mat-hint>AI-generated description that appears in search results</mat-hint>
+        </mat-form-field>
 
         <!-- Tags Section -->
         <div class="info-section tags-section" *ngIf="videoTags && (videoTags.people.length > 0 || videoTags.topics.length > 0)">
@@ -77,10 +82,18 @@ interface VideoMetadataDialogData {
         </div>
 
         <mat-form-field appearance="outline" class="full-width">
-          <mat-label>Week Folder (YYYY-MM-DD)</mat-label>
+          <mat-label>Upload Date (YYYY-MM-DD)</mat-label>
           <input matInput [(ngModel)]="weekFolder" placeholder="2025-11-03">
           <mat-icon matSuffix>calendar_today</mat-icon>
-          <mat-hint>Format: YYYY-MM-DD (Sunday of the week)</mat-hint>
+          <mat-hint>Date content was created/uploaded (from filename)</mat-hint>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Download Date</mat-label>
+          <input matInput [matDatepicker]="downloadDatePicker" [(ngModel)]="downloadDate">
+          <mat-datepicker-toggle matSuffix [for]="downloadDatePicker"></mat-datepicker-toggle>
+          <mat-datepicker #downloadDatePicker></mat-datepicker>
+          <mat-hint>When this file was downloaded</mat-hint>
         </mat-form-field>
 
         <mat-form-field appearance="outline" class="full-width">
@@ -268,13 +281,17 @@ export class VideoMetadataDialogComponent implements OnInit {
   video: DatabaseVideo;
   filename: string;
   weekFolder: string | null;
+  downloadDate: Date;
   addedDate: Date;
+  aiDescription: string | null;
   saving = false;
   videoTags: { people: string[]; topics: string[] } = { people: [], topics: [] };
 
   // Store original values for change detection
   private originalWeekFolder: string | null;
+  private originalDownloadDate: Date;
   private originalAddedDate: Date;
+  private originalAiDescription: string | null;
 
   constructor(
     private dialogRef: MatDialogRef<VideoMetadataDialogComponent>,
@@ -286,11 +303,15 @@ export class VideoMetadataDialogComponent implements OnInit {
     this.video = data.video;
     this.filename = data.video.filename;
     this.weekFolder = data.video.upload_date;
+    this.downloadDate = data.video.download_date ? new Date(data.video.download_date) : new Date();
     this.addedDate = new Date(data.video.added_at);
+    this.aiDescription = data.video.ai_description;
 
     // Store originals
     this.originalWeekFolder = this.weekFolder;
+    this.originalDownloadDate = new Date(this.downloadDate);
     this.originalAddedDate = new Date(this.addedDate);
+    this.originalAiDescription = this.aiDescription;
   }
 
   async ngOnInit() {
@@ -313,8 +334,10 @@ export class VideoMetadataDialogComponent implements OnInit {
 
   hasChanges(): boolean {
     const weekFolderChanged = this.weekFolder !== this.originalWeekFolder;
+    const downloadDateChanged = this.downloadDate.getTime() !== this.originalDownloadDate.getTime();
     const addedDateChanged = this.addedDate.getTime() !== this.originalAddedDate.getTime();
-    return weekFolderChanged || addedDateChanged;
+    const aiDescriptionChanged = this.aiDescription !== this.originalAiDescription;
+    return weekFolderChanged || downloadDateChanged || addedDateChanged || aiDescriptionChanged;
   }
 
   async save() {
@@ -329,7 +352,9 @@ export class VideoMetadataDialogComponent implements OnInit {
       const response = await this.http
         .patch<any>(url, {
           uploadDate: this.weekFolder,
+          downloadDate: this.downloadDate.toISOString(),
           addedAt: this.addedDate.toISOString(),
+          aiDescription: this.aiDescription,
         })
         .toPromise();
 

@@ -78,6 +78,12 @@ export class VideoInfoComponent implements OnInit {
   parsedTranscript: TranscriptEntry[] = [];
   isEditingTitle = false;
   editedTitle = '';
+  isEditingUploadDate = false;
+  editedUploadDate = '';
+  isEditingDownloadDate = false;
+  editedDownloadDate = '';
+  isEditingAiDescription = false;
+  editedAiDescription = '';
   isAddingTag = false;
   newTagName = '';
   newTagType = 'manual';
@@ -726,6 +732,123 @@ export class VideoInfoComponent implements OnInit {
     } else if (event.key === 'Escape') {
       event.preventDefault();
       this.cancelEditingTitle();
+    }
+  }
+
+  /**
+   * Start editing the upload date
+   */
+  startEditingUploadDate() {
+    if (!this.video) return;
+    this.isEditingUploadDate = true;
+    this.editedUploadDate = this.video.upload_date || '';
+  }
+
+  /**
+   * Save the edited upload date
+   */
+  async saveUploadDate() {
+    if (!this.video) {
+      this.isEditingUploadDate = false;
+      return;
+    }
+
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/metadata`);
+      const result = await firstValueFrom(
+        this.http.patch<{ success: boolean; message?: string; error?: string }>(url, {
+          uploadDate: this.editedUploadDate || null
+        })
+      );
+
+      if (result.success) {
+        this.video.upload_date = this.editedUploadDate || null;
+        this.notificationService.success('Date Updated', 'Upload date has been updated successfully');
+        this.isEditingUploadDate = false;
+      } else {
+        this.notificationService.error('Update Failed', result.error || 'Failed to update upload date');
+      }
+    } catch (error) {
+      console.error('Error updating upload date:', error);
+      this.notificationService.error('Update Failed', 'Failed to update upload date');
+    }
+  }
+
+  /**
+   * Start editing the download date
+   */
+  startEditingDownloadDate() {
+    if (!this.video) return;
+    this.isEditingDownloadDate = true;
+    this.editedDownloadDate = this.video.download_date || '';
+  }
+
+  /**
+   * Save the edited download date
+   */
+  async saveDownloadDate() {
+    if (!this.video) {
+      this.isEditingDownloadDate = false;
+      return;
+    }
+
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/metadata`);
+      const result = await firstValueFrom(
+        this.http.patch<{ success: boolean; message?: string; error?: string }>(url, {
+          downloadDate: this.editedDownloadDate
+        })
+      );
+
+      if (result.success) {
+        this.video.download_date = this.editedDownloadDate;
+        this.notificationService.success('Date Updated', 'Download date has been updated successfully');
+        this.isEditingDownloadDate = false;
+      } else {
+        this.notificationService.error('Update Failed', result.error || 'Failed to update download date');
+      }
+    } catch (error) {
+      console.error('Error updating download date:', error);
+      this.notificationService.error('Update Failed', 'Failed to update download date');
+    }
+  }
+
+  /**
+   * Start editing the AI description
+   */
+  startEditingAiDescription() {
+    if (!this.video) return;
+    this.isEditingAiDescription = true;
+    this.editedAiDescription = this.video.ai_description || '';
+  }
+
+  /**
+   * Save the edited AI description
+   */
+  async saveAiDescription() {
+    if (!this.video) {
+      this.isEditingAiDescription = false;
+      return;
+    }
+
+    try {
+      const url = await this.backendUrlService.getApiUrl(`/database/videos/${this.video.id}/metadata`);
+      const result = await firstValueFrom(
+        this.http.patch<{ success: boolean; message?: string; error?: string }>(url, {
+          aiDescription: this.editedAiDescription || null
+        })
+      );
+
+      if (result.success) {
+        this.video.ai_description = this.editedAiDescription || null;
+        this.notificationService.success('Description Updated', 'AI description has been updated successfully');
+        this.isEditingAiDescription = false;
+      } else {
+        this.notificationService.error('Update Failed', result.error || 'Failed to update AI description');
+      }
+    } catch (error) {
+      console.error('Error updating AI description:', error);
+      this.notificationService.error('Update Failed', 'Failed to update AI description');
     }
   }
 

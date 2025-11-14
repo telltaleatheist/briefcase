@@ -48,6 +48,9 @@ export class LibraryStateService {
     topic: Array<{ name: string; count: number }>;
   } | null>(null);
 
+  // Scroll position state (preserve scroll position when navigating away)
+  private _scrollPosition = new BehaviorSubject<number>(0);
+
   // Public observables
   public libraries$ = this._libraries.asObservable();
   public currentLibrary$ = this._currentLibrary.asObservable();
@@ -251,6 +254,16 @@ export class LibraryStateService {
 
   getAllTags(): { people: Array<{ name: string; count: number }>; topic: Array<{ name: string; count: number }> } | null {
     return this._allTags.value;
+  }
+
+  // ==================== Scroll Position Methods ====================
+
+  setScrollPosition(position: number): void {
+    this._scrollPosition.next(position);
+  }
+
+  getScrollPosition(): number {
+    return this._scrollPosition.value;
   }
 
   // ==================== Reset Methods ====================

@@ -1,11 +1,13 @@
 // clippy/backend/src/library/library.module.ts
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { LibraryService } from './library.service';
 import { RelinkService } from './relink.service';
 import { ClipExtractorService } from './clip-extractor.service';
 import { LibraryController } from './library.controller';
+import { AnalysisModule } from '../analysis/analysis.module';
 
 @Module({
+  imports: [forwardRef(() => AnalysisModule)],
   providers: [LibraryService, RelinkService, ClipExtractorService],
   controllers: [LibraryController],
   exports: [LibraryService, RelinkService, ClipExtractorService],

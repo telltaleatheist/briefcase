@@ -166,13 +166,34 @@
         </div>
 
         <!-- AI Description (Under Video) -->
-        <div class="ai-description-main" *ngIf="video?.ai_description">
+        <div class="ai-description-main" *ngIf="video?.ai_description || isEditingAiDescription">
           <mat-card class="ai-description-card">
-            <h3>
-              <mat-icon>description</mat-icon>
-              AI Description
-            </h3>
-            <p>{{ video.ai_description }}</p>
+            <div class="header-with-actions">
+              <h3>
+                <mat-icon>description</mat-icon>
+                AI Description
+              </h3>
+              <button mat-icon-button *ngIf="!isEditingAiDescription" (click)="startEditingAiDescription()" matTooltip="Edit description">
+                <mat-icon>edit</mat-icon>
+              </button>
+            </div>
+
+            <div *ngIf="!isEditingAiDescription">
+              <p>{{ video.ai_description }}</p>
+            </div>
+
+            <div *ngIf="isEditingAiDescription" class="edit-section">
+              <mat-form-field appearance="outline" class="full-width">
+                <textarea matInput
+                          [(ngModel)]="editedAiDescription"
+                          rows="4"
+                          placeholder="Enter AI description"></textarea>
+              </mat-form-field>
+              <div class="edit-actions">
+                <button mat-button (click)="isEditingAiDescription = false">Cancel</button>
+                <button mat-raised-button color="primary" (click)="saveAiDescription()">Save</button>
+              </div>
+            </div>
           </mat-card>
         </div>
 
@@ -240,7 +261,23 @@
               <mat-icon>upload</mat-icon>
               <div class="metadata-content">
                 <span class="metadata-label">Upload Date</span>
-                <span class="metadata-value">{{ video.upload_date ? formatDate(video.upload_date) : 'N/A' }}</span>
+                <div *ngIf="!isEditingUploadDate" class="metadata-value-with-edit">
+                  <span class="metadata-value">{{ video.upload_date ? formatDate(video.upload_date) : 'N/A' }}</span>
+                  <button mat-icon-button (click)="startEditingUploadDate()" matTooltip="Edit upload date" class="edit-btn">
+                    <mat-icon>edit</mat-icon>
+                  </button>
+                </div>
+                <div *ngIf="isEditingUploadDate" class="edit-inline">
+                  <mat-form-field appearance="outline" class="compact-field">
+                    <input matInput [(ngModel)]="editedUploadDate" placeholder="YYYY-MM-DD">
+                  </mat-form-field>
+                  <button mat-icon-button (click)="isEditingUploadDate = false" matTooltip="Cancel">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                  <button mat-icon-button color="primary" (click)="saveUploadDate()" matTooltip="Save">
+                    <mat-icon>check</mat-icon>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -248,7 +285,23 @@
               <mat-icon>download</mat-icon>
               <div class="metadata-content">
                 <span class="metadata-label">Downloaded</span>
-                <span class="metadata-value">{{ video.download_date ? formatDate(video.download_date) : 'N/A' }}</span>
+                <div *ngIf="!isEditingDownloadDate" class="metadata-value-with-edit">
+                  <span class="metadata-value">{{ video.download_date ? formatDate(video.download_date) : 'N/A' }}</span>
+                  <button mat-icon-button (click)="startEditingDownloadDate()" matTooltip="Edit download date" class="edit-btn">
+                    <mat-icon>edit</mat-icon>
+                  </button>
+                </div>
+                <div *ngIf="isEditingDownloadDate" class="edit-inline">
+                  <mat-form-field appearance="outline" class="compact-field">
+                    <input matInput [(ngModel)]="editedDownloadDate" placeholder="YYYY-MM-DD">
+                  </mat-form-field>
+                  <button mat-icon-button (click)="isEditingDownloadDate = false" matTooltip="Cancel">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                  <button mat-icon-button color="primary" (click)="saveDownloadDate()" matTooltip="Save">
+                    <mat-icon>check</mat-icon>
+                  </button>
+                </div>
               </div>
             </div>
 

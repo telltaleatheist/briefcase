@@ -24,13 +24,14 @@
     (manageLibraries)="openManageLibraries()"
     (importVideos)="openImportManager()"
     (downloadFromUrl)="downloadFromUrl()"
+    (analytics)="openAnalytics()"
     (openVideoManagement)="viewUnimportedVideos()">
   </app-library-header>
 
   <!-- Main Content -->
 
   <!-- Library View -->
-  <div>
+  <div class="library-content">
     <!-- Search Bar Component -->
     <app-search-bar
       [searchQuery]="searchQuery"

@@ -16,6 +16,14 @@
   position: relative; // For drop zone overlay and FAB positioning
 }
 
+.library-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+}
+
 // Drag and drop overlay (always in DOM, toggle visibility for performance)
 .drop-zone-overlay {
   position: fixed;
@@ -751,6 +759,11 @@
 
     // Ensure cascade-list items respect parent border radius
     ::ng-deep cascade-list {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      height: 100%;
+
       .item-list-container {
         border-radius: 8px;
         overflow: hidden;

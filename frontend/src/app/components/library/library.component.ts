@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
+import { CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { Router, ActivatedRoute } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -235,6 +236,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('managementContextMenuTrigger') managementContextMenuTrigger?: MatMenuTrigger;
   @ViewChild('fileTypeMenuTrigger') fileTypeMenuTrigger?: MatMenuTrigger;
   @ViewChild('cascadeList') cascadeList?: CascadeListComponent<DatabaseVideo>;
+  @ViewChild(CdkVirtualScrollViewport) virtualScrollViewport?: CdkVirtualScrollViewport;
   videoElement: HTMLVideoElement | null = null;
   isPlaying = false;
 
@@ -601,9 +603,23 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   ngAfterViewInit() {
     // Auto-collapse is now handled in loadVideos() after videos are loaded
     // This ensures the collapse happens at the right time with actual video data
+
+    // Restore scroll position from state service
+    setTimeout(() => {
+      const savedPosition = this.libraryStateService.getScrollPosition();
+      if (savedPosition > 0 && this.virtualScrollViewport) {
+        this.virtualScrollViewport.scrollToOffset(savedPosition);
+      }
+    }, 100); // Small delay to ensure viewport is ready
   }
 
   ngOnDestroy() {
+    // Save scroll position before destroying component
+    if (this.virtualScrollViewport) {
+      const scrollOffset = this.virtualScrollViewport.measureScrollOffset();
+      this.libraryStateService.setScrollPosition(scrollOffset);
+    }
+
     // Unsubscribe from all subscriptions to prevent memory leaks
     this.subscriptions.forEach(sub => {
       if (sub && typeof sub.unsubscribe === 'function') {
@@ -726,7 +742,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       } else {
         // On subsequent loads, load all at once (bypass cache to ensure fresh data)
         console.log(`[loadVideos] BEFORE fetch: this.videos.length = ${this.videos.length}`);
-        const response = await this.databaseLibraryService.getVideos(1000, 0, false);
+        const response = await this.databaseLibraryService.getVideos(999999, 0, false);
         console.log(`[loadVideos] Fetched ${response.videos.length} videos from API`);
         this.videos = response.videos;
         console.log(`[loadVideos] AFTER assignment: this.videos.length = ${this.videos.length}`);
@@ -767,7 +783,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       const batchSize = 100;
       let offset = 20; // Start after the initial 20
 
-      while (offset < totalCount && offset < 1000) {
+      while (offset < totalCount) {
         // Check if we should cancel this background load
         if (this.cancelBackgroundLoad) {
           console.log('[loadRemainingVideos] Background video loading cancelled');
@@ -3080,6 +3096,26 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     } catch (error) {
       console.error('Error importing videos:', error);
       this.notificationService.error('Import Failed', 'Could not open import dialog');
+    }
+  }
+
+  /**
+   * Open analytics dialog
+   */
+  async openAnalytics() {
+    try {
+      const { AnalyticsDialogComponent } = await import('../analytics-dialog/analytics-dialog.component');
+
+      this.dialog.open(AnalyticsDialogComponent, {
+        width: '90vw',
+        maxWidth: '1400px',
+        height: '90vh',
+        panelClass: 'analytics-dialog-panel',
+        disableClose: false,
+      });
+    } catch (error) {
+      console.error('Error opening analytics dialog:', error);
+      this.notificationService.error('Analytics Error', 'Could not open analytics dialog');
     }
   }
 

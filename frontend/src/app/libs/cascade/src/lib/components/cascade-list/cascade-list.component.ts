@@ -7,6 +7,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { DragDropModule, CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
+import { ScrollingModule } from '@angular/cdk/scrolling';
 import { Subscription } from 'rxjs';
 import { CascadeSelectionService } from '../../services/cascade-selection.service';
 import {
@@ -28,7 +29,7 @@ import {
 @Component({
   selector: 'cascade-list',
   standalone: true,
-  imports: [CommonModule, MatIconModule, MatTooltipModule, MatMenuModule, MatDividerModule, DragDropModule],
+  imports: [CommonModule, MatIconModule, MatTooltipModule, MatMenuModule, MatDividerModule, DragDropModule, ScrollingModule],
   providers: [CascadeSelectionService],
   templateUrl: './cascade-list.component.html',
   styleUrls: ['./cascade-list.component.scss'],
@@ -129,6 +130,10 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   // Grouping
   groupedItems: ItemGroup<T>[] = [];
   collapsedGroups = new Set<string>();
+
+  // Flattened items for virtual scrolling (includes group headers and items)
+  flattenedItems: Array<{ type: 'group'; group: ItemGroup<T> } | { type: 'item'; item: T; groupId: string }> = [];
+  readonly itemHeight = 44; // Height of each item in pixels
 
   // Selection - now managed by service
   selectedGroups = new Set<string>();
@@ -272,6 +277,69 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
     return item.id;
   }
 
+  /**
+   * TrackBy function for flattened items (virtual scrolling)
+   */
+  trackByFlattenedItem(index: number, row: { type: 'group'; group: ItemGroup<T> } | { type: 'item'; item: T; groupId: string }): string {
+    if (row.type === 'group') {
+      return `group-${row.group.id}`;
+    } else {
+      return `item-${row.item.id}`;
+    }
+  }
+
+  /**
+   * Check if a flattened item is at the top edge of a selection
+   */
+  isFlattenedItemEdgeTop(index: number): boolean {
+    const row = this.flattenedItems[index];
+    if (!row || row.type !== 'item') return false;
+
+    const currentItem = row.item;
+    const highlightedId = this.selectionService.getHighlighted();
+    const isCurrentActive = this.selectionService.isSelected(currentItem.id) || highlightedId === currentItem.id;
+
+    if (!isCurrentActive) return false;
+
+    // Find previous item in flattened list (skip group headers)
+    for (let i = index - 1; i >= 0; i--) {
+      const prevRow = this.flattenedItems[i];
+      if (prevRow.type === 'item') {
+        const isPrevActive = this.selectionService.isSelected(prevRow.item.id) || highlightedId === prevRow.item.id;
+        return !isPrevActive;
+      }
+    }
+
+    // No previous item found (or only group header), this is top edge
+    return true;
+  }
+
+  /**
+   * Check if a flattened item is at the bottom edge of a selection
+   */
+  isFlattenedItemEdgeBottom(index: number): boolean {
+    const row = this.flattenedItems[index];
+    if (!row || row.type !== 'item') return false;
+
+    const currentItem = row.item;
+    const highlightedId = this.selectionService.getHighlighted();
+    const isCurrentActive = this.selectionService.isSelected(currentItem.id) || highlightedId === currentItem.id;
+
+    if (!isCurrentActive) return false;
+
+    // Find next item in flattened list (skip group headers)
+    for (let i = index + 1; i < this.flattenedItems.length; i++) {
+      const nextRow = this.flattenedItems[i];
+      if (nextRow.type === 'item') {
+        const isNextActive = this.selectionService.isSelected(nextRow.item.id) || highlightedId === nextRow.item.id;
+        return !isNextActive;
+      }
+    }
+
+    // No next item found (or only group header), this is bottom edge
+    return true;
+  }
+
   // ========================================
   // Grouping Logic
   // ========================================
@@ -313,6 +381,29 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
       items: groups.get(key)!,
       collapsed: this.collapsedGroups.has(key)
     }));
+
+    // Update flattened items for virtual scrolling
+    this.updateFlattenedItems();
+  }
+
+  private updateFlattenedItems() {
+    const flattened: Array<{ type: 'group'; group: ItemGroup<T> } | { type: 'item'; item: T; groupId: string }> = [];
+
+    for (const group of this.groupedItems) {
+      // Add group header if grouping is enabled
+      if (this.groupConfig?.enabled) {
+        flattened.push({ type: 'group', group });
+      }
+
+      // Add items if group is not collapsed
+      if (!group.collapsed) {
+        for (const item of group.items) {
+          flattened.push({ type: 'item', item, groupId: group.id });
+        }
+      }
+    }
+
+    this.flattenedItems = flattened;
   }
 
   toggleGroup(groupId: string) {
@@ -322,6 +413,7 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
       this.collapsedGroups.add(groupId);
     }
     this.updateGroupedItems();
+    this.updateFlattenedItems();
     this.groupToggle.emit({ groupId, collapsed: this.collapsedGroups.has(groupId) });
   }
 
