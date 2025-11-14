@@ -1072,7 +1072,7 @@ export class DatabaseService {
       query += ' WHERE ' + conditions.join(' AND ');
     }
 
-    query += ' ORDER BY v.added_at DESC';
+    query += ' ORDER BY v.download_date DESC';
 
     if (options?.limit) {
       query += ' LIMIT ?';
