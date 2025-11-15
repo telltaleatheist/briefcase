@@ -800,7 +800,7 @@ export class FileScannerService {
    * Quick hash using file size + samples from beginning/middle/end
    * Much faster and memory-efficient than hashing entire file
    */
-  private async quickHashFile(filePath: string, fileSize: number): Promise<string> {
+  public async quickHashFile(filePath: string, fileSize: number): Promise<string> {
     const hash = crypto.createHash('sha256');
 
     // Add file size to hash

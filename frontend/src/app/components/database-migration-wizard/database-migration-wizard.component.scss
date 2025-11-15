@@ -1,0 +1,506 @@
+.migration-wizard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+
+  // Force readable colors for dark mode
+  color: #e0e0e0 !important;
+
+  * {
+    color: inherit;
+  }
+
+  .wizard-header {
+    text-align: center;
+    margin-bottom: 32px;
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 32px;
+      font-weight: 500;
+      color: #ffffff !important;
+    }
+
+    p {
+      margin: 0;
+      opacity: 0.7;
+      font-size: 16px;
+      color: #e0e0e0 !important;
+    }
+  }
+
+  .step-content {
+    padding: 24px 0;
+    min-height: 400px;
+
+    h2 {
+      margin: 0 0 16px 0;
+      font-size: 24px;
+      font-weight: 500;
+      color: #ffffff !important;
+    }
+
+    h3 {
+      margin: 24px 0 12px 0;
+      font-size: 18px;
+      font-weight: 500;
+      color: #ffffff !important;
+    }
+
+    h4 {
+      margin: 16px 0 8px 0;
+      font-size: 16px;
+      font-weight: 500;
+      color: #ffffff !important;
+    }
+
+    p, li, span {
+      color: #e0e0e0 !important;
+    }
+  }
+
+  // Info boxes - dark mode compatible
+  .info-box,
+  .warning-box {
+    display: flex;
+    gap: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+
+    mat-icon {
+      flex-shrink: 0;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+
+    ul {
+      margin: 8px 0 0 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+  }
+
+  .info-box {
+    background: rgba(33, 150, 243, 0.15);
+    border: 1px solid rgba(33, 150, 243, 0.4);
+    color: #64b5f6;
+
+    mat-icon {
+      color: #64b5f6;
+    }
+  }
+
+  .warning-box {
+    background: rgba(255, 152, 0, 0.15);
+    border: 1px solid rgba(255, 152, 0, 0.4);
+    color: #ffb74d;
+
+    mat-icon {
+      color: #ffb74d;
+    }
+  }
+
+  // Configuration form
+  .config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 24px 0;
+
+    .full-width {
+      width: 100%;
+    }
+  }
+
+  // Stats grid
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+
+      .stat-value {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: #64b5f6;
+      }
+
+      .stat-label {
+        font-size: 14px;
+        opacity: 0.7;
+      }
+    }
+  }
+
+  // Result cards - dark mode compatible
+  .result-card {
+    display: flex;
+    gap: 16px;
+    padding: 16px;
+    border-radius: 8px;
+    margin: 16px 0;
+
+    mat-icon {
+      flex-shrink: 0;
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+    }
+
+    &.success {
+      background: rgba(76, 175, 80, 0.15);
+      border: 1px solid rgba(76, 175, 80, 0.4);
+      color: #81c784;
+
+      mat-icon {
+        color: #81c784;
+      }
+
+      h4 {
+        color: #81c784;
+      }
+    }
+
+    &.error {
+      background: rgba(244, 67, 54, 0.15);
+      border: 1px solid rgba(244, 67, 54, 0.4);
+      color: #e57373;
+
+      mat-icon {
+        color: #e57373;
+      }
+
+      h4 {
+        color: #e57373;
+      }
+    }
+
+    h4 {
+      margin: 0 0 8px 0;
+    }
+
+    p {
+      margin: 0;
+      opacity: 0.9;
+    }
+  }
+
+  // Step actions
+  .step-actions {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+
+    button {
+      mat-icon {
+        margin: 0 4px;
+      }
+    }
+  }
+
+  // Preview actions
+  .preview-actions {
+    margin: 24px 0;
+  }
+
+  // Migration controls
+  .migration-controls {
+    margin: 24px 0;
+
+    .migrate-button {
+      font-size: 16px;
+      padding: 12px 32px;
+      height: auto;
+    }
+  }
+
+  // Progress
+  .migration-progress {
+    margin: 24px 0;
+
+    h3 {
+      margin: 0 0 16px 0;
+    }
+
+    .progress-message {
+      margin-top: 12px;
+      text-align: center;
+      opacity: 0.7;
+    }
+  }
+
+  // Backup info
+  .backup-info {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    margin: 16px 0;
+
+    mat-icon {
+      color: #64b5f6;
+    }
+
+    code {
+      display: block;
+      margin-top: 4px;
+      padding: 4px 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 12px;
+      color: #64b5f6;
+    }
+  }
+
+  // Errors list
+  .errors-list {
+    margin: 24px 0;
+    padding: 16px;
+    background: rgba(244, 67, 54, 0.15);
+    border: 1px solid rgba(244, 67, 54, 0.4);
+    border-radius: 8px;
+
+    h4 {
+      margin: 0 0 12px 0;
+      color: #e57373;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 4px 0;
+      opacity: 0.8;
+    }
+  }
+
+  // Status info
+  .status-info {
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    margin: 16px 0;
+
+    h3 {
+      margin: 0 0 12px 0;
+    }
+
+    p {
+      margin: 4px 0;
+    }
+
+    .current-config {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+
+      h4 {
+        margin: 0 0 8px 0;
+      }
+    }
+  }
+
+  // Completion banner
+  .completion-banner {
+    text-align: center;
+    padding: 40px 20px;
+    margin-bottom: 32px;
+
+    .large-icon {
+      font-size: 80px;
+      width: 80px;
+      height: 80px;
+      color: #81c784;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      margin: 16px 0 8px 0;
+      font-size: 28px;
+      color: #81c784;
+    }
+
+    p {
+      margin: 0;
+      font-size: 16px;
+      opacity: 0.7;
+    }
+  }
+
+  // Additional computers section
+  .additional-computers {
+    margin: 24px 0;
+    padding: 16px;
+    background: rgba(33, 150, 243, 0.15);
+    border: 1px solid rgba(33, 150, 243, 0.4);
+    border-radius: 8px;
+
+    h3 {
+      margin: 0 0 12px 0;
+      color: #64b5f6;
+    }
+
+    p {
+      margin: 0 0 12px 0;
+    }
+
+    ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 8px 0;
+    }
+  }
+
+  // Additional actions
+  .additional-actions {
+    margin-top: 32px;
+    padding: 24px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    text-align: center;
+
+    button {
+      margin-bottom: 12px;
+    }
+
+    .hint-text {
+      margin: 0;
+      font-size: 14px;
+      opacity: 0.6;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+  }
+
+  // Code blocks
+  code {
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 3px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    color: #64b5f6;
+  }
+}
+
+// Light theme overrides
+:host-context(.light-theme) .migration-wizard {
+  .info-box {
+    background: rgba(33, 150, 243, 0.1);
+    border: 1px solid rgba(33, 150, 243, 0.3);
+    color: #1976d2;
+
+    mat-icon {
+      color: #1976d2;
+    }
+  }
+
+  .warning-box {
+    background: rgba(255, 152, 0, 0.1);
+    border: 1px solid rgba(255, 152, 0, 0.3);
+    color: #f57c00;
+
+    mat-icon {
+      color: #f57c00;
+    }
+  }
+
+  .result-card.success {
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    color: #388e3c;
+
+    mat-icon {
+      color: #388e3c;
+    }
+
+    h4 {
+      color: #388e3c;
+    }
+  }
+
+  .result-card.error {
+    background: rgba(244, 67, 54, 0.1);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    color: #d32f2f;
+
+    mat-icon {
+      color: #d32f2f;
+    }
+
+    h4 {
+      color: #d32f2f;
+    }
+  }
+
+  .stats-grid .stat-card .stat-value {
+    color: #1976d2;
+  }
+
+  .completion-banner {
+    .large-icon {
+      color: #388e3c;
+    }
+
+    h2 {
+      color: #388e3c;
+    }
+  }
+
+  .additional-computers {
+    background: rgba(33, 150, 243, 0.1);
+    border: 1px solid rgba(33, 150, 243, 0.3);
+
+    h3 {
+      color: #1976d2;
+    }
+  }
+
+  .errors-list {
+    background: rgba(244, 67, 54, 0.1);
+    border: 1px solid rgba(244, 67, 54, 0.3);
+
+    h4 {
+      color: #d32f2f;
+    }
+  }
+
+  code {
+    background: rgba(0, 0, 0, 0.05);
+    color: #1976d2;
+  }
+
+  .backup-info {
+    mat-icon {
+      color: #1976d2;
+    }
+
+    code {
+      background: rgba(0, 0, 0, 0.08);
+      color: #1976d2;
+    }
+  }
+}

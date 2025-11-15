@@ -460,3 +460,71 @@ body {
 .ai-wizard-dialog .mat-mdc-dialog-container {
   padding: 0 !important;
 }
+
+/* Database Migration Wizard - Force dark mode colors */
+.migration-wizard {
+  background-color: #1e1e1e !important;
+  color: #e0e0e0 !important;
+
+  h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+  }
+
+  p, span, li, div, label {
+    color: #e0e0e0 !important;
+  }
+
+  /* Material stepper - dark background */
+  .mat-stepper-horizontal,
+  .mat-stepper-vertical {
+    background-color: #2d2d2d !important;
+  }
+
+  .mat-step-header {
+    background-color: #2d2d2d !important;
+  }
+
+  /* Step content panels */
+  .mat-horizontal-content-container,
+  .mat-vertical-content-container {
+    background-color: #1e1e1e !important;
+  }
+
+  /* Material form fields */
+  .mat-mdc-form-field {
+    color: #e0e0e0 !important;
+
+    .mdc-text-field {
+      background-color: #2d2d2d !important;
+    }
+  }
+
+  .mat-mdc-form-field-hint,
+  .mat-mdc-form-field-error {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+
+  /* Material stepper labels */
+  .mat-step-label,
+  .mat-step-text-label {
+    color: #e0e0e0 !important;
+  }
+
+  /* Material cards if any */
+  .mat-mdc-card {
+    background-color: #2d2d2d !important;
+    color: #e0e0e0 !important;
+  }
+
+  /* Expansion panels */
+  .mat-expansion-panel {
+    background-color: #2d2d2d !important;
+    color: #e0e0e0 !important;
+  }
+
+  /* Input fields */
+  input, textarea {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+  }
+}

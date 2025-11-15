@@ -353,6 +353,8 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
         items: this.items,
         collapsed: false
       }];
+      // Update flattened items for virtual scrolling
+      this.updateFlattenedItems();
       return;
     }
 

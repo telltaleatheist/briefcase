@@ -9,6 +9,7 @@ import { AnalysisService } from '../analysis/analysis.service';
 import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
+import { IgnoreService } from './ignore.service';
 
 /**
  * DatabaseController - REST API endpoints for database operations
@@ -32,6 +33,7 @@ export class DatabaseController {
     private readonly libraryManagerService: LibraryManagerService,
     private readonly ffmpegService: FfmpegService,
     private readonly mediaEventService: MediaEventService,
+    private readonly ignoreService: IgnoreService,
   ) {}
 
   /**
@@ -64,7 +66,7 @@ export class DatabaseController {
    */
   @Get('unimported')
   async getUnimportedVideos() {
-    this.logger.log('Checking for unimported videos in active library');
+    this.logger.log('Checking for unimported videos and searching for potential database matches');
 
     const activeLibrary = this.libraryManagerService.getActiveLibrary();
     if (!activeLibrary) {
@@ -79,10 +81,185 @@ export class DatabaseController {
     const videos = await this.fileScannerService.getUnimportedVideos(
       activeLibrary.clipsFolderPath,
     );
+
+    // Filter out ignored files
+    const filteredVideos = videos.filter(video => !this.ignoreService.shouldIgnore(video.fullPath));
+    this.logger.log(`Filtered ${videos.length - filteredVideos.length} ignored files`);
+
+    // Check if any unimported files match existing database entries
+    this.logger.log('Checking for existing database entries by filename and hash');
+    const allDbVideos = this.databaseService.getAllVideos({ linkedOnly: false, includeChildren: true });
+    const filenameMap = new Map<string, any[]>();
+    const hashMap = new Map<string, any[]>();
+
+    // Build maps of database videos by filename and hash
+    for (const dbVideo of allDbVideos) {
+      // Filename map
+      if (!filenameMap.has(dbVideo.filename)) {
+        filenameMap.set(dbVideo.filename, []);
+      }
+      filenameMap.get(dbVideo.filename)!.push({
+        id: dbVideo.id,
+        filename: dbVideo.filename,
+        current_path: dbVideo.current_path,
+        file_exists: dbVideo.current_path ? fs.existsSync(dbVideo.current_path) : false,
+      });
+
+      // Hash map (for duplicate content detection)
+      if (dbVideo.file_hash) {
+        if (!hashMap.has(dbVideo.file_hash)) {
+          hashMap.set(dbVideo.file_hash, []);
+        }
+        hashMap.get(dbVideo.file_hash)!.push({
+          id: dbVideo.id,
+          filename: dbVideo.filename,
+          current_path: dbVideo.current_path,
+          file_exists: dbVideo.current_path ? fs.existsSync(dbVideo.current_path) : false,
+        });
+      }
+    }
+
+    // Check for content duplicates by computing hashes
+    const videosWithMatches = await Promise.all(filteredVideos.map(async (video) => {
+      const filenameMatches = filenameMap.get(video.filename) || [];
+      let isDuplicateContent = false;
+      let duplicateOf = null;
+
+      try {
+        // Compute hash for this unimported file
+        const stats = fs.statSync(video.fullPath);
+        const fileHash = await this.fileScannerService.quickHashFile(video.fullPath, stats.size);
+
+        // Check if this hash exists in database
+        const hashMatches = hashMap.get(fileHash) || [];
+        if (hashMatches.length > 0) {
+          isDuplicateContent = true;
+          duplicateOf = hashMatches[0]; // First match
+          this.logger.debug(`Found duplicate content: ${video.filename} matches ${duplicateOf.filename}`);
+        }
+      } catch (error: any) {
+        this.logger.warn(`Could not compute hash for ${video.filename}: ${error.message}`);
+      }
+
+      return {
+        ...video,
+        potential_db_matches: filenameMatches,
+        has_db_match: filenameMatches.length > 0,
+        isDuplicateContent,
+        duplicateOf,
+      };
+    }));
+
+    const withMatches = videosWithMatches.filter(v => v.has_db_match).length;
+    const duplicateCount = videosWithMatches.filter(v => v.isDuplicateContent).length;
+    this.logger.log(`Found ${filteredVideos.length} unimported videos (${withMatches} filename matches, ${duplicateCount} content duplicates)`);
+
     return {
       success: true,
-      count: videos.length,
-      videos,
+      count: filteredVideos.length,
+      videos: videosWithMatches,
+      matchesFound: withMatches,
+      duplicatesFound: duplicateCount,
+    };
+  }
+
+  /**
+   * GET /api/database/duplicate-entries
+   * Find duplicate database entries (multiple entries with same file hash)
+   */
+  @Get('duplicate-entries')
+  findDuplicateEntries() {
+    this.logger.log('Scanning for duplicate database entries by file path');
+
+    const allVideos = this.databaseService.getAllVideos({ linkedOnly: false, includeChildren: true });
+    const pathMap = new Map<string, any[]>();
+
+    // Group videos by current_path
+    for (const video of allVideos) {
+      if (video.current_path) {
+        if (!pathMap.has(video.current_path)) {
+          pathMap.set(video.current_path, []);
+        }
+        pathMap.get(video.current_path)!.push({
+          id: video.id,
+          filename: video.filename,
+          current_path: video.current_path,
+          file_exists: video.current_path ? fs.existsSync(video.current_path) : false,
+          file_size_bytes: video.file_size_bytes,
+          duration_seconds: video.duration_seconds,
+          media_type: video.media_type,
+          download_date: video.download_date,
+          upload_date: video.upload_date,
+        });
+      }
+    }
+
+    // Find duplicate entries (all entries except the first one for each path)
+    const duplicateEntries: any[] = [];
+    const pathsWithDuplicates: string[] = [];
+
+    for (const [path, entries] of pathMap.entries()) {
+      if (entries.length > 1) {
+        pathsWithDuplicates.push(path);
+        // Keep the first entry, mark the rest as duplicates
+        for (let i = 1; i < entries.length; i++) {
+          duplicateEntries.push({
+            ...entries[i],
+            duplicate_count: entries.length,
+            is_duplicate_of: path,
+          });
+        }
+      }
+    }
+
+    this.logger.log(`Found ${pathsWithDuplicates.length} paths with duplicates (${duplicateEntries.length} duplicate entries total)`);
+
+    return {
+      success: true,
+      duplicateEntries,
+      pathsWithDuplicates: pathsWithDuplicates.length,
+      totalDuplicates: duplicateEntries.length,
+    };
+  }
+
+  /**
+   * POST /api/database/scan-ignored
+   * Scan database for entries that match ignore patterns and remove them
+   */
+  @Post('scan-ignored')
+  async scanAndRemoveIgnored() {
+    this.logger.log('Scanning database for entries matching ignore patterns');
+
+    const allVideos = this.databaseService.getAllVideos({ linkedOnly: false, includeChildren: true });
+    const toRemove: string[] = [];
+
+    for (const video of allVideos) {
+      if (video.current_path && this.ignoreService.shouldIgnore(video.current_path)) {
+        toRemove.push(video.id);
+        this.logger.log(`Found ignored entry: ${video.filename} (${video.id})`);
+      }
+    }
+
+    this.logger.log(`Found ${toRemove.length} database entries matching ignore patterns`);
+
+    // Delete the entries
+    const deleted = [];
+    for (const videoId of toRemove) {
+      try {
+        this.databaseService.deleteVideo(videoId);
+        deleted.push(videoId);
+      } catch (error: any) {
+        this.logger.error(`Failed to delete video ${videoId}: ${error.message}`);
+      }
+    }
+
+    this.logger.log(`Deleted ${deleted.length} ignored entries from database`);
+
+    return {
+      success: true,
+      found: toRemove.length,
+      deleted: deleted.length,
+      message: `Found ${toRemove.length} ignored entries, deleted ${deleted.length}`,
     };
   }
 
@@ -1302,6 +1479,88 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/missing-files
+   * Find database entries where the file doesn't exist on disk
+   * Actually checks file existence, not just is_linked flag
+   */
+  @Get('missing-files')
+  findMissingFiles() {
+    this.logger.log('Scanning for missing files and searching for potential matches');
+    const allVideos = this.databaseService.getAllVideos({ linkedOnly: false, includeChildren: true });
+    const missingVideos = [];
+
+    // Get active library's clips folder
+    const activeLibrary = this.libraryManagerService.getActiveLibrary();
+    if (!activeLibrary) {
+      this.logger.error('No active library found');
+      return {
+        success: false,
+        error: 'No active library',
+        count: 0,
+        videos: [],
+      };
+    }
+
+    const clipsFolder = activeLibrary.clipsFolderPath;
+    this.logger.log(`Searching for matches in library folder: ${clipsFolder}`);
+
+    // Build a map of all files in the library folder (filename -> full path)
+    const fileMap = new Map<string, string[]>();
+    const scanDirectory = (dir: string) => {
+      try {
+        if (!fs.existsSync(dir)) return;
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanDirectory(fullPath);
+          } else if (entry.isFile()) {
+            const filename = entry.name;
+            if (!fileMap.has(filename)) {
+              fileMap.set(filename, []);
+            }
+            fileMap.get(filename)!.push(fullPath);
+          }
+        }
+      } catch (error: any) {
+        this.logger.warn(`Could not read directory ${dir}: ${error.message}`);
+      }
+    };
+
+    scanDirectory(clipsFolder);
+    this.logger.log(`Built file map with ${fileMap.size} unique filenames`);
+
+    // Find missing files and search for potential matches
+    for (const video of allVideos) {
+      if (video.current_path && !fs.existsSync(video.current_path)) {
+        const potentialMatches = fileMap.get(video.filename) || [];
+
+        missingVideos.push({
+          id: video.id,
+          filename: video.filename,
+          current_path: video.current_path,
+          duration_seconds: video.duration_seconds,
+          media_type: video.media_type,
+          file_size_bytes: video.file_size_bytes,
+          download_date: video.download_date,
+          potential_matches: potentialMatches, // Add potential matches
+          has_match: potentialMatches.length > 0,
+        });
+      }
+    }
+
+    const withMatches = missingVideos.filter(v => v.has_match).length;
+    this.logger.log(`Found ${missingVideos.length} missing files (${withMatches} have potential matches)`);
+
+    return {
+      success: true,
+      count: missingVideos.length,
+      videos: missingVideos,
+      matchesFound: withMatches,
+    };
+  }
+
+  /**
    * POST /api/database/populate-durations
    * Populate missing video durations for existing videos
    * Useful for migrating videos that were imported before duration extraction was implemented
@@ -1434,8 +1693,8 @@ export class DatabaseController {
 
       // Get all unique directories from existing videos
       for (const video of allVideos) {
-        if (video.file_path) {
-          const dir = path.dirname(video.file_path);
+        if (video.current_path) {
+          const dir = path.dirname(video.current_path);
           libraryDirs.add(dir);
         }
       }
@@ -1506,10 +1765,15 @@ export class DatabaseController {
         }
 
         if (foundPath) {
+          const oldPath = video.current_path ? String(video.current_path) : undefined;
+
           // Update the video path (this also marks it as linked)
           this.databaseService.updateVideoPath(videoId, foundPath);
           relinkedCount++;
           this.logger.log(`Relinked video ${videoId}: ${foundPath}`);
+
+          // Emit WebSocket event to notify frontend of the relink
+          this.mediaEventService.emitVideoPathUpdated(videoId, foundPath, oldPath);
         } else {
           failedCount++;
           notFoundIds.push(videoId);
@@ -2257,5 +2521,71 @@ export class DatabaseController {
     }
 
     return 'video'; // default
+  }
+
+  /**
+   * GET /api/database/ignore
+   * Get the .clippyignore file content
+   */
+  @Get('ignore')
+  getIgnoreFile() {
+    const content = this.ignoreService.getIgnoreFileContent();
+    const filePath = this.ignoreService.getIgnoreFilePathString();
+
+    if (content === null) {
+      return {
+        success: false,
+        error: 'Could not read ignore file',
+      };
+    }
+
+    return {
+      success: true,
+      content,
+      filePath,
+      patterns: this.ignoreService.getIgnorePatterns(),
+    };
+  }
+
+  /**
+   * POST /api/database/ignore
+   * Update the .clippyignore file content
+   */
+  @Post('ignore')
+  updateIgnoreFile(@Body() body: { content: string }) {
+    if (!body.content || typeof body.content !== 'string') {
+      return {
+        success: false,
+        error: 'Content is required',
+      };
+    }
+
+    const success = this.ignoreService.updateIgnoreFileContent(body.content);
+
+    return {
+      success,
+      message: success ? 'Ignore file updated successfully' : 'Failed to update ignore file',
+    };
+  }
+
+  /**
+   * POST /api/database/ignore/add
+   * Add a pattern to the .clippyignore file
+   */
+  @Post('ignore/add')
+  addIgnorePattern(@Body() body: { pattern: string }) {
+    if (!body.pattern || typeof body.pattern !== 'string') {
+      return {
+        success: false,
+        error: 'Pattern is required',
+      };
+    }
+
+    const success = this.ignoreService.addIgnorePattern(body.pattern);
+
+    return {
+      success,
+      message: success ? 'Pattern added to ignore file' : 'Failed to add pattern',
+    };
   }
 }

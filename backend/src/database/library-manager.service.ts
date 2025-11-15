@@ -282,6 +282,24 @@ export class LibraryManagerService implements OnModuleInit {
   }
 
   /**
+   * Update library's clips folder path
+   */
+  updateLibraryClipsFolder(libraryId: string, newPath: string): boolean {
+    const library = this.config.libraries.find((lib) => lib.id === libraryId);
+
+    if (!library) {
+      this.logger.warn(`Library not found: ${libraryId}`);
+      return false;
+    }
+
+    library.clipsFolderPath = newPath;
+    this.saveConfig();
+
+    this.logger.log(`Updated clips folder for library ${libraryId} to: ${newPath}`);
+    return true;
+  }
+
+  /**
    * Check if database is initialized and ready
    */
   isDatabaseReady(): boolean {

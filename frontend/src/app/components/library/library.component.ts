@@ -480,6 +480,37 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }));
 
+    // Subscribe to video path updated events from WebSocket (e.g., after relinking)
+    this.subscriptions.push(this.socketService.onVideoPathUpdated().subscribe(event => {
+      console.log('[LibraryComponent] Video path updated event received:', event);
+
+      // Find the video in our local list and update its path
+      const videoIndex = this.videos.findIndex(v => v.id === event.videoId);
+      if (videoIndex !== -1) {
+        this.videos[videoIndex].current_path = event.newPath;
+
+        // Also update in filteredVideos if needed
+        const filteredIndex = this.filteredVideos.findIndex(v => v.id === event.videoId);
+        if (filteredIndex !== -1) {
+          this.filteredVideos[filteredIndex].current_path = event.newPath;
+        }
+
+        // If this is the selected/highlighted video, update that too
+        if (this.selectedVideo && this.selectedVideo.id === event.videoId) {
+          this.selectedVideo.current_path = event.newPath;
+        }
+
+        // Force re-render by creating new array references
+        this.videos = [...this.videos];
+        this.filteredVideos = [...this.filteredVideos];
+
+        // Trigger change detection
+        this.cdr.detectChanges();
+
+        console.log('[LibraryComponent] Video path updated in UI:', event.videoId, event.newPath);
+      }
+    }));
+
     // Subscribe to video imported events from WebSocket
     this.subscriptions.push(this.socketService.onVideoImported().subscribe(async event => {
       console.log('[LibraryComponent] Video imported event received:', event);
@@ -991,18 +1022,55 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   /**
    * Apply filters and sorting to videos
    */
-  applyFiltersAndSort() {
-    // Use VideoFilterService for all filtering/sorting
-    const criteria: FilterCriteria = {
-      searchQuery: this.searchQuery,
-      searchFilters: this.searchFilters,
-      selectedTags: this.selectedTags,
-      fileTypeFilters: this.fileTypeFilters,
-      sortBy: this.sortBy,
-      sortOrder: this.sortOrder
-    };
+  async applyFiltersAndSort() {
+    let filtered: DatabaseVideo[];
 
-    const filtered = this.videoFilterService.applyFilters(this.videos, criteria);
+    // If there's a search query, use backend search API
+    if (this.searchQuery && this.searchQuery.trim()) {
+      try {
+        // Use backend full-text search for performance
+        filtered = await this.databaseLibraryService.searchVideos(
+          this.searchQuery,
+          this.videos,
+          this.searchFilters
+        );
+
+        // Apply file type filters client-side on search results
+        filtered = this.videoFilterService.filterByFileType(filtered, this.fileTypeFilters);
+
+        // Apply tag filters client-side (if any)
+        if (this.selectedTags.length > 0) {
+          filtered = this.videoFilterService.filterByTags(filtered, this.selectedTags);
+        }
+
+        // Apply sorting
+        filtered = this.videoFilterService.sortVideos(filtered, this.sortBy, this.sortOrder);
+      } catch (error) {
+        console.error('Search failed, falling back to client-side filtering:', error);
+        // Fallback to client-side filtering
+        const criteria: FilterCriteria = {
+          searchQuery: this.searchQuery,
+          searchFilters: this.searchFilters,
+          selectedTags: this.selectedTags,
+          fileTypeFilters: this.fileTypeFilters,
+          sortBy: this.sortBy,
+          sortOrder: this.sortOrder
+        };
+        filtered = this.videoFilterService.applyFilters(this.videos, criteria);
+      }
+    } else {
+      // No search query - use client-side filtering (fast for file type/tag filters)
+      const criteria: FilterCriteria = {
+        searchQuery: '',
+        searchFilters: this.searchFilters,
+        selectedTags: this.selectedTags,
+        fileTypeFilters: this.fileTypeFilters,
+        sortBy: this.sortBy,
+        sortOrder: this.sortOrder
+      };
+      filtered = this.videoFilterService.applyFilters(this.videos, criteria);
+    }
+
     this.filteredVideos = filtered;
 
     // Update state service
@@ -4242,18 +4310,18 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   private autoCollapseOldSections() {
     // Use setTimeout to ensure cascade-list ViewChild is ready
     setTimeout(() => {
-      console.log('[LibraryComponent] autoCollapseOldSections called');
-      console.log('[LibraryComponent] Videos count:', this.videos.length);
-      console.log('[LibraryComponent] Cascade-list available:', !!this.cascadeList);
+      // console.log('[LibraryComponent] autoCollapseOldSections called');
+      // console.log('[LibraryComponent] Videos count:', this.videos.length);
+      // console.log('[LibraryComponent] Cascade-list available:', !!this.cascadeList);
 
       if (this.videos.length === 0) {
-        console.log('[LibraryComponent] No videos to process, skipping auto-collapse');
+        // console.log('[LibraryComponent] No videos to process, skipping auto-collapse');
         return;
       }
 
       const fourWeeksAgo = new Date();
       fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28); // 4 weeks = 28 days
-      console.log('[LibraryComponent] Four weeks ago date:', fourWeeksAgo.toISOString());
+      // console.log('[LibraryComponent] Four weeks ago date:', fourWeeksAgo.toISOString());
 
       // Clear existing collapsed weeks to start fresh
       this.collapsedWeeks.clear();
@@ -4266,25 +4334,25 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         if (downloadDate < fourWeeksAgo) {
           const weekKey = this.listGroupConfig.groupBy(video);
           if (weekKey !== 'NEW_VIDEOS_24H') {
-            console.log('[LibraryComponent] Collapsing week:', weekKey, 'for video from', downloadDate.toISOString());
+            // console.log('[LibraryComponent] Collapsing week:', weekKey, 'for video from', downloadDate.toISOString());
             this.collapsedWeeks.add(weekKey);
           }
         }
       });
 
-      console.log(`[LibraryComponent] Total sections to collapse: ${this.collapsedWeeks.size}`);
-      console.log('[LibraryComponent] Week keys to collapse:', Array.from(this.collapsedWeeks));
+      // console.log(`[LibraryComponent] Total sections to collapse: ${this.collapsedWeeks.size}`);
+      // console.log('[LibraryComponent] Week keys to collapse:', Array.from(this.collapsedWeeks));
 
       // Apply collapsed state to the cascade-list component
       if (this.cascadeList) {
         this.cascadeList.collapsedGroups = new Set(this.collapsedWeeks);
-        console.log('[LibraryComponent] Applied collapsed state to cascade-list');
-        console.log('[LibraryComponent] Cascade-list collapsedGroups size:', this.cascadeList.collapsedGroups.size);
+        // console.log('[LibraryComponent] Applied collapsed state to cascade-list');
+        // console.log('[LibraryComponent] Cascade-list collapsedGroups size:', this.cascadeList.collapsedGroups.size);
 
         // Trigger change detection to update the display
         this.cdr.detectChanges();
 
-        console.log('[LibraryComponent] Triggered change detection');
+        // console.log('[LibraryComponent] Triggered change detection');
       } else {
         console.error('[LibraryComponent] CASCADE-LIST NOT AVAILABLE - will be applied via [initialCollapsedGroups] binding');
       }

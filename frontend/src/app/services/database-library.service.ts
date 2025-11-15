@@ -482,6 +482,7 @@ export class DatabaseLibraryService {
 
         return (
           (searchFilename && video.filename.toLowerCase().includes(lowerQuery)) ||
+          (searchFilename && video.current_path && video.current_path.toLowerCase().includes(lowerQuery)) ||
           (searchFilename && video.upload_date && video.upload_date.toLowerCase().includes(lowerQuery)) ||
           (searchAiDesc && video.ai_description && video.ai_description.toLowerCase().includes(lowerQuery))
         );

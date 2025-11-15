@@ -48,6 +48,18 @@
             <mat-icon matListItemIcon>settings</mat-icon>
             <span matListItemTitle>Settings</span>
           </a>
+
+          <mat-divider></mat-divider>
+
+          <a mat-list-item routerLink="/database-migration" routerLinkActive="active-link" class="migration-link">
+            <mat-icon matListItemIcon>sync_alt</mat-icon>
+            <span matListItemTitle>Database Migration</span>
+          </a>
+
+          <a mat-list-item routerLink="/relink" routerLinkActive="active-link" class="relink-link">
+            <mat-icon matListItemIcon>link</mat-icon>
+            <span matListItemTitle>Relink Files</span>
+          </a>
         </mat-nav-list>
 
         <div class="theme-toggle-container">

@@ -16,7 +16,7 @@
     <mat-tab label="Orphaned Files">
       <div class="tab-content">
         <div class="tab-header">
-          <p class="tab-description">Video files in the clips folder that haven't been imported to the database yet.</p>
+          <p class="tab-description">Video files in the clips folder that haven't been imported to the database yet. Files with identical content to existing entries are highlighted in red.</p>
           <div class="tab-actions">
             <button mat-raised-button
                     color="primary"
@@ -27,16 +27,32 @@
             </button>
             <button mat-raised-button
                     color="accent"
-                    (click)="importSelectedUnimportedVideos()"
+                    (click)="importSelectedUnimportedVideos(false)"
                     [disabled]="selectedUnimportedVideos.size === 0 || loadingUnimported"
-                    matTooltip="Import selected videos to database">
+                    matTooltip="Import selected videos to database (skips duplicates)">
               <mat-icon>add</mat-icon>
               Import Selected ({{ selectedUnimportedVideos.size }})
+            </button>
+            <button mat-raised-button
+                    color="accent"
+                    (click)="importSelectedUnimportedVideos(true)"
+                    [disabled]="selectedUnimportedVideos.size === 0 || loadingUnimported"
+                    matTooltip="Force import even if duplicates exist in database">
+              <mat-icon>add_circle</mat-icon>
+              Force Import ({{ selectedUnimportedVideos.size }})
             </button>
           </div>
           <p class="count-info" *ngIf="!loadingUnimported && unimportedVideos.length > 0">
             <mat-icon class="warning-icon">warning</mat-icon>
             {{ unimportedVideos.length }} orphaned file{{ unimportedVideos.length !== 1 ? 's' : '' }} found
+            <span style="margin-left: 12px; color: #f44336; font-weight: 500;">
+              <mat-icon style="font-size: 18px; height: 18px; width: 18px; vertical-align: middle;">content_copy</mat-icon>
+              {{ unimportedDuplicateCount }} duplicate{{ unimportedDuplicateCount !== 1 ? 's' : '' }}
+            </span>
+            <span style="margin-left: 12px; color: #4caf50; font-weight: 500;">
+              <mat-icon style="font-size: 18px; height: 18px; width: 18px; vertical-align: middle;">fiber_new</mat-icon>
+              {{ unimportedNewCount }} new file{{ unimportedNewCount !== 1 ? 's' : '' }}
+            </span>
           </p>
         </div>
 
@@ -53,13 +69,34 @@
               <button mat-stroked-button
                       (click)="toggleAllUnimportedSelection()"
                       [color]="isAllUnimportedSelected ? 'primary' : undefined"
-                      matTooltip="Select all orphaned files">
+                      matTooltip="Select all visible files">
                 <mat-icon>select_all</mat-icon>
                 All
               </button>
+              <button mat-stroked-button
+                      (click)="setUnimportedFilter('all')"
+                      [color]="unimportedFilter === 'all' ? 'primary' : undefined"
+                      matTooltip="Show all files">
+                <mat-icon>view_list</mat-icon>
+                All ({{ unimportedVideos.length }})
+              </button>
+              <button mat-stroked-button
+                      (click)="setUnimportedFilter('duplicates')"
+                      [color]="unimportedFilter === 'duplicates' ? 'warn' : undefined"
+                      matTooltip="Show only duplicate files (content already exists in database)">
+                <mat-icon>content_copy</mat-icon>
+                Duplicates ({{ unimportedDuplicateCount }})
+              </button>
+              <button mat-stroked-button
+                      (click)="setUnimportedFilter('new')"
+                      [color]="unimportedFilter === 'new' ? 'accent' : undefined"
+                      matTooltip="Show only new files (not in database)">
+                <mat-icon>fiber_new</mat-icon>
+                New ({{ unimportedNewCount }})
+              </button>
             </div>
             <span class="count-text">
-              {{ selectedUnimportedVideos.size > 0 ? selectedUnimportedVideos.size + ' selected of ' : '' }}{{ unimportedVideos.length }} file{{ unimportedVideos.length !== 1 ? 's' : '' }}
+              {{ selectedUnimportedVideos.size > 0 ? selectedUnimportedVideos.size + ' selected of ' : '' }}{{ filteredUnimportedVideos.length }} file{{ filteredUnimportedVideos.length !== 1 ? 's' : '' }}
             </span>
           </div>
         </div>
@@ -91,11 +128,11 @@
       </div>
     </mat-tab>
 
-    <!-- Tab 2: Orphaned Database Entries -->
-    <mat-tab label="Orphaned Database Entries">
+    <!-- Tab 2: Missing Files -->
+    <mat-tab label="Missing Files">
       <div class="tab-content">
         <div class="tab-header">
-          <p class="tab-description">Database entries where the video file no longer exists on disk.</p>
+          <p class="tab-description">Database entries where the video file no longer exists on disk (checks actual file existence).</p>
           <div class="tab-actions">
             <button mat-raised-button
                     color="primary"
@@ -103,6 +140,15 @@
                     [disabled]="loadingOrphaned">
               <mat-icon>search</mat-icon>
               {{ loadingOrphaned ? 'Scanning...' : 'Scan for Orphaned Entries' }}
+            </button>
+            <button mat-raised-button
+                    color="accent"
+                    *ngIf="orphanedMatchesFound > 0"
+                    (click)="relinkMatchedOrphanedVideos()"
+                    [disabled]="loadingOrphaned"
+                    matTooltip="Automatically relink videos with matching files found in library">
+              <mat-icon>auto_fix_high</mat-icon>
+              Relink Matched ({{ orphanedMatchesFound }})
             </button>
             <button mat-raised-button
                     color="accent"
@@ -132,6 +178,10 @@
           <p class="count-info" *ngIf="!loadingOrphaned && orphanedVideos.length > 0">
             <mat-icon class="warning-icon">warning</mat-icon>
             {{ orphanedVideos.length }} orphaned entr{{ orphanedVideos.length !== 1 ? 'ies' : 'y' }} found
+            <span *ngIf="orphanedMatchesFound > 0" style="margin-left: 8px; color: #4caf50;">
+              <mat-icon style="font-size: 18px; height: 18px; width: 18px; vertical-align: middle;">check_circle</mat-icon>
+              {{ orphanedMatchesFound }} can be auto-relinked
+            </span>
           </p>
         </div>
 
@@ -182,6 +232,165 @@
           <mat-icon>check_circle</mat-icon>
           <p>No orphaned entries found</p>
           <p class="secondary">All database entries have valid video files</p>
+        </div>
+      </div>
+    </mat-tab>
+
+    <!-- Tab 3: Ignore File -->
+    <mat-tab label="Ignore File">
+      <div class="tab-content">
+        <div class="tab-header">
+          <p class="tab-description">Edit the .clippyignore file to specify which files should be ignored (supports wildcards like .gitignore).</p>
+          <div class="tab-actions">
+            <button mat-raised-button
+                    color="primary"
+                    (click)="loadIgnoreFile()"
+                    [disabled]="loadingIgnoreFile">
+              <mat-icon>refresh</mat-icon>
+              {{ loadingIgnoreFile ? 'Loading...' : 'Reload' }}
+            </button>
+            <button mat-raised-button
+                    color="accent"
+                    (click)="saveIgnoreFile()"
+                    [disabled]="loadingIgnoreFile">
+              <mat-icon>save</mat-icon>
+              Save Changes
+            </button>
+            <button mat-raised-button
+                    color="warn"
+                    (click)="scanAndRemoveIgnored()"
+                    [disabled]="loadingIgnoreFile || scanningIgnored"
+                    matTooltip="Scan database for entries matching ignore patterns and remove them">
+              <mat-icon>cleaning_services</mat-icon>
+              {{ scanningIgnored ? 'Scanning...' : 'Scan & Clean' }}
+            </button>
+          </div>
+          <p class="count-info" *ngIf="ignoreFilePath">
+            <mat-icon style="font-size: 18px; height: 18px; width: 18px; vertical-align: middle;">info</mat-icon>
+            {{ ignoreFilePath }}
+          </p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="loading-container" *ngIf="loadingIgnoreFile">
+          <mat-spinner></mat-spinner>
+          <p>Loading ignore file...</p>
+        </div>
+
+        <!-- Ignore file editor -->
+        <div *ngIf="!loadingIgnoreFile" class="ignore-file-editor">
+          <mat-form-field appearance="outline" style="width: 100%;">
+            <mat-label>.clippyignore</mat-label>
+            <textarea matInput
+                      [(ngModel)]="ignoreFileContent"
+                      rows="20"
+                      placeholder="# Add patterns to ignore files (supports wildcards)
+# Examples:
+._*
+.DS_Store
+*.tmp
+test-*"
+                      style="font-family: monospace; font-size: 14px;"></textarea>
+          </mat-form-field>
+
+          <div class="ignore-file-help">
+            <h3>Pattern Examples:</h3>
+            <ul>
+              <li><code>._*</code> - Ignore all files starting with ._</li>
+              <li><code>*.tmp</code> - Ignore all .tmp files</li>
+              <li><code>test-*.mp4</code> - Ignore files like test-video.mp4</li>
+              <li><code>.DS_Store</code> - Ignore specific file</li>
+              <li><code>folder-name/*</code> - Ignore all files in a specific folder (relative to clips folder)</li>
+              <li><code>2023-10-08/raw/*</code> - Ignore all files in a subfolder path</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </mat-tab>
+
+    <!-- Tab 4: Duplicate Entries -->
+    <mat-tab label="Duplicate Entries">
+      <div class="tab-content">
+        <div class="tab-header">
+          <p class="tab-description">Find and manage duplicate database entries that point to the same file path. Only duplicates are listed (one entry per file is kept).</p>
+          <div class="tab-actions">
+            <button mat-raised-button
+                    color="primary"
+                    (click)="scanDuplicateEntries()"
+                    [disabled]="loadingDuplicates">
+              <mat-icon>search</mat-icon>
+              {{ loadingDuplicates ? 'Scanning...' : 'Scan for Duplicates' }}
+            </button>
+            <button mat-raised-button
+                    color="warn"
+                    (click)="deleteAllDuplicates()"
+                    [disabled]="duplicateEntries.length === 0 || loadingDuplicates"
+                    matTooltip="Delete all duplicate entries (keeps one per file)">
+              <mat-icon>delete_sweep</mat-icon>
+              Delete All Duplicates ({{ duplicateEntries.length }})
+            </button>
+            <button mat-raised-button
+                    color="warn"
+                    (click)="deleteSelectedDuplicates()"
+                    [disabled]="selectedDuplicateEntries.size === 0 || loadingDuplicates"
+                    matTooltip="Delete selected duplicate entries from database">
+              <mat-icon>delete</mat-icon>
+              Delete Selected ({{ selectedDuplicateEntries.size }})
+            </button>
+          </div>
+          <p class="count-info" *ngIf="!loadingDuplicates && duplicateEntries.length > 0">
+            <mat-icon class="warning-icon">warning</mat-icon>
+            {{ duplicateEntries.length }} duplicate entr{{ duplicateEntries.length !== 1 ? 'ies' : 'y' }} found
+          </p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="loading-container" *ngIf="loadingDuplicates">
+          <mat-spinner></mat-spinner>
+          <p>Scanning for duplicate entries...</p>
+        </div>
+
+        <!-- Selection header -->
+        <div class="results-header" *ngIf="!loadingDuplicates && duplicateEntries.length > 0">
+          <div class="results-count">
+            <div class="selection-buttons">
+              <button mat-stroked-button
+                      (click)="toggleAllDuplicateSelection()"
+                      [color]="isAllDuplicatesSelected ? 'primary' : undefined"
+                      matTooltip="Select all duplicate entries">
+                <mat-icon>select_all</mat-icon>
+                All
+              </button>
+            </div>
+            <span class="count-text">
+              {{ selectedDuplicateEntries.size > 0 ? selectedDuplicateEntries.size + ' selected of ' : '' }}{{ duplicateEntries.length }} duplicate entr{{ duplicateEntries.length !== 1 ? 'ies' : 'y' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Duplicate entries list container -->
+        <div *ngIf="!loadingDuplicates && duplicateEntries.length > 0" class="management-list-container">
+          <cascade-list
+            [items]="duplicateEntriesAsListItems"
+            [displayConfig]="duplicateEntriesDisplayConfig"
+            [selectedItemIds]="selectedDuplicateEntriesSet"
+            [highlightedItemId]="highlightedDuplicateEntry?.id || null"
+            [contextMenuActions]="duplicateEntriesContextMenuActions"
+            (itemClick)="onDuplicateItemClick($any($event))"
+            (itemDoubleClick)="onDuplicateItemDoubleClick($any($event))"
+            (itemsSelected)="onDuplicateEntriesSelected($any($event))"
+            (itemsDeselected)="onDuplicateEntriesDeselected($any($event))"
+            (itemHighlighted)="onDuplicateItemHighlighted($any($event))"
+            (deleteAction)="onDuplicateDeleteAction($any($event))"
+            (contextMenuAction)="onDuplicateContextMenuAction($event)">
+          </cascade-list>
+        </div>
+
+        <!-- Empty state -->
+        <div class="empty-state" *ngIf="!loadingDuplicates && duplicateEntries.length === 0">
+          <mat-icon>check_circle</mat-icon>
+          <p>No duplicate entries found</p>
+          <p class="secondary">All database entries point to unique file paths</p>
         </div>
       </div>
     </mat-tab>

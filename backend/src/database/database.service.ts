@@ -224,17 +224,31 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
       );
 
-      -- Full-text search tables (using regular tables since sql.js doesn't include FTS5)
-      CREATE TABLE IF NOT EXISTS transcripts_fts (
-        video_id TEXT NOT NULL,
-        content TEXT,
-        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      -- Full-text search virtual tables using FTS5 for fast search
+      CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
+        video_id UNINDEXED,
+        content,
+        tokenize='porter unicode61'
       );
 
-      CREATE TABLE IF NOT EXISTS analyses_fts (
-        video_id TEXT NOT NULL,
-        content TEXT,
-        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      CREATE VIRTUAL TABLE IF NOT EXISTS analyses_fts USING fts5(
+        video_id UNINDEXED,
+        content,
+        tokenize='porter unicode61'
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS videos_fts USING fts5(
+        video_id UNINDEXED,
+        filename,
+        current_path,
+        ai_description,
+        tokenize='porter unicode61'
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS tags_fts USING fts5(
+        video_id UNINDEXED,
+        tag_name,
+        tokenize='porter unicode61'
       );
 
       -- Media relationships: Link multiple files together (e.g. PDF + audiobook)
@@ -280,21 +294,17 @@ export class DatabaseService {
     // Now create indexes (after migrations have run)
     const indexSchema = `
       -- Indexes for performance
-      CREATE INDEX IF NOT EXISTS idx_videos_filename ON videos(filename);
       CREATE INDEX IF NOT EXISTS idx_videos_hash ON videos(file_hash);
       CREATE INDEX IF NOT EXISTS idx_videos_upload_date ON videos(upload_date);
       CREATE INDEX IF NOT EXISTS idx_videos_download_date ON videos(download_date);
       CREATE INDEX IF NOT EXISTS idx_videos_is_linked ON videos(is_linked);
       CREATE INDEX IF NOT EXISTS idx_videos_parent_id ON videos(parent_id);
       CREATE INDEX IF NOT EXISTS idx_tags_video ON tags(video_id);
-      CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name);
       CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
       CREATE INDEX IF NOT EXISTS idx_custom_markers_video ON custom_markers(video_id);
       CREATE INDEX IF NOT EXISTS idx_saved_links_status ON saved_links(status);
       CREATE INDEX IF NOT EXISTS idx_saved_links_date_added ON saved_links(date_added);
       CREATE INDEX IF NOT EXISTS idx_saved_links_url ON saved_links(url);
-      CREATE INDEX IF NOT EXISTS idx_transcripts_fts_video ON transcripts_fts(video_id);
-      CREATE INDEX IF NOT EXISTS idx_analyses_fts_video ON analyses_fts(video_id);
       CREATE INDEX IF NOT EXISTS idx_media_relationships_primary ON media_relationships(primary_media_id);
       CREATE INDEX IF NOT EXISTS idx_media_relationships_related ON media_relationships(related_media_id);
       CREATE INDEX IF NOT EXISTS idx_text_content_media ON text_content(media_id);
@@ -645,6 +655,123 @@ export class DatabaseService {
         }
       }
     }
+
+    // Migration 13: Populate FTS5 tables from existing data
+    try {
+      // Check if FTS5 tables need to be populated by checking if they're empty
+      const stmt = db.prepare("SELECT COUNT(*) as count FROM videos_fts");
+      stmt.step();
+      const result = stmt.getAsObject() as any;
+      stmt.free();
+
+      if (result.count === 0) {
+        // Count total videos to populate
+        const countStmt = db.prepare("SELECT COUNT(*) as count FROM videos");
+        countStmt.step();
+        const countResult = countStmt.getAsObject() as any;
+        countStmt.free();
+
+        if (countResult.count > 0) {
+          this.logger.log(`Running migration: Populating FTS5 tables from ${countResult.count} existing videos`);
+          this.rebuildFTS5Indexes();
+          this.logger.log('Migration complete: FTS5 tables populated');
+        }
+      }
+    } catch (error: any) {
+      // FTS5 tables might not exist yet (new installation) - silently ignore
+      if (!error.message || !error.message.includes('no such table')) {
+        this.logger.warn(`FTS5 migration check failed: ${error?.message || 'Unknown error'}`);
+      }
+    }
+  }
+
+  /**
+   * Rebuild FTS5 full-text search indexes from existing data
+   * Call this after importing data or if search isn't working properly
+   */
+  rebuildFTS5Indexes(): void {
+    const db = this.ensureInitialized();
+
+    this.logger.log('[FTS5 Rebuild] Starting rebuild of FTS5 search indexes...');
+    const startTime = Date.now();
+
+    try {
+      // Clear existing FTS5 data
+      this.logger.log('[FTS5 Rebuild] Clearing existing FTS5 tables...');
+      db.run('DELETE FROM videos_fts');
+      db.run('DELETE FROM transcripts_fts');
+      db.run('DELETE FROM analyses_fts');
+      db.run('DELETE FROM tags_fts');
+
+      // Populate videos_fts
+      this.logger.log('[FTS5 Rebuild] Populating videos_fts...');
+      const videosStmt = db.prepare('SELECT id, filename, current_path, ai_description FROM videos');
+      let videoCount = 0;
+      while (videosStmt.step()) {
+        const row = videosStmt.getAsObject() as any;
+        db.run(
+          'INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)',
+          [row.id, row.filename, row.current_path || '', row.ai_description || '']
+        );
+        videoCount++;
+      }
+      videosStmt.free();
+      this.logger.log(`[FTS5 Rebuild] Populated ${videoCount} videos`);
+
+      // Populate transcripts_fts
+      this.logger.log('[FTS5 Rebuild] Populating transcripts_fts...');
+      const transcriptsStmt = db.prepare('SELECT video_id, plain_text FROM transcripts');
+      let transcriptCount = 0;
+      while (transcriptsStmt.step()) {
+        const row = transcriptsStmt.getAsObject() as any;
+        db.run(
+          'INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)',
+          [row.video_id, row.plain_text]
+        );
+        transcriptCount++;
+      }
+      transcriptsStmt.free();
+      this.logger.log(`[FTS5 Rebuild] Populated ${transcriptCount} transcripts`);
+
+      // Populate analyses_fts
+      this.logger.log('[FTS5 Rebuild] Populating analyses_fts...');
+      const analysesStmt = db.prepare('SELECT video_id, ai_analysis, summary FROM analyses');
+      let analysisCount = 0;
+      while (analysesStmt.step()) {
+        const row = analysesStmt.getAsObject() as any;
+        const contentForSearch = [row.ai_analysis, row.summary].filter(Boolean).join(' ');
+        db.run(
+          'INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)',
+          [row.video_id, contentForSearch]
+        );
+        analysisCount++;
+      }
+      analysesStmt.free();
+      this.logger.log(`[FTS5 Rebuild] Populated ${analysisCount} analyses`);
+
+      // Populate tags_fts
+      this.logger.log('[FTS5 Rebuild] Populating tags_fts...');
+      const tagsStmt = db.prepare('SELECT video_id, tag_name FROM tags');
+      let tagCount = 0;
+      while (tagsStmt.step()) {
+        const row = tagsStmt.getAsObject() as any;
+        db.run(
+          'INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)',
+          [row.video_id, row.tag_name]
+        );
+        tagCount++;
+      }
+      tagsStmt.free();
+      this.logger.log(`[FTS5 Rebuild] Populated ${tagCount} tags`);
+
+      this.saveDatabase();
+
+      const duration = Date.now() - startTime;
+      this.logger.log(`[FTS5 Rebuild] Rebuild complete in ${duration}ms (${videoCount} videos, ${transcriptCount} transcripts, ${analysisCount} analyses, ${tagCount} tags)`);
+    } catch (error: any) {
+      this.logger.error(`[FTS5 Rebuild] Failed to rebuild FTS5 indexes: ${error?.message || 'Unknown error'}`);
+      throw error;
+    }
   }
 
   /**
@@ -716,7 +843,7 @@ export class DatabaseService {
     }
 
     db.run(
-      `INSERT INTO videos (
+      `INSERT OR REPLACE INTO videos (
         id, filename, file_hash, current_path, upload_date,
         duration_seconds, file_size_bytes, source_url, media_type, file_extension,
         download_date, last_verified, added_at, is_linked
@@ -736,6 +863,15 @@ export class DatabaseService {
         now, // last_verified
         now, // added_at (when database entry was created)
       ]
+    );
+
+    // Insert/update FTS5 table for video search
+    // Delete existing entry first (if any)
+    db.run(`DELETE FROM videos_fts WHERE video_id = ?`, [video.id]);
+    // Insert new entry
+    db.run(
+      `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`,
+      [video.id, video.filename, video.currentPath || '', ''] // ai_description is empty initially, updated later
     );
 
     this.saveDatabase();
@@ -916,6 +1052,20 @@ export class DatabaseService {
         [description, id]
       );
 
+      // Update FTS5 table for video search
+      // Get filename and current_path for the FTS5 update
+      const stmt = db.prepare('SELECT filename, current_path FROM videos WHERE id = ?');
+      stmt.bind([id]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as { filename: string; current_path: string };
+        db.run(`DELETE FROM videos_fts WHERE video_id = ?`, [id]);
+        db.run(
+          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`,
+          [id, row.filename, row.current_path, description || '']
+        );
+      }
+      stmt.free();
+
       this.saveDatabase();
       this.logger.log(`[AI Description] Successfully updated description for video ${id}`);
     } catch (error: any) {
@@ -968,6 +1118,20 @@ export class DatabaseService {
          WHERE id = ?`,
         [filename, id]
       );
+
+      // Update FTS5 table for video search
+      // Get current_path and ai_description for the FTS5 update
+      const stmt = db.prepare('SELECT current_path, ai_description FROM videos WHERE id = ?');
+      stmt.bind([id]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as { current_path: string; ai_description: string | null };
+        db.run(`DELETE FROM videos_fts WHERE video_id = ?`, [id]);
+        db.run(
+          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`,
+          [id, filename, row.current_path, row.ai_description || '']
+        );
+      }
+      stmt.free();
 
       this.saveDatabase();
     } catch (error) {
@@ -1199,7 +1363,10 @@ export class DatabaseService {
       ]
     );
 
-    // Insert into FTS table
+    // Update FTS5 table for transcript search
+    // Delete existing entry first (if any)
+    db.run(`DELETE FROM transcripts_fts WHERE video_id = ?`, [transcript.videoId]);
+    // Insert new entry
     db.run(
       `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`,
       [transcript.videoId, transcript.plainText]
@@ -1252,10 +1419,14 @@ export class DatabaseService {
       ]
     );
 
-    // Insert into FTS table
+    // Update FTS5 table for analysis search
+    // Delete existing entry first (if any)
+    db.run(`DELETE FROM analyses_fts WHERE video_id = ?`, [analysis.videoId]);
+    // Insert new entry (combine analysis and summary for better search)
+    const contentForSearch = [analysis.aiAnalysis, analysis.summary].filter(Boolean).join(' ');
     db.run(
       `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`,
-      [analysis.videoId, analysis.aiAnalysis]
+      [analysis.videoId, contentForSearch]
     );
 
     this.saveDatabase();
@@ -1557,6 +1728,13 @@ export class DatabaseService {
       ]
     );
 
+    // Update FTS5 table for tag search
+    // Insert into tags_fts (don't delete first since multiple tags per video)
+    db.run(
+      `INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)`,
+      [tag.videoId, tag.tagName]
+    );
+
     this.saveDatabase();
     return tag.id;
   }
@@ -1745,6 +1923,7 @@ export class DatabaseService {
 
   /**
    * Search videos with full-text search across filename, AI description, transcripts, analyses, and tags
+   * Uses FTS5 for high-performance full-text search
    * Returns video IDs that match the search query
    */
   searchVideos(
@@ -1764,7 +1943,8 @@ export class DatabaseService {
       return [];
     }
 
-    const searchTerm = query.toLowerCase().trim();
+    // Prepare FTS5 query (escape special characters and add wildcards for partial matching)
+    const searchTerm = query.trim().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' OR ');
     const results = new Map<string, { id: string; score: number; matchType: string }>();
 
     // Default all filters to true if not specified
@@ -1784,94 +1964,85 @@ export class DatabaseService {
       }
     };
 
-    // 1. Search in video filename and AI description (highest priority)
+    // 1. Search in video filename and AI description using FTS5 (highest priority)
     if (searchFilters.filename || searchFilters.aiDescription) {
       try {
-        const conditions: string[] = [];
-        if (searchFilters.filename) conditions.push('lower(filename) LIKE ?');
-        if (searchFilters.aiDescription) conditions.push('lower(ai_description) LIKE ?');
-
         const stmt = db.prepare(`
-          SELECT id, filename, ai_description
-          FROM videos
-          WHERE ${conditions.join(' OR ')}
+          SELECT video_id, rank
+          FROM videos_fts
+          WHERE videos_fts MATCH ?
+          ORDER BY rank
           LIMIT ?
         `);
-
-        const bindParams: any[] = [];
-        if (searchFilters.filename) bindParams.push(`%${searchTerm}%`);
-        if (searchFilters.aiDescription) bindParams.push(`%${searchTerm}%`);
-        bindParams.push(limit);
-
-        stmt.bind(bindParams);
+        stmt.bind([searchTerm, limit]);
 
         while (stmt.step()) {
-          const row = stmt.getAsObject() as { id: string; filename: string; ai_description: string | null };
-          const filename = (row.filename || '').toLowerCase();
-          const aiDesc = (row.ai_description || '').toLowerCase();
-
-          if (searchFilters.filename && filename.includes(searchTerm)) {
-            addResult(row.id, 100, 'filename');
-          } else if (searchFilters.aiDescription && aiDesc.includes(searchTerm)) {
-            addResult(row.id, 90, 'ai_description');
-          }
+          const row = stmt.getAsObject() as { video_id: string; rank: number };
+          // Higher scores for better matches (FTS5 rank is negative, lower is better)
+          const score = 100 + Math.max(-10, row.rank);
+          addResult(row.video_id, score, 'filename');
         }
         stmt.free();
       } catch (error) {
-        this.logger.warn('Error searching videos table:', error);
+        this.logger.warn('Error searching videos FTS5 table:', error);
       }
     }
 
-    // 2. Search in transcripts (high priority)
+    // 2. Search in transcripts using FTS5 (high priority)
     if (searchFilters.transcript) {
       try {
-      const stmt = db.prepare(`
-        SELECT video_id, plain_text
-        FROM transcripts
-        WHERE lower(plain_text) LIKE ?
-        LIMIT ?
-      `);
-      stmt.bind([`%${searchTerm}%`, limit]);
+        const stmt = db.prepare(`
+          SELECT video_id, rank
+          FROM transcripts_fts
+          WHERE transcripts_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `);
+        stmt.bind([searchTerm, limit]);
 
-      while (stmt.step()) {
-        const row = stmt.getAsObject() as { video_id: string; plain_text: string };
-        addResult(row.video_id, 80, 'transcript');
-      }
+        while (stmt.step()) {
+          const row = stmt.getAsObject() as { video_id: string; rank: number };
+          const score = 80 + Math.max(-10, row.rank);
+          addResult(row.video_id, score, 'transcript');
+        }
         stmt.free();
       } catch (error) {
-        this.logger.warn('Error searching transcripts:', error);
+        this.logger.warn('Error searching transcripts FTS5:', error);
       }
     }
 
-    // 3. Search in analyses (medium priority)
+    // 3. Search in analyses using FTS5 (medium priority)
     if (searchFilters.analysis) {
       try {
-      const stmt = db.prepare(`
-        SELECT video_id, ai_analysis, summary
-        FROM analyses
-        WHERE lower(ai_analysis) LIKE ? OR lower(summary) LIKE ?
-        LIMIT ?
-      `);
-      stmt.bind([`%${searchTerm}%`, `%${searchTerm}%`, limit]);
+        const stmt = db.prepare(`
+          SELECT video_id, rank
+          FROM analyses_fts
+          WHERE analyses_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `);
+        stmt.bind([searchTerm, limit]);
 
-      while (stmt.step()) {
-        const row = stmt.getAsObject() as { video_id: string };
-        addResult(row.video_id, 70, 'analysis');
-      }
+        while (stmt.step()) {
+          const row = stmt.getAsObject() as { video_id: string; rank: number };
+          const score = 70 + Math.max(-10, row.rank);
+          addResult(row.video_id, score, 'analysis');
+        }
         stmt.free();
       } catch (error) {
-        this.logger.warn('Error searching analyses:', error);
+        this.logger.warn('Error searching analyses FTS5:', error);
       }
 
-      // Also search in analysis sections
+      // Also search in analysis sections (still using LIKE since no FTS5 table for sections)
       try {
+        const searchLike = `%${query.toLowerCase().trim()}%`;
         const stmt = db.prepare(`
-          SELECT DISTINCT video_id, title, description
+          SELECT DISTINCT video_id
           FROM analysis_sections
           WHERE lower(title) LIKE ? OR lower(description) LIKE ?
           LIMIT ?
         `);
-        stmt.bind([`%${searchTerm}%`, `%${searchTerm}%`, limit]);
+        stmt.bind([searchLike, searchLike, limit]);
 
         while (stmt.step()) {
           const row = stmt.getAsObject() as { video_id: string };
@@ -1883,24 +2054,26 @@ export class DatabaseService {
       }
     }
 
-    // 4. Search in tags (lower priority)
+    // 4. Search in tags using FTS5 (lower priority)
     if (searchFilters.tags) {
-      try{
-      const stmt = db.prepare(`
-        SELECT DISTINCT video_id, tag_name
-        FROM tags
-        WHERE lower(tag_name) LIKE ?
-        LIMIT ?
-      `);
-      stmt.bind([`%${searchTerm}%`, limit]);
+      try {
+        const stmt = db.prepare(`
+          SELECT video_id, rank
+          FROM tags_fts
+          WHERE tags_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `);
+        stmt.bind([searchTerm, limit]);
 
-      while (stmt.step()) {
-        const row = stmt.getAsObject() as { video_id: string };
-        addResult(row.video_id, 60, 'tag');
-      }
+        while (stmt.step()) {
+          const row = stmt.getAsObject() as { video_id: string; rank: number };
+          const score = 60 + Math.max(-10, row.rank);
+          addResult(row.video_id, score, 'tag');
+        }
         stmt.free();
       } catch (error) {
-        this.logger.warn('Error searching tags:', error);
+        this.logger.warn('Error searching tags FTS5:', error);
       }
     }
 

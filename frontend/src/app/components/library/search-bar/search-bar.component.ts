@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -50,7 +50,7 @@ export interface SearchCriteriaChange {
   templateUrl: './search-bar.component.html',
   styleUrls: ['./search-bar.component.scss']
 })
-export class SearchBarComponent {
+export class SearchBarComponent implements OnDestroy {
   // Inputs
   @Input() searchQuery: string = '';
   @Input() searchFilters: SearchFilters = {
@@ -79,12 +79,33 @@ export class SearchBarComponent {
   @Output() clearAll = new EventEmitter<void>();
   @Output() filtersExpandedChange = new EventEmitter<boolean>();
 
+  // Debounce timer for search
+  private searchDebounceTimer: any;
+  private readonly SEARCH_DEBOUNCE_MS = 300;
+
+  ngOnDestroy(): void {
+    // Clean up debounce timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+  }
+
   /**
-   * Handle search query change
+   * Handle search query change with debouncing
    */
   onSearchQueryChange(): void {
+    // Clear existing timer
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+
+    // Emit immediate change for input binding
     this.searchChange.emit(this.searchQuery);
-    this.emitCriteriaChange();
+
+    // Debounce the actual criteria change (which triggers search)
+    this.searchDebounceTimer = setTimeout(() => {
+      this.emitCriteriaChange();
+    }, this.SEARCH_DEBOUNCE_MS);
   }
 
   /**
@@ -101,6 +122,11 @@ export class SearchBarComponent {
    * Clear search query and filters
    */
   clearSearch(): void {
+    // Clear debounce timer since we want immediate clear
+    if (this.searchDebounceTimer) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+
     this.searchQuery = '';
     this.selectedTags = [];
     this.clearAll.emit();

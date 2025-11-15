@@ -235,6 +235,18 @@ export class MediaEventService {
   }
 
   /**
+   * Video path updated event (notify frontend when a video's path changes, e.g., after relinking)
+   */
+  emitVideoPathUpdated(videoId: string, newPath: string, oldPath?: string): void {
+    this.emitEvent('video-path-updated', {
+      videoId,
+      newPath,
+      oldPath,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
    * Video imported event (notify frontend when a new video is added to the library)
    */
   emitVideoImported(videoId: string, filename: string, filePath: string): void {

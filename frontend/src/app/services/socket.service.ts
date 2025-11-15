@@ -332,6 +332,13 @@ export class SocketService {
   }
 
   /**
+   * Listen for video path updated events (e.g., after relinking)
+   */
+  onVideoPathUpdated(): Observable<{ videoId: string; newPath: string; oldPath?: string; timestamp: string }> {
+    return this.listenTo<{ videoId: string; newPath: string; oldPath?: string; timestamp: string }>('video-path-updated');
+  }
+
+  /**
    * Listen for video imported events (when a new video is added to the library)
    */
   onVideoImported(): Observable<{ videoId: string; filename: string; filePath: string; timestamp: string }> {
