@@ -117,6 +117,13 @@ export class AnalysisService implements OnModuleInit {
           progress: data.progress,
           currentPhase: data.task,
         });
+
+        // Emit WebSocket event so frontend receives progress updates
+        this.mediaEventService.emitProcessingProgress(
+          data.progress,
+          data.task,
+          data.jobId
+        );
       }
     });
 

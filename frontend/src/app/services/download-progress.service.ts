@@ -12,7 +12,7 @@ export interface VideoProcessingJob {
   url?: string;
   videoId?: string; // Video ID for linking to library videos
   mode?: 'full' | 'transcribe-only' | 'process-only'; // Processing mode
-  stage: 'downloading' | 'importing' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
+  stage: 'downloading' | 'importing' | 'processing' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
   progress: number; // 0-100
   error?: string;
   startedAt: Date;
@@ -42,6 +42,32 @@ export class DownloadProgressService {
       console.log('[DownloadProgressService] Analysis progress event received:', data);
       if (data.jobId) {
         this.addOrUpdateAnalysisJob(data);
+      }
+    });
+
+    // Listen for processing progress events (aspect ratio fixing, etc.)
+    this.socketService.onProcessingProgress().subscribe(data => {
+      console.log('[DownloadProgressService] Processing progress event received:', data);
+      if (data.jobId) {
+        const currentJobs = this.jobs.getValue();
+        const job = currentJobs.get(data.jobId);
+        if (job) {
+          // Update job with processing progress
+          const updatedJob = {
+            ...job,
+            stage: 'processing' as const,
+            progress: data.progress || 0
+          };
+
+          // Create a new Map to trigger change detection
+          const newJobs = new Map(currentJobs);
+          newJobs.set(data.jobId, updatedJob);
+          this.jobs.next(newJobs);
+
+          console.log('[DownloadProgressService] Updated job to processing stage:', updatedJob);
+        } else {
+          console.warn('[DownloadProgressService] Job not found for processing progress:', data.jobId);
+        }
       }
     });
 
@@ -349,7 +375,8 @@ export class DownloadProgressService {
     if (status === 'downloading') stage = 'downloading';
     else if (status === 'extracting' || status === 'importing') stage = 'importing';
     else if (status === 'transcribing') stage = 'transcribing';
-    else if (status === 'analyzing' || status === 'processing') stage = 'analyzing';
+    else if (status === 'processing') stage = 'processing';
+    else if (status === 'analyzing') stage = 'analyzing';
     else if (status === 'completed') stage = 'completed';
     else if (status === 'failed') stage = 'failed';
 

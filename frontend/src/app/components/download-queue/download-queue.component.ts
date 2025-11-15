@@ -1034,7 +1034,17 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           });
         }
 
-        // Stage 2: Transcribe
+        // Stage 2: Process Video
+        children.push({
+          id: `${job.id}-process`,
+          parentId: job.id,
+          label: 'Process Video',
+          icon: 'aspect_ratio',
+          status: 'pending',
+          progress: { value: 0 }
+        });
+
+        // Stage 3: Transcribe
         children.push({
           id: `${job.id}-transcribe`,
           parentId: job.id,
@@ -1057,7 +1067,17 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           });
         }
 
-        // Stage 2: Transcribe
+        // Stage 2: Process Video
+        children.push({
+          id: `${job.id}-process`,
+          parentId: job.id,
+          label: 'Process Video',
+          icon: 'aspect_ratio',
+          status: 'pending',
+          progress: { value: 0 }
+        });
+
+        // Stage 3: Transcribe
         children.push({
           id: `${job.id}-transcribe`,
           parentId: job.id,
@@ -1067,7 +1087,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           progress: { value: 0 }
         });
 
-        // Stage 3: Analyze
+        // Stage 4: Analyze
         children.push({
           id: `${job.id}-analyze`,
           parentId: job.id,
@@ -1099,12 +1119,14 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         if (isUrlJob) {
           stages.push({ id: 'download', label: 'Download & Import', icon: 'download', stageName: 'downloading' });
         }
+        stages.push({ id: 'process', label: 'Process Video', icon: 'aspect_ratio', stageName: 'processing' });
         stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
       } else {
         // Full mode (default if mode not specified)
         if (isUrlJob) {
           stages.push({ id: 'download', label: 'Download & Import', icon: 'download', stageName: 'downloading' });
         }
+        stages.push({ id: 'process', label: 'Process Video', icon: 'aspect_ratio', stageName: 'processing' });
         stages.push({ id: 'transcribe', label: 'Transcribe', icon: 'subtitles', stageName: 'transcribing' });
         stages.push({ id: 'analyze', label: 'Analyze', icon: 'psychology', stageName: 'analyzing' });
       }
