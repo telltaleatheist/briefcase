@@ -2017,6 +2017,7 @@ export class DatabaseService {
    *
    * Features:
    * - AND by default: "dad vax bribe" → matches videos with ALL terms
+   * - Exclusion: "-full" → excludes videos containing "full"
    * - Quoted phrases: "exact phrase" → matches exact phrase
    * - Wildcards: dad* → matches dad, dads, daddy, etc.
    * - Explicit OR: dad OR vax → matches either term
@@ -2024,9 +2025,11 @@ export class DatabaseService {
    *
    * Examples:
    * - "dad vax bribe" → dad AND vax AND bribe
+   * - "vax -full" → vax AND NOT full (has vax, excludes full)
    * - '"anti vax"' → exact phrase "anti vax"
    * - "dad* vax*" → dad* AND vax* (prefix matching)
    * - "dad OR vax" → dad OR vax (explicit OR)
+   * - "vax -full -complete" → vax AND NOT full AND NOT complete
    */
   private buildFTS5Query(query: string): string {
     query = query.trim();
@@ -2045,17 +2048,29 @@ export class DatabaseService {
     // Split by whitespace and filter empty strings
     const terms = processedQuery.split(/\s+/).filter(t => t.length > 0);
 
+    // Separate positive and negative terms
+    const positiveTerms: string[] = [];
+    const negativeTerms: string[] = [];
+
     // Process each term
-    const processedTerms = terms.map(term => {
+    for (let term of terms) {
       // Restore phrases
       if (term.startsWith('__PHRASE_')) {
         const index = parseInt(term.replace('__PHRASE_', '').replace('__', ''));
-        return phrases[index];
+        positiveTerms.push(phrases[index]);
+        continue;
       }
 
       // Skip OR operator
       if (term.toUpperCase() === 'OR') {
-        return 'OR';
+        positiveTerms.push('OR');
+        continue;
+      }
+
+      // Handle exclusion (NOT) with - prefix
+      const isExclusion = term.startsWith('-');
+      if (isExclusion) {
+        term = term.substring(1); // Remove the - prefix
       }
 
       // Remove special characters except wildcards
@@ -2063,26 +2078,46 @@ export class DatabaseService {
 
       // Skip empty terms
       if (!term) {
-        return null;
+        continue;
       }
 
       // Add prefix wildcard if term doesn't already have one and is longer than 2 chars
       // This allows partial matching: "vax" matches "vaccine", "vax", "vaxxed", etc.
       if (!term.includes('*') && term.length > 2) {
-        return term + '*';
+        term = term + '*';
       }
 
-      return term;
-    }).filter(t => t !== null);
-
-    // Join terms
-    if (hasExplicitOr) {
-      // User explicitly used OR, so respect their choice
-      return processedTerms.join(' ');
-    } else {
-      // Default to AND for better precision
-      return processedTerms.join(' AND ');
+      // Add to appropriate array
+      if (isExclusion) {
+        negativeTerms.push(term);
+      } else {
+        positiveTerms.push(term);
+      }
     }
+
+    // FTS5 requires at least one positive term before using NOT
+    // If only negative terms exist, add a wildcard to match everything
+    if (positiveTerms.length === 0 && negativeTerms.length > 0) {
+      positiveTerms.push('*');
+    }
+
+    // Build the query
+    let result = '';
+
+    if (hasExplicitOr) {
+      // User explicitly used OR, join positive terms as-is
+      result = positiveTerms.join(' ');
+    } else {
+      // Default to implicit AND (space-separated)
+      result = positiveTerms.join(' ');
+    }
+
+    // Add NOT terms (FTS5 syntax: "positive_term NOT negative_term")
+    for (const negTerm of negativeTerms) {
+      result += ` NOT ${negTerm}`;
+    }
+
+    return result;
   }
 
   /**

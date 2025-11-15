@@ -89,14 +89,20 @@ export class VideoOperationsService {
 
     const result = await firstValueFrom(dialogRef.afterClosed());
 
+    console.log('[VideoOperations] Dialog closed with result:', result);
+
     if (result && result.success && result.jobsToAdd) {
+      console.log('[VideoOperations] Adding jobs to queue:', result.jobsToAdd);
       // Add jobs to queue after dialog closes
       setTimeout(() => {
         for (const jobData of result.jobsToAdd) {
+          console.log('[VideoOperations] Adding job:', jobData);
           analysisQueueService.addPendingJob(jobData);
         }
         console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
       }, 0);
+    } else {
+      console.warn('[VideoOperations] Dialog result missing expected data:', { result, hasSuccess: !!result?.success, hasJobsToAdd: !!result?.jobsToAdd });
     }
   }
 

@@ -840,18 +840,18 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         }
 
         // CRITICAL: Log before appending to detect duplicates
-        console.log(`[loadRemainingVideos] BEFORE append: this.videos.length = ${this.videos.length}`);
-        console.log(`[loadRemainingVideos] About to append ${response.videos.length} videos`);
+        // console.log(`[loadRemainingVideos] BEFORE append: this.videos.length = ${this.videos.length}`);
+        // console.log(`[loadRemainingVideos] About to append ${response.videos.length} videos`);
 
         this.videos = [...this.videos, ...response.videos];
 
         // Update state service
         this.libraryStateService.setVideos(this.videos);
 
-        console.log(`[loadRemainingVideos] AFTER append: this.videos.length = ${this.videos.length}`);
+        // console.log(`[loadRemainingVideos] AFTER append: this.videos.length = ${this.videos.length}`);
         this.applyFiltersAndSort();
         offset += batchSize;
-        console.log(`[loadRemainingVideos] Loaded ${offset} of ${totalCount} videos`);
+        // console.log(`[loadRemainingVideos] Loaded ${offset} of ${totalCount} videos`);
 
         // Small delay to prevent overwhelming the UI
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -1781,12 +1781,12 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       el.textContent && el.textContent.includes('Suggested:') && el.textContent.includes('Click to View')
     );
 
-    console.log(`[styleSuggestionTexts] Found ${suggestionElements.length} suggestion elements`);
+    // console.log(`[styleSuggestionTexts] Found ${suggestionElements.length} suggestion elements`);
 
     suggestionElements.forEach((element) => {
       const secondaryText = element as HTMLElement;
       if (!secondaryText.getAttribute('data-suggestion-styled')) {
-        console.log('[styleSuggestionTexts] Styling element:', secondaryText.textContent);
+        // console.log('[styleSuggestionTexts] Styling element:', secondaryText.textContent);
 
         const originalText = secondaryText.textContent || '';
 

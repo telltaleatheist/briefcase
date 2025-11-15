@@ -1111,6 +1111,23 @@
 
 // Override cascade-list styles for queue items
 ::ng-deep .jobs-list cascade-list {
+  // Ensure cascade-list fills the container
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+
+  // Ensure the item-list-container has proper height
+  .item-list-container {
+    height: 100%;
+    min-height: 300px;
+  }
+
+  // Ensure virtual scroll viewport has proper height
+  cdk-virtual-scroll-viewport {
+    height: 100% !important;
+  }
+
   // Make parent items match library height
   .item-card {
     min-height: 44px; // Match library cascade item height

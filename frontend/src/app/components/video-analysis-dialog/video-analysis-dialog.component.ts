@@ -309,8 +309,12 @@ export class VideoAnalysisDialogComponent implements OnInit {
     // Don't add to queue here - let parent component do it after dialog closes
     let jobsToAdd: any[] = [];
 
+    console.log('[VideoAnalysisDialog] Preparing jobs. Mode:', formValue.mode);
+    console.log('[VideoAnalysisDialog] Selected videos:', this.data.selectedVideos);
+
     // If we have selected videos from library, prepare each one
     if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
+      console.log('[VideoAnalysisDialog] Creating jobs for', this.data.selectedVideos.length, 'videos');
       jobsToAdd = this.data.selectedVideos.map(video => ({
         input: video.current_path,
         inputType: 'file',
@@ -367,6 +371,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
     }
 
     // Close the dialog and return job data for parent to add
+    console.log('[VideoAnalysisDialog] Closing dialog with', jobsToAdd.length, 'jobs');
     this.dialogRef.close({ success: true, jobsToAdd });
   }
 

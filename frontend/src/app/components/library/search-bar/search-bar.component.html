@@ -17,6 +17,12 @@
     <mat-icon>clear</mat-icon>
   </button>
   <button mat-icon-button
+          class="help-btn"
+          (click)="showSearchHelp()"
+          matTooltip="Search help">
+    <mat-icon>help_outline</mat-icon>
+  </button>
+  <button mat-icon-button
           class="expand-filters-btn"
           (click)="toggleFiltersExpanded()"
           [matTooltip]="filtersExpanded ? 'Hide filters' : 'Show filters'">

@@ -47,7 +47,6 @@
     <div class="jobs-list">
       <!-- All Jobs (Pending + Active) with Cascade Children -->
       <cascade-list
-        *ngIf="allJobsAsListItems.length > 0"
         [items]="allJobsAsListItems"
         [displayConfig]="jobDisplayConfig"
         [childrenConfig]="childrenConfig"
@@ -79,14 +78,6 @@
           </div>
         </ng-template>
       </cascade-list>
-
-      <!-- Empty state -->
-      <div class="empty-state" *ngIf="allJobsAsListItems.length === 0">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor" opacity="0.3"/>
-        </svg>
-        <p>No analysis jobs in queue</p>
-      </div>
     </div>
 
     <!-- Completed Jobs Section -->

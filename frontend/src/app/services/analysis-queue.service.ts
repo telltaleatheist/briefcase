@@ -49,7 +49,9 @@ export class AnalysisQueueService {
     };
 
     const currentJobs = this.pendingJobs.value;
+    console.log('[AnalysisQueueService] Adding job. Current count:', currentJobs.length, 'New job:', newJob);
     this.pendingJobs.next([...currentJobs, newJob]);
+    console.log('[AnalysisQueueService] Job added. New count:', this.pendingJobs.value.length);
 
     // Emit event to open download queue
     this.jobAdded.next();

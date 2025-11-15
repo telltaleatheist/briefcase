@@ -89,7 +89,6 @@ export class AppComponent implements OnInit, OnDestroy {
 
     // Log router events for debugging
     this.router.events.subscribe(event => {
-      console.log('Router event:', event);
     });
 
     // Dialog tracking removed - was causing freezing issues

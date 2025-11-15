@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, HostListener, ChangeDetectorRef, NgZone, ViewChild, AfterViewInit } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener, ChangeDetectorRef, NgZone, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -62,6 +62,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   private jobAddedSubscription?: Subscription;
   availableOllamaModels: string[] = [];
 
+  // Cache for combined jobs list (replaces getter to avoid performance issues)
+  allJobsAsListItems: ListItem[] = [];
+
   // ViewChild for cascade list to control expansion
   @ViewChild(CascadeListComponent) cascadeList?: CascadeListComponent<any>;
 
@@ -117,10 +120,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     public analysisQueueService: AnalysisQueueService,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
-    private cdr: ChangeDetectorRef,
+    public cdr: ChangeDetectorRef,
     private ngZone: NgZone,
     private dialog: MatDialog
-  ) {}
+  ) {
+    console.log('[DownloadQueue] Constructor called');
+  }
 
   async ngOnInit() {
     // Subscribe to processing jobs (analysis jobs only, NOT batch downloads)
@@ -129,20 +134,22 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       this.processingJobs = Array.from(jobsMap.values());
       console.log('[DownloadQueue] processingJobs updated, count:', this.processingJobs.length);
 
-      // The observable subscription should automatically run in Angular zone
-      // and trigger change detection when processingJobs array reference changes
+      // Update combined list when processing jobs change
+      this.updateAllJobsList();
     });
 
     // Subscribe to pending jobs from the queue service
     this.pendingJobsSubscription = this.analysisQueueService.getPendingJobs().subscribe(jobs => {
+      console.log('[DownloadQueue] Pending jobs updated. Count:', jobs.length, 'Jobs:', jobs);
       this.pendingJobs = jobs;
+
+      // Update combined list when pending jobs change
+      this.updateAllJobsList();
 
       // Expand only the first item after the view updates
       setTimeout(() => {
         this.expandFirstItemOnly();
       }, 0);
-
-      // Angular will automatically detect changes - no manual trigger needed
     });
 
     // Subscribe to job added event to auto-open the queue
@@ -156,6 +163,10 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
     // Check for any active jobs
     await this.checkForActiveJobs();
+
+    // Initialize the list with current data
+    console.log('[DownloadQueue] ngOnInit complete. Initial pendingJobs:', this.pendingJobs.length);
+    this.updateAllJobsList();
   }
 
   ngOnDestroy() {
@@ -801,8 +812,11 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     }
   }
 
-  // Combine pending and active jobs into one unified list
-  get allJobsAsListItems(): ListItem[] {
+  /**
+   * Update the combined jobs list (pending + active)
+   * Called when either pendingJobs or processingJobs changes
+   */
+  private updateAllJobsList(): void {
     const pending = this.pendingJobs.map(job => ({
       ...job,
       displayName: job.displayName || 'Unknown',
@@ -817,7 +831,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
         isPending: false
       }));
 
-    return [...pending, ...active];
+    // ALWAYS create a new array reference to trigger Angular's change detection
+    this.allJobsAsListItems = [...pending, ...active];
+    console.log('[DownloadQueue] Updated allJobsAsListItems. Pending:', pending.length, 'Active:', active.length, 'Total:', this.allJobsAsListItems.length);
   }
 
   /**
