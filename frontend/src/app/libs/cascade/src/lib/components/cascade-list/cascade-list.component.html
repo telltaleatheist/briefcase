@@ -12,8 +12,8 @@
     <ng-container *cdkVirtualFor="let row of flattenedItems; let i = index; trackBy: trackByFlattenedItem">
       <!-- Group Header -->
       <div *ngIf="row.type === 'group'" class="item-group">
-        <div class="group-header" (click)="toggleGroup(row.group.id)">
-          <mat-icon class="collapse-icon">
+        <div class="group-header">
+          <mat-icon class="collapse-icon" (click)="toggleGroup(row.group.id); $event.stopPropagation()">
             {{ isGroupCollapsed(row.group.id) ? 'chevron_right' : 'expand_more' }}
           </mat-icon>
           <span class="group-label">{{ row.group.label }}</span>

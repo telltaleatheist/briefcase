@@ -457,10 +457,8 @@ export class BatchDownloaderService {
                       if (newFilename !== video.filename) {
                         const db = this.fileScannerService['databaseService']['db'];
                         if (db) {
-                          db.run(
-                            'UPDATE videos SET filename = ? WHERE id = ?',
-                            [newFilename, video.id]
-                          );
+                          db.prepare('UPDATE videos SET filename = ? WHERE id = ?')
+                            .run(newFilename, video.id);
                         }
                       }
 

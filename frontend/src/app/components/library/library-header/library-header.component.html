@@ -54,11 +54,6 @@
       <mat-icon>analytics</mat-icon>
       Analytics
     </button>
-    <button mat-raised-button color="accent" (click)="viewVideoManagement()" matTooltip="Scan for new videos, find orphaned entries, and manage your library">
-      <mat-icon>manage_search</mat-icon>
-      Video Management
-      <span class="badge" *ngIf="stats && stats.unlinkedVideos > 0">{{ stats.unlinkedVideos }}</span>
-    </button>
   </div>
 
   <!-- Action buttons - Management View -->

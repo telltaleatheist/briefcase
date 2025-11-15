@@ -157,6 +157,7 @@ export class SharedDatabaseService extends DatabaseService {
 
   /**
    * Pull latest changes from NAS (reload database)
+   * With better-sqlite3, we close and reopen the database to reload from disk
    */
   private async pullFromNAS(): Promise<void> {
     if (!fs.existsSync(this.masterDbPath)) {
@@ -164,17 +165,15 @@ export class SharedDatabaseService extends DatabaseService {
       return;
     }
 
-    const buffer = fs.readFileSync(this.masterDbPath);
-    const SQL = await import('sql.js');
-    const sqlJs = await SQL.default();
-
-    // Access protected database property
-    const db = new sqlJs.Database(buffer);
-    this.setDatabase(db);
+    // Close current connection and reinitialize to reload from disk
+    this.closeDatabase();
+    this.initializeDatabase(this.masterDbPath);
   }
 
   /**
-   * Push changes to NAS (save database atomically)
+   * Push changes to NAS (ensure changes are written to disk)
+   * With better-sqlite3, changes are automatically persisted, but we can
+   * checkpoint WAL to ensure everything is written to the main database file
    */
   private async pushToNAS(): Promise<void> {
     const db = this.getDatabase();
@@ -182,16 +181,14 @@ export class SharedDatabaseService extends DatabaseService {
       throw new Error('Database not initialized');
     }
 
-    // Export database to buffer
-    const data = db.export();
-    const buffer = Buffer.from(data);
-
-    // Write to temp file first (atomic write)
-    const tempPath = `${this.masterDbPath}.tmp`;
-    fs.writeFileSync(tempPath, buffer);
-
-    // Atomic rename (this is instant and crash-safe)
-    fs.renameSync(tempPath, this.masterDbPath);
+    // Checkpoint WAL to ensure all changes are written to main database file
+    // This is important for shared NAS databases
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch (error) {
+      // If database is not in WAL mode, this will fail but that's okay
+      this.sharedLogger.debug('WAL checkpoint skipped (database may not be in WAL mode)');
+    }
   }
 
   /**

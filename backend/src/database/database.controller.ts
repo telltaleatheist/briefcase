@@ -2588,4 +2588,26 @@ export class DatabaseController {
       message: success ? 'Pattern added to ignore file' : 'Failed to add pattern',
     };
   }
+
+  /**
+   * POST /api/database/rebuild-search-index
+   * Rebuild FTS5 full-text search indexes from existing data
+   */
+  @Post('rebuild-search-index')
+  rebuildSearchIndex() {
+    this.logger.log('Rebuilding FTS5 search indexes');
+    try {
+      this.databaseService.rebuildFTS5Indexes();
+      return {
+        success: true,
+        message: 'FTS5 search indexes rebuilt successfully',
+      };
+    } catch (error: any) {
+      this.logger.error('Failed to rebuild FTS5 search indexes:', error);
+      return {
+        success: false,
+        error: error?.message || 'Unknown error',
+      };
+    }
+  }
 }

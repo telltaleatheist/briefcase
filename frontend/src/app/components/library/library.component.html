@@ -24,8 +24,7 @@
     (manageLibraries)="openManageLibraries()"
     (importVideos)="openImportManager()"
     (downloadFromUrl)="downloadFromUrl()"
-    (analytics)="openAnalytics()"
-    (openVideoManagement)="viewUnimportedVideos()">
+    (analytics)="openAnalytics()">
   </app-library-header>
 
   <!-- Main Content -->
@@ -77,16 +76,16 @@
           No Analysis
         </button>
 
-        <!-- Section collapse/expand buttons -->
+        <!-- Section collapse/expand buttons (hidden when searching) -->
         <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0"
+                *ngIf="filteredVideos.length > 0 && !searchQuery"
                 (click)="collapseAllSections()"
                 matTooltip="Collapse all week sections">
           <mat-icon>unfold_less</mat-icon>
           Collapse All
         </button>
         <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0"
+                *ngIf="filteredVideos.length > 0 && !searchQuery"
                 (click)="expandAllSections()"
                 matTooltip="Expand all week sections">
           <mat-icon>unfold_more</mat-icon>

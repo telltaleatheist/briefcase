@@ -162,13 +162,6 @@ export class LibraryManagementComponent implements OnInit {
   }
 
   /**
-   * Navigate back to library
-   */
-  backToLibrary() {
-    this.router.navigate(['/library']);
-  }
-
-  /**
    * Handle tab change
    */
   onManagementTabChange(event: any) {

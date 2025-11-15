@@ -177,6 +177,20 @@ export class SettingsComponent implements OnInit {
   }
 
   /**
+   * Navigate to Relink Files tool
+   */
+  openRelinkFiles(): void {
+    this.router.navigate(['/relink']);
+  }
+
+  /**
+   * Navigate to Analysis Parameters
+   */
+  openAnalysisParameters(): void {
+    this.router.navigate(['/analysis-parameters']);
+  }
+
+  /**
    * Get AI status summary for display
    */
   getAIStatusSummary(): string {

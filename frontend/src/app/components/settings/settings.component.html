@@ -54,6 +54,34 @@
             </div>
           </div>
 
+          <!-- Advanced Tools -->
+          <div class="form-step">
+            <div class="step-content">
+              <h3 class="step-title">
+                <mat-icon>build</mat-icon>
+                Advanced Tools
+              </h3>
+
+              <div class="tools-grid">
+                <button type="button" mat-raised-button class="tool-button" (click)="openRelinkFiles()">
+                  <mat-icon>link</mat-icon>
+                  <div class="tool-info">
+                    <span class="tool-title">Relink Files</span>
+                    <span class="tool-description">Fix broken file paths and reconnect videos to the library</span>
+                  </div>
+                </button>
+
+                <button type="button" mat-raised-button class="tool-button" (click)="openAnalysisParameters()">
+                  <mat-icon>tune</mat-icon>
+                  <div class="tool-info">
+                    <span class="tool-title">Analysis Parameters</span>
+                    <span class="tool-description">Configure AI analysis prompts and settings</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Download Settings -->
           <div class="form-step">
             <div class="step-content">

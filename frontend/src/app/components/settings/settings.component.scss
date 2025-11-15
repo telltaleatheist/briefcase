@@ -657,3 +657,66 @@
     }
   }
 }
+
+// ========================================
+// Advanced Tools Grid
+// ========================================
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.tool-button {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  text-align: left;
+  background: var(--bg-card) !important;
+  border: 2px solid var(--border-color) !important;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  height: auto;
+  min-height: 100px;
+
+  &:hover {
+    border-color: var(--primary-orange) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+  }
+
+  mat-icon {
+    font-size: 32px;
+    width: 32px;
+    height: 32px;
+    color: var(--primary-orange);
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .tool-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+
+    .tool-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .tool-description {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .tools-grid {
+    grid-template-columns: 1fr;
+  }
+}

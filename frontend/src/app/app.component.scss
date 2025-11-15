@@ -207,6 +207,18 @@
       }
     }
 
+    &.sub-item {
+      padding-left: 32px;
+      height: 48px;
+      font-size: 0.95em;
+
+      .mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
+
     &.clip-creator-nav {
       border-left: 4px solid var(--primary-orange);
       font-weight: 600;

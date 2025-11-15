@@ -1,9 +1,180 @@
 import { Injectable, Logger } from '@nestjs/common';
-import initSqlJs, { Database } from 'sql.js';
+import * as Database from 'better-sqlite3';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+
+// Type definitions for database records
+export interface VideoRecord {
+  id: string;
+  filename: string;
+  file_hash: string;
+  current_path: string;
+  upload_date: string | null;
+  download_date: string;
+  duration_seconds: number | null;
+  file_size_bytes: number | null;
+  ai_description: string | null;
+  source_url: string | null;
+  last_verified: string;
+  added_at: string;
+  is_linked: number;
+  media_type: string;
+  file_extension: string | null;
+  parent_id: string | null;
+  suggested_title?: string | null;
+  date_folder?: string | null;
+  title?: string | null;
+}
+
+export interface VideoRecordWithFlags extends VideoRecord {
+  has_transcript: number;
+  has_analysis: number;
+  has_children: number;
+}
+
+export interface TranscriptRecord {
+  video_id: string;
+  plain_text: string;
+  srt_format: string | null;
+  whisper_model: string | null;
+  language: string | null;
+  transcribed_at: string;
+  transcription_time_seconds: number | null;
+}
+
+export interface AnalysisRecord {
+  video_id: string;
+  ai_analysis: string;
+  summary: string | null;
+  sections_count: number | null;
+  ai_model: string;
+  ai_provider: string | null;
+  analyzed_at: string;
+  analysis_time_seconds: number | null;
+}
+
+export interface AnalysisSectionRecord {
+  id: string;
+  video_id: string;
+  start_seconds: number;
+  end_seconds: number;
+  timestamp_text: string | null;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  source: string;
+}
+
+export interface CustomMarkerRecord {
+  id: string;
+  video_id: string;
+  start_seconds: number;
+  end_seconds: number;
+  timestamp_text: string | null;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  created_at: string;
+  source?: string;
+}
+
+export interface TagRecord {
+  id: string;
+  video_id: string;
+  tag_name: string;
+  tag_type: string | null;
+  confidence: number | null;
+  source: string | null;
+  created_at: string;
+}
+
+export interface SavedLinkRecord {
+  id: string;
+  url: string;
+  title: string | null;
+  status: string;
+  date_added: string;
+  date_completed: string | null;
+  download_path: string | null;
+  thumbnail_path: string | null;
+  video_id: string | null;
+  error_message: string | null;
+  metadata: string | any | null;
+}
+
+export interface MediaRelationshipRecord {
+  id: string;
+  primary_media_id: string;
+  related_media_id: string;
+  relationship_type: string;
+  created_at: string;
+  filename?: string;
+  current_path?: string;
+  media_type?: string;
+  file_extension?: string;
+}
+
+export interface TextContentRecord {
+  media_id: string;
+  extracted_text: string;
+  extraction_method: string | null;
+  extracted_at: string;
+}
+
+export interface LibraryAnalyticsRecord {
+  id: string;
+  library_id: string;
+  generated_at: string;
+  videos_analyzed_count: number;
+  ai_insights: string;
+  ai_model: string;
+  generation_time_seconds: number | null;
+}
+
+export interface SearchResultRecord {
+  id: string;
+  score: number;
+  matchType: string;
+}
+
+export interface TranscriptSearchRecord {
+  video_id: string;
+  snippet: string;
+}
+
+export interface AnalysisSearchRecord {
+  video_id: string;
+  snippet: string;
+}
+
+export interface TagWithCountRecord {
+  tag_name: string;
+  tag_type: string;
+  count: number;
+}
+
+export interface TextContentSearchRecord {
+  media_id: string;
+  extracted_text: string;
+  filename: string;
+  media_type: string;
+}
+
+export interface StatsRecord {
+  totalVideos: number;
+  linkedVideos: number;
+  unlinkedVideos: number;
+  withTranscripts: number;
+  withAnalyses: number;
+  totalTags: number;
+}
+
+export interface PruneResult {
+  deletedCount: number;
+  deletedVideos: Array<{ id: string; filename: string }>;
+}
 
 /**
  * DatabaseService - Manages SQLite database for the Bulk Analysis Library system
@@ -12,17 +183,16 @@ import * as crypto from 'crypto';
  * - Database initialization and schema management
  * - CRUD operations for videos, transcripts, analyses, tags
  * - File hashing for video identification
- * - Full-text search capabilities
+ * - Full-text search capabilities with FTS5
  *
- * Now using sql.js (pure JavaScript SQLite) instead of better-sqlite3
+ * Using better-sqlite3 for full SQLite support including FTS5
  */
 @Injectable()
 export class DatabaseService {
   private readonly logger = new Logger(DatabaseService.name);
-  private db: Database | null = null;
+  private db: Database.Database | null = null;
   private dbPath: string | null = null;
   private readonly appDataPath: string;
-  private SQL: any = null;
 
   constructor() {
     // Base directory: ~/Library/Application Support/clippy
@@ -45,46 +215,43 @@ export class DatabaseService {
    * Initialize database connection with a specific database file
    * @param dbPath - Path to the database file (optional, uses default if not provided)
    */
-  async initializeDatabase(dbPath?: string) {
+  initializeDatabase(dbPath?: string) {
     // Use provided path or default to clippy.db
     this.dbPath = dbPath || path.join(this.appDataPath, 'clippy.db');
 
     this.logger.log(`Initializing database at: ${this.dbPath}`);
 
-    // Initialize sql.js
-    if (!this.SQL) {
-      this.SQL = await initSqlJs();
+    // Ensure parent directory exists
+    const parentDir = path.dirname(this.dbPath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
     }
 
-    // Load existing database or create new one
-    if (fs.existsSync(this.dbPath)) {
-      const buffer = fs.readFileSync(this.dbPath);
-      this.db = new this.SQL.Database(buffer);
-      this.logger.log('Loaded existing database');
-    } else {
-      this.db = new this.SQL.Database();
+    // Create or open database (better-sqlite3 handles this automatically)
+    const isNew = !fs.existsSync(this.dbPath);
+    this.db = new Database(this.dbPath);
+
+    if (isNew) {
       this.logger.log('Created new database');
+    } else {
+      this.logger.log('Loaded existing database');
     }
 
     this.initializeSchema();
-    this.saveDatabase();
     this.logger.log('Database initialized successfully');
+
+    // After initialization is complete, check if FTS5 needs population
+    this.checkAndPopulateFTS5();
   }
 
   /**
-   * Save database to disk
+   * Close database connection
    */
-  private saveDatabase() {
-    if (!this.db || !this.dbPath) {
-      return;
-    }
-
-    try {
-      const data = this.db.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(this.dbPath, buffer);
-    } catch (error: any) {
-      this.logger.error(`Error saving database: ${error?.message || 'Unknown error'}`);
+  closeDatabase(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+      this.logger.log('Database connection closed');
     }
   }
 
@@ -105,7 +272,7 @@ export class DatabaseService {
   /**
    * Ensure database is initialized (throws error if not)
    */
-  private ensureInitialized(): Database {
+  private ensureInitialized(): Database.Database {
     if (!this.db) {
       throw new Error('Database not initialized. Call initializeDatabase() first or create a library.');
     }
@@ -405,16 +572,12 @@ export class DatabaseService {
       // Migration 5: Move custom markers from analysis_sections to custom_markers table
       // Check if custom_markers table exists by querying it
       const stmt = db.prepare("SELECT COUNT(*) as count FROM custom_markers");
-      stmt.step();
-      const result = stmt.getAsObject() as any;
-      stmt.free();
+      const result = stmt.get() as any;
 
       // If table exists and is empty, check for custom markers in analysis_sections
       if (result.count === 0) {
         const checkStmt = db.prepare("SELECT COUNT(*) as count FROM analysis_sections WHERE source = 'user' OR category = 'custom'");
-        checkStmt.step();
-        const checkResult = checkStmt.getAsObject() as any;
-        checkStmt.free();
+        const checkResult = checkStmt.get() as any;
 
         if (checkResult.count > 0) {
           this.logger.log(`Running migration: Moving ${checkResult.count} custom markers from analysis_sections to custom_markers table`);
@@ -478,17 +641,13 @@ export class DatabaseService {
           `);
           // Update existing records to extract extension from filename
           const stmt = db.prepare('SELECT id, filename FROM videos');
-          const updates: Array<{id: string, ext: string}> = [];
-          while (stmt.step()) {
-            const row = stmt.getAsObject() as any;
-            const ext = row.filename.substring(row.filename.lastIndexOf('.')).toLowerCase();
-            updates.push({id: row.id, ext});
-          }
-          stmt.free();
+          const rows = stmt.all() as any[];
 
           // Apply updates
-          for (const update of updates) {
-            db.run('UPDATE videos SET file_extension = ? WHERE id = ?', [update.ext, update.id]);
+          const updateStmt = db.prepare('UPDATE videos SET file_extension = ? WHERE id = ?');
+          for (const row of rows) {
+            const ext = row.filename.substring(row.filename.lastIndexOf('.')).toLowerCase();
+            updateStmt.run(ext, row.id);
           }
 
           this.saveDatabase();
@@ -526,13 +685,8 @@ export class DatabaseService {
 
     try {
       const stmt = db.prepare("PRAGMA table_info(videos)");
-      const columns: string[] = [];
-
-      while (stmt.step()) {
-        const row = stmt.getAsObject() as any;
-        columns.push(row.name);
-      }
-      stmt.free();
+      const rows = stmt.all() as any[];
+      const columns = rows.map(row => row.name);
 
       hasCreatedAt = columns.includes('created_at');
       hasUploadDate = columns.includes('upload_date');
@@ -656,33 +810,95 @@ export class DatabaseService {
       }
     }
 
-    // Migration 13: Populate FTS5 tables from existing data
+  }
+
+  /**
+   * Check if FTS5 tables need population and populate them if needed
+   * Called after database initialization is complete
+   */
+  private checkAndPopulateFTS5(): void {
     try {
+      const db = this.ensureInitialized();
+
+      // First, check if FTS5 tables exist by querying sqlite_master
+      const tableCheckStmt = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM sqlite_master
+        WHERE type='table' AND name IN ('videos_fts', 'transcripts_fts', 'analyses_fts', 'tags_fts')
+      `);
+      const tableCheck = tableCheckStmt.get() as any;
+
+      // If not all 4 FTS5 tables exist, create them
+      if (tableCheck.count < 4) {
+        this.logger.log('[Migration] Creating missing FTS5 search tables...');
+        this.createFTS5Tables();
+        this.logger.log('[Migration] FTS5 tables created');
+      }
+
       // Check if FTS5 tables need to be populated by checking if they're empty
       const stmt = db.prepare("SELECT COUNT(*) as count FROM videos_fts");
-      stmt.step();
-      const result = stmt.getAsObject() as any;
-      stmt.free();
+      const result = stmt.get() as any;
 
       if (result.count === 0) {
         // Count total videos to populate
         const countStmt = db.prepare("SELECT COUNT(*) as count FROM videos");
-        countStmt.step();
-        const countResult = countStmt.getAsObject() as any;
-        countStmt.free();
+        const countResult = countStmt.get() as any;
 
         if (countResult.count > 0) {
-          this.logger.log(`Running migration: Populating FTS5 tables from ${countResult.count} existing videos`);
+          this.logger.log(`[Migration] Populating FTS5 search indexes for ${countResult.count} existing videos...`);
           this.rebuildFTS5Indexes();
-          this.logger.log('Migration complete: FTS5 tables populated');
+          this.logger.log('[Migration] FTS5 search indexes populated successfully');
         }
       }
     } catch (error: any) {
-      // FTS5 tables might not exist yet (new installation) - silently ignore
-      if (!error.message || !error.message.includes('no such table')) {
-        this.logger.warn(`FTS5 migration check failed: ${error?.message || 'Unknown error'}`);
-      }
+      this.logger.error(`[Migration] FTS5 setup failed: ${error?.message || 'Unknown error'}`);
+      this.logger.error(error?.stack || error);
     }
+  }
+
+  /**
+   * Create FTS5 virtual tables
+   */
+  private createFTS5Tables(): void {
+    const db = this.ensureInitialized();
+
+    const fts5Schema = `
+      -- Drop existing FTS5 tables if they exist (in case of corruption)
+      DROP TABLE IF EXISTS transcripts_fts;
+      DROP TABLE IF EXISTS analyses_fts;
+      DROP TABLE IF EXISTS videos_fts;
+      DROP TABLE IF EXISTS tags_fts;
+
+      -- Full-text search virtual tables using FTS5 for fast search
+      CREATE VIRTUAL TABLE transcripts_fts USING fts5(
+        video_id UNINDEXED,
+        content,
+        tokenize='porter unicode61'
+      );
+
+      CREATE VIRTUAL TABLE analyses_fts USING fts5(
+        video_id UNINDEXED,
+        content,
+        tokenize='porter unicode61'
+      );
+
+      CREATE VIRTUAL TABLE videos_fts USING fts5(
+        video_id UNINDEXED,
+        filename,
+        current_path,
+        ai_description,
+        tokenize='porter unicode61'
+      );
+
+      CREATE VIRTUAL TABLE tags_fts USING fts5(
+        video_id UNINDEXED,
+        tag_name,
+        tokenize='porter unicode61'
+      );
+    `;
+
+    db.exec(fts5Schema);
+    this.saveDatabase();
   }
 
   /**
@@ -698,76 +914,60 @@ export class DatabaseService {
     try {
       // Clear existing FTS5 data
       this.logger.log('[FTS5 Rebuild] Clearing existing FTS5 tables...');
-      db.run('DELETE FROM videos_fts');
-      db.run('DELETE FROM transcripts_fts');
-      db.run('DELETE FROM analyses_fts');
-      db.run('DELETE FROM tags_fts');
+      db.prepare('DELETE FROM videos_fts').run();
+      db.prepare('DELETE FROM transcripts_fts').run();
+      db.prepare('DELETE FROM analyses_fts').run();
+      db.prepare('DELETE FROM tags_fts').run();
 
       // Populate videos_fts
       this.logger.log('[FTS5 Rebuild] Populating videos_fts...');
       const videosStmt = db.prepare('SELECT id, filename, current_path, ai_description FROM videos');
-      let videoCount = 0;
-      while (videosStmt.step()) {
-        const row = videosStmt.getAsObject() as any;
-        db.run(
-          'INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)',
-          [row.id, row.filename, row.current_path || '', row.ai_description || '']
-        );
-        videoCount++;
+      const videos = videosStmt.all() as any[];
+
+      const videoInsertStmt = db.prepare('INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)');
+      for (const row of videos) {
+        videoInsertStmt.run(row.id, row.filename, row.current_path || '', row.ai_description || '');
       }
-      videosStmt.free();
-      this.logger.log(`[FTS5 Rebuild] Populated ${videoCount} videos`);
+      this.logger.log(`[FTS5 Rebuild] Populated ${videos.length} videos`);
 
       // Populate transcripts_fts
       this.logger.log('[FTS5 Rebuild] Populating transcripts_fts...');
       const transcriptsStmt = db.prepare('SELECT video_id, plain_text FROM transcripts');
-      let transcriptCount = 0;
-      while (transcriptsStmt.step()) {
-        const row = transcriptsStmt.getAsObject() as any;
-        db.run(
-          'INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)',
-          [row.video_id, row.plain_text]
-        );
-        transcriptCount++;
+      const transcripts = transcriptsStmt.all() as any[];
+
+      const transcriptInsertStmt = db.prepare('INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)');
+      for (const row of transcripts) {
+        transcriptInsertStmt.run(row.video_id, row.plain_text);
       }
-      transcriptsStmt.free();
-      this.logger.log(`[FTS5 Rebuild] Populated ${transcriptCount} transcripts`);
+      this.logger.log(`[FTS5 Rebuild] Populated ${transcripts.length} transcripts`);
 
       // Populate analyses_fts
       this.logger.log('[FTS5 Rebuild] Populating analyses_fts...');
       const analysesStmt = db.prepare('SELECT video_id, ai_analysis, summary FROM analyses');
-      let analysisCount = 0;
-      while (analysesStmt.step()) {
-        const row = analysesStmt.getAsObject() as any;
+      const analyses = analysesStmt.all() as any[];
+
+      const analysisInsertStmt = db.prepare('INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)');
+      for (const row of analyses) {
         const contentForSearch = [row.ai_analysis, row.summary].filter(Boolean).join(' ');
-        db.run(
-          'INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)',
-          [row.video_id, contentForSearch]
-        );
-        analysisCount++;
+        analysisInsertStmt.run(row.video_id, contentForSearch);
       }
-      analysesStmt.free();
-      this.logger.log(`[FTS5 Rebuild] Populated ${analysisCount} analyses`);
+      this.logger.log(`[FTS5 Rebuild] Populated ${analyses.length} analyses`);
 
       // Populate tags_fts
       this.logger.log('[FTS5 Rebuild] Populating tags_fts...');
       const tagsStmt = db.prepare('SELECT video_id, tag_name FROM tags');
-      let tagCount = 0;
-      while (tagsStmt.step()) {
-        const row = tagsStmt.getAsObject() as any;
-        db.run(
-          'INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)',
-          [row.video_id, row.tag_name]
-        );
-        tagCount++;
+      const tags = tagsStmt.all() as any[];
+
+      const tagInsertStmt = db.prepare('INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)');
+      for (const row of tags) {
+        tagInsertStmt.run(row.video_id, row.tag_name);
       }
-      tagsStmt.free();
-      this.logger.log(`[FTS5 Rebuild] Populated ${tagCount} tags`);
+      this.logger.log(`[FTS5 Rebuild] Populated ${tags.length} tags`);
 
       this.saveDatabase();
 
       const duration = Date.now() - startTime;
-      this.logger.log(`[FTS5 Rebuild] Rebuild complete in ${duration}ms (${videoCount} videos, ${transcriptCount} transcripts, ${analysisCount} analyses, ${tagCount} tags)`);
+      this.logger.log(`[FTS5 Rebuild] Rebuild complete in ${duration}ms (${videos.length} videos, ${transcripts.length} transcripts, ${analyses.length} analyses, ${tags.length} tags)`);
     } catch (error: any) {
       this.logger.error(`[FTS5 Rebuild] Failed to rebuild FTS5 indexes: ${error?.message || 'Unknown error'}`);
       throw error;
@@ -777,8 +977,18 @@ export class DatabaseService {
   /**
    * Get the database instance for raw queries
    */
-  getDatabase(): Database {
+  getDatabase(): Database.Database {
     return this.ensureInitialized();
+  }
+
+  /**
+   * Save the database to disk
+   * Note: better-sqlite3 is synchronous and auto-commits, so this is a no-op
+   * Kept for API compatibility with sql.js version
+   */
+  private saveDatabase() {
+    // No-op: better-sqlite3 is synchronous and auto-commits
+    // All changes are immediately persisted to disk
   }
 
   /**
@@ -842,37 +1052,35 @@ export class DatabaseService {
       mediaType = this.getMediaTypeFromExtension(fileExtension);
     }
 
-    db.run(
+    db.prepare(
       `INSERT OR REPLACE INTO videos (
         id, filename, file_hash, current_path, upload_date,
         duration_seconds, file_size_bytes, source_url, media_type, file_extension,
         download_date, last_verified, added_at, is_linked
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      [
-        video.id,
-        video.filename,
-        video.fileHash,
-        video.currentPath,
-        video.uploadDate || null,
-        video.durationSeconds || null,
-        video.fileSizeBytes || null,
-        video.sourceUrl || null,
-        mediaType || 'video',
-        fileExtension || null,
-        downloadDate, // File's creation timestamp (when you downloaded it)
-        now, // last_verified
-        now, // added_at (when database entry was created)
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+    ).run(
+      video.id,
+      video.filename,
+      video.fileHash,
+      video.currentPath,
+      video.uploadDate || null,
+      video.durationSeconds || null,
+      video.fileSizeBytes || null,
+      video.sourceUrl || null,
+      mediaType || 'video',
+      fileExtension || null,
+      downloadDate, // File's creation timestamp (when you downloaded it)
+      now, // last_verified
+      now, // added_at (when database entry was created)
     );
 
     // Insert/update FTS5 table for video search
     // Delete existing entry first (if any)
-    db.run(`DELETE FROM videos_fts WHERE video_id = ?`, [video.id]);
+    db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(video.id);
     // Insert new entry
-    db.run(
-      `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`,
-      [video.id, video.filename, video.currentPath || '', ''] // ai_description is empty initially, updated later
-    );
+    db.prepare(
+      `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
+    ).run(video.id, video.filename, video.currentPath || '', ''); // ai_description is empty initially, updated later
 
     this.saveDatabase();
   }
@@ -914,43 +1122,31 @@ export class DatabaseService {
   /**
    * Find video by filename
    */
-  findVideoByFilename(filename: string) {
+  findVideoByFilename(filename: string): VideoRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE filename = ?');
-    stmt.bind([filename]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(filename) as VideoRecord | undefined;
+    return result || null;
   }
 
   /**
    * Find video by file hash
    */
-  findVideoByHash(hash: string) {
+  findVideoByHash(hash: string): VideoRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE file_hash = ?');
-    stmt.bind([hash]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(hash) as VideoRecord | undefined;
+    return result || null;
   }
 
   /**
    * Find video by ID
    */
-  findVideoById(id: string) {
+  findVideoById(id: string): VideoRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE id = ?');
-    stmt.bind([id]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(id) as VideoRecord | undefined;
+    return result || null;
   }
 
   /**
@@ -959,15 +1155,14 @@ export class DatabaseService {
   updateVideoPath(id: string, newPath: string, uploadDate?: string) {
     const db = this.ensureInitialized();
 
-    db.run(
+    db.prepare(
       `UPDATE videos
        SET current_path = ?,
            upload_date = ?,
            last_verified = ?,
            is_linked = 1
-       WHERE id = ?`,
-      [newPath, uploadDate || null, new Date().toISOString(), id]
-    );
+       WHERE id = ?`
+    ).run(newPath, uploadDate || null, new Date().toISOString(), id);
 
     this.saveDatabase();
   }
@@ -1007,10 +1202,7 @@ export class DatabaseService {
 
     if (updates.length > 0) {
       values.push(id);
-      db.run(
-        `UPDATE videos SET ${updates.join(', ')} WHERE id = ?`,
-        values
-      );
+      db.prepare(`UPDATE videos SET ${updates.join(', ')} WHERE id = ?`).run(...values);
       this.saveDatabase();
     }
   }
@@ -1022,12 +1214,11 @@ export class DatabaseService {
     const db = this.ensureInitialized();
 
     try {
-      db.run(
+      db.prepare(
         `UPDATE videos
          SET source_url = ?
-         WHERE id = ?`,
-        [sourceUrl, id]
-      );
+         WHERE id = ?`
+      ).run(sourceUrl, id);
 
       this.saveDatabase();
     } catch (error) {
@@ -1045,26 +1236,22 @@ export class DatabaseService {
     this.logger.log(`[AI Description] Updating description for video ${id}: ${description ? description.substring(0, 100) + '...' : 'null'}`);
 
     try {
-      db.run(
+      db.prepare(
         `UPDATE videos
          SET ai_description = ?
-         WHERE id = ?`,
-        [description, id]
-      );
+         WHERE id = ?`
+      ).run(description, id);
 
       // Update FTS5 table for video search
       // Get filename and current_path for the FTS5 update
       const stmt = db.prepare('SELECT filename, current_path FROM videos WHERE id = ?');
-      stmt.bind([id]);
-      if (stmt.step()) {
-        const row = stmt.getAsObject() as { filename: string; current_path: string };
-        db.run(`DELETE FROM videos_fts WHERE video_id = ?`, [id]);
-        db.run(
-          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`,
-          [id, row.filename, row.current_path, description || '']
-        );
+      const row = stmt.get(id) as { filename: string; current_path: string } | undefined;
+      if (row) {
+        db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(id);
+        db.prepare(
+          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
+        ).run(id, row.filename, row.current_path, description || '');
       }
-      stmt.free();
 
       this.saveDatabase();
       this.logger.log(`[AI Description] Successfully updated description for video ${id}`);
@@ -1085,12 +1272,11 @@ export class DatabaseService {
     this.logger.log(`[Suggested Title] Updating suggested title for video ${id}: ${suggestedTitle || 'null'}`);
 
     try {
-      db.run(
+      db.prepare(
         `UPDATE videos
          SET suggested_title = ?
-         WHERE id = ?`,
-        [suggestedTitle, id]
-      );
+         WHERE id = ?`
+      ).run(suggestedTitle, id);
 
       this.saveDatabase();
       this.logger.log(`[Suggested Title] Successfully updated suggested title for video ${id}`);
@@ -1112,26 +1298,22 @@ export class DatabaseService {
     const db = this.ensureInitialized();
 
     try {
-      db.run(
+      db.prepare(
         `UPDATE videos
          SET filename = ?
-         WHERE id = ?`,
-        [filename, id]
-      );
+         WHERE id = ?`
+      ).run(filename, id);
 
       // Update FTS5 table for video search
       // Get current_path and ai_description for the FTS5 update
       const stmt = db.prepare('SELECT current_path, ai_description FROM videos WHERE id = ?');
-      stmt.bind([id]);
-      if (stmt.step()) {
-        const row = stmt.getAsObject() as { current_path: string; ai_description: string | null };
-        db.run(`DELETE FROM videos_fts WHERE video_id = ?`, [id]);
-        db.run(
-          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`,
-          [id, filename, row.current_path, row.ai_description || '']
-        );
+      const row = stmt.get(id) as { current_path: string; ai_description: string | null } | undefined;
+      if (row) {
+        db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(id);
+        db.prepare(
+          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
+        ).run(id, filename, row.current_path, row.ai_description || '');
       }
-      stmt.free();
 
       this.saveDatabase();
     } catch (error) {
@@ -1147,12 +1329,11 @@ export class DatabaseService {
     const db = this.ensureInitialized();
 
     try {
-      db.run(
+      db.prepare(
         `UPDATE videos
          SET download_date = ?
-         WHERE id = ?`,
-        [downloadDate, id]
-      );
+         WHERE id = ?`
+      ).run(downloadDate, id);
 
       this.saveDatabase();
     } catch (error) {
@@ -1164,15 +1345,11 @@ export class DatabaseService {
   /**
    * Get video by ID
    */
-  getVideoById(id: string) {
+  getVideoById(id: string): VideoRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE id = ?');
-    stmt.bind([id]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(id) as VideoRecord | undefined;
+    return result || null;
   }
 
   /**
@@ -1180,7 +1357,7 @@ export class DatabaseService {
    */
   markVideoUnlinked(id: string) {
     const db = this.ensureInitialized();
-    db.run('UPDATE videos SET is_linked = 0 WHERE id = ?', [id]);
+    db.prepare('UPDATE videos SET is_linked = 0 WHERE id = ?').run(id);
     this.saveDatabase();
   }
 
@@ -1189,7 +1366,7 @@ export class DatabaseService {
    * This will cascade delete all related records (transcripts, analyses, tags, sections)
    * Returns the video record before deletion so caller can delete physical file
    */
-  deleteVideo(id: string) {
+  deleteVideo(id: string): VideoRecord {
     const db = this.ensureInitialized();
 
     // Get video info before deleting (for file path)
@@ -1200,7 +1377,7 @@ export class DatabaseService {
 
     this.logger.log(`Deleting video ${id} and all related data`);
 
-    db.run('DELETE FROM videos WHERE id = ?', [id]);
+    db.prepare('DELETE FROM videos WHERE id = ?').run(id);
 
     this.saveDatabase();
 
@@ -1212,17 +1389,12 @@ export class DatabaseService {
    * Deletes all database records for videos where is_linked = 0
    * Returns count of deleted videos
    */
-  pruneOrphanedVideos(): { deletedCount: number; deletedVideos: Array<{ id: string; filename: string }> } {
+  pruneOrphanedVideos(): PruneResult {
     const db = this.ensureInitialized();
 
     // Get list of unlinked videos before deleting
     const stmt = db.prepare('SELECT id, filename FROM videos WHERE is_linked = 0');
-    const unlinkedVideos: Array<{ id: string; filename: string }> = [];
-
-    while (stmt.step()) {
-      unlinkedVideos.push(stmt.getAsObject() as any);
-    }
-    stmt.free();
+    const unlinkedVideos = stmt.all() as Array<{ id: string; filename: string }>;
 
     if (unlinkedVideos.length === 0) {
       this.logger.log('No orphaned videos to prune');
@@ -1232,7 +1404,7 @@ export class DatabaseService {
     this.logger.log(`Pruning ${unlinkedVideos.length} orphaned videos from database`);
 
     // Delete all unlinked videos (CASCADE will handle related records)
-    db.run('DELETE FROM videos WHERE is_linked = 0');
+    db.prepare('DELETE FROM videos WHERE is_linked = 0').run();
 
     this.saveDatabase();
 
@@ -1245,7 +1417,7 @@ export class DatabaseService {
   /**
    * Get all videos (excluding children - they are fetched separately via getChildVideos)
    */
-  getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number; includeChildren?: boolean }) {
+  getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number; includeChildren?: boolean }): VideoRecordWithFlags[] {
     const db = this.ensureInitialized();
     // Use subqueries instead of LEFT JOINs to prevent duplicate rows
     // when there are multiple transcripts or analyses for a video
@@ -1288,29 +1460,23 @@ export class DatabaseService {
     }
 
     const stmt = db.prepare(query);
-    stmt.bind(params);
+    const results = params.length > 0 ? stmt.all(...params) : stmt.all();
 
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
-    return results;
+    return results as VideoRecordWithFlags[];
   }
 
   /**
    * Get all videos in hierarchical structure (parents with their children)
    * Returns a flat array with children immediately following their parent
    */
-  getAllVideosHierarchical(options?: { linkedOnly?: boolean }) {
+  getAllVideosHierarchical(options?: { linkedOnly?: boolean }): Array<VideoRecordWithFlags & { isParent: boolean; isChild: boolean }> {
     // Get all parent/root videos
     const parents = this.getAllVideos({
       linkedOnly: options?.linkedOnly,
       includeChildren: false
     });
 
-    const results: any[] = [];
+    const results: Array<VideoRecordWithFlags & { isParent: boolean; isChild: boolean }> = [];
 
     // For each parent, add it and then its children
     for (const parent of parents) {
@@ -1325,6 +1491,9 @@ export class DatabaseService {
       for (const child of children) {
         results.push({
           ...child,
+          has_transcript: 0,
+          has_analysis: 0,
+          has_children: 0,
           isParent: false,
           isChild: true,
           parent_id: parent.id
@@ -1348,29 +1517,27 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    db.run(
+    db.prepare(
       `INSERT OR REPLACE INTO transcripts (
         video_id, plain_text, srt_format, whisper_model, language, transcribed_at, transcription_time_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        transcript.videoId,
-        transcript.plainText,
-        transcript.srtFormat,
-        transcript.whisperModel || null,
-        transcript.language || null,
-        new Date().toISOString(),
-        transcript.transcriptionTimeSeconds || null,
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      transcript.videoId,
+      transcript.plainText,
+      transcript.srtFormat,
+      transcript.whisperModel || null,
+      transcript.language || null,
+      new Date().toISOString(),
+      transcript.transcriptionTimeSeconds || null,
     );
 
     // Update FTS5 table for transcript search
     // Delete existing entry first (if any)
-    db.run(`DELETE FROM transcripts_fts WHERE video_id = ?`, [transcript.videoId]);
+    db.prepare(`DELETE FROM transcripts_fts WHERE video_id = ?`).run(transcript.videoId);
     // Insert new entry
-    db.run(
-      `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`,
-      [transcript.videoId, transcript.plainText]
-    );
+    db.prepare(
+      `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`
+    ).run(transcript.videoId, transcript.plainText);
 
     this.saveDatabase();
   }
@@ -1378,15 +1545,11 @@ export class DatabaseService {
   /**
    * Get transcript for a video
    */
-  getTranscript(videoId: string) {
+  getTranscript(videoId: string): TranscriptRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM transcripts WHERE video_id = ?');
-    stmt.bind([videoId]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(videoId) as TranscriptRecord | undefined;
+    return result || null;
   }
 
   /**
@@ -1403,31 +1566,29 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    db.run(
+    db.prepare(
       `INSERT OR REPLACE INTO analyses (
         video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at, analysis_time_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        analysis.videoId,
-        analysis.aiAnalysis,
-        analysis.summary || null,
-        analysis.sectionsCount || null,
-        analysis.aiModel,
-        analysis.aiProvider || null,
-        new Date().toISOString(),
-        analysis.analysisTimeSeconds || null,
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      analysis.videoId,
+      analysis.aiAnalysis,
+      analysis.summary || null,
+      analysis.sectionsCount || null,
+      analysis.aiModel,
+      analysis.aiProvider || null,
+      new Date().toISOString(),
+      analysis.analysisTimeSeconds || null,
     );
 
     // Update FTS5 table for analysis search
     // Delete existing entry first (if any)
-    db.run(`DELETE FROM analyses_fts WHERE video_id = ?`, [analysis.videoId]);
+    db.prepare(`DELETE FROM analyses_fts WHERE video_id = ?`).run(analysis.videoId);
     // Insert new entry (combine analysis and summary for better search)
     const contentForSearch = [analysis.aiAnalysis, analysis.summary].filter(Boolean).join(' ');
-    db.run(
-      `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`,
-      [analysis.videoId, contentForSearch]
-    );
+    db.prepare(
+      `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`
+    ).run(analysis.videoId, contentForSearch);
 
     this.saveDatabase();
   }
@@ -1435,15 +1596,11 @@ export class DatabaseService {
   /**
    * Get analysis for a video
    */
-  getAnalysis(videoId: string) {
+  getAnalysis(videoId: string): AnalysisRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM analyses WHERE video_id = ?');
-    stmt.bind([videoId]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(videoId) as AnalysisRecord | undefined;
+    return result || null;
   }
 
   /**
@@ -1454,7 +1611,7 @@ export class DatabaseService {
     // Delete only AI-generated sections (preserve user-created custom markers)
     this.deleteAIAnalysisSections(videoId);
     // Then delete the analysis record
-    db.run('DELETE FROM analyses WHERE video_id = ?', [videoId]);
+    db.prepare('DELETE FROM analyses WHERE video_id = ?').run(videoId);
     this.logger.log(`Deleted AI analysis for video ${videoId}`);
   }
 
@@ -1463,7 +1620,7 @@ export class DatabaseService {
    */
   deleteAIAnalysisSections(videoId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM analysis_sections WHERE video_id = ? AND source = ?', [videoId, 'ai']);
+    db.prepare('DELETE FROM analysis_sections WHERE video_id = ? AND source = ?').run(videoId, 'ai');
     this.logger.log(`Deleted AI analysis sections for video ${videoId} (preserving user markers)`);
   }
 
@@ -1473,7 +1630,7 @@ export class DatabaseService {
    */
   deleteAnalysisSections(videoId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM analysis_sections WHERE video_id = ?', [videoId]);
+    db.prepare('DELETE FROM analysis_sections WHERE video_id = ?').run(videoId);
     this.logger.log(`Deleted ALL analysis sections for video ${videoId}`);
   }
 
@@ -1482,7 +1639,7 @@ export class DatabaseService {
    */
   deleteAnalysisSection(sectionId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM analysis_sections WHERE id = ?', [sectionId]);
+    db.prepare('DELETE FROM analysis_sections WHERE id = ?').run(sectionId);
     this.logger.log(`Deleted analysis section ${sectionId}`);
   }
 
@@ -1491,7 +1648,7 @@ export class DatabaseService {
    */
   deleteTagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM tags WHERE video_id = ?', [videoId]);
+    db.prepare('DELETE FROM tags WHERE video_id = ?').run(videoId);
     this.logger.log(`Deleted tags for video ${videoId}`);
   }
 
@@ -1500,7 +1657,7 @@ export class DatabaseService {
    */
   deleteAITagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM tags WHERE video_id = ? AND source = ?', [videoId, 'ai']);
+    db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(videoId, 'ai');
     this.saveDatabase();
     this.logger.log(`Deleted AI-generated tags for video ${videoId}`);
   }
@@ -1510,7 +1667,7 @@ export class DatabaseService {
    */
   deleteTag(tagId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM tags WHERE id = ?', [tagId]);
+    db.prepare('DELETE FROM tags WHERE id = ?').run(tagId);
     this.saveDatabase();
     this.logger.log(`Deleted tag ${tagId}`);
   }
@@ -1520,7 +1677,7 @@ export class DatabaseService {
    */
   deleteTranscript(videoId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM transcripts WHERE video_id = ?', [videoId]);
+    db.prepare('DELETE FROM transcripts WHERE video_id = ?').run(videoId);
     this.logger.log(`Deleted transcript for video ${videoId}`);
   }
 
@@ -1540,21 +1697,20 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    db.run(
+    db.prepare(
       `INSERT INTO analysis_sections (
         id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        section.id,
-        section.videoId,
-        section.startSeconds,
-        section.endSeconds,
-        section.timestampText || null,
-        section.title || null,
-        section.description || null,
-        section.category || null,
-        section.source || 'ai',
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      section.id,
+      section.videoId,
+      section.startSeconds,
+      section.endSeconds,
+      section.timestampText || null,
+      section.title || null,
+      section.description || null,
+      section.category || null,
+      section.source || 'ai',
     );
 
     this.saveDatabase();
@@ -1563,36 +1719,24 @@ export class DatabaseService {
   /**
    * Get all sections for a video (both AI and custom markers)
    */
-  getAnalysisSections(videoId: string) {
+  getAnalysisSections(videoId: string): Array<AnalysisSectionRecord | CustomMarkerRecord> {
     const db = this.ensureInitialized();
 
     // Get AI-generated sections
     const aiStmt = db.prepare(
       'SELECT *, \'ai\' as source FROM analysis_sections WHERE video_id = ? ORDER BY start_seconds'
     );
-    aiStmt.bind([videoId]);
-
-    const aiResults: any[] = [];
-    while (aiStmt.step()) {
-      aiResults.push(aiStmt.getAsObject());
-    }
-    aiStmt.free();
+    const aiResults = aiStmt.all(videoId) as AnalysisSectionRecord[];
 
     // Get custom markers
     const customStmt = db.prepare(
       'SELECT *, \'user\' as source FROM custom_markers WHERE video_id = ? ORDER BY start_seconds'
     );
-    customStmt.bind([videoId]);
-
-    const customResults: any[] = [];
-    while (customStmt.step()) {
-      customResults.push(customStmt.getAsObject());
-    }
-    customStmt.free();
+    const customResults = customStmt.all(videoId) as CustomMarkerRecord[];
 
     // Merge and sort by start time
-    const allSections = [...aiResults, ...customResults];
-    allSections.sort((a: any, b: any) => a.start_seconds - b.start_seconds);
+    const allSections: Array<AnalysisSectionRecord | CustomMarkerRecord> = [...aiResults, ...customResults];
+    allSections.sort((a, b) => a.start_seconds - b.start_seconds);
 
     return allSections;
   }
@@ -1612,21 +1756,20 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    db.run(
+    db.prepare(
       `INSERT INTO custom_markers (
         id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        marker.id,
-        marker.videoId,
-        marker.startSeconds,
-        marker.endSeconds,
-        marker.timestampText || null,
-        marker.title || null,
-        marker.description || null,
-        marker.category || 'custom',
-        new Date().toISOString(),
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      marker.id,
+      marker.videoId,
+      marker.startSeconds,
+      marker.endSeconds,
+      marker.timestampText || null,
+      marker.title || null,
+      marker.description || null,
+      marker.category || 'custom',
+      new Date().toISOString(),
     );
 
     this.saveDatabase();
@@ -1635,19 +1778,12 @@ export class DatabaseService {
   /**
    * Get all custom markers for a video
    */
-  getCustomMarkers(videoId: string) {
+  getCustomMarkers(videoId: string): CustomMarkerRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare(
       'SELECT * FROM custom_markers WHERE video_id = ? ORDER BY start_seconds'
     );
-    stmt.bind([videoId]);
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all(videoId) as CustomMarkerRecord[];
     return results;
   }
 
@@ -1656,7 +1792,7 @@ export class DatabaseService {
    */
   deleteCustomMarker(markerId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM custom_markers WHERE id = ?', [markerId]);
+    db.prepare('DELETE FROM custom_markers WHERE id = ?').run(markerId);
     this.saveDatabase();
     this.logger.log(`Deleted custom marker ${markerId}`);
   }
@@ -1666,7 +1802,7 @@ export class DatabaseService {
    */
   deleteCustomMarkers(videoId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM custom_markers WHERE video_id = ?', [videoId]);
+    db.prepare('DELETE FROM custom_markers WHERE video_id = ?').run(videoId);
     this.saveDatabase();
     this.logger.log(`Deleted all custom markers for video ${videoId}`);
   }
@@ -1714,26 +1850,24 @@ export class DatabaseService {
       tag = videoIdOrTag;
     }
 
-    db.run(
+    db.prepare(
       `INSERT INTO tags (id, video_id, tag_name, tag_type, confidence, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        tag.id,
-        tag.videoId,
-        tag.tagName,
-        tag.tagType || null,
-        tag.confidence || null,
-        tag.source || null,
-        new Date().toISOString(),
-      ]
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      tag.id,
+      tag.videoId,
+      tag.tagName,
+      tag.tagType || null,
+      tag.confidence || null,
+      tag.source || null,
+      new Date().toISOString(),
     );
 
     // Update FTS5 table for tag search
     // Insert into tags_fts (don't delete first since multiple tags per video)
-    db.run(
-      `INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)`,
-      [tag.videoId, tag.tagName]
-    );
+    db.prepare(
+      `INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)`
+    ).run(tag.videoId, tag.tagName);
 
     this.saveDatabase();
     return tag.id;
@@ -1742,40 +1876,27 @@ export class DatabaseService {
   /**
    * Get all tags for a video
    */
-  getTags(videoId: string) {
+  getTags(videoId: string): TagRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM tags WHERE video_id = ?');
-    stmt.bind([videoId]);
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all(videoId) as TagRecord[];
     return results;
   }
 
   /**
    * Get all tags across all videos
    */
-  getAllTags() {
+  getAllTags(): TagRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM tags');
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all() as TagRecord[];
     return results;
   }
 
   /**
    * Get all tags with counts, grouped by type
    */
-  getAllTagsWithCounts() {
+  getAllTagsWithCounts(): Record<string, Array<{ name: string; count: number }>> {
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
       SELECT tag_name, tag_type, COUNT(*) as count
@@ -1784,11 +1905,7 @@ export class DatabaseService {
       ORDER BY count DESC, tag_name ASC
     `);
 
-    const tags: Array<{ tag_name: string; tag_type: string; count: number }> = [];
-    while (stmt.step()) {
-      tags.push(stmt.getAsObject() as any);
-    }
-    stmt.free();
+    const tags = stmt.all() as TagWithCountRecord[];
 
     // Group by type
     const grouped: Record<string, Array<{ name: string; count: number }>> = {
@@ -1823,26 +1940,16 @@ export class DatabaseService {
       WHERE LOWER(tag_name) IN (${placeholders})
     `);
     // Convert tag names to lowercase for case-insensitive matching
-    stmt.bind(tagNames.map(t => t.toLowerCase()));
-
-    const results: string[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as any;
-      results.push(row.video_id);
-    }
+    const rows = stmt.all(...tagNames.map(t => t.toLowerCase())) as any[];
+    const results = rows.map(row => row.video_id);
 
     console.log(`[getVideoIdsByTags] Searching for tags:`, tagNames, `Found ${results.length} videos`);
 
     // Debug: Let's see what tags exist in the database
     const allTagsStmt = db.prepare(`SELECT DISTINCT tag_name FROM tags LIMIT 20`);
-    const sampleTags: string[] = [];
-    while (allTagsStmt.step()) {
-      const row = allTagsStmt.getAsObject() as any;
-      sampleTags.push(row.tag_name);
-    }
-    allTagsStmt.free();
+    const sampleTagRows = allTagsStmt.all() as any[];
+    const sampleTags = sampleTagRows.map(row => row.tag_name);
     console.log(`[getVideoIdsByTags] Sample tags in database:`, sampleTags);
-    stmt.free();
 
     return results;
   }
@@ -1850,7 +1957,7 @@ export class DatabaseService {
   /**
    * Full-text search in transcripts
    */
-  searchTranscripts(query: string, limit = 50) {
+  searchTranscripts(query: string, limit = 50): TranscriptSearchRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
       SELECT video_id, snippet(transcripts_fts, 1, '<mark>', '</mark>', '...', 32) as snippet
@@ -1858,21 +1965,14 @@ export class DatabaseService {
       WHERE content MATCH ?
       LIMIT ?
     `);
-    stmt.bind([query, limit]);
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all(query, limit) as TranscriptSearchRecord[];
     return results;
   }
 
   /**
    * Full-text search in analyses
    */
-  searchAnalyses(query: string, limit = 50) {
+  searchAnalyses(query: string, limit = 50): AnalysisSearchRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
       SELECT video_id, snippet(analyses_fts, 1, '<mark>', '</mark>', '...', 32) as snippet
@@ -1880,28 +1980,19 @@ export class DatabaseService {
       WHERE content MATCH ?
       LIMIT ?
     `);
-    stmt.bind([query, limit]);
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all(query, limit) as AnalysisSearchRecord[];
     return results;
   }
 
   /**
    * Get database statistics
    */
-  getStats() {
+  getStats(): StatsRecord {
     const db = this.ensureInitialized();
 
     const getCount = (query: string): number => {
       const stmt = db.prepare(query);
-      stmt.step();
-      const result = stmt.getAsObject() as any;
-      stmt.free();
+      const result = stmt.get() as { count: number };
       return result.count;
     };
 
@@ -1922,6 +2013,79 @@ export class DatabaseService {
   }
 
   /**
+   * Build FTS5 query from user input with improved search logic
+   *
+   * Features:
+   * - AND by default: "dad vax bribe" → matches videos with ALL terms
+   * - Quoted phrases: "exact phrase" → matches exact phrase
+   * - Wildcards: dad* → matches dad, dads, daddy, etc.
+   * - Explicit OR: dad OR vax → matches either term
+   * - Prefix matching: partial terms automatically get * suffix
+   *
+   * Examples:
+   * - "dad vax bribe" → dad AND vax AND bribe
+   * - '"anti vax"' → exact phrase "anti vax"
+   * - "dad* vax*" → dad* AND vax* (prefix matching)
+   * - "dad OR vax" → dad OR vax (explicit OR)
+   */
+  private buildFTS5Query(query: string): string {
+    query = query.trim();
+
+    // Handle quoted phrases first (preserve them)
+    const phrases: string[] = [];
+    let processedQuery = query.replace(/"([^"]+)"/g, (match, phrase) => {
+      const placeholder = `__PHRASE_${phrases.length}__`;
+      phrases.push(`"${phrase}"`);
+      return placeholder;
+    });
+
+    // Check if user explicitly used OR (case insensitive)
+    const hasExplicitOr = /\s+OR\s+/i.test(processedQuery);
+
+    // Split by whitespace and filter empty strings
+    const terms = processedQuery.split(/\s+/).filter(t => t.length > 0);
+
+    // Process each term
+    const processedTerms = terms.map(term => {
+      // Restore phrases
+      if (term.startsWith('__PHRASE_')) {
+        const index = parseInt(term.replace('__PHRASE_', '').replace('__', ''));
+        return phrases[index];
+      }
+
+      // Skip OR operator
+      if (term.toUpperCase() === 'OR') {
+        return 'OR';
+      }
+
+      // Remove special characters except wildcards
+      term = term.replace(/[^\w*]/g, '');
+
+      // Skip empty terms
+      if (!term) {
+        return null;
+      }
+
+      // Add prefix wildcard if term doesn't already have one and is longer than 2 chars
+      // This allows partial matching: "vax" matches "vaccine", "vax", "vaxxed", etc.
+      if (!term.includes('*') && term.length > 2) {
+        return term + '*';
+      }
+
+      return term;
+    }).filter(t => t !== null);
+
+    // Join terms
+    if (hasExplicitOr) {
+      // User explicitly used OR, so respect their choice
+      return processedTerms.join(' ');
+    } else {
+      // Default to AND for better precision
+      return processedTerms.join(' AND ');
+    }
+  }
+
+  /**
    * Search videos with full-text search across filename, AI description, transcripts, analyses, and tags
    * Uses FTS5 for high-performance full-text search
    * Returns video IDs that match the search query
@@ -1936,15 +2100,15 @@ export class DatabaseService {
       analysis?: boolean;
       tags?: boolean;
     }
-  ): Array<{ id: string; score: number; matchType: string }> {
+  ): SearchResultRecord[] {
     const db = this.ensureInitialized();
 
     if (!query || query.trim() === '') {
       return [];
     }
 
-    // Prepare FTS5 query (escape special characters and add wildcards for partial matching)
-    const searchTerm = query.trim().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' OR ');
+    // Prepare FTS5 query with improved search logic
+    const searchTerm = this.buildFTS5Query(query);
     const results = new Map<string, { id: string; score: number; matchType: string }>();
 
     // Default all filters to true if not specified
@@ -1968,21 +2132,20 @@ export class DatabaseService {
     if (searchFilters.filename || searchFilters.aiDescription) {
       try {
         const stmt = db.prepare(`
-          SELECT video_id, rank
+          SELECT video_id, bm25(videos_fts) as score
           FROM videos_fts
           WHERE videos_fts MATCH ?
-          ORDER BY rank
+          ORDER BY bm25(videos_fts)
           LIMIT ?
         `);
-        stmt.bind([searchTerm, limit]);
+        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        while (stmt.step()) {
-          const row = stmt.getAsObject() as { video_id: string; rank: number };
-          // Higher scores for better matches (FTS5 rank is negative, lower is better)
-          const score = 100 + Math.max(-10, row.rank);
+        for (const row of rows) {
+          // FTS5 bm25 scores are negative, more negative = better match
+          // Convert to positive score (100 = best, lower = worse)
+          const score = 100 + Math.min(0, row.score);
           addResult(row.video_id, score, 'filename');
         }
-        stmt.free();
       } catch (error) {
         this.logger.warn('Error searching videos FTS5 table:', error);
       }
@@ -1992,20 +2155,18 @@ export class DatabaseService {
     if (searchFilters.transcript) {
       try {
         const stmt = db.prepare(`
-          SELECT video_id, rank
+          SELECT video_id, bm25(transcripts_fts) as score
           FROM transcripts_fts
           WHERE transcripts_fts MATCH ?
-          ORDER BY rank
+          ORDER BY bm25(transcripts_fts)
           LIMIT ?
         `);
-        stmt.bind([searchTerm, limit]);
+        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        while (stmt.step()) {
-          const row = stmt.getAsObject() as { video_id: string; rank: number };
-          const score = 80 + Math.max(-10, row.rank);
+        for (const row of rows) {
+          const score = 80 + Math.min(0, row.score);
           addResult(row.video_id, score, 'transcript');
         }
-        stmt.free();
       } catch (error) {
         this.logger.warn('Error searching transcripts FTS5:', error);
       }
@@ -2015,20 +2176,18 @@ export class DatabaseService {
     if (searchFilters.analysis) {
       try {
         const stmt = db.prepare(`
-          SELECT video_id, rank
+          SELECT video_id, bm25(analyses_fts) as score
           FROM analyses_fts
           WHERE analyses_fts MATCH ?
-          ORDER BY rank
+          ORDER BY bm25(analyses_fts)
           LIMIT ?
         `);
-        stmt.bind([searchTerm, limit]);
+        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        while (stmt.step()) {
-          const row = stmt.getAsObject() as { video_id: string; rank: number };
-          const score = 70 + Math.max(-10, row.rank);
+        for (const row of rows) {
+          const score = 70 + Math.min(0, row.score);
           addResult(row.video_id, score, 'analysis');
         }
-        stmt.free();
       } catch (error) {
         this.logger.warn('Error searching analyses FTS5:', error);
       }
@@ -2042,13 +2201,11 @@ export class DatabaseService {
           WHERE lower(title) LIKE ? OR lower(description) LIKE ?
           LIMIT ?
         `);
-        stmt.bind([searchLike, searchLike, limit]);
+        const rows = stmt.all(searchLike, searchLike, limit) as Array<{ video_id: string }>;
 
-        while (stmt.step()) {
-          const row = stmt.getAsObject() as { video_id: string };
+        for (const row of rows) {
           addResult(row.video_id, 65, 'section');
         }
-        stmt.free();
       } catch (error) {
         this.logger.warn('Error searching analysis sections:', error);
       }
@@ -2058,20 +2215,18 @@ export class DatabaseService {
     if (searchFilters.tags) {
       try {
         const stmt = db.prepare(`
-          SELECT video_id, rank
+          SELECT video_id, bm25(tags_fts) as score
           FROM tags_fts
           WHERE tags_fts MATCH ?
-          ORDER BY rank
+          ORDER BY bm25(tags_fts)
           LIMIT ?
         `);
-        stmt.bind([searchTerm, limit]);
+        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        while (stmt.step()) {
-          const row = stmt.getAsObject() as { video_id: string; rank: number };
-          const score = 60 + Math.max(-10, row.rank);
+        for (const row of rows) {
+          const score = 60 + Math.min(0, row.score);
           addResult(row.video_id, score, 'tag');
         }
-        stmt.free();
       } catch (error) {
         this.logger.warn('Error searching tags FTS5:', error);
       }
@@ -2103,18 +2258,17 @@ export class DatabaseService {
     const now = new Date().toISOString();
     const metadataJson = savedLink.metadata ? JSON.stringify(savedLink.metadata) : null;
 
-    db.run(
+    db.prepare(
       `INSERT INTO saved_links (
         id, url, title, status, date_added, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        savedLink.id,
-        savedLink.url,
-        savedLink.title || null,
-        savedLink.status || 'pending',
-        now,
-        metadataJson,
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      savedLink.id,
+      savedLink.url,
+      savedLink.title || null,
+      savedLink.status || 'pending',
+      now,
+      metadataJson,
     );
 
     this.saveDatabase();
@@ -2123,13 +2277,10 @@ export class DatabaseService {
   /**
    * Find saved link by ID
    */
-  findSavedLinkById(id: string) {
+  findSavedLinkById(id: string): SavedLinkRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM saved_links WHERE id = ?');
-    stmt.bind([id]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
+    const result = stmt.get(id) as SavedLinkRecord | undefined;
 
     // Parse metadata JSON if present
     if (result && result.metadata) {
@@ -2140,19 +2291,16 @@ export class DatabaseService {
       }
     }
 
-    return result;
+    return result || null;
   }
 
   /**
    * Find saved link by URL
    */
-  findSavedLinkByUrl(url: string) {
+  findSavedLinkByUrl(url: string): SavedLinkRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM saved_links WHERE url = ?');
-    stmt.bind([url]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
+    const result = stmt.get(url) as SavedLinkRecord | undefined;
 
     // Parse metadata JSON if present
     if (result && result.metadata) {
@@ -2163,13 +2311,13 @@ export class DatabaseService {
       }
     }
 
-    return result;
+    return result || null;
   }
 
   /**
    * Get all saved links
    */
-  getAllSavedLinks(status?: string): any[] {
+  getAllSavedLinks(status?: string): SavedLinkRecord[] {
     const db = this.ensureInitialized();
     let query = 'SELECT * FROM saved_links';
     const params: any[] = [];
@@ -2182,14 +2330,10 @@ export class DatabaseService {
     query += ' ORDER BY date_added DESC';
 
     const stmt = db.prepare(query);
-    if (params.length > 0) {
-      stmt.bind(params);
-    }
+    const results = (params.length > 0 ? stmt.all(...params) : stmt.all()) as SavedLinkRecord[];
 
-    const results: any[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      // Parse metadata JSON if present
+    // Parse metadata JSON if present
+    for (const row of results) {
       if (row.metadata) {
         try {
           row.metadata = JSON.parse(row.metadata as string);
@@ -2197,9 +2341,7 @@ export class DatabaseService {
           this.logger.warn(`Failed to parse metadata for saved link ${row.id}`);
         }
       }
-      results.push(row);
     }
-    stmt.free();
 
     return results;
   }
@@ -2219,22 +2361,21 @@ export class DatabaseService {
 
     const dateCompleted = (status === 'completed' || status === 'failed') ? now : null;
 
-    db.run(
+    db.prepare(
       `UPDATE saved_links
        SET status = ?,
            error_message = ?,
            download_path = ?,
            thumbnail_path = ?,
            date_completed = ?
-       WHERE id = ?`,
-      [
-        status,
-        errorMessage || null,
-        downloadPath || null,
-        thumbnailPath || null,
-        dateCompleted,
-        id,
-      ]
+       WHERE id = ?`
+    ).run(
+      status,
+      errorMessage || null,
+      downloadPath || null,
+      thumbnailPath || null,
+      dateCompleted,
+      id,
     );
 
     this.saveDatabase();
@@ -2246,10 +2387,9 @@ export class DatabaseService {
   linkSavedLinkToVideo(savedLinkId: string, videoId: string) {
     const db = this.ensureInitialized();
 
-    db.run(
-      `UPDATE saved_links SET video_id = ? WHERE id = ?`,
-      [videoId, savedLinkId]
-    );
+    db.prepare(
+      `UPDATE saved_links SET video_id = ? WHERE id = ?`
+    ).run(videoId, savedLinkId);
 
     this.saveDatabase();
   }
@@ -2260,10 +2400,9 @@ export class DatabaseService {
   updateSavedLinkTitle(id: string, title: string) {
     const db = this.ensureInitialized();
 
-    db.run(
-      `UPDATE saved_links SET title = ? WHERE id = ?`,
-      [title, id]
-    );
+    db.prepare(
+      `UPDATE saved_links SET title = ? WHERE id = ?`
+    ).run(title, id);
 
     this.saveDatabase();
   }
@@ -2273,7 +2412,7 @@ export class DatabaseService {
    */
   deleteSavedLink(id: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM saved_links WHERE id = ?', [id]);
+    db.prepare('DELETE FROM saved_links WHERE id = ?').run(id);
     this.saveDatabase();
   }
 
@@ -2291,12 +2430,7 @@ export class DatabaseService {
     }
 
     const stmt = db.prepare(query);
-    if (params.length > 0) {
-      stmt.bind(params);
-    }
-
-    const result = stmt.step() ? stmt.getAsObject() : { count: 0 };
-    stmt.free();
+    const result = (params.length > 0 ? stmt.get(...params) : stmt.get()) as { count: number };
 
     return Number(result.count) || 0;
   }
@@ -2317,17 +2451,16 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
 
-    db.run(
+    db.prepare(
       `INSERT INTO media_relationships (
         id, primary_media_id, related_media_id, relationship_type, created_at
-      ) VALUES (?, ?, ?, ?, ?)`,
-      [
-        relationship.id,
-        relationship.primaryMediaId,
-        relationship.relatedMediaId,
-        relationship.relationshipType,
-        now,
-      ]
+      ) VALUES (?, ?, ?, ?, ?)`
+    ).run(
+      relationship.id,
+      relationship.primaryMediaId,
+      relationship.relatedMediaId,
+      relationship.relationshipType,
+      now,
     );
 
     this.saveDatabase();
@@ -2336,7 +2469,7 @@ export class DatabaseService {
   /**
    * Get all related media for a given media item
    */
-  getRelatedMedia(mediaId: string) {
+  getRelatedMedia(mediaId: string): MediaRelationshipRecord[] {
     const db = this.ensureInitialized();
 
     // Get relationships where this item is primary
@@ -2346,13 +2479,7 @@ export class DatabaseService {
       JOIN videos v ON r.related_media_id = v.id
       WHERE r.primary_media_id = ?
     `);
-    primaryStmt.bind([mediaId]);
-
-    const primaryResults: any[] = [];
-    while (primaryStmt.step()) {
-      primaryResults.push(primaryStmt.getAsObject());
-    }
-    primaryStmt.free();
+    const primaryResults = primaryStmt.all(mediaId) as MediaRelationshipRecord[];
 
     // Get relationships where this item is related
     const relatedStmt = db.prepare(`
@@ -2361,13 +2488,7 @@ export class DatabaseService {
       JOIN videos v ON r.primary_media_id = v.id
       WHERE r.related_media_id = ?
     `);
-    relatedStmt.bind([mediaId]);
-
-    const relatedResults: any[] = [];
-    while (relatedStmt.step()) {
-      relatedResults.push(relatedStmt.getAsObject());
-    }
-    relatedStmt.free();
+    const relatedResults = relatedStmt.all(mediaId) as MediaRelationshipRecord[];
 
     return [...primaryResults, ...relatedResults];
   }
@@ -2377,7 +2498,7 @@ export class DatabaseService {
    */
   deleteMediaRelationship(relationshipId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM media_relationships WHERE id = ?', [relationshipId]);
+    db.prepare('DELETE FROM media_relationships WHERE id = ?').run(relationshipId);
     this.saveDatabase();
     this.logger.log(`Deleted media relationship ${relationshipId}`);
   }
@@ -2387,10 +2508,9 @@ export class DatabaseService {
    */
   deleteAllMediaRelationships(mediaId: string) {
     const db = this.ensureInitialized();
-    db.run(
-      'DELETE FROM media_relationships WHERE primary_media_id = ? OR related_media_id = ?',
-      [mediaId, mediaId]
-    );
+    db.prepare(
+      'DELETE FROM media_relationships WHERE primary_media_id = ? OR related_media_id = ?'
+    ).run(mediaId, mediaId);
     this.saveDatabase();
     this.logger.log(`Deleted all media relationships for ${mediaId}`);
   }
@@ -2437,10 +2557,9 @@ export class DatabaseService {
       }
     }
 
-    db.run(
-      'UPDATE videos SET parent_id = ? WHERE id = ?',
-      [parentId, childId]
-    );
+    db.prepare(
+      'UPDATE videos SET parent_id = ? WHERE id = ?'
+    ).run(parentId, childId);
 
     this.saveDatabase();
     this.logger.log(`Set parent for video ${childId}: ${parentId || 'none'}`);
@@ -2451,21 +2570,14 @@ export class DatabaseService {
    * @param parentId - ID of the parent video
    * @returns Array of child videos
    */
-  getChildVideos(parentId: string): any[] {
+  getChildVideos(parentId: string): VideoRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
       SELECT * FROM videos
       WHERE parent_id = ?
       ORDER BY added_at ASC
     `);
-    stmt.bind([parentId]);
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all(parentId) as VideoRecord[];
     return results;
   }
 
@@ -2474,14 +2586,14 @@ export class DatabaseService {
    * @param videoId - ID of the video
    * @returns Parent video or null
    */
-  getParentVideo(videoId: string): any | null {
+  getParentVideo(videoId: string): VideoRecord | null {
     const video = this.getVideoById(videoId);
 
     if (!video || !video.parent_id) {
       return null;
     }
 
-    return this.getVideoById(video.parent_id as string);
+    return this.getVideoById(video.parent_id);
   }
 
   /**
@@ -2492,11 +2604,7 @@ export class DatabaseService {
   hasChildren(videoId: string): boolean {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT COUNT(*) as count FROM videos WHERE parent_id = ?');
-    stmt.bind([videoId]);
-    stmt.step();
-    const result = stmt.getAsObject() as any;
-    stmt.free();
-
+    const result = stmt.get(videoId) as any;
     return result.count > 0;
   }
 
@@ -2506,7 +2614,7 @@ export class DatabaseService {
    */
   removeAllChildren(parentId: string) {
     const db = this.ensureInitialized();
-    db.run('UPDATE videos SET parent_id = NULL WHERE parent_id = ?', [parentId]);
+    db.prepare('UPDATE videos SET parent_id = NULL WHERE parent_id = ?').run(parentId);
     this.saveDatabase();
     this.logger.log(`Removed all children from parent ${parentId}`);
   }
@@ -2526,16 +2634,15 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
 
-    db.run(
+    db.prepare(
       `INSERT OR REPLACE INTO text_content (
         media_id, extracted_text, extraction_method, extracted_at
-      ) VALUES (?, ?, ?, ?)`,
-      [
-        textContent.mediaId,
-        textContent.extractedText,
-        textContent.extractionMethod || null,
-        now,
-      ]
+      ) VALUES (?, ?, ?, ?)`
+    ).run(
+      textContent.mediaId,
+      textContent.extractedText,
+      textContent.extractionMethod || null,
+      now,
     );
 
     this.saveDatabase();
@@ -2544,15 +2651,11 @@ export class DatabaseService {
   /**
    * Get extracted text content for a document
    */
-  getTextContent(mediaId: string) {
+  getTextContent(mediaId: string): TextContentRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM text_content WHERE media_id = ?');
-    stmt.bind([mediaId]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(mediaId) as TextContentRecord | undefined;
+    return result || null;
   }
 
   /**
@@ -2560,7 +2663,7 @@ export class DatabaseService {
    */
   deleteTextContent(mediaId: string) {
     const db = this.ensureInitialized();
-    db.run('DELETE FROM text_content WHERE media_id = ?', [mediaId]);
+    db.prepare('DELETE FROM text_content WHERE media_id = ?').run(mediaId);
     this.saveDatabase();
     this.logger.log(`Deleted text content for ${mediaId}`);
   }
@@ -2568,7 +2671,7 @@ export class DatabaseService {
   /**
    * Search text content (for documents)
    */
-  searchTextContent(query: string, limit = 50) {
+  searchTextContent(query: string, limit = 50): TextContentSearchRecord[] {
     const db = this.ensureInitialized();
     const searchTerm = query.toLowerCase().trim();
 
@@ -2579,21 +2682,14 @@ export class DatabaseService {
       WHERE lower(tc.extracted_text) LIKE ?
       LIMIT ?
     `);
-    stmt.bind([`%${searchTerm}%`, limit]);
-
-    const results: any[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject());
-    }
-    stmt.free();
-
+    const results = stmt.all(`%${searchTerm}%`, limit) as TextContentSearchRecord[];
     return results;
   }
 
   /**
    * Get the latest library analytics for a library
    */
-  getLatestLibraryAnalytics(libraryId: string) {
+  getLatestLibraryAnalytics(libraryId: string): LibraryAnalyticsRecord | null {
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
       SELECT * FROM library_analytics
@@ -2601,12 +2697,8 @@ export class DatabaseService {
       ORDER BY generated_at DESC
       LIMIT 1
     `);
-    stmt.bind([libraryId]);
-
-    const result = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
-
-    return result;
+    const result = stmt.get(libraryId) as LibraryAnalyticsRecord | undefined;
+    return result || null;
   }
 
   /**
@@ -2622,20 +2714,19 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const id = `analytics_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-    db.run(
+    db.prepare(
       `INSERT INTO library_analytics (
         id, library_id, generated_at, videos_analyzed_count,
         ai_insights, ai_model, generation_time_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        analytics.libraryId,
-        new Date().toISOString(),
-        analytics.videosAnalyzedCount,
-        analytics.aiInsights,
-        analytics.aiModel,
-        analytics.generationTimeSeconds || null,
-      ]
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      analytics.libraryId,
+      new Date().toISOString(),
+      analytics.videosAnalyzedCount,
+      analytics.aiInsights,
+      analytics.aiModel,
+      analytics.generationTimeSeconds || null,
     );
 
     this.saveDatabase();
@@ -2649,7 +2740,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
 
     // Delete all but the most recent N entries
-    db.run(`
+    db.prepare(`
       DELETE FROM library_analytics
       WHERE library_id = ?
       AND id NOT IN (
@@ -2658,7 +2749,7 @@ export class DatabaseService {
         ORDER BY generated_at DESC
         LIMIT ?
       )
-    `, [libraryId, libraryId, keepCount]);
+    `).run(libraryId, libraryId, keepCount);
 
     this.saveDatabase();
   }
@@ -2668,7 +2759,7 @@ export class DatabaseService {
    */
   onModuleDestroy() {
     if (this.db) {
-      this.saveDatabase();
+      // better-sqlite3 automatically saves all changes, no need to call saveDatabase()
       this.db.close();
       this.logger.log('Database connection closed');
     }

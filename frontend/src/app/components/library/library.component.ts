@@ -295,6 +295,11 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
     enabled: true,
     groupBy: (video) => {
+      // When searching, show all results in a single "Search Results" section
+      if (this.searchQuery && this.searchQuery.trim()) {
+        return 'SEARCH_RESULTS';
+      }
+
       const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
       const now = new Date();
       const hoursSinceDownload = (now.getTime() - downloadDate.getTime()) / (1000 * 60 * 60);
@@ -307,6 +312,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       return this.getWeekIdentifier(downloadDate);
     },
     groupLabel: (weekKey) => {
+      if (weekKey === 'SEARCH_RESULTS') {
+        return '🔍 Search Results';
+      }
       if (weekKey === 'NEW_VIDEOS_24H') {
         return '🆕 New (Last 24 Hours)';
       }
@@ -1280,6 +1288,11 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     this.fileTypeFilters = criteria.fileTypeFilters;
     this.sortBy = criteria.sortBy;
     this.sortOrder = criteria.sortOrder;
+
+    // Ensure search results section is always expanded when searching
+    if (this.searchQuery && this.searchQuery.trim()) {
+      this.collapsedWeeks.delete('SEARCH_RESULTS');
+    }
 
     this.applyFiltersAndSort();
   }

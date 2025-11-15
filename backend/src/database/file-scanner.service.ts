@@ -369,12 +369,7 @@ export class FileScannerService {
       ORDER BY v.download_date DESC
     `);
 
-    const results: NeedsAnalysisVideo[] = [];
-    while (stmt.step()) {
-      results.push(stmt.getAsObject() as unknown as NeedsAnalysisVideo);
-    }
-    stmt.free();
-
+    const results = stmt.all() as NeedsAnalysisVideo[];
     return results;
   }
 
@@ -395,10 +390,7 @@ export class FileScannerService {
         AND (t.video_id IS NULL OR a.video_id IS NULL)
     `);
 
-    stmt.step();
-    const result = stmt.getAsObject() as any;
-    stmt.free();
-
+    const result = stmt.get() as { count: number };
     return result.count;
   }
 
@@ -424,11 +416,7 @@ export class FileScannerService {
         AND is_linked = 1
     `);
 
-    const videosToUpdate: Array<{ id: string; filename: string; current_path: string; media_type: string }> = [];
-    while (stmt.step()) {
-      videosToUpdate.push(stmt.getAsObject() as any);
-    }
-    stmt.free();
+    const videosToUpdate = stmt.all() as Array<{ id: string; filename: string; current_path: string; media_type: string }>;
 
     const result = {
       total: videosToUpdate.length,
@@ -454,10 +442,8 @@ export class FileScannerService {
 
         if (metadata.duration) {
           // Update database
-          db.run(
-            'UPDATE videos SET duration_seconds = ? WHERE id = ?',
-            [metadata.duration, video.id]
-          );
+          db.prepare('UPDATE videos SET duration_seconds = ? WHERE id = ?')
+            .run(metadata.duration, video.id);
 
           result.updated++;
           this.logger.log(`Updated duration for ${video.filename}: ${metadata.duration}s`);

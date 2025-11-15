@@ -53,10 +53,6 @@ const routes: Routes = [
     loadComponent: () => import('./components/video-player/video-player.component').then(m => m.VideoPlayerComponent)
   },
   {
-    path: 'database-migration',
-    loadComponent: () => import('./components/database-migration-wizard/database-migration-wizard.component').then(m => m.DatabaseMigrationWizardComponent)
-  },
-  {
     path: 'relink',
     loadComponent: () => import('./components/relinking-tool/relinking-tool.component').then(m => m.RelinkingToolComponent)
   },

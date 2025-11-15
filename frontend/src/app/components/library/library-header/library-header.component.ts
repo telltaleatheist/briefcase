@@ -57,7 +57,6 @@ export class LibraryHeaderComponent {
   @Output() importVideos = new EventEmitter<void>();
   @Output() downloadFromUrl = new EventEmitter<void>();
   @Output() analytics = new EventEmitter<void>();
-  @Output() openVideoManagement = new EventEmitter<void>();
   @Output() backToLibrary = new EventEmitter<void>();
 
   /**
@@ -93,13 +92,6 @@ export class LibraryHeaderComponent {
    */
   openAnalytics(): void {
     this.analytics.emit();
-  }
-
-  /**
-   * Open video management view
-   */
-  viewVideoManagement(): void {
-    this.openVideoManagement.emit();
   }
 
   /**

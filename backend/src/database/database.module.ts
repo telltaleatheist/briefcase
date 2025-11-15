@@ -7,8 +7,6 @@ import { DatabaseController } from './database.controller';
 import { PathMappingService } from './path-mapping.service';
 import { SharedDatabaseService } from './shared-database.service';
 import { DatabaseConflictService } from './database-conflict.service';
-import { DatabaseMigrationService } from './database-migration.service';
-import { DatabaseMigrationController } from './database-migration.controller';
 import { RelinkingService } from './relinking.service';
 import { RelinkingController } from './relinking.controller';
 import { IgnoreService } from './ignore.service';
@@ -26,7 +24,6 @@ import { MediaModule } from '../media/media.module';
  * - PathMappingService: Translates paths between NAS-relative and absolute
  * - SharedDatabaseService: Pull-before-push pattern for multi-computer access
  * - DatabaseConflictService: Detects and handles conflicts (delete vs update)
- * - DatabaseMigrationService: Migrates existing database to shared mode
  */
 @Global()
 @Module({
@@ -37,7 +34,6 @@ import { MediaModule } from '../media/media.module';
   ],
   controllers: [
     DatabaseController,
-    DatabaseMigrationController,
     RelinkingController,
   ],
   providers: [
@@ -48,7 +44,6 @@ import { MediaModule } from '../media/media.module';
     PathMappingService,
     DatabaseConflictService,
     SharedDatabaseService,
-    DatabaseMigrationService,
     RelinkingService,
     IgnoreService,
   ],
@@ -60,7 +55,6 @@ import { MediaModule } from '../media/media.module';
     PathMappingService,
     DatabaseConflictService,
     SharedDatabaseService,
-    DatabaseMigrationService,
     IgnoreService,
   ],
 })

@@ -223,7 +223,8 @@ export class LibraryDownloadService {
       this.emitJobUpdate(job);
 
       const fileHash = await this.databaseService.hashFile(job.outputFile);
-      importedVideo = this.databaseService.findVideoByHash(fileHash);
+      const video = this.databaseService.findVideoByHash(fileHash);
+      importedVideo = video ? video as any : undefined;
     }
 
     if (importResult.imported.length === 0) {

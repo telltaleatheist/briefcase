@@ -20,13 +20,17 @@
             <mat-icon matListItemIcon>video_library</mat-icon>
             <span matListItemTitle>Video Library</span>
           </a>
+          <a mat-list-item routerLink="/library-management" routerLinkActive="active-link" class="sub-item">
+            <mat-icon matListItemIcon>settings</mat-icon>
+            <span matListItemTitle>Video Manager</span>
+          </a>
           <a mat-list-item routerLink="/batch-downloads" routerLinkActive="active-link">
             <mat-icon matListItemIcon>cloud_download</mat-icon>
             <span matListItemTitle>Batch Downloads</span>
           </a>
           <a mat-list-item routerLink="/bulk-analysis" routerLinkActive="active-link">
             <mat-icon matListItemIcon>auto_fix_high</mat-icon>
-            <span matListItemTitle>Analyze All</span>
+            <span matListItemTitle>Batch Analysis</span>
           </a>
           <a mat-list-item routerLink="/saved-links" routerLinkActive="active-link">
             <mat-icon matListItemIcon>bookmarks</mat-icon>
@@ -40,25 +44,9 @@
             <mat-icon matListItemIcon>equalizer</mat-icon>
             <span matListItemTitle>Normalize Audio</span>
           </a>
-          <a mat-list-item routerLink="/analysis-parameters" routerLinkActive="active-link">
-            <mat-icon matListItemIcon>tune</mat-icon>
-            <span matListItemTitle>Analysis Parameters</span>
-          </a>
           <a mat-list-item routerLink="/settings" routerLinkActive="active-link">
             <mat-icon matListItemIcon>settings</mat-icon>
             <span matListItemTitle>Settings</span>
-          </a>
-
-          <mat-divider></mat-divider>
-
-          <a mat-list-item routerLink="/database-migration" routerLinkActive="active-link" class="migration-link">
-            <mat-icon matListItemIcon>sync_alt</mat-icon>
-            <span matListItemTitle>Database Migration</span>
-          </a>
-
-          <a mat-list-item routerLink="/relink" routerLinkActive="active-link" class="relink-link">
-            <mat-icon matListItemIcon>link</mat-icon>
-            <span matListItemTitle>Relink Files</span>
           </a>
         </mat-nav-list>
 
