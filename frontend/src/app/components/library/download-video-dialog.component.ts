@@ -13,6 +13,7 @@ import { HttpClient } from '@angular/common/http';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { ApiService } from '../../services/api.service';
 import { DownloadProgressService } from '../../services/download-progress.service';
+import { VideoProcessingQueueService } from '../../services/video-processing-queue.service';
 import { firstValueFrom } from 'rxjs';
 
 interface DialogData {
@@ -367,7 +368,8 @@ export class DownloadVideoDialogComponent implements OnInit {
     private apiService: ApiService,
     private http: HttpClient,
     private backendUrlService: BackendUrlService,
-    private downloadProgressService: DownloadProgressService
+    private downloadProgressService: DownloadProgressService,
+    private videoProcessingQueueService: VideoProcessingQueueService
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -468,63 +470,70 @@ export class DownloadVideoDialogComponent implements OnInit {
       console.log('[DownloadVideoDialog] Title fetching completed or timed out');
     }
 
-    // Generate a jobId for tracking
-    const jobId = `download-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    console.log('[DownloadVideoDialog] Generated jobId:', jobId);
+    // Build child processes array based on selected options
+    const childProcesses: any[] = [
+      {
+        type: 'download',
+        displayName: 'Download Video',
+        downloadUrl: this.url,
+        outputDir: this.data.activeLibrary.clipsFolderPath,
+        quality: '1080',
+        convertToMp4: true,
+        status: 'pending',
+        progress: 0
+      }
+    ];
 
-    // Add job to download progress tracker
-    this.downloadProgressService.addJob({
-      id: jobId,
-      filename: this.url, // Will be updated when we get actual filename
-      url: this.url,
-      stage: 'downloading',
-      progress: 0,
-      startedAt: new Date()
+    // Add transcription if selected
+    if (this.transcribeAfterDownload) {
+      childProcesses.push({
+        type: 'transcribe',
+        displayName: 'Transcribe Audio',
+        whisperModel: 'base',
+        status: 'pending',
+        progress: 0
+      });
+    }
+
+    // Add analysis if selected
+    if (this.analyzeAfterDownload && this.transcribeAfterDownload) {
+      childProcesses.push({
+        type: 'analyze',
+        displayName: `AI Analysis (${this.selectedModel})`,
+        aiModel: this.selectedModelFull, // Full format: "provider:model"
+        aiProvider: this.selectedProvider,
+        apiKey: this.selectedProvider === 'claude' && this.claudeApiKey !== '***' ? this.claudeApiKey :
+                this.selectedProvider === 'openai' && this.openaiApiKey !== '***' ? this.openaiApiKey :
+                undefined,
+        status: 'pending',
+        progress: 0
+      });
+    }
+
+    // Create video processing job
+    const displayTitle = this.videoTitle || new URL(this.url).hostname;
+    const jobId = this.videoProcessingQueueService.addVideoJob({
+      videoId: undefined,  // No video ID yet (will be set after download/import)
+      videoPath: this.url,  // Use URL as initial path
+      displayName: displayTitle,
+      processes: childProcesses.map(child => ({
+        type: child.type as any,
+        config: child
+      }))
     });
 
-    // Close dialog immediately - download will be tracked in the queue
+    console.log('[DownloadVideoDialog] Created processing job with', childProcesses.length, 'child tasks');
+
+    // Start processing the job immediately
+    this.videoProcessingQueueService.submitJob(jobId).catch(err => {
+      console.error('[DownloadVideoDialog] Failed to start job:', err);
+    });
+
+    // Close dialog immediately - download will be tracked in the processing queue
     this.dialogRef.close({
       success: true,
       downloadStarted: true,
-      transcribe: this.transcribeAfterDownload,
-      analyze: this.analyzeAfterDownload,
-      aiProvider: this.selectedProvider,
-      aiModel: this.selectedModel,
-      claudeApiKey: this.claudeApiKey !== '***' ? this.claudeApiKey : undefined,
-      openaiApiKey: this.openaiApiKey !== '***' ? this.openaiApiKey : undefined
-    });
-
-    // Log the displayName being sent
-    console.log('[DownloadVideoDialog] Starting download with displayName:', this.videoTitle || '(empty)');
-
-    // Start the download asynchronously - it will be tracked in the download queue
-    this.apiService.downloadVideo({
-      url: this.url,
-      jobId: jobId,  // Pass the jobId to backend
-      quality: '1080',  // Use valid quality value - backend accepts: 360, 480, 720, 1080, 1440, 2160
-      convertToMp4: true,
-      fixAspectRatio: false,
-      useCookies: false,
-      browser: 'auto',
-      outputDir: this.data.activeLibrary.clipsFolderPath,
-      displayName: this.videoTitle || '', // Use fetched video title or empty string
-      transcribeVideo: this.transcribeAfterDownload,
-      analyzeVideo: this.analyzeAfterDownload,  // Add analyze flag
-      shouldImport: true  // Auto-import to library after download
-    }).subscribe({
-      next: (result) => {
-        console.log('[DownloadVideoDialog] Download completed:', result);
-      },
-      error: (error) => {
-        console.error('[DownloadVideoDialog] Download error:', error);
-        // Update job to failed status
-        const job = this.downloadProgressService.getJob(jobId);
-        if (job) {
-          job.stage = 'failed';
-          job.error = error.message || 'Download failed';
-          this.downloadProgressService.updateJob(job);
-        }
-      }
+      jobId: jobId
     });
   }
 

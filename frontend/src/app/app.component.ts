@@ -134,6 +134,9 @@ export class AppComponent implements OnInit, OnDestroy {
   private handleBeforeUnload(): void {
     // Clear the pending jobs queue when the app is closing
     this.batchStateService.clearPendingJobs();
+
+    // Clear the video processing queue cache
+    this.videoProcessingQueueService.clearCache();
   }
 
   navigateToAnalysis(): void {

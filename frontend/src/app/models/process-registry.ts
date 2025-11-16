@@ -23,6 +23,22 @@ export interface ProcessDefinition {
  * Add new processes here!
  */
 export const PROCESS_DEFINITIONS: Record<ProcessType, ProcessDefinition> = {
+  'download': {
+    type: 'download',
+    displayName: 'Download',
+    icon: 'download',
+    apiPath: '/downloader/download-only',
+    requiresVideoId: false,
+  },
+
+  'import': {
+    type: 'import',
+    displayName: 'Import to Library',
+    icon: 'library_add',
+    apiPath: '/library/import-file',
+    requiresVideoId: false,
+  },
+
   'process': {
     type: 'process',
     displayName: 'Fix Aspect Ratio',

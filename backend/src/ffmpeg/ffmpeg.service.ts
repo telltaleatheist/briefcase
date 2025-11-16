@@ -421,9 +421,9 @@ export class FfmpegService {
       }
       
       filterComplex += `;${audioFilter}`;
-      commandOptions.push('-map', '[aout]');
+      commandOptions.push('-map', '[aout]?');
     } else {
-      commandOptions.push('-map', '0:a');
+      commandOptions.push('-map', '0:a?');
     }
     
     commandOptions.unshift('-filter_complex', filterComplex);
@@ -524,9 +524,9 @@ export class FfmpegService {
       if (this.safeDeleteFile(videoFile)) {
         this.logger.log(`Deleted original video: ${videoFile}`);
 
-        // Rename the reencoded file to the original name
+        // Rename the reencoded file to the original name (keep original extension)
         const fs = require('fs');
-        const originalName = videoFile.replace(/\.[^/.]+$/, '.mov');
+        const originalName = videoFile;  // Keep exact original filename
         try {
           fs.renameSync(outputFile, originalName);
           this.logger.log(`Renamed ${outputFile} to ${originalName}`);

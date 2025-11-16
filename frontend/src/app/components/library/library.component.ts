@@ -183,6 +183,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   };
   showFileTypeFilters = false;
 
+  // Title suggestion filter
+  showOnlyTitleSuggestions = false;
+
   // Track open video player dialog to prevent multiple instances
   private openVideoPlayerDialog: any = null;
 
@@ -357,7 +360,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     actions.push(
       { id: 'divider1', label: '', divider: true },
       { id: 'analyze', label: 'Run Analysis', icon: 'analytics' },
-      { id: 'transcribe', label: 'Run Transcription', icon: 'transcribe' },
       { id: 'divider2', label: '', divider: true },
       { id: 'relink', label: 'Relink Video', icon: 'link' },
       { id: 'delete', label: 'Delete', icon: 'delete' }
@@ -1235,7 +1237,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
           selectedTags: this.selectedTags,
           fileTypeFilters: this.fileTypeFilters,
           sortBy: this.sortBy,
-          sortOrder: this.sortOrder
+          sortOrder: this.sortOrder,
+          showOnlyTitleSuggestions: this.showOnlyTitleSuggestions
         };
         filtered = this.videoFilterService.applyFilters(this.videos, criteria);
       }
@@ -1247,7 +1250,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         selectedTags: this.selectedTags,
         fileTypeFilters: this.fileTypeFilters,
         sortBy: this.sortBy,
-        sortOrder: this.sortOrder
+        sortOrder: this.sortOrder,
+        showOnlyTitleSuggestions: this.showOnlyTitleSuggestions
       };
       filtered = this.videoFilterService.applyFilters(this.videos, criteria);
     }
@@ -1485,6 +1489,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     this.fileTypeFilters = criteria.fileTypeFilters;
     this.sortBy = criteria.sortBy;
     this.sortOrder = criteria.sortOrder;
+    this.showOnlyTitleSuggestions = criteria.showOnlyTitleSuggestions || false;
 
     // Ensure search results section is always expanded when searching
     if (this.searchQuery && this.searchQuery.trim()) {

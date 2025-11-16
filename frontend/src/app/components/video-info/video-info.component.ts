@@ -294,13 +294,19 @@ export class VideoInfoComponent implements OnInit {
   }
 
   async getVideoUrl(): Promise<string> {
-    if (!this.video) return '';
+    if (!this.video) {
+      console.log('[getVideoUrl] No video object');
+      return '';
+    }
 
+    console.log('[getVideoUrl] Generating URL for:', this.video.filename, 'media_type:', this.video.media_type);
     try {
       const backendUrl = await this.backendUrlService.getBackendUrl();
       // Use the custom path endpoint with proper encoding (same as video-player component)
       const encodedPath = btoa(unescape(encodeURIComponent(this.video.current_path)));
-      return `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+      const url = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+      console.log('[getVideoUrl] Generated URL:', url);
+      return url;
     } catch (error) {
       console.error('Error generating video URL:', error);
       return '';
@@ -370,11 +376,24 @@ export class VideoInfoComponent implements OnInit {
   }
 
   /**
+   * Get the media type with a default value of 'video' for old databases
+   */
+  getMediaType(): string {
+    return this.video?.media_type || 'video';
+  }
+
+  /**
    * Check if the current media can be analyzed (video or audio only)
    */
   canAnalyzeMedia(): boolean {
-    if (!this.video) return false;
-    return this.video.media_type === 'video' || this.video.media_type === 'audio';
+    if (!this.video) {
+      console.log('[canAnalyzeMedia] No video object');
+      return false;
+    }
+    // Default to 'video' if media_type is not set (for old databases without this column)
+    const mediaType = this.getMediaType();
+    console.log('[canAnalyzeMedia] video.media_type:', mediaType);
+    return mediaType === 'video' || mediaType === 'audio';
   }
 
   async deleteAnalysisSection(section: DatabaseAnalysisSection): Promise<void> {

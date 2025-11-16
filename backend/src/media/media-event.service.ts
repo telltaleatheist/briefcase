@@ -37,13 +37,14 @@ export class MediaEventService {
     return new Date().toISOString();
   }
   
-  emitJobStatusUpdate(jobId: string, status: string, task: string): void {
+  emitJobStatusUpdate(jobId: string, status: string, task: string, extraData?: { videoId?: string, videoPath?: string }): void {
     this.logger.log(`Emitting job status update for ${jobId}: ${status} - ${task}`);
     this.emitEvent('job-status-updated', {
       jobId,
       status,
       task,
-      timestamp: this.getTimestamp()
+      timestamp: this.getTimestamp(),
+      ...extraData
     });
   }
     
@@ -292,6 +293,36 @@ export class MediaEventService {
     this.logger.log(`Emitting suggestion-rejected event for ${videoId}`);
     this.emitEvent('suggestion-rejected', {
       videoId,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Analysis events
+   */
+  emitAnalysisProgress(videoId: string, progress: number, message: string, jobId?: string): void {
+    this.emitEvent('analysisProgress', {
+      videoId,
+      jobId: jobId || `analyze-${videoId}`,  // Use provided jobId or fallback
+      progress: this.normalizeProgress(progress),
+      message,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  emitAnalysisCompleted(videoId: string, suggestedTitle: string, aiDescription: string): void {
+    this.emitEvent('analysis-completed', {
+      videoId,
+      suggestedTitle,
+      aiDescription,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  emitAnalysisFailed(videoId: string, error: string): void {
+    this.emitEvent('analysis-failed', {
+      videoId,
+      error,
       timestamp: this.getTimestamp()
     });
   }

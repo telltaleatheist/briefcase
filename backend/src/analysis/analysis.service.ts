@@ -134,8 +134,8 @@ export class AnalysisService implements OnModuleInit {
   /**
    * Start a new analysis job (adds to queue)
    */
-  async startAnalysis(request: AnalysisRequest): Promise<string> {
-    const jobId = uuidv4();
+  async startAnalysis(request: AnalysisRequest, customJobId?: string): Promise<string> {
+    const jobId = customJobId || uuidv4();
 
     // Determine title from input
     let title = 'Video Analysis';
@@ -1396,6 +1396,7 @@ export class AnalysisService implements OnModuleInit {
     claudeApiKey?: string;
     openaiApiKey?: string;
     limit?: number; // Process only first N videos (for testing)
+    customJobId?: string; // Custom job ID from frontend (for single-video analysis in processing queue)
   }): Promise<{ batchId: string; jobIds: string[] }> {
     const batchId = uuidv4();
 
@@ -1502,7 +1503,9 @@ export class AnalysisService implements OnModuleInit {
           videoId: video.id,
         };
 
-        const jobId = await this.startAnalysis(request);
+        // Use customJobId only for single-video batches (when explicitly provided from frontend)
+        const useCustomJobId = options.customJobId && videosToProcess.length === 1;
+        const jobId = await this.startAnalysis(request, useCustomJobId ? options.customJobId : undefined);
         jobIds.push(jobId);
 
       } catch (error) {

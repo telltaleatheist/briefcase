@@ -240,6 +240,30 @@ export class VideoAnalysisDialogComponent implements OnInit {
     const processes: ProcessConfig[] = [];
     const formValue = this.analysisForm.getRawValue();
 
+    // IMPORTANT: If input is a URL (not a local file), add download as FIRST task
+    const isUrl = formValue.inputType === 'url' && formValue.input && formValue.input.trim();
+    if (isUrl && !this.data.selectedVideos) {
+      try {
+        new URL(formValue.input); // Validate it's actually a URL
+
+        // Add download task as the FIRST child process
+        processes.push({
+          type: 'download' as ProcessType,
+          config: {
+            downloadUrl: formValue.input,
+            postTitle: this.fetchedVideoTitle || '',
+            outputDir: undefined, // Backend will use default library path
+            quality: '1080',
+            convertToMp4: true
+          }
+        });
+
+        console.log('[VideoAnalysisDialog] Added download task for URL:', formValue.input);
+      } catch (e) {
+        console.warn('[VideoAnalysisDialog] Input is not a valid URL, skipping download task');
+      }
+    }
+
     // Process video (aspect ratio fix)
     if (formValue.processVideo) {
       processes.push({

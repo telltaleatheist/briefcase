@@ -719,6 +719,21 @@ export class FileScannerService {
   }
 
   /**
+   * Find a video in the database by its filename
+   * Returns the video object if found, null otherwise
+   */
+  async findVideoByFilename(filename: string): Promise<any | null> {
+    try {
+      const videos = await this.databaseService.getAllVideos();
+      const found = videos.find((v: any) => v.filename === filename);
+      return found || null;
+    } catch (error) {
+      this.logger.error(`Error finding video by filename: ${error}`);
+      return null;
+    }
+  }
+
+  /**
    * Import videos with progress updates (for large batches)
    * Uses batching and memory optimization
    */

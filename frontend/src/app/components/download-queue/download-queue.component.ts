@@ -182,20 +182,25 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
     // Subscribe to video processing queue jobs (NEW service)
     this.videoProcessingJobsSubscription = this.videoProcessingQueueService.getJobs().subscribe(jobsMap => {
-      console.log('[DownloadQueue] Video processing jobs updated. Count:', jobsMap.size);
       const previousJobs = this.videoProcessingJobs;
       this.videoProcessingJobs = Array.from(jobsMap.values());
 
-      // Auto-submit newly added pending jobs if queue is running
-      if (this.autoProcessQueue) {
-        this.autoSubmitNewPendingJobs(previousJobs, this.videoProcessingJobs);
-      }
+      // Only check for new jobs if the list actually changed (not just progress updates)
+      const jobCountChanged = previousJobs.length !== this.videoProcessingJobs.length;
+      const jobIdsChanged = jobCountChanged ||
+        !this.arraysHaveSameIds(previousJobs, this.videoProcessingJobs);
+
+      // NOTE: Auto-submit disabled - processQueueSequentially() handles all submissions
+      // No auto-submit here to avoid race conditions and duplicate submissions
 
       // Update combined list when video processing jobs change
       this.updateAllJobsList();
 
       // Expand only the first item after the view updates (debounced to avoid race conditions)
-      this.scheduleExpandFirstItem();
+      // Only do this if jobs were added/removed, not on every progress update
+      if (jobIdsChanged) {
+        this.scheduleExpandFirstItem();
+      }
     });
 
     // Load available Ollama models
@@ -364,25 +369,51 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     this.autoProcessQueue = true;
     console.log('[DownloadQueue] *** autoProcessQueue set to true ***');
 
-    // Start OLD service jobs (if any)
-    if (this.pendingJobs.length > 0) {
-      await this.startNextPendingJob();
-    }
+    // Start simple sequential processing
+    this.processQueueSequentially();
+  }
 
-    // Start NEW service jobs (video processing jobs)
-    const pendingVideoJobs = this.videoProcessingJobs.filter(job => job.overallStatus === 'pending');
-    for (const job of pendingVideoJobs) {
-      await this.videoProcessingQueueService.submitJob(job.id);
-    }
+  /**
+   * Process queue jobs one at a time, sequentially
+   * This is the ONLY place that should submit jobs
+   */
+  private async processQueueSequentially(): Promise<void> {
+    while (this.autoProcessQueue) {
+      // Get the next pending job (only one, the first one)
+      const pendingVideoJobs = this.videoProcessingJobs.filter(job => job.overallStatus === 'pending');
+      const pendingOldJobs = this.pendingJobs;
 
-    // Start polling to track progress
-    if (!this.pollingSubscription) {
-      this.isProcessing = true;
-      this.startPolling();
-    }
+      // Process new video processing jobs first
+      if (pendingVideoJobs.length > 0) {
+        const nextJob = pendingVideoJobs[0];
+        console.log('[DownloadQueue] Processing next job:', nextJob.id, nextJob.displayName);
 
-    // Toast notification removed - dialog is already visible showing queue status
-    // Angular change detection will automatically update the UI
+        try {
+          // Submit the job and WAIT for it to complete
+          await this.videoProcessingQueueService.submitJob(nextJob.id);
+          console.log('[DownloadQueue] Job completed:', nextJob.id);
+        } catch (error: any) {
+          console.error('[DownloadQueue] Job failed:', nextJob.id, error);
+        }
+
+        // Loop will continue to next job
+        continue;
+      }
+
+      // Process old system jobs if no new jobs
+      if (pendingOldJobs.length > 0) {
+        await this.startNextPendingJob();
+        // Wait a bit for the job to start processing
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      // No more pending jobs - stop
+      console.log('[DownloadQueue] No more pending jobs, stopping queue');
+      this.autoProcessQueue = false;
+      this.isProcessing = false;
+      break;
+    }
   }
 
   /**
@@ -763,11 +794,18 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Run polling OUTSIDE Angular zone to avoid triggering change detection every 2s
     this.ngZone.runOutsideAngular(() => {
       const intervalId = setInterval(async () => {
-        const activeJobs = this.processingJobs.filter(job =>
+        // Check for active jobs in BOTH old and new systems
+        const activeOldJobs = this.processingJobs.filter(job =>
           job.stage !== 'completed' && job.stage !== 'failed'
         );
 
-        if (activeJobs.length === 0) {
+        const activeNewJobs = this.videoProcessingJobs.filter(job =>
+          job.overallStatus === 'processing'
+        );
+
+        const hasActiveJobs = activeOldJobs.length > 0 || activeNewJobs.length > 0;
+
+        if (!hasActiveJobs) {
           // Re-enter zone for these operations
           this.ngZone.run(() => {
             if (this.autoProcessQueue && this.hasPendingJobs()) {
@@ -782,6 +820,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
           });
           return;
         }
+
+        const activeJobs = activeOldJobs; // Keep polling OLD system jobs
 
         for (const job of activeJobs) {
           try {
@@ -910,8 +950,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     }));
 
     // Add video processing jobs (NEW service)
+    // Show all jobs except completed (show failed so user can see what went wrong)
     const videoProcessing = this.videoProcessingJobs
-      .filter(job => job.overallStatus !== 'completed' && job.overallStatus !== 'failed')
+      .filter(job => job.overallStatus !== 'completed')
       .map(job => ({
         ...job,
         displayName: job.displayName || 'Unknown Video',
@@ -929,8 +970,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     const seenIds = new Set<string>();
     const uniqueJobs = combined.filter(job => {
       if (seenIds.has(job.id)) {
-        console.warn('[DownloadQueue] Duplicate job ID detected:', job.id, 'Removing duplicate.');
-        return false;
+        return false; // Skip duplicate
       }
       seenIds.add(job.id);
       return true;
@@ -944,7 +984,6 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       const validIds = new Set(uniqueJobs.map(j => j.id));
       const staleIds = Array.from(this.cascadeList.expandedItems).filter(id => !validIds.has(id));
       staleIds.forEach(id => {
-        console.log('[DownloadQueue] Removing stale expanded item:', id);
         this.cascadeList!.expandedItems.delete(id);
       });
     }
@@ -977,7 +1016,22 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Check if two arrays have the same IDs (for detecting when jobs are added/removed vs just updated)
+   */
+  private arraysHaveSameIds(arr1: any[], arr2: any[]): boolean {
+    if (arr1.length !== arr2.length) return false;
+    const ids1 = new Set(arr1.map(j => j.id));
+    const ids2 = new Set(arr2.map(j => j.id));
+    if (ids1.size !== ids2.size) return false;
+    for (const id of ids1) {
+      if (!ids2.has(id)) return false;
+    }
+    return true;
+  }
+
+  /**
    * Auto-submit newly added pending jobs when queue is running
+   * Jobs are processed sequentially (one at a time)
    */
   private async autoSubmitNewPendingJobs(previousJobs: any[], currentJobs: any[]): Promise<void> {
     // Find new pending jobs (jobs that weren't in the previous list)
@@ -990,17 +1044,27 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       return;
     }
 
-    console.log('[DownloadQueue] Auto-submitting', newPendingJobs.length, 'new pending jobs');
+    console.log('[DownloadQueue] Auto-submitting', newPendingJobs.length, 'new pending jobs sequentially');
 
-    // Submit each new pending job
-    for (const job of newPendingJobs) {
+    // Submit each new pending job sequentially (one at a time)
+    // This matches the behavior of startQueue() and prevents overloading the backend
+    for (let i = 0; i < newPendingJobs.length; i++) {
+      const job = newPendingJobs[i];
       try {
-        console.log('[DownloadQueue] Auto-submitting job:', job.id, job['displayName']);
+        console.log(`[DownloadQueue] ======== Auto-submitting job ${i + 1}/${newPendingJobs.length} ========`);
+        console.log('[DownloadQueue] Job ID:', job.id);
+        console.log('[DownloadQueue] Job name:', job['displayName']);
+
         await this.videoProcessingQueueService.submitJob(job.id);
+
+        console.log(`[DownloadQueue] ✅ Job ${i + 1}/${newPendingJobs.length} completed successfully:`, job.id);
       } catch (error: any) {
-        console.error('[DownloadQueue] Failed to auto-submit job:', job.id, error);
+        console.error(`[DownloadQueue] ❌ Failed to auto-submit job ${i + 1}/${newPendingJobs.length}:`, job.id, error);
+        // Continue to next job even if this one fails
       }
     }
+
+    console.log('[DownloadQueue] ======== All auto-submit jobs processed ========');
   }
 
   /**
@@ -1025,22 +1089,14 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
    */
   private expandFirstItemOnly(): void {
     if (!this.cascadeList) {
-      console.log('[DownloadQueue] expandFirstItemOnly: cascadeList not available yet');
       return;
     }
 
     const allJobs = this.allJobsAsListItems;
     if (allJobs.length === 0) {
-      console.log('[DownloadQueue] expandFirstItemOnly: no jobs to expand');
       this.cascadeList.expandedItems.clear();
       return;
     }
-
-    console.log('[DownloadQueue] expandFirstItemOnly: Processing', allJobs.length, 'jobs');
-
-    // Get current expanded items before clearing
-    const currentlyExpanded = Array.from(this.cascadeList.expandedItems);
-    console.log('[DownloadQueue] Currently expanded items:', currentlyExpanded);
 
     // Clear all expanded items first
     this.cascadeList.expandedItems.clear();
@@ -1048,14 +1104,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Expand only the first item if it has children
     const firstJob = allJobs[0];
     if (this.cascadeList.hasChildren(firstJob)) {
-      console.log('[DownloadQueue] Expanding first job:', firstJob.id, firstJob['displayName']);
       this.cascadeList.expandedItems.add(firstJob.id);
-    } else {
-      console.log('[DownloadQueue] First job has no children:', firstJob.id, firstJob['displayName']);
     }
-
-    // Log final state
-    console.log('[DownloadQueue] Final expanded items:', Array.from(this.cascadeList.expandedItems));
   }
 
   /**
@@ -1086,10 +1136,18 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
   // Remove a job from the queue
   removeJob(jobId: string): void {
-    // Check if it's a pending job
+    // Check if it's a video processing queue job (new system)
+    const videoProcessingJob = this.videoProcessingJobs.find(j => j.id === jobId);
+    if (videoProcessingJob) {
+      this.videoProcessingQueueService.removeJob(jobId);
+      return;
+    }
+
+    // Check if it's a pending job (old system)
     const pendingJob = this.pendingJobs.find(j => j.id === jobId);
     if (pendingJob) {
       this.removePendingJob(jobId);
+      return;
     }
   }
 

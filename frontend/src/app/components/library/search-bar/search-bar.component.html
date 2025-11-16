@@ -121,6 +121,19 @@
       </div>
     </div>
 
+    <!-- Title Suggestion Filter -->
+    <div class="filter-section">
+      <div class="filter-section-title">Content Filter:</div>
+      <div class="filter-checkboxes-compact">
+        <mat-checkbox
+          [(ngModel)]="showOnlyTitleSuggestions"
+          (change)="onTitleSuggestionFilterChange()"
+          matTooltip="Show only videos with unresolved title suggestions">
+          Title Suggestions Only
+        </mat-checkbox>
+      </div>
+    </div>
+
     <!-- Sort buttons (moved to end) -->
     <div class="filter-section">
       <div class="filter-section-title">Sort by:</div>

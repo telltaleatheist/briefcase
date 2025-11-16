@@ -8,7 +8,7 @@
 /**
  * Types of processing operations that can be performed on a video
  */
-export type ProcessType = 'process' | 'normalize' | 'transcribe' | 'analyze';
+export type ProcessType = 'download' | 'import' | 'process' | 'normalize' | 'transcribe' | 'analyze';
 
 /**
  * Status of a job or process
@@ -40,6 +40,22 @@ export interface ChildProcess {
 
   /** Display name for UI (e.g., "Fix Aspect Ratio", "Normalize Audio") */
   displayName: string;
+
+  // ===== Download Configuration (only for 'download' type) =====
+  /** URL to download from */
+  downloadUrl?: string;
+
+  /** Post title for renaming downloaded file */
+  postTitle?: string;
+
+  /** Output directory for download */
+  outputDir?: string;
+
+  /** Video quality (e.g., '1080', '720') */
+  quality?: string;
+
+  /** Convert to MP4 format */
+  convertToMp4?: boolean;
 
   // ===== AI Analysis Configuration (only for 'analyze' type) =====
   /** AI model to use for analysis */
@@ -131,7 +147,18 @@ export interface ProcessConfig {
 /**
  * Type-specific configuration for processes
  */
-export type ProcessTypeConfig = AIAnalysisConfig | TranscriptionConfig | Record<string, never>;
+export type ProcessTypeConfig = DownloadConfig | AIAnalysisConfig | TranscriptionConfig | Record<string, never>;
+
+/**
+ * Configuration for download/import
+ */
+export interface DownloadConfig {
+  downloadUrl: string;
+  postTitle?: string;
+  outputDir?: string;
+  quality?: string;
+  convertToMp4?: boolean;
+}
 
 /**
  * Configuration for AI analysis
@@ -156,6 +183,8 @@ export interface TranscriptionConfig {
  */
 export function getProcessDisplayName(type: ProcessType): string {
   const names: Record<ProcessType, string> = {
+    'download': 'Download',
+    'import': 'Import to Library',
     'process': 'Fix Aspect Ratio',
     'normalize': 'Normalize Audio',
     'transcribe': 'Transcribe',
@@ -169,6 +198,8 @@ export function getProcessDisplayName(type: ProcessType): string {
  */
 export function getProcessIcon(type: ProcessType): string {
   const icons: Record<ProcessType, string> = {
+    'download': 'download',
+    'import': 'library_add',
     'process': 'aspect_ratio',
     'normalize': 'equalizer',
     'transcribe': 'subtitles',

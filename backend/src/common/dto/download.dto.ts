@@ -133,6 +133,10 @@ export class DownloadVideoDto {
   shouldImport?: boolean = false;  // Auto-import to library after download (only for library downloads)
 
   @IsOptional()
+  @IsBoolean()
+  skipProcessing?: boolean = false;  // Skip automatic processing (fix-aspect-ratio, normalize) - used by analysis queue
+
+  @IsOptional()
   @IsString()
   libraryId?: string;  // Library ID for database import
 }

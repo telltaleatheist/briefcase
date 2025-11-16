@@ -27,6 +27,7 @@ export interface FilterCriteria {
   fileTypeFilters: FileTypeFilters;
   sortBy: SortField;
   sortOrder: SortOrder;
+  showOnlyTitleSuggestions?: boolean;
 }
 
 /**
@@ -65,6 +66,11 @@ export class VideoFilterService {
 
     // Apply file type filters
     filtered = this.filterByFileType(filtered, criteria.fileTypeFilters);
+
+    // Apply title suggestion filter
+    if (criteria.showOnlyTitleSuggestions) {
+      filtered = this.filterByTitleSuggestions(filtered);
+    }
 
     // Apply sorting
     filtered = this.sortVideos(filtered, criteria.sortBy, criteria.sortOrder);
@@ -150,6 +156,21 @@ export class VideoFilterService {
       }
 
       return false;
+    });
+  }
+
+  /**
+   * Filter videos by unresolved title suggestions
+   * Shows only videos that have a suggested_title that differs from the current filename
+   */
+  filterByTitleSuggestions(videos: DatabaseVideo[]): DatabaseVideo[] {
+    return videos.filter(video => {
+      // Must have a suggested title
+      if (!video.suggested_title) {
+        return false;
+      }
+      // Suggested title must be different from current filename
+      return video.suggested_title !== video.filename;
     });
   }
 

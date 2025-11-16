@@ -1,6 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AnalysisController } from './analysis.controller';
 import { AnalysisService } from './analysis.service';
+import { SimpleTranscribeController } from './simple-transcribe.controller';
+import { SimpleAnalyzeController } from './simple-analyze.controller';
 import { OllamaService } from './ollama.service';
 import { PythonBridgeService } from './python-bridge.service';
 import { AIProviderService } from './ai-provider.service';
@@ -23,7 +25,11 @@ import { MediaModule } from '../media/media.module';
     forwardRef(() => DatabaseModule),
     forwardRef(() => MediaModule),
   ],
-  controllers: [AnalysisController],
+  controllers: [
+    AnalysisController,
+    SimpleTranscribeController,
+    SimpleAnalyzeController,
+  ],
   providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService, TextExtractionService],
   exports: [AnalysisService, OllamaService, AIProviderService, PythonBridgeService, TextExtractionService],
 })

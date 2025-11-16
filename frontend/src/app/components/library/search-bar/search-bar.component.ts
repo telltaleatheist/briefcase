@@ -22,6 +22,7 @@ export interface SearchCriteriaChange {
   fileTypeFilters: FileTypeFilters;
   sortBy: SortField;
   sortOrder: SortOrder;
+  showOnlyTitleSuggestions?: boolean;
 }
 
 /**
@@ -74,6 +75,7 @@ export class SearchBarComponent implements OnDestroy {
   @Input() sortOrder: SortOrder = 'desc';
   @Input() allTags: TagData | null = null;
   @Input() filtersExpanded: boolean = false;
+  @Input() showOnlyTitleSuggestions: boolean = false;
 
   // Outputs
   @Output() searchChange = new EventEmitter<string>();
@@ -214,6 +216,13 @@ export class SearchBarComponent implements OnDestroy {
   }
 
   /**
+   * Handle title suggestion filter change
+   */
+  onTitleSuggestionFilterChange(): void {
+    this.emitCriteriaChange();
+  }
+
+  /**
    * Emit criteria change event
    */
   private emitCriteriaChange(): void {
@@ -223,7 +232,8 @@ export class SearchBarComponent implements OnDestroy {
       selectedTags: this.selectedTags,
       fileTypeFilters: this.fileTypeFilters,
       sortBy: this.sortBy,
-      sortOrder: this.sortOrder
+      sortOrder: this.sortOrder,
+      showOnlyTitleSuggestions: this.showOnlyTitleSuggestions
     });
   }
 

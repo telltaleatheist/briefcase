@@ -90,7 +90,7 @@
       <!-- Left Column: Media and AI Description -->
       <div class="video-column">
         <!-- Video Preview -->
-        <div class="video-preview" *ngIf="video.media_type === 'video'">
+        <div class="video-preview" *ngIf="getMediaType() === 'video'">
           <video #videoPlayer
                  [src]="videoUrl"
                  controls
@@ -112,7 +112,7 @@
         </div>
 
         <!-- Audio Preview -->
-        <div class="audio-preview" *ngIf="video.media_type === 'audio'">
+        <div class="audio-preview" *ngIf="getMediaType() === 'audio'">
           <div class="audio-container">
             <mat-icon class="audio-icon">audiotrack</mat-icon>
             <audio [src]="videoUrl"
@@ -136,7 +136,7 @@
         </div>
 
         <!-- Image Preview -->
-        <div class="image-preview" *ngIf="video.media_type === 'image'">
+        <div class="image-preview" *ngIf="getMediaType() === 'image'">
           <img [src]="videoUrl"
                [alt]="video.filename"
                class="image-viewer"
@@ -154,10 +154,10 @@
         </div>
 
         <!-- Other Media Types (Document, Webpage) -->
-        <div class="other-media-preview" *ngIf="video.media_type !== 'video' && video.media_type !== 'audio' && video.media_type !== 'image'">
+        <div class="other-media-preview" *ngIf="getMediaType() !== 'video' && getMediaType() !== 'audio' && getMediaType() !== 'image'">
           <div class="media-type-display">
-            <mat-icon>{{ getMediaTypeIcon(video.media_type) }}</mat-icon>
-            <h3>{{ getMediaTypeLabel(video.media_type) }}</h3>
+            <mat-icon>{{ getMediaTypeIcon(getMediaType()) }}</mat-icon>
+            <h3>{{ getMediaTypeLabel(getMediaType()) }}</h3>
             <p class="media-filename">{{ video.filename }}</p>
             <button mat-raised-button color="primary" (click)="openFileLocation()" *ngIf="video.current_path">
               <mat-icon>folder_open</mat-icon>

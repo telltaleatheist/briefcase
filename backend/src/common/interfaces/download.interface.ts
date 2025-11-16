@@ -1,6 +1,6 @@
 // clippy/backend/src/common/interfaces/download.interface.ts
 
-export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'processing' | 'transcribing' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'importing' | 'processing' | 'transcribing' | 'completed' | 'failed';
 
 export interface Job {
   id: string;

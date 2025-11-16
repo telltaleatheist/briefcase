@@ -18,8 +18,9 @@ interface Result<T> {
 export class JobStateManagerService {
   private readonly VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
     'queued': ['downloading', 'failed'],
-    'downloading': ['downloaded', 'failed'],
+    'downloading': ['downloaded', 'importing', 'failed'],
     'downloaded': ['processing', 'transcribing', 'failed'],
+    'importing': ['completed', 'failed'],  // Import leads directly to completed (when skipProcessing is true)
     'processing': ['transcribing', 'completed', 'failed'],
     'transcribing': ['processing', 'completed', 'failed'],  // Allow transcribing → processing for AI analysis
     'completed': ['failed'],

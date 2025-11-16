@@ -52,6 +52,62 @@ export class LibraryController {
   ) {}
 
   /**
+   * Import a single file to the library
+   * Simple endpoint for processing queue - just imports, doesn't download
+   */
+  @Post('import-file')
+  async importFile(@Body() body: { filePath: string, displayName?: string }) {
+    try {
+      const { filePath, displayName } = body;
+
+      if (!filePath) {
+        throw new HttpException('File path is required', HttpStatus.BAD_REQUEST);
+      }
+
+      // Check if file exists
+      if (!existsSync(filePath)) {
+        throw new HttpException('File not found', HttpStatus.NOT_FOUND);
+      }
+
+      this.logger.log(`Importing file: ${filePath}`);
+
+      // Import the file using file scanner service
+      const result = await this.fileScannerService.importVideos([filePath]);
+
+      if (result.errors.length > 0) {
+        this.logger.warn(`Import warnings: ${result.errors.join(', ')}`);
+      }
+
+      // Find the imported video in the database
+      const videos = await this.databaseService.getAllVideos();
+      const importedVideo = videos.find((v: any) =>
+        v.file_path === filePath || v.current_path === filePath
+      );
+
+      if (!importedVideo) {
+        throw new HttpException('Failed to find imported video in database', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      this.logger.log(`File imported successfully with videoId: ${importedVideo.id}`);
+
+      return {
+        success: true,
+        videoId: importedVideo.id,
+        message: 'File imported successfully',
+      };
+    } catch (error: any) {
+      this.logger.error('Import failed:', error);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to import file: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Calculate the Sunday of the current week for a given date
    * Format: YYYY-MM-DD (e.g., "2025-09-02")
    */

@@ -135,8 +135,9 @@ export class BatchDownloaderService {
     
     // Add to jobs collection
     this.jobs.set(jobId, job);
-    
+
     this.logger.log(`Added job ${jobId} to batch queue. Total jobs: ${this.jobs.size}`);
+    this.logger.log(`Job options: skipProcessing=${options.skipProcessing}, shouldImport=${(options as any).shouldImport}`);
     
     // Update UI and start processing
     this.emitQueueUpdate();
@@ -242,16 +243,49 @@ export class BatchDownloaderService {
             try {
               if (result.outputFile) {
                 this.logger.log(`Importing video to database: ${result.outputFile}`);
-                this.jobStateManager.updateJobStatus(job, 'downloaded', 'Importing to library...');
+                // Use 'importing' status to prevent processQueue from triggering processVideos()
+                this.jobStateManager.updateJobStatus(job, 'importing', 'Importing to library...');
 
                 const importResult = await this.fileScannerService.importVideos([result.outputFile]);
 
                 if (importResult.imported.length > 0) {
-                  this.logger.log(`Video imported successfully: ${importResult.imported[0]}`);
+                  const videoId = importResult.imported[0];
+                  this.logger.log(`Video imported successfully: ${videoId}`);
                   // Mark as completed since we're skipping processing
                   this.jobStateManager.updateJobStatus(job, 'completed', 'Download and import completed');
-                  this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download and import completed');
+                  this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download and import completed', {
+                    videoId: videoId,
+                    videoPath: result.outputFile
+                  });
                   this.logger.log(`Video download and import completed (no processing): ${job.id}`);
+                } else if (importResult.skipped.length > 0) {
+                  // Video was skipped because it's a duplicate - fetch the existing videoId from database
+                  this.logger.log(`Video already exists in library, fetching videoId for: ${result.outputFile}`);
+
+                  // Get filename from path
+                  const path = require('path');
+                  const filename = path.basename(result.outputFile);
+
+                  // Query database for this video by filename
+                  try {
+                    const existingVideo = await this.fileScannerService.findVideoByFilename(filename);
+
+                    if (existingVideo) {
+                      this.logger.log(`Found existing video in database with ID: ${existingVideo.id}`);
+                      // Mark as completed - the video already exists
+                      this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (already in library)');
+                      this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (already in library)');
+                      this.logger.log(`Video download completed (duplicate skipped): ${job.id}`);
+                    } else {
+                      this.logger.warn(`Video was skipped but not found in database`);
+                      this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import skipped)');
+                      this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import skipped)');
+                    }
+                  } catch (error) {
+                    this.logger.error(`Error finding existing video: ${error}`);
+                    this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import skipped)');
+                    this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import skipped)');
+                  }
                 } else {
                   this.logger.warn(`Failed to import video: ${importResult.errors.join(', ')}`);
                   // Still mark as completed - the download succeeded
@@ -285,7 +319,8 @@ export class BatchDownloaderService {
             try {
               if (result.outputFile) {
                 this.logger.log(`Importing video to database: ${result.outputFile}`);
-                this.jobStateManager.updateJobStatus(job, 'downloaded', 'Importing to library...');
+                // Use 'importing' status to prevent processQueue from triggering processVideos()
+                this.jobStateManager.updateJobStatus(job, 'importing', 'Importing to library...');
 
                 const importResult = await this.fileScannerService.importVideos([result.outputFile]);
 
@@ -436,15 +471,20 @@ export class BatchDownloaderService {
                     // The video was imported at the old path, so we need to update it
                     // Find the video by the OLD path and update it to the NEW path
                     const videos = await this.fileScannerService['databaseService'].getAllVideos();
-                    const video = videos.find((v: any) =>
-                      v.current_path === oldPath || v.file_path === oldPath
-                    );
+
+                    // Normalize paths for comparison (resolve to absolute paths)
+                    const path = require('path');
+                    const normalizedOldPath = path.resolve(oldPath);
+
+                    const video = videos.find((v: any) => {
+                      const videoPath = path.resolve(v.current_path || '');
+                      return videoPath === normalizedOldPath;
+                    });
 
                     if (video) {
                       this.logger.log(`Updating database path for video ${video.id} from ${oldPath} to ${newPath}`);
 
                       // Update both the path and filename
-                      const path = require('path');
                       const newFilename = path.basename(newPath);
 
                       await this.fileScannerService['databaseService'].updateVideoPath(
@@ -465,6 +505,11 @@ export class BatchDownloaderService {
                       this.logger.log(`Successfully updated database with new file path`);
                     } else {
                       this.logger.warn(`Could not find video in database with path ${oldPath}`);
+                      this.logger.warn(`Searched ${videos.length} videos for normalized path: ${normalizedOldPath}`);
+                      // Log a few sample paths for debugging
+                      if (videos.length > 0) {
+                        this.logger.warn(`Sample paths in database: ${videos.slice(0, 3).map((v: any) => v.current_path).join(', ')}`);
+                      }
                     }
                   } catch (error) {
                     this.logger.error(`Failed to update database path: ${(error as Error).message}`);

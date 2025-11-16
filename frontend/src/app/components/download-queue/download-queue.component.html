@@ -15,29 +15,28 @@
       </h3>
     </div>
 
-    <!-- Queue Actions -->
-    <div class="queue-actions" *ngIf="hasPendingJobs()">
+    <!-- Queue Actions - ALWAYS show buttons -->
+    <div class="queue-actions">
       <button mat-raised-button
               color="primary"
               (click)="startQueue(); $event.stopPropagation()"
-              class="start-queue-btn">
+              class="start-queue-btn"
+              [disabled]="!hasPendingJobs()">
         <mat-icon>play_arrow</mat-icon>
         Start Queue
       </button>
       <button mat-stroked-button
               color="warn"
               (click)="clearQueue(); $event.stopPropagation()"
-              class="clear-queue-btn">
+              class="clear-queue-btn"
+              [disabled]="!hasPendingJobs()">
         <mat-icon>clear_all</mat-icon>
         Clear Pending
       </button>
-    </div>
-
-    <!-- Clear All Button (show when there are any jobs) -->
-    <div class="queue-actions" *ngIf="pendingJobs.length > 0 || processingJobs.length > 0">
       <button mat-stroked-button
               (click)="clearAll()"
-              class="clear-all-btn">
+              class="clear-all-btn"
+              [disabled]="allJobsAsListItems.length === 0">
         <mat-icon>delete_sweep</mat-icon>
         Clear All
       </button>

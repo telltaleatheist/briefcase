@@ -44,6 +44,26 @@ export class DownloaderController {
   }
 
   /**
+   * Download and import to library (no additional processing)
+   * This is for the processing queue - download + import only, no transcribe/analyze
+   */
+  @Post('download-and-import')
+  async downloadAndImport(@Body() body: { url: string, postTitle?: string, jobId?: string }) {
+    // Start library download but don't do transcription or analysis
+    const jobId = body.jobId || `download-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    // Use startLibraryDownload but with transcribe and analyze disabled
+    await this.libraryDownloadService.startLibraryDownload(
+      body.url,
+      body.postTitle,  // Use postTitle as displayName
+      false,  // Don't transcribe
+      false   // Don't analyze
+    );
+
+    return { success: true, jobId };
+  }
+
+  /**
    * Library download with full pipeline: download → import → transcribe → analyze
    * This uses LibraryDownloadService which orchestrates the entire pipeline
    */

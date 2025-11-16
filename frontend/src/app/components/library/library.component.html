@@ -41,6 +41,7 @@
       [sortOrder]="sortOrder"
       [allTags]="allTags"
       [filtersExpanded]="searchFiltersExpanded"
+      [showOnlyTitleSuggestions]="showOnlyTitleSuggestions"
       (criteriaChange)="onSearchCriteriaChange($event)"
       (clearAll)="onClearAllSearch()"
       (filtersExpandedChange)="searchFiltersExpanded = $event">
@@ -286,10 +287,6 @@
       <button mat-menu-item (click)="analyzeSelected()">
         <mat-icon>psychology</mat-icon>
         <span>Run Analysis{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
-      </button>
-      <button mat-menu-item (click)="analyzeSelected()">
-        <mat-icon>transcribe</mat-icon>
-        <span>Run Transcription{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
       </button>
       <button mat-menu-item (click)="moveToLibrary()">
         <mat-icon>drive_file_move</mat-icon>

@@ -430,6 +430,7 @@ export class AnalysisController {
     forceRetranscribe?: boolean;
     claudeApiKey?: string;
     openaiApiKey?: string;
+    jobId?: string;  // Custom job ID from frontend (for tracking in processing queue)
   }) {
     try {
       if (!body.videoId) {
@@ -466,6 +467,7 @@ export class AnalysisController {
         forceRetranscribe,
         claudeApiKey: body.claudeApiKey,
         openaiApiKey: body.openaiApiKey,
+        customJobId: body.jobId,  // Pass the custom job ID from frontend
       });
 
       return {
