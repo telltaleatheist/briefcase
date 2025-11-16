@@ -1136,6 +1136,8 @@ export class AnalysisService implements OnModuleInit {
     // Complete
     const completionMessage = mode === 'transcribe-only'
       ? 'Transcription complete!'
+      : mode === 'download-and-process'
+      ? 'Download and processing complete!'
       : `Analysis complete! Found ${(request as any).analysisResult?.sections_count || 0} interesting sections.`;
 
     this.updateJob(jobId, {
