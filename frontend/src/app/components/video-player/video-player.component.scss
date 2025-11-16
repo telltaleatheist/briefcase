@@ -160,168 +160,131 @@
   }
 }
 
-// Fullscreen-specific styles to make video fill the entire screen
-.video-player-dialog:fullscreen,
-.video-player-dialog:-webkit-full-screen,
-.video-player-dialog:-moz-full-screen,
-.video-player-dialog:-ms-fullscreen {
-  // Root container in fullscreen - ensure it fills the viewport
-  width: 100vw !important;
-  height: 100vh !important;
-  max-width: 100vw !important;
-  max-height: 100vh !important;
-  padding: 0 !important;
-  margin: 0 !important;
-
+// Fullscreen-specific styles - Angular approach with conditional class
+.video-player-dialog.is-fullscreen {
   .dialog-header {
-    // Hide header in fullscreen
-    display: none !important;
+    display: none;
   }
 
   .dialog-content {
-    // Override grid layout in fullscreen - use flexbox to fill space
-    display: flex !important;
+    // In fullscreen, remove grid and let video container fill space
+    display: flex;
     flex-direction: column;
-    flex: 1;
-    width: 100%;
-    height: 100%;
-    max-width: 100%;
-    max-height: 100%;
-    padding: 0 !important;
-    margin: 0 !important;
+    height: 100vh;
   }
 
   .video-container {
-    // Make video container fill entire available space
+    // Let video container take all available space
     flex: 1;
-    width: 100%;
-    height: 100%;
-    max-width: 100%;
-    max-height: 100%;
-    min-width: 100%;
-    min-height: 100%;
 
-    .native-video-player, .native-audio-player {
-      width: 100% !important;
-      height: 100% !important;
-      max-width: 100% !important;
-      max-height: 100% !important;
-    }
-
-    .video-js {
-      width: 100% !important;
-      height: 100% !important;
-      max-width: 100% !important;
-      max-height: 100% !important;
-
-      video {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-      }
+    // Ensure video.js and native players fill their container
+    .video-js,
+    .native-video-player,
+    .native-audio-player {
+      width: 100%;
+      height: 100%;
     }
   }
 
   .sections-sidebar {
-    display: none !important;
+    display: none;
+  }
+}
+
+.audio-player-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
+
+  .native-audio-player {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
   }
 
-  .audio-player-container {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    position: relative;
-
-    .native-audio-player {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .audio-visualizer {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 24px;
-      padding: 40px;
-
-      .audio-icon {
-        font-size: 120px;
-        width: 120px;
-        height: 120px;
-        color: rgba(255, 255, 255, 0.9);
-        animation: pulse 2s ease-in-out infinite;
-      }
-
-      .audio-info {
-        text-align: center;
-        color: white;
-
-        h3 {
-          font-size: 24px;
-          font-weight: 500;
-          margin: 0 0 8px 0;
-        }
-
-        p {
-          font-size: 16px;
-          opacity: 0.8;
-          margin: 0;
-        }
-      }
-    }
-  }
-
-  .image-viewer-container {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #1a1a1a;
-    overflow: auto;
-
-    .image-viewer {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-    }
-  }
-
-  .document-placeholder {
-    width: 100%;
-    height: 100%;
+  .audio-visualizer {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 20px;
-    background-color: #2a2a2a;
-    color: white;
+    gap: 24px;
     padding: 40px;
 
-    .document-icon {
-      font-size: 80px;
-      width: 80px;
-      height: 80px;
-      opacity: 0.5;
+    .audio-icon {
+      font-size: 120px;
+      width: 120px;
+      height: 120px;
+      color: rgba(255, 255, 255, 0.9);
+      animation: pulse 2s ease-in-out infinite;
     }
 
-    h3 {
-      font-size: 20px;
-      font-weight: 500;
-      margin: 0;
-    }
+    .audio-info {
+      text-align: center;
+      color: white;
 
-    p {
-      font-size: 14px;
-      opacity: 0.7;
-      margin: 0;
+      h3 {
+        font-size: 24px;
+        font-weight: 500;
+        margin: 0 0 8px 0;
+      }
+
+      p {
+        font-size: 16px;
+        opacity: 0.8;
+        margin: 0;
+      }
     }
+  }
+}
+
+.image-viewer-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #1a1a1a;
+  overflow: auto;
+
+  .image-viewer {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+}
+
+.document-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background-color: #2a2a2a;
+  color: white;
+  padding: 40px;
+
+  .document-icon {
+    font-size: 80px;
+    width: 80px;
+    height: 80px;
+    opacity: 0.5;
+  }
+
+  h3 {
+    font-size: 20px;
+    font-weight: 500;
+    margin: 0;
+  }
+
+  p {
+    font-size: 14px;
+    opacity: 0.7;
+    margin: 0;
   }
 }
 

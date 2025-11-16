@@ -1,4 +1,4 @@
-<div class="video-player-dialog" #playerContainer [class.route-mode]="!isDialogMode">
+<div class="video-player-dialog" #playerContainer [class.route-mode]="!isDialogMode" [class.is-fullscreen]="isFullscreen">
   <!-- Only show header in dialog mode -->
   <div class="dialog-header" *ngIf="isDialogMode">
     <button mat-icon-button (click)="close()" class="back-button" matTooltip="Back to Clip Creator">

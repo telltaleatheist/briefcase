@@ -23,7 +23,7 @@ export interface AnalysisJob {
   progress: number;
   currentPhase: string;
   title?: string; // Video title/filename for display
-  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio'; // Processing mode
+  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio' | 'download-and-process'; // Processing mode
   error?: string;
   videoId?: string; // Library video ID for progress tracking
   videoPath?: string;
@@ -49,7 +49,7 @@ export interface AnalysisJob {
 export interface AnalysisRequest {
   input: string; // URL or file path
   inputType: 'url' | 'file';
-  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio'; // Analysis mode: full, transcription only, analysis only (using existing transcript), process only (fix aspect ratio), or normalize audio
+  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio' | 'download-and-process'; // Analysis mode: full, transcription only, analysis only (using existing transcript), process only (fix aspect ratio), normalize audio, or download and process (download + import + fix aspect ratio)
   aiModel: string;
   aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
   apiKey?: string; // API key for Claude/OpenAI
@@ -173,6 +173,9 @@ export class AnalysisService implements OnModuleInit {
       initialPhase = 'normalize-audio';
     } else if (mode === 'analysis-only') {
       initialPhase = 'analyze';
+    } else if (mode === 'download-and-process') {
+      // Download and process mode: download first (will skip transcribe and go to process)
+      initialPhase = 'download';
     } else if (request.inputType === 'file') {
       // Local files skip download and go straight to transcribe
       initialPhase = 'transcribe';
@@ -328,22 +331,29 @@ export class AnalysisService implements OnModuleInit {
         // Phase 1: Download/prepare video
         await this.processDownloadPhase(jobId, request);
 
-        // DON'T release transcription slot yet - transcribe phase needs it
-        // Just move directly to transcribe without re-queuing
-        this.logger.log(`Download phase complete for job ${jobId}, moving to transcribe...`);
-
-        // Continue directly to transcribe phase without releasing the slot
-        await this.processTranscribePhase(jobId, request);
-
-        // NOW release job slot after both download and transcribe are done
-        this.activeJobs--;
-        this.logger.log(`Transcription phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
-
-        // Move to appropriate next phase based on mode
-        if (mode === 'transcribe-only') {
-          this.requeueJobForNextPhase(jobId, request, 'finalize');
+        // Check mode to determine next phase
+        if (mode === 'download-and-process') {
+          // For download-and-process mode: skip transcribe/analyze, go straight to process
+          this.activeJobs--;
+          this.logger.log(`Download phase complete for job ${jobId}, moving to process...`);
+          this.requeueJobForNextPhase(jobId, request, 'process');
         } else {
-          this.requeueJobForNextPhase(jobId, request, 'analyze');
+          // For full/transcribe-only modes: continue to transcribe
+          this.logger.log(`Download phase complete for job ${jobId}, moving to transcribe...`);
+
+          // Continue directly to transcribe phase without releasing the slot
+          await this.processTranscribePhase(jobId, request);
+
+          // NOW release job slot after both download and transcribe are done
+          this.activeJobs--;
+          this.logger.log(`Transcription phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
+
+          // Move to appropriate next phase based on mode
+          if (mode === 'transcribe-only') {
+            this.requeueJobForNextPhase(jobId, request, 'finalize');
+          } else {
+            this.requeueJobForNextPhase(jobId, request, 'analyze');
+          }
         }
       } else if (phase === 'transcribe') {
         // This is for local files that start directly at transcribe (skipping download)

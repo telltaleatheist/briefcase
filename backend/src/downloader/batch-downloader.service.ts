@@ -1,148 +1,47 @@
 // clippy/backend/src/downloader/batch-downloader.service.ts
-import { Injectable, Logger } from '@nestjs/common';
-import { DownloaderService } from './downloader.service';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { MediaEventService } from '../media/media-event.service';
-import { MediaProcessingService, ProcessingOptions } from '../media/media-processing.service';
-import { FileScannerService } from '../database/file-scanner.service';
 import {
   DownloadOptions,
-  DownloadResult,
-  Job,
   JobResponse,
   JobStatus,
   BatchQueueStatus
 } from '../common/interfaces/download.interface';
-import { JobStateManagerService } from '../common/job-state-manager.service';
+import { AnalysisService } from '../analysis/analysis.service';
 
 @Injectable()
 export class BatchDownloaderService {
   private readonly logger = new Logger(BatchDownloaderService.name);
-  
-  // Single collection of all jobs
-  private jobs: Map<string, Job> = new Map();
-  
-  // Processing state
-  private maxConcurrentDownloads: number = 5;
-  private maxConcurrentProcessing: number = 5;
-  private isProcessing: boolean = false;
-  private allDownloadsComplete: boolean = false;
 
   constructor(
-    private readonly downloaderService: DownloaderService,
-    private readonly mediaProcessingService: MediaProcessingService,
     private readonly eventService: MediaEventService,
-    private readonly jobStateManager: JobStateManagerService,
-    private readonly fileScannerService: FileScannerService
+    @Inject(forwardRef(() => AnalysisService))
+    private readonly analysisService: AnalysisService
   ) {
-    // Listen for job status updates
-    this.eventService.server?.on('job-status-updated', (data: {jobId: string, status: string, task: string}) => {
-      const job = this.jobs.get(data.jobId);
-      if (job) {
-        this.jobStateManager.updateJobStatus(job, data.status as JobStatus, data.task);
-      } else {
-        this.logger.warn(`Job with ID ${data.jobId} not found for status update`);
-      }
-    });
-
-    // Listen for download progress updates
-    this.eventService.server?.on('download-progress', (data: {progress: number, task: string, jobId?: string}) => {
-      if (data.jobId) {
-        this.updateJobProgress(data.jobId, data.progress, data.task);
-      }
-    });
-
-    // Listen for transcription progress updates
-    this.eventService.server?.on('transcription-progress', (data: {progress: number, task: string, jobId?: string}) => {
-      if (data.jobId) {
-        this.updateJobProgress(data.jobId, data.progress, data.task || 'Transcribing');
-      }
-    });
-
-    // Listen for processing progress updates
-    this.eventService.server?.on('processing-progress', (data: {progress: number, task: string, jobId?: string}) => {
-      if (data.jobId) {
-        this.updateJobProgress(data.jobId, data.progress, data.task || 'Processing');
-      }
-    });
-
-    // Listen for transcription completion
-    this.eventService.server?.on('transcription-completed', (data: {jobId?: string, outputFile: string}) => {
-      if (data.jobId) {
-        const job = this.jobs.get(data.jobId);
-        if (job && job.status === 'transcribing') {
-          this.jobStateManager.updateJobStatus(job, 'completed', 'Transcription completed');
-          this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Transcription completed');
-          this.logger.log(`Transcription completed for job ${data.jobId}, setting to completed`);
-          this.emitQueueUpdate();
-        }
-      }
-    });
+    this.logger.log('Batch downloader service initialized (delegating to analysis queue)');
   }
 
-  private transitionJobState(job: Job, newStatus: JobStatus, task: string): void {
-    this.updateJobState(job, newStatus, task);
-    this.emitQueueUpdate(); // Centralized update method
-  }
-
-  updateJobState(job: Job, newStatus: JobStatus, task: string): void {
-    const result = this.jobStateManager.updateJobStatus(job, newStatus, task);
-    
-    if (result.success) {
-      // Emit event or log successful transition
-      this.eventService.emitJobStatusUpdate(job.id, newStatus, task);
-    } else {
-      // Log or handle invalid transition
-      this.logger.warn(`State transition failed: ${result.error}`);
-    }
-  }
-
-  // Set max concurrent downloads
-  setMaxConcurrentDownloads(max: number): void {
-    if (max < 1) {
-      throw new Error('Maximum concurrent downloads must be at least 1');
-    }
-    
-    this.maxConcurrentDownloads = max;
-    this.logger.log(`Max concurrent downloads set to: ${max}`);
-    
-    // Process queue with new limit
-    this.processQueue();
-  }
-
-  getMaxConcurrentDownloads(): number {
-    return this.maxConcurrentDownloads;
-  }
-
-  // Add a new job to the system
+  // Add a new job to the system - queues to analysis service with 'download-and-process' mode
   addToBatchQueue(options: DownloadOptions, providedJobId?: string): string {
     // Use provided jobId if available, otherwise generate one
     const jobId = providedJobId || `batch-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    // Use the displayName from options directly
-    const displayName = options.displayName || options.url;
-    
-    // Create the job
-    const job: Job = {
-      id: jobId,
-      url: options.url,
-      displayName: displayName,
-      status: 'queued',
-      progress: 0,
-      currentTask: 'Waiting in queue...',
-      createdAt: new Date().toISOString(),
-      options: options
-    };
-    
-    // Add to jobs collection
-    this.jobs.set(jobId, job);
+    this.logger.log(`Queuing batch job ${jobId} to analysis service with mode 'download-and-process'`);
 
-    this.logger.log(`Added job ${jobId} to batch queue. Total jobs: ${this.jobs.size}`);
-    this.logger.log(`Job options: skipProcessing=${options.skipProcessing}, shouldImport=${(options as any).shouldImport}`);
-    
-    // Update UI and start processing
-    this.emitQueueUpdate();
-    this.processQueue();
-    
+    // Queue directly to analysis service with download-and-process mode
+    this.analysisService.startAnalysis({
+      input: options.url,
+      inputType: 'url',
+      mode: 'download-and-process',
+      aiModel: '', // Not needed for download-and-process
+      ollamaEndpoint: '', // Not needed for download-and-process
+      outputPath: options.outputDir,
+    }, jobId).catch(error => {
+      this.logger.error(`Failed to queue batch job ${jobId}: ${error}`);
+    });
+
+    this.logger.log(`Batch job ${jobId} queued to analysis service`);
+
     return jobId;
   }
 
@@ -151,765 +50,143 @@ export class BatchDownloaderService {
     return optionsArray.map(options => this.addToBatchQueue(options));
   }
 
-  // Get jobs by status
-  private getJobsByStatus(status: JobStatus): Job[] {
-    return Array.from(this.jobs.values())
-      .filter(job => job.status === status);
-  }
-
-  // Process the download and processing queues
-  private async processQueue(): Promise<void> {
-    // Get job counts for logging
-    const queuedCount = this.getJobsByStatus('queued').length;
-    const downloadingCount = this.getJobsByStatus('downloading').length;
-    const downloadedCount = this.getJobsByStatus('downloaded').length;
-    const processingCount = this.getJobsByStatus('processing').length;
-    const completedCount = this.getJobsByStatus('completed').length;
-    const failedCount = this.getJobsByStatus('failed').length;
-    
-    this.logger.log(`Processing queue: 
-      - Queued: ${queuedCount}
-      - Downloading: ${downloadingCount}
-      - Downloaded: ${downloadedCount}
-      - Processing: ${processingCount}
-      - Completed: ${completedCount}
-      - Failed: ${failedCount}`
-    );
-    
-    // Early exit if no work to do
-    if (queuedCount === 0 && downloadingCount === 0 && downloadedCount === 0) {
-      this.logger.log('No work to do in queue');
-      return;
-    }
-    
-    // Process downloads within concurrency limit
-    if (downloadingCount < this.maxConcurrentDownloads && queuedCount > 0) {
-      const queuedJobs = this.getJobsByStatus('queued')
-        .slice(0, this.maxConcurrentDownloads - downloadingCount);
-      
-      this.logger.log(`Starting download for ${queuedJobs.length} jobs`);
-      
-      for (const job of queuedJobs) {
-        this.startDownload(job);
-      }
-    }
-    
-    // Check if ALL downloads are complete
-    if (queuedCount === 0 && downloadingCount === 0 && downloadedCount > 0) {
-      this.allDownloadsComplete = true;
-      this.logger.log('All downloads complete. Preparing to process videos.');
-      
-      // Start processing videos
-      await this.processVideos();
-    }
-  }
-      
-  // Start a download for a job
-  private async startDownload(job: Job): Promise<void> {
-    // Update job state
-    this.jobStateManager.updateJobStatus(job, 'downloading', 'Initializing download...');
-
-    try {
-      // Skip background metadata fetch - yt-dlp gets metadata during download
-      // The old fetchMetadataInBackground was causing 10-second delays per video
-      // this.fetchMetadataInBackground(job);
-
-      // Start download with downloaderService
-      this.logger.log(`Starting download for job ${job.id}: ${job.url}`);
-
-      const result = await this.downloaderService.downloadVideo(job.options, job.id);
-      
-      // Mark download end time
-      job.downloadEndTime = new Date().toISOString();
-      
-      // Process download result
-      if (result.success) {
-        job.outputFile = result.outputFile;
-
-        if (result.isImage) {
-          // Images don't need processing
-          this.jobStateManager.updateJobStatus(job, 'completed', 'Image download completed');
-          this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Image download completed');
-          this.logger.log(`Image download completed for job ${job.id}`);
-        } else if (job.options.skipProcessing) {
-          // Skip processing - just import and complete
-          this.logger.log(`Skipping processing for job ${job.id} (skipProcessing flag set)`);
-
-          // Check if this job should auto-import
-          const shouldImport = job.options.shouldImport === true;
-
-          if (shouldImport) {
-            // Import the downloaded video to the database
-            try {
-              if (result.outputFile) {
-                this.logger.log(`Importing video to database: ${result.outputFile}`);
-                // Use 'importing' status to prevent processQueue from triggering processVideos()
-                this.jobStateManager.updateJobStatus(job, 'importing', 'Importing to library...');
-
-                const importResult = await this.fileScannerService.importVideos([result.outputFile]);
-
-                if (importResult.imported.length > 0) {
-                  const videoId = importResult.imported[0];
-                  this.logger.log(`Video imported successfully: ${videoId}`);
-                  // Mark as completed since we're skipping processing
-                  this.jobStateManager.updateJobStatus(job, 'completed', 'Download and import completed');
-                  this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download and import completed', {
-                    videoId: videoId,
-                    videoPath: result.outputFile
-                  });
-                  this.logger.log(`Video download and import completed (no processing): ${job.id}`);
-                } else if (importResult.skipped.length > 0) {
-                  // Video was skipped because it's a duplicate - fetch the existing videoId from database
-                  this.logger.log(`Video already exists in library, fetching videoId for: ${result.outputFile}`);
-
-                  // Get filename from path
-                  const path = require('path');
-                  const filename = path.basename(result.outputFile);
-
-                  // Query database for this video by filename
-                  try {
-                    const existingVideo = await this.fileScannerService.findVideoByFilename(filename);
-
-                    if (existingVideo) {
-                      this.logger.log(`Found existing video in database with ID: ${existingVideo.id}`);
-                      // Mark as completed - the video already exists
-                      this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (already in library)');
-                      this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (already in library)');
-                      this.logger.log(`Video download completed (duplicate skipped): ${job.id}`);
-                    } else {
-                      this.logger.warn(`Video was skipped but not found in database`);
-                      this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import skipped)');
-                      this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import skipped)');
-                    }
-                  } catch (error) {
-                    this.logger.error(`Error finding existing video: ${error}`);
-                    this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import skipped)');
-                    this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import skipped)');
-                  }
-                } else {
-                  this.logger.warn(`Failed to import video: ${importResult.errors.join(', ')}`);
-                  // Still mark as completed - the download succeeded
-                  this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import failed)');
-                  this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import failed)');
-                }
-              } else {
-                this.logger.error('Cannot import: output file path is missing');
-                this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (no import)');
-                this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (no import)');
-              }
-            } catch (error) {
-              this.logger.error(`Error importing video: ${error}`);
-              // Still mark as completed - the download succeeded
-              this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed (import error)');
-              this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed (import error)');
-            }
-          } else {
-            // No import, no processing - just mark as completed
-            this.jobStateManager.updateJobStatus(job, 'completed', 'Download completed');
-            this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Download completed');
-            this.logger.log(`Video download completed (no processing or import): ${job.id}`);
-          }
-        } else {
-          // Normal flow - download, then wait for processing
-          // Check if this job should auto-import (only for library downloads)
-          const shouldImport = (job.options as any).shouldImport === true;
-
-          if (shouldImport) {
-            // Import the downloaded video to the database
-            try {
-              if (result.outputFile) {
-                this.logger.log(`Importing video to database: ${result.outputFile}`);
-                // Use 'importing' status to prevent processQueue from triggering processVideos()
-                this.jobStateManager.updateJobStatus(job, 'importing', 'Importing to library...');
-
-                const importResult = await this.fileScannerService.importVideos([result.outputFile]);
-
-                if (importResult.imported.length > 0) {
-                  this.logger.log(`Video imported successfully: ${importResult.imported[0]}`);
-
-                  // Mark videos as downloaded and imported, waiting for processing
-                  this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import complete, waiting for processing...');
-                  this.logger.log(`Video download and import completed, waiting for processing: ${job.id}`);
-                } else {
-                  this.logger.warn(`Failed to import video: ${importResult.errors.join(', ')}`);
-                  this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import failed, waiting for processing...');
-                }
-              } else {
-                this.logger.error('Cannot import: output file path is missing');
-                this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import failed - no output file');
-              }
-            } catch (error) {
-              this.logger.error(`Error importing video: ${error}`);
-              // Continue anyway - the video is downloaded, processing can still work
-              this.jobStateManager.updateJobStatus(job, 'downloaded', 'Import error, waiting for processing...');
-            }
-          } else {
-            // No import needed - mark as downloaded and ready for processing
-            this.jobStateManager.updateJobStatus(job, 'downloaded', 'Download complete, waiting for processing...');
-            this.logger.log(`Video download completed, waiting for processing: ${job.id}`);
-          }
-        }
-      } else {
-        this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');
-        this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Download failed');
-      }
-    } catch (error) {
-      // Handle unexpected errors
-      const errorMessage = error instanceof Error
-        ? (error as Error).message
-        : 'Unknown error during download';
-
-      this.jobStateManager.updateJobStatus(job, 'failed', 'Download failed');
-      this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Download failed');
-      this.logger.error(`Unexpected error during download for job ${job.id}`, {
-        error: errorMessage,
-        jobDetails: job
-      });
-    } finally {
-      // Always update UI and process queue again
-      this.emitQueueUpdate();
-      this.processQueue();
-    }
-  }
-  
-  // Process downloaded videos
-  private async processVideos(): Promise<void> {
-    // Ensure we only process once and only when all downloads are complete
-    if (!this.allDownloadsComplete || this.isProcessing) {
-      this.logger.log('Processing already in progress or downloads not complete');
-      return;
-    }
-
-    const downloadedJobs = this.getJobsByStatus('downloaded');
-    
-    if (downloadedJobs.length === 0) {
-      this.logger.log('No jobs to process');
-      return;
-    }
-    
-    this.isProcessing = true;
-    this.logger.log(`Starting to process ${downloadedJobs.length} videos`);
-    
-    // Process videos concurrently, respecting maxConcurrentProcessing
-    const processQueue = async () => {
-      // Get jobs that are ready for processing but not yet started
-      const processingJobs = this.getJobsByStatus('downloaded');
-      
-      // Stop if no more jobs to process
-      if (processingJobs.length === 0) {
-        this.isProcessing = false;
-        this.allDownloadsComplete = false;
-        
-        // Emit batch completed event
-        const completedCount = this.getJobsByStatus('completed').length;
-        const failedCount = this.getJobsByStatus('failed').length;
-        this.eventService.emitBatchCompleted(completedCount, failedCount);
-        
-        return;
-      }
-      
-      // Determine how many jobs we can start processing
-      const availableProcessingSlots = this.maxConcurrentProcessing - 
-        this.getJobsByStatus('processing').length;
-      
-      // Start processing jobs
-      const jobsToProcess = processingJobs.slice(0, availableProcessingSlots);
-      
-      const processPromises = jobsToProcess.map(async (job) => {
-        // Explicitly set status to processing
-        this.jobStateManager.updateJobStatus(job, 'processing', 'Preparing video processing');
-        
-        try {
-          const outputFile = job.outputFile || 
-            (job.options as any).outputFile || 
-            (() => {
-              this.logger.error(`No output file found for job ${job.id}`);
-              throw new Error(`No output file for job ${job.id}`);
-            })();
-
-          const processingOptions: ProcessingOptions = {
-            fixAspectRatio: job.options.fixAspectRatio ?? true,
-          };
-          
-          try {
-            const outputFile = job.outputFile || (() => {
-              this.logger.error(`No output file found for job ${job.id}`);
-              throw new Error(`No output file for job ${job.id}`);
-            })();
-    
-            const processingOptions: ProcessingOptions = {
-              fixAspectRatio: job.options.fixAspectRatio ?? true,
-              useRmsNormalization: job.options.useRmsNormalization ?? false,
-              rmsNormalizationLevel: job.options.rmsNormalizationLevel ?? 0,
-              useCompression: job.options.useCompression ?? false,
-              compressionLevel: job.options.compressionLevel ?? 5,
-              transcribeVideo: job.options.transcribeVideo ?? false
-            };
-            
-            const processingResult = await this.mediaProcessingService.processMedia(
-              outputFile,
-              processingOptions,
-              job.id
-            );
-
-            if (processingResult.success) {
-              // IMPORTANT: If the output file path changed (e.g., due to re-encoding changing extension from .mp4 to .mov),
-              // we need to update the database record to point to the new file
-              if (processingResult.outputFile && processingResult.outputFile !== outputFile) {
-                const oldPath = outputFile;
-                const newPath = processingResult.outputFile;
-                job.outputFile = newPath;
-
-                this.logger.log(`Output file path changed from ${oldPath} to ${newPath}`);
-
-                // Check if this job should have been imported (library downloads)
-                const shouldImport = (job.options as any).shouldImport === true;
-
-                // Update database if the video was imported
-                if (shouldImport) {
-                  try {
-                    // The video was imported at the old path, so we need to update it
-                    // Find the video by the OLD path and update it to the NEW path
-                    const videos = await this.fileScannerService['databaseService'].getAllVideos();
-
-                    // Normalize paths for comparison (resolve to absolute paths)
-                    const path = require('path');
-                    const normalizedOldPath = path.resolve(oldPath);
-
-                    const video = videos.find((v: any) => {
-                      const videoPath = path.resolve(v.current_path || '');
-                      return videoPath === normalizedOldPath;
-                    });
-
-                    if (video) {
-                      this.logger.log(`Updating database path for video ${video.id} from ${oldPath} to ${newPath}`);
-
-                      // Update both the path and filename
-                      const newFilename = path.basename(newPath);
-
-                      await this.fileScannerService['databaseService'].updateVideoPath(
-                        video.id,
-                        newPath,
-                        video.date_folder || undefined
-                      );
-
-                      // Also update the filename if it changed
-                      if (newFilename !== video.filename) {
-                        const db = this.fileScannerService['databaseService']['db'];
-                        if (db) {
-                          db.prepare('UPDATE videos SET filename = ? WHERE id = ?')
-                            .run(newFilename, video.id);
-                        }
-                      }
-
-                      this.logger.log(`Successfully updated database with new file path`);
-                    } else {
-                      this.logger.warn(`Could not find video in database with path ${oldPath}`);
-                      this.logger.warn(`Searched ${videos.length} videos for normalized path: ${normalizedOldPath}`);
-                      // Log a few sample paths for debugging
-                      if (videos.length > 0) {
-                        this.logger.warn(`Sample paths in database: ${videos.slice(0, 3).map((v: any) => v.current_path).join(', ')}`);
-                      }
-                    }
-                  } catch (error) {
-                    this.logger.error(`Failed to update database path: ${(error as Error).message}`);
-                  }
-                }
-              }
-
-              if (processingResult.transcriptFile) {
-                job.transcriptFile = processingResult.transcriptFile;
-              }
-
-              if (job.status !== 'transcribing') {
-                this.jobStateManager.updateJobStatus(job, 'completed', 'Processing completed');
-                this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Processing completed');
-                this.logger.log(`Processing completed for job ${job.id}`);
-              } else {
-                this.logger.log(`Job ${job.id} is in transcribing state, waiting for transcription to complete`);
-              }
-            } else {
-              this.jobStateManager.updateJobStatus(job, 'failed', 'Unknown processing error');
-              this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Unknown processing error');
-              this.logger.error(`Processing failed for job ${job.id}: ${job.error}`);
-                        }
-          } catch (error) {
-            this.jobStateManager.updateJobStatus(job, 'failed', 'Unexpected processing error');
-            this.eventService.emitJobStatusUpdate(job.id, 'failed', 'Unexpected processing error');
-            this.logger.error(`Unexpected error processing job ${job.id}`, error);
-          }
-
-          this.emitQueueUpdate();
-        } catch {
-          this.logger.error(`Unexpected error processing job ${job.id}`);
-        }
-      });
-        
-      // Wait for current batch of jobs to complete
-      await Promise.all(processPromises);
-      
-      // Continue processing remaining jobs
-      await processQueue();
-    };
-      
-    // Start processing
-    await processQueue();
-  }
-    
-  // Update job progress from events
-  updateJobProgress(jobId: string, progress: number, task: string): void {
-    const job = this.jobs.get(jobId);
-    
-    if (job) {
-      this.jobStateManager.updateJobProgress(job, progress, task);
-      this.emitQueueUpdate();
-    }
-  }
-  
-  // Cancel a job
-  cancelJob(jobId: string): boolean {
-    const job = this.jobs.get(jobId);
-    if (!job) return false;
-
-    // Handle different job states
-    if (job.status === 'queued') {
-      this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
-      return true;
-    }
-
-    if (job.status === 'downloading') {
-      if (this.downloaderService.cancelDownload(jobId)) {
-        this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
-        return true;
-      }
-    }
-
-    if (job.status === 'downloaded' || job.status === 'processing' || job.status === 'transcribing') {
-      this.jobStateManager.updateJobStatus(job, 'failed', 'Canceled by user');
-      return true;
-    }
-
-    return false;
-  }
-  
-  // Retry a failed job
-  retryJob(jobId: string): boolean {
-    const job = this.jobs.get(jobId);
-    if (!job || job.status !== 'failed') {
-      return false;
-    }
-
-    // Reset job state
-    if (job.outputFile) {
-      // If we have an output file, we can retry from processing
-      this.jobStateManager.updateJobStatus(job, 'downloaded', 'Waiting for processing...');
-    } else {
-      this.jobStateManager.updateJobStatus(job, 'queued', 'Waiting in queue...');
-    }
-
-    this.processQueue();
-    return true;
-  }
-
-  // Skip processing for a job - keeps the original downloaded file
-  skipJob(jobId: string): boolean {
-    const job = this.jobs.get(jobId);
-    if (!job) {
-      this.logger.warn(`Cannot skip job ${jobId}: job not found`);
-      return false;
-    }
-
-    // Only allow skipping jobs that are in downloaded, processing, or transcribing state
-    if (job.status !== 'downloaded' && job.status !== 'processing' && job.status !== 'transcribing') {
-      this.logger.warn(`Cannot skip job ${jobId}: invalid status ${job.status}`);
-      return false;
-    }
-
-    this.logger.log(`Skipping processing for job ${jobId}. Keeping original download.`);
-
-    // Mark the job as completed with the original downloaded file
-    // Don't modify the outputFile - it already points to the original download
-    this.jobStateManager.updateJobStatus(job, 'completed', 'Processing skipped - original download kept');
-    this.eventService.emitJobStatusUpdate(job.id, 'completed', 'Processing skipped - original download kept');
-
-    // Emit update to notify frontend
-    this.emitQueueUpdate();
-
-    // Continue processing other jobs
-    this.processQueue();
-
-    return true;
-  }
-  
-  // Get current queue status
+  // Get current queue status - queries analysis service for 'download-and-process' jobs
   getBatchStatus(): BatchQueueStatus {
-    // Get jobs by state
-    const queuedJobs = this.getJobsByStatus('queued').map(job => this.formatJobForResponse(job));
-    const downloadingJobs = this.getJobsByStatus('downloading').map(job => this.formatJobForResponse(job));
-    const downloadedJobs = this.getJobsByStatus('downloaded').map(job => this.formatJobForResponse(job));
-    const processingJobs = this.getJobsByStatus('processing').map(job => this.formatJobForResponse(job));
-    const transcribingJobs = this.getJobsByStatus('transcribing').map(job => this.formatJobForResponse(job));
-    const completedJobs = this.getJobsByStatus('completed').map(job => this.formatJobForResponse(job));
-    const failedJobs = this.getJobsByStatus('failed').map(job => this.formatJobForResponse(job));
-    
+    // Get all jobs from analysis service with mode 'download-and-process'
+    const allAnalysisJobs = this.analysisService.getAllJobs();
+    const batchJobs = allAnalysisJobs.filter(job => job.mode === 'download-and-process');
+
+    // Map analysis jobs to batch job format
+    const mapToJobResponse = (analysisJob: any): JobResponse => ({
+      id: analysisJob.id,
+      url: '', // Analysis jobs don't store URL separately
+      displayName: analysisJob.title || 'Batch Download',
+      status: this.mapAnalysisStatusToJobStatus(analysisJob.status),
+      progress: analysisJob.progress,
+      currentTask: analysisJob.currentPhase,
+      error: analysisJob.error,
+      createdAt: analysisJob.createdAt?.toISOString() || new Date().toISOString(),
+      outputFile: analysisJob.videoPath,
+    });
+
+    // Categorize jobs by status
+    const queuedJobs = batchJobs.filter(j => j.status === 'pending').map(mapToJobResponse);
+    const downloadingJobs = batchJobs.filter(j => j.status === 'downloading').map(mapToJobResponse);
+    const processingJobs = batchJobs.filter(j => j.status === 'processing').map(mapToJobResponse);
+    const completedJobs = batchJobs.filter(j => j.status === 'completed').map(mapToJobResponse);
+    const failedJobs = batchJobs.filter(j => j.status === 'failed').map(mapToJobResponse);
+
     return {
       queuedJobs,
       downloadingJobs,
-      downloadedJobs,
+      downloadedJobs: [], // Not used in new flow
       processingJobs,
-      transcribingJobs,
+      transcribingJobs: [], // Not used in new flow
       completedJobs,
       failedJobs,
-      activeDownloadCount: downloadingJobs.length,
-      maxConcurrentDownloads: this.maxConcurrentDownloads,
-      isProcessing: this.isProcessing
+      activeDownloadCount: downloadingJobs.length + processingJobs.length,
+      maxConcurrentDownloads: 1, // Analysis queue processes 1 at a time
+      isProcessing: processingJobs.length > 0
     };
   }
-    
-  // Format job for API response
-  private formatJobForResponse(job: Job): JobResponse {
-    return {
-      id: job.id,
-      url: job.url,
-      displayName: job.displayName,
-      status: job.status,
-      progress: job.progress,
-      currentTask: job.currentTask,
-      error: job.error,
-      createdAt: job.createdAt,
-      downloadStartTime: job.downloadStartTime,
-      downloadEndTime: job.downloadEndTime,
-      processingStartTime: job.processingStartTime,
-      processingEndTime: job.processingEndTime,
-      outputFile: job.outputFile,
-      thumbnail: job.thumbnail,
-      transcriptFile: job.transcriptFile
-    };
-  }
-  
-  // Delete a single job from the queue
-  deleteJob(jobId: string): boolean {
-    const job = this.jobs.get(jobId);
-    if (!job) {
-      this.logger.warn(`Attempted to delete non-existent job: ${jobId}`);
-      return false;
+
+  // Map analysis job status to batch job status
+  private mapAnalysisStatusToJobStatus(analysisStatus: string): JobStatus {
+    switch (analysisStatus) {
+      case 'pending':
+        return 'queued';
+      case 'downloading':
+        return 'downloading';
+      case 'processing':
+      case 'extracting':
+        return 'processing';
+      case 'completed':
+        return 'completed';
+      case 'failed':
+        return 'failed';
+      default:
+        return 'queued';
     }
-
-    // If the job is actively downloading, cancel it first
-    if (job.status === 'downloading') {
-      this.logger.log(`Cancelling download for job ${jobId} before deletion`);
-      this.downloaderService.cancelDownload(jobId);
-    }
-
-    // Remove from jobs map
-    this.jobs.delete(jobId);
-    this.logger.log(`Deleted job ${jobId}. Remaining jobs: ${this.jobs.size}`);
-
-    // Update UI
-    this.emitQueueUpdate();
-    return true;
   }
 
-  // Clear ALL jobs and cancel any ongoing operations
+  // Delete a single job - delegates to analysis service
+  async deleteJob(jobId: string): Promise<boolean> {
+    this.logger.log(`Deleting batch job ${jobId} from analysis service`);
+    return await this.analysisService.deleteJob(jobId);
+  }
+
+  // Retry a failed job - not implemented yet (would need analysis service support)
+  retryJob(jobId: string): boolean {
+    this.logger.warn(`Retry not yet implemented for batch jobs (job ${jobId})`);
+    return false;
+  }
+
+  // Skip a job - not applicable for batch downloads
+  skipJob(jobId: string): boolean {
+    this.logger.warn(`Skip not applicable for batch downloads (job ${jobId})`);
+    return false;
+  }
+
+  // Cancel a job - not implemented yet (would need analysis service support)
+  cancelJob(jobId: string): boolean {
+    this.logger.warn(`Cancel not yet implemented for batch jobs (job ${jobId})`);
+    return false;
+  }
+
+  // Clear ALL batch jobs - delegates to analysis service
   clearQueues(): void {
-    this.logger.log(`Clearing all queues. Total jobs before clear: ${this.jobs.size}`);
+    this.logger.log('Clearing all batch download jobs from analysis service');
 
-    // Cancel any active downloads
-    this.getJobsByStatus('downloading').forEach(job => {
-      this.logger.log(`Cancelling download for job ${job.id}`);
-      this.downloaderService.cancelDownload(job.id);
+    // Get all batch jobs and delete them
+    const allAnalysisJobs = this.analysisService.getAllJobs();
+    const batchJobs = allAnalysisJobs.filter(job => job.mode === 'download-and-process');
+
+    batchJobs.forEach(job => {
+      this.analysisService.deleteJob(job.id);
     });
 
-    // Cancel any processing jobs
-    this.getJobsByStatus('processing').forEach(job => {
-      this.logger.log(`Cancelling processing for job ${job.id}`);
-      // The media processing service should handle cancellation
-      // For now, we just mark them as cancelled
-    });
-
-    // Cancel any transcribing jobs
-    this.getJobsByStatus('transcribing').forEach(job => {
-      this.logger.log(`Cancelling transcription for job ${job.id}`);
-      // The media processing service should handle cancellation
-    });
-
-    // Clear ALL jobs from the map - no matter what state they're in
-    this.jobs.clear();
-
-    // Reset processing flags
-    this.isProcessing = false;
-    this.allDownloadsComplete = false;
-
-    this.logger.log('All jobs cleared from queue');
-    this.emitQueueUpdate();
+    this.logger.log(`Cleared ${batchJobs.length} batch jobs from analysis queue`);
   }
 
-  // Clear completed jobs
+  // Clear completed jobs - delegates to analysis service
   clearCompletedJobs(): void {
-    // Get completed job IDs
-    const completedJobIds = this.getJobsByStatus('completed').map(job => job.id);
-    
-    // Remove from jobs collection
-    completedJobIds.forEach(id => {
-      this.jobs.delete(id);
+    const allAnalysisJobs = this.analysisService.getAllJobs();
+    const completedBatchJobs = allAnalysisJobs.filter(
+      job => job.mode === 'download-and-process' && job.status === 'completed'
+    );
+
+    completedBatchJobs.forEach(job => {
+      this.analysisService.deleteJob(job.id);
     });
-    
-    this.logger.log(`Cleared ${completedJobIds.length} completed jobs`);
-    this.emitQueueUpdate();
+
+    this.logger.log(`Cleared ${completedBatchJobs.length} completed batch jobs`);
   }
 
-  // Clear failed jobs
+  // Clear failed jobs - delegates to analysis service
   clearFailedJobs(): void {
-    // Get failed job IDs
-    const failedJobIds = this.getJobsByStatus('failed').map(job => job.id);
-    
-    // Remove from jobs collection
-    failedJobIds.forEach(id => {
-      this.jobs.delete(id);
-    });
-    
-    this.logger.log(`Cleared ${failedJobIds.length} failed jobs`);
-    this.emitQueueUpdate();
-  }
+    const allAnalysisJobs = this.analysisService.getAllJobs();
+    const failedBatchJobs = allAnalysisJobs.filter(
+      job => job.mode === 'download-and-process' && job.status === 'failed'
+    );
 
-  // Emit queue update event
-  private emitQueueUpdate(): void {
-    this.eventService.emitBatchQueueUpdated(this.getBatchStatus());
-  }
-
-  /**
-   * Fetch metadata in the background with a 10-second timeout
-   * Updates the job's displayName when metadata is retrieved
-   */
-  private async fetchMetadataInBackground(job: Job): Promise<void> {
-    const METADATA_TIMEOUT = 10000; // 10 seconds - fail fast to avoid delaying downloads
-
-    this.logger.log(`Starting background metadata fetch for job ${job.id}`);
-
-    // Skip metadata fetch for Facebook - it's too slow and unreliable
-    // The download will proceed with the URL-based display name
-    if (job.url.includes('facebook.com') || job.url.includes('fb.watch')) {
-      this.logger.log(`Skipping metadata fetch for Facebook URL - will use filename from download`);
-      return;
-    }
-
-    // Create a timeout promise
-    const timeoutPromise = new Promise<null>((resolve) => {
-      setTimeout(() => {
-        this.logger.warn(`Metadata fetch timeout for job ${job.id} after ${METADATA_TIMEOUT}ms - proceeding with download`);
-        resolve(null);
-      }, METADATA_TIMEOUT);
+    failedBatchJobs.forEach(job => {
+      this.analysisService.deleteJob(job.id);
     });
 
-    // Create metadata fetch promise
-    const metadataPromise = this.downloaderService.getVideoInfo(job.url)
-      .then(info => {
-        this.logger.log(`Metadata fetched successfully for job ${job.id}: ${info.title}`);
-        return info;
-      })
-      .catch(error => {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(`Error fetching metadata for job ${job.id}: ${errorMessage}`);
-        return null;
-      });
-
-    // Race between timeout and metadata fetch
-    const result = await Promise.race([metadataPromise, timeoutPromise]);
-
-    // Update job displayName if we got metadata
-    if (result && result.title) {
-      const oldDisplayName = job.displayName;
-
-      // Truncate title to prevent excessively long display names (max 200 chars for title)
-      const maxTitleLength = 200;
-      let truncatedTitle = result.title;
-      if (truncatedTitle.length > maxTitleLength) {
-        truncatedTitle = truncatedTitle.substring(0, maxTitleLength) + '...';
-      }
-
-      // Create a display name with upload date if available
-      if (result.uploadDate) {
-        job.displayName = `${result.uploadDate} ${truncatedTitle}`;
-        job.uploadDate = result.uploadDate; // Store the upload date separately
-      } else {
-        job.displayName = truncatedTitle;
-      }
-
-      this.logger.log(`Updated job ${job.id} displayName from "${oldDisplayName}" to "${job.displayName}"`);
-
-      // Update the options displayName as well
-      job.options.displayName = job.displayName;
-
-      // If download is complete and we have an output file, rename it
-      if (job.outputFile && job.status !== 'downloading') {
-        await this.renameDownloadedFile(job, result);
-      }
-
-      // Emit queue update to notify frontend
-      this.emitQueueUpdate();
-    } else {
-      this.logger.log(`No metadata retrieved for job ${job.id}, keeping temporary name`);
-    }
+    this.logger.log(`Cleared ${failedBatchJobs.length} failed batch jobs`);
   }
 
-  /**
-   * Rename the downloaded file based on metadata
-   */
-  private async renameDownloadedFile(job: Job, metadata: any): Promise<void> {
-    if (!job.outputFile) {
-      this.logger.warn(`Cannot rename file for job ${job.id}: no output file`);
-      return;
-    }
+  // Legacy methods kept for compatibility
+  setMaxConcurrentDownloads(max: number): void {
+    this.logger.log(`setMaxConcurrentDownloads called with ${max}, but analysis queue handles concurrency (fixed at 1)`);
+  }
 
-    try {
-      const fs = require('fs');
-      const path = require('path');
+  getMaxConcurrentDownloads(): number {
+    return 1; // Analysis queue processes 1 job at a time
+  }
 
-      // Check if file still exists
-      if (!fs.existsSync(job.outputFile)) {
-        this.logger.warn(`Cannot rename file for job ${job.id}: file does not exist at ${job.outputFile}`);
-        return;
-      }
-
-      // Create new filename based on metadata
-      const dir = path.dirname(job.outputFile);
-      const ext = path.extname(job.outputFile);
-
-      // Truncate title to prevent filename too long errors (max 200 chars for title)
-      const maxTitleLength = 200;
-      let truncatedTitle = metadata.title;
-      if (truncatedTitle.length > maxTitleLength) {
-        truncatedTitle = truncatedTitle.substring(0, maxTitleLength);
-      }
-
-      let newFilename: string;
-      if (metadata.uploadDate) {
-        newFilename = `${metadata.uploadDate} ${truncatedTitle}${ext}`;
-      } else {
-        newFilename = `${truncatedTitle}${ext}`;
-      }
-
-      // Sanitize filename (remove invalid characters)
-      newFilename = newFilename.replace(/[<>:"/\\|?*]/g, '_');
-
-      const newPath = path.join(dir, newFilename);
-
-      // Only rename if the new path is different
-      if (job.outputFile !== newPath) {
-        this.logger.log(`Renaming file for job ${job.id}:`);
-        this.logger.log(`  From: ${job.outputFile}`);
-        this.logger.log(`  To: ${newPath}`);
-
-        fs.renameSync(job.outputFile, newPath);
-        job.outputFile = newPath;
-
-        this.logger.log(`File renamed successfully for job ${job.id}`);
-        this.emitQueueUpdate();
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Error renaming file for job ${job.id}: ${errorMessage}`);
-      // Don't throw - the download is still successful even if rename fails
-    }
+  updateJobProgress(jobId: string, progress: number, task: string): void {
+    // Progress updates are handled by analysis service
+    this.logger.debug(`Job progress update for ${jobId}: ${progress}% - ${task}`);
   }
 }

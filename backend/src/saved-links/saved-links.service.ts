@@ -67,6 +67,8 @@ export class SavedLinksService implements OnModuleInit {
 
   /**
    * Handle successful download completion
+   * Note: With the new batch downloader implementation using analysis queue,
+   * download + import + processing happens automatically. This just marks as completed.
    */
   private async handleDownloadCompleted(savedLinkId: string) {
     this.logger.log(`Download completed for saved link: ${savedLinkId}`);
@@ -77,43 +79,21 @@ export class SavedLinksService implements OnModuleInit {
       return;
     }
 
-    // Get the batch job to find the download path
-    const job = this.batchDownloaderService['jobs'].get(`saved-link-${savedLinkId}`);
-    if (job && job.outputFile) {
-      this.logger.log(`Updating saved link with download path: ${job.outputFile}`);
+    // Update status to completed
+    // Note: The analysis queue handles download + import + processing automatically
+    this.databaseService.updateSavedLinkStatus(
+      savedLinkId,
+      'completed',
+      undefined,
+      undefined, // Output file path handled by analysis queue
+    );
 
-      // Update status to completed
-      this.databaseService.updateSavedLinkStatus(
-        savedLinkId,
-        'completed',
-        undefined,
-        job.outputFile,
-      );
+    this.logger.log(`Marked saved link ${savedLinkId} as completed`);
 
-      // Auto-import to library
-      try {
-        this.logger.log(`Auto-importing ${job.outputFile} to library`);
-        const result = await this.fileScannerService.importVideos([job.outputFile]);
-
-        if (result.imported.length > 0) {
-          const videoId = result.imported[0];
-          this.logger.log(`Successfully imported to library with video ID: ${videoId}`);
-
-          // Link the saved link to the imported video
-          this.databaseService.linkSavedLinkToVideo(savedLinkId, videoId);
-        } else if (result.errors.length > 0) {
-          this.logger.error(`Failed to import to library: ${result.errors[0]}`);
-        }
-      } catch (error: any) {
-        this.logger.error(`Error auto-importing to library: ${error.message}`);
-        // Don't fail the whole operation if import fails - the video is still downloaded
-      }
-
-      // Emit update
-      const updatedLink = this.databaseService.findSavedLinkById(savedLinkId) as unknown as SavedLink;
-      if (updatedLink) {
-        this.websocketService.emitSavedLinkUpdated(updatedLink);
-      }
+    // Emit update
+    const updatedLink = this.databaseService.findSavedLinkById(savedLinkId) as unknown as SavedLink;
+    if (updatedLink) {
+      this.websocketService.emitSavedLinkUpdated(updatedLink);
     }
   }
 
