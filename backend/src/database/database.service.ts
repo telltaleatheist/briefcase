@@ -1343,12 +1343,20 @@ export class DatabaseService {
   }
 
   /**
-   * Get video by ID
+   * Get video by ID with computed flags
    */
-  getVideoById(id: string): VideoRecord | null {
+  getVideoById(id: string): VideoRecordWithFlags | null {
     const db = this.ensureInitialized();
-    const stmt = db.prepare('SELECT * FROM videos WHERE id = ?');
-    const result = stmt.get(id) as VideoRecord | undefined;
+    const stmt = db.prepare(`
+      SELECT
+        v.*,
+        CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
+        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) OR v.suggested_title IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
+      FROM videos v
+      WHERE v.id = ?
+    `);
+    const result = stmt.get(id) as VideoRecordWithFlags | undefined;
     return result || null;
   }
 

@@ -308,21 +308,18 @@ export class VideoStateService {
       processingProgress: event.progress || 0
     };
 
-    // If completed, mark as having analysis
+    // If completed, reload from database to get all updated flags and metadata
     if (event.status === 'completed' || event.progress === 100) {
-      updates.hasAnalysis = true;
-      updates.processingStatus = 'completed';
-      updates.processingProgress = 100;
-
-      // Reload full video data to get new metadata
+      // Don't update with partial data - let reloadVideoFromDatabase handle it
+      // This ensures we get both has_transcript and has_analysis flags from DB
       this.reloadVideoFromDatabase(videoId);
     } else if (event.status === 'failed') {
       updates.processingStatus = 'failed';
+      this.updateVideo(videoId, updates);
     } else {
       updates.processingStatus = 'processing';
+      this.updateVideo(videoId, updates);
     }
-
-    this.updateVideo(videoId, updates);
   }
 
   /**
@@ -356,10 +353,14 @@ export class VideoStateService {
    */
   private async reloadVideoFromDatabase(videoId: string): Promise<void> {
     try {
+      console.log(`[VideoStateService] Reloading video ${videoId} from database...`);
       const video = await this.databaseLibraryService.getVideoById(videoId);
       if (video) {
+        console.log(`[VideoStateService] Reloaded video ${videoId} - has_transcript: ${video.has_transcript}, has_analysis: ${video.has_analysis}, suggested_title: ${video.suggested_title?.substring(0, 50)}`);
         const videoState = this.createVideoStateFromDatabase(video);
         this.upsertVideo(videoState);
+      } else {
+        console.warn(`[VideoStateService] Video ${videoId} not found in database`);
       }
     } catch (error) {
       console.error(`[VideoStateService] Failed to reload video ${videoId}:`, error);
@@ -399,7 +400,7 @@ export class VideoStateService {
         uploadDate: dbVideo.upload_date,
         downloadDate: dbVideo.download_date,
         addedAt: dbVideo.added_at,
-        duration: dbVideo.duration,
+        duration: dbVideo.duration_seconds, // Map from duration_seconds to duration
         fileSize: dbVideo.file_size,
         parentId: dbVideo.parent_id,
         isLinked: dbVideo.is_linked,

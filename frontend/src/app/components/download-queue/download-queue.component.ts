@@ -100,6 +100,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   private pollingSubscription: Subscription | null = null;
   isProcessing = false;
 
+  // Debounce timer for expandFirstItemOnly
+  private expandFirstItemTimer: any = null;
+
   // Auto-queue processing (sequential, one-at-a-time)
   private autoProcessQueue = false;
 
@@ -160,10 +163,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       // Update combined list when pending jobs change
       this.updateAllJobsList();
 
-      // Expand only the first item after the view updates
-      setTimeout(() => {
-        this.expandFirstItemOnly();
-      }, 0);
+      // Expand only the first item after the view updates (debounced to avoid race conditions)
+      this.scheduleExpandFirstItem();
     });
 
     // Subscribe to job added event to auto-open the queue (OLD service)
@@ -182,15 +183,19 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Subscribe to video processing queue jobs (NEW service)
     this.videoProcessingJobsSubscription = this.videoProcessingQueueService.getJobs().subscribe(jobsMap => {
       console.log('[DownloadQueue] Video processing jobs updated. Count:', jobsMap.size);
+      const previousJobs = this.videoProcessingJobs;
       this.videoProcessingJobs = Array.from(jobsMap.values());
+
+      // Auto-submit newly added pending jobs if queue is running
+      if (this.autoProcessQueue) {
+        this.autoSubmitNewPendingJobs(previousJobs, this.videoProcessingJobs);
+      }
 
       // Update combined list when video processing jobs change
       this.updateAllJobsList();
 
-      // Expand only the first item after the view updates
-      setTimeout(() => {
-        this.expandFirstItemOnly();
-      }, 0);
+      // Expand only the first item after the view updates (debounced to avoid race conditions)
+      this.scheduleExpandFirstItem();
     });
 
     // Load available Ollama models
@@ -207,6 +212,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
+    }
+    if (this.expandFirstItemTimer) {
+      clearTimeout(this.expandFirstItemTimer);
     }
     if (this.jobsSubscription) {
       this.jobsSubscription.unsubscribe();
@@ -914,8 +922,32 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // OLD active jobs are excluded to prevent duplicates
     const active: any[] = [];
 
+    // Combine all jobs and remove duplicates based on ID
+    const combined = [...pending, ...active, ...videoProcessing];
+
+    // De-duplicate by ID (keep first occurrence)
+    const seenIds = new Set<string>();
+    const uniqueJobs = combined.filter(job => {
+      if (seenIds.has(job.id)) {
+        console.warn('[DownloadQueue] Duplicate job ID detected:', job.id, 'Removing duplicate.');
+        return false;
+      }
+      seenIds.add(job.id);
+      return true;
+    });
+
     // ALWAYS create a new array reference to trigger Angular's change detection
-    this.allJobsAsListItems = [...pending, ...active, ...videoProcessing];
+    this.allJobsAsListItems = uniqueJobs;
+
+    // Clear stale expanded items (items that no longer exist)
+    if (this.cascadeList) {
+      const validIds = new Set(uniqueJobs.map(j => j.id));
+      const staleIds = Array.from(this.cascadeList.expandedItems).filter(id => !validIds.has(id));
+      staleIds.forEach(id => {
+        console.log('[DownloadQueue] Removing stale expanded item:', id);
+        this.cascadeList!.expandedItems.delete(id);
+      });
+    }
 
     // Update cached active items count
     const pendingCount = this.pendingJobs.length;
@@ -945,13 +977,70 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Auto-submit newly added pending jobs when queue is running
+   */
+  private async autoSubmitNewPendingJobs(previousJobs: any[], currentJobs: any[]): Promise<void> {
+    // Find new pending jobs (jobs that weren't in the previous list)
+    const previousIds = new Set(previousJobs.map(j => j.id));
+    const newPendingJobs = currentJobs.filter(job =>
+      !previousIds.has(job.id) && job.overallStatus === 'pending'
+    );
+
+    if (newPendingJobs.length === 0) {
+      return;
+    }
+
+    console.log('[DownloadQueue] Auto-submitting', newPendingJobs.length, 'new pending jobs');
+
+    // Submit each new pending job
+    for (const job of newPendingJobs) {
+      try {
+        console.log('[DownloadQueue] Auto-submitting job:', job.id, job['displayName']);
+        await this.videoProcessingQueueService.submitJob(job.id);
+      } catch (error: any) {
+        console.error('[DownloadQueue] Failed to auto-submit job:', job.id, error);
+      }
+    }
+  }
+
+  /**
+   * Schedule expandFirstItemOnly with debouncing to avoid race conditions
+   * when multiple subscriptions fire in quick succession
+   */
+  private scheduleExpandFirstItem(): void {
+    // Clear any existing timer
+    if (this.expandFirstItemTimer) {
+      clearTimeout(this.expandFirstItemTimer);
+    }
+
+    // Schedule the expansion after a short delay (Angular's change detection cycle)
+    this.expandFirstItemTimer = setTimeout(() => {
+      this.expandFirstItemOnly();
+      this.expandFirstItemTimer = null;
+    }, 100); // 100ms debounce to batch multiple updates
+  }
+
+  /**
    * Expand only the first item in the queue, collapse all others
    */
   private expandFirstItemOnly(): void {
-    if (!this.cascadeList) return;
+    if (!this.cascadeList) {
+      console.log('[DownloadQueue] expandFirstItemOnly: cascadeList not available yet');
+      return;
+    }
 
     const allJobs = this.allJobsAsListItems;
-    if (allJobs.length === 0) return;
+    if (allJobs.length === 0) {
+      console.log('[DownloadQueue] expandFirstItemOnly: no jobs to expand');
+      this.cascadeList.expandedItems.clear();
+      return;
+    }
+
+    console.log('[DownloadQueue] expandFirstItemOnly: Processing', allJobs.length, 'jobs');
+
+    // Get current expanded items before clearing
+    const currentlyExpanded = Array.from(this.cascadeList.expandedItems);
+    console.log('[DownloadQueue] Currently expanded items:', currentlyExpanded);
 
     // Clear all expanded items first
     this.cascadeList.expandedItems.clear();
@@ -959,8 +1048,14 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Expand only the first item if it has children
     const firstJob = allJobs[0];
     if (this.cascadeList.hasChildren(firstJob)) {
+      console.log('[DownloadQueue] Expanding first job:', firstJob.id, firstJob['displayName']);
       this.cascadeList.expandedItems.add(firstJob.id);
+    } else {
+      console.log('[DownloadQueue] First job has no children:', firstJob.id, firstJob['displayName']);
     }
+
+    // Log final state
+    console.log('[DownloadQueue] Final expanded items:', Array.from(this.cascadeList.expandedItems));
   }
 
   /**

@@ -469,7 +469,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
             upload_date: videoState.metadata.uploadDate || null,
             download_date: videoState.metadata.downloadDate || null,
             added_at: videoState.metadata.addedAt || null,
-            duration: videoState.metadata.duration || null,
+            duration_seconds: videoState.metadata.duration || null, // Map duration to duration_seconds
             file_size: videoState.metadata.fileSize || null,
             parent_id: videoState.metadata.parentId || null,
             is_linked: videoState.metadata.isLinked || 0,
@@ -1559,6 +1559,45 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   /**
    * Get streaming URL for a video
    */
+  /**
+   * Infer media type from filename if not provided
+   */
+  private inferMediaType(video: DatabaseVideo): string {
+    if (video.media_type) {
+      return video.media_type;
+    }
+
+    // Fallback: infer from file extension
+    const ext = (video.file_extension || video.filename.substring(video.filename.lastIndexOf('.'))).toLowerCase();
+
+    // Video extensions
+    if (['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv', '.ogg'].includes(ext)) {
+      return 'video';
+    }
+
+    // Audio extensions
+    if (['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.oga'].includes(ext)) {
+      return 'audio';
+    }
+
+    // Image extensions
+    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) {
+      return 'image';
+    }
+
+    // Document extensions
+    if (['.pdf', '.txt', '.md'].includes(ext)) {
+      return 'document';
+    }
+
+    // Web archive extensions
+    if (['.html', '.htm', '.mhtml'].includes(ext)) {
+      return 'webpage';
+    }
+
+    return 'video'; // default
+  }
+
   getVideoStreamUrl(video: DatabaseVideo): string {
     // Properly encode Unicode path to base64
     // Convert string -> UTF-8 bytes -> base64
@@ -1566,13 +1605,15 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     const binaryString = Array.from(utf8Bytes, byte => String.fromCharCode(byte)).join('');
     const encodedPath = btoa(binaryString);
 
+    const mediaType = this.inferMediaType(video);
+
     // Use dedicated image endpoint for images, video endpoint for everything else
-    const endpoint = video.media_type === 'image'
+    const endpoint = mediaType === 'image'
       ? '/api/library/images/custom'
       : '/api/library/videos/custom';
 
     const url = `${this.backendUrl}${endpoint}?path=${encodeURIComponent(encodedPath)}`;
-    console.log(`[Preview] Media type: ${video.media_type}, Path: ${video.current_path}`);
+    console.log(`[Preview] Media type: ${mediaType}, Path: ${video.current_path}`);
     console.log(`[Preview] Generated URL: ${url}`);
     return url;
   }
@@ -1616,7 +1657,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         : video.suggested_title;
 
       // Show preview of suggested title with instruction to right-click
-      parts.push(`💡 Suggested: ${preview} <span style="color: #999; font-style: italic;">(right-click to edit)</span>`);
+      // Use CSS class for proper Angular styling (inline styles get sanitized)
+      parts.push(`<span class="suggested-title">💡 Suggested: ${preview} <em>(right-click to edit)</em></span>`);
     }
 
     // Upload date (from filename) - when content was created/filmed by the person
@@ -1651,6 +1693,13 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Format video duration for display
    */
   formatVideoDuration(video: DatabaseVideo): string {
+    console.log('[formatVideoDuration] Called with:', {
+      id: video.id,
+      filename: video.filename?.substring(0, 30),
+      duration_seconds: video.duration_seconds,
+      hasField: 'duration_seconds' in video
+    });
+
     if (!video.duration_seconds) {
       return '';
     }
@@ -1670,7 +1719,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Get media type icon
    */
   getMediaIcon(video: DatabaseVideo): string {
-    switch (video.media_type) {
+    const mediaType = this.inferMediaType(video);
+    switch (mediaType) {
       case 'video': return 'movie';
       case 'audio': return 'audiotrack';
       case 'document': return 'description';
@@ -1696,6 +1746,12 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     const has_transcript = sourceVideo.has_transcript;
     const has_analysis = sourceVideo.has_analysis;
     const duration_seconds = sourceVideo.duration_seconds || video.duration_seconds;
+
+    // Non-video/audio files (documents, webpages, images) are always green
+    const mediaType = this.inferMediaType(sourceVideo);
+    if (mediaType !== 'video' && mediaType !== 'audio') {
+      return { color: '#198754', tooltip: 'Document/webpage/image' }; // Green
+    }
 
     // Priority: missing both > has transcript only > has analysis (complete)
     if (!has_transcript && !has_analysis) {
@@ -4085,6 +4141,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       video: this.highlightedVideo,
       autoPlay: this.previewAutoPlayEnabled,
       videoStreamUrl: this.getVideoStreamUrl(this.highlightedVideo),
+      mediaType: this.inferMediaType(this.highlightedVideo),
       parseFilename: (filename: string) => this.parseFilename(filename),
       getMediaTypeIcon: (mediaType: string) => this.getMediaTypeIcon(mediaType),
       getMediaTypeLabel: (mediaType: string) => this.getMediaTypeLabel(mediaType),
@@ -4150,7 +4207,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     // If dialog is open, just update it; don't close/reopen
     if (this.currentPreviewDialogRef) {
       const componentInstance = this.currentPreviewDialogRef.componentInstance;
-      componentInstance.updateVideoData(video, this.getVideoStreamUrl(video));
+      componentInstance.updateVideoData(video, this.getVideoStreamUrl(video), this.inferMediaType(video));
     }
   }
 

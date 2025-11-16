@@ -194,6 +194,13 @@ export class VideoProcessingQueueService {
 
     // Submit each child process sequentially
     for (const child of job.childProcesses) {
+      // Check if job was removed before processing next child
+      const currentJob = this.jobs.getValue().get(parentJobId);
+      if (!currentJob) {
+        console.log('[VideoProcessingQueueService] Job removed during processing:', parentJobId);
+        return; // Exit gracefully
+      }
+
       try {
         await this.submitChildProcess(parentJobId, child);
 
@@ -204,22 +211,31 @@ export class VideoProcessingQueueService {
         console.error('[VideoProcessingQueueService] Error submitting child process:', error);
         child.status = 'failed';
         child.error = error.message || 'Failed to submit process';
-        this.updateJob(parentJobId, job);
 
-        // Stop processing further children if one fails
-        job.overallStatus = 'failed';
-        this.updateJob(parentJobId, job);
+        // Check if job still exists before updating
+        if (this.jobs.getValue().has(parentJobId)) {
+          this.updateJob(parentJobId, job);
+
+          // Stop processing further children if one fails
+          job.overallStatus = 'failed';
+          this.updateJob(parentJobId, job);
+        }
         break;
       }
     }
 
-    // Check if all children completed successfully
-    const allCompleted = job.childProcesses.every(c => c.status === 'completed');
-    if (allCompleted) {
-      job.overallStatus = 'completed';
-      job.completedAt = new Date();
-      this.updateJob(parentJobId, job);
-      console.log('[VideoProcessingQueueService] Job completed:', parentJobId);
+    // Check if job still exists and all children completed successfully
+    const finalJob = this.jobs.getValue().get(parentJobId);
+    if (finalJob) {
+      const allCompleted = finalJob.childProcesses.every(c => c.status === 'completed');
+      if (allCompleted) {
+        finalJob.overallStatus = 'completed';
+        finalJob.completedAt = new Date();
+        this.updateJob(parentJobId, finalJob);
+        console.log('[VideoProcessingQueueService] Job completed:', parentJobId);
+      }
+    } else {
+      console.log('[VideoProcessingQueueService] Job removed before completion:', parentJobId);
     }
   }
 
@@ -232,7 +248,9 @@ export class VideoProcessingQueueService {
         const job = this.jobs.getValue().get(parentJobId);
         if (!job) {
           clearInterval(checkInterval);
-          reject(new Error('Job not found'));
+          console.log('[VideoProcessingQueueService] Job removed while waiting for child completion:', parentJobId);
+          // Don't reject - job was removed by user, just resolve silently
+          resolve();
           return;
         }
 

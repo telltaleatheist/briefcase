@@ -637,6 +637,31 @@ export class LibraryController {
   }
 
   /**
+   * Get video metadata by ID
+   * Returns the video database record with all flags and metadata
+   */
+  @Get('videos/:id/metadata')
+  async getVideoMetadata(@Param('id') id: string) {
+    try {
+      const video = this.databaseService.getVideoById(id);
+
+      if (!video) {
+        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
+      }
+
+      return video;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        'Failed to get video metadata',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Stream video file for an analysis
    * Supports range requests for seeking
    */

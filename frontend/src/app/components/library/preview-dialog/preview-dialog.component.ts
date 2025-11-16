@@ -11,6 +11,7 @@ export interface PreviewDialogData {
   video: DatabaseVideo;
   autoPlay: boolean;
   videoStreamUrl: string;
+  mediaType: string;
   parseFilename: (filename: string) => { title: string };
   getMediaTypeIcon: (mediaType: string) => string;
   getMediaTypeLabel: (mediaType: string) => string;
@@ -55,8 +56,32 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
+    // Add error handling for video element
+    if (this.videoPlayer?.nativeElement) {
+      const videoElement = this.videoPlayer.nativeElement;
+
+      videoElement.addEventListener('error', (e) => {
+        const error = videoElement.error;
+        console.error('Preview video error:', {
+          code: error?.code,
+          message: error?.message,
+          src: videoElement.src
+        });
+
+        if (error?.code === MediaError.MEDIA_ERR_DECODE) {
+          console.error('Video codec not supported by browser');
+        } else if (error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+          console.error('Video format not supported');
+        } else if (error?.code === MediaError.MEDIA_ERR_NETWORK) {
+          console.error('Network error while loading video');
+        } else if (error?.code === MediaError.MEDIA_ERR_ABORTED) {
+          console.error('Video loading aborted');
+        }
+      });
+    }
+
     // Auto-play video if enabled
-    if (this.autoPlayEnabled && this.data.video.media_type === 'video' && this.videoPlayer?.nativeElement) {
+    if (this.autoPlayEnabled && this.data.mediaType === 'video' && this.videoPlayer?.nativeElement) {
       const videoElement = this.videoPlayer.nativeElement;
 
       // Wait for video to be ready before playing
@@ -76,7 +101,7 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
     }
 
     // Auto-play audio if enabled
-    if (this.autoPlayEnabled && this.data.video.media_type === 'audio') {
+    if (this.autoPlayEnabled && this.data.mediaType === 'audio') {
       setTimeout(() => {
         const audioElement = document.querySelector('.preview-dialog-content audio') as HTMLAudioElement;
         if (audioElement) {
@@ -106,7 +131,7 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
   /**
    * Public method to update video data (called by parent component)
    */
-  updateVideoData(video: DatabaseVideo, videoStreamUrl: string) {
+  updateVideoData(video: DatabaseVideo, videoStreamUrl: string, mediaType: string) {
     // Only update if video actually changed
     if (this.previousVideoId === video.id) {
       return;
@@ -119,9 +144,10 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
     // Update data object
     this.data.video = video;
     this.data.videoStreamUrl = videoStreamUrl;
+    this.data.mediaType = mediaType;
 
     // If we have a video element, update its source
-    if (this.videoPlayer?.nativeElement && video.media_type === 'video') {
+    if (this.videoPlayer?.nativeElement && mediaType === 'video') {
       const videoElement = this.videoPlayer.nativeElement;
 
       // Pause current video
@@ -150,7 +176,7 @@ export class PreviewDialogComponent implements AfterViewInit, OnDestroy {
     }
 
     // Handle audio element auto-play when navigating
-    if (video.media_type === 'audio' && this.autoPlayEnabled) {
+    if (mediaType === 'audio' && this.autoPlayEnabled) {
       setTimeout(() => {
         const audioElement = document.querySelector('.preview-dialog-content audio') as HTMLAudioElement;
         if (audioElement) {

@@ -19,23 +19,25 @@
   <div class="preview-dialog-content">
     <!-- Video Player -->
     <video #videoPlayer
-           *ngIf="data.video.media_type === 'video'"
+           *ngIf="data.mediaType === 'video'"
            [src]="data.videoStreamUrl"
            controls
            class="media-player"
+           preload="metadata"
            tabindex="-1">
     </video>
 
     <!-- Audio Player -->
-    <audio *ngIf="data.video.media_type === 'audio'"
+    <audio *ngIf="data.mediaType === 'audio'"
            [src]="data.videoStreamUrl"
            controls
            class="media-player"
+           preload="metadata"
            tabindex="-1">
     </audio>
 
     <!-- Image Viewer -->
-    <div *ngIf="data.video.media_type === 'image'" class="image-viewer">
+    <div *ngIf="data.mediaType === 'image'" class="image-viewer">
       <img [src]="data.videoStreamUrl"
            [alt]="data.video.filename"
            (error)="onImageError()"
@@ -44,10 +46,10 @@
     </div>
 
     <!-- Unsupported Media Type -->
-    <div *ngIf="data.video.media_type !== 'video' && data.video.media_type !== 'audio' && data.video.media_type !== 'image'"
+    <div *ngIf="data.mediaType !== 'video' && data.mediaType !== 'audio' && data.mediaType !== 'image'"
          class="unsupported-media">
-      <mat-icon>{{ data.getMediaTypeIcon(data.video.media_type) }}</mat-icon>
-      <p>{{ data.getMediaTypeLabel(data.video.media_type) }} preview not available</p>
+      <mat-icon>{{ data.getMediaTypeIcon(data.mediaType) }}</mat-icon>
+      <p>{{ data.getMediaTypeLabel(data.mediaType) }} preview not available</p>
       <p class="hint">Open "View Details" to see more information</p>
     </div>
   </div>

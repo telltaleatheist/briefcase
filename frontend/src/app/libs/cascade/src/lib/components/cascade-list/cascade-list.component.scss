@@ -604,6 +604,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+
+    // Suggested title - make it orange to stand out
+    .suggested-title {
+      color: #ff6600;
+    }
   }
 }
 
@@ -1360,6 +1365,11 @@
 
       .item-secondary {
         color: #999;
+
+        // Suggested title - orange in dark mode too
+        .suggested-title {
+          color: #ff8833; // Slightly brighter orange for dark mode
+        }
       }
     }
 

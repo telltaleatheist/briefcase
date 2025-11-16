@@ -1375,6 +1375,7 @@ export class AnalysisService implements OnModuleInit {
     this.eventEmitter.emit('analysis.progress', {
       id: jobId,  // Frontend expects 'id' field
       jobId,      // Keep jobId for backwards compatibility
+      videoId: job.videoId,  // Include videoId so frontend can identify which video to update
       ...updates,
     });
   }
