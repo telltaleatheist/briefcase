@@ -248,7 +248,16 @@ export class SocketService {
    * Listen for video analysis progress updates
    */
   onAnalysisProgress(): Observable<any> {
-    return this.listenTo<any>('analysisProgress');
+    return new Observable<any>(observer => {
+      this.socket.on('analysisProgress', (data: any) => {
+        console.log('[SocketService] 🔔 Received analysisProgress event:', data);
+        observer.next(data);
+      });
+
+      return () => {
+        this.socket.off('analysisProgress');
+      };
+    });
   }
 
   /**
@@ -357,5 +366,19 @@ export class SocketService {
    */
   onImportProgress(): Observable<{ current: number; total: number; imported: number; skipped: number; errors: number }> {
     return this.listenTo<{ current: number; total: number; imported: number; skipped: number; errors: number }>('import-progress');
+  }
+
+  /**
+   * Listen for suggestion accepted events (when a video name suggestion is accepted)
+   */
+  onSuggestionAccepted(): Observable<{ videoId: string; oldFilename: string; newFilename: string; timestamp: string }> {
+    return this.listenTo<{ videoId: string; oldFilename: string; newFilename: string; timestamp: string }>('suggestion-accepted');
+  }
+
+  /**
+   * Listen for suggestion rejected events (when a video name suggestion is rejected)
+   */
+  onSuggestionRejected(): Observable<{ videoId: string; timestamp: string }> {
+    return this.listenTo<{ videoId: string; timestamp: string }>('suggestion-rejected');
   }
 }

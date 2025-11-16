@@ -1103,12 +1103,19 @@ export class DatabaseController {
 
       this.logger.log(`Accepted suggested title for video ${videoId}: ${newFilename}`);
 
-      // Emit WebSocket event to notify frontend of the rename
+      // Emit WebSocket events to notify frontend
       this.mediaEventService.emitVideoRenamed(
         videoId,
         video.filename as string,
         newFilename,
         newPath
+      );
+
+      // Emit suggestion-specific event for reactive UI updates
+      this.mediaEventService.emitSuggestionAccepted(
+        videoId,
+        video.filename as string,
+        newFilename
       );
 
       return {
@@ -1156,6 +1163,9 @@ export class DatabaseController {
       this.databaseService.updateVideoSuggestedTitle(videoId, null);
 
       this.logger.log(`Rejected suggested title for video ${videoId}`);
+
+      // Emit WebSocket event to notify frontend of the rejection
+      this.mediaEventService.emitSuggestionRejected(videoId);
 
       return {
         success: true,

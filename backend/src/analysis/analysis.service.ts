@@ -19,11 +19,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
   id: string;
-  status: 'pending' | 'downloading' | 'extracting' | 'transcribing' | 'analyzing' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'downloading' | 'extracting' | 'transcribing' | 'analyzing' | 'processing' | 'normalizing' | 'completed' | 'failed';
   progress: number;
   currentPhase: string;
   title?: string; // Video title/filename for display
-  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only'; // Processing mode
+  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio'; // Processing mode
   error?: string;
   videoId?: string; // Library video ID for progress tracking
   videoPath?: string;
@@ -49,7 +49,7 @@ export interface AnalysisJob {
 export interface AnalysisRequest {
   input: string; // URL or file path
   inputType: 'url' | 'file';
-  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only'; // Analysis mode: full, transcription only, analysis only (using existing transcript), or process only (fix aspect ratio)
+  mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio'; // Analysis mode: full, transcription only, analysis only (using existing transcript), process only (fix aspect ratio), or normalize audio
   aiModel: string;
   aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
   apiKey?: string; // API key for Claude/OpenAI
@@ -71,7 +71,7 @@ interface AnalysisRequestWithState extends AnalysisRequest {
   videoPath?: string;
   videoTitle?: string;
   audioPath?: string;
-  phase?: 'download' | 'transcribe' | 'analyze' | 'process' | 'finalize';
+  phase?: 'download' | 'transcribe' | 'analyze' | 'process' | 'normalize-audio' | 'finalize';
 }
 
 @Injectable()
@@ -112,7 +112,8 @@ export class AnalysisService implements OnModuleInit {
 
       // Update the job progress
       const job = this.jobs.get(data.jobId);
-      if (job && job.status === 'processing') {
+      // Handle both 'processing' (aspect ratio) and 'normalizing' (audio) statuses
+      if (job && (job.status === 'processing' || job.status === 'normalizing')) {
         this.updateJob(data.jobId, {
           progress: data.progress,
           currentPhase: data.task,
@@ -164,10 +165,12 @@ export class AnalysisService implements OnModuleInit {
     this.jobs.set(jobId, job);
 
     // Determine initial phase based on mode and input type
-    let initialPhase: 'download' | 'transcribe' | 'analyze' | 'process' | 'finalize';
+    let initialPhase: 'download' | 'transcribe' | 'analyze' | 'process' | 'normalize-audio' | 'finalize';
 
     if (mode === 'process-only') {
       initialPhase = 'process';
+    } else if (mode === 'normalize-audio') {
+      initialPhase = 'normalize-audio';
     } else if (mode === 'analysis-only') {
       initialPhase = 'analyze';
     } else if (request.inputType === 'file') {
@@ -241,11 +244,11 @@ export class AnalysisService implements OnModuleInit {
       }
     }
 
-    // Priority 2: Transcribe/Download/Process jobs (start new jobs)
+    // Priority 2: Transcribe/Download/Process/Normalize jobs (start new jobs)
     for (let i = 0; i < this.pendingQueue.length; i++) {
       const { jobId, request } = this.pendingQueue[i];
       const phase = request.phase || 'download';
-      if (phase === 'download' || phase === 'transcribe' || phase === 'process') {
+      if (phase === 'download' || phase === 'transcribe' || phase === 'process' || phase === 'normalize-audio') {
         this.activeJobs++;
         this.pendingQueue.splice(i, 1);
         this.logger.log(`Starting job ${jobId} at phase '${phase}'. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
@@ -382,6 +385,16 @@ export class AnalysisService implements OnModuleInit {
 
         // Move to finalize
         this.requeueJobForNextPhase(jobId, request, 'finalize');
+      } else if (phase === 'normalize-audio') {
+        // Normalize-audio mode: Normalize audio levels using EBU R128
+        await this.processNormalizeAudioPhase(jobId, request);
+
+        // Release job slot
+        this.activeJobs--;
+        this.logger.log(`Audio normalization phase complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
+
+        // Move to finalize
+        this.requeueJobForNextPhase(jobId, request, 'finalize');
       } else if (phase === 'finalize') {
         // Phase 4: Finalize
         await this.processFinalizePhase(jobId, request);
@@ -393,7 +406,7 @@ export class AnalysisService implements OnModuleInit {
       }
     } catch (error: any) {
       // Release resources on error
-      if (phase === 'download' || phase === 'transcribe' || phase === 'analyze' || phase === 'process') {
+      if (phase === 'download' || phase === 'transcribe' || phase === 'analyze' || phase === 'process' || phase === 'normalize-audio') {
         this.activeJobs--;
       }
 
@@ -550,8 +563,10 @@ export class AnalysisService implements OnModuleInit {
       request.whisperModel || 'base',
       request.language || 'en',
       (progress) => {
+        // Map Python's transcription progress (0-100%) to overall job progress (30-60%)
+        const mappedProgress = Math.round(30 + (progress.progress / 100) * 30);
         this.updateJob(jobId, {
-          progress: progress.progress,
+          progress: Math.min(Math.max(mappedProgress, 30), 60),
           currentPhase: progress.message,
         });
       },
@@ -578,6 +593,28 @@ export class AnalysisService implements OnModuleInit {
     const job = this.jobs.get(jobId);
     if (!job) throw new Error('Job not found');
 
+    // Load video metadata from database if videoTitle is missing
+    if (request.videoId && !request.videoTitle) {
+      const video = this.databaseService.getVideoById(request.videoId);
+      if (video) {
+        request.videoTitle = video.filename || video.suggested_title || 'Untitled Video';
+        this.logger.log(`Loaded video title from database: ${request.videoTitle}`);
+      }
+    }
+
+    // Handle analysis-only mode: use existing transcript
+    const mode = request.mode || 'full';
+    if (mode === 'analysis-only') {
+      request.transcriptText = request.existingTranscriptText!;
+      request.transcriptSrt = request.existingTranscriptSrt!;
+      this.logger.log(`Using existing transcript for analysis-only mode (length: ${request.transcriptText?.length || 0} chars)`);
+
+      this.updateJob(jobId, {
+        progress: 60,
+        currentPhase: 'Using existing transcript...',
+      });
+    }
+
     // Clear existing analysis data if re-analyzing
     if (request.videoId) {
       const existingAnalysis = this.databaseService.getAnalysis(request.videoId);
@@ -596,10 +633,29 @@ export class AnalysisService implements OnModuleInit {
       }
     }
 
+    // Strip provider prefix from model name for display and usage (e.g., "ollama:cogito:14b" -> "cogito:14b")
+    let modelName = request.aiModel || 'default-model';
+    this.logger.log(`[processAnalyzePhase] Original aiModel: ${request.aiModel}, aiProvider: ${request.aiProvider}`);
+
+    try {
+      if (modelName && typeof modelName === 'string' && modelName.includes(':')) {
+        const parts = modelName.split(':');
+        // If first part matches provider, strip it
+        if (request.aiProvider && parts[0] === request.aiProvider) {
+          modelName = parts.slice(1).join(':');
+          this.logger.log(`[processAnalyzePhase] Stripped model name: ${modelName}`);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`[processAnalyzePhase] Error stripping model name: ${(error as Error).message}`, (error as Error).stack);
+      // Use fallback
+      modelName = 'default-model';
+    }
+
     this.updateJob(jobId, {
       status: 'analyzing',
       progress: 60,
-      currentPhase: `Analyzing with ${request.aiModel}...`,
+      currentPhase: `Analyzing with ${modelName}...`,
       timing: { ...job.timing, analysisStart: new Date() },
     });
 
@@ -608,38 +664,55 @@ export class AnalysisService implements OnModuleInit {
     // Prepare AI model (preload if not loaded, unload others if different model)
     if (request.aiProvider === 'ollama' || !request.aiProvider) {
       try {
-        await this.ollama.prepareModel(request.aiModel, request.ollamaEndpoint);
+        await this.ollama.prepareModel(modelName, request.ollamaEndpoint);
       } catch (error: any) {
-        this.logger.warn(`Failed to prepare model ${request.aiModel}: ${(error as Error).message}. Continuing anyway...`);
+        this.logger.warn(`Failed to prepare model ${modelName}: ${(error as Error).message}. Continuing anyway...`);
       }
+    }
+
+    // Validate that transcript exists before proceeding
+    if (!request.transcriptText || !request.transcriptSrt) {
+      throw new Error(`Video must be transcribed before analysis. Missing: ${!request.transcriptText ? 'transcriptText' : 'transcriptSrt'}`);
     }
 
     // Create temp directory for analysis output
     const os = require('os');
     const tmpDir = os.tmpdir();
-    const sanitizedTitle = this.sanitizeFilename(request.videoTitle!);
+    const sanitizedTitle = this.sanitizeFilename(request.videoTitle || 'untitled');
     const reportFileName = request.customReportName || `${sanitizedTitle}.txt`;
     const analysisOutputPath = path.join(tmpDir, `${jobId}_${reportFileName}`);
 
     // Parse SRT to get segments
-    const segments = this.parseSrtToSegments(request.transcriptSrt!);
+    const segments = this.parseSrtToSegments(request.transcriptSrt);
 
+    // modelName already stripped earlier in this method
     const analysisResult = await this.pythonBridge.analyze(
       request.ollamaEndpoint,
-      request.aiModel,
-      request.transcriptText!,
+      modelName,  // Use stripped model name
+      request.transcriptText,
       segments,
       analysisOutputPath,
       (progress) => {
-        this.updateJob(jobId, {
-          progress: progress.progress,
-          currentPhase: progress.message,
-        });
+        // Handle indeterminate progress (single-chunk videos)
+        if (progress.progress === -1) {
+          this.updateJob(jobId, {
+            progress: -1,  // Frontend should show indeterminate/spinner
+            currentPhase: progress.message,
+          });
+        } else {
+          // Map Python's chunk completion progress (0-100%) to overall job progress (60-95%)
+          // This shows meaningful chunk-based updates
+          const mappedProgress = Math.round(60 + (progress.progress / 100) * 35);
+          this.updateJob(jobId, {
+            progress: Math.min(Math.max(mappedProgress, 60), 95),
+            currentPhase: progress.message,
+          });
+        }
       },
       request.customInstructions,
       request.aiProvider,
       request.apiKey,
-      request.videoTitle!,
+      request.videoTitle || 'Untitled Video',
     );
 
     // Read and save analysis
@@ -657,7 +730,7 @@ export class AnalysisService implements OnModuleInit {
     });
 
     // Keep-alive will maintain the model in memory for the next job in queue
-    this.logger.log(`Analysis complete for job ${jobId}. Model ${request.aiModel} will stay loaded for ${this.ollama['KEEP_ALIVE_DURATION'] / 60000} minutes.`);
+    this.logger.log(`Analysis complete for job ${jobId}. Model ${modelName} will stay loaded for ${this.ollama['KEEP_ALIVE_DURATION'] / 60000} minutes.`);
   }
 
   /**
@@ -741,6 +814,54 @@ export class AnalysisService implements OnModuleInit {
       }
     } catch (error: any) {
       this.logger.error(`Failed to process video: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Process audio normalization (normalize-audio mode)
+   */
+  private async processNormalizeAudioPhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error('Job not found');
+
+    // For normalize-audio mode, input should be a file path
+    const videoPath = request.input;
+    if (!videoPath) {
+      throw new Error('No video path provided for audio normalization');
+    }
+
+    // Get video ID from request
+    const videoId = request.videoId;
+    if (!videoId) {
+      throw new Error('Video ID is required for normalize-audio mode');
+    }
+
+    this.updateJob(jobId, {
+      status: 'normalizing',
+      progress: 5,
+      currentPhase: 'Analyzing audio levels...',
+      timing: { ...job.timing },
+    });
+
+    this.logger.log(`Normalizing audio for job ${jobId}: ${videoPath}`);
+
+    try {
+      // Normalize audio using EBU R128 standard (default target: -20dB)
+      const normalizedPath = await this.ffmpeg.normalizeAudio(videoPath, -20, jobId);
+
+      if (normalizedPath) {
+        this.updateJob(jobId, {
+          progress: 100,
+          currentPhase: 'Audio normalization complete',
+        });
+
+        this.logger.log(`Audio normalization complete for job ${jobId}`);
+      } else {
+        throw new Error('Audio normalization failed - no output file returned');
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to normalize audio: ${error.message}`);
       throw error;
     }
   }
@@ -927,6 +1048,13 @@ export class AnalysisService implements OnModuleInit {
         } else {
           this.logger.warn(`No sections found in analysisResult for video ${videoId}`);
         }
+
+        // Save suggested title if available (MOVED INSIDE analysis block)
+        // This ensures suggested_title is only saved when analysis record exists
+        if (analysisResult && analysisResult.suggested_title) {
+          this.logger.log(`Saving suggested title for video ${videoId}: ${analysisResult.suggested_title}`);
+          this.databaseService.updateVideoSuggestedTitle(videoId, analysisResult.suggested_title);
+        }
       }
 
       // Save AI description to video if available (MOVED OUTSIDE analysis block)
@@ -939,12 +1067,6 @@ export class AnalysisService implements OnModuleInit {
         this.databaseService.updateVideoDescription(videoId, analysisResult.description);
       } else {
         this.logger.warn(`[AI Description Debug] No description in analysisResult for video ${videoId}. Keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
-      }
-
-      // Save suggested title if available
-      if (analysisResult && analysisResult.suggested_title) {
-        this.logger.log(`Saving suggested title for video ${videoId}: ${analysisResult.suggested_title}`);
-        this.databaseService.updateVideoSuggestedTitle(videoId, analysisResult.suggested_title);
       }
 
       // Save tags (people and topics) if available (MOVED OUTSIDE analysis block)
@@ -1192,6 +1314,12 @@ export class AnalysisService implements OnModuleInit {
    */
   private parseSrtToSegments(srtContent: string): any[] {
     const segments: any[] = [];
+
+    if (!srtContent || typeof srtContent !== 'string') {
+      this.logger.warn('[parseSrtToSegments] SRT content is undefined or not a string');
+      return segments;
+    }
+
     const blocks = srtContent.split('\n\n').filter(b => b.trim());
 
     for (const block of blocks) {
@@ -1235,13 +1363,18 @@ export class AnalysisService implements OnModuleInit {
    */
   private updateJob(jobId: string, updates: Partial<AnalysisJob>): void {
     const job = this.jobs.get(jobId);
-    if (!job) return;
+    if (!job) {
+      this.logger.warn(`[updateJob] Job ${jobId} not found, cannot update`);
+      return;
+    }
 
     Object.assign(job, updates);
 
-    // Emit WebSocket event
+    // Emit WebSocket event with both jobId and id for frontend compatibility
+    this.logger.log(`[updateJob] Emitting progress for job ${jobId}: ${JSON.stringify(updates)}`);
     this.eventEmitter.emit('analysis.progress', {
-      jobId,
+      id: jobId,  // Frontend expects 'id' field
+      jobId,      // Keep jobId for backwards compatibility
       ...updates,
     });
   }
@@ -1258,6 +1391,7 @@ export class AnalysisService implements OnModuleInit {
     ollamaEndpoint?: string;
     transcribeOnly?: boolean;
     forceReanalyze?: boolean;
+    forceRetranscribe?: boolean;
     claudeApiKey?: string;
     openaiApiKey?: string;
     limit?: number; // Process only first N videos (for testing)
@@ -1268,6 +1402,7 @@ export class AnalysisService implements OnModuleInit {
     const config = await this.configService.getConfig();
     const transcribeOnly = options?.transcribeOnly || false;
     const forceReanalyze = options?.forceReanalyze || false;
+    const forceRetranscribe = options?.forceRetranscribe !== undefined ? options.forceRetranscribe : true; // Default true for batch operations
     const aiModel = options?.aiModel || config.aiModel || 'qwen2.5:7b';
     const aiProvider = options?.aiProvider || 'ollama';
     const whisperModel = options?.whisperModel || 'base';
@@ -1325,21 +1460,29 @@ export class AnalysisService implements OnModuleInit {
         let mode: 'full' | 'transcribe-only' | 'analysis-only';
 
         if (transcribeOnly) {
-          if (hasTranscript) {
-            this.logger.log(`Transcript already exists for ${video.filename}, skipping`);
-            continue;
-          }
+          // If user explicitly selected transcribe, always re-transcribe (don't skip)
           mode = 'transcribe-only';
+          if (hasTranscript) {
+            this.logger.log(`Re-transcribing ${video.filename} (transcript will be overwritten)`);
+          }
         } else {
           if (hasAnalysis && !forceReanalyze) {
             this.logger.log(`Analysis already exists for ${video.filename}, skipping`);
             continue;
           }
 
-          if (hasTranscript) {
+          // Determine mode based on existing transcript and user preferences
+          // - If forceRetranscribe is true: always use 'full' (re-transcribe)
+          // - If forceRetranscribe is false AND transcript exists: use 'analysis-only' (reuse transcript)
+          // - If forceRetranscribe is false AND no transcript: use 'full' (must transcribe)
+          if (hasTranscript && !forceRetranscribe) {
             mode = 'analysis-only';
+            this.logger.log(`Using existing transcript for ${video.filename}`);
           } else {
             mode = 'full';
+            if (hasTranscript) {
+              this.logger.log(`Re-transcribing ${video.filename} (forceRetranscribe=true)`);
+            }
           }
         }
 
@@ -1374,6 +1517,12 @@ export class AnalysisService implements OnModuleInit {
       totalJobs: jobIds.length,
       jobIds,
     });
+
+    // If no jobs were queued (all skipped), no need to track batch job
+    if (jobIds.length === 0) {
+      this.logger.log(`Batch ${batchId}: No jobs to process (all videos skipped)`);
+      // Don't call updateJob - batch job was never created since no processing needed
+    }
 
     return { batchId, jobIds };
   }

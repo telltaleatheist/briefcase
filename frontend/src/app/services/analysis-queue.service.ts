@@ -5,7 +5,7 @@ export interface PendingAnalysisJob {
   id: string;
   input: string;
   inputType: 'url' | 'file';
-  mode: 'full' | 'transcribe-only' | 'process-only';
+  mode: 'full' | 'transcribe-only' | 'process-only' | 'normalize-audio';
   aiModel: string;
   apiKey?: string;
   ollamaEndpoint?: string;

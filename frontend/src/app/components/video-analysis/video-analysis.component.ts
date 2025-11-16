@@ -158,7 +158,6 @@ export class VideoAnalysisComponent implements OnInit, OnDestroy {
 
       // Add all selected videos to the pending queue
       for (const video of selectedVideos) {
-        console.log('[VideoAnalysis] Adding video to queue:', video.filename, video.current_path);
         const jobId = this.analysisQueueService.addToPendingQueue({
           videoId: video.id,
           videoPath: video.current_path,

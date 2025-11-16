@@ -8,13 +8,6 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  WebSocketGateway,
-  WebSocketServer,
-  OnGatewayInit,
-} from '@nestjs/websockets';
-import { Server } from 'socket.io';
-import { OnEvent } from '@nestjs/event-emitter';
 import { AnalysisService, AnalysisRequest } from './analysis.service';
 import { OllamaService } from './ollama.service';
 import { SharedConfigService } from '../config/shared-config.service';
@@ -23,21 +16,13 @@ import * as path from 'path';
 import * as os from 'os';
 
 @Controller('analysis')
-@WebSocketGateway({ cors: true })
-export class AnalysisController implements OnGatewayInit {
-  @WebSocketServer()
-  server: Server;
-
+export class AnalysisController {
   constructor(
     private analysisService: AnalysisService,
     private ollamaService: OllamaService,
     private configService: SharedConfigService,
     private databaseService: DatabaseService,
   ) {}
-
-  afterInit(server: Server) {
-    console.log('Analysis WebSocket Gateway initialized');
-  }
 
   /**
    * Get the base output directory from config or default
@@ -442,6 +427,7 @@ export class AnalysisController implements OnGatewayInit {
     aiProvider?: 'ollama' | 'claude' | 'openai';
     whisperModel?: string;
     forceReanalyze?: boolean;
+    forceRetranscribe?: boolean;
     claudeApiKey?: string;
     openaiApiKey?: string;
   }) {
@@ -468,6 +454,7 @@ export class AnalysisController implements OnGatewayInit {
       const aiProvider = body.aiProvider || 'ollama';
       const whisperModel = body.whisperModel || 'base';
       const forceReanalyze = body.forceReanalyze || false;
+      const forceRetranscribe = body.forceRetranscribe || false;
 
       // Start batch analysis for this single video
       const result = await this.analysisService.startBatchAnalysis({
@@ -476,6 +463,7 @@ export class AnalysisController implements OnGatewayInit {
         aiProvider,
         whisperModel,
         forceReanalyze,
+        forceRetranscribe,
         claudeApiKey: body.claudeApiKey,
         openaiApiKey: body.openaiApiKey,
       });
@@ -695,15 +683,4 @@ export class AnalysisController implements OnGatewayInit {
     }
   }
 
-  /**
-   * Listen for analysis progress events and broadcast via WebSocket
-   */
-  @OnEvent('analysis.progress')
-  handleAnalysisProgress(payload: any) {
-    // Only log and broadcast if WebSocket server is ready
-    if (this.server) {
-      this.server.emit('analysisProgress', payload);
-    }
-    // Silently skip if WebSocket not yet initialized (happens during early startup)
-  }
 }

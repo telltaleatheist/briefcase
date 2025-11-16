@@ -29,10 +29,6 @@ const routes: Routes = [
     loadComponent: () => import('./components/library-management/library-management.component').then(m => m.LibraryManagementComponent)
   },
   {
-    path: 'normalize',
-    loadComponent: () => import('./components/audio-normalize/audio-normalize.component').then(m => m.AudioNormalizeComponent)
-  },
-  {
     path: 'settings',
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent)
   },

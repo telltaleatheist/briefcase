@@ -43,6 +43,8 @@ interface ElectronAPI {
   getSettingsPath: () => Promise<string>;
   // Setup progress listener
   onSetupProgress?: (callback: (event: any, data: any) => void) => void;
+  // Console logging
+  saveConsoleLogs: (filename: string, content: string) => Promise<void>;
 }
 
 // Get resource path information
@@ -109,7 +111,9 @@ contextBridge.exposeInMainWorld('electron', {
   getSetting: (key: string) => ipcRenderer.invoke('get-setting', key),
   setSetting: (key: string, value: any) => ipcRenderer.invoke('set-setting', key, value),
   clearSettings: () => ipcRenderer.invoke('clear-settings'),
-  getSettingsPath: () => ipcRenderer.invoke('get-settings-path')
+  getSettingsPath: () => ipcRenderer.invoke('get-settings-path'),
+  // Console logging
+  saveConsoleLogs: (filename: string, content: string) => ipcRenderer.invoke('save-console-logs', filename, content)
 } as ElectronAPI);
 
 // Expose setup progress listener to window.electronAPI

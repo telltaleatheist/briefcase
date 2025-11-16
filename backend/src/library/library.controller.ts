@@ -58,7 +58,20 @@ export class LibraryController {
   private getWeekStartDate(date: Date = new Date()): string {
     const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
     const sundayDate = new Date(date);
-    sundayDate.setDate(date.getDate() - dayOfWeek); // Subtract days to get to Sunday
+
+    // Find closest Sunday:
+    // - If Sunday-Wednesday (0-3): use current/previous Sunday
+    // - If Thursday-Saturday (4-6): use next Sunday
+    if (dayOfWeek === 0) {
+      // Already Sunday, use current day
+      // No adjustment needed
+    } else if (dayOfWeek <= 3) {
+      // Monday-Wednesday: go back to previous Sunday
+      sundayDate.setDate(date.getDate() - dayOfWeek);
+    } else {
+      // Thursday-Saturday: go forward to next Sunday
+      sundayDate.setDate(date.getDate() + (7 - dayOfWeek));
+    }
 
     const year = sundayDate.getFullYear();
     const month = String(sundayDate.getMonth() + 1).padStart(2, '0');
@@ -737,13 +750,38 @@ export class LibraryController {
         throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
       }
 
+      // Find the source video and determine the correct parent for the clip
+      // If source video is a child, use its parent; otherwise use source video as parent
+      let parentVideo: any = null;
+      let parentVideoId: string | undefined;
+      try {
+        const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
+        parentVideo = allVideos.find((v: any) => v.current_path === body.videoPath);
+
+        if (parentVideo && parentVideo.id) {
+          // If source video has a parent, make the clip a co-child (sibling)
+          // Otherwise, make the source video the parent
+          if (parentVideo.parent_id) {
+            parentVideoId = String(parentVideo.parent_id);
+            this.logger.log(`Source video is a child - linking clip as co-child to parent: ${parentVideoId}`);
+          } else {
+            parentVideoId = String(parentVideo.id);
+            this.logger.log(`Source video is a parent - linking clip as child: ${parentVideoId}`);
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`Could not find source video for linking: ${(error as Error).message}`);
+      }
+
       // Generate clip filename
       const originalFilename = path.basename(body.videoPath);
       const clipFilename = this.clipExtractor.generateClipFilename(
         originalFilename,
         body.startTime,
         body.endTime,
-        body.category
+        body.category,
+        body.title,
+        parentVideo?.upload_date
       );
 
       // Determine output path
@@ -793,14 +831,23 @@ export class LibraryController {
         try {
           this.logger.log(`Importing clip to library: ${extractionResult.outputPath}`);
 
-          // Try to find the parent video ID by path to link the clip as a child
+          // Find the source video and determine the correct parent for the clip
+          // If source video is a child, use its parent; otherwise use source video as parent
           let parentVideoId: string | undefined;
           try {
-            const parentVideos = this.databaseService.getAllVideos({ includeChildren: true });
-            const parentVideo = parentVideos.find((v: any) => v.current_path === body.videoPath);
-            if (parentVideo && parentVideo.id) {
-              parentVideoId = String(parentVideo.id);
-              this.logger.log(`Found parent video ID: ${parentVideoId} for path: ${body.videoPath}`);
+            const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
+            const sourceVideo = allVideos.find((v: any) => v.current_path === body.videoPath);
+
+            if (sourceVideo && sourceVideo.id) {
+              // If source video has a parent, make the clip a co-child (sibling)
+              // Otherwise, make the source video the parent
+              if (sourceVideo.parent_id) {
+                parentVideoId = String(sourceVideo.parent_id);
+                this.logger.log(`Source video is a child - linking clip as co-child to parent: ${parentVideoId}`);
+              } else {
+                parentVideoId = String(sourceVideo.id);
+                this.logger.log(`Source video is a parent - linking clip as child: ${parentVideoId}`);
+              }
             }
           } catch (error) {
             this.logger.warn(`Could not find parent video for linking: ${(error as Error).message}`);
@@ -856,6 +903,7 @@ export class LibraryController {
       endTime: number;
       category?: string;
       customDirectory?: string;
+      title?: string;
     }
   ) {
     try {
@@ -865,13 +913,27 @@ export class LibraryController {
         throw new HttpException('Analysis not found', HttpStatus.NOT_FOUND);
       }
 
+      // Try to get the parent video from database to retrieve upload_date
+      let uploadDate: string | undefined;
+      try {
+        const parentVideos = this.databaseService.getAllVideos({ includeChildren: true });
+        const parentVideo = parentVideos.find((v: any) => v.current_path === analysis.video.currentPath);
+        if (parentVideo && parentVideo.upload_date) {
+          uploadDate = parentVideo.upload_date;
+        }
+      } catch (error) {
+        this.logger.warn(`Could not find parent video upload_date: ${(error as Error).message}`);
+      }
+
       // Generate clip filename
       const originalFilename = path.basename(analysis.video.currentPath);
       const clipFilename = this.clipExtractor.generateClipFilename(
         originalFilename,
         body.startTime,
         body.endTime,
-        body.category
+        body.category,
+        body.title,
+        uploadDate
       );
 
       // Determine output path
@@ -942,13 +1004,38 @@ export class LibraryController {
         throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
       }
 
+      // Find the source video and determine the correct parent for the clip
+      // If source video is a child, use its parent; otherwise use source video as parent
+      let parentVideo: any = null;
+      let parentVideoId: string | undefined;
+      try {
+        const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
+        parentVideo = allVideos.find((v: any) => v.current_path === body.videoPath);
+
+        if (parentVideo && parentVideo.id) {
+          // If source video has a parent, make the clip a co-child (sibling)
+          // Otherwise, make the source video the parent
+          if (parentVideo.parent_id) {
+            parentVideoId = String(parentVideo.parent_id);
+            this.logger.log(`Source video is a child - linking clip as co-child to parent: ${parentVideoId}`);
+          } else {
+            parentVideoId = String(parentVideo.id);
+            this.logger.log(`Source video is a parent - linking clip as child: ${parentVideoId}`);
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`Could not find source video for linking: ${(error as Error).message}`);
+      }
+
       // Generate clip filename
       const originalFilename = path.basename(body.videoPath);
       const clipFilename = this.clipExtractor.generateClipFilename(
         originalFilename,
         body.startTime,
         body.endTime,
-        body.category
+        body.category,
+        body.title,
+        parentVideo?.upload_date
       );
 
       // Determine output path
@@ -1002,10 +1089,14 @@ export class LibraryController {
         );
       }
 
-      // Automatically import the clip to the library
+      // Automatically import the clip to the library with parent linking
       try {
-        const importResult = await this.fileScannerService.importVideos([outputPath]);
-        this.logger.log(`Imported clip to library: ${importResult.imported.length > 0 ? 'success' : 'failed'}`);
+        const importResult = await this.fileScannerService.importVideos(
+          [outputPath],
+          undefined,
+          parentVideoId
+        );
+        this.logger.log(`Imported clip to library: ${importResult.imported.length > 0 ? 'success' : 'failed'}${parentVideoId ? ` (linked to parent ${parentVideoId})` : ''}`);
         if (importResult.errors.length > 0) {
           this.logger.warn(`Import warnings: ${importResult.errors.join(', ')}`);
         }
@@ -1069,13 +1160,27 @@ export class LibraryController {
         );
       }
 
+      // Try to get the parent video from database to retrieve upload_date
+      let uploadDate: string | undefined;
+      try {
+        const parentVideos = this.databaseService.getAllVideos({ includeChildren: true });
+        const parentVideo = parentVideos.find((v: any) => v.current_path === analysis.video.currentPath);
+        if (parentVideo && parentVideo.upload_date) {
+          uploadDate = parentVideo.upload_date;
+        }
+      } catch (error) {
+        this.logger.warn(`Could not find parent video upload_date: ${(error as Error).message}`);
+      }
+
       // Generate clip filename
       const originalFilename = path.basename(analysis.video.currentPath);
       const clipFilename = this.clipExtractor.generateClipFilename(
         originalFilename,
         body.startTime,
         body.endTime,
-        body.category
+        body.category,
+        body.title,
+        uploadDate
       );
 
       // Determine output path
@@ -1135,17 +1240,26 @@ export class LibraryController {
         try {
           this.logger.log(`Importing clip to library: ${extractionResult.outputPath}`);
 
-          // Try to find the parent video ID by path to link the clip as a child
+          // Find the source video and determine the correct parent for the clip
+          // If source video is a child, use its parent; otherwise use source video as parent
           let parentVideoId: string | undefined;
           try {
-            const parentVideos = this.databaseService.getAllVideos({ includeChildren: true });
-            const parentVideo = parentVideos.find((v: any) => v.current_path === analysis.video.currentPath);
-            if (parentVideo && parentVideo.id) {
-              parentVideoId = String(parentVideo.id);
-              this.logger.log(`Found parent video ID: ${parentVideoId} for path: ${analysis.video.currentPath}`);
+            const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
+            const sourceVideo = allVideos.find((v: any) => v.current_path === analysis.video.currentPath);
+
+            if (sourceVideo && sourceVideo.id) {
+              // If source video has a parent, make the clip a co-child (sibling)
+              // Otherwise, make the source video the parent
+              if (sourceVideo.parent_id) {
+                parentVideoId = String(sourceVideo.parent_id);
+                this.logger.log(`Source video is a child - linking clip as co-child to parent: ${parentVideoId}`);
+              } else {
+                parentVideoId = String(sourceVideo.id);
+                this.logger.log(`Source video is a parent - linking clip as child: ${parentVideoId}`);
+              }
             }
           } catch (error) {
-            this.logger.warn(`Could not find parent video for linking: ${(error as Error).message}`);
+            this.logger.warn(`Could not find source video for linking: ${(error as Error).message}`);
             // Continue without parent linking
           }
 

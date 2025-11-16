@@ -15,6 +15,7 @@ import { SharedConfigModule } from './config/shared-config.module';
 import { ApiKeysModule } from './config/config.module';
 import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
+import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Global()
@@ -27,6 +28,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     EventEmitterModule.forRoot({
       global: true,
     }),
+    CommonModule,
     SharedConfigModule,
     ApiKeysModule,
     DatabaseModule,

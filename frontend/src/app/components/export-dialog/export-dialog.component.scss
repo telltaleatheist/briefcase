@@ -27,11 +27,112 @@
   flex-direction: column;
 }
 
+.export-options-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.output-location {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 16px;
+  background-color: #1a1a1a;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+
+  .location-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #999;
+    white-space: nowrap;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  .location-value {
+    flex: 1;
+    font-size: 0.85rem;
+    color: #ccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  button {
+    flex-shrink: 0;
+  }
+}
+
+.export-progress {
+  padding: 2rem;
+  text-align: center;
+
+  .progress-text {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #ccc;
+    margin-bottom: 1rem;
+  }
+
+  mat-progress-bar {
+    margin: 1rem 0;
+  }
+
+  .progress-detail {
+    font-size: 0.85rem;
+    color: #999;
+    margin-top: 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.export-complete {
+  padding: 2rem;
+  text-align: center;
+
+  .success-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    color: #22c55e;
+    margin-bottom: 1rem;
+  }
+
+  h3 {
+    color: #ccc;
+    margin: 0 0 0.5rem 0;
+  }
+
+  p {
+    color: #999;
+    margin: 0.25rem 0;
+  }
+
+  .error-text {
+    color: #ef4444;
+    font-weight: 500;
+  }
+}
+
 .categories-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 
   .export-header {
     display: flex;
@@ -75,6 +176,7 @@
     overflow-y: auto;
 
     ::ng-deep .item-list-container {
+      height: 100%;
       overflow-y: auto;
     }
   }
@@ -122,6 +224,12 @@
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+
+  .export-options {
+    flex: 1;
+    display: flex;
+    align-items: center;
+  }
 
   button {
     min-width: 120px;

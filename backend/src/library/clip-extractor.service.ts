@@ -200,11 +200,27 @@ export class ClipExtractorService {
     originalFilename: string,
     startTime: number,
     endTime: number,
-    category?: string
+    category?: string,
+    title?: string,
+    uploadDate?: string
   ): string {
     const ext = path.extname(originalFilename);
-    const basename = path.basename(originalFilename, ext);
 
+    // If both uploadDate and title are provided, use the new format:
+    // "{uploadDate} {title}.{ext}"
+    if (uploadDate && title) {
+      // Sanitize the title to be filesystem-safe
+      const safeTitle = title
+        .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filesystem characters
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim();
+
+      // Format: "YYYY-MM-DD title"
+      return `${uploadDate} ${safeTitle}${ext}`;
+    }
+
+    // Fall back to old timestamp-based naming if either is missing
+    const basename = path.basename(originalFilename, ext);
     const startStr = this.formatTimestamp(startTime).replace(/:/g, '-');
     const endStr = this.formatTimestamp(endTime).replace(/:/g, '-');
 

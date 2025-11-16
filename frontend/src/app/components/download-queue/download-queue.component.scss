@@ -1149,6 +1149,10 @@
   .item-primary {
     font-size: 13px;
     line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 350px; // Prevent long names from pushing content off screen
   }
 
   // Make secondary text more compact
@@ -1213,6 +1217,12 @@
     .child-label {
       font-size: 11px;
       line-height: 1.2;
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 280px; // Limit width to prevent pushing progress bar off screen
     }
 
     // Smaller metadata text
@@ -1223,7 +1233,32 @@
     // Smaller progress bar
     .child-progress-bar {
       width: 50px; // Narrower progress bar
-      height: 2px; // Thinner progress bar
+      height: 4px; // Slightly thicker for visibility
+      background-color: rgba(255, 255, 255, 0.1); // Track background
+      border-radius: 2px;
+      overflow: hidden;
+      flex-shrink: 0;
+
+      // Progress fill
+      .progress-fill {
+        height: 100%;
+        background-color: var(--primary-orange);
+        transition: width 0.3s ease-out;
+
+        &.indeterminate {
+          width: 100%;
+          animation: indeterminate-progress 1.5s ease-in-out infinite;
+        }
+      }
+    }
+
+    @keyframes indeterminate-progress {
+      0% {
+        transform: translateX(-100%);
+      }
+      100% {
+        transform: translateX(100%);
+      }
     }
 
     // Smaller status icon

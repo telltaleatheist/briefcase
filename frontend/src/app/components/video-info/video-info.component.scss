@@ -166,6 +166,7 @@
   // Customize the cascade-list for children display
   ::ng-deep cascade-list {
     .item-list-container {
+      height: 400px;
       max-height: 400px;
       overflow-y: auto;
     }

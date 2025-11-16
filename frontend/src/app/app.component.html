@@ -6,6 +6,12 @@
     </button>
     <span class="app-title">{{ title }}</span>
     <span class="spacer"></span>
+    <button mat-icon-button
+            (click)="saveConsoleLogs()"
+            matTooltip="Save console logs for debugging"
+            class="save-logs-btn">
+      <mat-icon>bug_report</mat-icon>
+    </button>
     <app-download-queue></app-download-queue>
     <app-notification-bell></app-notification-bell>
   </mat-toolbar>
@@ -39,10 +45,6 @@
           <a mat-list-item routerLink="/video-editor" routerLinkActive="active-link">
             <mat-icon matListItemIcon>movie_edit</mat-icon>
             <span matListItemTitle>Video Editor</span>
-          </a>
-          <a mat-list-item routerLink="/normalize" routerLinkActive="active-link">
-            <mat-icon matListItemIcon>equalizer</mat-icon>
-            <span matListItemTitle>Normalize Audio</span>
           </a>
           <a mat-list-item routerLink="/settings" routerLinkActive="active-link">
             <mat-icon matListItemIcon>settings</mat-icon>

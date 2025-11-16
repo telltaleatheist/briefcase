@@ -19,7 +19,7 @@
     <div class="queue-actions" *ngIf="hasPendingJobs()">
       <button mat-raised-button
               color="primary"
-              (click)="startQueue()"
+              (click)="startQueue(); $event.stopPropagation()"
               class="start-queue-btn">
         <mat-icon>play_arrow</mat-icon>
         Start Queue

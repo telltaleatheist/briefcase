@@ -507,17 +507,19 @@ def analyze_with_ai(
         # Chunk transcript into time-based segments (5 min chunks for more granular analysis)
         chunks = chunk_transcript(segments, chunk_minutes=5)
 
-        send_progress("analysis", 10, f"Analyzing {len(chunks)} chunks...")
+        # Send initial progress indicating total chunks
+        # If only 1 chunk, we'll use indeterminate progress (progress=-1)
+        total_chunks = len(chunks)
+        if total_chunks == 1:
+            send_progress("analysis", -1, f"Analyzing video...")
+        else:
+            send_progress("analysis", 0, f"Starting analysis of {total_chunks} chunks...")
 
         analyzed_sections = []
-
         failed_chunks = []
+        completed_chunks = 0
 
         for i, chunk in enumerate(chunks, 1):
-            # Progress from 10% to 85% based on chunk completion
-            chunk_progress = round(10 + (i / len(chunks)) * 75)
-            send_progress("analysis", chunk_progress, f"Analyzing chunk {i}/{len(chunks)}...")
-
             # Identify interesting sections - with error handling to skip failed chunks
             try:
                 interesting_sections = identify_interesting_sections(
@@ -528,10 +530,14 @@ def analyze_with_ai(
                 print(f"[WARNING] Chunk {i} failed after retries: {e}", file=sys.stderr)
                 print(f"[WARNING] Skipping chunk {i} and continuing with remaining chunks...", file=sys.stderr)
                 failed_chunks.append(i)
+                completed_chunks += 1
+                # Send progress update for completed (but failed) chunk
+                if total_chunks > 1:
+                    chunk_progress = round((completed_chunks / total_chunks) * 100)
+                    send_progress("analysis", chunk_progress, f"Chunk {i} failed, continuing... ({completed_chunks}/{total_chunks})")
                 continue  # Skip this chunk, move to next one
 
             if interesting_sections:
-                send_progress("analysis", chunk_progress + 0.5, f"Found {len(interesting_sections)} sections in chunk {i}")
 
                 # Process each section
                 for section in interesting_sections:
@@ -571,12 +577,18 @@ def analyze_with_ai(
                             # Write section immediately to file (streaming, is_first=False since we already wrote header)
                             write_section_to_file(output_file, detailed_analysis, is_first=False)
 
+            # Chunk processing complete - update progress
+            completed_chunks += 1
+            if total_chunks > 1:
+                chunk_progress = round((completed_chunks / total_chunks) * 100)
+                send_progress("analysis", chunk_progress, f"Completed chunk {i}/{total_chunks}")
+
         # Report completion with chunk failure information
         if failed_chunks:
-            send_progress("analysis", 90, f"Analysis complete with {len(failed_chunks)} failed chunks. Found {len(analyzed_sections)} sections.")
+            send_progress("analysis", 100, f"Analysis complete with {len(failed_chunks)} failed chunks. Found {len(analyzed_sections)} sections.")
             print(f"[WARNING] Analysis completed but {len(failed_chunks)} chunks failed: {failed_chunks}", file=sys.stderr)
         else:
-            send_progress("analysis", 90, f"Analyzing complete. Found {len(analyzed_sections)} sections.")
+            send_progress("analysis", 100, f"Analysis complete. Found {len(analyzed_sections)} sections.")
 
         # Final safety check: if we have NO sections at all, create a default "routine" section
         if len(analyzed_sections) == 0:

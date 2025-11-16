@@ -31,7 +31,8 @@ import {
   ListItem,
   ItemDisplayConfig,
   SelectionMode,
-  ContextMenuAction
+  ContextMenuAction,
+  ItemStatus
 } from '../../libs/cascade/src/lib/types/cascade.types';
 
 interface TranscriptEntry {
@@ -106,11 +107,14 @@ export class VideoInfoComponent implements OnInit {
     primaryField: 'filename',
     secondaryField: 'added_at',
     metadataField: 'duration_seconds',
-    iconField: 'media_type',
-    renderPrimary: (item) => this.getVideoDisplayName(item as DatabaseVideo),
-    renderSecondary: (item) => this.formatVideoSecondaryText(item as DatabaseVideo),
-    renderMetadata: (item) => this.formatVideoDuration(item as DatabaseVideo),
-    renderIcon: (item) => this.getMediaIcon(item as DatabaseVideo)
+    renderMetadata: (item: any) => {
+      if (!item.duration_seconds) return '';
+      const totalSeconds = Math.floor(item.duration_seconds);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
   };
 
   childListContextMenuActions: ContextMenuAction[] = [
@@ -120,6 +124,25 @@ export class VideoInfoComponent implements OnInit {
       icon: 'link_off'
     }
   ];
+
+  // Status mapper for child videos - each child shows its own individual status
+  getChildStatusMapper(video: DatabaseVideo): ItemStatus | null {
+    // Priority: missing both > has transcript only > has analysis (complete)
+    if (!video.has_transcript && !video.has_analysis) {
+      return { color: '#dc3545', tooltip: 'Missing transcript and analysis' }; // Red
+    }
+    if (!video.has_analysis) {
+      // Has transcript but no analysis
+      return { color: '#ff6600', tooltip: 'Missing analysis' }; // Orange
+    }
+    // If has_analysis is true, transcript must exist (can't analyze without transcript)
+    // Long videos (>10 min) get blue marker
+    if (video.duration_seconds && video.duration_seconds > 600) {
+      return { color: '#0dcaf0', tooltip: 'Complete (>10 min)' }; // Blue
+    }
+    // Short videos (<10 min) get green marker
+    return { color: '#198754', tooltip: 'Complete' }; // Green
+  }
 
   // Library picker display config
   libraryPickerDisplayConfig: ItemDisplayConfig = {
@@ -258,12 +281,14 @@ export class VideoInfoComponent implements OnInit {
    * Load child videos (files linked to this video)
    */
   async loadChildVideos() {
-    if (!this.video) return;
+    if (!this.video) {
+      return;
+    }
 
     try {
       this.childVideos = await this.databaseLibraryService.getChildVideos(this.video.id);
     } catch (error) {
-      console.error('Error loading child videos:', error);
+      console.error('[VideoInfo] Error loading child videos:', error);
       this.childVideos = [];
     }
   }

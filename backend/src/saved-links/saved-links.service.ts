@@ -3,7 +3,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { BatchDownloaderService } from '../downloader/batch-downloader.service';
 import { MediaEventService } from '../media/media-event.service';
-import { SavedLinksGateway } from './saved-links.gateway';
+import { WebSocketService } from '../common/websocket.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,7 +31,7 @@ export class SavedLinksService implements OnModuleInit {
     private readonly databaseService: DatabaseService,
     private readonly batchDownloaderService: BatchDownloaderService,
     private readonly mediaEventService: MediaEventService,
-    private readonly savedLinksGateway: SavedLinksGateway,
+    private readonly websocketService: WebSocketService,
     private readonly fileScannerService: FileScannerService,
     private readonly libraryManagerService: LibraryManagerService,
   ) {}
@@ -112,7 +112,7 @@ export class SavedLinksService implements OnModuleInit {
       // Emit update
       const updatedLink = this.databaseService.findSavedLinkById(savedLinkId) as unknown as SavedLink;
       if (updatedLink) {
-        this.savedLinksGateway.emitLinkUpdated(updatedLink);
+        this.websocketService.emitSavedLinkUpdated(updatedLink);
       }
     }
   }
@@ -131,7 +131,7 @@ export class SavedLinksService implements OnModuleInit {
 
     const updatedLink = this.databaseService.findSavedLinkById(savedLinkId) as unknown as SavedLink;
     if (updatedLink) {
-      this.savedLinksGateway.emitLinkUpdated(updatedLink);
+      this.websocketService.emitSavedLinkUpdated(updatedLink);
     }
   }
 
@@ -171,7 +171,7 @@ export class SavedLinksService implements OnModuleInit {
     const fullRecord = this.databaseService.findSavedLinkById(id) as unknown as SavedLink;
 
     // Emit update to websocket clients
-    this.savedLinksGateway.emitLinkAdded(fullRecord);
+    this.websocketService.emitSavedLinkAdded(fullRecord);
 
     // Start download immediately with library ID (only if shouldDownload is true)
     if (doDownload) {
@@ -193,7 +193,7 @@ export class SavedLinksService implements OnModuleInit {
 
     // Update status to downloading
     this.databaseService.updateSavedLinkStatus(savedLinkId, 'downloading');
-    this.savedLinksGateway.emitLinkUpdated({
+    this.websocketService.emitSavedLinkUpdated({
       ...savedLink,
       status: 'downloading',
     });
@@ -250,7 +250,7 @@ export class SavedLinksService implements OnModuleInit {
         'failed',
         error.message || 'Download failed',
       );
-      this.savedLinksGateway.emitLinkUpdated({
+      this.websocketService.emitSavedLinkUpdated({
         ...savedLink,
         status: 'failed',
         error_message: error.message,
@@ -278,7 +278,7 @@ export class SavedLinksService implements OnModuleInit {
   deleteLink(id: string): void {
     this.databaseService.deleteSavedLink(id);
     this.logger.log(`Deleted saved link: ${id}`);
-    this.savedLinksGateway.emitLinkDeleted(id);
+    this.websocketService.emitSavedLinkDeleted(id);
   }
 
   /**
@@ -324,7 +324,7 @@ export class SavedLinksService implements OnModuleInit {
 
     const updatedLink = this.databaseService.findSavedLinkById(id) as unknown as SavedLink;
     if (updatedLink) {
-      this.savedLinksGateway.emitLinkUpdated(updatedLink);
+      this.websocketService.emitSavedLinkUpdated(updatedLink);
     }
   }
 
@@ -374,7 +374,7 @@ export class SavedLinksService implements OnModuleInit {
 
     const updatedLink = this.databaseService.findSavedLinkById(id) as unknown as SavedLink;
     if (updatedLink) {
-      this.savedLinksGateway.emitLinkUpdated(updatedLink);
+      this.websocketService.emitSavedLinkUpdated(updatedLink);
     }
 
     return updatedLink;

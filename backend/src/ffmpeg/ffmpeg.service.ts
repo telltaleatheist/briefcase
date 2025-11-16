@@ -1,5 +1,6 @@
 // clippy/backend/src/ffmpeg/ffmpeg.service.ts
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as ffmpeg from 'fluent-ffmpeg';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -16,7 +17,8 @@ export class FfmpegService {
 
   constructor(
     private readonly eventService: MediaEventService,
-    private readonly configService: SharedConfigService
+    private readonly configService: SharedConfigService,
+    private readonly eventEmitter: EventEmitter2
   ) {
     try {
       // Prioritize config service paths, then environment variables, then packaged binaries, then installer paths
@@ -682,7 +684,7 @@ export class FfmpegService {
    * @param targetVolume - Target volume in dB (e.g., -20)
    * @returns Path to the normalized file
    */
-  async normalizeAudio(filePath: string, targetVolume: number = -20): Promise<string | null> {
+  async normalizeAudio(filePath: string, targetVolume: number = -20, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(filePath)) {
       this.logger.error(`File doesn't exist: ${filePath}`);
       return null;
@@ -717,16 +719,41 @@ export class FfmpegService {
 
         command.on('start', (cmdline: string) => {
           this.logger.log(`Audio normalization started: ${cmdline}`);
+          // Emit internal event for analysis service to track
+          if (jobId) {
+            this.eventEmitter.emit('processing-progress', {
+              jobId,
+              progress: 0,
+              task: 'Starting audio normalization'
+            });
+          }
         });
 
         command.on('progress', (progress: any) => {
           if (progress.percent) {
-            this.logger.log(`Normalizing: ${Math.round(progress.percent)}%`);
+            const percent = Math.round(progress.percent);
+            this.logger.log(`Normalizing: ${percent}%`);
+            // Emit internal event for analysis service to track
+            if (jobId) {
+              this.eventEmitter.emit('processing-progress', {
+                jobId,
+                progress: percent,
+                task: `Normalizing audio: ${percent}%`
+              });
+            }
           }
         });
 
         command.on('end', () => {
           this.logger.log(`Successfully normalized audio to temp file: ${tempOutputFile}`);
+          // Emit internal event for analysis service to track
+          if (jobId) {
+            this.eventEmitter.emit('processing-progress', {
+              jobId,
+              progress: 95,
+              task: 'Audio normalization complete, finalizing...'
+            });
+          }
 
           // Delete the original file and rename temp file to original name
           if (this.safeDeleteFile(filePath)) {

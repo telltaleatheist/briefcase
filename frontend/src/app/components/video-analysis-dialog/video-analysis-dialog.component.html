@@ -124,80 +124,90 @@
         </ng-container>
       </div>
 
-      <!-- Processing Mode - PRIMARY CHOICE -->
+      <!-- Processing Options - CHECKBOXES -->
       <div class="form-section">
         <h3 class="section-title">
           <mat-icon>tune</mat-icon>
           Processing Options
         </h3>
-        <p class="section-description">Choose how you want to process this video</p>
+        <p class="section-description">Select one or more processing options</p>
 
-        <div class="mode-cards">
-          <!-- Import - only show if videos are NOT already in library -->
-          <button type="button"
-                  class="mode-card"
-                  *ngIf="!isFromLibrary()"
-                  [class.active]="analysisForm.get('mode')?.value === 'import-only'"
-                  (click)="analysisForm.patchValue({mode: 'import-only'})">
-            <div class="card-icon">
-              <mat-icon>download</mat-icon>
+        <div class="checkbox-options">
+          <!-- Process Video (Aspect Ratio) -->
+          <label class="checkbox-card" [class.checked]="analysisForm.get('processVideo')?.value">
+            <input type="checkbox" formControlName="processVideo">
+            <div class="checkbox-card-content">
+              <div class="checkbox-icon">
+                <mat-icon>aspect_ratio</mat-icon>
+              </div>
+              <div class="checkbox-text">
+                <h4 class="checkbox-title">Fix Aspect Ratio</h4>
+                <p class="checkbox-description">Process vertical/non-16:9 videos with blurred background</p>
+              </div>
+              <div class="checkbox-indicator">
+                <mat-icon *ngIf="analysisForm.get('processVideo')?.value">check_box</mat-icon>
+                <mat-icon *ngIf="!analysisForm.get('processVideo')?.value">check_box_outline_blank</mat-icon>
+              </div>
             </div>
-            <div class="card-content">
-              <h4 class="card-title">Import Only</h4>
-              <p class="card-description">No transcription or AI analysis</p>
-            </div>
-            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'import-only'">
-              <mat-icon>check_circle</mat-icon>
-            </div>
-          </button>
+          </label>
 
-          <button type="button"
-                  class="mode-card"
-                  [class.active]="analysisForm.get('mode')?.value === 'transcribe-only'"
-                  (click)="analysisForm.patchValue({mode: 'transcribe-only'})">
-            <div class="card-icon">
-              <mat-icon>subtitles</mat-icon>
+          <!-- Normalize Audio -->
+          <label class="checkbox-card" [class.checked]="analysisForm.get('normalizeAudio')?.value">
+            <input type="checkbox" formControlName="normalizeAudio">
+            <div class="checkbox-card-content">
+              <div class="checkbox-icon">
+                <mat-icon>equalizer</mat-icon>
+              </div>
+              <div class="checkbox-text">
+                <h4 class="checkbox-title">Normalize Audio</h4>
+                <p class="checkbox-description">Normalize audio levels using EBU R128 standard</p>
+              </div>
+              <div class="checkbox-indicator">
+                <mat-icon *ngIf="analysisForm.get('normalizeAudio')?.value">check_box</mat-icon>
+                <mat-icon *ngIf="!analysisForm.get('normalizeAudio')?.value">check_box_outline_blank</mat-icon>
+              </div>
             </div>
-            <div class="card-content">
-              <h4 class="card-title">Transcribe Only</h4>
-              <p class="card-description">Generate transcript using Whisper</p>
-            </div>
-            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'transcribe-only'">
-              <mat-icon>check_circle</mat-icon>
-            </div>
-          </button>
+          </label>
 
-          <button type="button"
-                  class="mode-card"
-                  [class.active]="analysisForm.get('mode')?.value === 'full'"
-                  (click)="analysisForm.patchValue({mode: 'full'})">
-            <div class="card-icon">
-              <mat-icon>psychology</mat-icon>
+          <!-- AI Analysis -->
+          <label class="checkbox-card" [class.checked]="analysisForm.get('aiAnalysis')?.value">
+            <input type="checkbox" formControlName="aiAnalysis">
+            <div class="checkbox-card-content">
+              <div class="checkbox-icon">
+                <mat-icon>psychology</mat-icon>
+              </div>
+              <div class="checkbox-text">
+                <h4 class="checkbox-title">AI Analysis</h4>
+                <p class="checkbox-description">Generate AI-powered description and analysis</p>
+              </div>
+              <div class="checkbox-indicator">
+                <mat-icon *ngIf="analysisForm.get('aiAnalysis')?.value">check_box</mat-icon>
+                <mat-icon *ngIf="!analysisForm.get('aiAnalysis')?.value">check_box_outline_blank</mat-icon>
+              </div>
             </div>
-            <div class="card-content">
-              <h4 class="card-title">Transcribe + Analyze</h4>
-              <p class="card-description">Full AI analysis with transcript</p>
-            </div>
-            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'full'">
-              <mat-icon>check_circle</mat-icon>
-            </div>
-          </button>
+          </label>
 
-          <button type="button"
-                  class="mode-card"
-                  [class.active]="analysisForm.get('mode')?.value === 'process-only'"
-                  (click)="analysisForm.patchValue({mode: 'process-only'})">
-            <div class="card-icon">
-              <mat-icon>aspect_ratio</mat-icon>
+          <!-- Transcribe -->
+          <label class="checkbox-card"
+                 [class.checked]="analysisForm.get('transcribe')?.value"
+                 [class.disabled]="analysisForm.get('transcribe')?.disabled">
+            <input type="checkbox" formControlName="transcribe">
+            <div class="checkbox-card-content">
+              <div class="checkbox-icon">
+                <mat-icon>subtitles</mat-icon>
+              </div>
+              <div class="checkbox-text">
+                <h4 class="checkbox-title">Transcribe</h4>
+                <p class="checkbox-description">Generate transcript using Whisper
+                  <span *ngIf="analysisForm.get('transcribe')?.disabled" class="required-note">(Required for AI analysis)</span>
+                </p>
+              </div>
+              <div class="checkbox-indicator">
+                <mat-icon *ngIf="analysisForm.get('transcribe')?.value">check_box</mat-icon>
+                <mat-icon *ngIf="!analysisForm.get('transcribe')?.value">check_box_outline_blank</mat-icon>
+              </div>
             </div>
-            <div class="card-content">
-              <h4 class="card-title">Fix Aspect Ratio</h4>
-              <p class="card-description">Process vertical/non-16:9 videos with blurred background</p>
-            </div>
-            <div class="card-check" *ngIf="analysisForm.get('mode')?.value === 'process-only'">
-              <mat-icon>check_circle</mat-icon>
-            </div>
-          </button>
+          </label>
         </div>
       </div>
 

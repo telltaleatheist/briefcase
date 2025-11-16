@@ -10,7 +10,8 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
-import { AnalysisQueueService } from '../../services/analysis-queue.service';
+import { VideoProcessingQueueService } from '../../services/video-processing-queue.service';
+import { ProcessType, ProcessConfig } from '../../models/video-processing.model';
 import { AiSetupHelperService, AIAvailability } from '../../services/ai-setup-helper.service';
 import { AiSetupWizardComponent } from '../ai-setup-wizard/ai-setup-wizard.component';
 import { AiSetupTooltipComponent } from '../ai-setup-tooltip/ai-setup-tooltip.component';
@@ -60,7 +61,7 @@ export class VideoAnalysisDialogComponent implements OnInit {
     @Inject(MAT_DIALOG_DATA) public data: VideoAnalysisDialogData,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
-    private analysisQueueService: AnalysisQueueService,
+    private videoProcessingQueueService: VideoProcessingQueueService,
     private aiSetupHelper: AiSetupHelperService,
     private dialog: MatDialog,
     private batchApiService: BatchApiService
@@ -78,11 +79,18 @@ export class VideoAnalysisDialogComponent implements OnInit {
     // Load saved settings
     await this.loadSettings();
 
+    // Set default transcribe state based on whether video has transcript
+    // If single video with transcript, leave unchecked; otherwise check by default
+    const shouldDefaultTranscribe = !this.allVideosHaveTranscripts();
+
     // Pre-populate form based on dialog data
     if (this.data.mode === 'transcribe') {
-      this.analysisForm.patchValue({ mode: 'transcribe-only' });
+      this.analysisForm.patchValue({ transcribe: true });
     } else if (this.data.mode === 'analyze') {
-      this.analysisForm.patchValue({ mode: 'full' });
+      this.analysisForm.patchValue({ aiAnalysis: true, transcribe: true });
+    } else {
+      // Set default transcribe state
+      this.analysisForm.patchValue({ transcribe: shouldDefaultTranscribe });
     }
 
     // If video path provided, set it
@@ -96,13 +104,6 @@ export class VideoAnalysisDialogComponent implements OnInit {
     // If this is for URL import or download, default to URL input
     if (this.data.mode === 'import' || this.data.mode === 'download') {
       this.analysisForm.patchValue({ inputType: 'url' });
-    }
-
-    // If videos are from library (not being imported), change default from 'import-only' to 'transcribe-only'
-    // since import doesn't make sense for videos already in library
-    // Check for mode !== 'import' because drag/drop passes both selectedVideos AND mode='import'
-    if (this.isFromLibrary() && this.data.mode !== 'import' && this.analysisForm.get('mode')?.value === 'import-only') {
-      this.analysisForm.patchValue({ mode: 'transcribe-only' });
     }
 
     // Update validation based on whether we have selected videos
@@ -119,13 +120,37 @@ export class VideoAnalysisDialogComponent implements OnInit {
         }
       });
     }
+
+    // Watch aiAnalysis checkbox - auto-select transcribe and manage disabled state
+    this.analysisForm.get('aiAnalysis')?.valueChanges.subscribe((selected: boolean) => {
+      const transcribeControl = this.analysisForm.get('transcribe');
+
+      if (selected) {
+        // Always auto-check transcribe when AI analysis is selected
+        transcribeControl?.patchValue(true, { emitEvent: false });
+
+        // Disable transcribe control if required (no transcript or multiple files)
+        if (this.shouldDisableTranscribeWhenAISelected()) {
+          transcribeControl?.disable({ emitEvent: false });
+        } else {
+          transcribeControl?.enable({ emitEvent: false });
+        }
+      } else {
+        // Re-enable transcribe when AI analysis is unchecked
+        transcribeControl?.enable({ emitEvent: false });
+      }
+    });
   }
 
   createForm(): FormGroup {
     return this.fb.group({
       inputType: ['url', Validators.required],
       input: [''], // Don't require if selectedVideos provided
-      mode: ['import-only', Validators.required],
+      // Processing options as checkboxes
+      processVideo: [false],
+      normalizeAudio: [false],
+      aiAnalysis: [false],
+      transcribe: [false],
       customInstructions: [''],
       aiModel: ['ollama:qwen2.5:7b', Validators.required],
       apiKey: [''],
@@ -136,16 +161,19 @@ export class VideoAnalysisDialogComponent implements OnInit {
   }
 
   isAIAnalysisEnabled(): boolean {
-    return this.analysisForm.get('mode')?.value === 'full';
+    return this.analysisForm.get('aiAnalysis')?.value === true;
   }
 
   isTranscriptionEnabled(): boolean {
-    const mode = this.analysisForm.get('mode')?.value;
-    return mode === 'transcribe-only' || mode === 'full';
+    return this.analysisForm.get('transcribe')?.value === true;
   }
 
   isImportOnly(): boolean {
-    return this.analysisForm.get('mode')?.value === 'import-only';
+    // Import only means no processing options are selected
+    return !this.analysisForm.get('processVideo')?.value &&
+           !this.analysisForm.get('normalizeAudio')?.value &&
+           !this.analysisForm.get('aiAnalysis')?.value &&
+           !this.analysisForm.get('transcribe')?.value;
   }
 
   /**
@@ -158,6 +186,102 @@ export class VideoAnalysisDialogComponent implements OnInit {
     }
     // Otherwise, if we have selectedVideos, they're from the library
     return !!(this.data.selectedVideos && this.data.selectedVideos.length > 0);
+  }
+
+  /**
+   * Check if all selected videos have transcripts
+   */
+  allVideosHaveTranscripts(): boolean {
+    if (!this.data.selectedVideos || this.data.selectedVideos.length === 0) {
+      return false;
+    }
+    // has_transcript is 0 or 1 (SQLite boolean)
+    return this.data.selectedVideos.every(video => video.has_transcript === 1);
+  }
+
+  /**
+   * Check if transcribe should be disabled when AI is selected
+   * Returns true if transcribe is REQUIRED (should be disabled)
+   */
+  shouldDisableTranscribeWhenAISelected(): boolean {
+    // For multiple files, transcribe is required
+    if (this.data.selectedVideos && this.data.selectedVideos.length > 1) {
+      return true;
+    }
+
+    // For single file, only required if no transcript exists
+    if (this.data.selectedVideos && this.data.selectedVideos.length === 1) {
+      return !this.allVideosHaveTranscripts();
+    }
+
+    // For new imports (no selectedVideos), transcribe is required
+    return true;
+  }
+
+  /**
+   * Check if transcribe checkbox should be disabled
+   * It's disabled when:
+   * 1. AI analysis is selected AND
+   * 2. Either there are multiple files OR no video has a transcript
+   */
+  isTranscribeDisabled(): boolean {
+    const aiAnalysisSelected = this.analysisForm.get('aiAnalysis')?.value;
+    if (!aiAnalysisSelected) {
+      return false;
+    }
+
+    return this.shouldDisableTranscribeWhenAISelected();
+  }
+
+  /**
+   * Convert checkbox selections to ProcessConfig array for the new queue service
+   */
+  private getProcessConfigs(): ProcessConfig[] {
+    const processes: ProcessConfig[] = [];
+    const formValue = this.analysisForm.getRawValue();
+
+    // Process video (aspect ratio fix)
+    if (formValue.processVideo) {
+      processes.push({
+        type: 'process' as ProcessType,
+        config: {}
+      });
+    }
+
+    // Normalize audio
+    if (formValue.normalizeAudio) {
+      processes.push({
+        type: 'normalize' as ProcessType,
+        config: {}
+      });
+    }
+
+    // Transcribe (if selected without AI analysis, or with AI analysis)
+    if (formValue.transcribe) {
+      processes.push({
+        type: 'transcribe' as ProcessType,
+        config: {
+          whisperModel: formValue.whisperModel || 'base',
+          language: formValue.language || 'en'
+        }
+      });
+    }
+
+    // AI Analysis
+    if (formValue.aiAnalysis) {
+      const aiModel = formValue.aiModel || '';
+      processes.push({
+        type: 'analyze' as ProcessType,
+        config: {
+          aiModel: aiModel,
+          apiKey: formValue.apiKey,
+          ollamaEndpoint: formValue.ollamaEndpoint || 'http://localhost:11434',
+          customInstructions: formValue.customInstructions || ''
+        }
+      });
+    }
+
+    return processes;
   }
 
   needsApiKey(): boolean {
@@ -268,12 +392,13 @@ export class VideoAnalysisDialogComponent implements OnInit {
     }
 
     const formValue = this.analysisForm.value;
+    const processConfigs = this.getProcessConfigs();
 
     // Auto-save settings
     await this.saveSettings();
 
-    // Handle import-only mode - directly import videos without analysis queue
-    if (formValue.mode === 'import-only') {
+    // Handle import-only mode - directly import videos without processing queue
+    if (processConfigs.length === 0) {
       if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
         try {
           const videoPaths = this.data.selectedVideos.map(v => v.current_path);
@@ -305,30 +430,26 @@ export class VideoAnalysisDialogComponent implements OnInit {
       return;
     }
 
-    // For transcribe/analyze modes, prepare job data to return
-    // Don't add to queue here - let parent component do it after dialog closes
-    let jobsToAdd: any[] = [];
+    // Add videos to processing queue with multiple child processes
+    const jobIds: string[] = [];
 
-    console.log('[VideoAnalysisDialog] Preparing jobs. Mode:', formValue.mode);
-    console.log('[VideoAnalysisDialog] Selected videos:', this.data.selectedVideos);
-
-    // If we have selected videos from library, prepare each one
     if (this.data.selectedVideos && this.data.selectedVideos.length > 0) {
-      console.log('[VideoAnalysisDialog] Creating jobs for', this.data.selectedVideos.length, 'videos');
-      jobsToAdd = this.data.selectedVideos.map(video => ({
-        input: video.current_path,
-        inputType: 'file',
-        mode: formValue.mode,
-        aiModel: formValue.aiModel,
-        apiKey: formValue.apiKey,
-        ollamaEndpoint: formValue.ollamaEndpoint,
-        whisperModel: formValue.whisperModel,
-        language: formValue.language,
-        customInstructions: formValue.customInstructions,
-        displayName: video.filename || 'Unknown',
-        videoId: video.id,  // Include video ID for progress tracking
-        loading: false
-      }));
+      // Process each selected video
+      for (const video of this.data.selectedVideos) {
+        const jobId = this.videoProcessingQueueService.addVideoJob({
+          videoId: video.id,
+          videoPath: video.current_path,
+          displayName: video.filename || 'Unknown',
+          processes: processConfigs
+        });
+
+        jobIds.push(jobId);
+
+        // Don't auto-submit - let user start queue manually
+        // this.videoProcessingQueueService.submitJob(jobId);
+      }
+
+      // Notification removed - queue panel shows status
     } else {
       // Single video/URL
       let displayName = 'Video Analysis';
@@ -355,24 +476,22 @@ export class VideoAnalysisDialogComponent implements OnInit {
         displayName = parts[parts.length - 1] || 'Local video';
       }
 
-      jobsToAdd = [{
-        input: formValue.input,
-        inputType: formValue.inputType,
-        mode: formValue.mode,
-        aiModel: formValue.aiModel,
-        apiKey: formValue.apiKey,
-        ollamaEndpoint: formValue.ollamaEndpoint,
-        whisperModel: formValue.whisperModel,
-        language: formValue.language,
-        customInstructions: formValue.customInstructions,
+      const jobId = this.videoProcessingQueueService.addVideoJob({
+        videoPath: formValue.input,
         displayName: displayName,
-        loading: false
-      }];
+        processes: processConfigs
+      });
+
+      jobIds.push(jobId);
+
+      // Don't auto-submit - let user start queue manually
+      // this.videoProcessingQueueService.submitJob(jobId);
+
+      // Notification removed - queue panel shows status
     }
 
-    // Close the dialog and return job data for parent to add
-    console.log('[VideoAnalysisDialog] Closing dialog with', jobsToAdd.length, 'jobs');
-    this.dialogRef.close({ success: true, jobsToAdd });
+    // Close the dialog
+    this.dialogRef.close({ success: true, jobIds });
   }
 
   async browseFile(): Promise<void> {
@@ -515,9 +634,10 @@ export class VideoAnalysisDialogComponent implements OnInit {
         filename: video.filename
       }));
 
-      // If mode is import-only, import directly
-      const formValue = this.analysisForm.value;
-      if (formValue.mode === 'import-only') {
+      const processConfigs = this.getProcessConfigs();
+
+      // If no processing modes selected, import directly
+      if (processConfigs.length === 0) {
         const videoPaths = videosToImport.map((v: any) => v.current_path);
         const importUrl = await this.backendUrlService.getApiUrl('/database/import');
 
@@ -540,27 +660,26 @@ export class VideoAnalysisDialogComponent implements OnInit {
 
         this.dialogRef.close({ success: true });
       } else {
-        // For transcribe/analyze modes, add to analysis queue
+        // Add each video to processing queue with multiple child processes
+        const jobIds: string[] = [];
+
         for (const video of videosToImport) {
-          this.analysisQueueService.addPendingJob({
-            input: video.current_path,
-            inputType: 'file',
-            mode: formValue.mode,
-            aiModel: formValue.aiModel,
-            apiKey: formValue.apiKey,
-            ollamaEndpoint: formValue.ollamaEndpoint,
-            whisperModel: formValue.whisperModel,
-            language: formValue.language,
-            customInstructions: formValue.customInstructions,
+          const jobId = this.videoProcessingQueueService.addVideoJob({
+            videoId: video.id,
+            videoPath: video.current_path,
             displayName: video.filename || 'Unknown',
-            videoId: video.id,  // Include video ID for progress tracking (if available)
-            loading: false
+            processes: processConfigs
           });
+          jobIds.push(jobId);
+
+          // Submit job immediately
+          this.videoProcessingQueueService.submitJob(jobId);
         }
 
+        const totalProcesses = processConfigs.length;
         this.notificationService.success(
           'Videos Added to Queue',
-          `Added ${videosToImport.length} video${videosToImport.length !== 1 ? 's' : ''} to the analysis queue`
+          `Added ${videosToImport.length} video${videosToImport.length !== 1 ? 's' : ''} to processing queue with ${totalProcesses} process${totalProcesses !== 1 ? 'es' : ''} each`
         );
 
         this.dialogRef.close({ success: true });
@@ -665,10 +784,8 @@ export class VideoAnalysisDialogComponent implements OnInit {
    * Check if AI setup is needed and show prompt
    */
   private checkAndPromptAISetup(): void {
-    const mode = this.analysisForm.get('mode')?.value;
-
-    // Only check if mode requires AI (full analysis or transcription)
-    if (mode === 'import-only' || mode === 'process-only') {
+    // Only check if AI analysis is selected
+    if (!this.analysisForm.get('aiAnalysis')?.value) {
       return;
     }
 
@@ -734,13 +851,14 @@ export class VideoAnalysisDialogComponent implements OnInit {
       return 'Checking AI availability...';
     }
 
-    const mode = this.analysisForm.get('mode')?.value;
+    const aiAnalysisSelected = this.analysisForm.get('aiAnalysis')?.value;
+    const transcribeSelected = this.analysisForm.get('transcribe')?.value;
 
-    if (mode === 'transcribe-only') {
+    if (transcribeSelected && !aiAnalysisSelected) {
       return 'Transcription does not require AI setup. However, you can optionally use AI for enhanced transcription quality.';
     }
 
-    if (mode === 'full') {
+    if (aiAnalysisSelected) {
       return 'AI analysis requires either Ollama (free, runs locally) or an API key for Claude/ChatGPT. Click "Set Up AI" to get started!';
     }
 

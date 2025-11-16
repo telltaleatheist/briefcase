@@ -20,6 +20,8 @@ import { BatchStateService } from './services/batch-state.service';
 import { NotificationService } from './services/notification.service';
 import { DatabaseLibraryService } from './services/database-library.service';
 import { AiSetupHelperService } from './services/ai-setup-helper.service';
+import { ConsoleLoggerService } from './services/console-logger.service';
+import { VideoProcessingQueueService } from './services/video-processing-queue.service';
 import { ThemeToggleComponent } from './components/theme-toggle/theme-toggle.component';
 import { NotificationToastComponent } from './components/notification-toast/notification-toast.component';
 import { NotificationBellComponent } from './components/notification-bell/notification-bell.component';
@@ -66,7 +68,9 @@ export class AppComponent implements OnInit, OnDestroy {
   private notificationService = inject(NotificationService);  // Inject the NotificationService
   private databaseLibraryService = inject(DatabaseLibraryService);  // Inject the DatabaseLibraryService
   private downloadProgressService = inject(DownloadProgressService);  // CRITICAL: Inject to instantiate on app start
+  private videoProcessingQueueService = inject(VideoProcessingQueueService);  // CRITICAL: Inject to instantiate on app start and setup WebSocket listeners
   private aiSetupHelper = inject(AiSetupHelperService);  // Inject AI setup helper
+  private consoleLogger = inject(ConsoleLoggerService);  // Inject console logger
   private dialog = inject(MatDialog);  // Inject dialog service
   public router = inject(Router);
   private renderer = inject(Renderer2);
@@ -202,5 +206,13 @@ export class AppComponent implements OnInit, OnDestroy {
     } catch (error) {
       console.error('[AppComponent] Error checking AI availability:', error);
     }
+  }
+
+  /**
+   * Save console logs to file for debugging
+   */
+  async saveConsoleLogs(): Promise<void> {
+    await this.consoleLogger.saveLogs();
+    this.notificationService.toastOnly('success', 'Logs Saved', 'Console logs saved to logs directory');
   }
 }

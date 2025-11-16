@@ -1425,7 +1425,7 @@ export class DatabaseService {
       SELECT
         v.*,
         CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
-        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) THEN 1 ELSE 0 END as has_analysis,
+        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) OR v.suggested_title IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
         CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
       FROM videos v
     `;

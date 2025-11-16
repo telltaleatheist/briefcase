@@ -13,6 +13,8 @@ import { MatDialog } from '@angular/material/dialog';
 import { BatchProgress, DatabaseLibraryService } from '../../services/database-library.service';
 import { DownloadProgressService, VideoProcessingJob } from '../../services/download-progress.service';
 import { AnalysisQueueService, PendingAnalysisJob } from '../../services/analysis-queue.service';
+import { VideoProcessingQueueService } from '../../services/video-processing-queue.service';
+import { VideoProcessingJob as QueuedVideoJob } from '../../models/video-processing.model';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { Subscription, interval } from 'rxjs';
@@ -60,10 +62,19 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   pendingJobs: PendingAnalysisJob[] = [];
   private pendingJobsSubscription?: Subscription;
   private jobAddedSubscription?: Subscription;
+
+  // Video processing queue integration (NEW service)
+  videoProcessingJobs: QueuedVideoJob[] = [];
+  private videoProcessingJobsSubscription?: Subscription;
+  private videoProcessingJobAddedSubscription?: Subscription;
+
   availableOllamaModels: string[] = [];
 
   // Cache for combined jobs list (replaces getter to avoid performance issues)
   allJobsAsListItems: ListItem[] = [];
+
+  // Cache for active items count (replaces getter to avoid performance issues)
+  activeItemsCount: number = 0;
 
   // ViewChild for cascade list to control expansion
   @ViewChild(CascadeListComponent) cascadeList?: CascadeListComponent<any>;
@@ -118,6 +129,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     private databaseLibraryService: DatabaseLibraryService,
     private downloadProgressService: DownloadProgressService,
     public analysisQueueService: AnalysisQueueService,
+    private videoProcessingQueueService: VideoProcessingQueueService,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
     public cdr: ChangeDetectorRef,
@@ -152,10 +164,31 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       }, 0);
     });
 
-    // Subscribe to job added event to auto-open the queue
+    // Subscribe to job added event to auto-open the queue (OLD service)
     this.jobAddedSubscription = this.analysisQueueService.jobAdded$.subscribe(() => {
       this.isOpen = true;
       // Angular will detect the change automatically
+    });
+
+    // Subscribe to video processing queue job added event (NEW service)
+    this.videoProcessingJobAddedSubscription = this.videoProcessingQueueService.jobAdded$.subscribe(() => {
+      this.isOpen = true;
+      console.log('[DownloadQueue] Video processing job added - opening dropdown');
+      // Angular will detect the change automatically
+    });
+
+    // Subscribe to video processing queue jobs (NEW service)
+    this.videoProcessingJobsSubscription = this.videoProcessingQueueService.getJobs().subscribe(jobsMap => {
+      console.log('[DownloadQueue] Video processing jobs updated. Count:', jobsMap.size);
+      this.videoProcessingJobs = Array.from(jobsMap.values());
+
+      // Update combined list when video processing jobs change
+      this.updateAllJobsList();
+
+      // Expand only the first item after the view updates
+      setTimeout(() => {
+        this.expandFirstItemOnly();
+      }, 0);
     });
 
     // Load available Ollama models
@@ -181,6 +214,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     }
     if (this.jobAddedSubscription) {
       this.jobAddedSubscription.unsubscribe();
+    }
+    if (this.videoProcessingJobsSubscription) {
+      this.videoProcessingJobsSubscription.unsubscribe();
+    }
+    if (this.videoProcessingJobAddedSubscription) {
+      this.videoProcessingJobAddedSubscription.unsubscribe();
     }
     this.stopPolling();
     if (this.pollingSubscription) {
@@ -213,16 +252,6 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     }).catch(error => {
       console.error('Failed to fetch initial batch progress:', error);
     });
-  }
-
-  get activeItemsCount(): number {
-    // Count pending + active analysis jobs
-    const pendingCount = this.pendingJobs.length;
-    const activeJobs = this.processingJobs.filter(job =>
-      job.stage !== 'completed' && job.stage !== 'failed'
-    ).length;
-
-    return pendingCount + activeJobs;
   }
 
   get hasActiveItems(): boolean {
@@ -306,7 +335,9 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   // Queue management methods
 
   hasPendingJobs(): boolean {
-    return this.pendingJobs.length > 0;
+    const hasOldPendingJobs = this.pendingJobs.length > 0;
+    const hasNewPendingJobs = this.videoProcessingJobs.some(job => job.overallStatus === 'pending');
+    return hasOldPendingJobs || hasNewPendingJobs;
   }
 
   async startQueue(): Promise<void> {
@@ -315,11 +346,22 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Keep dropdown open while processing
+    this.isOpen = true;
+
     // Enable auto-processing mode (sequential, one-at-a-time)
     this.autoProcessQueue = true;
 
-    // Start only the first pending job
-    await this.startNextPendingJob();
+    // Start OLD service jobs (if any)
+    if (this.pendingJobs.length > 0) {
+      await this.startNextPendingJob();
+    }
+
+    // Start NEW service jobs (video processing jobs)
+    const pendingVideoJobs = this.videoProcessingJobs.filter(job => job.overallStatus === 'pending');
+    for (const job of pendingVideoJobs) {
+      await this.videoProcessingQueueService.submitJob(job.id);
+    }
 
     // Start polling to track progress
     if (!this.pollingSubscription) {
@@ -813,8 +855,8 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Update the combined jobs list (pending + active)
-   * Called when either pendingJobs or processingJobs changes
+   * Update the combined jobs list (pending + active + video processing)
+   * Called when pendingJobs, processingJobs, or videoProcessingJobs changes
    */
   private updateAllJobsList(): void {
     const pending = this.pendingJobs.map(job => ({
@@ -823,17 +865,30 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       isPending: true
     }));
 
-    const active = this.processingJobs
-      .filter(job => job.stage !== 'completed' && job.stage !== 'failed')
+    // Add video processing jobs (NEW service)
+    const videoProcessing = this.videoProcessingJobs
+      .filter(job => job.overallStatus !== 'completed' && job.overallStatus !== 'failed')
       .map(job => ({
         ...job,
-        displayName: this.getJobTitle(job),
-        isPending: false
+        displayName: job.displayName || 'Unknown Video',
+        isPending: job.overallStatus === 'pending'
       }));
 
+    // IMPORTANT: Analysis Queue ONLY shows NEW video processing jobs
+    // OLD active jobs are excluded to prevent duplicates
+    const active: any[] = [];
+
     // ALWAYS create a new array reference to trigger Angular's change detection
-    this.allJobsAsListItems = [...pending, ...active];
-    console.log('[DownloadQueue] Updated allJobsAsListItems. Pending:', pending.length, 'Active:', active.length, 'Total:', this.allJobsAsListItems.length);
+    this.allJobsAsListItems = [...pending, ...active, ...videoProcessing];
+
+    // Update cached active items count
+    const pendingCount = this.pendingJobs.length;
+    const activeJobsCount = this.processingJobs.filter(job =>
+      job.stage !== 'completed' && job.stage !== 'failed'
+    ).length;
+    const videoProcessingCount = videoProcessing.length; // Already filtered above
+
+    this.activeItemsCount = pendingCount + activeJobsCount + videoProcessingCount;
   }
 
   /**
@@ -985,6 +1040,12 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
    * Uses memoization to avoid expensive recalculations on every change detection cycle
    */
   generateJobStages(job: any): CascadeChild[] {
+    // Check if this is a NEW video processing job (has childProcesses array)
+    if (job.childProcesses && Array.isArray(job.childProcesses)) {
+      return this.generateVideoProcessingStages(job);
+    }
+
+    // OLD job structure - use existing logic
     // Create a cache key based on properties that affect the stages
     const isPending = job.isPending === true;
     const isUrlJob = job.inputType === 'url' || job.url;
@@ -1180,10 +1241,75 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Generate stages for NEW video processing jobs (from VideoProcessingQueueService)
+   * These jobs already have childProcesses defined, so we just convert them to CascadeChild format
+   */
+  private generateVideoProcessingStages(job: QueuedVideoJob): CascadeChild[] {
+    // Create cache key from child process statuses and progress
+    const cacheKey = job.childProcesses
+      .map(child => `${child.id}|${child.status}|${child.progress}`)
+      .join('|');
+
+    // Check cache first
+    const cached = this.jobStagesCache.get(job.id);
+    if (cached && cached.key === cacheKey) {
+      return cached.stages;
+    }
+
+    // Convert child processes to CascadeChild format
+    const children: CascadeChild[] = job.childProcesses.map(child => {
+      // Map status to CascadeChildStatus
+      let status: CascadeChildStatus = 'pending';
+      if (child.status === 'processing') {
+        status = 'active';
+      } else if (child.status === 'completed') {
+        status = 'completed';
+      } else if (child.status === 'failed') {
+        status = 'failed';
+      }
+
+      // Map process type to icon
+      let icon = 'settings';
+      if (child.type === 'transcribe') {
+        icon = 'subtitles';
+      } else if (child.type === 'analyze') {
+        icon = 'psychology';
+      } else if (child.type === 'process') {
+        icon = 'aspect_ratio';
+      } else if (child.type === 'normalize') {
+        icon = 'graphic_eq';
+      }
+
+      return {
+        id: child.id,
+        parentId: job.id,
+        label: child.displayName || child.type,
+        icon: icon,
+        status: status,
+        progress: {
+          value: child.progress || 0,
+          indeterminate: status === 'active' && (child.progress || 0) < 5
+        }
+      };
+    });
+
+    // Store in cache
+    this.jobStagesCache.set(job.id, { key: cacheKey, stages: children });
+
+    return children;
+  }
+
+  /**
    * Calculate master progress as the average of all child stage progress
    * Uses memoization to avoid expensive recalculations on every change detection cycle
    */
   calculateMasterProgress(job: any): number {
+    // For NEW video processing jobs, use overallProgress directly
+    if (job.childProcesses && Array.isArray(job.childProcesses)) {
+      return job.overallProgress || 0;
+    }
+
+    // OLD job structure
     // Create a cache key (same as generateJobStages since it depends on the same properties)
     const isPending = job.isPending === true;
     const isUrlJob = job.inputType === 'url' || job.url;

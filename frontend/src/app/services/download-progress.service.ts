@@ -11,8 +11,8 @@ export interface VideoProcessingJob {
   displayName?: string; // User-friendly display name (e.g., fetched title)
   url?: string;
   videoId?: string; // Video ID for linking to library videos
-  mode?: 'full' | 'transcribe-only' | 'process-only'; // Processing mode
-  stage: 'downloading' | 'importing' | 'processing' | 'transcribing' | 'analyzing' | 'completed' | 'failed';
+  mode?: 'full' | 'transcribe-only' | 'process-only' | 'normalize-audio'; // Processing mode
+  stage: 'downloading' | 'importing' | 'processing' | 'transcribing' | 'analyzing' | 'normalizing' | 'completed' | 'failed';
   progress: number; // 0-100
   error?: string;
   startedAt: Date;
@@ -45,26 +45,35 @@ export class DownloadProgressService {
       }
     });
 
-    // Listen for processing progress events (aspect ratio fixing, etc.)
+    // Listen for processing progress events (aspect ratio fixing, audio normalization, etc.)
     this.socketService.onProcessingProgress().subscribe(data => {
       console.log('[DownloadProgressService] Processing progress event received:', data);
       if (data.jobId) {
         const currentJobs = this.jobs.getValue();
-        const job = currentJobs.get(data.jobId);
+
+        // Try to find job with raw jobId first, then try prefixed version
+        let jobId = data.jobId;
+        let job = currentJobs.get(jobId);
+
+        if (!job) {
+          // Try analysis- prefix for analysis queue jobs
+          jobId = `analysis-${data.jobId}`;
+          job = currentJobs.get(jobId);
+        }
+
         if (job) {
-          // Update job with processing progress
+          // Update job with processing progress - keep existing stage
           const updatedJob = {
             ...job,
-            stage: 'processing' as const,
             progress: data.progress || 0
           };
 
           // Create a new Map to trigger change detection
           const newJobs = new Map(currentJobs);
-          newJobs.set(data.jobId, updatedJob);
+          newJobs.set(jobId, updatedJob);
           this.jobs.next(newJobs);
 
-          console.log('[DownloadProgressService] Updated job to processing stage:', updatedJob);
+          console.log('[DownloadProgressService] Updated job progress:', updatedJob);
         } else {
           console.warn('[DownloadProgressService] Job not found for processing progress:', data.jobId);
         }
@@ -369,16 +378,21 @@ export class DownloadProgressService {
     const existingJob = currentJobs.get(jobId);
 
     // Map analysis job status to our stages
-    let stage: VideoProcessingJob['stage'] = 'analyzing';
+    // If status is not provided, preserve existing stage
+    let stage: VideoProcessingJob['stage'] = existingJob?.stage || 'analyzing';
     const status = analysisJob.status?.toLowerCase() || '';
 
-    if (status === 'downloading') stage = 'downloading';
-    else if (status === 'extracting' || status === 'importing') stage = 'importing';
-    else if (status === 'transcribing') stage = 'transcribing';
-    else if (status === 'processing') stage = 'processing';
-    else if (status === 'analyzing') stage = 'analyzing';
-    else if (status === 'completed') stage = 'completed';
-    else if (status === 'failed') stage = 'failed';
+    // Only update stage if status is provided
+    if (status) {
+      if (status === 'downloading') stage = 'downloading';
+      else if (status === 'extracting' || status === 'importing') stage = 'importing';
+      else if (status === 'transcribing') stage = 'transcribing';
+      else if (status === 'processing') stage = 'processing';
+      else if (status === 'normalizing') stage = 'normalizing';
+      else if (status === 'analyzing') stage = 'analyzing';
+      else if (status === 'completed') stage = 'completed';
+      else if (status === 'failed') stage = 'failed';
+    }
 
     // Extract filename from path if it's a file path
     // If updating existing job and no new input provided, keep the old filename

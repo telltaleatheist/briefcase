@@ -271,4 +271,28 @@ export class MediaEventService {
       timestamp: this.getTimestamp()
     });
   }
+
+  /**
+   * Suggestion accepted event (notify frontend when a video name suggestion is accepted)
+   */
+  emitSuggestionAccepted(videoId: string, oldFilename: string, newFilename: string): void {
+    this.logger.log(`Emitting suggestion-accepted event for ${videoId}: ${oldFilename} -> ${newFilename}`);
+    this.emitEvent('suggestion-accepted', {
+      videoId,
+      oldFilename,
+      newFilename,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Suggestion rejected event (notify frontend when a video name suggestion is rejected)
+   */
+  emitSuggestionRejected(videoId: string): void {
+    this.logger.log(`Emitting suggestion-rejected event for ${videoId}`);
+    this.emitEvent('suggestion-rejected', {
+      videoId,
+      timestamp: this.getTimestamp()
+    });
+  }
 }

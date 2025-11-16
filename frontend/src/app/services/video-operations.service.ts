@@ -67,7 +67,7 @@ export class VideoOperationsService {
   /**
    * Open analyze dialog for multiple videos
    */
-  async analyzeVideos(videos: DatabaseVideo[], analysisQueueService: any): Promise<void> {
+  async analyzeVideos(videos: DatabaseVideo[]): Promise<void> {
     if (!videos || videos.length === 0) {
       this.notificationService.toastOnly('info', 'No Videos Selected', 'Please select videos to analyze');
       return;
@@ -87,36 +87,21 @@ export class VideoOperationsService {
       disableClose: false
     });
 
-    const result = await firstValueFrom(dialogRef.afterClosed());
-
-    console.log('[VideoOperations] Dialog closed with result:', result);
-
-    if (result && result.success && result.jobsToAdd) {
-      console.log('[VideoOperations] Adding jobs to queue:', result.jobsToAdd);
-      // Add jobs to queue after dialog closes
-      setTimeout(() => {
-        for (const jobData of result.jobsToAdd) {
-          console.log('[VideoOperations] Adding job:', jobData);
-          analysisQueueService.addPendingJob(jobData);
-        }
-        console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
-      }, 0);
-    } else {
-      console.warn('[VideoOperations] Dialog result missing expected data:', { result, hasSuccess: !!result?.success, hasJobsToAdd: !!result?.jobsToAdd });
-    }
+    // Dialog now handles job creation internally via VideoProcessingQueueService
+    await firstValueFrom(dialogRef.afterClosed());
   }
 
   /**
    * Open analyze dialog for a single video
    */
-  async analyzeVideo(video: DatabaseVideo, analysisQueueService: any): Promise<void> {
-    await this.analyzeVideos([video], analysisQueueService);
+  async analyzeVideo(video: DatabaseVideo): Promise<void> {
+    await this.analyzeVideos([video]);
   }
 
   /**
    * Open download from URL dialog
    */
-  async downloadFromUrl(analysisQueueService: any): Promise<void> {
+  async downloadFromUrl(): Promise<void> {
     const { VideoAnalysisDialogComponent } = await import('../components/video-analysis-dialog/video-analysis-dialog.component');
 
     const dialogRef = this.dialog.open(VideoAnalysisDialogComponent, {
@@ -130,16 +115,8 @@ export class VideoOperationsService {
       disableClose: false
     });
 
-    const result = await firstValueFrom(dialogRef.afterClosed());
-
-    if (result && result.success && result.jobsToAdd) {
-      setTimeout(() => {
-        for (const jobData of result.jobsToAdd) {
-          analysisQueueService.addPendingJob(jobData);
-        }
-        console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
-      }, 0);
-    }
+    // Dialog now handles job creation internally via VideoProcessingQueueService
+    await firstValueFrom(dialogRef.afterClosed());
   }
 
   // ==================== Delete Operations ====================

@@ -366,4 +366,24 @@ function setupSettingsHandlers(): void {
   ipcMain.handle('get-settings-path', () => {
     return (store as any).path;
   });
+
+  // Save console logs to logs directory
+  ipcMain.handle('save-console-logs', async (_event, filename: string, content: string) => {
+    try {
+      const fs = await import('fs').then(m => m.promises);
+      const path = await import('path');
+
+      // Save to app logs directory
+      const logsDir = log.transports.file.getFile().path.replace(/[^/]+$/, '');
+      const logPath = path.join(logsDir, filename);
+
+      await fs.writeFile(logPath, content, 'utf-8');
+      log.info(`Console logs saved to: ${logPath}`);
+
+      return logPath;
+    } catch (error) {
+      log.error('Failed to save console logs:', error);
+      throw error;
+    }
+  });
 }

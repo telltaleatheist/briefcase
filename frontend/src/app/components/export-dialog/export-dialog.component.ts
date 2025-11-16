@@ -1,12 +1,19 @@
 import { Component, Inject, OnInit, ViewChild, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import { ListItem, ItemDisplayConfig, GroupConfig, SelectionMode, ItemStatus } from '../../libs/cascade/src/lib/types/cascade.types';
+import { NotificationService } from '../../services/notification.service';
+import { BackendUrlService } from '../../services/backend-url.service';
 
 interface ExportSection extends ListItem {
   id: string;
@@ -22,10 +29,13 @@ interface ExportSection extends ListItem {
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     MatDialogModule,
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
+    MatProgressBarModule,
+    MatCheckboxModule,
     MatTooltipModule,
     CascadeListComponent
   ],
@@ -41,6 +51,19 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
   selectionEnd = 0;
   selectionDuration = '';
   isExporting = false;
+
+  // Export options
+  outputDirectory: string | null = null;
+  reEncode = false;
+
+  // Export progress
+  exportComplete = false;
+  currentClip = 0;
+  totalClips = 0;
+  exportProgress = 0;
+  currentClipName = '';
+  successCount = 0;
+  failedCount = 0;
 
   // Cascade list configuration
   sections: ExportSection[] = [];
@@ -74,7 +97,10 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
       videoPath: string;
       videoTitle: string;
     },
-    private dialogRef: MatDialogRef<ExportDialogComponent>
+    private dialogRef: MatDialogRef<ExportDialogComponent>,
+    private http: HttpClient,
+    private notificationService: NotificationService,
+    private backendUrlService: BackendUrlService
   ) {}
 
   ngOnInit() {
@@ -246,6 +272,32 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
     this.dialogRef.close();
   }
 
+  async chooseOutputDirectory() {
+    // Use Electron dialog if available (desktop app)
+    const electron = (window as any).electron;
+    if (electron && electron.showOpenDialog) {
+      try {
+        const result = await electron.showOpenDialog({
+          properties: ['openDirectory', 'createDirectory'],
+          title: 'Choose Output Folder for Clips'
+        });
+
+        if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+          this.outputDirectory = result.filePaths[0];
+        }
+      } catch (error) {
+        console.error('Failed to open directory picker:', error);
+        this.notificationService.error('Error', 'Failed to open directory picker');
+      }
+    } else {
+      // Web mode - inform user that default location will be used
+      this.notificationService.info(
+        'Default Location',
+        'Clips will be exported to your library folder. Directory picker is only available in the desktop app.'
+      );
+    }
+  }
+
   async export() {
     const selectedSections = this.getSelectedSections();
 
@@ -254,22 +306,46 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
     }
 
     this.isExporting = true;
+    this.totalClips = selectedSections.length;
+    this.currentClip = 0;
+    this.successCount = 0;
+    this.failedCount = 0;
 
-    // Check if the special selection item is selected
-    const hasSelectionItem = selectedSections.some(s => s.id === '__selection__' || s.category.trim() === 'Current Selection');
-    const markerSections = selectedSections.filter(s => s.id !== '__selection__' && s.category.trim() !== 'Current Selection');
+    for (const section of selectedSections) {
+      this.currentClip++;
+      this.currentClipName = section.description || 'Unnamed section';
+      this.exportProgress = (this.currentClip / this.totalClips) * 100;
 
-    // Prepare export data
-    const exportData = {
-      includeSelection: hasSelectionItem,
-      selectionStart: this.selectionStart,
-      selectionEnd: this.selectionEnd,
-      sections: markerSections,
-      videoId: this.data.videoId,
-      videoPath: this.data.videoPath,
-      videoTitle: this.data.videoTitle
-    };
+      try {
+        await this.exportSection(section);
+        this.successCount++;
+      } catch (error) {
+        console.error('Failed to export section:', error);
+        this.failedCount++;
+      }
+    }
 
-    this.dialogRef.close({ export: true, data: exportData });
+    this.isExporting = false;
+    this.exportComplete = true;
+  }
+
+  private async exportSection(section: ExportSection): Promise<void> {
+    const url = await this.backendUrlService.getApiUrl('/library/extract-clip');
+
+    await firstValueFrom(
+      this.http.post(url, {
+        videoPath: this.data.videoPath,
+        startTime: section.startSeconds,
+        endTime: section.endSeconds,
+        category: section.category,
+        title: section.description,
+        customDirectory: this.outputDirectory || undefined,
+        reEncode: this.reEncode,
+      })
+    );
+  }
+
+  close() {
+    this.dialogRef.close({ exported: this.exportComplete });
   }
 }

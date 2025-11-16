@@ -1,0 +1,179 @@
+// WebSocket Service - Clean API for emitting WebSocket events
+import { Injectable, Logger } from '@nestjs/common';
+import { Server } from 'socket.io';
+import { WebSocketEvent, WebSocketEventMap } from './websocket.types';
+import { SavedLink } from '../saved-links/saved-links.service';
+
+/**
+ * WebSocketService provides a clean, type-safe API for emitting WebSocket events.
+ * This service should be injected into any service that needs to broadcast events to clients.
+ *
+ * Benefits:
+ * - Type safety: Event names and payloads are validated at compile time
+ * - Single responsibility: Services don't need to know about Socket.IO internals
+ * - Testability: Easy to mock for unit tests
+ * - Centralized logging and error handling
+ */
+@Injectable()
+export class WebSocketService {
+  private server: Server | null = null;
+  private readonly logger = new Logger(WebSocketService.name);
+
+  /**
+   * Set the Socket.IO server instance
+   * Called by AppGateway during initialization
+   */
+  setServer(server: Server): void {
+    this.server = server;
+    this.logger.log('WebSocket server instance registered');
+  }
+
+  /**
+   * Get current connection count
+   */
+  getConnectionCount(): number {
+    return this.server?.sockets.sockets.size ?? 0;
+  }
+
+  /**
+   * Generic emit method with type safety
+   */
+  private emit<K extends keyof WebSocketEventMap>(
+    event: K,
+    payload: WebSocketEventMap[K],
+  ): void {
+    if (!this.server) {
+      this.logger.warn(`Cannot emit ${event}: WebSocket server not initialized`);
+      return;
+    }
+
+    try {
+      this.server.emit(event, payload);
+      this.logger.debug(`Emitted ${event} to ${this.getConnectionCount()} clients`);
+    } catch (error) {
+      this.logger.error(`Error emitting ${event}:`, error);
+    }
+  }
+
+  /**
+   * Emit to a specific room
+   */
+  private emitToRoom<K extends keyof WebSocketEventMap>(
+    room: string,
+    event: K,
+    payload: WebSocketEventMap[K],
+  ): void {
+    if (!this.server) {
+      this.logger.warn(`Cannot emit ${event}: WebSocket server not initialized`);
+      return;
+    }
+
+    try {
+      this.server.to(room).emit(event, payload);
+      this.logger.debug(`Emitted ${event} to room ${room}`);
+    } catch (error) {
+      this.logger.error(`Error emitting ${event} to room ${room}:`, error);
+    }
+  }
+
+  /**
+   * Analysis & Processing Events
+   */
+  emitAnalysisProgress(payload: WebSocketEventMap[WebSocketEvent.ANALYSIS_PROGRESS]): void {
+    const jobId = payload.jobId || payload.id;
+    const progress = payload.progress;
+    this.logger.log(`Broadcasting analysis progress: jobId=${jobId}, progress=${progress}`);
+    this.emit(WebSocketEvent.ANALYSIS_PROGRESS, payload);
+  }
+
+  emitProcessingProgress(payload: WebSocketEventMap[WebSocketEvent.PROCESSING_PROGRESS]): void {
+    this.emit(WebSocketEvent.PROCESSING_PROGRESS, payload);
+  }
+
+  emitProcessingFailed(payload: WebSocketEventMap[WebSocketEvent.PROCESSING_FAILED]): void {
+    this.logger.warn(`Processing failed: jobId=${payload.jobId}, error=${payload.error}`);
+    this.emit(WebSocketEvent.PROCESSING_FAILED, payload);
+  }
+
+  /**
+   * Saved Links Events
+   */
+  emitSavedLinkAdded(link: SavedLink): void {
+    this.logger.log(`Emitted saved-link-added event for: ${link.url}`);
+    this.emit(WebSocketEvent.SAVED_LINK_ADDED, { link });
+  }
+
+  emitSavedLinkUpdated(link: SavedLink): void {
+    this.logger.log(`Emitted saved-link-updated event for: ${link.id}`);
+    this.emit(WebSocketEvent.SAVED_LINK_UPDATED, { link });
+  }
+
+  emitSavedLinkDeleted(id: string): void {
+    this.logger.log(`Emitted saved-link-deleted event for: ${id}`);
+    this.emit(WebSocketEvent.SAVED_LINK_DELETED, { id });
+  }
+
+  emitSavedLinksCount(count: number): void {
+    this.logger.log(`Emitted saved-links-count event: ${count}`);
+    this.emit(WebSocketEvent.SAVED_LINKS_COUNT, { count });
+  }
+
+  /**
+   * Advanced Methods for Future Use
+   */
+
+  /**
+   * Broadcast to all clients except sender
+   */
+  broadcast<K extends keyof WebSocketEventMap>(
+    event: K,
+    payload: WebSocketEventMap[K],
+    excludeSocketId?: string,
+  ): void {
+    if (!this.server) {
+      this.logger.warn(`Cannot broadcast ${event}: WebSocket server not initialized`);
+      return;
+    }
+
+    try {
+      if (excludeSocketId) {
+        this.server.sockets.sockets.forEach((socket) => {
+          if (socket.id !== excludeSocketId) {
+            socket.emit(event, payload);
+          }
+        });
+      } else {
+        this.server.emit(event, payload);
+      }
+      this.logger.debug(`Broadcasted ${event}`);
+    } catch (error) {
+      this.logger.error(`Error broadcasting ${event}:`, error);
+    }
+  }
+
+  /**
+   * Emit to specific client by socket ID
+   */
+  emitToClient<K extends keyof WebSocketEventMap>(
+    socketId: string,
+    event: K,
+    payload: WebSocketEventMap[K],
+  ): void {
+    if (!this.server) {
+      this.logger.warn(`Cannot emit ${event}: WebSocket server not initialized`);
+      return;
+    }
+
+    try {
+      const socket = this.server.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit(event, payload);
+        this.logger.debug(`Emitted ${event} to client ${socketId}`);
+      } else {
+        this.logger.warn(`Socket ${socketId} not found`);
+      }
+    } catch (error) {
+      this.logger.error(`Error emitting ${event} to client ${socketId}:`, error);
+    }
+  }
+}

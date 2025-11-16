@@ -42,8 +42,6 @@ import { LibraryStateService, ClipLibrary as LibraryStateClipLibrary } from '../
 import { VideoFilterService, FilterCriteria } from '../../services/video-filter.service';
 import { VideoOperationsService } from '../../services/video-operations.service';
 import { ImportQueueService } from '../../services/import-queue.service';
-import { VideoProcessingQueueService } from '../../services/video-processing-queue.service';
-import { VideoProcessingJob, getProcessIcon } from '../../models/video-processing.model';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
@@ -225,9 +223,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   videoProcessingStates = new Map<string, { stage: 'transcribing' | 'analyzing', progress: number }>();
   progressVersion = 0; // Increment to force item-list to refresh progress
 
-  // Map from videoId to processing job (for displaying progress in library)
-  videoToJobMap = new Map<string, VideoProcessingJob>();
-
   // View mode (list or detail split view)
   viewMode: 'list' | 'detail' = 'list';
   selectedVideo: DatabaseVideo | null = null;
@@ -259,7 +254,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   groupedVideos: { week: string; videos: DatabaseVideo[] }[] = [];
   selectedWeeks = new Set<string>(); // Set of selected week identifiers
   highlightedWeek: string | null = null; // Currently highlighted week section
-  private hasAutoCollapsedOnce = false; // Track if auto-collapse has run to prevent resetting user's manual expand/collapse
 
   // Type-ahead search state
   private typeAheadBuffer = '';
@@ -287,14 +281,14 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     return null;
   };
 
-  // Children config for cascade - accordion disabled but progress bars enabled
+  // Children config for cascade - shows processing stages as ghost items
   listChildrenConfig: ChildrenConfig = {
-    enabled: false, // No accordion arrows
-    expandable: false, // Not expandable
-    defaultExpanded: false,
-    showMasterProgress: true, // YES show progress bars on items
-    generator: (item: any) => [], // No children
-    masterProgressCalculator: (item: any) => this.calculateVideoMasterProgress(item) ?? 0
+    enabled: true,
+    expandable: true,
+    defaultExpanded: true,
+    showMasterProgress: true,
+    generator: (item: any) => this.generateVideoProcessingStages(item),
+    masterProgressCalculator: (item: any) => this.calculateVideoMasterProgress(item)
   };
 
   listGroupConfig: GroupConfig<DatabaseVideo & ListItem> = {
@@ -375,8 +369,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     private libraryStateService: LibraryStateService,
     private videoFilterService: VideoFilterService,
     private videoOperationsService: VideoOperationsService,
-    private importQueueService: ImportQueueService,
-    private videoProcessingQueueService: VideoProcessingQueueService
+    private importQueueService: ImportQueueService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -410,9 +403,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     if (savedPreviewAutoPlay !== null) {
       this.previewAutoPlayEnabled = savedPreviewAutoPlay === 'true';
     }
-
-    // Clear cache to ensure fresh data with latest backend changes
-    this.databaseLibraryService.clearCache();
 
     // Load all data in parallel for maximum speed
     await Promise.all([
@@ -459,23 +449,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       jobsMap.forEach((job, id) => previousJobs.set(id, { ...job }));
     }));
 
-    // Subscribe to video processing queue jobs to show progress in library
-    this.subscriptions.push(this.videoProcessingQueueService.getJobs().subscribe(jobsMap => {
-      console.log('[LibraryComponent] Processing queue jobs updated:', jobsMap.size);
-
-      // Update video-to-job mapping
-      this.videoToJobMap.clear();
-      jobsMap.forEach((job) => {
-        if (job.videoId) {
-          this.videoToJobMap.set(job.videoId, job);
-          console.log(`[LibraryComponent] Mapped video ${job.videoId} to job ${job.id} (progress: ${job.overallProgress}%)`);
-        }
-      });
-
-      // Trigger change detection to update progress bars
-      this.cdr.detectChanges();
-    }));
-
     // Subscribe to video renamed events from WebSocket
     this.subscriptions.push(this.socketService.onVideoRenamed().subscribe(event => {
       console.log('[LibraryComponent] Video renamed event received:', event);
@@ -508,56 +481,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
         // Trigger change detection
         this.cdr.detectChanges();
-      }
-    }));
 
-    // Subscribe to suggestion accepted events from WebSocket
-    this.subscriptions.push(this.socketService.onSuggestionAccepted().subscribe(event => {
-      console.log('[LibraryComponent] Suggestion accepted event received:', event);
-
-      // Find the video and clear its suggestion
-      const video = this.videos.find(v => v.id === event.videoId);
-      if (video) {
-        video.suggested_title = null;
-        video.filename = event.newFilename;
-
-        // Also update in filteredVideos
-        const filteredVideo = this.filteredVideos.find(v => v.id === event.videoId);
-        if (filteredVideo) {
-          filteredVideo.suggested_title = null;
-          filteredVideo.filename = event.newFilename;
-        }
-
-        // Trigger reactive update
-        this.updateVideosAsListItems();
-        this.cdr.detectChanges();
-
-        // Also update DOM to clean up styled suggestion text
-        this.updateListItemSecondaryText(video);
-      }
-    }));
-
-    // Subscribe to suggestion rejected events from WebSocket
-    this.subscriptions.push(this.socketService.onSuggestionRejected().subscribe(event => {
-      console.log('[LibraryComponent] Suggestion rejected event received:', event);
-
-      // Find the video and clear its suggestion
-      const video = this.videos.find(v => v.id === event.videoId);
-      if (video) {
-        video.suggested_title = null;
-
-        // Also update in filteredVideos
-        const filteredVideo = this.filteredVideos.find(v => v.id === event.videoId);
-        if (filteredVideo) {
-          filteredVideo.suggested_title = null;
-        }
-
-        // Trigger reactive update
-        this.updateVideosAsListItems();
-        this.cdr.detectChanges();
-
-        // Also update DOM to clean up styled suggestion text
-        this.updateListItemSecondaryText(video);
+        console.log('[LibraryComponent] Video updated in UI:', event.videoId, event.newFilename);
       }
     }));
 
@@ -628,51 +553,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
               this.filteredVideos[filteredIndex] = { ...this.filteredVideos[filteredIndex], has_transcript: updatedVideo.has_transcript };
             }
 
-            // Trigger reactive update to refresh status dots
-            this.updateVideosAsListItems();
-            this.cdr.detectChanges();
-
             console.log('[LibraryComponent] Video transcript flag updated:', video.id);
           }
         });
-      }
-    }));
-
-    // Subscribe to analysis progress events to update video status when processing completes
-    this.subscriptions.push(this.socketService.onAnalysisProgress().subscribe(event => {
-      // Only process completion events
-      if (event.status === 'completed' || event.progress === 100) {
-        console.log('[LibraryComponent] Analysis completed event received:', event);
-
-        // Find video by videoId if available in the event
-        const videoId = event.videoId;
-        if (videoId) {
-          const video = this.videos.find(v => v.id === videoId);
-          if (video) {
-            // Reload the specific video from database to get updated status/dot color
-            this.databaseLibraryService.getVideoById(video.id).then(updatedVideo => {
-              if (updatedVideo) {
-                // Update in main videos array
-                const videoIndex = this.videos.findIndex(v => v.id === video.id);
-                if (videoIndex !== -1) {
-                  this.videos[videoIndex] = updatedVideo;
-                }
-
-                // Update in filtered videos array
-                const filteredIndex = this.filteredVideos.findIndex(v => v.id === video.id);
-                if (filteredIndex !== -1) {
-                  this.filteredVideos[filteredIndex] = updatedVideo;
-                }
-
-                // Trigger reactive update to refresh status dots
-                this.updateVideosAsListItems();
-                this.cdr.detectChanges();
-
-                console.log('[LibraryComponent] Video status updated after analysis completion:', video.id);
-              }
-            });
-          }
-        }
       }
     }));
 
@@ -708,10 +591,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
             if (filteredIndex !== -1) {
               this.filteredVideos[filteredIndex] = { ...this.filteredVideos[filteredIndex], has_analysis: updatedVideo.has_analysis };
             }
-
-            // Trigger reactive update to refresh status dots
-            this.updateVideosAsListItems();
-            this.cdr.detectChanges();
 
             console.log('[LibraryComponent] Video analysis flag updated:', video.id);
           }
@@ -852,7 +731,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /**
    * Load all videos from database with progressive loading
-   * Prioritizes "New" videos (last 24 hours) for immediate display
    */
   async loadVideos() {
     try {
@@ -877,42 +755,21 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         // Reset cancel flag before starting new background load
         this.cancelBackgroundLoad = false;
 
-        // Load ALL videos initially (they're sorted by date DESC on backend)
-        // This ensures we get all "New" videos (last 24h) immediately
-        const initialResponse = await this.databaseLibraryService.getVideos(200, 0);
-
-        // Separate new videos (last 24 hours) from older videos
-        const now = new Date();
-        const newVideos: DatabaseVideo[] = [];
-        const olderVideos: DatabaseVideo[] = [];
-
-        initialResponse.videos.forEach(video => {
-          const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
-          const hoursSinceDownload = (now.getTime() - downloadDate.getTime()) / (1000 * 60 * 60);
-
-          if (hoursSinceDownload < 24) {
-            newVideos.push(video);
-          } else {
-            olderVideos.push(video);
-          }
-        });
-
-        // Show new videos first, then append a few older ones
-        this.videos = [...newVideos, ...olderVideos.slice(0, Math.max(0, 50 - newVideos.length))];
-
-        console.log(`[loadVideos] Loaded ${newVideos.length} new videos (24h) + ${this.videos.length - newVideos.length} older videos`);
+        const initialResponse = await this.databaseLibraryService.getVideos(20, 0);
+        this.videos = initialResponse.videos;
 
         // Update state service
         this.libraryStateService.setVideos(this.videos);
 
         this.applyFiltersAndSort();
         this.markItemsWithSuggestions(); // Add class to items with suggestions
+        console.log(`[loadVideos] Loaded initial ${this.videos.length} videos`);
 
         // Auto-collapse old sections after videos are loaded
         this.autoCollapseOldSections();
 
         // If there are more videos, continue loading in the background
-        if (initialResponse.count > 200) {
+        if (initialResponse.count > 20) {
           this.isLoading = false; // Show the initial results while loading more
           this.loadRemainingVideos(initialResponse.count);
         } else {
@@ -961,7 +818,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     try {
       // Load the rest in batches of 100
       const batchSize = 100;
-      let offset = 200; // Start after the initial 200
+      let offset = 20; // Start after the initial 20
 
       while (offset < totalCount) {
         // Check if we should cancel this background load
@@ -1466,6 +1323,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Select a video for playback
    */
   selectVideo(video: DatabaseVideo) {
+    console.log('[selectVideo] Selecting video:', video.id, video.filename);
+
     // Stop previous video if playing
     if (this.videoElement && !this.videoElement.paused) {
       this.videoElement.pause();
@@ -1819,11 +1678,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
           video.filename = result.newFilename;
         }
 
-        // Trigger reactive update of the cascade list
-        this.updateVideosAsListItems();
-        this.cdr.detectChanges();
-
-        // Also update DOM directly to ensure styled suggestion text is removed immediately
+        // Update the DOM element directly
         this.updateListItemSecondaryText(video);
 
         this.notificationService.toastOnly('success', 'Renamed', 'File has been renamed successfully');
@@ -1848,11 +1703,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         // Update the video object in place
         video.suggested_title = null;
 
-        // Trigger reactive update of the cascade list
-        this.updateVideosAsListItems();
-        this.cdr.detectChanges();
-
-        // Also update DOM directly to ensure styled suggestion text is removed immediately
+        // Update the DOM element directly
         this.updateListItemSecondaryText(video);
 
         this.notificationService.toastOnly('success', 'Suggestion Rejected', 'The suggestion has been removed');
@@ -2037,33 +1888,26 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     data.event.preventDefault();
     data.event.stopPropagation();
 
-    // If this is a ghost (reference to parent/child in different group),
-    // find the real video object
-    const isGhost = (data.item as any)['isGhostParent'] || (data.item as any)['isGhostChild'];
-    const realVideo = isGhost
-      ? this.filteredVideos.find(v => v.id === data.item.id) || data.item
-      : data.item;
-
     // Finder-like behavior: If right-clicking on an unselected item, clear selection and select only that item
-    if (!this.selectedVideos.has(realVideo.id)) {
+    if (!this.selectedVideos.has(data.item.id)) {
       // Clear all selections
       this.selectedVideos.clear();
       // Select only the right-clicked item
-      this.selectedVideos.add(realVideo.id);
+      this.selectedVideos.add(data.item.id);
       // Update cached count
       this.updateSelectedCount();
-      // Highlight the real video (not the ghost)
-      this.highlightedVideo = realVideo;
+      // Highlight the right-clicked item
+      this.highlightedVideo = data.item;
       this.updateAllSelectedState();
     }
     // If right-clicking on a selected item, keep the current selection (allows multi-item operations)
 
-    // Set context menu position and video (use real video, not ghost)
+    // Set context menu position and video
     this.contextMenuPosition = {
       x: data.event.clientX,
       y: data.event.clientY
     };
-    this.contextMenuVideo = realVideo;
+    this.contextMenuVideo = data.item;
 
     // Clear any pending timeout to avoid race conditions
     if (this.contextMenuTimeout) {
@@ -2206,7 +2050,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         if (result && result.success && result.jobsToAdd) {
           setTimeout(() => {
             for (const jobData of result.jobsToAdd) {
-              // REMOVED: this.analysisQueueService.addPendingJob(jobData); // TODO: Migrate to VideoProcessingQueueService
+              this.analysisQueueService.addPendingJob(jobData);
             }
             console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
           }, 0);
@@ -2298,7 +2142,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    */
   private async analyzeVideos(videos: DatabaseVideo[]) {
     // Delegate to VideoOperationsService
-    await this.videoOperationsService.analyzeVideos(videos);
+    await this.videoOperationsService.analyzeVideos(videos, this.analysisQueueService);
 
     // Clear selection after adding to queue
     this.selectedVideos.clear();
@@ -2330,7 +2174,12 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     for (const video of videos) {
       try {
         // Add to analysis queue with process-only mode
-        // REMOVED: addToPendingQueue call - TODO: Migrate to VideoProcessingQueueService
+        this.analysisQueueService.addToPendingQueue({
+          videoId: video.id,
+          videoPath: video.current_path,
+          filename: video.filename,
+          mode: 'process-only'
+        });
       } catch (error: any) {
         console.error(`Failed to add video ${video.filename} to processing queue:`, error);
         this.notificationService.toastOnly('error', 'Failed to Process', `Could not add ${video.filename} to queue`);
@@ -2350,7 +2199,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Open analyze dialog for a single video
    */
   async openAnalyzeDialog(video: DatabaseVideo) {
-    await this.videoOperationsService.analyzeVideo(video);
+    await this.videoOperationsService.analyzeVideo(video, this.analysisQueueService);
   }
 
   /**
@@ -2380,7 +2229,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Download from URL - open dialog for importing URL
    */
   async downloadFromUrl() {
-    await this.videoOperationsService.downloadFromUrl();
+    await this.videoOperationsService.downloadFromUrl(this.analysisQueueService);
   }
 
   async analyzeSelectedOld() {
@@ -2556,11 +2405,13 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         // Track the currently processing video
         if (newProgress.currentVideoFilename && newProgress.status === 'running') {
           const currentVideo = this.videos.find(v => v.filename === newProgress.currentVideoFilename);
+          console.log('[LibraryComponent] Current video processing:', newProgress.currentVideoFilename, 'Found:', !!currentVideo);
           if (currentVideo) {
             // Determine stage based on video state
             const stage: 'transcribing' | 'analyzing' = currentVideo.has_transcript ? 'analyzing' : 'transcribing';
             // Show animated progress - since we don't have per-video progress, show an indeterminate state
             const progress = 65; // Show at 65% to indicate active processing
+            console.log('[LibraryComponent] Setting progress state for video:', currentVideo.id, 'stage:', stage, 'progress:', progress);
             this.videoProcessingStates.set(currentVideo.id, { stage, progress });
 
             // Create a new Map reference to trigger change detection
@@ -2619,8 +2470,10 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       // If there's a batch running, initialize processing state for current video
       if (progress.status === 'running' && progress.currentVideoFilename) {
         const currentVideo = this.videos.find(v => v.filename === progress.currentVideoFilename);
+        console.log('[LibraryComponent] Initial batch progress check - Current video:', progress.currentVideoFilename, 'Found:', !!currentVideo);
         if (currentVideo) {
           const stage: 'transcribing' | 'analyzing' = currentVideo.has_transcript ? 'analyzing' : 'transcribing';
+          console.log('[LibraryComponent] Setting initial progress state for video:', currentVideo.id, 'stage:', stage);
           this.videoProcessingStates.set(currentVideo.id, { stage, progress: 65 });
           // Create a new Map reference to trigger change detection
           this.videoProcessingStates = new Map(this.videoProcessingStates);
@@ -3313,7 +3166,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         if (result && result.success && result.jobsToAdd) {
           setTimeout(() => {
             for (const jobData of result.jobsToAdd) {
-              // REMOVED: this.analysisQueueService.addPendingJob(jobData); // TODO: Migrate to VideoProcessingQueueService
+              this.analysisQueueService.addPendingJob(jobData);
             }
             console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
           }, 0);
@@ -3466,7 +3319,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
           if (result.jobsToAdd) {
             setTimeout(() => {
               for (const jobData of result.jobsToAdd) {
-                // REMOVED: this.analysisQueueService.addPendingJob(jobData); // TODO: Migrate to VideoProcessingQueueService
+                this.analysisQueueService.addPendingJob(jobData);
               }
               console.log(`Added ${result.jobsToAdd.length} job(s) to analysis queue`);
             }, 0);
@@ -4374,51 +4227,17 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /**
    * Generate ghost items (children) for a video based on its processing stages
-   * Uses the new VideoProcessingQueueService for accurate real-time progress
+   * Similar to download-queue but for library videos
    */
   private generateVideoProcessingStages(video: DatabaseVideo): CascadeChild[] {
-    // First check new processing queue (hierarchical jobs)
-    const job = this.videoToJobMap.get(video.id);
-
-    // Only show processing stages for jobs that are still in progress
-    // Completed/failed jobs should not show accordion arrows
-    if (job && job.childProcesses.length > 0 && job.overallStatus !== 'completed' && job.overallStatus !== 'failed') {
-      // Map child processes to CascadeChild format
-      return job.childProcesses.map(child => {
-        // Map ProcessStatus to CascadeChildStatus
-        let status: 'pending' | 'active' | 'completed' | 'failed' = 'pending';
-        if (child.status === 'processing') {
-          status = 'active';
-        } else if (child.status === 'completed') {
-          status = 'completed';
-        } else if (child.status === 'failed') {
-          status = 'failed';
-        }
-
-        return {
-          id: child.id,
-          parentId: job.id,
-          label: child.displayName,
-          icon: getProcessIcon(child.type),
-          status: status,
-          progress: {
-            value: child.progress,
-            indeterminate: status === 'active' && child.progress < 5
-          },
-          error: child.error
-        };
-      });
-    }
-
-    // Fallback to old processing states (for backward compatibility)
     const state = this.videoProcessingStates.get(video.id);
     if (!state) return []; // No processing, no children
 
     const children: CascadeChild[] = [];
 
-    // Get the job from the old jobs map to determine what stages to show
+    // Get the job from the jobs map to determine what stages to show
     const jobs = Array.from(this.downloadProgressService['jobs'].value.values());
-    const oldJob = jobs.find(j => j.videoId === video.id);
+    const job = jobs.find(j => j.videoId === video.id);
 
     // Determine stages based on job info
     const stages: Array<{
@@ -4438,8 +4257,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     stages.push({ id: 'analyze', label: 'Analyze', icon: 'psychology', stageName: 'analyzing' });
 
     // Map current stage to determine status of each child
-    const currentStage = oldJob?.stage || state.stage;
-    const progress = oldJob?.progress || state.progress;
+    const currentStage = job?.stage || state.stage;
+    const progress = job?.progress || state.progress;
 
     stages.forEach((stage, index) => {
       let status: 'pending' | 'active' | 'completed' | 'failed' | 'skipped' = 'pending';
@@ -4482,23 +4301,12 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /**
    * Calculate master progress for a video from all its stages
-   * Returns null when complete to hide progress bar
+   * Same logic as download-queue: average of all stage progress values
    */
-  private calculateVideoMasterProgress(video: DatabaseVideo): number | null {
-    // First check new processing queue (already has overall progress calculated)
-    const job = this.videoToJobMap.get(video.id);
-    if (job) {
-      // Hide progress bar when job is complete or failed
-      if (job.overallStatus === 'completed' || job.overallStatus === 'failed') {
-        return null;
-      }
-      return job.overallProgress || 0;
-    }
-
-    // Fallback to calculating from children for old jobs
+  private calculateVideoMasterProgress(video: DatabaseVideo): number {
     const children = this.generateVideoProcessingStages(video);
 
-    if (children.length === 0) return null;  // No progress to show
+    if (children.length === 0) return 0;
 
     const totalProgress = children.reduce((sum, child) => {
       return sum + (child.progress?.value || 0);
@@ -4511,12 +4319,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Auto-collapse sections older than 4 weeks on startup
    */
   private autoCollapseOldSections() {
-    // Only run auto-collapse once on initial load to avoid overwriting user's manual expand/collapse
-    if (this.hasAutoCollapsedOnce) {
-      console.log('[LibraryComponent] Auto-collapse already ran, skipping to preserve user state');
-      return;
-    }
-
     // Use setTimeout to ensure cascade-list ViewChild is ready
     setTimeout(() => {
       // console.log('[LibraryComponent] autoCollapseOldSections called');
@@ -4565,9 +4367,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       } else {
         console.error('[LibraryComponent] CASCADE-LIST NOT AVAILABLE - will be applied via [initialCollapsedGroups] binding');
       }
-
-      // Mark that auto-collapse has run to prevent it from running again
-      this.hasAutoCollapsedOnce = true;
 
       console.log(`[LibraryComponent] Auto-collapsed ${this.collapsedWeeks.size} sections older than 4 weeks`);
     }, 100); // Small delay to ensure ViewChild is ready

@@ -175,20 +175,11 @@ export class PythonBridgeService {
             const message: PythonMessage = JSON.parse(line);
 
             if (message.type === 'progress') {
-              // Only log important progress milestones (skip routine chunk updates)
-              const isImportantMilestone =
-                message.message.includes('Starting') ||
-                message.message.includes('complete') ||
-                message.message.includes('Loading') ||
-                message.progress === 0 ||
-                message.progress >= 90 ||
-                message.progress % 25 === 0; // Log every 25%
-
-              if (isImportantMilestone) {
-                this.logger.log(
-                  `Python: ${message.phase} - ${message.progress}% - ${message.message}`,
-                );
-              }
+              // Log progress updates (indeterminate progress shown as "pending")
+              const progressStr = message.progress === -1 ? 'pending' : `${message.progress}%`;
+              this.logger.log(
+                `Python: ${message.phase} - ${progressStr} - ${message.message}`,
+              );
 
               if (onProgress) {
                 onProgress(message);

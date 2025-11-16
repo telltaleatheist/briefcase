@@ -3,14 +3,13 @@ import { Module } from '@nestjs/common';
 import { SavedLinksService } from './saved-links.service';
 import { SavedLinksController } from './saved-links.controller';
 import { WebController } from './web.controller';
-import { SavedLinksGateway } from './saved-links.gateway';
 import { DatabaseModule } from '../database/database.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { MediaModule } from '../media/media.module';
 
 @Module({
   imports: [DatabaseModule, DownloaderModule, MediaModule],
-  providers: [SavedLinksService, SavedLinksGateway],
+  providers: [SavedLinksService],
   controllers: [SavedLinksController, WebController],
   exports: [SavedLinksService],
 })

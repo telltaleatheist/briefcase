@@ -36,10 +36,12 @@ async function bootstrap() {
     const expressApp = express();
     
     const app = await NestFactory.create<NestExpressApplication>(
-      AppModule, 
+      AppModule,
       new ExpressAdapter(expressApp),
       {
-        logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+        // Reduce log verbosity - only show errors, warnings, and important logs
+        // This removes verbose RouterExplorer route mapping logs
+        logger: ['error', 'warn', 'log'],
         abortOnError: false
       }
     );
