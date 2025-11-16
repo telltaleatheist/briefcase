@@ -334,9 +334,18 @@ export class AnalysisService implements OnModuleInit {
         // Check mode to determine next phase
         if (mode === 'download-and-process') {
           // For download-and-process mode: skip transcribe/analyze, go straight to process
+          // DON'T release the slot - continue directly to processing
+          this.logger.log(`Download phase complete for job ${jobId}, continuing to process...`);
+
+          // Process immediately without re-queuing to maintain sequential order
+          await this.processProcessPhase(jobId, request);
+
+          // NOW release job slot after processing is done
           this.activeJobs--;
-          this.logger.log(`Download phase complete for job ${jobId}, moving to process...`);
-          this.requeueJobForNextPhase(jobId, request, 'process');
+          this.logger.log(`Processing complete for job ${jobId}. Active jobs: ${this.activeJobs}/${this.MAX_CONCURRENT_JOBS}`);
+
+          // Move to finalize
+          this.requeueJobForNextPhase(jobId, request, 'finalize');
         } else {
           // For full/transcribe-only modes: continue to transcribe
           this.logger.log(`Download phase complete for job ${jobId}, moving to transcribe...`);
@@ -750,8 +759,8 @@ export class AnalysisService implements OnModuleInit {
     const job = this.jobs.get(jobId);
     if (!job) throw new Error('Job not found');
 
-    // For process-only mode, input should be a file path
-    const videoPath = request.input;
+    // Use videoPath from request (set during download phase) or fall back to input for process-only mode
+    const videoPath = request.videoPath || request.input;
     if (!videoPath) {
       throw new Error('No video path provided for processing');
     }

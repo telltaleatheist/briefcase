@@ -184,7 +184,7 @@ export class SimpleProcessController implements OnModuleInit {
     try {
       this.logger.log(`Starting aspect ratio fix for ${videoId}`);
 
-      const outputFile = await this.ffmpegService.reencodeVideo(filePath, jobId);
+      const outputFile = await this.ffmpegService.reencodeVideo(filePath, jobId, { fixAspectRatio: true });
 
       if (!outputFile) {
         throw new Error('Processing failed - no output file');
