@@ -194,7 +194,16 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   }
 
   ngOnChanges(changes: SimpleChanges) {
-    // Sync external selection state FIRST (before updating groups)
+    // Clear performance caches FIRST when items change (before updateGroupedItems uses them)
+    if (changes['items']) {
+      console.log('[CascadeList] Items changed - clearing all caches');
+      this.statusCache.clear();
+      this.progressCache.clear();
+      this.iconCache.clear();
+      this.badgeCache.clear();
+    }
+
+    // Sync external selection state (before updating groups)
     if (changes['selectedItemIds']) {
       this.syncExternalSelection();
     }
@@ -204,16 +213,8 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
       this.syncExternalHighlighted();
     }
 
-    // Then update grouped items
+    // Then update grouped items (will use fresh, uncached values)
     this.updateGroupedItems();
-
-    // Clear performance caches when items change
-    if (changes['items']) {
-      this.statusCache.clear();
-      this.progressCache.clear();
-      this.iconCache.clear();
-      this.badgeCache.clear();
-    }
   }
 
   /**
@@ -1137,14 +1138,22 @@ export class CascadeListComponent<T extends ListItem = ListItem> implements OnIn
   getStatus(item: T): ItemStatus | null {
     if (!this.statusMapper) return null;
 
-    // Check cache first
-    if (this.statusCache.has(item.id)) {
-      return this.statusCache.get(item.id)!;
+    // REMOVED CACHING: Status computation is trivial (just checking flags)
+    // Caching was causing stale values when video data updated
+    // Always compute fresh from current item data
+    const status = this.statusMapper(item);
+
+    // DEBUG: Log for target video
+    const targetId = '1c4cc888-5d83-441f-b179-fcff863a00e3';
+    if (item.id === targetId) {
+      console.log('[CascadeList.getStatus] *** Computing fresh status for target video (no cache) ***', {
+        item_id: item.id,
+        item_has_transcript: (item as any).has_transcript,
+        item_has_analysis: (item as any).has_analysis,
+        computed_status: status
+      });
     }
 
-    // Calculate and cache
-    const status = this.statusMapper(item);
-    this.statusCache.set(item.id, status);
     return status;
   }
 

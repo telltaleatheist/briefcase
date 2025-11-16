@@ -44,6 +44,7 @@ import { VideoOperationsService } from '../../services/video-operations.service'
 import { ImportQueueService } from '../../services/import-queue.service';
 import { VideoProcessingQueueService } from '../../services/video-processing-queue.service';
 import { VideoProcessingJob, getProcessIcon } from '../../models/video-processing.model';
+import { VideoStateService, VideoState } from '../../services/video-state.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
@@ -113,6 +114,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   isInitialLoad = true; // Track if this is the first load
   private cancelBackgroundLoad = false; // Flag to cancel ongoing background loads
   private backgroundLoadRunning = false; // Track if background load is actually running
+  // Videos array - populated from VideoStateService (converted to DatabaseVideo format for compatibility)
   videos: DatabaseVideo[] = [];
   filteredVideos: DatabaseVideo[] = [];
   stats: DatabaseStats | null = null;
@@ -376,7 +378,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     private videoFilterService: VideoFilterService,
     private videoOperationsService: VideoOperationsService,
     private importQueueService: ImportQueueService,
-    private videoProcessingQueueService: VideoProcessingQueueService
+    private videoProcessingQueueService: VideoProcessingQueueService,
+    private videoStateService: VideoStateService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -411,14 +414,122 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       this.previewAutoPlayEnabled = savedPreviewAutoPlay === 'true';
     }
 
-    // Clear cache to ensure fresh data with latest backend changes
-    this.databaseLibraryService.clearCache();
+    // Initialize VideoStateService - SINGLE SOURCE OF TRUTH
+    console.log('[LibraryComponent] Initializing VideoStateService...');
+    await this.videoStateService.initialize();
 
-    // Load all data in parallel for maximum speed
+    // Subscribe to video state changes
+    this.subscriptions.push(
+      this.videoStateService.videos$.subscribe(videosMap => {
+        console.log(`[LibraryComponent] Received ${videosMap.size} videos from VideoStateService`);
+
+        // DEBUG: Check for target video in videosMap
+        const targetId = '1c4cc888-5d83-441f-b179-fcff863a00e3';
+        const targetVideoState = videosMap.get(targetId);
+        if (targetVideoState) {
+          console.log(`[LibraryComponent] *** TARGET VIDEO IN VIDEOSMAP ***`, {
+            id: targetVideoState.id,
+            filename: targetVideoState.filename,
+            hasTranscript: targetVideoState.hasTranscript,
+            hasAnalysis: targetVideoState.hasAnalysis
+          });
+        } else {
+          console.warn(`[LibraryComponent] *** TARGET VIDEO NOT IN VIDEOSMAP ***`);
+        }
+
+        // Convert VideoState to DatabaseVideo-compatible format
+        // This ensures existing template and logic continue to work
+        this.videos = Array.from(videosMap.values()).map(videoState => {
+          const mappedVideo = {
+            // Core fields
+            id: videoState.id,
+            filename: videoState.filename,
+            current_path: videoState.currentPath,
+
+            // Flags (as numbers for backward compatibility)
+            has_transcript: videoState.hasTranscript ? 1 : 0,
+            has_analysis: videoState.hasAnalysis ? 1 : 0,
+
+            // Metadata fields (mapped from VideoState.metadata)
+            suggested_title: videoState.metadata.suggestedTitle || null,
+            ai_description: videoState.metadata.aiDescription || null,
+            upload_date: videoState.metadata.uploadDate || null,
+            download_date: videoState.metadata.downloadDate || null,
+            added_at: videoState.metadata.addedAt || null,
+            duration: videoState.metadata.duration || null,
+            file_size: videoState.metadata.fileSize || null,
+            parent_id: videoState.metadata.parentId || null,
+            is_linked: videoState.metadata.isLinked || 0,
+
+            // Copy other fields that might exist
+            file_hash: videoState.metadata['file_hash'] || null,
+            file_extension: videoState.metadata['file_extension'] || null,
+            thumbnail_path: videoState.metadata['thumbnail_path'] || null
+          } as any;
+
+          // DEBUG: Log mapping if video has suggested_title
+          if (mappedVideo.suggested_title) {
+            console.log(`[LibraryComponent] Mapped video ${mappedVideo.filename}:`);
+            console.log(`  VideoState.metadata.suggestedTitle: "${videoState.metadata.suggestedTitle}"`);
+            console.log(`  mappedVideo.suggested_title: "${mappedVideo.suggested_title}"`);
+          }
+
+          // DEBUG: Log target video after mapping
+          if (videoState.id === targetId) {
+            console.log(`[LibraryComponent] *** MAPPED TARGET VIDEO TO DatabaseVideo ***`, {
+              id: mappedVideo.id,
+              filename: mappedVideo.filename,
+              has_transcript: mappedVideo.has_transcript,
+              has_analysis: mappedVideo.has_analysis
+            });
+          }
+
+          return mappedVideo;
+        });
+
+        // DEBUG: Check if target video is in final array
+        const targetInArray = this.videos.find(v => v.id === targetId);
+        if (targetInArray) {
+          console.log(`[LibraryComponent] *** TARGET VIDEO IN FINAL ARRAY ***`, {
+            id: targetInArray.id,
+            filename: targetInArray.filename,
+            has_transcript: targetInArray.has_transcript,
+            has_analysis: targetInArray.has_analysis
+          });
+        } else {
+          console.warn(`[LibraryComponent] *** TARGET VIDEO NOT IN FINAL ARRAY ***`);
+        }
+
+        // IMPORTANT: Create a NEW array reference (not just modify existing)
+        // This ensures Angular detects the change and cascade-list clears its caches
+        this.videos = [...this.videos];
+
+        // DEBUG: Check for duplicate video IDs in the array
+        const videoIds = this.videos.map(v => v.id);
+        const uniqueIds = new Set(videoIds);
+        if (videoIds.length !== uniqueIds.size) {
+          console.error(`[LibraryComponent] DUPLICATE VIDEO IDS DETECTED! Total: ${videoIds.length}, Unique: ${uniqueIds.size}`);
+
+          // Find which IDs are duplicated
+          const counts = new Map<string, number>();
+          videoIds.forEach(id => counts.set(id, (counts.get(id) || 0) + 1));
+          const duplicates = Array.from(counts.entries()).filter(([id, count]) => count > 1);
+          console.error(`[LibraryComponent] Duplicated IDs:`, duplicates);
+        }
+
+        // DEBUG: Log videos with suggested_title in the final array
+        const videosWithSuggestions = this.videos.filter(v => v.suggested_title);
+        console.log(`[LibraryComponent] Final array has ${videosWithSuggestions.length} videos with suggested_title:`,
+          videosWithSuggestions.map(v => ({ id: v.id, filename: v.filename })));
+
+        this.applyFiltersAndSort();
+      })
+    );
+
+    // Load other data in parallel
     await Promise.all([
       this.loadLibraries(),
       this.loadStats(),
-      this.loadVideos(),
       this.loadTags()
     ]);
 
@@ -1174,6 +1285,17 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   async applyFiltersAndSort() {
     let filtered: DatabaseVideo[];
 
+    // DEBUG: Check this.videos BEFORE filtering
+    const targetId = '1c4cc888-5d83-441f-b179-fcff863a00e3';
+    const targetInVideos = this.videos.find(v => v.id === targetId);
+    if (targetInVideos) {
+      console.log('[applyFiltersAndSort] *** TARGET VIDEO IN this.videos BEFORE FILTERING ***', {
+        id: targetInVideos.id,
+        has_transcript: targetInVideos.has_transcript,
+        has_analysis: targetInVideos.has_analysis
+      });
+    }
+
     // If there's a search query, use backend search API
     if (this.searchQuery && this.searchQuery.trim()) {
       try {
@@ -1222,6 +1344,18 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.filteredVideos = filtered;
 
+    // DEBUG: Check target video in filtered array
+    const targetInFiltered = filtered.find(v => v.id === targetId);
+    if (targetInFiltered) {
+      console.log('[applyFiltersAndSort] *** TARGET VIDEO IN FILTERED ARRAY ***', {
+        id: targetInFiltered.id,
+        has_transcript: targetInFiltered.has_transcript,
+        has_analysis: targetInFiltered.has_analysis
+      });
+    } else {
+      console.warn('[applyFiltersAndSort] *** TARGET VIDEO NOT IN FILTERED ARRAY ***');
+    }
+
     // Update state service
     this.libraryStateService.setFilteredVideos(filtered);
 
@@ -1230,6 +1364,18 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Update cached list items (avoid recomputation on every change detection)
     this.updateVideosAsListItems();
+
+    // DEBUG: Check target video in videosAsListItems
+    const targetInListItems = this.videosAsListItems.find((v: any) => v.id === targetId);
+    if (targetInListItems) {
+      console.log('[applyFiltersAndSort] *** TARGET VIDEO IN VIDEOSASLISTITEMS ***', {
+        id: targetInListItems.id,
+        has_transcript: targetInListItems.has_transcript,
+        has_analysis: targetInListItems.has_analysis
+      });
+    } else {
+      console.warn('[applyFiltersAndSort] *** TARGET VIDEO NOT IN VIDEOSASLISTITEMS ***');
+    }
 
     // Mark items with suggestions for orange styling
     this.markItemsWithSuggestions();
@@ -1549,13 +1695,18 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   formatVideoSecondaryText(video: DatabaseVideo): string {
     const parts: string[] = [];
 
-    // Name suggestion with preview (orange color will be applied via JavaScript)
+    // Name suggestion with preview
     if (video.suggested_title) {
+      // DEBUG: Log every video that has a suggested_title when rendering
+      console.log(`[formatVideoSecondaryText] Rendering suggested_title for ${video.id} / ${video.filename}:`, video.suggested_title);
+
       // Show first 60 characters of suggested title
       const preview = video.suggested_title.length > 60
         ? video.suggested_title.substring(0, 60) + '...'
         : video.suggested_title;
-      parts.push(`💡 Suggested: ${preview} - Click to View`);
+
+      // Use inline HTML for styling - this will be properly bound to each item
+      parts.push(`💡 Suggested: ${preview} - <span style="color: #ff8c00; cursor: pointer;">Click to View</span>`);
     }
 
     // Upload date (from filename) - when content was created/filmed by the person
@@ -1623,20 +1774,43 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Map video status to visual indicator
    */
   getVideoStatusMapper = (video: DatabaseVideo): ItemStatus | null => {
+    // DEBUG: Log target video when computing status
+    const targetId = '1c4cc888-5d83-441f-b179-fcff863a00e3';
+    if (video.id === targetId) {
+      console.log('[getVideoStatusMapper] *** COMPUTING STATUS FOR TARGET VIDEO ***', {
+        id: video.id,
+        has_transcript: video.has_transcript,
+        has_analysis: video.has_analysis,
+        duration_seconds: video.duration_seconds
+      });
+    }
+
     // Priority: missing both > has transcript only > has analysis (complete)
     if (!video.has_transcript && !video.has_analysis) {
+      if (video.id === targetId) {
+        console.log('[getVideoStatusMapper] *** TARGET VIDEO -> RED (no transcript, no analysis) ***');
+      }
       return { color: '#dc3545', tooltip: 'Missing transcript and analysis' }; // Red
     }
     if (!video.has_analysis) {
       // Has transcript but no analysis
+      if (video.id === targetId) {
+        console.log('[getVideoStatusMapper] *** TARGET VIDEO -> ORANGE (has transcript, no analysis) ***');
+      }
       return { color: '#ff6600', tooltip: 'Missing analysis' }; // Orange
     }
     // If has_analysis is true, transcript must exist (can't analyze without transcript)
     // Long videos (>10 min) get blue marker
     if (video.duration_seconds && video.duration_seconds > 600) {
+      if (video.id === targetId) {
+        console.log('[getVideoStatusMapper] *** TARGET VIDEO -> BLUE (complete, >10 min) ***');
+      }
       return { color: '#0dcaf0', tooltip: 'Complete (>10 min)' }; // Blue
     }
     // Short videos (<10 min) get green marker
+    if (video.id === targetId) {
+      console.log('[getVideoStatusMapper] *** TARGET VIDEO -> GREEN (complete, <10 min) ***');
+    }
     return { color: '#198754', tooltip: 'Complete' }; // Green
   };
 
@@ -1900,25 +2074,11 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Also add click handlers to secondary text to open video info
    */
   private markItemsWithSuggestions() {
-    // Setup mutation observer to watch for DOM changes
-    const observer = new MutationObserver(() => {
-      this.styleSuggestionTexts();
-    });
-
-    // Observe the cascade list for changes
-    const cascadeList = document.querySelector('cascade-list');
-    if (cascadeList) {
-      observer.observe(cascadeList, {
-        childList: true,
-        subtree: true
-      });
-    }
-
-    // Also try immediately and with delays
-    this.styleSuggestionTexts();
-    setTimeout(() => this.styleSuggestionTexts(), 100);
-    setTimeout(() => this.styleSuggestionTexts(), 500);
-    setTimeout(() => this.styleSuggestionTexts(), 1000);
+    // DISABLED: This function was causing metadata mixing bugs
+    // by manipulating DOM directly without proper tracking of which
+    // element belongs to which video in virtual scrolling context.
+    // The suggested titles will display without special styling for now.
+    console.log('[markItemsWithSuggestions] DISABLED to prevent metadata mixing bug');
   }
 
   private styleSuggestionTexts() {

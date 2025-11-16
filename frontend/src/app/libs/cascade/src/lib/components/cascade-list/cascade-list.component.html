@@ -72,8 +72,7 @@
               <div class="item-primary">{{ getPrimaryText(row.item) }}</div>
 
               <!-- Secondary Text -->
-              <div *ngIf="getSecondaryText(row.item)" class="item-secondary">
-                {{ getSecondaryText(row.item) }}
+              <div *ngIf="getSecondaryText(row.item)" class="item-secondary" [innerHTML]="getSecondaryText(row.item)">
               </div>
             </div>
 
