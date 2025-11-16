@@ -81,6 +81,14 @@
     </button>
     <div class="export-options" *ngIf="!exportComplete">
       <mat-checkbox
+        [(ngModel)]="overwriteOriginal"
+        [disabled]="isExporting || !canOverwriteOriginal()"
+        color="warn"
+        matTooltip="Replace the original video file with the highlighted section. This will DELETE all metadata (transcript, analysis, markers). Only available when selecting the current timeline selection."
+        matTooltipPosition="above">
+        Overwrite Original
+      </mat-checkbox>
+      <mat-checkbox
         [(ngModel)]="reEncode"
         [disabled]="isExporting"
         color="primary"

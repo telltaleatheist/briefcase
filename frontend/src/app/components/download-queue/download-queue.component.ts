@@ -17,6 +17,7 @@ import { VideoProcessingQueueService } from '../../services/video-processing-que
 import { VideoProcessingJob as QueuedVideoJob } from '../../models/video-processing.model';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { VideoStateService } from '../../services/video-state.service';
 import { Subscription, interval } from 'rxjs';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import { AnalysisNotesDialogComponent } from './analysis-notes-dialog.component';
@@ -132,6 +133,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     private videoProcessingQueueService: VideoProcessingQueueService,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService,
+    private videoStateService: VideoStateService,
     public cdr: ChangeDetectorRef,
     private ngZone: NgZone,
     private dialog: MatDialog
@@ -341,6 +343,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   async startQueue(): Promise<void> {
+    console.log('[DownloadQueue] *** startQueue() called ***');
     if (!this.hasPendingJobs()) {
       this.notificationService.toastOnly('info', 'No Jobs', 'No pending jobs to start');
       return;
@@ -351,6 +354,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
 
     // Enable auto-processing mode (sequential, one-at-a-time)
     this.autoProcessQueue = true;
+    console.log('[DownloadQueue] *** autoProcessQueue set to true ***');
 
     // Start OLD service jobs (if any)
     if (this.pendingJobs.length > 0) {
@@ -482,13 +486,38 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   clearQueue(): void {
+    console.log('[DownloadQueue] *** clearQueue() called - FORCE CLEARING EVERYTHING ***');
+
+    // Stop auto-processing FIRST
+    this.autoProcessQueue = false;
+
+    // Stop polling to prevent jobs from continuing
+    this.stopPolling();
+    this.isProcessing = false;
+
+    // Clear pending jobs from the analysis queue service
     this.analysisQueueService.clearPendingJobs();
+
+    // Clear ALL jobs (not just analysis) from download progress service
+    this.downloadProgressService.clearAllJobs();
+
+    // Force clear video processing queue jobs as well
+    // Get all jobs and remove them one by one
+    this.videoProcessingJobs.forEach(job => {
+      this.videoProcessingQueueService.removeJob(job.id);
+    });
+
     // Clear caches for all jobs
     this.jobStagesCache.clear();
     this.masterProgressCache.clear();
-    // Disable auto-processing when user manually clears the queue
-    this.autoProcessQueue = false;
-    // Notification removed - user is already in the queue panel
+
+    // Force UI update by triggering change detection
+    this.cdr.detectChanges();
+
+    console.log('[DownloadQueue] *** FORCE CLEAR COMPLETE - All jobs removed from all services ***');
+
+    // Show notification that queue was cleared
+    this.notificationService.toastOnly('success', 'Queue Force Cleared', 'All jobs have been forcefully removed');
   }
 
   clearAll(): void {
@@ -772,10 +801,17 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
                   this.downloadProgressService.addOrUpdateAnalysisJob(data.job);
 
                   const isNewFailure = (newStatus === 'failed' && previousStatus !== 'failed');
+                  const isNewCompletion = (newStatus === 'completed' && previousStatus !== 'completed');
 
                   if (isNewFailure) {
                     const errorMessage = data.job.error || 'Unknown error occurred during analysis';
                     this.notificationService.error('Analysis Failed', errorMessage);
+                  }
+
+                  // When a job completes, refresh the video's flags from database to update the dot
+                  if (isNewCompletion && data.job.videoId) {
+                    console.log('[DownloadQueue] Job completed, refreshing video flags for:', data.job.videoId);
+                    this.videoStateService.refreshVideo(data.job.videoId);
                   }
                 });
               }

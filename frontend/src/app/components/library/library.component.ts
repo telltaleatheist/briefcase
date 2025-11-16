@@ -341,17 +341,30 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     enableEscapeDeselect: true
   };
 
-  listContextMenuActions: ContextMenuAction[] = [
-    { id: 'open', label: 'Open in Video Editor', icon: 'play_arrow' },
-    { id: 'openLocation', label: 'Open File Location', icon: 'folder_open' },
-    { id: 'copyPath', label: 'Copy File Path', icon: 'content_copy' },
-    { id: 'divider1', label: '', divider: true },
-    { id: 'analyze', label: 'Run Analysis', icon: 'analytics' },
-    { id: 'transcribe', label: 'Run Transcription', icon: 'transcribe' },
-    { id: 'divider2', label: '', divider: true },
-    { id: 'relink', label: 'Relink Video', icon: 'link' },
-    { id: 'delete', label: 'Delete', icon: 'delete' }
-  ];
+  get listContextMenuActions(): ContextMenuAction[] {
+    const actions: ContextMenuAction[] = [
+      { id: 'open', label: 'Open in Video Editor', icon: 'play_arrow' },
+      { id: 'openLocation', label: 'Open File Location', icon: 'folder_open' },
+      { id: 'copyPath', label: 'Copy File Path', icon: 'content_copy' }
+    ];
+
+    // Add "Edit Suggested Title" if the highlighted video has a suggested title
+    if (this.highlightedVideo?.suggested_title) {
+      actions.push({ id: 'divider_suggestion', label: '', divider: true });
+      actions.push({ id: 'editSuggestedTitle', label: 'Edit Suggested Title', icon: 'auto_awesome' });
+    }
+
+    actions.push(
+      { id: 'divider1', label: '', divider: true },
+      { id: 'analyze', label: 'Run Analysis', icon: 'analytics' },
+      { id: 'transcribe', label: 'Run Transcription', icon: 'transcribe' },
+      { id: 'divider2', label: '', divider: true },
+      { id: 'relink', label: 'Relink Video', icon: 'link' },
+      { id: 'delete', label: 'Delete', icon: 'delete' }
+    );
+
+    return actions;
+  }
 
   // Subscription management for cleanup
   private subscriptions: any[] = [];
@@ -713,79 +726,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       console.log('[LibraryComponent] Videos reloaded after import. Total videos:', this.videos.length);
     }));
 
-    // Subscribe to transcription completed events to update video has_transcript flag
-    this.subscriptions.push(this.socketService.onTranscriptionCompleted().subscribe(event => {
-      console.log('[LibraryComponent] Transcription completed event received:', event);
-
-      // Find the video by path and update its transcript flag
-      const video = this.videos.find(v =>
-        event.outputFile && v.current_path &&
-        (event.outputFile.includes(v.id) || event.outputFile.includes(v.filename.replace(/\.[^/.]+$/, '')))
-      );
-
-      if (video) {
-        // Reload the specific video from database to get updated transcript flag
-        this.databaseLibraryService.getVideoById(video.id).then(updatedVideo => {
-          if (updatedVideo) {
-            // Update in main videos array
-            const videoIndex = this.videos.findIndex(v => v.id === video.id);
-            if (videoIndex !== -1) {
-              this.videos[videoIndex] = { ...this.videos[videoIndex], has_transcript: updatedVideo.has_transcript };
-            }
-
-            // Update in filtered videos array
-            const filteredIndex = this.filteredVideos.findIndex(v => v.id === video.id);
-            if (filteredIndex !== -1) {
-              this.filteredVideos[filteredIndex] = { ...this.filteredVideos[filteredIndex], has_transcript: updatedVideo.has_transcript };
-            }
-
-            // Trigger reactive update to refresh status dots
-            this.updateVideosAsListItems();
-            this.cdr.detectChanges();
-
-            console.log('[LibraryComponent] Video transcript flag updated:', video.id);
-          }
-        });
-      }
-    }));
-
-    // Subscribe to analysis progress events to update video status when processing completes
-    this.subscriptions.push(this.socketService.onAnalysisProgress().subscribe(event => {
-      // Only process completion events
-      if (event.status === 'completed' || event.progress === 100) {
-        console.log('[LibraryComponent] Analysis completed event received:', event);
-
-        // Find video by videoId if available in the event
-        const videoId = event.videoId;
-        if (videoId) {
-          const video = this.videos.find(v => v.id === videoId);
-          if (video) {
-            // Reload the specific video from database to get updated status/dot color
-            this.databaseLibraryService.getVideoById(video.id).then(updatedVideo => {
-              if (updatedVideo) {
-                // Update in main videos array
-                const videoIndex = this.videos.findIndex(v => v.id === video.id);
-                if (videoIndex !== -1) {
-                  this.videos[videoIndex] = updatedVideo;
-                }
-
-                // Update in filtered videos array
-                const filteredIndex = this.filteredVideos.findIndex(v => v.id === video.id);
-                if (filteredIndex !== -1) {
-                  this.filteredVideos[filteredIndex] = updatedVideo;
-                }
-
-                // Trigger reactive update to refresh status dots
-                this.updateVideosAsListItems();
-                this.cdr.detectChanges();
-
-                console.log('[LibraryComponent] Video status updated after analysis completion:', video.id);
-              }
-            });
-          }
-        }
-      }
-    }));
+    // Note: Transcription and analysis completion updates are handled by VideoStateService
+    // which reloads the video from database and emits via videos$ observable.
+    // The subscription at line 436 receives these updates and refreshes the UI automatically.
 
     // Subscribe to transcription failed events to handle errors
     this.subscriptions.push(this.socketService.onTranscriptionFailed().subscribe(event => {
@@ -793,48 +736,15 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       this.notificationService.toastOnly('error', 'Transcription Failed', event.error || 'An error occurred during transcription');
     }));
 
-    // Subscribe to processing completed events to update video has_analysis flag
-    this.subscriptions.push(this.socketService.listenTo<any>('processing-completed').subscribe(event => {
-      console.log('[LibraryComponent] Processing completed event received:', event);
-
-      // Find the video by path or jobId and update its analysis flag
-      const video = this.videos.find(v =>
-        (event.outputFile && v.current_path &&
-         (event.outputFile.includes(v.id) || event.outputFile.includes(v.filename.replace(/\.[^/.]+$/, '')))) ||
-        (event.jobId && this.videoProcessingStates.has(v.id))
-      );
-
-      if (video) {
-        // Reload the specific video from database to get updated analysis flag
-        this.databaseLibraryService.getVideoById(video.id).then(updatedVideo => {
-          if (updatedVideo) {
-            // Update in main videos array
-            const videoIndex = this.videos.findIndex(v => v.id === video.id);
-            if (videoIndex !== -1) {
-              this.videos[videoIndex] = { ...this.videos[videoIndex], has_analysis: updatedVideo.has_analysis };
-            }
-
-            // Update in filtered videos array
-            const filteredIndex = this.filteredVideos.findIndex(v => v.id === video.id);
-            if (filteredIndex !== -1) {
-              this.filteredVideos[filteredIndex] = { ...this.filteredVideos[filteredIndex], has_analysis: updatedVideo.has_analysis };
-            }
-
-            // Trigger reactive update to refresh status dots
-            this.updateVideosAsListItems();
-            this.cdr.detectChanges();
-
-            console.log('[LibraryComponent] Video analysis flag updated:', video.id);
-          }
-        });
-      }
-    }));
-
     // Subscribe to processing failed events to handle analysis errors
     this.subscriptions.push(this.socketService.onProcessingFailed().subscribe(event => {
       console.error('[LibraryComponent] Processing failed:', event);
       this.notificationService.toastOnly('error', 'Analysis Failed', event.error || 'An error occurred during video analysis');
     }));
+
+    // Note: VideoStateService updates are already handled by the subscription at line 436
+    // That subscription rebuilds the entire videos array and calls applyFiltersAndSort(),
+    // which properly updates all video metadata including flags, suggested_title, etc.
 
     // Check for query param to highlight a specific video
     this.subscriptions.push(this.route.queryParams.subscribe(params => {
@@ -1705,8 +1615,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         ? video.suggested_title.substring(0, 60) + '...'
         : video.suggested_title;
 
-      // Use inline HTML for styling - this will be properly bound to each item
-      parts.push(`💡 Suggested: ${preview} - <span style="color: #ff8c00; cursor: pointer;">Click to View</span>`);
+      // Show preview of suggested title with instruction to right-click
+      parts.push(`💡 Suggested: ${preview} <span style="color: #999; font-style: italic;">(right-click to edit)</span>`);
     }
 
     // Upload date (from filename) - when content was created/filmed by the person
@@ -1774,43 +1684,33 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Map video status to visual indicator
    */
   getVideoStatusMapper = (video: DatabaseVideo): ItemStatus | null => {
-    // DEBUG: Log target video when computing status
-    const targetId = '1c4cc888-5d83-441f-b179-fcff863a00e3';
-    if (video.id === targetId) {
-      console.log('[getVideoStatusMapper] *** COMPUTING STATUS FOR TARGET VIDEO ***', {
-        id: video.id,
-        has_transcript: video.has_transcript,
-        has_analysis: video.has_analysis,
-        duration_seconds: video.duration_seconds
-      });
+    // FIX: Always look up the video from this.videos to get correct flags
+    // The video object passed in might have lost properties during filtering/mapping
+    const sourceVideo = this.videos.find(v => v.id === video.id);
+    if (!sourceVideo) {
+      console.warn(`[getVideoStatusMapper] Video ${video.id} not found in this.videos`);
+      return { color: '#999999', tooltip: 'Unknown status' }; // Gray
     }
 
+    // Use flags from sourceVideo (which always has correct data)
+    const has_transcript = sourceVideo.has_transcript;
+    const has_analysis = sourceVideo.has_analysis;
+    const duration_seconds = sourceVideo.duration_seconds || video.duration_seconds;
+
     // Priority: missing both > has transcript only > has analysis (complete)
-    if (!video.has_transcript && !video.has_analysis) {
-      if (video.id === targetId) {
-        console.log('[getVideoStatusMapper] *** TARGET VIDEO -> RED (no transcript, no analysis) ***');
-      }
+    if (!has_transcript && !has_analysis) {
       return { color: '#dc3545', tooltip: 'Missing transcript and analysis' }; // Red
     }
-    if (!video.has_analysis) {
+    if (!has_analysis) {
       // Has transcript but no analysis
-      if (video.id === targetId) {
-        console.log('[getVideoStatusMapper] *** TARGET VIDEO -> ORANGE (has transcript, no analysis) ***');
-      }
       return { color: '#ff6600', tooltip: 'Missing analysis' }; // Orange
     }
     // If has_analysis is true, transcript must exist (can't analyze without transcript)
     // Long videos (>10 min) get blue marker
-    if (video.duration_seconds && video.duration_seconds > 600) {
-      if (video.id === targetId) {
-        console.log('[getVideoStatusMapper] *** TARGET VIDEO -> BLUE (complete, >10 min) ***');
-      }
+    if (duration_seconds && duration_seconds > 600) {
       return { color: '#0dcaf0', tooltip: 'Complete (>10 min)' }; // Blue
     }
     // Short videos (<10 min) get green marker
-    if (video.id === targetId) {
-      console.log('[getVideoStatusMapper] *** TARGET VIDEO -> GREEN (complete, <10 min) ***');
-    }
     return { color: '#198754', tooltip: 'Complete' }; // Green
   };
 
@@ -2270,6 +2170,11 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'copyPath':
         if (event.items.length > 0) {
           this.copyFilename(event.items[0]);
+        }
+        break;
+      case 'editSuggestedTitle':
+        if (event.items.length > 0 && event.items[0].suggested_title) {
+          this.showNameSuggestionDialog(event.items[0]);
         }
         break;
       case 'analyze':

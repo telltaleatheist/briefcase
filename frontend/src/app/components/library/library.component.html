@@ -273,12 +273,23 @@
         <mat-icon>folder_open</mat-icon>
         <span>Open File Location</span>
       </button>
-      <mat-divider *ngIf="getSelectedCount() === 1"></mat-divider>
 
-      <!-- Multi-selection actions -->
-      <button mat-menu-item (click)="analyzeSelected()" *ngIf="hasAnalyzableSelection()">
+      <!-- Edit Suggested Title option (only show for videos with suggested titles) -->
+      <button mat-menu-item (click)="showNameSuggestionDialog(contextMenuVideo)" *ngIf="getSelectedCount() === 1 && contextMenuVideo?.suggested_title">
+        <mat-icon>auto_awesome</mat-icon>
+        <span>Edit Suggested Title</span>
+      </button>
+
+      <mat-divider></mat-divider>
+
+      <!-- Analysis actions -->
+      <button mat-menu-item (click)="analyzeSelected()">
         <mat-icon>psychology</mat-icon>
-        <span>Process{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
+        <span>Run Analysis{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
+      </button>
+      <button mat-menu-item (click)="analyzeSelected()">
+        <mat-icon>transcribe</mat-icon>
+        <span>Run Transcription{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
       </button>
       <button mat-menu-item (click)="moveToLibrary()">
         <mat-icon>drive_file_move</mat-icon>

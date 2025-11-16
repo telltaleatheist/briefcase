@@ -3316,3 +3316,27 @@
     }
   }
 }
+
+// "See Suggested Title" button - make it large and always visible
+:host ::ng-deep .view-suggested-title-btn {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  padding: 8px 16px !important;
+  height: 40px !important;
+  line-height: 24px !important;
+  margin-left: 12px !important;
+  white-space: nowrap !important;
+
+  .mat-icon {
+    font-size: 20px;
+    height: 20px;
+    width: 20px;
+    margin-right: 6px;
+  }
+}
+
+// Make the button always visible (override cascade-list's hover-only behavior)
+:host ::ng-deep .item-actions {
+  opacity: 1 !important;
+  visibility: visible !important;
+}

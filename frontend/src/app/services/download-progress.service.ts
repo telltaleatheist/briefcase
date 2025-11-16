@@ -370,6 +370,28 @@ export class DownloadProgressService {
   }
 
   /**
+   * Clear ALL jobs (including active/processing ones)
+   */
+  clearAllJobs() {
+    console.log('[DownloadProgressService] Clearing ALL jobs');
+    this.jobs.next(new Map());
+  }
+
+  /**
+   * Clear only analysis jobs (jobs with 'analysis-' prefix)
+   */
+  clearAllAnalysisJobs() {
+    console.log('[DownloadProgressService] Clearing all analysis jobs');
+    const currentJobs = this.jobs.value;
+    const nonAnalysisJobs = new Map(
+      Array.from(currentJobs.entries()).filter(([jobId, _]) =>
+        !jobId.startsWith('analysis-')
+      )
+    );
+    this.jobs.next(nonAnalysisJobs);
+  }
+
+  /**
    * Add or update an analysis job (from video-analysis component)
    */
   addOrUpdateAnalysisJob(analysisJob: any) {

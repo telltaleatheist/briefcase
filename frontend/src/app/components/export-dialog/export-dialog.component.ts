@@ -55,6 +55,7 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
   // Export options
   outputDirectory: string | null = null;
   reEncode = false;
+  overwriteOriginal = false;
 
   // Export progress
   exportComplete = false;
@@ -208,6 +209,16 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
     return this.sections.filter(section => this.selectedSectionIds.has(section.id));
   }
 
+  // Check if overwrite option should be enabled
+  // Only allow overwriting when exactly one section is selected and it's the current selection
+  canOverwriteOriginal(): boolean {
+    if (!this.hasSelection) {
+      return false;
+    }
+    const selectedSections = this.getSelectedSections();
+    return selectedSections.length === 1 && selectedSections[0].id === '__selection__';
+  }
+
   // Status mapper to apply category colors
   getItemStatus = (item: ExportSection): ItemStatus | null => {
     const color = this.getCategoryColor(item.category);
@@ -305,6 +316,18 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
       return;
     }
 
+    // If overwrite is enabled, show confirmation dialog
+    if (this.overwriteOriginal && this.canOverwriteOriginal()) {
+      const confirmed = await this.confirmOverwrite();
+      if (!confirmed) {
+        return;
+      }
+
+      // Perform the overwrite operation
+      await this.performOverwrite(selectedSections[0]);
+      return;
+    }
+
     this.isExporting = true;
     this.totalClips = selectedSections.length;
     this.currentClip = 0;
@@ -327,6 +350,56 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
 
     this.isExporting = false;
     this.exportComplete = true;
+  }
+
+  private async confirmOverwrite(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const confirmed = confirm(
+        'WARNING: This will permanently overwrite the original video file and delete ALL metadata including:\n\n' +
+        '• Transcript\n' +
+        '• Analysis sections\n' +
+        '• Custom markers\n' +
+        '• All other metadata\n\n' +
+        'The video file will be replaced with only the highlighted section.\n\n' +
+        'This action CANNOT be undone. Are you sure you want to continue?'
+      );
+      resolve(confirmed);
+    });
+  }
+
+  private async performOverwrite(section: ExportSection): Promise<void> {
+    this.isExporting = true;
+    this.totalClips = 1;
+    this.currentClip = 1;
+    this.successCount = 0;
+    this.failedCount = 0;
+    this.currentClipName = 'Overwriting original file...';
+    this.exportProgress = 50;
+
+    try {
+      const url = await this.backendUrlService.getApiUrl('/library/overwrite-with-clip');
+
+      await firstValueFrom(
+        this.http.post(url, {
+          videoId: this.data.videoId,
+          videoPath: this.data.videoPath,
+          startTime: section.startSeconds,
+          endTime: section.endSeconds,
+          reEncode: this.reEncode,
+        })
+      );
+
+      this.successCount = 1;
+      this.exportProgress = 100;
+      this.notificationService.success('Success', 'Video file has been overwritten with the selected section');
+    } catch (error) {
+      console.error('Failed to overwrite video:', error);
+      this.failedCount = 1;
+      this.notificationService.error('Error', 'Failed to overwrite video file');
+    } finally {
+      this.isExporting = false;
+      this.exportComplete = true;
+    }
   }
 
   private async exportSection(section: ExportSection): Promise<void> {

@@ -87,9 +87,10 @@
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  z-index: 1000;
+  z-index: 10000;  // Increased to be above tooltips and other overlays
   animation: slideDown 0.2s ease-out;
   overflow: hidden;
+  pointer-events: auto;  // Ensure clicks work on this panel
 }
 
 @keyframes slideDown {

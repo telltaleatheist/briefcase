@@ -367,6 +367,15 @@ export class VideoStateService {
   }
 
   /**
+   * Public method to refresh a video's state from database
+   * Use this when external events (like polling) detect changes
+   */
+  async refreshVideo(videoId: string): Promise<void> {
+    console.log(`[VideoStateService] Refreshing video ${videoId} from database`);
+    await this.reloadVideoFromDatabase(videoId);
+  }
+
+  /**
    * Create VideoState from database video
    */
   private createVideoStateFromDatabase(dbVideo: any): VideoState {

@@ -1125,6 +1125,188 @@ export class LibraryController {
   }
 
   /**
+   * Overwrite a video file with a clip from itself
+   * This will replace the original video file and clear all metadata
+   */
+  @Post('overwrite-with-clip')
+  async overwriteVideoWithClip(
+    @Body() body: {
+      videoId: string;
+      videoPath: string;
+      startTime: number;
+      endTime: number;
+      reEncode?: boolean;
+    }
+  ) {
+    try {
+      // Validate time range
+      if (body.startTime < 0 || body.endTime <= body.startTime) {
+        throw new HttpException(
+          'Invalid time range',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Check if video file exists
+      if (!fs.existsSync(body.videoPath)) {
+        throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
+      }
+
+      // Get video record from database to preserve metadata
+      const video = this.databaseService.getVideoById(body.videoId);
+      if (!video) {
+        throw new HttpException('Video not found in database', HttpStatus.NOT_FOUND);
+      }
+
+      // Store original metadata to preserve after overwrite
+      const originalMetadata = {
+        uploadDate: video.upload_date,
+        downloadDate: video.download_date,
+        addedAt: video.added_at,
+        sourceUrl: video.source_url,
+        aiDescription: video.ai_description,
+        suggestedTitle: video.suggested_title,
+      };
+
+      this.logger.log(`Overwriting video ${body.videoId} with clip from ${body.startTime} to ${body.endTime}`);
+
+      // Create a temporary file for the clip
+      const tempDir = os.tmpdir();
+      const originalExt = path.extname(body.videoPath);
+      const tempFilename = `clippy_temp_${Date.now()}${originalExt}`;
+      const tempPath = path.join(tempDir, tempFilename);
+
+      // Extract the clip to temp file
+      const extractionResult = await this.clipExtractor.extractClip({
+        videoPath: body.videoPath,
+        startTime: body.startTime,
+        endTime: body.endTime,
+        outputPath: tempPath,
+        reEncode: body.reEncode || false,
+      });
+
+      if (!extractionResult.success) {
+        throw new HttpException(
+          extractionResult.error || 'Failed to extract clip',
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      // Delete the original file
+      try {
+        fs.unlinkSync(body.videoPath);
+        this.logger.log(`Deleted original file: ${body.videoPath}`);
+      } catch (error) {
+        // Clean up temp file
+        try {
+          fs.unlinkSync(tempPath);
+        } catch (cleanupError) {
+          this.logger.error(`Failed to clean up temp file: ${(cleanupError as Error).message}`);
+        }
+        throw new HttpException(
+          `Failed to delete original file: ${(error as Error).message}`,
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      // Copy temp file to replace original (can't use rename across different devices)
+      try {
+        fs.copyFileSync(tempPath, body.videoPath);
+        this.logger.log(`Copied temp file to original location: ${body.videoPath}`);
+
+        // Delete temp file after successful copy
+        try {
+          fs.unlinkSync(tempPath);
+          this.logger.log(`Deleted temp file: ${tempPath}`);
+        } catch (cleanupError) {
+          this.logger.warn(`Failed to delete temp file: ${(cleanupError as Error).message}`);
+          // Don't fail the request if temp cleanup fails
+        }
+      } catch (error) {
+        throw new HttpException(
+          `Failed to copy temp file to original location: ${(error as Error).message}`,
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      // Clear all metadata for this video
+      try {
+        // Delete transcript
+        this.databaseService.deleteTranscript(body.videoId);
+        this.logger.log(`Deleted transcript for video ${body.videoId}`);
+
+        // Delete analysis sections
+        this.databaseService.deleteAnalysisSections(body.videoId);
+        this.logger.log(`Deleted analysis sections for video ${body.videoId}`);
+
+        // Delete custom markers
+        this.databaseService.deleteCustomMarkers(body.videoId);
+        this.logger.log(`Deleted custom markers for video ${body.videoId}`);
+
+        // Delete analysis record
+        this.databaseService.deleteAnalysis(body.videoId);
+        this.logger.log(`Deleted analysis for video ${body.videoId}`);
+
+        // Update video record with new duration and file size, but preserve dates and other metadata
+        const newDuration = extractionResult.duration || (body.endTime - body.startTime);
+        const db = this.databaseService['db'];
+        if (db) {
+          db.prepare(`
+            UPDATE videos
+            SET duration = ?,
+                file_size = ?,
+                has_transcript = 0,
+                has_analysis = 0,
+                transcript_status = NULL,
+                analysis_status = NULL,
+                upload_date = ?,
+                download_date = ?,
+                added_at = ?,
+                source_url = ?,
+                ai_description = ?,
+                suggested_title = ?
+            WHERE id = ?
+          `).run(
+            newDuration,
+            extractionResult.fileSize,
+            originalMetadata.uploadDate,
+            originalMetadata.downloadDate,
+            originalMetadata.addedAt,
+            originalMetadata.sourceUrl,
+            originalMetadata.aiDescription,
+            originalMetadata.suggestedTitle,
+            body.videoId
+          );
+          this.databaseService['saveDatabase']();
+          this.logger.log(`Updated video ${body.videoId} with new duration: ${newDuration}, preserved original metadata`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to clear metadata: ${(error as Error).message}`);
+        // Don't fail the whole request if metadata clearing fails
+        // The file has already been overwritten successfully
+      }
+
+      return {
+        success: true,
+        message: 'Video file overwritten successfully',
+        newDuration: extractionResult.duration || (body.endTime - body.startTime),
+        fileSize: extractionResult.fileSize,
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to overwrite video: ${error?.message}`);
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw new HttpException(
+        error?.message || 'Failed to overwrite video',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Extract a clip from an analysis video
    */
   @Post('analyses/:id/extract-clip')
