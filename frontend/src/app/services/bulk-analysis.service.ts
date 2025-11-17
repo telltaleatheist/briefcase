@@ -18,7 +18,6 @@ export interface BulkAnalysisConfig {
   operationType: 'transcribe' | 'analyze';
   aiModel: string;
   whisperModel: string;
-  maxConcurrent: number;
   sortOrder: 'oldest' | 'newest' | 'shortest' | 'longest';
 }
 
@@ -206,7 +205,7 @@ export class BulkAnalysisService {
   }
 
   /**
-   * Start processing the queue
+   * Start processing the queue using the new queue API
    * @param config - Configuration for processing
    * @param selectedVideoIds - Optional array of video IDs to process. If provided, only these will be processed.
    */
@@ -215,15 +214,20 @@ export class BulkAnalysisService {
       throw new Error('Processing already in progress');
     }
 
-    // If specific videos are selected, filter the queue to only those
+    // Get videos to process
+    let videosToProcess: UnprocessedVideo[];
     if (selectedVideoIds && selectedVideoIds.length > 0) {
-      const currentQueue = this.queuedVideos.value;
-      const filteredQueue = currentQueue.filter(v => selectedVideoIds.includes(v.id));
-      this.queuedVideos.next(filteredQueue);
+      videosToProcess = this.queuedVideos.value.filter(v => selectedVideoIds.includes(v.id));
+    } else {
+      videosToProcess = this.queuedVideos.value;
     }
 
-    // Set session total to the number of videos we're about to process
-    this.sessionTotal = this.queuedVideos.value.length;
+    if (videosToProcess.length === 0) {
+      throw new Error('No videos to process');
+    }
+
+    // Set session total
+    this.sessionTotal = videosToProcess.length;
 
     // Reset session counters
     this.processedVideos.next([]);
@@ -233,140 +237,161 @@ export class BulkAnalysisService {
 
     this.config = config;
     this.isProcessing.next(true);
-    this.saveStateToStorage();
 
-    // Process videos one by one
-    await this.processNextVideo();
-  }
+    // Build tasks based on operation type
+    const tasks: Array<{ type: string; options?: any }> = [];
 
-  /**
-   * Process next video in queue
-   */
-  private async processNextVideo(): Promise<void> {
-    if (!this.isProcessing.value || !this.config) {
-      return;
+    // Always transcribe first
+    tasks.push({
+      type: 'transcribe',
+      options: { whisperModel: config.whisperModel }
+    });
+
+    // Add analysis if requested
+    if (config.operationType === 'analyze') {
+      tasks.push({
+        type: 'analyze',
+        options: { aiModel: config.aiModel }
+      });
     }
 
-    const queue = this.queuedVideos.value;
-
-    if (queue.length === 0) {
-      // Queue complete
-      this.stopProcessing();
-      return;
-    }
-
-    const video = queue[0];
-    this.currentVideoId.next(video.id);
-    this.saveStateToStorage();
-
-    const videoStartTime = Date.now();
+    // Create jobs array for bulk submission
+    const jobs = videosToProcess.map(video => ({
+      videoId: video.id,
+      videoPath: video.current_path,
+      displayName: video.filename,
+      tasks: tasks
+    }));
 
     try {
-      // Start analysis via backend
-      const endpoint = this.config.operationType === 'transcribe'
-        ? '/analysis/transcribe'
-        : '/analysis/analyze';
-
-      const body = this.config.operationType === 'transcribe'
-        ? { videoId: video.id, whisperModel: this.config.whisperModel }
-        : { videoId: video.id, aiModel: this.config.aiModel, forceReanalyze: false };
-
+      // Submit all jobs to the queue at once
       const response = await this.http.post<{ success: boolean; jobIds: string[] }>(
-        `${this.apiUrl}${endpoint}`,
-        body
+        `${this.apiUrl}/queue/add-bulk`,
+        {
+          queueType: 'analysis',
+          jobs: jobs
+        }
       ).toPromise();
 
-      if (!response?.success || !response.jobIds || response.jobIds.length === 0) {
-        throw new Error('Failed to start analysis job');
+      if (!response?.success || !response.jobIds) {
+        throw new Error('Failed to submit jobs to queue');
       }
 
-      const jobId = response.jobIds[0];
-
-      // Wait for job to complete
-      await this.waitForJobCompletion(jobId);
-
-      // Calculate processing time for this video
-      const videoEndTime = Date.now();
-      const processingTimeSeconds = (videoEndTime - videoStartTime) / 1000;
-      this.videoProcessingTimes.push(processingTimeSeconds);
-
-      // Mark as processed
-      const processed = this.processedVideos.value;
-      this.processedVideos.next([...processed, video.id]);
-
-      // Remove from queue
-      const newQueue = queue.slice(1);
-      this.queuedVideos.next(newQueue);
-      this.currentVideoId.next(null);
+      this.currentJobIds = response.jobIds;
       this.saveStateToStorage();
 
-      // Process next video
-      setTimeout(() => this.processNextVideo(), 1000);
+      // Start polling for job completion
+      this.startPollingJobs();
     } catch (error: any) {
-      // Mark as failed
-      const failed = this.failedVideos.value;
-      this.failedVideos.next([...failed, {
-        videoId: video.id,
-        filename: video.filename,
-        error: error.message || 'Unknown error'
-      }]);
-
-      // Remove from queue
-      const newQueue = queue.slice(1);
-      this.queuedVideos.next(newQueue);
-      this.currentVideoId.next(null);
-      this.saveStateToStorage();
-
-      // Continue with next video
-      setTimeout(() => this.processNextVideo(), 1000);
+      this.isProcessing.next(false);
+      throw new Error(`Failed to start processing: ${error.message}`);
     }
   }
 
   /**
-   * Wait for a job to complete by polling the backend
+   * Start polling for job status updates
    */
-  private waitForJobCompletion(jobId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const poll = interval(2000).subscribe(async () => {
-        try {
-          const response = await this.http.get<{ success: boolean; job: any }>(
-            `${this.apiUrl}/analysis/job/${jobId}`
-          ).toPromise();
-
-          if (!response?.job) {
-            poll.unsubscribe();
-            reject(new Error('Job not found'));
-            return;
-          }
-
-          const status = response.job.status;
-
-          if (status === 'completed') {
-            poll.unsubscribe();
-            resolve();
-          } else if (status === 'failed') {
-            poll.unsubscribe();
-            reject(new Error(response.job.error || 'Job failed'));
-          }
-        } catch (error) {
-          poll.unsubscribe();
-          reject(error);
-        }
-      });
+  private startPollingJobs(): void {
+    // Poll every 2 seconds
+    this.pollingSubscription = interval(2000).subscribe(async () => {
+      try {
+        await this.updateJobStatuses();
+      } catch (error) {
+        console.error('Error polling job statuses:', error);
+      }
     });
   }
 
   /**
-   * Pause processing
+   * Update job statuses from the queue API
+   */
+  private async updateJobStatuses(): Promise<void> {
+    if (!this.isProcessing.value || this.currentJobIds.length === 0) {
+      return;
+    }
+
+    try {
+      // Get queue status for analysis queue
+      const response = await this.http.get<{ success: boolean; status: any }>(
+        `${this.apiUrl}/queue/status?type=analysis`
+      ).toPromise();
+
+      if (!response?.success || !response.status) {
+        return;
+      }
+
+      const status = response.status;
+      const allJobs = [
+        ...status.pendingJobs,
+        ...status.processingJobs,
+        ...status.completedJobs,
+        ...status.failedJobs
+      ];
+
+      // Find our jobs
+      const ourJobs = allJobs.filter(job => this.currentJobIds.includes(job.id));
+
+      // Update progress based on job statuses
+      const completedJobs = ourJobs.filter(job => job.status === 'completed');
+      const failedJobs = ourJobs.filter(job => job.status === 'failed');
+      const processingJobs = ourJobs.filter(job => job.status === 'processing');
+
+      // Update processed videos
+      const processedVideoIds = completedJobs.map(job => job.videoId).filter(Boolean);
+      this.processedVideos.next(processedVideoIds);
+
+      // Update failed videos
+      const failedVideosList = failedJobs.map(job => {
+        const video = this.queuedVideos.value.find(v => v.id === job.videoId);
+        return {
+          videoId: job.videoId || '',
+          filename: video?.filename || job.displayName || 'Unknown',
+          error: job.error || 'Unknown error'
+        };
+      });
+      this.failedVideos.next(failedVideosList);
+
+      // Update current video
+      if (processingJobs.length > 0) {
+        this.currentVideoId.next(processingJobs[0].videoId || null);
+      } else {
+        this.currentVideoId.next(null);
+      }
+
+      // Remove completed and failed videos from queue
+      const processedOrFailedIds = [...processedVideoIds, ...failedVideosList.map(f => f.videoId)];
+      const remainingVideos = this.queuedVideos.value.filter(v => !processedOrFailedIds.includes(v.id));
+      this.queuedVideos.next(remainingVideos);
+
+      // Check if all jobs are complete
+      const allComplete = ourJobs.every(job => job.status === 'completed' || job.status === 'failed');
+      if (allComplete) {
+        this.stopProcessing();
+      }
+
+      this.saveStateToStorage();
+    } catch (error) {
+      console.error('Error updating job statuses:', error);
+    }
+  }
+
+  /**
+   * Pause processing (stops polling but doesn't cancel jobs)
    */
   pauseProcessing(): void {
     this.isProcessing.next(false);
     this.currentVideoId.next(null);
+
+    if (this.pollingSubscription) {
+      this.pollingSubscription.unsubscribe();
+      this.pollingSubscription = null;
+    }
+
     this.saveStateToStorage();
   }
 
   /**
-   * Resume processing
+   * Resume processing (restarts polling)
    */
   async resumeProcessing(): Promise<void> {
     if (!this.config) {
@@ -375,7 +400,9 @@ export class BulkAnalysisService {
 
     this.isProcessing.next(true);
     this.saveStateToStorage();
-    await this.processNextVideo();
+
+    // Restart polling
+    this.startPollingJobs();
   }
 
   /**
@@ -424,7 +451,8 @@ export class BulkAnalysisService {
       isProcessing: this.isProcessing.value,
       currentVideoId: this.currentVideoId.value,
       config: this.config,
-      sessionTotal: this.sessionTotal
+      sessionTotal: this.sessionTotal,
+      currentJobIds: this.currentJobIds
     };
 
     localStorage.setItem('bulk-analysis-state', JSON.stringify(state));
@@ -446,6 +474,7 @@ export class BulkAnalysisService {
       this.failedVideos.next(state.failed || []);
       this.config = state.config || null;
       this.sessionTotal = state.sessionTotal || 0;
+      this.currentJobIds = state.currentJobIds || [];
 
       // Don't auto-resume processing on load
       this.isProcessing.next(false);

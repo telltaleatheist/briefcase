@@ -6,8 +6,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
-import * as ffmpegPath from '@ffmpeg-installer/ffmpeg';
-import * as ffprobePath from '@ffprobe-installer/ffprobe';
 import { SharedConfigService } from '../config/shared-config.service';
 
 @Injectable()
@@ -21,12 +19,16 @@ export class FfmpegService {
     private readonly eventEmitter: EventEmitter2
   ) {
     try {
-      // Prioritize config service paths, then environment variables, then packaged binaries, then installer paths
+      // Prioritize environment variables FIRST (set by Electron), then config service paths
       const configFfmpegPath = this.configService.getFfmpegPath();
       const configFfprobePath = this.configService.getFfprobePath();
 
-      let ffmpegExecutablePath = configFfmpegPath || process.env.FFMPEG_PATH;
-      let ffprobeExecutablePath = configFfprobePath || process.env.FFPROBE_PATH;
+      console.log('[FfmpegService] Env FFmpeg:', process.env.FFMPEG_PATH, 'Config FFmpeg:', configFfmpegPath);
+      console.log('[FfmpegService] Env FFprobe:', process.env.FFPROBE_PATH, 'Config FFprobe:', configFfprobePath);
+
+      // Prioritize env vars over config (Electron sets correct paths via env vars)
+      let ffmpegExecutablePath = process.env.FFMPEG_PATH || configFfmpegPath;
+      let ffprobeExecutablePath = process.env.FFPROBE_PATH || configFfprobePath;
 
       // If not configured, try packaged binaries in production
       // In production: Check if RESOURCES_PATH env var is set OR resourcesPath property exists
@@ -107,21 +109,66 @@ export class FfmpegService {
         }
       }
 
-      // Fall back to installer paths if still not found
+      // Fall back to trying to find ffmpeg/ffprobe in backend's node_modules
       if (!ffmpegExecutablePath) {
-        ffmpegExecutablePath = ffmpegPath.path;
+        console.log('[FfmpegService] Looking for FFmpeg - process.cwd():', process.cwd(), '__dirname:', __dirname);
+
+        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
+                              (process.platform === 'darwin' ?
+                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
+                                'linux-x64');
+
+        // Try to find in node_modules relative to this file
+        const possiblePaths = [
+          path.join(process.cwd(), 'node_modules', '@ffmpeg-installer', platformFolder, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+          path.join(__dirname, '..', '..', 'node_modules', '@ffmpeg-installer', platformFolder, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+        ];
+
+        console.log('[FfmpegService] Checking FFmpeg paths:', possiblePaths);
+
+        for (const possiblePath of possiblePaths) {
+          const exists = fs.existsSync(possiblePath);
+          console.log('[FfmpegService] Checking if exists:', possiblePath, '=', exists);
+          if (exists) {
+            ffmpegExecutablePath = possiblePath;
+            console.log('[FfmpegService] Found FFmpeg at:', possiblePath);
+            break;
+          }
+        }
+
+        if (!ffmpegExecutablePath) {
+          console.error('[FfmpegService] FFmpeg not found in any of the checked paths');
+        }
+      }
+
+      console.log('[FfmpegService] Final ffmpegExecutablePath:', ffmpegExecutablePath);
+
+      if (!ffprobeExecutablePath) {
+        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
+                              (process.platform === 'darwin' ?
+                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
+                                'linux-x64');
+
+        const possiblePaths = [
+          path.join(process.cwd(), 'node_modules', '@ffprobe-installer', platformFolder, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
+          path.join(__dirname, '..', '..', 'node_modules', '@ffprobe-installer', platformFolder, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
+        ];
+
+        for (const possiblePath of possiblePaths) {
+          if (fs.existsSync(possiblePath)) {
+            ffprobeExecutablePath = possiblePath;
+            this.logger.log(`Found FFprobe at: ${possiblePath}`);
+            break;
+          }
+        }
+      }
+
+      if (!ffmpegExecutablePath) {
+        throw new Error('FFmpeg path not found. Please configure it in the application settings or ensure @ffmpeg-installer is installed.');
       }
 
       if (!ffprobeExecutablePath) {
-        ffprobeExecutablePath = ffprobePath.path;
-      }
-
-      if (!ffmpegExecutablePath) {
-        throw new Error('FFmpeg path not found. Please configure it in the application settings.');
-      }
-
-      if (!ffprobeExecutablePath) {
-        throw new Error('FFprobe path not found. Please configure it in the application settings.');
+        throw new Error('FFprobe path not found. Please configure it in the application settings or ensure @ffprobe-installer is installed.');
       }
 
       // Set paths for fluent-ffmpeg

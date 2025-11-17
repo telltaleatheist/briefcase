@@ -63,7 +63,7 @@ export class QueueController {
   /**
    * Add multiple jobs to a queue (bulk add)
    * POST /queue/add-bulk
-   * Body: { queueType, jobs: Array<{ url?, displayName?, tasks }> }
+   * Body: { queueType, jobs: Array<{ url?, videoId?, videoPath?, displayName?, tasks }> }
    */
   @Post('add-bulk')
   async addBulkJobs(
@@ -72,6 +72,8 @@ export class QueueController {
       queueType: 'batch' | 'analysis';
       jobs: Array<{
         url?: string;
+        videoId?: string;
+        videoPath?: string;
         displayName?: string;
         tasks: Task[];
       }>;
@@ -91,6 +93,8 @@ export class QueueController {
       const jobId = this.queueManager.addJob({
         queueType: body.queueType,
         url: job.url,
+        videoId: job.videoId,
+        videoPath: job.videoPath,
         displayName: job.displayName,
         tasks: job.tasks,
       });

@@ -253,6 +253,37 @@ export class BackendService {
       const runtimePaths = getRuntimePaths();
       log.info(`Binary paths: ffmpeg=${runtimePaths.ffmpeg}, ffprobe=${runtimePaths.ffprobe}, ytdlp=${runtimePaths.ytdlp}`);
 
+      // Determine FFmpeg/FFprobe paths - prioritize runtime paths, then env vars, then backend node_modules installers
+      let ffmpegPath = runtimePaths.ffmpeg || process.env.FFMPEG_PATH;
+      let ffprobePath = runtimePaths.ffprobe || process.env.FFPROBE_PATH;
+
+      // If not provided, look for them in backend's node_modules
+      if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
+                              (process.platform === 'darwin' ?
+                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
+                                'linux-x64');
+        const ffmpegInstaller = path.join(backendNodeModules, '@ffmpeg-installer', platformFolder,
+                                         process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+        if (fs.existsSync(ffmpegInstaller)) {
+          ffmpegPath = ffmpegInstaller;
+          log.info(`Using FFmpeg from backend node_modules: ${ffmpegPath}`);
+        }
+      }
+
+      if (!ffprobePath || !fs.existsSync(ffprobePath)) {
+        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
+                              (process.platform === 'darwin' ?
+                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
+                                'linux-x64');
+        const ffprobeInstaller = path.join(backendNodeModules, '@ffprobe-installer', platformFolder,
+                                          process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+        if (fs.existsSync(ffprobeInstaller)) {
+          ffprobePath = ffprobeInstaller;
+          log.info(`Using FFprobe from backend node_modules: ${ffprobePath}`);
+        }
+      }
+
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -265,8 +296,8 @@ export class BackendService {
         APP_ROOT: resourcesPath,
         VERBOSE: 'true',
         // Set binary paths for backend to use
-        FFMPEG_PATH: runtimePaths.ffmpeg || process.env.FFMPEG_PATH,
-        FFPROBE_PATH: runtimePaths.ffprobe || process.env.FFPROBE_PATH,
+        FFMPEG_PATH: ffmpegPath,
+        FFPROBE_PATH: ffprobePath,
         YT_DLP_PATH: runtimePaths.ytdlp || process.env.YT_DLP_PATH,
       };
       

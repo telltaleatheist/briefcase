@@ -63,7 +63,6 @@ export class BulkAnalysisComponent implements OnInit, OnDestroy {
   operationType: 'transcribe' | 'analyze' = 'analyze';
   aiModel: string = 'qwen2.5:7b';
   whisperModel: string = 'base';
-  maxConcurrent: number = 1;
   sortOrder: 'oldest' | 'newest' | 'shortest' | 'longest' = 'oldest';
 
   // Available models
@@ -453,7 +452,6 @@ export class BulkAnalysisComponent implements OnInit, OnDestroy {
       operationType: this.operationType,
       aiModel: this.aiModel,
       whisperModel: this.whisperModel,
-      maxConcurrent: this.maxConcurrent,
       sortOrder: this.sortOrder
     };
 
