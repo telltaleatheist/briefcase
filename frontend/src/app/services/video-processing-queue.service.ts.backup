@@ -46,6 +46,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     private backendUrlService: BackendUrlService,
     private http: HttpClient
   ) {
+    console.log('[VideoProcessingQueueService] Service initialized');
     this.loadFromCache();
     this.setupProgressListeners();
     // Fetch current queue state from backend to sync with server
@@ -53,6 +54,7 @@ export class VideoProcessingQueueService implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    console.log('[VideoProcessingQueueService] Cleaning up subscriptions and timers');
 
     // Clear all subscriptions
     this.subscriptions.forEach(sub => sub.unsubscribe());
@@ -84,6 +86,7 @@ export class VideoProcessingQueueService implements OnDestroy {
         });
 
         this.jobs.next(jobsMap);
+        console.log('[VideoProcessingQueueService] Loaded', jobsMap.size, 'jobs from cache');
       }
     } catch (error) {
       console.error('[VideoProcessingQueueService] Failed to load cache:', error);
@@ -98,6 +101,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       const jobsMap = this.jobs.getValue();
       const jobsArray = Array.from(jobsMap.values());
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(jobsArray));
+      console.log('[VideoProcessingQueueService] Saved', jobsArray.length, 'jobs to cache');
     } catch (error) {
       console.error('[VideoProcessingQueueService] Failed to save cache:', error);
     }
@@ -110,6 +114,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     try {
       localStorage.removeItem(this.STORAGE_KEY);
       this.jobs.next(new Map());
+      console.log('[VideoProcessingQueueService] Cache cleared');
     } catch (error) {
       console.error('[VideoProcessingQueueService] Failed to clear cache:', error);
     }
@@ -121,6 +126,7 @@ export class VideoProcessingQueueService implements OnDestroy {
    */
   private async syncWithBackend(): Promise<void> {
     try {
+      console.log('[VideoProcessingQueueService] Syncing with backend queue state...');
 
       // Fetch both batch and analysis queue jobs
       const batchUrl = `${this.backendUrlService.getBackendUrl()}/queue/jobs?type=batch`;
@@ -137,9 +143,11 @@ export class VideoProcessingQueueService implements OnDestroy {
       ];
 
       if (backendJobs.length === 0) {
+        console.log('[VideoProcessingQueueService] No active jobs on backend');
         return;
       }
 
+      console.log(`[VideoProcessingQueueService] Found ${backendJobs.length} active jobs on backend`);
 
       // Get current local jobs
       const currentJobs = this.jobs.getValue();
@@ -153,6 +161,7 @@ export class VideoProcessingQueueService implements OnDestroy {
         if (localJob &&
             (localJob.overallStatus === 'completed' || localJob.overallStatus === 'failed') &&
             !backendJobIds.has(localJob.backendJobId || '')) {
+          console.log(`[VideoProcessingQueueService] Removing completed job ${localJobId} that's no longer on backend`);
           currentJobs.delete(localJobId);
           removedCount++;
         }
@@ -161,8 +170,10 @@ export class VideoProcessingQueueService implements OnDestroy {
       if (removedCount > 0) {
         // Emit updated jobs
         this.emitJobs();
+        console.log(`[VideoProcessingQueueService] Removed ${removedCount} completed jobs`);
       }
 
+      console.log('[VideoProcessingQueueService] Sync with backend complete - WebSocket will handle live updates');
 
     } catch (error) {
       console.error('[VideoProcessingQueueService] Failed to sync with backend:', error);
@@ -197,6 +208,7 @@ export class VideoProcessingQueueService implements OnDestroy {
   addVideoJob(params: AddVideoJobParams): string {
     const parentJobId = `video-job-${Date.now()}-${this.jobIdCounter++}`;
 
+    console.log('[VideoProcessingQueueService] Adding new video job:', parentJobId, params);
 
     // Create child processes from process configurations
     const childProcesses: ChildProcess[] = params.processes.map((processConfig, index) => {
@@ -236,6 +248,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     this.jobs.next(new Map(currentJobs));
     this.saveToCache();
 
+    console.log('[VideoProcessingQueueService] Job added:', job);
 
     // Emit event to notify listeners (for auto-opening queue panel)
     this.jobAdded.next(parentJobId);
@@ -291,6 +304,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       return;
     }
 
+    console.log('[VideoProcessingQueueService] Submitting job to new queue system:', parentJobId);
 
     job.overallStatus = 'processing';
     this.updateJob(parentJobId, job, true); // Immediate - status change
@@ -340,6 +354,7 @@ export class VideoProcessingQueueService implements OnDestroy {
               handledTypes.add('process');
               handledTypes.add('normalize');
               combinedTaskAdded = true;
+              console.log('[VideoProcessingQueueService] Combining fix-aspect-ratio + normalize-audio into single process-video task');
             } else if (!shouldCombine) {
               tasks.push({ type: 'fix-aspect-ratio', options: {} });
             }
@@ -360,6 +375,7 @@ export class VideoProcessingQueueService implements OnDestroy {
               handledTypes.add('process');
               handledTypes.add('normalize');
               combinedTaskAdded = true;
+              console.log('[VideoProcessingQueueService] Combining fix-aspect-ratio + normalize-audio into single process-video task');
             } else if (!shouldCombine) {
               tasks.push({ type: 'normalize-audio', options: { level: -16 } });
             }
@@ -418,6 +434,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
       // Store backend job ID for progress tracking
       job.backendJobId = response.jobId;
+      console.log('[VideoProcessingQueueService] Queue job created:', response.jobId);
 
       // Mark all children as processing (backend will handle them sequentially)
       job.childProcesses.forEach(child => {
@@ -449,6 +466,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       return;
     }
 
+    console.log('[VideoProcessingQueueService] Submitting job:', parentJobId);
 
     job.overallStatus = 'processing';
     this.updateJob(parentJobId, job, true); // Immediate - status change
@@ -457,18 +475,26 @@ export class VideoProcessingQueueService implements OnDestroy {
     for (let i = 0; i < job.childProcesses.length; i++) {
       const child = job.childProcesses[i];
 
+      console.log(`[VideoProcessingQueueService] ========================================`);
+      console.log(`[VideoProcessingQueueService] Processing child ${i + 1}/${job.childProcesses.length}:`, child.type, child.displayName);
+      console.log(`[VideoProcessingQueueService] Parent job:`, parentJobId, job.displayName);
 
       // Check if job was removed before processing next child
       const currentJob = this.jobs.getValue().get(parentJobId);
       if (!currentJob) {
+        console.log('[VideoProcessingQueueService] ❌ Job removed during processing:', parentJobId);
         return; // Exit gracefully
       }
 
       try {
+        console.log(`[VideoProcessingQueueService] ⏩ Submitting child process:`, child.type);
         await this.submitChildProcess(parentJobId, child);
+        console.log(`[VideoProcessingQueueService] ✅ Child process submitted successfully:`, child.type);
 
         // Wait for process to complete before submitting next one
+        console.log(`[VideoProcessingQueueService] ⏳ Waiting for child to complete:`, child.type, child.id);
         await this.waitForChildCompletion(parentJobId, child.id);
+        console.log(`[VideoProcessingQueueService] ✅ Child completed:`, child.type);
 
       } catch (error: any) {
         console.error('[VideoProcessingQueueService] ❌ Error with child process:', child.type, error);
@@ -488,6 +514,8 @@ export class VideoProcessingQueueService implements OnDestroy {
       }
     }
 
+    console.log(`[VideoProcessingQueueService] ========================================`);
+    console.log(`[VideoProcessingQueueService] All children processed for job:`, parentJobId);
 
     // Check if job still exists and all children completed successfully
     const finalJob = this.jobs.getValue().get(parentJobId);
@@ -497,8 +525,10 @@ export class VideoProcessingQueueService implements OnDestroy {
         finalJob.overallStatus = 'completed';
         finalJob.completedAt = new Date();
         this.updateJob(parentJobId, finalJob, true); // Immediate - completion
+        console.log('[VideoProcessingQueueService] Job completed:', parentJobId);
       }
     } else {
+      console.log('[VideoProcessingQueueService] Job removed before completion:', parentJobId);
     }
   }
 
@@ -521,6 +551,7 @@ export class VideoProcessingQueueService implements OnDestroy {
         const job = this.jobs.getValue().get(parentJobId);
         if (!job) {
           clearInterval(checkInterval);
+          console.log('[VideoProcessingQueueService] Job removed while waiting for child completion:', parentJobId);
           // Don't reject - job was removed by user, just resolve silently
           resolve();
           return;
@@ -551,6 +582,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     const job = this.jobs.getValue().get(parentJobId);
     if (!job) return;
 
+    console.log('[VideoProcessingQueueService] Submitting child process:', child.type, child.id);
 
     child.status = 'processing';
     child.progress = 0;
@@ -567,9 +599,11 @@ export class VideoProcessingQueueService implements OnDestroy {
           // Update job with downloaded file info
           if (downloadResult.videoPath) {
             job.videoPath = downloadResult.videoPath;
+            console.log('[VideoProcessingQueueService] Updated job videoPath:', job.videoPath);
           }
           if (downloadResult.videoId) {
             job.videoId = downloadResult.videoId;
+            console.log('[VideoProcessingQueueService] Updated job videoId:', job.videoId);
           }
           break;
 
@@ -610,16 +644,19 @@ export class VideoProcessingQueueService implements OnDestroy {
 
       // If step was skipped, mark as completed immediately
       if (skipped) {
+        console.log('[VideoProcessingQueueService] Step was skipped, marking as completed:', child.type);
         child.status = 'completed';
         child.progress = 100;
       }
 
       this.updateJob(parentJobId, job, true); // Immediate - child submitted or completed
 
+      console.log('[VideoProcessingQueueService] Child process submitted:', child.type, 'Backend Job ID:', backendJobId, 'Skipped:', skipped);
 
       // For processing steps (aspect ratio, normalize), refresh video path from database after completion
       // because the file path may have changed
       if ((child.type === 'process' || child.type === 'normalize') && !skipped) {
+        console.log('[VideoProcessingQueueService] Will refresh video path from database after', child.type, 'completes');
       }
 
     } catch (error: any) {
@@ -650,6 +687,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // If skipped, return immediately - the step is already done
     if (response.skipped) {
+      console.log('[VideoProcessingQueueService] Step skipped:', response.message);
     }
 
     return {
@@ -677,6 +715,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // If skipped, return immediately - the step is already done
     if (response.skipped) {
+      console.log('[VideoProcessingQueueService] Step skipped:', response.message);
     }
 
     return {
@@ -695,6 +734,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     const url = await this.backendUrlService.getApiUrl('/transcribe');
 
+    console.log('[VideoProcessingQueueService] Submitting transcription to NEW endpoint:', url);
 
     const response = await this.http.post<any>(url, {
       videoId: job.videoId,
@@ -706,6 +746,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       throw new Error(response.message || 'Failed to start transcription');
     }
 
+    console.log('[VideoProcessingQueueService] Transcription started:', response);
 
     return childJobId;  // Return the same jobId we sent
   }
@@ -720,6 +761,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     const url = await this.backendUrlService.getApiUrl('/analyze');
 
+    console.log('[VideoProcessingQueueService] Submitting analysis to NEW endpoint:', url);
 
     // Parse AI model to get provider
     const aiModel = child.aiModel || 'qwen2.5:7b';
@@ -745,6 +787,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       throw new Error(response.message || 'Failed to start AI analysis');
     }
 
+    console.log('[VideoProcessingQueueService] Analysis started:', response);
 
     return childJobId;  // Return the same jobId we sent
   }
@@ -760,6 +803,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     const url = await this.backendUrlService.getApiUrl('/queue/add');
 
+    console.log('[VideoProcessingQueueService] Submitting download to new queue system:', child.downloadUrl);
 
     const childJobId = `${job.id}-child-download`;
 
@@ -780,6 +824,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       throw new Error(response.error || response.message || 'Failed to start download');
     }
 
+    console.log('[VideoProcessingQueueService] Download job added to new queue:', response.jobId);
 
     // Note: New queue system handles download + import via tasks
     // We'll get progress updates via WebSocket (task-progress events)
@@ -802,6 +847,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     const url = await this.backendUrlService.getApiUrl('/library/import-file');
 
+    console.log('[VideoProcessingQueueService] Submitting import:', job.videoPath);
 
     const response = await this.http.post<any>(url, {
       filePath: job.videoPath,
@@ -812,6 +858,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       throw new Error(response.error || response.message || 'Failed to import file');
     }
 
+    console.log('[VideoProcessingQueueService] Import completed:', response);
 
     // Return job ID and video ID
     return {
@@ -824,9 +871,11 @@ export class VideoProcessingQueueService implements OnDestroy {
    * Setup WebSocket listeners for progress updates
    */
   private setupProgressListeners(): void {
+    console.log('[VideoProcessingQueueService] Setting up progress listeners');
 
     // Listen to NEW QUEUE SYSTEM task progress events
     const taskProgressSub = this.socketService.onTaskProgress().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Task progress received:', data);
       const backendJobId = data.jobId;
 
       if (backendJobId) {
@@ -849,12 +898,14 @@ export class VideoProcessingQueueService implements OnDestroy {
                   child.progress = data.progress;
                   if (data.progress >= 100) {
                     child.status = 'completed';
+                    console.log(`[VideoProcessingQueueService] Child ${child.type} completed (combined task)`);
                   } else if (child.status !== 'processing') {
                     child.status = 'processing';
                   }
                 }
               });
 
+              console.log(`[VideoProcessingQueueService] Updated combined task progress: ${data.progress}%`);
             } else {
               // Normal single-task mapping
               const currentChild = job.childProcesses.find(child => {
@@ -874,10 +925,12 @@ export class VideoProcessingQueueService implements OnDestroy {
                 // Mark as completed when reaching 100%
                 if (data.progress >= 100) {
                   currentChild.status = 'completed';
+                  console.log(`[VideoProcessingQueueService] Child ${currentChild.type} completed`);
                 } else if (currentChild.status !== 'processing') {
                   currentChild.status = 'processing';
                 }
 
+                console.log(`[VideoProcessingQueueService] Updated child ${currentChild.type} progress: ${data.progress}% (status: ${currentChild.status})`);
               }
             }
 
@@ -895,6 +948,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen to queue status updates to sync job completion
     const queueStatusSub = this.socketService.onQueueStatusUpdated().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Queue status updated:', data);
 
       // Handle both batch and analysis queue updates
       if ((data.queueType === 'batch' || data.queueType === 'analysis') && data.status) {
@@ -922,6 +976,7 @@ export class VideoProcessingQueueService implements OnDestroy {
                     child.progress = 100;
                   }
                 });
+                console.log(`[VideoProcessingQueueService] Job ${parentJobId} completed`);
               } else if (backendJob.status === 'failed') {
                 job.overallStatus = 'failed';
                 job.childProcesses.forEach(child => {
@@ -930,6 +985,7 @@ export class VideoProcessingQueueService implements OnDestroy {
                     child.error = backendJob.error || 'Task failed';
                   }
                 });
+                console.log(`[VideoProcessingQueueService] Job ${parentJobId} failed:`, backendJob.error);
               }
 
               // Update overall progress
@@ -938,6 +994,7 @@ export class VideoProcessingQueueService implements OnDestroy {
               // Update videoId if available
               if (backendJob.videoId) {
                 job.videoId = backendJob.videoId;
+                console.log(`[VideoProcessingQueueService] Updated videoId for job ${parentJobId}:`, backendJob.videoId);
               }
 
               this.updateJob(parentJobId, job, false);
@@ -950,6 +1007,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen to download progress (OLD SYSTEM - for backward compatibility)
     const downloadProgressSub = this.socketService.onDownloadProgress().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Download progress received:', data);
       const backendJobId = data.jobId;
       if (backendJobId) {
         this.updateChildProgressByBackendJobId(backendJobId, data.progress);
@@ -961,6 +1019,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen to processing progress (FFmpeg operations)
     const processingProgressSub = this.socketService.onProcessingProgress().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Processing progress received:', data);
       if (data.jobId) {
         this.updateChildProgressByBackendJobId(data.jobId, data.progress);
       } else {
@@ -971,9 +1030,11 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen to transcription progress (Whisper operations)
     const transcriptionProgressSub = this.socketService.onTranscriptionProgress().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Transcription progress received:', data);
 
       const backendJobId = data.jobId;
       if (backendJobId) {
+        console.log('[VideoProcessingQueueService] Looking for child with backendJobId:', backendJobId);
         this.updateChildProgressByBackendJobId(backendJobId, data.progress);
       } else {
         console.warn('[VideoProcessingQueueService] Transcription progress missing jobId:', data);
@@ -983,9 +1044,11 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen to analysis progress (AI operations)
     const analysisProgressSub = this.socketService.onAnalysisProgress().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Analysis progress received:', data);
 
       const backendJobId = data.jobId;
       if (backendJobId) {
+        console.log('[VideoProcessingQueueService] Looking for child with backendJobId:', backendJobId);
         this.updateChildProgressByBackendJobId(backendJobId, data.progress);
       } else {
         console.warn('[VideoProcessingQueueService] Analysis progress missing jobId:', data);
@@ -995,6 +1058,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen for processing failures
     const processingFailedSub = this.socketService.onProcessingFailed().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Processing failed:', data);
       if (data.jobId) {
         this.markChildAsFailed(data.jobId, data.error);
       }
@@ -1003,6 +1067,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     // Listen for batch download job status updates (download + import completion)
     const jobStatusSub = this.socketService.onJobStatusUpdated().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Job status updated:', data);
 
       if (data.status === 'completed' && data.jobId) {
         // Find the child process with this backend job ID
@@ -1012,6 +1077,7 @@ export class VideoProcessingQueueService implements OnDestroy {
           const child = job.childProcesses.find(c => c.backendJobId === data.jobId);
 
           if (child && child.type === 'download') {
+            console.log('[VideoProcessingQueueService] Batch download completed for:', data.jobId);
 
             // Mark child as 100% complete
             child.progress = 100;
@@ -1020,9 +1086,11 @@ export class VideoProcessingQueueService implements OnDestroy {
             // Update job with videoId and videoPath from the import
             if ((data as any).videoId) {
               job.videoId = (data as any).videoId;
+              console.log('[VideoProcessingQueueService] Updated job videoId:', job.videoId);
             }
             if ((data as any).videoPath) {
               job.videoPath = (data as any).videoPath;
+              console.log('[VideoProcessingQueueService] Updated job videoPath:', job.videoPath);
             }
 
             // Update the job
@@ -1052,6 +1120,7 @@ export class VideoProcessingQueueService implements OnDestroy {
 
       if (child) {
         found = true;
+        console.log(`[VideoProcessingQueueService] Updating progress for ${child.displayName}: ${progress}%`);
 
         child.progress = Math.min(100, Math.max(0, progress));
 
@@ -1060,6 +1129,7 @@ export class VideoProcessingQueueService implements OnDestroy {
         const wasCompleted = child.progress >= 100 && child.status === 'processing' && child.type !== 'download';
         if (wasCompleted) {
           child.status = 'completed';
+          console.log(`[VideoProcessingQueueService] ${child.displayName} auto-completed (progress: 100%)`);
 
           // Refresh video path from database after processing/normalize steps
           // because the file path may have changed
@@ -1081,9 +1151,12 @@ export class VideoProcessingQueueService implements OnDestroy {
 
     if (!found) {
       console.warn(`[VideoProcessingQueueService] ❌ No child process found with backendJobId: ${backendJobId}`);
+      console.log('[VideoProcessingQueueService] 🔍 Current jobs and their backendJobIds:');
 
       Array.from(currentJobs.values()).forEach(j => {
+        console.log(`  Job ${j.id} (${j.displayName}):`);
         j.childProcesses.forEach(c => {
+          console.log(`    - ${c.type}: backendJobId = "${c.backendJobId}" (status: ${c.status})`);
         });
       });
     }
@@ -1100,6 +1173,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     }
 
     try {
+      console.log(`[VideoProcessingQueueService] Refreshing video path from database for ${job.videoId}`);
 
       const url = await this.backendUrlService.getApiUrl(`/library/videos/${job.videoId}`);
       const video = await this.http.get<any>(url).toPromise();
@@ -1107,6 +1181,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       if (video && video.current_path) {
         const oldPath = job.videoPath;
         job.videoPath = video.current_path;
+        console.log(`[VideoProcessingQueueService] Updated video path: ${oldPath} -> ${job.videoPath}`);
         this.updateJob(parentId, job, false); // Update without immediate emit (throttled)
       } else {
         console.warn('[VideoProcessingQueueService] Video path not found in database response');
@@ -1127,6 +1202,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       const child = job.childProcesses.find(c => c.backendJobId === backendJobId);
 
       if (child) {
+        console.log(`[VideoProcessingQueueService] Marking ${child.displayName} as completed`);
 
         child.status = 'completed';
         child.progress = 100;
@@ -1148,6 +1224,7 @@ export class VideoProcessingQueueService implements OnDestroy {
       const child = job.childProcesses.find(c => c.backendJobId === backendJobId);
 
       if (child) {
+        console.log(`[VideoProcessingQueueService] Marking ${child.displayName} as failed:`, error);
 
         child.status = 'failed';
         child.error = error;
@@ -1256,6 +1333,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     currentJobs.delete(jobId);
     this.emitJobs(); // Immediate - job removed
     this.saveToCache();
+    console.log('[VideoProcessingQueueService] Job removed:', jobId);
   }
 
   /**
@@ -1265,6 +1343,7 @@ export class VideoProcessingQueueService implements OnDestroy {
     this.emitJobs(); // Clear the map
     this.jobs.next(new Map());
     this.saveToCache();
+    console.log('[VideoProcessingQueueService] All jobs cleared');
   }
 
   /**

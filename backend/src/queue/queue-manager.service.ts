@@ -30,17 +30,13 @@ export class QueueManagerService implements OnModuleDestroy {
   constructor(
     private readonly mediaOps: MediaOperationsService,
     private readonly eventService: MediaEventService,
-  ) {
-    this.logger.log('Queue Manager initialized');
-  }
+  ) {}
 
   /**
    * Lifecycle hook - called when the module is being destroyed
    * Clears all queues on application shutdown
    */
   onModuleDestroy() {
-    this.logger.log('Queue Manager shutting down - clearing all queues');
-
     // Mark all pending and processing jobs as failed
     const allJobs = [
       ...Array.from(this.batchJobs.values()),
@@ -51,7 +47,6 @@ export class QueueManagerService implements OnModuleDestroy {
       if (job.status === 'pending' || job.status === 'processing') {
         job.status = 'failed';
         job.error = 'Application shutdown - job cancelled';
-        this.logger.log(`Cancelled job ${job.id} due to shutdown`);
       }
     }
 
@@ -62,8 +57,6 @@ export class QueueManagerService implements OnModuleDestroy {
     // Reset processing flags
     this.batchProcessing = false;
     this.analysisProcessing = false;
-
-    this.logger.log('All queues cleared on shutdown');
   }
 
   /**
@@ -84,13 +77,11 @@ export class QueueManagerService implements OnModuleDestroy {
 
     if (job.queueType === 'batch') {
       this.batchJobs.set(jobId, fullJob);
-      this.logger.log(`Added job ${jobId} to batch queue`);
       this.emitQueueStatus('batch');
       // Start processing if not already running
       setImmediate(() => this.processBatchQueue());
     } else {
       this.analysisJobs.set(jobId, fullJob);
-      this.logger.log(`Added job ${jobId} to analysis queue`);
       this.emitQueueStatus('analysis');
       // Start processing if not already running
       setImmediate(() => this.processAnalysisQueue());
@@ -120,7 +111,6 @@ export class QueueManagerService implements OnModuleDestroy {
   deleteJob(jobId: string): boolean {
     const deleted = this.batchJobs.delete(jobId) || this.analysisJobs.delete(jobId);
     if (deleted) {
-      this.logger.log(`Deleted job ${jobId}`);
       this.emitQueueStatus('batch');
       this.emitQueueStatus('analysis');
     }
@@ -266,8 +256,6 @@ export class QueueManagerService implements OnModuleDestroy {
    * Process a single job by executing its tasks sequentially
    */
   private async processJob(job: QueueJob): Promise<void> {
-    this.logger.log(`Starting job ${job.id} (${job.queueType} queue)`);
-
     job.status = 'processing';
     job.startedAt = new Date();
     job.currentTaskIndex = 0;
@@ -278,8 +266,6 @@ export class QueueManagerService implements OnModuleDestroy {
       for (let i = 0; i < job.tasks.length; i++) {
         job.currentTaskIndex = i;
         const task = job.tasks[i];
-
-        this.logger.log(`Job ${job.id}: Executing task ${i + 1}/${job.tasks.length} (${task.type})`);
 
         job.currentPhase = `${task.type} (${i + 1}/${job.tasks.length})`;
         this.emitQueueStatus(job.queueType);
@@ -301,7 +287,6 @@ export class QueueManagerService implements OnModuleDestroy {
       job.currentPhase = 'Completed';
       job.completedAt = new Date();
 
-      this.logger.log(`Job ${job.id} completed successfully`);
       this.emitQueueStatus(job.queueType);
 
       // Continue processing the queue

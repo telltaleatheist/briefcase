@@ -1471,9 +1471,6 @@ export class AnalysisService implements OnModuleInit {
       }
     }
 
-    this.logger.log(
-      `Starting batch ${transcribeOnly ? 'transcription' : 'analysis'} ${batchId} for ${videosToProcess.length} videos`
-    );
 
     // Submit all videos to the new queue system
     const jobIds: string[] = [];
@@ -1491,26 +1488,18 @@ export class AnalysisService implements OnModuleInit {
 
         if (transcribeOnly) {
           // If user explicitly selected transcribe, always re-transcribe (don't skip)
-          if (hasTranscript) {
-            this.logger.log(`Re-transcribing ${video.filename} (transcript will be overwritten)`);
-          }
           tasks.push({ type: 'transcribe', options: { model: whisperModel } });
         } else {
           // User requested full analysis
           if (hasAnalysis && !forceReanalyze) {
-            this.logger.log(`Analysis already exists for ${video.filename}, skipping`);
             continue;
           }
 
           // Determine which tasks to add based on existing transcript and user preferences
           if (hasTranscript && !forceRetranscribe) {
             // Use existing transcript, only run analysis
-            this.logger.log(`Using existing transcript for ${video.filename}`);
           } else {
             // Need to transcribe (either no transcript exists, or forceRetranscribe is true)
-            if (hasTranscript) {
-              this.logger.log(`Re-transcribing ${video.filename} (forceRetranscribe=true)`);
-            }
             tasks.push({ type: 'transcribe', options: { model: whisperModel } });
           }
 
@@ -1535,14 +1524,11 @@ export class AnalysisService implements OnModuleInit {
         });
 
         jobIds.push(createdJobId);
-        this.logger.log(`Queued ${video.filename} with tasks: ${tasks.map(t => t.type).join(', ')}`);
 
       } catch (error) {
         this.logger.error(`Failed to queue video ${video.filename}: ${(error as Error).message}`);
       }
     }
-
-    this.logger.log(`Batch ${batchId}: Queued ${jobIds.length} videos for processing`);
 
     // Emit batch started event
     this.eventEmitter.emit('batch.started', {
