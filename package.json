@@ -19,7 +19,7 @@
     "build:frontend": "tsc -p frontend/tsconfig.json && cd frontend && npm run build",
     "build:electron": "tsc -p electron/tsconfig.electron.json",
     "build:preload": "tsc -p electron/tsconfig.preload.json",
-    "build:shared": "tsc shared/*.ts --outDir dist-electron/shared --esModuleInterop --moduleResolution node --target ES2020 --module commonjs --declaration",
+    "build:shared": "tsc -p shared",
     "download:ytdlp": "node scripts/download-ytdlp.js",
     "package:python:mac-arm64": "node scripts/package-python-mac.js arm64",
     "package:python:mac-x64": "node scripts/package-python-mac.js x64",
@@ -96,7 +96,7 @@
     "appId": "com.owenmorgan.clippy",
     "productName": "Clippy",
     "asar": true,
-    "compression": "maximum",
+    "compression": "normal",
     "directories": {
       "output": "dist-electron",
       "buildResources": "assets"
@@ -255,7 +255,8 @@
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "include": "assets/installer.nsh",
       "warningsAsErrors": false,
-      "packElevateHelper": true
+      "packElevateHelper": true,
+      "differentialPackage": false
     },
     "linux": {
       "icon": "assets/icon.png",

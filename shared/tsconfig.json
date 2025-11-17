@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "outDir": "../dist-electron/shared",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "target": "ES2020",
+    "module": "commonjs",
+    "declaration": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "resolveJsonModule": true
+  },
+  "include": ["*.ts"],
+  "exclude": ["node_modules"]
+}
