@@ -1,23 +1,9 @@
 // clippy/electron/environment.util.ts
+// SIMPLIFIED: Removed config persistence code - using bundled binaries via runtime-paths
 import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
 import log from 'electron-log';
-
-let getYtDlpPath: () => string;
-try {
-  const ytDlpWrap = require('yt-dlp-wrap');
-  getYtDlpPath = typeof ytDlpWrap.getBinaryPath === 'function' 
-    ? ytDlpWrap.getBinaryPath 
-    : () => {
-        // Fallback if function doesn't exist
-        throw new Error('getBinaryPath not available in yt-dlp-wrap');
-      };
-} catch (error) {
-  getYtDlpPath = () => {
-    throw new Error(`Error loading yt-dlp-wrap: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  };
-}
 
 export const DEFAULT_SERVER_CONFIG = {
   nestBackend: {
@@ -42,50 +28,9 @@ export interface ServerConfig {
   };
 }
 
-interface ConfigFile {
-  [key: string]: string | undefined;
-}
-
 export class EnvironmentUtil {
   private static frontendPath: string | undefined;
   private static backendPath: string | undefined;
-  private static readonly CONFIG_FILENAME = 'clippy-config.json';
-
-  private static getConfigPath(): string {
-    // Use app.getPath for a user-specific, persistent location
-    return path.join(app.getPath('userData'), this.CONFIG_FILENAME);
-  }
-  
-  static writeEnvironmentConfig(envVars: NodeJS.ProcessEnv): void {
-    try {
-      const configPath = this.getConfigPath();
-      const configToWrite: ConfigFile = {};
-
-      // Select specific environment variables to persist
-      const keysToSave = [
-        'FRONTEND_PATH', 
-        'BACKEND_PATH', 
-        'YT_DLP_PATH', 
-        'FFMPEG_PATH',
-        'NODE_ENV'
-        // Add other keys you want to persist
-      ];
-
-      keysToSave.forEach(key => {
-        if (envVars[key]) {
-          configToWrite[key] = envVars[key];
-        }
-      });
-
-      // Ensure the directory exists
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-
-      // Write the config file
-      fs.writeFileSync(configPath, JSON.stringify(configToWrite, null, 2), 'utf8');
-    } catch (error) {
-      log.error('Error writing environment config:', error);
-    }
-  }
 
   static getServerConfig(): ServerConfig {
     // Start with default configuration
@@ -109,28 +54,6 @@ export class EnvironmentUtil {
     }
     
     return config;
-  }
-  
-  // Read environment variables from config file
-  static readEnvironmentConfig(): NodeJS.ProcessEnv {
-    try {
-      const configPath = this.getConfigPath();
-      
-      // If config file doesn't exist, return empty object
-      if (!fs.existsSync(configPath)) {
-        log.warn(`Config file not found at: ${configPath}`);
-        return {};
-      }
-
-      // Read and parse the config file
-      const configContent = fs.readFileSync(configPath, 'utf8');
-      const parsedConfig: ConfigFile = JSON.parse(configContent);
-
-      return parsedConfig;
-    } catch (error) {
-      log.error('Error reading environment config:', error);
-      return {};
-    }
   }
 
   static getFrontEndPath(): string {
@@ -225,14 +148,5 @@ export class EnvironmentUtil {
 
     log.info(`Using backend path: ${this.backendPath}`);
     return this.backendPath;
-  }
-  
-  static setupEnvironmentConfig(): void {
-    // Collect environment variables to persist
-    const envToPersist = { ...process.env };
-    envToPersist.NODE_ENV = 'production';
-
-    // Write the environment config
-    this.writeEnvironmentConfig(envToPersist);
   }
 }

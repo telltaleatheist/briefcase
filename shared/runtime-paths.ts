@@ -2,29 +2,58 @@
  * Simple runtime path resolution for bundled binaries
  * No user configuration, no auto-detection, no complexity
  * Just returns the paths to bundled binaries
+ *
+ * IMPORTANT: Works in both Electron main process AND backend Node.js process
  */
 
 import * as path from 'path';
-import { app } from 'electron';
+
+// Try to load electron, but don't fail if not available (e.g., when called from backend)
+let app: any = null;
+try {
+  app = require('electron').app;
+} catch {
+  // Electron not available - we're probably in the backend process
+}
 
 /**
  * Check if we're running in a packaged app
  */
 function isPackaged(): boolean {
-  return app?.isPackaged ?? process.env.NODE_ENV === 'production';
+  // If electron is available, use app.isPackaged
+  if (app?.isPackaged !== undefined) {
+    return app.isPackaged;
+  }
+
+  // Otherwise, check environment or process.resourcesPath
+  if (process.env.NODE_ENV === 'production') {
+    return true;
+  }
+
+  // If process.resourcesPath exists, we're probably packaged
+  if ((process as any).resourcesPath) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
  * Get the base resources directory
  */
 function getResourcesPath(): string {
-  if (isPackaged()) {
-    // Production: app.getAppPath() points to app.asar, go up one level to Resources
-    return process.resourcesPath || path.dirname(app.getAppPath());
-  } else {
-    // Development: project root
-    return process.cwd();
+  // In packaged app, use process.resourcesPath
+  if ((process as any).resourcesPath) {
+    return (process as any).resourcesPath;
   }
+
+  // If electron app is available and packaged
+  if (app?.getAppPath && isPackaged()) {
+    return path.dirname(app.getAppPath());
+  }
+
+  // Development: project root
+  return process.cwd();
 }
 
 /**
@@ -112,13 +141,18 @@ export function getRuntimePaths() {
 
 /**
  * Get user data directory (for databases, cache, config)
+ * Only works when called from Electron context
  */
 export function getUserDataPath(): string {
+  if (!app) {
+    throw new Error('getUserDataPath() can only be called from Electron main process');
+  }
   return app.getPath('userData');
 }
 
 /**
  * Get cache directory (for Whisper models, etc.)
+ * Only works when called from Electron context
  */
 export function getCachePath(): string {
   return path.join(getUserDataPath(), 'cache');
@@ -126,7 +160,11 @@ export function getCachePath(): string {
 
 /**
  * Get logs directory
+ * Only works when called from Electron context
  */
 export function getLogsPath(): string {
+  if (!app) {
+    throw new Error('getLogsPath() can only be called from Electron main process');
+  }
   return app.getPath('logs');
 }
