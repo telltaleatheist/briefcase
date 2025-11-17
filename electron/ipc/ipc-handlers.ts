@@ -1,10 +1,9 @@
 // clippy/electron/ipc/ipc-handlers.ts
+// SIMPLIFIED: Removed ConfigManager and PathValidator - using bundled binaries
 import { ipcMain, dialog, shell, app } from 'electron';
 import * as log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
 import Store from 'electron-store';
-import { ConfigManager } from '../../config/ConfigManager';
-import { PathValidator } from '../../utilities/PathValidator';
 import { WindowService } from '../services/window-service';
 import { BackendService } from '../services/backend-service';
 import { DownloadService } from '../services/download-service';
@@ -61,51 +60,12 @@ export function setupIpcHandlers(
 
 /**
  * Set up configuration-related IPC handlers
+ * SIMPLIFIED: Just backend URL now - no more path configuration
  */
 function setupConfigHandlers(): void {
-  const configManager = ConfigManager.getInstance();
-
   // Get backend URL
   ipcMain.handle('get-backend-url', () => {
     return backendServiceRef.getBackendUrl();
-  });
-
-  // Check path configuration
-  ipcMain.handle('check-path-config', async () => {
-    const validation = await PathValidator.validateAllPaths(configManager.getConfig());
-    return { isValid: validation.allValid };
-  });
-  
-  // Show path configuration dialog
-  ipcMain.handle('show-path-config-dialog', async () => {
-    const configDialog = new (require('../../utilities/configDialog').ConfigDialog)(() => {
-      const config = configManager.getConfig();
-      process.env.FFMPEG_PATH = config.ffmpegPath;
-      process.env.FFPROBE_PATH = config.ffprobePath;
-      process.env.YT_DLP_PATH = config.ytDlpPath;
-    });
-    
-    return configDialog.showDialog();
-  });
-  
-  // Get current path configuration
-  ipcMain.handle('get-path-config', () => {
-    return configManager.getConfig();
-  });
-  
-  // Update path configuration
-  ipcMain.handle('update-path-config', (_, config) => {
-    const success = configManager.updateConfig(config);
-    
-    if (success) {
-      // Update environment variables
-      const updatedConfig = configManager.getConfig();
-      process.env.FFMPEG_PATH = updatedConfig.ffmpegPath;
-      process.env.FFPROBE_PATH = updatedConfig.ffprobePath;
-      process.env.YT_DLP_PATH = updatedConfig.ytDlpPath;
-    }
-    
-    return { success };
   });
 }
 

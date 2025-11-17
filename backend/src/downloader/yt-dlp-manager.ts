@@ -9,8 +9,6 @@ import * as readline from 'readline';
 import * as logger from 'electron-log';
 import { log } from 'electron-log';
 import { getPythonConfig } from '../shared/python-config';
-// Import centralized binary path resolver from compiled JS
-const { getYtDlpPath } = require('../../../dist-electron/shared/binary-paths');
 
 export interface YtDlpProgress {
   percent: number;
@@ -55,26 +53,17 @@ export class YtDlpManager extends EventEmitter {
 
   /**
    * Get the path to the yt-dlp executable
-   * Now uses the centralized binary path resolver
+   * SIMPLIFIED: Just use bundled binary from shared config
    */
   private getYtDlpPath(): string {
-    // First try to use the configured path from environment variable
-    if (process.env.YT_DLP_PATH && fs.existsSync(process.env.YT_DLP_PATH)) {
-      return process.env.YT_DLP_PATH;
-    }
-
-    // Try shared config service (which also uses centralized resolver as fallback)
     const ytDlpPath = this.sharedConfigService.getYtDlpPath();
+
     if (!ytDlpPath) {
-      // Last resort: use centralized binary path resolver directly
-      const ytDlpPathFromResolver = getYtDlpPath();
-      if (!ytDlpPathFromResolver) {
-        throw new Error('yt-dlp path is not defined in the shared configuration or centralized resolver.');
-      }
-      return ytDlpPathFromResolver;
+      throw new Error('yt-dlp path is not defined');
     }
 
     if (!fs.existsSync(ytDlpPath)) {
+      logger.error(`yt-dlp not found at: ${ytDlpPath}`);
       throw new Error(`yt-dlp executable not found at path: ${ytDlpPath}`);
     }
 

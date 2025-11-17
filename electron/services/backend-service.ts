@@ -10,6 +10,15 @@ import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 import { PortUtil } from '../utilities/port-util';
 
+// Import runtime paths for binary locations
+let getRuntimePaths: any;
+try {
+  getRuntimePaths = require('../../dist-electron/shared/runtime-paths').getRuntimePaths;
+} catch (error) {
+  log.warn('runtime-paths not available, will use environment variables');
+  getRuntimePaths = () => ({ ffmpeg: '', ffprobe: '', ytdlp: '', python: '' });
+}
+
 /**
  * Backend server management service
  * Handles starting, stopping, and communicating with the NestJS backend
@@ -240,6 +249,10 @@ export class BackendService {
       log.info(`Backend node_modules: ${backendNodeModules}`);
       log.info(`Node modules exists: ${fs.existsSync(backendNodeModules)}`);
 
+      // Get binary paths from runtime-paths
+      const runtimePaths = getRuntimePaths();
+      log.info(`Binary paths: ffmpeg=${runtimePaths.ffmpeg}, ffprobe=${runtimePaths.ffprobe}, ytdlp=${runtimePaths.ytdlp}`);
+
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -250,7 +263,11 @@ export class BackendService {
         PORT: this.actualBackendPort.toString(),
         NODE_ENV: process.env.NODE_ENV || 'production',
         APP_ROOT: resourcesPath,
-        VERBOSE: 'true'
+        VERBOSE: 'true',
+        // Set binary paths for backend to use
+        FFMPEG_PATH: runtimePaths.ffmpeg || process.env.FFMPEG_PATH,
+        FFPROBE_PATH: runtimePaths.ffprobe || process.env.FFPROBE_PATH,
+        YT_DLP_PATH: runtimePaths.ytdlp || process.env.YT_DLP_PATH,
       };
       
       // Set the working directory to the backend directory for proper module resolution

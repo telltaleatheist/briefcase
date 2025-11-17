@@ -123,6 +123,13 @@
         "to": "backend/python"
       },
       {
+        "from": "dist-electron/shared",
+        "to": "dist-electron/shared",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "utilities",
         "to": "utilities",
         "filter": [

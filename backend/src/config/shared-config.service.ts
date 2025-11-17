@@ -1,26 +1,29 @@
 // backend/src/config/shared-config.service.ts
+// SIMPLIFIED: No more user configuration, just use bundled binaries
 import { Injectable, Logger } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
-// Import centralized binary path resolver from compiled JS
-const { getBinariesConfig } = require('../../../dist-electron/shared/binary-paths');
+
+// Import simple runtime path resolver
+const getRuntimePaths = () => {
+  try {
+    return require('../../../dist-electron/shared/runtime-paths').getRuntimePaths();
+  } catch (error) {
+    // Fallback for when runtime-paths isn't built yet (during development setup)
+    console.warn('runtime-paths not available, using fallback');
+    return {
+      ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
+      ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
+      ytdlp: process.env.YT_DLP_PATH || 'yt-dlp'
+    };
+  }
+};
 
 @Injectable()
 export class SharedConfigService {
   private static instance: SharedConfigService;
   private readonly logger = new Logger(SharedConfigService.name);
-  private config: any = {};
-  private configPath: string;
 
   private constructor() {
-    // Determine the user config path - similar to your ConfigManager
-    const userDataPath = process.env.APPDATA ||
-                      (process.platform === 'darwin' ?
-                      path.join(process.env.HOME || '', 'Library', 'Application Support') :
-                      path.join(process.env.HOME || '', '.config'));
-
-    this.configPath = path.join(userDataPath, 'clippy', 'app-config.json');
-    this.loadConfig();
+    this.logger.log('SharedConfigService initialized with bundled binaries');
   }
 
   static getInstance(): SharedConfigService {
@@ -30,68 +33,49 @@ export class SharedConfigService {
     return SharedConfigService.instance;
   }
 
-  private loadConfig(): void {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        const configData = fs.readFileSync(this.configPath, 'utf8');
-        this.config = JSON.parse(configData);
-        this.logger.log(`Loaded config from ${this.configPath}`);
-      } else {
-        this.logger.warn(`No config file found at ${this.configPath}, using defaults`);
-        this.config = {};
-      }
-    } catch (error) {
-      this.logger.error('Failed to load config:', error);
-      this.config = {};
-    }
+  getFfmpegPath(): string {
+    return getRuntimePaths().ffmpeg;
   }
 
-  refreshConfig(): void {
-    this.loadConfig();
+  getFfprobePath(): string {
+    return getRuntimePaths().ffprobe;
   }
 
-  getFfmpegPath(): string | undefined {
-    // Priority: user config > centralized binary resolver
-    if (this.config.ffmpegPath) {
-      return this.config.ffmpegPath;
-    }
-
-    // Fallback to centralized binary resolver
-    const binariesConfig = getBinariesConfig();
-    return binariesConfig.ffmpeg.exists ? binariesConfig.ffmpeg.path : undefined;
+  getYtDlpPath(): string {
+    return getRuntimePaths().ytdlp;
   }
 
-  getFfprobePath(): string | undefined {
-    // Priority: user config > centralized binary resolver
-    if (this.config.ffprobePath) {
-      return this.config.ffprobePath;
-    }
-
-    // Fallback to centralized binary resolver
-    const binariesConfig = getBinariesConfig();
-    return binariesConfig.ffprobe.exists ? binariesConfig.ffprobe.path : undefined;
-  }
-
-  getYtDlpPath(): string | undefined {
-    // Priority: user config > centralized binary resolver
-    if (this.config.ytDlpPath) {
-      return this.config.ytDlpPath;
-    }
-
-    // Fallback to centralized binary resolver
-    const binariesConfig = getBinariesConfig();
-    return binariesConfig.ytdlp.exists ? binariesConfig.ytdlp.path : undefined;
-  }
-
+  // Legacy method - no longer needed but kept for compatibility
   getOutputDir(): string | undefined {
-    return this.config.outputDir;
+    return undefined;
   }
 
+  // Legacy method - no longer needed but kept for compatibility
   getConfig(): any {
-    return { ...this.config }; // Return a copy to prevent direct mutation
+    return {
+      ffmpegPath: this.getFfmpegPath(),
+      ffprobePath: this.getFfprobePath(),
+      ytDlpPath: this.getYtDlpPath()
+    };
   }
 
+  // Legacy method - no longer needed but kept for compatibility
   getConfigDir(): string {
-    return path.dirname(this.configPath);
+    const os = require('os');
+    const path = require('path');
+    const homeDir = os.homedir();
+
+    if (process.platform === 'darwin') {
+      return path.join(homeDir, 'Library', 'Application Support', 'clippy');
+    } else if (process.platform === 'win32') {
+      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'clippy');
+    } else {
+      return path.join(homeDir, '.config', 'clippy');
+    }
+  }
+
+  // No longer needed - paths are fixed to bundled binaries
+  refreshConfig(): void {
+    this.logger.log('refreshConfig called (no-op - using bundled binaries)');
   }
 }

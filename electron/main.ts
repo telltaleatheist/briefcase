@@ -1,12 +1,11 @@
 // clippy/electron/main.ts
+// SIMPLIFIED: No more executable checking - binaries are bundled!
 import { app } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';
 import { AppConfig } from './config/app-config';
-import { ExecutablesUtil } from './utilities/executables';
 import { WindowService } from './services/window-service';
 import { BackendService } from './services/backend-service';
-import { SetupService } from './services/setup-service';
 import { TrayService } from './services/tray-service';
 import { setupIpcHandlers } from './ipc/ipc-handlers';
 import { UpdateService } from './services/update-service';
@@ -45,7 +44,6 @@ if (process.env.NODE_ENV === 'production') {
 let windowService: WindowService;
 let backendService: BackendService;
 let updateService: UpdateService;
-let setupService: SetupService;
 let trayService: TrayService;
 
 // Configure logging - always log to file
@@ -86,22 +84,14 @@ app.whenReady().then(async () => {
     // Initialize AppConfig first
     AppConfig.initialize();
 
-    // Check required executables first
-    const executablesUtil = new ExecutablesUtil();
-    const executablesConfigured = await executablesUtil.checkAndConfigureExecutables();
-    
-    if (!executablesConfigured) {
-      log.error('Failed to configure required executables, exiting application');
-      app.quit();
-      return;
-    }
-    
+    // SIMPLIFIED: No executable checking needed - binaries are bundled!
+    log.info('Using bundled binaries from extraResources');
+
     // Initialize services
     backendService = new BackendService();
     windowService = new WindowService();
     trayService = new TrayService(windowService);
     updateService = new UpdateService(windowService);
-    setupService = new SetupService();
 
     // Set up IPC handlers
     setupIpcHandlers(windowService, backendService);
@@ -125,18 +115,6 @@ app.whenReady().then(async () => {
       // Create tray icon
       trayService.createTray();
       trayService.setBackendPort(backendService.getBackendPort());
-
-      // Run optional AI features setup after window is created (non-blocking)
-      // This runs in the background and won't prevent the app from starting
-      setTimeout(async () => {
-        try {
-          const checkResult = await setupService.checkDependencies();
-          await setupService.runOptionalSetups(checkResult);
-        } catch (error) {
-          log.error('Error during optional setups:', error);
-          // Silently fail - don't interrupt user experience
-        }
-      }, 2000); // Wait 2 seconds after launch to let user see the app first
     } else {
       // Backend failed twice - show error
       log.error('Backend failed to start after retry attempt');
