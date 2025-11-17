@@ -179,7 +179,7 @@ TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 #   - topic_tags: comma-separated list of topics discussed (str)
 # =============================================================================
 
-SUGGESTED_TITLE_PROMPT = """Based on the AI analysis of this video, suggest a better, more descriptive filename.
+SUGGESTED_TITLE_PROMPT = """Generate a concise, descriptive filename for this video.
 
 **Current Title:** {current_title}
 
@@ -189,36 +189,35 @@ SUGGESTED_TITLE_PROMPT = """Based on the AI analysis of this video, suggest a be
 
 **Topics Discussed:** {topic_tags}
 
-**Requirements:**
-- Use lowercase with spaces (NOT hyphens) between words
-- Be descriptive and keyword-rich to aid in searching
-- Include the most important person's name if applicable
-- Describe the main topic, action, or claim
-- **IMPORTANT: Use commas (,) to separate lists of names, items, or topics**
-- Use dashes (single hyphen with spaces around it " - ") for elaboration or additional context
-- Can be long and detailed (no strict character limit, but keep it reasonable)
-- NO special characters: no periods, quotes, slashes, or other symbols
-- You may use "etc" at the end without a period if listing many items
-- DO NOT include date or file extension
-- Return ONLY the suggested title, nothing else
+**CRITICAL REQUIREMENTS:**
+1. Use **lowercase only** with **spaces** between words (NOT hyphens, NOT underscores)
+2. **Maximum 100 characters** - keep it concise but descriptive
+3. Include the most important person's name if applicable
+4. Describe the main topic or claim in one clear phrase
+5. Use commas (,) ONLY to separate short lists of 2-3 items maximum
+6. Use dashes with spaces ( - ) for ONE additional detail if needed
+7. **NEVER include:**
+   - Dates (like 2025-11-06 or any date format)
+   - File extensions (.mp4, .mov, etc.)
+   - Special characters (periods, quotes, slashes, colons)
+   - Capital letters
+8. **Return ONLY the title** - no explanations, no quotes, no extra text
 
-**Examples showing proper comma usage:**
-- When listing people: "george washington, abraham lincoln, christopher columbus"
-- When listing groups: "jews, ethnic minorities, lgbtq people"
-- When listing topics: "election fraud, qanon, deep state conspiracy"
+**Good Examples (concise and clear):**
+- "greg locke prophesies conservative movement split over jew hate"
+- "joel webbon criticizes modern women as wicked and stupid"
+- "tucker carlson interviews nick fuentes about antisemitism"
+- "nick fuentes releases antisemitic video praising historical figures"
+- "joshua haymes defends michael cassidy destroying satanic statue"
 
-Examples of good titles:
-- "greg locke prophesies that the conservative movement will be split on jew hate, and tucker carlson is where it starts, after interviewing nick fuentes"
-- "joel webbon says women are atrocious today - theyre hoes, stupid, deceitful, wicked, vile, vote for trans people, etc"
-- "joshua haymes says a satanic statue was being erected in the state capitol, but this extremist destroyed one, and he should be honored for that - michael cassidy"
-- "tucker carlson interviews nick fuentes - ben shapiro was not happy - new york times claims fuentes is replacing charlie kirk"
-- "nick fuentes releases antisemitic video praising racist figures - george washington, abraham lincoln, christopher columbus - hate speech promoting discrimination against jews, ethnic minorities, etc"
-
-Bad examples:
+**Bad Examples (what NOT to do):**
+- "2025-11-06 religious-communities-response-to-baby-food-assistance.mp4" (has date and extension!)
 - "greg-locke-election-fraud" (uses hyphens instead of spaces)
-- "Video about politics" (too generic, has capital letter)
+- "Video about politics" (too generic, has capital)
 - "Greg Locke's speech." (has capitals and period)
-- "2021-08-15 sermon.mp4" (includes date and extension)
+- "really long title that goes on and on describing every single detail of the video including all the people and all the topics, etc" (too long!)
+
+**REMEMBER: Short, lowercase, spaces only, NO dates, NO extensions!**
 
 Suggested title:"""
 

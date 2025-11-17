@@ -66,30 +66,75 @@
 
   <!-- Jobs List with Cascade -->
   <div class="jobs-viewport">
-    <cascade-list
-      *ngIf="allJobsAsListItems.length > 0"
-      [items]="allJobsAsListItems"
-      [displayConfig]="jobDisplayConfig"
-      [childrenConfig]="childrenConfig"
-      [selectionMode]="SelectionMode.None"
-      [progressMapper]="jobProgressMapper"
-      [enableDragDrop]="false"
-      emptyMessage="No jobs in queue"
-      emptyIcon="cloud_download">
+    <!-- Active Jobs Section -->
+    <div class="jobs-section active-jobs" *ngIf="activeJobsAsListItems.length > 0">
+      <div class="section-header">
+        <h3>
+          <mat-icon>downloading</mat-icon>
+          Active Downloads
+        </h3>
+      </div>
+      <cascade-list
+        [items]="activeJobsAsListItems"
+        [displayConfig]="jobDisplayConfig"
+        [childrenConfig]="childrenConfig"
+        [selectionMode]="SelectionMode.None"
+        [progressMapper]="jobProgressMapper"
+        [enableDragDrop]="false"
+        emptyMessage="No active jobs"
+        emptyIcon="cloud_download">
 
-      <!-- Custom action template for X button -->
-      <ng-template #itemActions let-item>
-        <button mat-icon-button
-                (click)="removeJob(item); $event.stopPropagation()"
-                matTooltip="Remove from queue"
-                class="remove-job-btn">
-          <mat-icon>close</mat-icon>
+        <!-- Custom action template for X button -->
+        <ng-template #itemActions let-item>
+          <button mat-icon-button
+                  (click)="removeJob(item); $event.stopPropagation()"
+                  matTooltip="Remove from queue"
+                  class="remove-job-btn">
+            <mat-icon>close</mat-icon>
+          </button>
+        </ng-template>
+      </cascade-list>
+    </div>
+
+    <!-- Completed Jobs Section -->
+    <div class="jobs-section completed-jobs" *ngIf="hasCompletedJobs()">
+      <div class="section-header">
+        <h3>
+          <mat-icon>history</mat-icon>
+          Completed Downloads
+        </h3>
+        <button mat-stroked-button
+                color="warn"
+                (click)="clearCompletedJobs()"
+                class="clear-completed-btn">
+          <mat-icon>delete_sweep</mat-icon>
+          Clear Completed
         </button>
-      </ng-template>
-    </cascade-list>
+      </div>
+      <cascade-list
+        [items]="completedJobsAsListItems"
+        [displayConfig]="jobDisplayConfig"
+        [childrenConfig]="childrenConfig"
+        [selectionMode]="SelectionMode.None"
+        [progressMapper]="jobProgressMapper"
+        [enableDragDrop]="false"
+        emptyMessage="No completed jobs"
+        emptyIcon="check_circle">
+
+        <!-- Custom action template for X button -->
+        <ng-template #itemActions let-item>
+          <button mat-icon-button
+                  (click)="removeJob(item); $event.stopPropagation()"
+                  matTooltip="Remove from list"
+                  class="remove-job-btn">
+            <mat-icon>close</mat-icon>
+          </button>
+        </ng-template>
+      </cascade-list>
+    </div>
 
     <!-- Empty state -->
-    <div class="empty-state" *ngIf="allJobsAsListItems.length === 0">
+    <div class="empty-state" *ngIf="activeJobsAsListItems.length === 0 && !hasCompletedJobs()">
       <mat-icon>cloud_download</mat-icon>
       <h2>No downloads in queue</h2>
       <p>Click "Paste URLs" to add videos to download</p>

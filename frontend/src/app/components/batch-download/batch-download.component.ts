@@ -137,7 +137,7 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   childrenConfig: ChildrenConfig = {
     enabled: true,
     expandable: true,
-    defaultExpanded: true,
+    defaultExpanded: false,  // Collapsed by default
     showMasterProgress: true,
     generator: (item: any) => this.generateJobStages(item),
     masterProgressCalculator: (item: any) => this.calculateMasterProgress(item)
@@ -1342,6 +1342,49 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Clear all completed jobs
+   */
+  clearCompletedJobs(): void {
+    const completedJobs = this.getCompletedJobsForDisplay();
+    if (completedJobs.length === 0) {
+      return;
+    }
+
+    // Delete each completed job
+    let deletedCount = 0;
+    const totalToDelete = completedJobs.length;
+
+    completedJobs.forEach(job => {
+      this.batchApiService.deleteJob(job.id).subscribe({
+        next: (response) => {
+          if (response.success) {
+            deletedCount++;
+            // Remove from frontend display
+            if (this.batchQueueStatus) {
+              if (job.status === 'completed') {
+                this.batchQueueStatus.completedJobs = this.batchQueueStatus.completedJobs?.filter(j => j.id !== job.id) || [];
+              } else {
+                this.batchQueueStatus.failedJobs = this.batchQueueStatus.failedJobs?.filter(j => j.id !== job.id) || [];
+              }
+              // Remove from order tracking
+              this.originalJobOrder = this.originalJobOrder.filter(id => id !== job.id);
+            }
+
+            // Show notification when all are deleted
+            if (deletedCount === totalToDelete) {
+              this.notificationService.toastOnly('success', 'Completed', `Cleared ${deletedCount} completed jobs`);
+              this.cdr.detectChanges();
+            }
+          }
+        },
+        error: (error) => {
+          console.error('Error removing completed job:', error);
+        }
+      });
+    });
+  }
+
+  /**
    * Toggle job details expansion
    */
   toggleJobDetails(jobId: string): void {
@@ -2001,6 +2044,39 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       }));
 
     return [...pending, ...active];
+  }
+
+  /**
+   * Get active jobs as list items for cascade display
+   */
+  get activeJobsAsListItems(): ListItem[] {
+    const pending = this.pendingJobs.map(job => ({
+      ...job,
+      displayName: job.displayName || 'Unknown',
+      isPending: true
+    }));
+
+    const active = this.getActiveJobsForDisplay()
+      .filter(job => job.status !== 'pending')
+      .map(job => ({
+        ...job,
+        displayName: this.getDisplayName(job),
+        isPending: false
+      }));
+
+    return [...pending, ...active];
+  }
+
+  /**
+   * Get completed jobs as list items for cascade display
+   */
+  get completedJobsAsListItems(): ListItem[] {
+    return this.getCompletedJobsForDisplay()
+      .map(job => ({
+        ...job,
+        displayName: this.getDisplayName(job),
+        isPending: false
+      }));
   }
 
   /**

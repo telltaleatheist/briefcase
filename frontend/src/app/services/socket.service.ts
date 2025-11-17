@@ -220,10 +220,24 @@ export class SocketService {
   }
 
   /**
-   * Listen for batch queue updates
+   * Listen for batch queue updates (legacy event)
    */
   onBatchQueueUpdated(): Observable<BatchQueueStatus> {
     return this.listenTo<BatchQueueStatus>('batch-queue-updated');
+  }
+
+  /**
+   * Listen for queue status updates (new queue system)
+   */
+  onQueueStatusUpdated(): Observable<{queueType: 'batch' | 'analysis', status: any, timestamp: string}> {
+    return this.listenTo<{queueType: 'batch' | 'analysis', status: any, timestamp: string}>('queue-status-updated');
+  }
+
+  /**
+   * Listen for task progress updates (new queue system)
+   */
+  onTaskProgress(): Observable<{jobId: string, taskType: string, progress: number, message: string, timestamp: string}> {
+    return this.listenTo<{jobId: string, taskType: string, progress: number, message: string, timestamp: string}>('task-progress');
   }
   
   onJobStatusUpdated(): Observable<{jobId: string, status: JobStatus, task: string}> {
@@ -258,6 +272,13 @@ export class SocketService {
         this.socket.off('analysisProgress');
       };
     });
+  }
+
+  /**
+   * Listen for analysis completed event
+   */
+  onAnalysisCompleted(): Observable<{videoId: string, suggestedTitle: string, aiDescription: string}> {
+    return this.listenTo<{videoId: string, suggestedTitle: string, aiDescription: string}>('analysis-completed');
   }
 
   /**

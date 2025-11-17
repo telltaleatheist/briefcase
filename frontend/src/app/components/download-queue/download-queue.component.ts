@@ -1085,7 +1085,7 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Expand only the first item in the queue, collapse all others
+   * Expand only the active (processing) item in the queue, collapse all others
    */
   private expandFirstItemOnly(): void {
     if (!this.cascadeList) {
@@ -1101,10 +1101,16 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
     // Clear all expanded items first
     this.cascadeList.expandedItems.clear();
 
-    // Expand only the first item if it has children
-    const firstJob = allJobs[0];
-    if (this.cascadeList.hasChildren(firstJob)) {
-      this.cascadeList.expandedItems.add(firstJob.id);
+    // Find the active/processing job and expand only that one
+    const activeJob = allJobs.find(job =>
+      job['overallStatus'] === 'processing' ||
+      job['status'] === 'processing' ||
+      job['overallStatus'] === 'active' ||
+      job['status'] === 'active'
+    );
+
+    if (activeJob && this.cascadeList.hasChildren(activeJob)) {
+      this.cascadeList.expandedItems.add(activeJob.id);
     }
   }
 

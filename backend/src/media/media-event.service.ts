@@ -116,14 +116,24 @@ export class MediaEventService {
   }
   
   emitDownloadFailed(url: string, error: string, jobId?: string): void {
-    this.emitEvent('download-failed', { 
-      url, 
+    this.emitEvent('download-failed', {
+      url,
       error,
       jobId,
       timestamp: this.getTimestamp()
     });
   }
-  
+
+  emitDownloadSkipped(url: string, reason: string, videoId?: string, jobId?: string): void {
+    this.emitEvent('download-skipped', {
+      url,
+      reason,
+      videoId,
+      jobId,
+      timestamp: this.getTimestamp()
+    });
+  }
+
   /**
    * Processing events
    */
@@ -323,6 +333,30 @@ export class MediaEventService {
     this.emitEvent('analysis-failed', {
       videoId,
       error,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Task progress event (for queue system)
+   */
+  emitTaskProgress(jobId: string, taskType: string, progress: number, message: string): void {
+    this.emitEvent('task-progress', {
+      jobId,
+      taskType,
+      progress: this.normalizeProgress(progress),
+      message,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Queue status updated event
+   */
+  emitQueueStatusUpdated(queueType: 'batch' | 'analysis', status: any): void {
+    this.emitEvent('queue-status-updated', {
+      queueType,
+      status,
       timestamp: this.getTimestamp()
     });
   }

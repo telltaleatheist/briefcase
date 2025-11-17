@@ -835,6 +835,60 @@ export class DatabaseService {
       }
     }
 
+    try {
+      // Migration 13: Add has_transcript column to videos table if it doesn't exist
+      db.exec("SELECT has_transcript FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: has_transcript')) {
+        this.logger.log('Running migration: Adding has_transcript column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN has_transcript INTEGER DEFAULT 0;
+          `);
+          // Update existing rows based on whether they have transcripts
+          db.exec(`
+            UPDATE videos
+            SET has_transcript = CASE
+              WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = videos.id) THEN 1
+              ELSE 0
+            END;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: has_transcript column added and populated');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 14: Add has_analysis column to videos table if it doesn't exist
+      db.exec("SELECT has_analysis FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: has_analysis')) {
+        this.logger.log('Running migration: Adding has_analysis column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN has_analysis INTEGER DEFAULT 0;
+          `);
+          // Update existing rows based on whether they have analyses
+          db.exec(`
+            UPDATE videos
+            SET has_analysis = CASE
+              WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = videos.id) THEN 1
+              ELSE 0
+            END;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: has_analysis column added and populated');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
   }
 
   /**
@@ -1165,6 +1219,16 @@ export class DatabaseService {
   }
 
   /**
+   * Find video by source URL
+   */
+  findVideoByUrl(url: string): VideoRecord | null {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT * FROM videos WHERE source_url = ?');
+    const result = stmt.get(url) as VideoRecord | undefined;
+    return result || null;
+  }
+
+  /**
    * Find video by ID
    */
   findVideoById(id: string): VideoRecord | null {
@@ -1375,10 +1439,10 @@ export class DatabaseService {
     const stmt = db.prepare(`
       SELECT
         v.*,
-        CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
-        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) OR v.suggested_title IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+        a.summary as suggested_title,
         CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
       FROM videos v
+      LEFT JOIN analyses a ON a.video_id = v.id
       WHERE v.id = ?
     `);
     const result = stmt.get(id) as VideoRecordWithFlags | undefined;
@@ -1452,15 +1516,15 @@ export class DatabaseService {
    */
   getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number; includeChildren?: boolean }): VideoRecordWithFlags[] {
     const db = this.ensureInitialized();
-    // Use subqueries instead of LEFT JOINs to prevent duplicate rows
-    // when there are multiple transcripts or analyses for a video
+    // Use LEFT JOIN for analyses to get suggested_title (summary field)
+    // has_transcript and has_analysis are now actual columns (maintained by triggers/updates)
     let query = `
       SELECT
         v.*,
-        CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
-        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) OR v.suggested_title IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+        a.summary as suggested_title,
         CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
       FROM videos v
+      LEFT JOIN analyses a ON a.video_id = v.id
     `;
     const params: any[] = [];
 
@@ -1572,7 +1636,13 @@ export class DatabaseService {
       `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`
     ).run(transcript.videoId, transcript.plainText);
 
+    // Update has_transcript flag in videos table
+    db.prepare(
+      `UPDATE videos SET has_transcript = 1 WHERE id = ?`
+    ).run(transcript.videoId);
+
     this.saveDatabase();
+    this.logger.log(`Set has_transcript flag for video ${transcript.videoId}`);
   }
 
   /**
@@ -1623,7 +1693,13 @@ export class DatabaseService {
       `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`
     ).run(analysis.videoId, contentForSearch);
 
+    // Update has_analysis flag in videos table
+    db.prepare(
+      `UPDATE videos SET has_analysis = 1 WHERE id = ?`
+    ).run(analysis.videoId);
+
     this.saveDatabase();
+    this.logger.log(`Set has_analysis flag for video ${analysis.videoId}`);
   }
 
   /**

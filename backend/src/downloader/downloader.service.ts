@@ -9,6 +9,7 @@ import { YtDlpManager } from './yt-dlp-manager';
 import { SharedConfigService } from '../config/shared-config.service';
 import { MediaEventService } from '../media/media-event.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
+import { DatabaseService } from '../database/database.service';
 
 @Injectable()
 export class DownloaderService implements OnModuleInit {
@@ -20,7 +21,8 @@ export class DownloaderService implements OnModuleInit {
   constructor(
     private readonly pathService: PathService,
     private readonly sharedConfigService: SharedConfigService,
-    private readonly eventService: MediaEventService
+    private readonly eventService: MediaEventService,
+    private readonly databaseService: DatabaseService
   ) {
     // Use user's app data directory instead of process.cwd() to avoid permission issues
     const userDataPath = process.env.APPDATA ||
@@ -185,6 +187,23 @@ export class DownloaderService implements OnModuleInit {
       options.url = await this.transformAbcNewsUrl(options.url);
 
       this.logger.log(`Starting download for URL: ${options.url}`);
+
+      // Check if video already exists in database
+      const existingVideo = this.databaseService.findVideoByUrl(options.url);
+      if (existingVideo) {
+        const reason = `Video already exists in library: "${existingVideo.filename || existingVideo.title || 'Untitled'}"`;
+        this.logger.log(`Skipping download - ${reason}`);
+        this.eventService.emitDownloadSkipped(options.url, reason, existingVideo.id, jobId);
+
+        return {
+          success: false,
+          outputFile: existingVideo.current_path,
+          url: options.url,
+          skipped: true,
+          reason,
+          existingVideoId: existingVideo.id
+        };
+      }
 
       // Capture start time BEFORE starting download
       const downloadStartTime = Date.now();

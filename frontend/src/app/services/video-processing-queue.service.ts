@@ -49,6 +49,8 @@ export class VideoProcessingQueueService implements OnDestroy {
     console.log('[VideoProcessingQueueService] Service initialized');
     this.loadFromCache();
     this.setupProgressListeners();
+    // Fetch current queue state from backend to sync with server
+    this.syncWithBackend();
   }
 
   ngOnDestroy(): void {
@@ -115,6 +117,67 @@ export class VideoProcessingQueueService implements OnDestroy {
       console.log('[VideoProcessingQueueService] Cache cleared');
     } catch (error) {
       console.error('[VideoProcessingQueueService] Failed to clear cache:', error);
+    }
+  }
+
+  /**
+   * Sync with backend queue state on initialization
+   * Ensures frontend stays subscribed to active backend jobs after page refresh
+   */
+  private async syncWithBackend(): Promise<void> {
+    try {
+      console.log('[VideoProcessingQueueService] Syncing with backend queue state...');
+
+      // Fetch both batch and analysis queue jobs
+      const batchUrl = `${this.backendUrlService.getBackendUrl()}/queue/jobs?type=batch`;
+      const analysisUrl = `${this.backendUrlService.getBackendUrl()}/queue/jobs?type=analysis`;
+
+      const [batchResponse, analysisResponse] = await Promise.all([
+        this.http.get<{ success: boolean; jobs: any[] }>(batchUrl).toPromise(),
+        this.http.get<{ success: boolean; jobs: any[] }>(analysisUrl).toPromise()
+      ]);
+
+      const backendJobs = [
+        ...(batchResponse?.jobs || []),
+        ...(analysisResponse?.jobs || [])
+      ];
+
+      if (backendJobs.length === 0) {
+        console.log('[VideoProcessingQueueService] No active jobs on backend');
+        return;
+      }
+
+      console.log(`[VideoProcessingQueueService] Found ${backendJobs.length} active jobs on backend`);
+
+      // Get current local jobs
+      const currentJobs = this.jobs.getValue();
+      const backendJobIds = new Set(backendJobs.map((j: any) => j.id));
+
+      // Clean up completed/failed jobs that are no longer on backend
+      let removedCount = 0;
+      Array.from(currentJobs.keys()).forEach(localJobId => {
+        const localJob = currentJobs.get(localJobId);
+        // Remove jobs that finished and are no longer tracked by backend
+        if (localJob &&
+            (localJob.overallStatus === 'completed' || localJob.overallStatus === 'failed') &&
+            !backendJobIds.has(localJob.backendJobId || '')) {
+          console.log(`[VideoProcessingQueueService] Removing completed job ${localJobId} that's no longer on backend`);
+          currentJobs.delete(localJobId);
+          removedCount++;
+        }
+      });
+
+      if (removedCount > 0) {
+        // Emit updated jobs
+        this.emitJobs();
+        console.log(`[VideoProcessingQueueService] Removed ${removedCount} completed jobs`);
+      }
+
+      console.log('[VideoProcessingQueueService] Sync with backend complete - WebSocket will handle live updates');
+
+    } catch (error) {
+      console.error('[VideoProcessingQueueService] Failed to sync with backend:', error);
+      // Don't throw - allow app to continue with cached state
     }
   }
 
@@ -231,10 +294,158 @@ export class VideoProcessingQueueService implements OnDestroy {
   }
 
   /**
-   * Submit a job and all its child processes to the backend
-   * Processes are submitted sequentially to ensure proper ordering
+   * Submit a job to the new queue system
+   * All child processes are submitted as tasks in a single queue job
    */
   async submitJob(parentJobId: string): Promise<void> {
+    const job = this.jobs.getValue().get(parentJobId);
+    if (!job) {
+      console.error('[VideoProcessingQueueService] Job not found:', parentJobId);
+      return;
+    }
+
+    console.log('[VideoProcessingQueueService] Submitting job to new queue system:', parentJobId);
+
+    job.overallStatus = 'processing';
+    this.updateJob(parentJobId, job, true); // Immediate - status change
+
+    try {
+      // Build task list from child processes
+      const tasks: any[] = [];
+
+      // Check if we have BOTH process and normalize - combine into process-video
+      const hasProcess = job.childProcesses.some(c => c.type === 'process');
+      const hasNormalize = job.childProcesses.some(c => c.type === 'normalize');
+      const shouldCombine = hasProcess && hasNormalize;
+
+      // Track which child types we've already handled
+      const handledTypes = new Set<string>();
+      let combinedTaskAdded = false;
+
+      for (const child of job.childProcesses) {
+        // Skip if already handled by combination
+        if (handledTypes.has(child.type)) {
+          continue;
+        }
+
+        switch (child.type) {
+          case 'download':
+            // Download and import are combined in new system
+            tasks.push({ type: 'download', options: { quality: child.quality || '1080', outputDir: child.outputDir } });
+            tasks.push({ type: 'import', options: {} });
+            break;
+
+          case 'import':
+            // Skip - already handled by download
+            break;
+
+          case 'process':
+            // Add combined task if we should combine, otherwise add individual task
+            if (shouldCombine && !combinedTaskAdded) {
+              tasks.push({
+                type: 'process-video',
+                options: {
+                  fixAspectRatio: true,
+                  normalizeAudio: true,
+                  level: -16,
+                  method: 'rms'
+                }
+              });
+              handledTypes.add('process');
+              handledTypes.add('normalize');
+              combinedTaskAdded = true;
+              console.log('[VideoProcessingQueueService] Combining fix-aspect-ratio + normalize-audio into single process-video task');
+            } else if (!shouldCombine) {
+              tasks.push({ type: 'fix-aspect-ratio', options: {} });
+            }
+            break;
+
+          case 'normalize':
+            // Add combined task if we should combine and haven't added it yet
+            if (shouldCombine && !combinedTaskAdded) {
+              tasks.push({
+                type: 'process-video',
+                options: {
+                  fixAspectRatio: true,
+                  normalizeAudio: true,
+                  level: -16,
+                  method: 'rms'
+                }
+              });
+              handledTypes.add('process');
+              handledTypes.add('normalize');
+              combinedTaskAdded = true;
+              console.log('[VideoProcessingQueueService] Combining fix-aspect-ratio + normalize-audio into single process-video task');
+            } else if (!shouldCombine) {
+              tasks.push({ type: 'normalize-audio', options: { level: -16 } });
+            }
+            break;
+
+          case 'transcribe':
+            tasks.push({
+              type: 'transcribe',
+              options: {
+                model: child.whisperModel || 'base',
+                language: child.language || 'en'
+              }
+            });
+            break;
+
+          case 'analyze':
+            tasks.push({
+              type: 'analyze',
+              options: {
+                aiModel: child.aiModel || 'qwen2.5:7b',
+                aiProvider: 'ollama',
+                ollamaEndpoint: child.ollamaEndpoint || 'http://localhost:11434',
+                customInstructions: child.customInstructions
+              }
+            });
+            break;
+        }
+      }
+
+      // Submit to new queue system
+      const url = await this.backendUrlService.getApiUrl('/queue/add');
+      const response = await this.http.post<any>(url, {
+        queueType: 'batch',
+        url: job.videoPath, // The download URL
+        displayName: job.displayName,
+        tasks
+      }).toPromise();
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to start queue job');
+      }
+
+      // Store backend job ID for progress tracking
+      job.backendJobId = response.jobId;
+      console.log('[VideoProcessingQueueService] Queue job created:', response.jobId);
+
+      // Mark all children as processing (backend will handle them sequentially)
+      job.childProcesses.forEach(child => {
+        child.status = 'processing';
+      });
+
+      this.updateJob(parentJobId, job, true);
+
+    } catch (error: any) {
+      console.error('[VideoProcessingQueueService] ❌ Error submitting job:', error);
+      job.overallStatus = 'failed';
+      job.childProcesses.forEach(child => {
+        if (child.status === 'pending' || child.status === 'processing') {
+          child.status = 'failed';
+          child.error = error.message || 'Failed to submit job';
+        }
+      });
+      this.updateJob(parentJobId, job, true);
+    }
+  }
+
+  /**
+   * OLD METHOD - Kept for backward compatibility but not used with new queue system
+   */
+  async submitJobOld(parentJobId: string): Promise<void> {
     const job = this.jobs.getValue().get(parentJobId);
     if (!job) {
       console.error('[VideoProcessingQueueService] Job not found:', parentJobId);
@@ -576,32 +787,33 @@ export class VideoProcessingQueueService implements OnDestroy {
       throw new Error('Download URL required for download task');
     }
 
-    const url = await this.backendUrlService.getApiUrl('/downloader/batch');
+    const url = await this.backendUrlService.getApiUrl('/queue/add');
 
-    console.log('[VideoProcessingQueueService] Submitting download to batch queue:', child.downloadUrl);
+    console.log('[VideoProcessingQueueService] Submitting download to new queue system:', child.downloadUrl);
 
     const childJobId = `${job.id}-child-download`;
 
+    // Build task list using new queue system
+    const tasks = [
+      { type: 'download', options: { quality: child.quality || '1080', outputDir: child.outputDir } },
+      { type: 'import', options: {} }
+    ];
+
     const response = await this.http.post<any>(url, {
+      queueType: 'batch',
       url: child.downloadUrl,
       displayName: child.postTitle || job.displayName,
-      outputDir: child.outputDir,
-      quality: child.quality || '1080',
-      convertToMp4: child.convertToMp4 !== false,
-      shouldImport: true,        // Auto-import after download
-      skipProcessing: true,      // Don't run fix-aspect-ratio automatically - we'll do it as a separate child task
-      jobId: childJobId,
+      tasks
     }).toPromise();
 
     if (!response.success) {
       throw new Error(response.error || response.message || 'Failed to start download');
     }
 
-    console.log('[VideoProcessingQueueService] Download job added to batch queue:', response.jobId);
+    console.log('[VideoProcessingQueueService] Download job added to new queue:', response.jobId);
 
-    // Note: Batch download service handles the download + import automatically
-    // We'll get progress updates via WebSocket and need to listen for completion
-    // to get the videoId and videoPath
+    // Note: New queue system handles download + import via tasks
+    // We'll get progress updates via WebSocket (task-progress events)
 
     // Return job ID - path and videoId will be updated via WebSocket events
     return {
@@ -647,7 +859,138 @@ export class VideoProcessingQueueService implements OnDestroy {
   private setupProgressListeners(): void {
     console.log('[VideoProcessingQueueService] Setting up progress listeners');
 
-    // Listen to download progress
+    // Listen to NEW QUEUE SYSTEM task progress events
+    const taskProgressSub = this.socketService.onTaskProgress().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Task progress received:', data);
+      const backendJobId = data.jobId;
+
+      if (backendJobId) {
+        // Find the parent job that matches this backend job ID
+        const jobsMap = this.jobs.getValue();
+        for (const [parentJobId, job] of jobsMap.entries()) {
+          if (job.backendJobId === backendJobId) {
+            // Update the job's overall progress
+            job.overallProgress = data.progress;
+
+            // Update the current child process based on task type
+            // Special case: process-video updates BOTH process and normalize children
+            if (data.taskType === 'process-video') {
+              const processChild = job.childProcesses.find(c => c.type === 'process');
+              const normalizeChild = job.childProcesses.find(c => c.type === 'normalize');
+
+              // Update both children with the same progress
+              [processChild, normalizeChild].forEach(child => {
+                if (child) {
+                  child.progress = data.progress;
+                  if (data.progress >= 100) {
+                    child.status = 'completed';
+                    console.log(`[VideoProcessingQueueService] Child ${child.type} completed (combined task)`);
+                  } else if (child.status !== 'processing') {
+                    child.status = 'processing';
+                  }
+                }
+              });
+
+              console.log(`[VideoProcessingQueueService] Updated combined task progress: ${data.progress}%`);
+            } else {
+              // Normal single-task mapping
+              const currentChild = job.childProcesses.find(child => {
+                // Map task types to child process types
+                if (data.taskType === 'download' && child.type === 'download') return true;
+                if (data.taskType === 'import' && child.type === 'import') return true;
+                if (data.taskType === 'fix-aspect-ratio' && child.type === 'process') return true;
+                if (data.taskType === 'normalize-audio' && child.type === 'normalize') return true;
+                if (data.taskType === 'transcribe' && child.type === 'transcribe') return true;
+                if (data.taskType === 'analyze' && child.type === 'analyze') return true;
+                return false;
+              });
+
+              if (currentChild) {
+                currentChild.progress = data.progress;
+
+                // Mark as completed when reaching 100%
+                if (data.progress >= 100) {
+                  currentChild.status = 'completed';
+                  console.log(`[VideoProcessingQueueService] Child ${currentChild.type} completed`);
+                } else if (currentChild.status !== 'processing') {
+                  currentChild.status = 'processing';
+                }
+
+                console.log(`[VideoProcessingQueueService] Updated child ${currentChild.type} progress: ${data.progress}% (status: ${currentChild.status})`);
+              }
+            }
+
+            // Calculate overall progress from all children
+            const totalProgress = job.childProcesses.reduce((sum, child) => sum + child.progress, 0);
+            job.overallProgress = Math.round(totalProgress / job.childProcesses.length);
+
+            this.updateJob(parentJobId, job, false);
+            break;
+          }
+        }
+      }
+    });
+    this.subscriptions.push(taskProgressSub);
+
+    // Listen to queue status updates to sync job completion
+    const queueStatusSub = this.socketService.onQueueStatusUpdated().subscribe(data => {
+      console.log('[VideoProcessingQueueService] Queue status updated:', data);
+
+      if (data.queueType === 'batch' && data.status) {
+        const allJobs = [
+          ...data.status.pendingJobs,
+          ...data.status.processingJobs,
+          ...data.status.completedJobs,
+          ...data.status.failedJobs
+        ];
+
+        // Update our jobs based on backend queue status
+        const jobsMap = this.jobs.getValue();
+        for (const [parentJobId, job] of jobsMap.entries()) {
+          if (job.backendJobId) {
+            const backendJob = allJobs.find(j => j.id === job.backendJobId);
+            if (backendJob) {
+              // Update overall status
+              if (backendJob.status === 'completed') {
+                job.overallStatus = 'completed';
+                job.completedAt = new Date();
+                // Mark all children as completed
+                job.childProcesses.forEach(child => {
+                  if (child.status !== 'completed') {
+                    child.status = 'completed';
+                    child.progress = 100;
+                  }
+                });
+                console.log(`[VideoProcessingQueueService] Job ${parentJobId} completed`);
+              } else if (backendJob.status === 'failed') {
+                job.overallStatus = 'failed';
+                job.childProcesses.forEach(child => {
+                  if (child.status === 'processing') {
+                    child.status = 'failed';
+                    child.error = backendJob.error || 'Task failed';
+                  }
+                });
+                console.log(`[VideoProcessingQueueService] Job ${parentJobId} failed:`, backendJob.error);
+              }
+
+              // Update overall progress
+              job.overallProgress = backendJob.progress;
+
+              // Update videoId if available
+              if (backendJob.videoId) {
+                job.videoId = backendJob.videoId;
+                console.log(`[VideoProcessingQueueService] Updated videoId for job ${parentJobId}:`, backendJob.videoId);
+              }
+
+              this.updateJob(parentJobId, job, false);
+            }
+          }
+        }
+      }
+    });
+    this.subscriptions.push(queueStatusSub);
+
+    // Listen to download progress (OLD SYSTEM - for backward compatibility)
     const downloadProgressSub = this.socketService.onDownloadProgress().subscribe(data => {
       console.log('[VideoProcessingQueueService] Download progress received:', data);
       const backendJobId = data.jobId;

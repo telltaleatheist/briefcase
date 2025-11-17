@@ -55,6 +55,20 @@ export const PROCESS_DEFINITIONS: Record<ProcessType, ProcessDefinition> = {
     requiresVideoId: false,
   },
 
+  'process-video': {
+    type: 'process-video',
+    displayName: 'Process Video',
+    icon: 'video_settings',
+    apiPath: '/media/process-video',
+    requiresVideoId: false,
+    defaultConfig: {
+      fixAspectRatio: true,
+      normalizeAudio: true,
+      level: -16,
+      method: 'rms'
+    }
+  },
+
   'transcribe': {
     type: 'transcribe',
     displayName: 'Transcribe',

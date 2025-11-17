@@ -6,6 +6,7 @@ import { DownloaderModule } from './downloader/downloader.module';
 import { FfmpegModule } from './ffmpeg/ffmpeg.module';
 import { PathModule } from './path/path.module';
 import { MediaModule } from './media/media.module';
+import { QueueModule } from './queue/queue.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { LibraryModule } from './library/library.module';
 import { DatabaseModule } from './database/database.module';
@@ -36,6 +37,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     FfmpegModule,
     PathModule,
     MediaModule,
+    QueueModule,
     AnalysisModule,
     LibraryModule,
     SavedLinksModule,

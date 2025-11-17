@@ -232,6 +232,15 @@ export class VideoStateService {
       this.handleAnalysisProgress(event);
     });
 
+    // Analysis completed - reload video to get ALL data at once
+    this.socketService.onAnalysisCompleted().subscribe(event => {
+      console.log('[VideoStateService] Analysis completed - reloading video:', event.videoId);
+      if (event.videoId) {
+        // Reload from database to get all saved data (tags, description, title, sections, etc.)
+        this.reloadVideoFromDatabase(event.videoId);
+      }
+    });
+
     // Processing progress
     this.socketService.onProcessingProgress().subscribe(event => {
       console.log('[VideoStateService] Processing progress:', event);
@@ -270,14 +279,25 @@ export class VideoStateService {
    */
   private async handleVideoImported(event: any): Promise<void> {
     const videoId = event.videoId || event.video?.id;
-    if (!videoId) return;
+    console.log('[VideoStateService] handleVideoImported - event:', event);
+    console.log('[VideoStateService] handleVideoImported - extracted videoId:', videoId);
+
+    if (!videoId) {
+      console.warn('[VideoStateService] handleVideoImported - no videoId in event!');
+      return;
+    }
 
     // Reload this specific video from database
     try {
+      console.log('[VideoStateService] handleVideoImported - fetching video from database:', videoId);
       const video = await this.databaseLibraryService.getVideoById(videoId);
       if (video) {
+        console.log('[VideoStateService] handleVideoImported - loaded video:', video.id, video.filename);
         const videoState = this.createVideoStateFromDatabase(video);
         this.upsertVideo(videoState);
+        console.log('[VideoStateService] handleVideoImported - upserted video state for:', videoState.id);
+      } else {
+        console.warn('[VideoStateService] handleVideoImported - video not found in database:', videoId);
       }
     } catch (error) {
       console.error('[VideoStateService] Failed to load imported video:', error);

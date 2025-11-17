@@ -79,7 +79,11 @@ export interface DownloadResult {
   outputFile?: string;
   error?: string;
   jobId?: string;
-  isImage?: boolean; // Add this new property
+  isImage?: boolean;
+  skipped?: boolean; // True if download was skipped (e.g., duplicate)
+  reason?: string; // Reason for skip/failure
+  existingVideoId?: string; // ID of existing video if skipped due to duplicate
+  url?: string; // The URL that was downloaded/skipped
 }
 
 export interface DownloadProgress {

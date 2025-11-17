@@ -33,11 +33,16 @@ export class WhisperService {
       // Set up progress tracking
       whisperManager.on('progress', (progress) => {
         this.logger.log(`Transcription progress: ${progress.percent}% - ${progress.task}`);
+        // Emit old event for backward compatibility
         this.eventService.emitTranscriptionProgress(
           progress.percent,
           progress.task,
           jobId
         );
+        // Emit new task-progress event for queue system
+        if (jobId) {
+          this.eventService.emitTaskProgress(jobId, 'transcribe', progress.percent, progress.task);
+        }
 
         console.log(`Progress event: ${JSON.stringify(progress)}`);
       });

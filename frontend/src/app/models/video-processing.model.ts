@@ -8,7 +8,7 @@
 /**
  * Types of processing operations that can be performed on a video
  */
-export type ProcessType = 'download' | 'import' | 'process' | 'normalize' | 'transcribe' | 'analyze';
+export type ProcessType = 'download' | 'import' | 'process' | 'normalize' | 'process-video' | 'transcribe' | 'analyze';
 
 /**
  * Status of a job or process
@@ -85,6 +85,9 @@ export interface ChildProcess {
 export interface VideoProcessingJob {
   /** Unique identifier for this parent job */
   id: string;
+
+  /** Backend queue job ID (from new queue system) */
+  backendJobId?: string;
 
   /** Database video ID (if processing an existing library video) */
   videoId?: string;
@@ -187,6 +190,7 @@ export function getProcessDisplayName(type: ProcessType): string {
     'import': 'Import to Library',
     'process': 'Fix Aspect Ratio',
     'normalize': 'Normalize Audio',
+    'process-video': 'Process Video',
     'transcribe': 'Transcribe',
     'analyze': 'AI Analysis'
   };
@@ -202,6 +206,7 @@ export function getProcessIcon(type: ProcessType): string {
     'import': 'library_add',
     'process': 'aspect_ratio',
     'normalize': 'equalizer',
+    'process-video': 'video_settings',
     'transcribe': 'subtitles',
     'analyze': 'psychology'
   };

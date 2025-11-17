@@ -52,9 +52,10 @@ export class MediaProcessingService {
   ) {}
   
   async processMedia(
-    inputFile: string, 
+    inputFile: string,
     options: ProcessingOptions,
-    jobId?: string
+    jobId?: string,
+    taskType?: string  // NEW: Allow caller to specify task type for progress events
   ): Promise<ProcessingResult> {
     this.logger.log('Received processing options:', JSON.stringify({
       fixAspectRatio: options.fixAspectRatio,
@@ -62,20 +63,20 @@ export class MediaProcessingService {
       audioNormalizationMethod: options.audioNormalizationMethod,
       transcribeVideo: options.transcribeVideo
     }, null, 2));
-      
+
     try {
       this.logger.log(`Processing media: ${inputFile} with options: ${JSON.stringify(options)}`);
-      
+
       // Emit processing started event
       this.eventService.emitProcessingStarted(inputFile, options, jobId);
-            
+
       // Initialize result
-      const result: ProcessingResult = { 
+      const result: ProcessingResult = {
         success: true,
         outputFile: inputFile // Default to input file if no processing occurs
       };
 
-      if (options.fixAspectRatio || options.normalizeAudio || 
+      if (options.fixAspectRatio || options.normalizeAudio ||
           options.useRmsNormalization || options.useCompression) {
         const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
           fixAspectRatio: options.fixAspectRatio,
@@ -85,8 +86,8 @@ export class MediaProcessingService {
           rmsNormalizationLevel: options.rmsNormalizationLevel,
           useCompression: options.useCompression,
           compressionLevel: options.compressionLevel
-        });
-          
+        }, taskType);  // Pass taskType to ffmpeg
+
         if (outputFile && fs.existsSync(outputFile)) {
           this.logger.log(`Media processed successfully: ${outputFile}`);
           result.outputFile = outputFile;

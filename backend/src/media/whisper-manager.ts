@@ -21,6 +21,9 @@ export class WhisperManager extends EventEmitter {
   private whisperPath: string;
   private whisperVersion: string = 'unknown';
   private progressCounter = 0;
+  private startTime: number = 0;
+  private audioDuration: number = 0;
+  private lastReportedPercent = 0;
 
   constructor(private readonly sharedConfigService: SharedConfigService) {
     super();
@@ -130,17 +133,32 @@ export class WhisperManager extends EventEmitter {
 
   async transcribe(audioFile: string, outputDir: string): Promise<string> {
     this.progressCounter = 0;
+    this.lastReportedPercent = 0;
+    this.startTime = Date.now();
 
     console.log('Starting Whisper transcription with extensive logging');
     console.log('Audio file:', audioFile);
     console.log('Output directory:', outputDir);
-  
+
     if (!audioFile || !fs.existsSync(audioFile)) {
       throw new Error(`Audio file not found: ${audioFile}`);
     }
 
+    // Get audio duration for progress estimation
+    this.audioDuration = await this.getAudioDuration(audioFile);
+    this.logger.log(`Audio duration: ${this.audioDuration}s`);
+
     this.aborted = false;
     this.isRunning = true;
+
+    // Start periodic progress updates based on time
+    const progressInterval = setInterval(() => {
+      if (!this.isRunning) {
+        clearInterval(progressInterval);
+        return;
+      }
+      this.updateTimeBasedProgress();
+    }, 1000); // Update every second
 
     // Create output filename for SRT
     const basename = path.basename(audioFile, path.extname(audioFile));
@@ -328,51 +346,81 @@ export class WhisperManager extends EventEmitter {
     return seconds < 10 ? `0${seconds}` : `${seconds}`;
   }
 
+  /**
+   * Get audio duration using ffprobe
+   */
+  private async getAudioDuration(audioFile: string): Promise<number> {
+    return new Promise((resolve) => {
+      exec(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioFile}"`, (error, stdout) => {
+        if (error) {
+          this.logger.warn(`Could not get audio duration: ${error.message}`);
+          resolve(180); // Default to 3 minutes if we can't detect
+          return;
+        }
+        const duration = parseFloat(stdout.trim());
+        resolve(isNaN(duration) ? 180 : duration);
+      });
+    });
+  }
+
+  /**
+   * Update progress based on elapsed time vs audio duration
+   * Whisper typically processes at 10-20x realtime speed
+   */
+  private updateTimeBasedProgress(): void {
+    if (this.audioDuration === 0) return;
+
+    const elapsedSeconds = (Date.now() - this.startTime) / 1000;
+    // Assume Whisper processes at 15x realtime (conservative estimate)
+    const estimatedProgress = Math.min(95, (elapsedSeconds * 15 / this.audioDuration) * 100);
+
+    // Only emit if progress changed by at least 5%
+    if (Math.floor(estimatedProgress / 5) > Math.floor(this.lastReportedPercent / 5)) {
+      this.lastReportedPercent = estimatedProgress;
+      this.emit('progress', {
+        percent: Math.round(estimatedProgress),
+        task: this.getCurrentTask(estimatedProgress)
+      });
+      this.logger.log(`Time-based progress: ${Math.round(estimatedProgress)}%`);
+    }
+  }
+
   private parseProgress(output: string): void {
-    console.log('Raw Whisper output:', output);  // Log ALL output
-  
+    // Log output for debugging
+    if (output.trim().length > 0) {
+      this.logger.debug(`Whisper: ${output.trim()}`);
+    }
+
+    // Check for explicit percentage in output
     const percentMatch = output.match(/(\d+)%/);
+    if (percentMatch) {
+      const percent = Math.min(100, parseInt(percentMatch[1], 10));
+      if (percent > this.lastReportedPercent) {
+        this.lastReportedPercent = percent;
+        this.emit('progress', {
+          percent,
+          task: this.getCurrentTask(percent)
+        });
+      }
+    }
+
+    // Check for milestone events
     const milestones = [
       { pattern: 'Loading model', percent: 10, task: 'Loading Whisper model' },
       { pattern: 'Detecting language', percent: 20, task: 'Detecting language' },
-      { pattern: 'Running on:', percent: 30, task: 'Preparing transcription' },
-      { pattern: 'Processing', percent: 50, task: 'Processing audio' },
-      { pattern: 'Adding segments', percent: 70, task: 'Processing audio segments' },
-      { pattern: 'Writing', percent: 90, task: 'Writing transcript file' }
+      { pattern: 'Running on:', percent: 25, task: 'Preparing transcription' },
     ];
-  
-    // Check milestone events first
+
     for (const milestone of milestones) {
-      if (output.includes(milestone.pattern)) {
-        console.log(`Milestone detected: ${milestone.pattern}, Emitting progress: ${milestone.percent}%`);
-        this.emit('progress', { 
-          percent: milestone.percent, 
-          task: milestone.task 
+      if (output.includes(milestone.pattern) && milestone.percent > this.lastReportedPercent) {
+        this.lastReportedPercent = milestone.percent;
+        this.emit('progress', {
+          percent: milestone.percent,
+          task: milestone.task
         });
-        return;
+        break;
       }
     }
-  
-    // Forcing progress emission
-    if (percentMatch) {
-      const percent = parseInt(percentMatch[1], 10);
-      const scaledPercent = Math.min(100, percent);
-      
-      console.log(`Percentage match: ${scaledPercent}%`);
-      this.emit('progress', { 
-        percent: scaledPercent, 
-        task: 'Transcribing audio' 
-      });
-      return;
-    }
-  
-    // Periodic progress if no explicit progress
-    this.progressCounter = Math.min(90, this.progressCounter + 5);
-    console.log(`Periodic progress: ${this.progressCounter}%`);
-    this.emit('progress', { 
-      percent: this.progressCounter, 
-      task: 'Transcribing audio' 
-    });
   }
   
   private getCurrentTask(percent: number): string {

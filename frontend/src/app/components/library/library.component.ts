@@ -723,19 +723,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }));
 
-    // Subscribe to video imported events from WebSocket
-    this.subscriptions.push(this.socketService.onVideoImported().subscribe(async event => {
-      console.log('[LibraryComponent] Video imported event received:', event);
-
-      // Reload videos from the database to include the new video
-      await this.loadVideos();
-
-      console.log('[LibraryComponent] Videos reloaded after import. Total videos:', this.videos.length);
-    }));
-
-    // Note: Transcription and analysis completion updates are handled by VideoStateService
+    // Note: Video imported, transcription, and analysis completion updates are handled by VideoStateService
     // which reloads the video from database and emits via videos$ observable.
-    // The subscription at line 436 receives these updates and refreshes the UI automatically.
+    // The subscription at the top of this method receives these updates and refreshes the UI automatically.
 
     // Subscribe to transcription failed events to handle errors
     this.subscriptions.push(this.socketService.onTranscriptionFailed().subscribe(event => {

@@ -207,17 +207,18 @@ export class FfmpegService {
   }
 
   async reencodeVideo(
-    videoFile: string, 
-    jobId?: string, 
+    videoFile: string,
+    jobId?: string,
     options?: {
       fixAspectRatio?: boolean,
-      normalizeAudio?: boolean, 
+      normalizeAudio?: boolean,
       audioNormalizationMethod?: 'rms' | 'peak',
       useRmsNormalization?: boolean,
       rmsNormalizationLevel?: number,
       useCompression?: boolean,
       compressionLevel?: number
-    }
+    },
+    taskType?: string  // NEW: Task type for new queue system
   ): Promise<string | null> {
     this.logger.log('Received reencoding options:', JSON.stringify({
       fixAspectRatio: options?.fixAspectRatio,
@@ -267,9 +268,12 @@ export class FfmpegService {
                       
           // Start progress at 0%
           this.eventService.emitProcessingProgress(0, 'Preparing video re-encoding', jobId);
-              
-          this.setupCommandEventHandlers(command, videoFile, outputFile, progressKey, duration, jobId, resolve);
-          
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, 0, 'Preparing video re-encoding');
+          }
+
+          this.setupCommandEventHandlers(command, videoFile, outputFile, progressKey, duration, jobId, resolve, taskType);
+
           // Make sure the command is explicitly run
           command.run();
         });
@@ -492,31 +496,40 @@ export class FfmpegService {
   }
 
   private setupCommandEventHandlers(
-    command: any, 
-    videoFile: string, 
-    outputFile: string, 
-    progressKey: string, 
-    duration: number, 
-    jobId?: string, 
-    resolve?: (value: string | null) => void
+    command: any,
+    videoFile: string,
+    outputFile: string,
+    progressKey: string,
+    duration: number,
+    jobId?: string,
+    resolve?: (value: string | null) => void,
+    taskType?: string  // NEW: Task type for new queue system
   ): void {
     command.on('start', (cmdline: string) => {
       this.logger.log(`FFmpeg re-encoding command started: ${cmdline}`);
       this.eventService.emitProcessingProgress(0, 'Starting video re-encoding', jobId);
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, 0, 'Starting video re-encoding');
+      }
     });
-    
+
     command.on('stderr', (stderrLine: string) => {
       const progress = this.parseProgress(stderrLine, duration, progressKey);
       if (progress) {
-        // Emit progress with jobId
+        const message = `Re-encoding video ${progress.speedInfo}`;
+        // Emit progress with jobId (old system)
         this.eventService.emitProcessingProgress(
           progress.progressPercent,
-          `Re-encoding video ${progress.speedInfo}`,
+          message,
           jobId
         );
+        // Also emit task-progress for new queue system
+        if (taskType && jobId) {
+          this.eventService.emitTaskProgress(jobId, taskType, progress.progressPercent, message);
+        }
       }
     });
-  
+
     command.on('end', () => {
       this.logger.log(`Successfully re-encoded video: ${outputFile}`);
 
@@ -545,6 +558,9 @@ export class FfmpegService {
           // Emit 100% completion
           this.lastReportedProgress.set(progressKey, 100);
           this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
+          }
 
           if (resolve) resolve(originalName);
         } catch (err: any) {
@@ -552,22 +568,28 @@ export class FfmpegService {
           // Still resolve with the _reencoded file if rename fails
           this.lastReportedProgress.set(progressKey, 100);
           this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
+          }
           if (resolve) resolve(outputFile);
         }
       } else {
         // If deletion failed, keep the _reencoded version
         this.lastReportedProgress.set(progressKey, 100);
         this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
+        if (taskType && jobId) {
+          this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
+        }
         if (resolve) resolve(outputFile);
       }
-    });          
-    
+    });
+
     command.on('error', (err: any) => {
       this.logger.error(`Error re-encoding video: ${err.message}`);
-      
+
       // Emit error event
       this.eventService.emitProcessingFailed(videoFile, err.message, jobId);
-      
+
       if (resolve) resolve(null);
     });
   }
