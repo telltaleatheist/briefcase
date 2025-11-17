@@ -1,98 +1,15 @@
 // clippy/backend/src/downloader/downloader.controller.ts
-import { Body, Controller, Get, Param, Post, Delete, Res, Query, Patch } from '@nestjs/common';
+import { Controller, Get, Param, Delete, Res, Query } from '@nestjs/common';
 import { Response } from 'express';
 import { DownloaderService } from './downloader.service';
-import { BatchDownloaderService } from './batch-downloader.service';
-import { LibraryDownloadService } from './library-download.service';
-import { DownloadVideoDto } from '../common/dto/download.dto';
 import * as fs from 'fs';
 import * as log from 'electron-log';
 
 @Controller('downloader')
 export class DownloaderController {
   constructor(
-    private readonly downloaderService: DownloaderService,
-    private readonly batchDownloaderService: BatchDownloaderService,
-    private readonly libraryDownloadService: LibraryDownloadService
+    private readonly downloaderService: DownloaderService
   ) {}
-
-  /**
-   * NEW: Pure download endpoint - just downloads video with progress reporting
-   * No pipeline logic, no auto-import, just YT-DLP download
-   * Progress is emitted via WebSocket events: 'download-progress', 'download-completed', 'download-failed'
-   */
-  @Post('download-only')
-  async downloadOnly(@Body() downloadOptions: DownloadVideoDto) {
-    const result = await this.downloaderService.downloadVideo(
-      {
-        url: downloadOptions.url,
-        outputDir: downloadOptions.outputDir,
-        quality: downloadOptions.quality || '720',
-        convertToMp4: downloadOptions.convertToMp4 !== false,
-        useCookies: downloadOptions.useCookies !== false,
-        browser: downloadOptions.browser || 'auto',
-        displayName: downloadOptions.displayName,
-        fixAspectRatio: downloadOptions.fixAspectRatio,
-        useRmsNormalization: downloadOptions.useRmsNormalization,
-        rmsNormalizationLevel: downloadOptions.rmsNormalizationLevel,
-        useCompression: downloadOptions.useCompression,
-        compressionLevel: downloadOptions.compressionLevel
-      },
-      downloadOptions.jobId
-    );
-    return result;
-  }
-
-  /**
-   * Download and import to library (no additional processing)
-   * This is for the processing queue - download + import only, no transcribe/analyze
-   */
-  @Post('download-and-import')
-  async downloadAndImport(@Body() body: { url: string, postTitle?: string, jobId?: string }) {
-    // Start library download but don't do transcription or analysis
-    const jobId = body.jobId || `download-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-    // Use startLibraryDownload but with transcribe and analyze disabled
-    await this.libraryDownloadService.startLibraryDownload(
-      body.url,
-      body.postTitle,  // Use postTitle as displayName
-      false,  // Don't transcribe
-      false   // Don't analyze
-    );
-
-    return { success: true, jobId };
-  }
-
-  /**
-   * Library download with full pipeline: download → import → transcribe → analyze
-   * This uses LibraryDownloadService which orchestrates the entire pipeline
-   */
-  @Post()
-  async downloadVideo(@Body() downloadOptions: DownloadVideoDto) {
-    // Use the new library download service for single video downloads with full pipeline
-    // download → import → transcribe → analyze
-    const jobId = await this.libraryDownloadService.startLibraryDownload(
-      downloadOptions.url,
-      downloadOptions.displayName,
-      downloadOptions.transcribeVideo === true, // Only transcribe if explicitly requested
-      downloadOptions.analyzeVideo === true     // Only analyze if explicitly requested
-    );
-    return { success: true, jobId };
-  }
-
-  @Post('batch')
-  async addToBatchQueue(@Body() downloadOptions: DownloadVideoDto) {
-    const jobId = this.batchDownloaderService.addToBatchQueue(downloadOptions);
-    return { success: true, jobId };
-  }
-
-  @Post('batch/bulk')
-  async addMultipleToBatchQueue(@Body() bulkDownloads: DownloadVideoDto[]) {
-    const jobIds = bulkDownloads.map(options => 
-      this.batchDownloaderService.addToBatchQueue(options)
-    );
-    return { success: true, jobIds };
-  }
 
   @Get('info')
   async getVideoInfo(@Query('url') url: string) {
@@ -109,43 +26,6 @@ export class DownloaderController {
         title: 'Unknown Title'
       };
     }
-  }
-
-  @Get('batch/status')
-  async getBatchStatus() {
-    return this.batchDownloaderService.getBatchStatus();
-  }
-
-  @Patch('batch/config')
-  async updateBatchConfig(@Body() config: { maxConcurrentDownloads: number }) {
-    if (config.maxConcurrentDownloads) {
-      this.batchDownloaderService.setMaxConcurrentDownloads(config.maxConcurrentDownloads);
-    }
-    return { success: true, config };
-  }
-
-  @Delete('batch/:jobId')
-  async deleteJob(@Param('jobId') jobId: string) {
-    const success = await this.batchDownloaderService.deleteJob(jobId);
-    return { success, message: success ? 'Job deleted' : 'Job not found' };
-  }
-
-  @Post('batch/job/:jobId/skip')
-  async skipJob(@Param('jobId') jobId: string) {
-    const success = this.batchDownloaderService.skipJob(jobId);
-    return { success, message: success ? 'Job processing skipped' : 'Job not found or cannot be skipped' };
-  }
-
-  @Post('batch/job/:jobId/retry')
-  async retryJob(@Param('jobId') jobId: string) {
-    const success = this.batchDownloaderService.retryJob(jobId);
-    return { success, message: success ? 'Job retried' : 'Job not found or cannot be retried' };
-  }
-
-  @Delete('batch')
-  async clearBatchQueues() {
-    this.batchDownloaderService.clearQueues();
-    return { success: true, message: 'Batch queues cleared' };
   }
 
   // Existing endpoints remain unchanged...

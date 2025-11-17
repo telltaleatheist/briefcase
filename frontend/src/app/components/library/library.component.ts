@@ -204,9 +204,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   videosAsListItems: (DatabaseVideo & ListItem)[] = [];
 
   // Inline editing
-  editingVideo: { [videoId: string]: { date: boolean; title: boolean; extension: boolean } } = {};
-  editedValues: { [videoId: string]: { date: string; title: string; extension: string } } = {};
-  currentlyEditingVideo: DatabaseVideo | null = null; // Track which video is being edited (for performance)
 
   // Cached selection count (updated when selectedVideos changes, for performance)
   selectedCount: number = 0;
@@ -3834,42 +3831,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
-   * Start editing a specific field (date, title, or extension)
-   */
-  startEditing(video: DatabaseVideo, field: 'date' | 'title' | 'extension', event: Event) {
-    event.stopPropagation();
-
-    // Track which video is being edited (for performance - only render one edit overlay)
-    this.currentlyEditingVideo = video;
-
-    // Initialize editing state for this video if not exists
-    if (!this.editingVideo[video.id]) {
-      this.editingVideo[video.id] = { date: false, title: false, extension: false };
-    }
-
-    // Initialize edited values if not exists
-    if (!this.editedValues[video.id]) {
-      const parsed = this.parseFilename(video.filename);
-      this.editedValues[video.id] = parsed;
-    }
-
-    // Set editing flag
-    this.editingVideo[video.id][field] = true;
-
-    // Auto-focus the input after it renders
-    setTimeout(() => {
-      const inputSelector = field === 'date' ? '.date-input' :
-                           field === 'title' ? '.title-input' :
-                           '.extension-input';
-      const input = document.querySelector(inputSelector) as HTMLInputElement;
-      if (input) {
-        input.focus();
-        input.select(); // Select all text for easy replacement
-      }
-    }, 0);
-  }
-
-  /**
    * Handle three-dot menu click (triggers same context menu as right-click)
    */
   onThreeDotsClick(event: MouseEvent, video: DatabaseVideo) {
@@ -4002,121 +3963,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /**
-   * Save edited filename (legacy - for inline editing)
-   */
-  async saveFilename(video: DatabaseVideo) {
-    const edited = this.editedValues[video.id];
-    if (!edited) return;
-
-    // Reconstruct filename
-    let newFilename = '';
-    if (edited.date) {
-      newFilename = `${edited.date} ${edited.title}`;
-    } else {
-      newFilename = edited.title;
-    }
-
-    if (edited.extension) {
-      newFilename += `.${edited.extension}`;
-    }
-
-    // Skip if unchanged
-    if (newFilename === video.filename) {
-      this.cancelEditing(video.id);
-      return;
-    }
-
-    try {
-      // Call backend to rename the file
-      const result = await this.databaseLibraryService.updateVideoFilename(video.id, newFilename);
-
-      if (result.success) {
-        // Update local copy with new filename and path
-        video.filename = newFilename;
-        if (result.newPath) {
-          video.current_path = result.newPath;
-        }
-
-        // Clear editing state
-        this.cancelEditing(video.id);
-      } else {
-        this.notificationService.toastOnly('error', 'Rename Failed', result.error || 'Failed to rename video');
-      }
-    } catch (error: any) {
-      console.error('Failed to rename video:', error);
-      this.notificationService.toastOnly('error', 'Rename Failed', error.error?.message || 'Failed to rename video');
-    }
-  }
-
-  /**
-   * Cancel editing
-   */
-  cancelEditing(videoId: string) {
-    if (this.editingVideo[videoId]) {
-      this.editingVideo[videoId] = { date: false, title: false, extension: false };
-    }
-    // Clear currently editing video (performance optimization)
-    this.currentlyEditingVideo = null;
-  }
-
-  /**
-   * Get position for inline edit overlay in list view
-   */
-  getEditOverlayPosition(videoId: string): { top: number; left: number } {
-    // Find the list item element
-    const itemElement = document.getElementById(`item-${videoId}`);
-    if (itemElement) {
-      const rect = itemElement.getBoundingClientRect();
-      return {
-        top: rect.top + window.scrollY,
-        left: rect.left + window.scrollX
-      };
-    }
-    return { top: 0, left: 0 };
-  }
-
-  /**
-   * Handle Enter key to save, Escape to cancel
-   */
-  onEditKeydown(video: DatabaseVideo, event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      this.saveFilename(video);
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      this.cancelEditing(video.id);
-
-      // Reset to original values
-      const parsed = this.parseFilename(video.filename);
-      this.editedValues[video.id] = parsed;
-    }
-  }
-
-  /**
-   * Handle blur event to save changes
-   */
-  onEditBlur(video: DatabaseVideo, field: 'date' | 'title' | 'extension') {
-    // Don't close fields immediately - wait to see if user is clicking another field
-    setTimeout(() => {
-      // Check if focus moved to another input field for this video
-      const activeElement = document.activeElement;
-      const isEditingAnotherField = activeElement && (
-        activeElement.classList.contains('date-input') ||
-        activeElement.classList.contains('title-input') ||
-        activeElement.classList.contains('extension-input')
-      );
-
-      // Only close editing mode if user clicked outside all edit fields
-      if (!isEditingAnotherField) {
-        // Close all fields and save
-        if (this.editingVideo[video.id]) {
-          this.editingVideo[video.id] = { date: false, title: false, extension: false };
-        }
-        this.saveFilename(video);
-      }
-    }, 150);
-  }
 
   /**
    * PREVIEW MODAL METHODS FOR LIST VIEW

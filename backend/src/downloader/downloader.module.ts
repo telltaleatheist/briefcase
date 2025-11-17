@@ -2,8 +2,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { DownloaderService } from './downloader.service';
 import { DownloaderController } from './downloader.controller';
-import { BatchDownloaderService } from './batch-downloader.service';
-import { LibraryDownloadService } from './library-download.service';
 import { MediaModule } from '../media/media.module';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { PathModule } from '../path/path.module';
@@ -22,8 +20,8 @@ import { AnalysisModule } from '../analysis/analysis.module';
     SharedConfigModule,
     forwardRef(() => JobStateManagerModule)
   ],
-  providers: [DownloaderService, BatchDownloaderService, LibraryDownloadService],
+  providers: [DownloaderService],
   controllers: [DownloaderController],
-  exports: [DownloaderService, BatchDownloaderService, LibraryDownloadService],
+  exports: [DownloaderService],
 })
 export class DownloaderModule {}

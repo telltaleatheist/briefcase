@@ -1,7 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
-import { AnalysisService, AnalysisRequest } from '../analysis/analysis.service';
+import { QueueManagerService } from '../queue/queue-manager.service';
+import { Task } from '../common/interfaces/task.interface';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SharedConfigService } from '../config/shared-config.service';
 import * as fs from 'fs/promises';
@@ -66,7 +67,7 @@ export class BatchAnalysisService implements OnModuleInit {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly fileScannerService: FileScannerService,
-    private readonly analysisService: AnalysisService,
+    private readonly queueManager: QueueManagerService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: SharedConfigService,
   ) {}
@@ -362,7 +363,7 @@ export class BatchAnalysisService implements OnModuleInit {
   }
 
   /**
-   * Process a single video through the analysis pipeline
+   * Process a single video through the analysis pipeline using new queue system
    */
   private async processVideo(
     video: { id: string; filename: string; current_path: string },
@@ -396,8 +397,8 @@ export class BatchAnalysisService implements OnModuleInit {
     const hasTranscript = !!existingTranscript;
     const hasAnalysis = !!existingAnalysis;
 
-    // Determine mode based on existing data and config
-    let mode: 'full' | 'transcribe-only' | 'analysis-only';
+    // Build task list based on what needs to be done
+    const tasks: Task[] = [];
 
     if (config.transcribeOnly) {
       // User explicitly requested transcribe-only
@@ -405,7 +406,7 @@ export class BatchAnalysisService implements OnModuleInit {
         this.logger.log(`Transcript already exists for ${currentFilename}, skipping transcription`);
         return; // Skip this video entirely
       }
-      mode = 'transcribe-only';
+      tasks.push({ type: 'transcribe', options: { model: config.whisperModel } });
     } else {
       // User requested full analysis
       // Check if analysis already exists and if we should skip
@@ -417,60 +418,58 @@ export class BatchAnalysisService implements OnModuleInit {
         return; // Skip this video entirely
       }
 
-      if (hasTranscript) {
-        // Transcript exists, only run AI analysis
-        mode = 'analysis-only';
-        this.logger.log(`Transcript exists for ${currentFilename}, running analysis-only mode`);
-      } else {
-        // No transcript, run full pipeline
-        mode = 'full';
-        this.logger.log(`No transcript for ${currentFilename}, running full analysis mode`);
+      if (!hasTranscript) {
+        // Need to transcribe first
+        tasks.push({ type: 'transcribe', options: { model: config.whisperModel } });
       }
+
+      // Always add analyze task for full analysis
+      const apiKey = config.aiProvider === 'claude' ? config.claudeApiKey : config.aiProvider === 'openai' ? config.openaiApiKey : undefined;
+      tasks.push({
+        type: 'analyze',
+        options: {
+          aiModel: config.aiModel,
+          aiProvider: config.aiProvider,
+          ollamaEndpoint: config.ollamaEndpoint,
+          apiKey, // Single apiKey field for all providers
+        },
+      });
     }
 
-    const request: AnalysisRequest = {
-      input: currentPath,  // Use current path from database, not queued path
-      inputType: 'file',
-      mode: mode as any, // Add 'analysis-only' to AnalysisRequest type
-      aiModel: config.aiModel,
-      aiProvider: config.aiProvider,
-      apiKey: config.aiProvider === 'claude' ? config.claudeApiKey : config.aiProvider === 'openai' ? config.openaiApiKey : undefined,
-      whisperModel: config.whisperModel,
-      ollamaEndpoint: config.ollamaEndpoint,
-      customReportName: `${video.id}.txt`, // Use video ID for report name
-      existingTranscriptText: mode === 'analysis-only' ? (existingTranscript?.plain_text as string) : undefined,
-      existingTranscriptSrt: mode === 'analysis-only' ? (existingTranscript?.srt_format as string) : undefined,
-      videoId: video.id, // Pass video ID to skip import/search in finalize phase
-    };
+    this.logger.log(`Creating queue job for ${currentFilename} with tasks: ${tasks.map(t => t.type).join(', ')}`);
 
-    // Start analysis through existing AnalysisService
-    const jobId = await this.analysisService.startAnalysis(request);
+    // Create queue job with videoId and tasks
+    const jobId = this.queueManager.addJob({
+      queueType: 'analysis',
+      videoId: video.id,
+      displayName: currentFilename,
+      tasks,
+    });
 
     // Wait for completion
-    await this.waitForAnalysisCompletion(jobId);
+    await this.waitForQueueJobCompletion(jobId);
 
     // Get the job result
-    const job = this.analysisService.getJob(jobId);
+    const job = this.queueManager.getJob(jobId);
     if (!job) {
-      throw new Error('Analysis job not found');
+      throw new Error('Queue job not found');
     }
 
     if (job.status === 'failed') {
       throw new Error(job.error || 'Analysis failed');
     }
 
-    // Results already saved by AnalysisService.finalize() - no need to duplicate
-    // Just clean up the job from memory
-    await this.analysisService.deleteJob(jobId);
+    // Results are already saved by the queue manager's task execution
+    this.logger.log(`Completed processing ${currentFilename}`);
   }
 
   /**
-   * Wait for an analysis job to complete
+   * Wait for a queue job to complete
    */
-  private async waitForAnalysisCompletion(jobId: string): Promise<void> {
+  private async waitForQueueJobCompletion(jobId: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const checkInterval = setInterval(() => {
-        const job = this.analysisService.getJob(jobId);
+        const job = this.queueManager.getJob(jobId);
 
         if (!job) {
           clearInterval(checkInterval);

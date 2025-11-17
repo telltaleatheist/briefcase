@@ -14,6 +14,7 @@ import { SharedConfigModule } from '../config/shared-config.module';
 import { LibraryModule } from '../library/library.module';
 import { DatabaseModule } from '../database/database.module';
 import { MediaModule } from '../media/media.module';
+import { QueueModule } from '../queue/queue.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { MediaModule } from '../media/media.module';
     LibraryModule,
     forwardRef(() => DatabaseModule),
     forwardRef(() => MediaModule),
+    forwardRef(() => QueueModule),
   ],
   controllers: [
     AnalysisController,

@@ -406,13 +406,27 @@ export class VideoProcessingQueueService implements OnDestroy {
       }
 
       // Submit to new queue system
+      // Determine queue type based on tasks:
+      // - If tasks include download/import, use 'batch' queue (requires URL)
+      // - If tasks are only transcribe/analyze/process, use 'analysis' queue (requires videoId)
+      const hasDownloadTasks = tasks.some(t => t.type === 'download' || t.type === 'import');
+      const queueType = hasDownloadTasks ? 'batch' : 'analysis';
+
       const url = await this.backendUrlService.getApiUrl('/queue/add');
-      const response = await this.http.post<any>(url, {
-        queueType: 'batch',
-        url: job.videoPath, // The download URL
+      const requestBody: any = {
+        queueType,
         displayName: job.displayName,
         tasks
-      }).toPromise();
+      };
+
+      // Add url or videoId depending on queue type
+      if (queueType === 'batch') {
+        requestBody.url = job.videoPath; // The download URL
+      } else {
+        requestBody.videoId = job.videoId; // The library video ID
+      }
+
+      const response = await this.http.post<any>(url, requestBody).toPromise();
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to start queue job');

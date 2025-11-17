@@ -184,10 +184,6 @@ export class MediaEventService {
   /**
    * Batch events
    */
-  emitBatchQueueUpdated(queueState: any): void {
-    this.emitEvent('batch-queue-updated', queueState);
-  }
-  
   emitBatchCompleted(completedJobsCount: number, failedJobsCount: number): void {
     this.emitEvent('batch-completed', {
       completedJobsCount,

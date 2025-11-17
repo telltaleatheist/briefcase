@@ -220,13 +220,6 @@ export class SocketService {
   }
 
   /**
-   * Listen for batch queue updates (legacy event)
-   */
-  onBatchQueueUpdated(): Observable<BatchQueueStatus> {
-    return this.listenTo<BatchQueueStatus>('batch-queue-updated');
-  }
-
-  /**
    * Listen for queue status updates (new queue system)
    */
   onQueueStatusUpdated(): Observable<{queueType: 'batch' | 'analysis', status: any, timestamp: string}> {

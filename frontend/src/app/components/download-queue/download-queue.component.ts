@@ -185,10 +185,15 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       const previousJobs = this.videoProcessingJobs;
       this.videoProcessingJobs = Array.from(jobsMap.values());
 
-      // Only check for new jobs if the list actually changed (not just progress updates)
+      // Check if job list changed
       const jobCountChanged = previousJobs.length !== this.videoProcessingJobs.length;
       const jobIdsChanged = jobCountChanged ||
         !this.arraysHaveSameIds(previousJobs, this.videoProcessingJobs);
+
+      // Check if any job's status changed to processing (to auto-expand the active job)
+      const previousProcessingIds = new Set(previousJobs.filter(j => j.overallStatus === 'processing').map(j => j.id));
+      const currentProcessingIds = new Set(this.videoProcessingJobs.filter(j => j.overallStatus === 'processing').map(j => j.id));
+      const newJobStartedProcessing = [...currentProcessingIds].some(id => !previousProcessingIds.has(id));
 
       // NOTE: Auto-submit disabled - processQueueSequentially() handles all submissions
       // No auto-submit here to avoid race conditions and duplicate submissions
@@ -196,9 +201,10 @@ export class DownloadQueueComponent implements OnInit, OnDestroy {
       // Update combined list when video processing jobs change
       this.updateAllJobsList();
 
-      // Expand only the first item after the view updates (debounced to avoid race conditions)
-      // Only do this if jobs were added/removed, not on every progress update
-      if (jobIdsChanged) {
+      // Expand the active item when:
+      // 1. Jobs were added/removed
+      // 2. A job transitioned to processing status
+      if (jobIdsChanged || newJobStartedProcessing) {
         this.scheduleExpandFirstItem();
       }
     });

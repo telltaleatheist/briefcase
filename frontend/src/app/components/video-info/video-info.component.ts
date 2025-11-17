@@ -1012,13 +1012,6 @@ export class VideoInfoComponent implements OnInit {
   }
 
   /**
-   * Save a new tag (legacy method for single tag)
-   */
-  async saveTag() {
-    await this.saveTags();
-  }
-
-  /**
    * Save new tags (supports comma-separated values)
    */
   async saveTags() {

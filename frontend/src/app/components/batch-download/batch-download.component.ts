@@ -173,45 +173,6 @@ export class BatchDownloadComponent implements OnInit, OnDestroy {
       this.cdr.detectChanges();
     });
 
-    // Listen for batch queue updates
-    this.socketService.onBatchQueueUpdated().subscribe(
-      (status: BatchQueueStatus) => {
-        console.log('Batch queue update received:', status);
-
-        // Process jobs to shorten error messages and store full errors
-        this.processJobErrors(status);
-
-        this.batchQueueStatus = status;
-
-        // Check if completed jobs count increased - if so, auto-expand accordion
-        const currentCompletedCount = (status.completedJobs?.length || 0) + (status.failedJobs?.length || 0);
-        if (currentCompletedCount > this.previousCompletedJobsCount) {
-          this.isCompletedAccordionExpanded = true;
-        }
-        this.previousCompletedJobsCount = currentCompletedCount;
-
-        // If we get a status update, ensure our order tracking is up to date
-        const allJobIds = [
-          ...(status.queuedJobs || []).map(job => job.id),
-          ...(status.downloadingJobs || []).map(job => job.id),
-          ...(status.downloadedJobs || []).map(job => job.id),
-          ...(status.processingJobs || []).map(job => job.id),
-          ...(status.transcribingJobs || []).map(job => job.id),
-          ...(status.completedJobs || []).map(job => job.id),
-          ...(status.failedJobs || []).map(job => job.id)
-        ];
-
-        // Add any new jobs to our tracking
-        allJobIds.forEach(id => {
-          if (!this.originalJobOrder.includes(id)) {
-            this.originalJobOrder.push(id);
-          }
-        });
-
-        this.cdr.detectChanges();
-      }
-    );
-
     this.socketService.onTranscriptionProgress().subscribe(
       (progress: DownloadProgress) => {
         console.log(`Received transcription progress update: ${progress.progress}% - ${progress.task}`);

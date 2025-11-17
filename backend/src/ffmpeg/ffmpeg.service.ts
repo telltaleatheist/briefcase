@@ -265,9 +265,8 @@ export class FfmpegService {
             options,
             duration
           );
-                      
+
           // Start progress at 0%
-          this.eventService.emitProcessingProgress(0, 'Preparing video re-encoding', jobId);
           if (taskType && jobId) {
             this.eventService.emitTaskProgress(jobId, taskType, 0, 'Preparing video re-encoding');
           }
@@ -507,7 +506,6 @@ export class FfmpegService {
   ): void {
     command.on('start', (cmdline: string) => {
       this.logger.log(`FFmpeg re-encoding command started: ${cmdline}`);
-      this.eventService.emitProcessingProgress(0, 'Starting video re-encoding', jobId);
       if (taskType && jobId) {
         this.eventService.emitTaskProgress(jobId, taskType, 0, 'Starting video re-encoding');
       }
@@ -517,13 +515,7 @@ export class FfmpegService {
       const progress = this.parseProgress(stderrLine, duration, progressKey);
       if (progress) {
         const message = `Re-encoding video ${progress.speedInfo}`;
-        // Emit progress with jobId (old system)
-        this.eventService.emitProcessingProgress(
-          progress.progressPercent,
-          message,
-          jobId
-        );
-        // Also emit task-progress for new queue system
+        // Emit task-progress for queue system
         if (taskType && jobId) {
           this.eventService.emitTaskProgress(jobId, taskType, progress.progressPercent, message);
         }
@@ -557,7 +549,6 @@ export class FfmpegService {
 
           // Emit 100% completion
           this.lastReportedProgress.set(progressKey, 100);
-          this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
           if (taskType && jobId) {
             this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
           }
@@ -567,7 +558,6 @@ export class FfmpegService {
           this.logger.error(`Failed to rename file: ${err.message}`);
           // Still resolve with the _reencoded file if rename fails
           this.lastReportedProgress.set(progressKey, 100);
-          this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
           if (taskType && jobId) {
             this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
           }
@@ -576,7 +566,6 @@ export class FfmpegService {
       } else {
         // If deletion failed, keep the _reencoded version
         this.lastReportedProgress.set(progressKey, 100);
-        this.eventService.emitProcessingProgress(100, 'Video re-encoding completed', jobId);
         if (taskType && jobId) {
           this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
         }
@@ -586,9 +575,6 @@ export class FfmpegService {
 
     command.on('error', (err: any) => {
       this.logger.error(`Error re-encoding video: ${err.message}`);
-
-      // Emit error event
-      this.eventService.emitProcessingFailed(videoFile, err.message, jobId);
 
       if (resolve) resolve(null);
     });

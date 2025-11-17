@@ -1,7 +1,7 @@
 // clippy/backend/src/saved-links/saved-links.service.ts
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-import { BatchDownloaderService } from '../downloader/batch-downloader.service';
+import { QueueManagerService } from '../queue/queue-manager.service';
 import { MediaEventService } from '../media/media-event.service';
 import { WebSocketService } from '../common/websocket.service';
 import { FileScannerService } from '../database/file-scanner.service';
@@ -29,7 +29,7 @@ export class SavedLinksService implements OnModuleInit {
 
   constructor(
     private readonly databaseService: DatabaseService,
-    private readonly batchDownloaderService: BatchDownloaderService,
+    private readonly queueManagerService: QueueManagerService,
     private readonly mediaEventService: MediaEventService,
     private readonly websocketService: WebSocketService,
     private readonly fileScannerService: FileScannerService,
@@ -208,15 +208,16 @@ export class SavedLinksService implements OnModuleInit {
         }
       }
 
-      // Add to batch downloader with skipProcessing flag
-      const jobId = this.batchDownloaderService.addToBatchQueue({
+      // Add to batch queue using new queue system
+      const jobId = this.queueManagerService.addJob({
+        queueType: 'batch',
         url: savedLink.url,
         displayName: savedLink.title || savedLink.url,
-        outputDir,
-        quality: '720p',
-        skipProcessing: true, // Skip processing - just download and import
-        shouldImport: true, // Auto-import to library
-      }, `saved-link-${savedLinkId}`);
+        tasks: [
+          { type: 'download', options: { quality: '720' } },
+          { type: 'import', options: {} }
+        ]
+      });
 
       this.logger.log(`Started download job ${jobId} for saved link ${savedLinkId} (library: ${libraryId || 'default'})`);
 

@@ -1440,44 +1440,6 @@ export class DatabaseController {
   }
 
   /**
-   * POST /api/database/batch/pause
-   * Pause the current batch analysis (deprecated - kept for compatibility)
-   */
-  @Post('batch/pause')
-  pauseBatch() {
-    // This functionality is deprecated with the new queue system
-    // Jobs are automatically managed by the queue
-    return {
-      success: false,
-      message: 'Batch pause/resume is no longer supported with the new queue system',
-    };
-  }
-
-  /**
-   * POST /api/database/batch/resume
-   * Resume a paused batch analysis (deprecated - kept for compatibility)
-   */
-  @Post('batch/resume')
-  async resumeBatch() {
-    return {
-      success: false,
-      message: 'Batch pause/resume is no longer supported with the new queue system',
-    };
-  }
-
-  /**
-   * POST /api/database/batch/stop
-   * Stop the current batch analysis (deprecated - kept for compatibility)
-   */
-  @Post('batch/stop')
-  stopBatch() {
-    return {
-      success: false,
-      message: 'Batch stop is no longer supported with the new queue system',
-    };
-  }
-
-  /**
    * POST /api/database/prune
    * Prune orphaned videos from the database
    * Deletes all videos marked as unlinked (is_linked = 0)

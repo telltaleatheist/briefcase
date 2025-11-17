@@ -155,13 +155,6 @@ export class DownloadProgressService implements OnDestroy {
     //   }
     // });
 
-    // NOTE: Batch queue updates are NOT tracked here
-    // The batch download system is separate and has its own UI
-    // this.socketService.onBatchQueueUpdated().subscribe(data => {
-    //   console.log('[DownloadProgressService] Batch queue updated event received:', data);
-    //   this.handleBatchQueueUpdate(data);
-    // });
-
     // NOTE: Individual job status updates are for batch downloads, not analysis jobs
     // this.socketService.onJobStatusUpdated().subscribe(data => {
     //   console.log('[DownloadProgressService] Job status update event received:', data);

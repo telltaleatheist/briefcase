@@ -21,7 +21,7 @@ export class QueueController {
   /**
    * Add a job to a queue
    * POST /queue/add
-   * Body: { queueType, url?, displayName?, tasks: Task[] }
+   * Body: { queueType, url?, videoId?, displayName?, tasks: Task[] }
    */
   @Post('add')
   async addJob(
@@ -29,6 +29,7 @@ export class QueueController {
     body: {
       queueType: 'batch' | 'analysis';
       url?: string;
+      videoId?: string; // For transcribe/analyze tasks on existing library videos
       displayName?: string;
       tasks: Task[];
     },
@@ -47,6 +48,7 @@ export class QueueController {
     const jobId = this.queueManager.addJob({
       queueType: body.queueType,
       url: body.url,
+      videoId: body.videoId,
       displayName: body.displayName,
       tasks: body.tasks,
     });

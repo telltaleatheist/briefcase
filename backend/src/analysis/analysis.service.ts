@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -15,6 +15,8 @@ import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaProcessingService } from '../media/media-processing.service';
+import { QueueManagerService } from '../queue/queue-manager.service';
+import { Task } from '../common/interfaces/task.interface';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -100,6 +102,8 @@ export class AnalysisService implements OnModuleInit {
     private databaseService: DatabaseService,
     private mediaEventService: MediaEventService,
     private mediaProcessingService: MediaProcessingService,
+    @Inject(forwardRef(() => QueueManagerService))
+    private queueManager: QueueManagerService,
   ) {}
 
   /**
@@ -1471,7 +1475,7 @@ export class AnalysisService implements OnModuleInit {
       `Starting batch ${transcribeOnly ? 'transcription' : 'analysis'} ${batchId} for ${videosToProcess.length} videos`
     );
 
-    // Submit all videos to the queue
+    // Submit all videos to the new queue system
     const jobIds: string[] = [];
 
     for (const video of videosToProcess) {
@@ -1482,55 +1486,56 @@ export class AnalysisService implements OnModuleInit {
         const hasTranscript = !!existingTranscript;
         const hasAnalysis = !!existingAnalysis;
 
-        // Determine mode
-        let mode: 'full' | 'transcribe-only' | 'analysis-only';
+        // Build task list based on what needs to be done
+        const tasks: Task[] = [];
 
         if (transcribeOnly) {
           // If user explicitly selected transcribe, always re-transcribe (don't skip)
-          mode = 'transcribe-only';
           if (hasTranscript) {
             this.logger.log(`Re-transcribing ${video.filename} (transcript will be overwritten)`);
           }
+          tasks.push({ type: 'transcribe', options: { model: whisperModel } });
         } else {
+          // User requested full analysis
           if (hasAnalysis && !forceReanalyze) {
             this.logger.log(`Analysis already exists for ${video.filename}, skipping`);
             continue;
           }
 
-          // Determine mode based on existing transcript and user preferences
-          // - If forceRetranscribe is true: always use 'full' (re-transcribe)
-          // - If forceRetranscribe is false AND transcript exists: use 'analysis-only' (reuse transcript)
-          // - If forceRetranscribe is false AND no transcript: use 'full' (must transcribe)
+          // Determine which tasks to add based on existing transcript and user preferences
           if (hasTranscript && !forceRetranscribe) {
-            mode = 'analysis-only';
+            // Use existing transcript, only run analysis
             this.logger.log(`Using existing transcript for ${video.filename}`);
           } else {
-            mode = 'full';
+            // Need to transcribe (either no transcript exists, or forceRetranscribe is true)
             if (hasTranscript) {
               this.logger.log(`Re-transcribing ${video.filename} (forceRetranscribe=true)`);
             }
+            tasks.push({ type: 'transcribe', options: { model: whisperModel } });
           }
+
+          // Always add analyze task for full analysis
+          tasks.push({
+            type: 'analyze',
+            options: {
+              aiModel,
+              aiProvider,
+              ollamaEndpoint,
+              apiKey, // Single apiKey field for all providers
+            },
+          });
         }
 
-        const request: AnalysisRequest = {
-          input: video.current_path,
-          inputType: 'file',
-          mode: mode as any,
-          aiModel,
-          aiProvider,
-          apiKey,
-          whisperModel,
-          ollamaEndpoint,
-          customReportName: `${video.id}.txt`,
-          existingTranscriptText: mode === 'analysis-only' ? (existingTranscript?.plain_text as string) : undefined,
-          existingTranscriptSrt: mode === 'analysis-only' ? (existingTranscript?.srt_format as string) : undefined,
+        // Create queue job with videoId and tasks
+        const createdJobId = this.queueManager.addJob({
+          queueType: 'analysis',
           videoId: video.id,
-        };
+          displayName: video.filename,
+          tasks,
+        });
 
-        // Use customJobId only for single-video batches (when explicitly provided from frontend)
-        const useCustomJobId = options.customJobId && videosToProcess.length === 1;
-        const jobId = await this.startAnalysis(request, useCustomJobId ? options.customJobId : undefined);
-        jobIds.push(jobId);
+        jobIds.push(createdJobId);
+        this.logger.log(`Queued ${video.filename} with tasks: ${tasks.map(t => t.type).join(', ')}`);
 
       } catch (error) {
         this.logger.error(`Failed to queue video ${video.filename}: ${(error as Error).message}`);

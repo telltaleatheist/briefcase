@@ -211,38 +211,6 @@
     (contextMenu)="onListContextMenu($event)">
   </cascade-list>
 
-  <!-- Inline Editing Overlay for List View (single overlay, positioned as needed) -->
-  <div *ngIf="currentlyEditingVideo"
-       class="inline-edit-overlay active"
-       [attr.data-video-id]="currentlyEditingVideo.id">
-    <div class="inline-edit-container">
-      <input *ngIf="editingVideo[currentlyEditingVideo.id]?.date"
-             type="text"
-             class="inline-edit-input date-input"
-             [(ngModel)]="editedValues[currentlyEditingVideo.id].date"
-             (keydown.enter)="saveFilename(currentlyEditingVideo)"
-             (keydown.escape)="cancelEditing(currentlyEditingVideo.id)"
-             (blur)="onEditBlur(currentlyEditingVideo, 'date')"
-             placeholder="Date">
-      <input *ngIf="editingVideo[currentlyEditingVideo.id]?.title"
-             type="text"
-             class="inline-edit-input title-input"
-             [(ngModel)]="editedValues[currentlyEditingVideo.id].title"
-             (keydown.enter)="saveFilename(currentlyEditingVideo)"
-             (keydown.escape)="cancelEditing(currentlyEditingVideo.id)"
-             (blur)="onEditBlur(currentlyEditingVideo, 'title')"
-             placeholder="Title">
-      <input *ngIf="editingVideo[currentlyEditingVideo.id]?.extension"
-             type="text"
-             class="inline-edit-input extension-input"
-             [(ngModel)]="editedValues[currentlyEditingVideo.id].extension"
-             (keydown.enter)="saveFilename(currentlyEditingVideo)"
-             (keydown.escape)="cancelEditing(currentlyEditingVideo.id)"
-             (blur)="onEditBlur(currentlyEditingVideo, 'extension')"
-             placeholder="ext">
-    </div>
-  </div>
-
   <!-- Context Menu (Right-click) - positioned at cursor -->
   <div style="visibility: hidden; position: fixed;"
        [style.left.px]="contextMenuPosition.x"
