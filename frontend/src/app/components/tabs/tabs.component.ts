@@ -207,21 +207,16 @@ export class TabsComponent implements OnInit, OnDestroy {
   }
 
   async openFileLocation(video: VideoWithListItem) {
-    if (video.current_path) {
-      try {
-        const response = await fetch(`${this.backendUrl}/api/path/open-location`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filePath: video.current_path })
-        });
+    if (!video.current_path) {
+      this.snackBar.open('File path not available', 'Close', { duration: 3000 });
+      return;
+    }
 
-        if (!response.ok) {
-          throw new Error('Failed to open file location');
-        }
-      } catch (error) {
-        console.error('Error opening file location:', error);
-        this.snackBar.open('Failed to open file location', 'Close', { duration: 3000 });
-      }
+    try {
+      await (window as any).electron?.showInFolder(video.current_path);
+    } catch (error) {
+      console.error('Error opening file location:', error);
+      this.snackBar.open('Failed to open file location', 'Close', { duration: 3000 });
     }
   }
 

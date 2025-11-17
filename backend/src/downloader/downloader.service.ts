@@ -51,6 +51,37 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Calculate the closest Sunday to a given date
+   * Returns the date in YYYY-MM-DD format
+   */
+  private getClosestSunday(date: Date = new Date()): string {
+    const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+
+    // If today is Sunday (0), use today
+    // If Monday-Wednesday (1-3), use previous Sunday
+    // If Thursday-Saturday (4-6), use next Sunday
+    let daysToAdd: number;
+
+    if (dayOfWeek === 0) {
+      daysToAdd = 0; // Today is Sunday
+    } else if (dayOfWeek <= 3) {
+      daysToAdd = -dayOfWeek; // Go back to previous Sunday
+    } else {
+      daysToAdd = 7 - dayOfWeek; // Go forward to next Sunday
+    }
+
+    const closestSunday = new Date(date);
+    closestSunday.setDate(date.getDate() + daysToAdd);
+
+    // Format as YYYY-MM-DD
+    const year = closestSunday.getFullYear();
+    const month = String(closestSunday.getMonth() + 1).padStart(2, '0');
+    const day = String(closestSunday.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /**
    * Configure YouTube download with multiple fallback client methods
    * Tries: android -> ios -> mweb -> web -> default
    */
@@ -173,8 +204,14 @@ export class DownloaderService implements OnModuleInit {
       // Emit download-started event
       this.eventService.emitDownloadStarted(options.url, jobId);
 
-      const downloadFolder = this.pathService.getSafePath(options.outputDir);
-      this.logger.log(`Using download directory: ${downloadFolder}`);
+      // Get the base download folder
+      const baseDownloadFolder = this.pathService.getSafePath(options.outputDir);
+
+      // Add date-based subfolder (closest Sunday)
+      const dateFolderName = this.getClosestSunday();
+      const downloadFolder = path.join(baseDownloadFolder, dateFolderName);
+
+      this.logger.log(`Using download directory: ${downloadFolder} (base: ${baseDownloadFolder}, date: ${dateFolderName})`);
 
       if (!this.pathService.ensurePathExists(downloadFolder)) {
         const error = `Cannot create or access download directory: ${downloadFolder}`;

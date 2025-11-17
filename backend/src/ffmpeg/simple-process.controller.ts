@@ -71,12 +71,17 @@ export class SimpleProcessController implements OnModuleInit {
       }
 
       // Check aspect ratio
-      const aspectRatio = await this.getAspectRatio(filePath);
+      const aspectRatioStr = await this.getAspectRatio(filePath);
+      const aspectRatio = parseFloat(aspectRatioStr);
       this.logger.log(`Video ${videoId} has aspect ratio: ${aspectRatio}`);
 
       // If already 16:9, skip processing
-      if (aspectRatio === '16:9' || aspectRatio === '1.778' || aspectRatio === '1.777778') {
-        this.logger.log(`Video ${videoId} already has 16:9 aspect ratio, skipping`);
+      // 16:9 = 1.7778, allow small tolerance of 0.01
+      const targetAspectRatio = 16 / 9; // 1.7778
+      const tolerance = 0.01;
+
+      if (Math.abs(aspectRatio - targetAspectRatio) <= tolerance) {
+        this.logger.log(`Video ${videoId} already has 16:9 aspect ratio (${aspectRatio}), skipping`);
         return {
           success: true,
           skipped: true,
@@ -158,8 +163,8 @@ export class SimpleProcessController implements OnModuleInit {
       const ffprobe = spawn('ffprobe', [
         '-v', 'error',
         '-select_streams', 'v:0',
-        '-show_entries', 'stream=display_aspect_ratio',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
+        '-show_entries', 'stream=width,height',
+        '-of', 'json',
         filePath,
       ]);
 
@@ -170,7 +175,21 @@ export class SimpleProcessController implements OnModuleInit {
 
       ffprobe.on('close', (code) => {
         if (code === 0) {
-          resolve(output.trim());
+          try {
+            const data = JSON.parse(output);
+            const stream = data.streams[0];
+            if (stream && stream.width && stream.height) {
+              const width = stream.width;
+              const height = stream.height;
+              const aspectRatio = width / height;
+              // Return as decimal string with 4 decimal places
+              resolve(aspectRatio.toFixed(4));
+            } else {
+              reject(new Error('Could not determine video dimensions'));
+            }
+          } catch (error) {
+            reject(new Error(`Failed to parse ffprobe output: ${error}`));
+          }
         } else {
           reject(new Error(`ffprobe exited with code ${code}`));
         }

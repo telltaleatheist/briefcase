@@ -1,5 +1,5 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { Injectable, OnDestroy } from '@angular/core';
+import { BehaviorSubject, Observable, Subscription } from 'rxjs';
 import { SocketService } from './socket.service';
 import { DownloadProgress } from '../models/download.model';
 import { MatDialog } from '@angular/material/dialog';
@@ -22,9 +22,12 @@ export interface VideoProcessingJob {
 @Injectable({
   providedIn: 'root'
 })
-export class DownloadProgressService {
+export class DownloadProgressService implements OnDestroy {
   private jobs = new BehaviorSubject<Map<string, VideoProcessingJob>>(new Map());
   public jobs$ = this.jobs.asObservable();
+
+  // Store subscriptions for cleanup
+  private subscriptions: Subscription[] = [];
 
   constructor(
     private socketService: SocketService,
@@ -34,19 +37,26 @@ export class DownloadProgressService {
     this.setupListeners();
   }
 
+  ngOnDestroy(): void {
+    console.log('[DownloadProgressService] Cleaning up subscriptions');
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.subscriptions = [];
+  }
+
   private setupListeners() {
     console.log('[DownloadProgressService] Setting up WebSocket listeners');
 
     // Listen for analysis job progress updates (includes FFmpeg processing progress)
-    this.socketService.onAnalysisProgress().subscribe(data => {
+    const analysisProgressSub = this.socketService.onAnalysisProgress().subscribe(data => {
       console.log('[DownloadProgressService] Analysis progress event received:', data);
       if (data.jobId) {
         this.addOrUpdateAnalysisJob(data);
       }
     });
+    this.subscriptions.push(analysisProgressSub);
 
     // Listen for processing progress events (aspect ratio fixing, audio normalization, etc.)
-    this.socketService.onProcessingProgress().subscribe(data => {
+    const processingProgressSub = this.socketService.onProcessingProgress().subscribe(data => {
       console.log('[DownloadProgressService] Processing progress event received:', data);
       if (data.jobId) {
         const currentJobs = this.jobs.getValue();
@@ -79,6 +89,7 @@ export class DownloadProgressService {
         }
       }
     });
+    this.subscriptions.push(processingProgressSub);
 
     // NOTE: Download events are for batch downloads, not analysis jobs
     // Analysis jobs are tracked via addOrUpdateAnalysisJob() method

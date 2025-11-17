@@ -827,6 +827,12 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       this.contextMenuTimeout = null;
     }
 
+    // Clear type-ahead timer
+    if (this.typeAheadTimer) {
+      clearTimeout(this.typeAheadTimer);
+      this.typeAheadTimer = null;
+    }
+
     // Close preview dialog when leaving the page
     if (this.currentPreviewDialogRef) {
       this.currentPreviewDialogRef.close();

@@ -1,5 +1,5 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { Injectable, OnDestroy } from '@angular/core';
+import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import {
   VideoProcessingJob,
@@ -21,7 +21,7 @@ import { BackendUrlService } from './backend-url.service';
 @Injectable({
   providedIn: 'root'
 })
-export class VideoProcessingQueueService {
+export class VideoProcessingQueueService implements OnDestroy {
   private readonly STORAGE_KEY = 'video-processing-queue';
   private jobs = new BehaviorSubject<Map<string, VideoProcessingJob>>(new Map());
   public jobs$ = this.jobs.asObservable();
@@ -38,6 +38,9 @@ export class VideoProcessingQueueService {
   private emitTimer: any = null;
   private readonly EMIT_THROTTLE_MS = 250; // Emit at most every 250ms
 
+  // Store subscriptions for cleanup
+  private subscriptions: Subscription[] = [];
+
   constructor(
     private socketService: SocketService,
     private backendUrlService: BackendUrlService,
@@ -46,6 +49,24 @@ export class VideoProcessingQueueService {
     console.log('[VideoProcessingQueueService] Service initialized');
     this.loadFromCache();
     this.setupProgressListeners();
+  }
+
+  ngOnDestroy(): void {
+    console.log('[VideoProcessingQueueService] Cleaning up subscriptions and timers');
+
+    // Clear all subscriptions
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.subscriptions = [];
+
+    // Clear emit timer
+    if (this.emitTimer) {
+      clearTimeout(this.emitTimer);
+      this.emitTimer = null;
+    }
+
+    // Complete subjects
+    this.jobs.complete();
+    this.jobAdded.complete();
   }
 
   /**
@@ -627,7 +648,7 @@ export class VideoProcessingQueueService {
     console.log('[VideoProcessingQueueService] Setting up progress listeners');
 
     // Listen to download progress
-    this.socketService.onDownloadProgress().subscribe(data => {
+    const downloadProgressSub = this.socketService.onDownloadProgress().subscribe(data => {
       console.log('[VideoProcessingQueueService] Download progress received:', data);
       const backendJobId = data.jobId;
       if (backendJobId) {
@@ -636,9 +657,10 @@ export class VideoProcessingQueueService {
         console.warn('[VideoProcessingQueueService] Download progress missing jobId:', data);
       }
     });
+    this.subscriptions.push(downloadProgressSub);
 
     // Listen to processing progress (FFmpeg operations)
-    this.socketService.onProcessingProgress().subscribe(data => {
+    const processingProgressSub = this.socketService.onProcessingProgress().subscribe(data => {
       console.log('[VideoProcessingQueueService] Processing progress received:', data);
       if (data.jobId) {
         this.updateChildProgressByBackendJobId(data.jobId, data.progress);
@@ -646,9 +668,10 @@ export class VideoProcessingQueueService {
         console.warn('[VideoProcessingQueueService] Processing progress missing jobId:', data);
       }
     });
+    this.subscriptions.push(processingProgressSub);
 
     // Listen to transcription progress (Whisper operations)
-    this.socketService.onTranscriptionProgress().subscribe(data => {
+    const transcriptionProgressSub = this.socketService.onTranscriptionProgress().subscribe(data => {
       console.log('[VideoProcessingQueueService] Transcription progress received:', data);
 
       const backendJobId = data.jobId;
@@ -659,9 +682,10 @@ export class VideoProcessingQueueService {
         console.warn('[VideoProcessingQueueService] Transcription progress missing jobId:', data);
       }
     });
+    this.subscriptions.push(transcriptionProgressSub);
 
     // Listen to analysis progress (AI operations)
-    this.socketService.onAnalysisProgress().subscribe(data => {
+    const analysisProgressSub = this.socketService.onAnalysisProgress().subscribe(data => {
       console.log('[VideoProcessingQueueService] Analysis progress received:', data);
 
       const backendJobId = data.jobId;
@@ -672,17 +696,19 @@ export class VideoProcessingQueueService {
         console.warn('[VideoProcessingQueueService] Analysis progress missing jobId:', data);
       }
     });
+    this.subscriptions.push(analysisProgressSub);
 
     // Listen for processing failures
-    this.socketService.onProcessingFailed().subscribe(data => {
+    const processingFailedSub = this.socketService.onProcessingFailed().subscribe(data => {
       console.log('[VideoProcessingQueueService] Processing failed:', data);
       if (data.jobId) {
         this.markChildAsFailed(data.jobId, data.error);
       }
     });
+    this.subscriptions.push(processingFailedSub);
 
     // Listen for batch download job status updates (download + import completion)
-    this.socketService.onJobStatusUpdated().subscribe(data => {
+    const jobStatusSub = this.socketService.onJobStatusUpdated().subscribe(data => {
       console.log('[VideoProcessingQueueService] Job status updated:', data);
 
       if (data.status === 'completed' && data.jobId) {
@@ -721,6 +747,7 @@ export class VideoProcessingQueueService {
         this.markChildAsFailed(data.jobId, data.task || 'Download failed');
       }
     });
+    this.subscriptions.push(jobStatusSub);
   }
 
   /**
