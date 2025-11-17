@@ -283,6 +283,14 @@
 
       <mat-divider></mat-divider>
 
+      <!-- Add to Tab action -->
+      <button mat-menu-item (click)="addSelectedToTab()">
+        <mat-icon>tab</mat-icon>
+        <span>Add to Tab{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
+      </button>
+
+      <mat-divider></mat-divider>
+
       <!-- Analysis actions -->
       <button mat-menu-item (click)="analyzeSelected()">
         <mat-icon>psychology</mat-icon>

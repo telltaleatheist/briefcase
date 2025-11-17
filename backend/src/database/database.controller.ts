@@ -10,6 +10,7 @@ import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
 import { IgnoreService } from './ignore.service';
+import { FilenameDateUtil } from '../common/utils/filename-date.util';
 
 /**
  * DatabaseController - REST API endpoints for database operations
@@ -952,8 +953,15 @@ export class DatabaseController {
         };
       }
 
-      const newFilename = body.filename.trim();
       const oldPath = video.current_path as string;
+      const oldFilename = video.filename as string;
+
+      // Extract upload date from old filename (if it exists)
+      const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
+      const uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
+
+      // Ensure new filename has the date prefix (preserves existing or adds upload date)
+      const newFilename = FilenameDateUtil.updateTitle(oldFilename, body.filename.trim(), uploadDate);
 
       // Skip if filename hasn't changed
       if (video.filename === newFilename) {

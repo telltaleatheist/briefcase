@@ -1,0 +1,226 @@
+// clippy/backend/src/common/utils/filename-date.util.ts
+
+/**
+ * Utility for managing dates in video filenames
+ *
+ * Enforces the format: YYYY-MM-DD [title] or YYYY-MM-T[1-3] [title]
+ * - Standard format: 2025-01-15 Video Title.mp4
+ * - Trimester format: 2025-01-T1 Video Title.mp4
+ *   - T1 = 1st-9th of month
+ *   - T2 = 10th-19th of month
+ *   - T3 = 20th-last day of month
+ */
+
+export interface DateInfo {
+  /** The extracted date string (e.g., "2025-01-15" or "2025-01-T1") */
+  date: string;
+  /** The original date format found */
+  originalFormat: 'YYYY-MM-DD' | 'YYYY-MM-T#' | 'YYYYMMDD' | 'none';
+  /** The title portion after the date */
+  title: string;
+  /** Whether a valid date was found */
+  hasDate: boolean;
+}
+
+export class FilenameDateUtil {
+  // Standard date format: YYYY-MM-DD
+  private static readonly STANDARD_DATE_PATTERN = /^(\d{4}-\d{2}-\d{2})\s+(.+)$/;
+
+  // Trimester format: YYYY-MM-T[1-3]
+  private static readonly TRIMESTER_DATE_PATTERN = /^(\d{4}-\d{2}-T[123])\s+(.+)$/;
+
+  // Old format: YYYYMMDD
+  private static readonly OLD_DATE_PATTERN = /^(\d{8})[-_ ](.+)$/;
+
+  // Combined pattern to detect any date at start
+  private static readonly ANY_DATE_AT_START = /^(\d{4}-\d{2}-(?:\d{2}|T[123]))\s+/;
+
+  /**
+   * Extract date information from a filename
+   */
+  static extractDateInfo(filename: string): DateInfo {
+    // Remove extension for processing
+    const ext = this.getExtension(filename);
+    const nameWithoutExt = ext ? filename.slice(0, -ext.length) : filename;
+
+    // Check for standard date format (YYYY-MM-DD)
+    const standardMatch = nameWithoutExt.match(this.STANDARD_DATE_PATTERN);
+    if (standardMatch) {
+      return {
+        date: standardMatch[1],
+        originalFormat: 'YYYY-MM-DD',
+        title: standardMatch[2],
+        hasDate: true
+      };
+    }
+
+    // Check for trimester format (YYYY-MM-T#)
+    const trimesterMatch = nameWithoutExt.match(this.TRIMESTER_DATE_PATTERN);
+    if (trimesterMatch) {
+      return {
+        date: trimesterMatch[1],
+        originalFormat: 'YYYY-MM-T#',
+        title: trimesterMatch[2],
+        hasDate: true
+      };
+    }
+
+    // Check for old format (YYYYMMDD)
+    const oldMatch = nameWithoutExt.match(this.OLD_DATE_PATTERN);
+    if (oldMatch) {
+      // Convert to standard format
+      const dateStr = oldMatch[1];
+      const year = dateStr.substring(0, 4);
+      const month = dateStr.substring(4, 6);
+      const day = dateStr.substring(6, 8);
+      return {
+        date: `${year}-${month}-${day}`,
+        originalFormat: 'YYYYMMDD',
+        title: oldMatch[2],
+        hasDate: true
+      };
+    }
+
+    // No date found
+    return {
+      date: '',
+      originalFormat: 'none',
+      title: nameWithoutExt,
+      hasDate: false
+    };
+  }
+
+  /**
+   * Ensure filename starts with a date (YYYY-MM-DD format)
+   * If no date exists, adds the provided date
+   * If date exists, keeps it (no duplication)
+   * IMPORTANT: Only adds a date if uploadDate is explicitly provided.
+   * Does NOT fall back to current date - upload date must be the actual content creation date.
+   */
+  static ensureDatePrefix(filename: string, uploadDate?: string): string {
+    const ext = this.getExtension(filename);
+    const dateInfo = this.extractDateInfo(filename);
+
+    // If already has a date, return as-is (sanitized)
+    if (dateInfo.hasDate) {
+      const sanitizedTitle = this.sanitizeTitle(dateInfo.title);
+      return `${dateInfo.date} ${sanitizedTitle}${ext}`;
+    }
+
+    // No date in filename - add one ONLY if uploadDate is provided
+    if (uploadDate) {
+      const sanitizedTitle = this.sanitizeTitle(dateInfo.title);
+      return `${uploadDate} ${sanitizedTitle}${ext}`;
+    }
+
+    // No date available - return filename without date prefix
+    const sanitizedTitle = this.sanitizeTitle(dateInfo.title);
+    return `${sanitizedTitle}${ext}`;
+  }
+
+  /**
+   * Update the title portion while preserving the date
+   * Ensures date stays at the front, no duplication
+   * IMPORTANT: Only adds a date if one already exists or uploadDate is provided.
+   * Does NOT fall back to current date.
+   */
+  static updateTitle(filename: string, newTitle: string, uploadDate?: string): string {
+    const ext = this.getExtension(filename);
+    const dateInfo = this.extractDateInfo(filename);
+
+    // Remove any date from the new title to avoid duplication
+    const newTitleInfo = this.extractDateInfo(newTitle);
+    const cleanNewTitle = this.sanitizeTitle(newTitleInfo.title);
+
+    // Use existing date if available, otherwise use provided date
+    if (dateInfo.hasDate) {
+      return `${dateInfo.date} ${cleanNewTitle}${ext}`;
+    } else if (uploadDate) {
+      return `${uploadDate} ${cleanNewTitle}${ext}`;
+    } else {
+      // No date available - return title without date
+      return `${cleanNewTitle}${ext}`;
+    }
+  }
+
+  /**
+   * Validate if a date string is in valid format
+   */
+  static isValidDateFormat(dateStr: string): boolean {
+    // Check standard format YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return year >= 1900 && year <= 2100 &&
+             month >= 1 && month <= 12 &&
+             day >= 1 && day <= 31;
+    }
+
+    // Check trimester format YYYY-MM-T[1-3]
+    if (/^\d{4}-\d{2}-T[123]$/.test(dateStr)) {
+      const [year, month] = dateStr.split('-').map(s => s.replace(/T\d/, ''));
+      return Number(year) >= 1900 && Number(year) <= 2100 &&
+             Number(month) >= 1 && Number(month) <= 12;
+    }
+
+    return false;
+  }
+
+  /**
+   * Convert trimester format to approximate standard date
+   * T1 -> 05 (mid-point of 1-9)
+   * T2 -> 15 (mid-point of 10-19)
+   * T3 -> 25 (mid-point of 20-31)
+   */
+  static trimesterToStandardDate(trimesterDate: string): string {
+    const match = trimesterDate.match(/^(\d{4})-(\d{2})-T([123])$/);
+    if (!match) return trimesterDate;
+
+    const [, year, month, trimester] = match;
+    const dayMap: { [key: string]: string } = {
+      '1': '05',
+      '2': '15',
+      '3': '25'
+    };
+
+    return `${year}-${month}-${dayMap[trimester]}`;
+  }
+
+  /**
+   * Get current date in YYYY-MM-DD format
+   */
+  private static getCurrentDate(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  /**
+   * Sanitize title by removing/replacing invalid filename characters
+   */
+  private static sanitizeTitle(title: string): string {
+    return title
+      .replace(/[\/\\:*?"<>|]/g, '-')  // Replace invalid chars
+      .replace(/\s+/g, ' ')             // Normalize spaces
+      .trim();
+  }
+
+  /**
+   * Get file extension including the dot
+   */
+  private static getExtension(filename: string): string {
+    const lastDot = filename.lastIndexOf('.');
+    return lastDot > 0 ? filename.substring(lastDot) : '';
+  }
+
+  /**
+   * Format an upload date from yt-dlp format (YYYYMMDD) to YYYY-MM-DD
+   */
+  static formatUploadDate(ytDlpDate: string): string {
+    if (!ytDlpDate || ytDlpDate.length !== 8) {
+      return this.getCurrentDate();
+    }
+
+    const year = ytDlpDate.substring(0, 4);
+    const month = ytDlpDate.substring(4, 6);
+    const day = ytDlpDate.substring(6, 8);
+    return `${year}-${month}-${day}`;
+  }
+}

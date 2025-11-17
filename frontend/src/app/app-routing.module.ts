@@ -53,6 +53,10 @@ const routes: Routes = [
     loadComponent: () => import('./components/relinking-tool/relinking-tool.component').then(m => m.RelinkingToolComponent)
   },
   {
+    path: 'tabs',
+    loadComponent: () => import('./components/tabs/tabs.component').then(m => m.TabsComponent)
+  },
+  {
     path: '**',
     redirectTo: 'library'
   }

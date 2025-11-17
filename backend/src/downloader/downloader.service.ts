@@ -8,6 +8,7 @@ import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
 import { SharedConfigService } from '../config/shared-config.service';
 import { MediaEventService } from '../media/media-event.service';
+import { FilenameDateUtil } from '../common/utils/filename-date.util';
 
 @Injectable()
 export class DownloaderService implements OnModuleInit {
@@ -156,6 +157,18 @@ export class DownloaderService implements OnModuleInit {
 
       // Capture start time BEFORE starting download
       const downloadStartTime = Date.now();
+
+      // Extract upload date for filename formatting (used later in processOutputFilename)
+      let uploadDate: string | undefined;
+      try {
+        const videoInfo = await this.getVideoInfo(options.url);
+        if (videoInfo && videoInfo.upload_date) {
+          uploadDate = FilenameDateUtil.formatUploadDate(videoInfo.upload_date);
+          this.logger.log(`Extracted upload date for filename: ${uploadDate}`);
+        }
+      } catch (error) {
+        this.logger.warn(`Could not fetch upload date, will use current date: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
 
       // Emit download-started event
       this.eventService.emitDownloadStarted(options.url, jobId);
@@ -395,8 +408,8 @@ export class DownloaderService implements OnModuleInit {
         
         if (outputFile && fs.existsSync(outputFile)) {
           this.logger.log(`Download successful: ${outputFile}`);
-          outputFile = await this.processOutputFilename(outputFile);
-          
+          outputFile = await this.processOutputFilename(outputFile, uploadDate);
+
           // Determine if this is an image based on file extension
           const fileExt = path.extname(outputFile).toLowerCase();
           const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(fileExt);
@@ -789,9 +802,10 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
-   * Process output filename to ensure consistent format
+   * Process output filename to ensure consistent date format
+   * Uses FilenameDateUtil to enforce YYYY-MM-DD [title] format
    */
-  async processOutputFilename(filePath: string): Promise<string> {
+  async processOutputFilename(filePath: string, uploadDate?: string): Promise<string> {
     try {
       if (!fs.existsSync(filePath)) {
         this.logger.error(`File does not exist: ${filePath}`);
@@ -800,59 +814,20 @@ export class DownloaderService implements OnModuleInit {
 
       const filename = path.basename(filePath);
       const directory = path.dirname(filePath);
-      const extension = path.extname(filename);
-      const nameWithoutExt = filename.slice(0, -extension.length);
 
-      // Sanitize the filename by replacing special characters
-      // Replace slashes, backslashes, colons, pipes, asterisks, question marks, quotes, and other problematic chars
-      const sanitizedName = nameWithoutExt.replace(/[\/\\:*?"<>|]/g, '-');
+      // Use the utility to ensure proper date format
+      const newFilename = FilenameDateUtil.ensureDatePrefix(filename, uploadDate);
 
-      // Check if the filename already starts with a date pattern (YYYY-MM-DD )
-      if (/^\d{4}-\d{2}-\d{2} /.test(sanitizedName)) {
-        const sanitizedFilename = sanitizedName + extension;
-
-        // Only rename if sanitization changed the name
-        if (sanitizedFilename !== filename) {
-          const sanitizedPath = path.join(directory, sanitizedFilename);
-          fs.renameSync(filePath, sanitizedPath);
-          this.logger.log(`Sanitized filename: ${sanitizedFilename}`);
-          return sanitizedPath;
-        }
-
-        this.logger.log(`File already has correct date format: ${filename}`);
-        return filePath;
-      }
-      
-      // Check if it has the YYYYMMDD- format
-      if (/^\d{8}[-_ ]/.test(sanitizedName)) {
-        // Convert YYYYMMDD- to YYYY-MM-DD
-        const dateStr = sanitizedName.substring(0, 8);
-        const restOfFilename = sanitizedName.substring(9);
-
-        // Format the date with dashes
-        const year = dateStr.substring(0, 4);
-        const month = dateStr.substring(4, 6);
-        const day = dateStr.substring(6, 8);
-        const newDateFormat = `${year}-${month}-${day} `;
-
-        const newFilename = `${newDateFormat}${restOfFilename}${extension}`;
+      // Only rename if the filename changed
+      if (newFilename !== filename) {
         const newPath = path.join(directory, newFilename);
-
-        // Rename the file
         fs.renameSync(filePath, newPath);
-        this.logger.log(`Reformatted date in filename: ${newFilename}`);
+        this.logger.log(`Processed filename: ${filename} -> ${newFilename}`);
         return newPath;
       }
 
-      // If no date, add today's date as prefix with proper format
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const newFilename = `${today} ${sanitizedName}${extension}`;
-      const newPath = path.join(directory, newFilename);
-
-      // Rename the file
-      fs.renameSync(filePath, newPath);
-      this.logger.log(`Adding date prefix to file: ${newFilename}`);
-      return newPath;
+      this.logger.log(`File already has correct date format: ${filename}`);
+      return filePath;
     } catch (error) {
       this.logger.error('Error processing output filename:', error);
       return filePath;

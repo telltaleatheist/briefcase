@@ -45,10 +45,12 @@ import { ImportQueueService } from '../../services/import-queue.service';
 import { VideoProcessingQueueService } from '../../services/video-processing-queue.service';
 import { VideoProcessingJob, getProcessIcon } from '../../models/video-processing.model';
 import { VideoStateService, VideoState } from '../../services/video-state.service';
+import { TabsService } from '../../services/tabs.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
 import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/preview-dialog.component';
+import { AddToTabDialogComponent, AddToTabDialogResult } from './add-to-tab-dialog.component';
 import { SearchBarComponent, SearchCriteriaChange, TagData } from './search-bar/search-bar.component';
 import { LibraryHeaderComponent } from './library-header/library-header.component';
 import { ImportIndicatorComponent } from './import-indicator.component';
@@ -359,8 +361,10 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
     actions.push(
       { id: 'divider1', label: '', divider: true },
-      { id: 'analyze', label: 'Run Analysis', icon: 'analytics' },
+      { id: 'addToTab', label: 'Add to Tab', icon: 'tab' },
       { id: 'divider2', label: '', divider: true },
+      { id: 'analyze', label: 'Run Analysis', icon: 'analytics' },
+      { id: 'divider3', label: '', divider: true },
       { id: 'relink', label: 'Relink Video', icon: 'link' },
       { id: 'delete', label: 'Delete', icon: 'delete' }
     );
@@ -394,7 +398,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     private videoOperationsService: VideoOperationsService,
     private importQueueService: ImportQueueService,
     private videoProcessingQueueService: VideoProcessingQueueService,
-    private videoStateService: VideoStateService
+    private videoStateService: VideoStateService,
+    private tabsService: TabsService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -1291,6 +1296,9 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       console.warn('[applyFiltersAndSort] *** TARGET VIDEO NOT IN VIDEOSASLISTITEMS ***');
     }
 
+    // Clean up selection - remove any selected videos that are no longer in filtered results
+    this.cleanupSelectionAfterFilter();
+
     // Mark items with suggestions for orange styling
     this.markItemsWithSuggestions();
   }
@@ -1939,6 +1947,82 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
+   * Add selected videos to a tab
+   */
+  async addSelectedToTab() {
+    if (this.selectedVideos.size === 0) return;
+
+    const videoIds = Array.from(this.selectedVideos);
+    const selectedVideoObjects = this.filteredVideos.filter(v => videoIds.includes(v.id));
+
+    await this.showAddToTabDialog(selectedVideoObjects);
+  }
+
+  /**
+   * Show dialog to add videos to a tab
+   */
+  async showAddToTabDialog(videos: DatabaseVideo[]) {
+    const videoIds = videos.map(v => v.id);
+
+    const dialogRef = this.dialog.open(AddToTabDialogComponent, {
+      width: '500px',
+      data: { videoIds }
+    });
+
+    const result: AddToTabDialogResult | undefined = await dialogRef.afterClosed().toPromise();
+
+    if (!result) return;
+
+    try {
+      let tabId: string;
+
+      if (result.action === 'new' && result.tabName) {
+        // Create new tab
+        const newTab = await this.tabsService.createTab(result.tabName);
+        tabId = newTab.id;
+        this.snackBar.open(`Created tab "${result.tabName}"`, 'Close', { duration: 2000 });
+      } else if (result.action === 'existing' && result.tabId) {
+        tabId = result.tabId;
+      } else {
+        return;
+      }
+
+      // Add videos to tab
+      let successCount = 0;
+      let alreadyInTabCount = 0;
+
+      for (const videoId of videoIds) {
+        try {
+          await this.tabsService.addVideoToTab(tabId, videoId);
+          successCount++;
+        } catch (error: any) {
+          if (error?.error?.message?.includes('already in this tab')) {
+            alreadyInTabCount++;
+          } else {
+            console.error('Failed to add video to tab:', error);
+          }
+        }
+      }
+
+      // Show result
+      if (successCount > 0) {
+        const message = alreadyInTabCount > 0
+          ? `Added ${successCount} video${successCount > 1 ? 's' : ''} (${alreadyInTabCount} already in tab)`
+          : `Added ${successCount} video${successCount > 1 ? 's' : ''} to tab`;
+        this.snackBar.open(message, 'View Tabs', { duration: 4000 }).onAction().subscribe(() => {
+          this.router.navigate(['/tabs']);
+        });
+      } else if (alreadyInTabCount > 0) {
+        this.snackBar.open('All videos are already in this tab', 'Close', { duration: 3000 });
+      }
+
+    } catch (error) {
+      console.error('Failed to add videos to tab:', error);
+      this.snackBar.open('Failed to add videos to tab', 'Close', { duration: 3000 });
+    }
+  }
+
+  /**
    * Accept the name suggestion and rename the video
    */
   async acceptVideoSuggestion(video: DatabaseVideo, customFilename?: string) {
@@ -2140,6 +2224,46 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     this.deleteSelected();
   }
 
+  @HostListener('document:keydown.meta.c', ['$event'])
+  @HostListener('document:keydown.control.c', ['$event'])
+  async handleCopyFiles(event: KeyboardEvent) {
+    // Only handle if we have selected videos
+    if (!this.cascadeList || this.selectedVideos.size === 0) return;
+
+    // Don't interfere if user is typing in an input field
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Get selected items from cascade list
+    const selectedItems = this.cascadeList.getSelectedItems();
+    const filePaths = selectedItems
+      .map(video => video.current_path)
+      .filter(path => path) as string[];
+
+    if (filePaths.length === 0) {
+      this.notificationService.warning('No file paths', 'No valid file paths to copy');
+      return;
+    }
+
+    try {
+      const result = await (window as any).electron?.copyFilesToClipboard(filePaths);
+      if (result && result.success) {
+        this.notificationService.success(
+          'Files copied',
+          `Copied ${filePaths.length} file${filePaths.length > 1 ? 's' : ''} to clipboard`
+        );
+      } else {
+        throw new Error(result?.error || 'Failed to copy files');
+      }
+    } catch (error) {
+      console.error('Error copying files to clipboard:', error);
+      this.notificationService.error('Copy failed', 'Failed to copy files to clipboard');
+    }
+  }
+
   onListItemHighlighted(video: DatabaseVideo | null) {
     // Save the previous highlighted video before updating
     const previousVideo = this.highlightedVideo;
@@ -2236,6 +2360,11 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'editSuggestedTitle':
         if (event.items.length > 0 && event.items[0].suggested_title) {
           this.showNameSuggestionDialog(event.items[0]);
+        }
+        break;
+      case 'addToTab':
+        if (event.items && event.items.length > 0) {
+          this.showAddToTabDialog(event.items);
         }
         break;
       case 'analyze':
@@ -2913,6 +3042,27 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    */
   private updateSelectedCount() {
     this.selectedCount = this.selectedVideos.size;
+  }
+
+  /**
+   * Clean up selection after filtering - remove any selected videos that are no longer visible
+   * This prevents "ghost selections" where videos are selected but not in the filtered list
+   */
+  private cleanupSelectionAfterFilter() {
+    const filteredVideoIds = new Set(this.filteredVideos.map(v => v.id));
+    const removedCount = this.selectedVideos.size;
+
+    // Remove any selected videos that are not in the filtered results
+    for (const videoId of this.selectedVideos) {
+      if (!filteredVideoIds.has(videoId)) {
+        this.selectedVideos.delete(videoId);
+      }
+    }
+
+    // Update the count if we removed any selections
+    if (this.selectedVideos.size !== removedCount) {
+      this.updateSelectedCount();
+    }
   }
 
   /**

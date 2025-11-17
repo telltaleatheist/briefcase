@@ -384,7 +384,7 @@ export class VideoOperationsService {
     try {
       const url = await this.backendUrlService.getApiUrl('/path/open-file-location');
       await firstValueFrom(this.http.post(url, { filePath }));
-      this.notificationService.toastOnly('success', 'File Location Opened', 'File location opened in file manager');
+      // No notification needed - file location opens silently
     } catch (error: any) {
       console.error('Failed to open file location:', error);
       this.notificationService.toastOnly(

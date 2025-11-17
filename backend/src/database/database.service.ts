@@ -449,6 +449,27 @@ export class DatabaseService {
         ai_model TEXT NOT NULL,
         generation_time_seconds REAL
       );
+
+      -- Video tabs: Named groups/collections for organizing videos (e.g. streaming playlists)
+      CREATE TABLE IF NOT EXISTS video_tabs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        display_order INTEGER DEFAULT 0
+      );
+
+      -- Video tab items: Junction table for videos in tabs (many-to-many relationship)
+      CREATE TABLE IF NOT EXISTS video_tab_items (
+        id TEXT PRIMARY KEY,
+        tab_id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        display_order INTEGER DEFAULT 0,
+        FOREIGN KEY (tab_id) REFERENCES video_tabs(id) ON DELETE CASCADE,
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+        UNIQUE(tab_id, video_id)
+      );
     `;
 
     // Execute table creation
@@ -477,6 +498,10 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_text_content_media ON text_content(media_id);
       CREATE INDEX IF NOT EXISTS idx_library_analytics_library ON library_analytics(library_id);
       CREATE INDEX IF NOT EXISTS idx_library_analytics_generated ON library_analytics(generated_at);
+      CREATE INDEX IF NOT EXISTS idx_video_tabs_display_order ON video_tabs(display_order);
+      CREATE INDEX IF NOT EXISTS idx_video_tab_items_tab ON video_tab_items(tab_id);
+      CREATE INDEX IF NOT EXISTS idx_video_tab_items_video ON video_tab_items(video_id);
+      CREATE INDEX IF NOT EXISTS idx_video_tab_items_display_order ON video_tab_items(display_order);
     `;
 
     db.exec(indexSchema);
@@ -2795,6 +2820,153 @@ export class DatabaseService {
     `).run(libraryId, libraryId, keepCount);
 
     this.saveDatabase();
+  }
+
+  // ========================
+  // VIDEO TABS MANAGEMENT
+  // ========================
+
+  /**
+   * Get all video tabs
+   */
+  getAllTabs(): Array<{ id: string; name: string; created_at: string; updated_at: string; display_order: number; video_count: number }> {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT
+        vt.*,
+        (SELECT COUNT(*) FROM video_tab_items WHERE tab_id = vt.id) as video_count
+      FROM video_tabs vt
+      ORDER BY vt.display_order ASC, vt.created_at DESC
+    `);
+    return stmt.all() as any[];
+  }
+
+  /**
+   * Get a single tab by ID
+   */
+  getTabById(tabId: string): { id: string; name: string; created_at: string; updated_at: string; display_order: number } | null {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare('SELECT * FROM video_tabs WHERE id = ?');
+    return stmt.get(tabId) as any || null;
+  }
+
+  /**
+   * Create a new video tab
+   */
+  createTab(name: string): string {
+    const db = this.ensureInitialized();
+    const id = require('crypto').randomUUID();
+    const now = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO video_tabs (id, name, created_at, updated_at, display_order)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, name, now, now, 0);
+
+    this.saveDatabase();
+    return id;
+  }
+
+  /**
+   * Update tab name
+   */
+  updateTab(tabId: string, name: string): void {
+    const db = this.ensureInitialized();
+    const now = new Date().toISOString();
+
+    db.prepare('UPDATE video_tabs SET name = ?, updated_at = ? WHERE id = ?')
+      .run(name, now, tabId);
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Delete a tab (cascade will remove all tab items)
+   */
+  deleteTab(tabId: string): void {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM video_tabs WHERE id = ?').run(tabId);
+    this.saveDatabase();
+  }
+
+  /**
+   * Get all videos in a tab
+   */
+  getTabVideos(tabId: string): VideoRecordWithFlags[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT
+        v.*,
+        CASE WHEN EXISTS (SELECT 1 FROM transcripts WHERE video_id = v.id) THEN 1 ELSE 0 END as has_transcript,
+        CASE WHEN EXISTS (SELECT 1 FROM analyses WHERE video_id = v.id) OR v.suggested_title IS NOT NULL THEN 1 ELSE 0 END as has_analysis,
+        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children,
+        vti.added_at as tab_added_at,
+        vti.display_order as tab_display_order
+      FROM video_tab_items vti
+      JOIN videos v ON vti.video_id = v.id
+      WHERE vti.tab_id = ?
+      ORDER BY vti.display_order ASC, vti.added_at DESC
+    `);
+    return stmt.all(tabId) as VideoRecordWithFlags[];
+  }
+
+  /**
+   * Add a video to a tab
+   */
+  addVideoToTab(tabId: string, videoId: string): string {
+    const db = this.ensureInitialized();
+    const id = require('crypto').randomUUID();
+    const now = new Date().toISOString();
+
+    try {
+      db.prepare(`
+        INSERT INTO video_tab_items (id, tab_id, video_id, added_at, display_order)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, tabId, videoId, now, 0);
+
+      // Update tab's updated_at timestamp
+      db.prepare('UPDATE video_tabs SET updated_at = ? WHERE id = ?')
+        .run(now, tabId);
+
+      this.saveDatabase();
+      return id;
+    } catch (error: any) {
+      if (error.message && error.message.includes('UNIQUE constraint failed')) {
+        throw new Error('Video is already in this tab');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a video from a tab
+   */
+  removeVideoFromTab(tabId: string, videoId: string): void {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM video_tab_items WHERE tab_id = ? AND video_id = ?')
+      .run(tabId, videoId);
+
+    // Update tab's updated_at timestamp
+    const now = new Date().toISOString();
+    db.prepare('UPDATE video_tabs SET updated_at = ? WHERE id = ?')
+      .run(now, tabId);
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Get all tabs that contain a specific video
+   */
+  getTabsForVideo(videoId: string): Array<{ id: string; name: string; created_at: string; updated_at: string }> {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT vt.id, vt.name, vt.created_at, vt.updated_at
+      FROM video_tabs vt
+      JOIN video_tab_items vti ON vt.id = vti.tab_id
+      WHERE vti.video_id = ?
+      ORDER BY vt.name ASC
+    `);
+    return stmt.all(videoId) as any[];
   }
 
   /**

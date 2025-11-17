@@ -9,6 +9,7 @@ import { SharedDatabaseService } from './shared-database.service';
 import { DatabaseConflictService } from './database-conflict.service';
 import { RelinkingService } from './relinking.service';
 import { RelinkingController } from './relinking.controller';
+import { TabsController } from './tabs.controller';
 import { IgnoreService } from './ignore.service';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
@@ -35,6 +36,7 @@ import { MediaModule } from '../media/media.module';
   controllers: [
     DatabaseController,
     RelinkingController,
+    TabsController,
   ],
   providers: [
     DatabaseService,

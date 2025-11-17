@@ -520,16 +520,27 @@ export class FfmpegService {
     command.on('end', () => {
       this.logger.log(`Successfully re-encoded video: ${outputFile}`);
 
+      // Preserve original file timestamps before deletion
+      const fs = require('fs');
+      const originalStats = fs.statSync(videoFile);
+      const originalAtime = originalStats.atime;
+      const originalMtime = originalStats.mtime;
+
       // Delete the original video safely
       if (this.safeDeleteFile(videoFile)) {
         this.logger.log(`Deleted original video: ${videoFile}`);
 
         // Rename the reencoded file to the original name (keep original extension)
-        const fs = require('fs');
         const originalName = videoFile;  // Keep exact original filename
         try {
           fs.renameSync(outputFile, originalName);
           this.logger.log(`Renamed ${outputFile} to ${originalName}`);
+
+          // Preserve original timestamps (critical for maintaining download_date)
+          // atime = access time, mtime = modification time
+          // These determine the file's birthtime/creation date
+          fs.utimesSync(originalName, originalAtime, originalMtime);
+          this.logger.log(`Preserved original file timestamps (download_date maintained)`);
 
           // Emit 100% completion
           this.lastReportedProgress.set(progressKey, 100);
@@ -755,6 +766,11 @@ export class FfmpegService {
             });
           }
 
+          // Preserve original file timestamps before deletion
+          const originalStats = fs.statSync(filePath);
+          const originalAtime = originalStats.atime;
+          const originalMtime = originalStats.mtime;
+
           // Delete the original file and rename temp file to original name
           if (this.safeDeleteFile(filePath)) {
             this.logger.log(`Deleted original file: ${filePath}`);
@@ -762,6 +778,11 @@ export class FfmpegService {
             try {
               fs.renameSync(tempOutputFile, filePath);
               this.logger.log(`Renamed ${tempOutputFile} to ${filePath}`);
+
+              // Preserve original timestamps (critical for maintaining download_date)
+              fs.utimesSync(filePath, originalAtime, originalMtime);
+              this.logger.log(`Preserved original file timestamps (download_date maintained)`);
+
               resolve(filePath);
             } catch (err: any) {
               this.logger.error(`Failed to rename file: ${err.message}`);

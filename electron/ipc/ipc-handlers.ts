@@ -126,7 +126,7 @@ function setupFileSystemHandlers(): void {
   // Select directory
   ipcMain.handle('select-directory', async (event) => {
     const window = event.sender ? require('electron').BrowserWindow.fromWebContents(event.sender) : null;
-    
+
     if (!window) return null;
 
     const result = await dialog.showOpenDialog(window, {
@@ -139,15 +139,56 @@ function setupFileSystemHandlers(): void {
 
     return result.filePaths[0];
   });
-  
+
   // Open file in native application
   ipcMain.handle('open-file', (_, filePath) => {
     return shell.openPath(filePath);
   });
-  
+
   // Show file in folder
   ipcMain.handle('show-in-folder', (_, filePath) => {
     return shell.showItemInFolder(filePath);
+  });
+
+  // Copy files to clipboard (for Cmd+C functionality)
+  ipcMain.handle('copy-files-to-clipboard', (_, filePaths: string[]) => {
+    try {
+      const { clipboard } = require('electron');
+      clipboard.writeBuffer('public.file-url', Buffer.from(
+        filePaths.map(p => `file://${p}`).join('\n')
+      ));
+      log.info(`Copied ${filePaths.length} file(s) to clipboard`);
+      return { success: true };
+    } catch (error) {
+      log.error('Error copying files to clipboard:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
+  // Open file in QuickTime Player (macOS)
+  ipcMain.handle('open-in-quicktime', async (_, filePath: string) => {
+    try {
+      if (process.platform === 'darwin') {
+        const { exec } = require('child_process');
+        return new Promise((resolve, reject) => {
+          exec(`open -a "QuickTime Player" "${filePath}"`, (error: any) => {
+            if (error) {
+              log.error('Error opening file in QuickTime:', error);
+              reject(error);
+            } else {
+              log.info(`Opened ${filePath} in QuickTime Player`);
+              resolve({ success: true });
+            }
+          });
+        });
+      } else {
+        // On non-macOS platforms, just open with default app
+        return shell.openPath(filePath);
+      }
+    } catch (error) {
+      log.error('Error opening in QuickTime:', error);
+      return { success: false, error: (error as Error).message };
+    }
   });
   
   // Directory picker dialog

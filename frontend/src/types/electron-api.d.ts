@@ -6,6 +6,8 @@ interface ElectronAPI {
   exitApp: () => void;
   openExternal: (url: string) => Promise<void>;
   openPath: (path: string) => Promise<string>;
+  copyFilesToClipboard: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
+  openInQuickTime: (filePath: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 interface Window {

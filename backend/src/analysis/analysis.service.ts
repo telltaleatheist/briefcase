@@ -139,7 +139,10 @@ export class AnalysisService implements OnModuleInit {
 
     // Determine title from input
     let title = 'Video Analysis';
-    if (request.inputType === 'file' && request.input) {
+    if (request.customReportName) {
+      // Use custom name if provided (e.g., from batch downloader)
+      title = request.customReportName;
+    } else if (request.inputType === 'file' && request.input) {
       // Extract filename from path
       const path = require('path');
       title = path.basename(request.input, path.extname(request.input));

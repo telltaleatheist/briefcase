@@ -1,0 +1,148 @@
+:host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.tabs-container {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.tabs-header {
+  margin-bottom: 20px;
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 500;
+  }
+
+  .subtitle {
+    margin: 5px 0 0 0;
+    color: #999;
+    font-size: 14px;
+  }
+}
+
+.tabs-management {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 30px;
+  max-height: 300px;
+  overflow-y: auto;
+
+  .tab-card {
+    background-color: #2a2a2a;
+
+    mat-card-content {
+      padding: 16px;
+    }
+
+    .tab-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      .tab-name {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 16px;
+
+        mat-icon {
+          color: #3f51b5;
+        }
+
+        .video-count {
+          color: #999;
+          font-size: 14px;
+        }
+      }
+
+      .tab-actions {
+        display: flex;
+        gap: 8px;
+      }
+    }
+  }
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  gap: 20px;
+
+  p {
+    color: #999;
+  }
+}
+
+.empty-state,
+.empty-videos-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  gap: 15px;
+  text-align: center;
+
+  mat-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    color: #666;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 400;
+  }
+
+  p {
+    margin: 0;
+    color: #999;
+    max-width: 400px;
+  }
+
+  button {
+    margin-top: 10px;
+
+    mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      margin-right: 8px;
+    }
+  }
+}
+
+.tabs-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+
+  cascade-list {
+    flex: 1;
+    min-height: 0;
+  }
+}

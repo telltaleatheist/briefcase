@@ -1,0 +1,74 @@
+<div class="tabs-container">
+  <div class="tabs-header">
+    <div class="header-top">
+      <div>
+        <h1>Video Tabs</h1>
+        <p class="subtitle">Organize your videos into custom groups for streaming</p>
+      </div>
+      <button mat-raised-button color="primary" (click)="createNewTab()" *ngIf="!loading">
+        <mat-icon>add</mat-icon>
+        Create Tab
+      </button>
+    </div>
+  </div>
+
+  <div *ngIf="loading" class="loading-container">
+    <mat-spinner></mat-spinner>
+    <p>Loading tabs...</p>
+  </div>
+
+  <!-- Tab Management Section -->
+  <div *ngIf="!loading && tabs.length > 0" class="tabs-management">
+    <mat-card class="tab-card" *ngFor="let tab of tabs">
+      <mat-card-content>
+        <div class="tab-info">
+          <div class="tab-name">
+            <mat-icon>tab</mat-icon>
+            <span>{{ tab.name }}</span>
+            <span class="video-count">({{ tab.video_count }} videos)</span>
+          </div>
+          <div class="tab-actions">
+            <button mat-icon-button matTooltip="Rename tab" (click)="renameTab(tab)">
+              <mat-icon>edit</mat-icon>
+            </button>
+            <button mat-icon-button matTooltip="Delete tab" color="warn" (click)="deleteTab(tab)">
+              <mat-icon>delete</mat-icon>
+            </button>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
+  <div *ngIf="!loading && tabs.length === 0" class="empty-state">
+    <mat-icon>tab</mat-icon>
+    <h2>No tabs yet</h2>
+    <p>Create a tab to start organizing your videos, or right-click videos in the library to add them to a new tab</p>
+    <button mat-raised-button color="primary" (click)="createNewTab()">
+      <mat-icon>add</mat-icon>
+      Create Tab
+    </button>
+  </div>
+
+  <div *ngIf="!loading && allVideos.length > 0" class="tabs-content">
+    <cascade-list
+      [items]="allVideos"
+      [displayConfig]="listDisplayConfig"
+      [groupConfig]="listGroupConfig"
+      [contextMenuActions]="listContextMenuActions"
+      (contextMenuAction)="onListContextMenuAction($event)"
+      (itemDoubleClick)="openInQuickTime($event)"
+      [selectionMode]="selectionMode"
+    ></cascade-list>
+  </div>
+
+  <div *ngIf="!loading && tabs.length > 0 && allVideos.length === 0" class="empty-videos-state">
+    <mat-icon>video_library</mat-icon>
+    <h2>No videos in tabs</h2>
+    <p>Your tabs are empty. Right-click videos in the library to add them to a tab.</p>
+    <button mat-raised-button color="primary" routerLink="/library">
+      <mat-icon>video_library</mat-icon>
+      Go to Library
+    </button>
+  </div>
+</div>

@@ -36,6 +36,7 @@ export class BatchDownloaderService {
       aiModel: '', // Not needed for download-and-process
       ollamaEndpoint: '', // Not needed for download-and-process
       outputPath: options.outputDir,
+      customReportName: options.displayName, // Pass displayName so analysis job shows proper title
     }, jobId).catch(error => {
       this.logger.error(`Failed to queue batch job ${jobId}: ${error}`);
     });
