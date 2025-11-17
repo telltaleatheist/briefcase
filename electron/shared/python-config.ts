@@ -9,6 +9,15 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { app } from 'electron';
+
+/**
+ * Get the user data path for storing writable data (cache, logs, etc.)
+ * This directory is OUTSIDE the app bundle and is writable
+ */
+function getUserDataPath(): string {
+  return app.getPath('userData');
+}
 
 /**
  * Configuration for Python environment

@@ -8,6 +8,8 @@ import * as child_process from 'child_process';
 import * as fs from 'fs';
 import path from 'path';
 import * as os from 'os';
+// Import centralized binary path resolver
+import { getBinariesConfig, validateBinaries } from '../../dist-electron/shared/binary-paths';
 
 /**
  * Utilities for managing executable paths (FFmpeg, FFprobe, yt-dlp)
@@ -260,160 +262,33 @@ export class ExecutablesUtil {
 
   /**
    * Try to get bundled binary paths from npm packages and utilities folder
+   * Now uses the centralized binary path resolver
    */
   private getBundledBinaryPaths(): Partial<PathConfig> {
     const bundledPaths: Partial<PathConfig> = {};
-    const { app } = require('electron');
 
     try {
-      // Try to get ffmpeg from @ffmpeg-installer/ffmpeg
-      // First check extraResources (production), then fall back to npm package location (development)
-      const platform = process.platform;
-      const arch = process.arch;
+      // Use centralized binary path resolver
+      const binariesConfig = getBinariesConfig();
 
-      let platformFolder = '';
-      if (platform === 'win32') {
-        platformFolder = 'win32-x64';
-      } else if (platform === 'darwin') {
-        platformFolder = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-      } else if (platform === 'linux') {
-        platformFolder = 'linux-x64';
+      log.info('Using centralized binary path resolver');
+      log.info(`FFmpeg: ${binariesConfig.ffmpeg.path} (${binariesConfig.ffmpeg.source})`);
+      log.info(`FFprobe: ${binariesConfig.ffprobe.path} (${binariesConfig.ffprobe.source})`);
+      log.info(`yt-dlp: ${binariesConfig.ytdlp.path} (${binariesConfig.ytdlp.source})`);
+
+      if (binariesConfig.ffmpeg.exists) {
+        bundledPaths.ffmpegPath = binariesConfig.ffmpeg.path;
       }
 
-      const binaryName = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-
-      // Try extraResources first (production)
-      const resourcesPath = process.resourcesPath || app.getAppPath();
-
-      // Check multiple possible locations for bundled ffmpeg
-      const possiblePaths = [
-        // Production: in Resources/node_modules (packaged by electron-builder)
-        path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, binaryName),
-        // Production alternative: app.asar.unpacked
-        path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@ffmpeg-installer', platformFolder, binaryName),
-      ];
-
-      let found = false;
-      for (const ffmpegPath of possiblePaths) {
-        if (fs.existsSync(ffmpegPath)) {
-          log.info(`Found bundled ffmpeg at: ${ffmpegPath}`);
-          bundledPaths.ffmpegPath = ffmpegPath;
-          found = true;
-          break;
-        }
+      if (binariesConfig.ffprobe.exists) {
+        bundledPaths.ffprobePath = binariesConfig.ffprobe.path;
       }
 
-      if (!found) {
-        // Fall back to npm package (development)
-        try {
-          const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-          if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
-            log.info(`Found bundled ffmpeg at: ${ffmpegInstaller.path}`);
-            bundledPaths.ffmpegPath = ffmpegInstaller.path;
-          }
-        } catch (error) {
-          log.warn('Could not load @ffmpeg-installer/ffmpeg via require:', error);
-        }
+      if (binariesConfig.ytdlp.exists) {
+        bundledPaths.ytDlpPath = binariesConfig.ytdlp.path;
       }
     } catch (error) {
-      log.warn('Could not load @ffmpeg-installer/ffmpeg:', error);
-    }
-
-    try {
-      // Try to get ffprobe from @ffprobe-installer/ffprobe
-      // First check extraResources (production), then fall back to npm package location (development)
-      const platform = process.platform;
-      const arch = process.arch;
-
-      let platformFolder = '';
-      if (platform === 'win32') {
-        platformFolder = 'win32-x64';
-      } else if (platform === 'darwin') {
-        platformFolder = arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-      } else if (platform === 'linux') {
-        platformFolder = 'linux-x64';
-      }
-
-      const binaryName = platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
-
-      // Try extraResources first (production)
-      const resourcesPath = process.resourcesPath || app.getAppPath();
-
-      // Check multiple possible locations for bundled ffprobe
-      const possiblePaths = [
-        // Production: in Resources/node_modules (packaged by electron-builder)
-        path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, binaryName),
-        // Production alternative: app.asar.unpacked
-        path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@ffprobe-installer', platformFolder, binaryName),
-      ];
-
-      let found = false;
-      for (const ffprobePath of possiblePaths) {
-        if (fs.existsSync(ffprobePath)) {
-          log.info(`Found bundled ffprobe at: ${ffprobePath}`);
-          bundledPaths.ffprobePath = ffprobePath;
-          found = true;
-          break;
-        }
-      }
-
-      if (!found) {
-        // Fall back to npm package (development)
-        try {
-          const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
-          if (ffprobeInstaller && ffprobeInstaller.path && fs.existsSync(ffprobeInstaller.path)) {
-            log.info(`Found bundled ffprobe at: ${ffprobeInstaller.path}`);
-            bundledPaths.ffprobePath = ffprobeInstaller.path;
-          }
-        } catch (error) {
-          log.warn('Could not load @ffprobe-installer/ffprobe via require:', error);
-        }
-      }
-    } catch (error) {
-      log.warn('Could not load @ffprobe-installer/ffprobe:', error);
-    }
-
-    try {
-      // Try to get bundled yt-dlp from utilities/bin folder
-      const { app } = require('electron');
-      const platform = os.platform();
-
-      // Determine the correct binary name for the platform
-      let ytDlpBinaryName: string;
-      if (platform === 'win32') {
-        ytDlpBinaryName = 'yt-dlp.exe';
-      } else if (platform === 'darwin') {
-        ytDlpBinaryName = 'yt-dlp_macos';
-      } else {
-        ytDlpBinaryName = 'yt-dlp_linux';
-      }
-
-      // Try multiple possible locations for bundled yt-dlp
-      const possiblePaths = [
-        // Production: extraResources location
-        path.join(process.resourcesPath || app.getAppPath(), 'utilities', 'bin', ytDlpBinaryName),
-        // Production: app.asar.unpacked location
-        path.join(process.resourcesPath || app.getAppPath(), 'app.asar.unpacked', 'utilities', 'bin', ytDlpBinaryName),
-        // Development: project root
-        path.join(__dirname, '../../..', 'utilities', 'bin', ytDlpBinaryName),
-        path.join(__dirname, '../..', 'utilities', 'bin', ytDlpBinaryName),
-        path.join(app.getAppPath(), 'utilities', 'bin', ytDlpBinaryName)
-      ];
-
-      for (const ytDlpPath of possiblePaths) {
-        log.info(`Checking for yt-dlp at: ${ytDlpPath}`);
-        if (fs.existsSync(ytDlpPath) && this.isExecutable(ytDlpPath)) {
-          log.info(`Found bundled yt-dlp at: ${ytDlpPath}`);
-          bundledPaths.ytDlpPath = ytDlpPath;
-          break;
-        }
-      }
-
-      if (!bundledPaths.ytDlpPath) {
-        log.info(`Bundled yt-dlp not found in any of the checked locations`);
-      }
-    } catch (error) {
-      log.warn('Could not load bundled yt-dlp:', error);
+      log.error('Error using centralized binary path resolver:', error);
     }
 
     return bundledPaths;

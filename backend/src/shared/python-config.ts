@@ -35,6 +35,31 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+
+/**
+ * Get the user data path for storing writable data (cache, logs, etc.)
+ * This directory is OUTSIDE the app bundle and is writable
+ */
+function getUserDataPath(): string {
+  // Try to use Electron's app.getPath if available
+  try {
+    const { app } = require('electron');
+    return app.getPath('userData');
+  } catch {
+    // Fallback for non-Electron contexts
+    const platform = process.platform;
+    const home = os.homedir();
+
+    if (platform === 'darwin') {
+      return path.join(home, 'Library', 'Application Support', 'clippy');
+    } else if (platform === 'win32') {
+      return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'clippy');
+    } else {
+      return path.join(home, '.config', 'clippy');
+    }
+  }
+}
 
 /**
  * Configuration for Python environment
@@ -130,11 +155,17 @@ export function getPythonConfig(): PythonConfig {
         process.env.PYTHONHOME = pythonHome;
         process.env.PYTHONPATH = path.join(pythonHome, 'lib', 'python3.11', 'site-packages');
 
-        // Set cache directory for Whisper
-        const cacheDir = path.join(pythonHome, 'cache');
-        if (fs.existsSync(cacheDir)) {
-          process.env.XDG_CACHE_HOME = cacheDir;
+        // Set cache directory for Whisper - MUST be writable!
+        // Use userData directory instead of bundled python directory
+        const userDataPath = getUserDataPath();
+        const cacheDir = path.join(userDataPath, 'cache');
+
+        // Ensure cache directory exists
+        if (!fs.existsSync(cacheDir)) {
+          fs.mkdirSync(cacheDir, { recursive: true });
         }
+
+        process.env.XDG_CACHE_HOME = cacheDir;
       } else if (platform === 'win32') {
         // Windows: Set Python user base
         const pythonHome = isPackaged
@@ -143,11 +174,17 @@ export function getPythonConfig(): PythonConfig {
 
         process.env.PYTHONHOME = pythonHome;
 
-        // Set cache directory for Whisper
-        const cacheDir = path.join(pythonHome, 'cache');
-        if (fs.existsSync(cacheDir)) {
-          process.env.XDG_CACHE_HOME = cacheDir;
+        // Set cache directory for Whisper - MUST be writable!
+        // Use userData directory instead of bundled python directory
+        const userDataPath = getUserDataPath();
+        const cacheDir = path.join(userDataPath, 'cache');
+
+        // Ensure cache directory exists
+        if (!fs.existsSync(cacheDir)) {
+          fs.mkdirSync(cacheDir, { recursive: true });
         }
+
+        process.env.XDG_CACHE_HOME = cacheDir;
       }
 
       return {

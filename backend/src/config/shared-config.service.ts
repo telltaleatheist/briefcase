@@ -2,6 +2,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
+// Import centralized binary path resolver from compiled JS
+const { getBinariesConfig } = require('../../../dist-electron/shared/binary-paths');
 
 @Injectable()
 export class SharedConfigService {
@@ -12,11 +14,11 @@ export class SharedConfigService {
 
   private constructor() {
     // Determine the user config path - similar to your ConfigManager
-    const userDataPath = process.env.APPDATA || 
-                      (process.platform === 'darwin' ? 
-                      path.join(process.env.HOME || '', 'Library', 'Application Support') : 
+    const userDataPath = process.env.APPDATA ||
+                      (process.platform === 'darwin' ?
+                      path.join(process.env.HOME || '', 'Library', 'Application Support') :
                       path.join(process.env.HOME || '', '.config'));
-    
+
     this.configPath = path.join(userDataPath, 'clippy', 'app-config.json');
     this.loadConfig();
   }
@@ -49,15 +51,36 @@ export class SharedConfigService {
   }
 
   getFfmpegPath(): string | undefined {
-    return this.config.ffmpegPath;
+    // Priority: user config > centralized binary resolver
+    if (this.config.ffmpegPath) {
+      return this.config.ffmpegPath;
+    }
+
+    // Fallback to centralized binary resolver
+    const binariesConfig = getBinariesConfig();
+    return binariesConfig.ffmpeg.exists ? binariesConfig.ffmpeg.path : undefined;
   }
 
   getFfprobePath(): string | undefined {
-    return this.config.ffprobePath;
+    // Priority: user config > centralized binary resolver
+    if (this.config.ffprobePath) {
+      return this.config.ffprobePath;
+    }
+
+    // Fallback to centralized binary resolver
+    const binariesConfig = getBinariesConfig();
+    return binariesConfig.ffprobe.exists ? binariesConfig.ffprobe.path : undefined;
   }
 
   getYtDlpPath(): string | undefined {
-    return this.config.ytDlpPath;
+    // Priority: user config > centralized binary resolver
+    if (this.config.ytDlpPath) {
+      return this.config.ytDlpPath;
+    }
+
+    // Fallback to centralized binary resolver
+    const binariesConfig = getBinariesConfig();
+    return binariesConfig.ytdlp.exists ? binariesConfig.ytdlp.path : undefined;
   }
 
   getOutputDir(): string | undefined {

@@ -14,11 +14,12 @@
     "clean:mac": "rimraf dist-electron/mac dist-electron/mac-arm64 dist-electron/*.dmg dist-electron/*.dmg.blockmap dist-electron/latest-mac.yml mac-arm64 mac-arm64* *.dmg *.dmg.blockmap",
     "clean:linux": "rimraf dist-electron/linux-unpacked dist-electron/*.AppImage dist-electron/*.AppImage.blockmap dist-electron/*.deb dist-electron/latest-linux.yml",
     "clean:all": "npm run clean && rimraf frontend/dist backend/dist",
-    "build:all": "npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
+    "build:all": "npm run build:shared && npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
     "build:backend": "tsc -p backend/tsconfig.json && cd backend && npm run build",
     "build:frontend": "tsc -p frontend/tsconfig.json && cd frontend && npm run build",
     "build:electron": "tsc -p electron/tsconfig.electron.json",
     "build:preload": "tsc -p electron/tsconfig.preload.json",
+    "build:shared": "tsc shared/*.ts --outDir dist-electron/shared --esModuleInterop --moduleResolution node --target ES2020 --module commonjs --declaration",
     "download:ytdlp": "node scripts/download-ytdlp.js",
     "package:python:mac-arm64": "node scripts/package-python-mac.js arm64",
     "package:python:mac-x64": "node scripts/package-python-mac.js x64",
@@ -123,21 +124,31 @@
       },
       {
         "from": "utilities",
-        "to": "utilities"
+        "to": "utilities",
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "node_modules/@ffmpeg-installer",
-        "to": "node_modules/@ffmpeg-installer"
+        "to": "node_modules/@ffmpeg-installer",
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "node_modules/@ffprobe-installer",
-        "to": "node_modules/@ffprobe-installer"
+        "to": "node_modules/@ffprobe-installer",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "files": [
       "dist-electron/electron/**/*",
       "dist-electron/config/**/*",
       "dist-electron/utilities/**/*",
+      "dist-electron/shared/**/*",
       "!dist-electron/**/*.map",
       "!backend/**",
       "frontend/dist/clippy-frontend/**/*",
