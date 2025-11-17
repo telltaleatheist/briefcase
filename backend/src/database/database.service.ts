@@ -280,6 +280,88 @@ export class DatabaseService {
   }
 
   /**
+   * Convert absolute path to relative path (relative to clips folder)
+   * Stores paths relative to enable cross-platform library sharing
+   * @param absolutePath - Full absolute path to video file
+   * @param clipsFolderPath - Root clips folder path
+   * @returns Relative path from clips folder, or absolute path if outside clips folder
+   */
+  toRelativePath(absolutePath: string, clipsFolderPath: string): string {
+    // Normalize both paths for comparison
+    const normalizedAbsolute = path.normalize(absolutePath);
+    const normalizedClipsFolder = path.normalize(clipsFolderPath);
+
+    // Check if path is inside clips folder
+    if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
+      // Get relative path from clips folder
+      const relativePath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+      return relativePath;
+    }
+
+    // If outside clips folder, keep absolute (shouldn't happen in normal operation)
+    this.logger.warn(`Path outside clips folder: ${absolutePath}`);
+    return absolutePath;
+  }
+
+  /**
+   * Convert relative path to absolute path (resolved from clips folder)
+   * @param relativePath - Relative path from database
+   * @param clipsFolderPath - Root clips folder path
+   * @returns Absolute path to video file
+   */
+  toAbsolutePath(relativePath: string, clipsFolderPath: string): string {
+    // If already absolute, return as-is (backward compatibility)
+    if (path.isAbsolute(relativePath)) {
+      return relativePath;
+    }
+
+    // Resolve relative path from clips folder
+    return path.join(clipsFolderPath, relativePath);
+  }
+
+  /**
+   * Get the clips folder path for the current database
+   * Looks for .library.db location as the clips folder
+   * @returns Clips folder path or null if database not initialized
+   */
+  getClipsFolderPath(): string | null {
+    if (!this.dbPath) {
+      return null;
+    }
+
+    // Database is stored as .library.db in the clips folder
+    // So the clips folder is the parent directory of the database file
+    return path.dirname(this.dbPath);
+  }
+
+  /**
+   * Resolve video paths from relative to absolute
+   * Modifies the video record in place
+   * @param video - Video record to resolve paths for
+   */
+  private resolveVideoPaths<T extends VideoRecord>(video: T): T {
+    const clipsFolder = this.getClipsFolderPath();
+    if (!clipsFolder) {
+      return video;
+    }
+
+    // Resolve current_path from relative to absolute
+    if (video.current_path) {
+      video.current_path = this.toAbsolutePath(video.current_path, clipsFolder);
+    }
+
+    return video;
+  }
+
+  /**
+   * Resolve paths for an array of videos
+   * @param videos - Array of video records
+   */
+  private resolveVideoPathsArray<T extends VideoRecord>(videos: T[]): T[] {
+    return videos.map(video => this.resolveVideoPaths(video));
+  }
+
+  /**
    * Initialize database schema with all tables and indexes
    */
   private initializeSchema() {
@@ -1205,7 +1287,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE filename = ?');
     const result = stmt.get(filename) as VideoRecord | undefined;
-    return result || null;
+    return result ? this.resolveVideoPaths(result) : null;
   }
 
   /**
@@ -1215,7 +1297,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE file_hash = ?');
     const result = stmt.get(hash) as VideoRecord | undefined;
-    return result || null;
+    return result ? this.resolveVideoPaths(result) : null;
   }
 
   /**
@@ -1225,7 +1307,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE source_url = ?');
     const result = stmt.get(url) as VideoRecord | undefined;
-    return result || null;
+    return result ? this.resolveVideoPaths(result) : null;
   }
 
   /**
@@ -1235,7 +1317,7 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const stmt = db.prepare('SELECT * FROM videos WHERE id = ?');
     const result = stmt.get(id) as VideoRecord | undefined;
-    return result || null;
+    return result ? this.resolveVideoPaths(result) : null;
   }
 
   /**
@@ -1244,6 +1326,10 @@ export class DatabaseService {
   updateVideoPath(id: string, newPath: string, uploadDate?: string) {
     const db = this.ensureInitialized();
 
+    // Convert to relative path for cross-platform compatibility
+    const clipsFolder = this.getClipsFolderPath();
+    const relativePath = clipsFolder ? this.toRelativePath(newPath, clipsFolder) : newPath;
+
     db.prepare(
       `UPDATE videos
        SET current_path = ?,
@@ -1251,7 +1337,7 @@ export class DatabaseService {
            last_verified = ?,
            is_linked = 1
        WHERE id = ?`
-    ).run(newPath, uploadDate || null, new Date().toISOString(), id);
+    ).run(relativePath, uploadDate || null, new Date().toISOString(), id);
 
     this.saveDatabase();
   }
@@ -1446,7 +1532,7 @@ export class DatabaseService {
       WHERE v.id = ?
     `);
     const result = stmt.get(id) as VideoRecordWithFlags | undefined;
-    return result || null;
+    return result ? this.resolveVideoPaths(result) : null;
   }
 
   /**
@@ -1559,7 +1645,7 @@ export class DatabaseService {
     const stmt = db.prepare(query);
     const results = params.length > 0 ? stmt.all(...params) : stmt.all();
 
-    return results as VideoRecordWithFlags[];
+    return this.resolveVideoPathsArray(results as VideoRecordWithFlags[]);
   }
 
   /**
@@ -2722,7 +2808,7 @@ export class DatabaseService {
       ORDER BY added_at ASC
     `);
     const results = stmt.all(parentId) as VideoRecord[];
-    return results;
+    return this.resolveVideoPathsArray(results);
   }
 
   /**
@@ -2983,7 +3069,7 @@ export class DatabaseService {
       WHERE vti.tab_id = ?
       ORDER BY vti.display_order ASC, vti.added_at DESC
     `);
-    return stmt.all(tabId) as VideoRecordWithFlags[];
+    return this.resolveVideoPathsArray(stmt.all(tabId) as VideoRecordWithFlags[]);
   }
 
   /**

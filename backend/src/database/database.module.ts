@@ -3,6 +3,7 @@ import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
 import { LibraryManagerService } from './library-manager.service';
+import { LibraryMigrationService } from './library-migration.service';
 import { DatabaseController } from './database.controller';
 import { PathMappingService } from './path-mapping.service';
 import { SharedDatabaseService } from './shared-database.service';
@@ -41,6 +42,7 @@ import { MediaModule } from '../media/media.module';
   providers: [
     DatabaseService,
     LibraryManagerService,
+    LibraryMigrationService,
     FileScannerService,
     MigrationService,
     PathMappingService,

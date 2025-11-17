@@ -207,11 +207,14 @@ export class FileScannerService {
             const stats = fs.statSync(file.fullPath);
             const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
 
+            // Convert to relative path for cross-platform compatibility
+            const relativePath = this.databaseService.toRelativePath(file.fullPath, clipsRoot);
+
             this.databaseService.insertVideo({
               id: videoId,
               filename: file.filename,
               fileHash: file.hash,
-              currentPath: file.fullPath,
+              currentPath: relativePath,
               uploadDate: file.uploadDate,
               downloadDate: fileCreationDate.toISOString(),
               fileSizeBytes: stats.size,
@@ -676,12 +679,14 @@ export class FileScannerService {
           this.logger.log(`Skipping duration extraction for large file (${(stats.size / 1024 / 1024).toFixed(1)}MB): ${filename}`);
         }
 
-        // Insert into database
+        // Insert into database (convert to relative path for cross-platform compatibility)
+        const relativePath = this.databaseService.toRelativePath(destinationPath, clipsRoot);
+
         this.databaseService.insertVideo({
           id: videoId,
           filename,
           fileHash,
-          currentPath: destinationPath,
+          currentPath: relativePath,
           uploadDate: uploadDate || undefined, // Content creation date from filename
           downloadDate, // File creation timestamp (when you downloaded it)
           durationSeconds,

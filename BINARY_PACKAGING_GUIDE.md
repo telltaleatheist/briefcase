@@ -188,7 +188,7 @@ The build process includes these steps:
 # macOS ARM64
 npm run package:mac-arm64
 
-# macOS x64
+# macOS x64 (Intel Mac)
 npm run package:mac-x64
 
 # Windows x64
@@ -200,6 +200,27 @@ npm run package:win-arm64
 # Linux
 npm run package:linux
 ```
+
+### Cross-Platform Build Requirements
+
+**Important:** When building for a different architecture than your current platform, you need to install the correct FFmpeg/FFprobe binaries.
+
+#### Building Intel Mac (x64) on ARM Mac
+
+The `@ffmpeg-installer` and `@ffprobe-installer` packages only install binaries for your current platform. When building for Intel Mac on an ARM Mac, you need the `darwin-x64` binaries.
+
+**Solution:** The `package:mac-x64` script automatically runs `npm run install:ffmpeg:x64` which installs the Intel Mac binaries via `scripts/install-ffmpeg-x64.js`.
+
+If you need to install them manually:
+```bash
+npm run install:ffmpeg:x64
+```
+
+This installs:
+- `@ffmpeg-installer/darwin-x64@4.1.0`
+- `@ffprobe-installer/darwin-x64@5.1.0`
+
+Both in the root and backend `node_modules` directories.
 
 ## Code Integration
 

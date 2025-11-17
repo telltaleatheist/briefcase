@@ -2002,6 +2002,36 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/libraries/open
+   * Open an existing library from a folder (looks for .library.db)
+   */
+  @Post('libraries/open')
+  async openExistingLibrary(@Body() body: { clipsFolderPath: string; name?: string }) {
+    if (!body.clipsFolderPath || typeof body.clipsFolderPath !== 'string') {
+      return {
+        success: false,
+        error: 'Clips folder path is required',
+      };
+    }
+
+    try {
+      const library = await this.libraryManagerService.openExistingLibrary(
+        body.clipsFolderPath,
+        body.name,
+      );
+      return {
+        success: true,
+        library,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to open library',
+      };
+    }
+  }
+
+  /**
    * POST /api/database/libraries/:id/switch
    * Switch to a different library
    */

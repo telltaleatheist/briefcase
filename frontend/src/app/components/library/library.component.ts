@@ -46,6 +46,7 @@ import { VideoProcessingQueueService } from '../../services/video-processing-que
 import { VideoProcessingJob, getProcessIcon } from '../../models/video-processing.model';
 import { VideoStateService, VideoState } from '../../services/video-state.service';
 import { TabsService } from '../../services/tabs.service';
+import { FrontendBatchAnalysisService } from '../../services/frontend-batch-analysis.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
@@ -396,7 +397,8 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     private importQueueService: ImportQueueService,
     private videoProcessingQueueService: VideoProcessingQueueService,
     private videoStateService: VideoStateService,
-    private tabsService: TabsService
+    private tabsService: TabsService,
+    private frontendBatchAnalysisService: FrontendBatchAnalysisService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -2687,14 +2689,22 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         return;
       }
 
-      // Start batch analysis with selected videos
+      // Start batch analysis with selected videos using frontend queue management
       try {
-        await this.databaseLibraryService.startBatchAnalysis({
-          videoIds: videoIds,
+        // Get video details for the selected videos
+        const selectedVideoDetails = this.videos.filter(v => videoIds.includes(v.id));
+        const videosToProcess = selectedVideoDetails.map(v => ({
+          id: v.id,
+          filename: v.filename
+        }));
+
+        // Use frontend batch analysis service to manage the queue
+        await this.frontendBatchAnalysisService.startBatchAnalysis(videosToProcess, {
           transcribeOnly: result.option === 'transcribe-only',
           forceReanalyze: result.forceReanalyze,
           aiProvider: result.aiProvider,
           aiModel: result.aiModel,
+          whisperModel: 'base',
           claudeApiKey: result.claudeApiKey,
           openaiApiKey: result.openaiApiKey
         });
@@ -2768,14 +2778,38 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     this.completedVideos = [];
     this.lastProcessedCount = 0;
 
-    // Poll every 3 seconds
+    // Subscribe to frontend batch state instead of polling backend
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
     }
 
     this.progressInterval = setInterval(async () => {
       try {
-        const newProgress = await this.databaseLibraryService.getBatchProgress();
+        // Get batch state from frontend service
+        const batchState = this.frontendBatchAnalysisService.getCurrentState();
+        if (!batchState) {
+          return;
+        }
+
+        // Convert to progress format expected by the UI
+        const newProgress = {
+          running: batchState.isRunning,
+          status: batchState.isRunning ? 'running' : 'completed',
+          totalVideos: batchState.totalVideos,
+          processedVideos: batchState.completedVideos,
+          failedVideos: batchState.failedVideos,
+          skippedVideos: 0,
+          currentVideoFilename: batchState.currentVideo,
+          progress: batchState.totalVideos > 0 ? (batchState.completedVideos / batchState.totalVideos) * 100 : 0,
+          errors: batchState.jobs
+            .filter(j => j.status === 'failed')
+            .map(j => ({
+              videoId: j.videoId,
+              filename: j.filename,
+              error: j.error || 'Unknown error',
+              timestamp: j.completedAt?.toISOString() || new Date().toISOString()
+            }))
+        };
 
         // Track video processing states for progress bars
         // Remove completed video from processing states

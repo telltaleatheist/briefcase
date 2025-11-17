@@ -177,7 +177,6 @@ async function downloadYtDlp() {
     console.log('║              yt-dlp Download Complete! ✅                 ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
     console.log('📁 Binaries saved to: utilities/bin/');
-    console.log('\n⚡ These Python-based binaries have ~1s startup time instead of 9s!');
     console.log('   (Compiled binaries backed up with .backup suffix)\n');
 
   } catch (error) {

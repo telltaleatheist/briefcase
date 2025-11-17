@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { DatabaseService } from './database.service';
+import { LibraryMigrationService } from './library-migration.service';
 
 /**
  * Library configuration stored in settings
@@ -41,7 +42,10 @@ export class LibraryManagerService implements OnModuleInit {
   private readonly configFilePath: string;
   private config: LibraryManagerConfig;
 
-  constructor(private readonly databaseService: DatabaseService) {
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly migrationService: LibraryMigrationService,
+  ) {
     // Base directory: ~/Library/Application Support/clippy
     this.appDataPath = path.join(
       os.homedir(),
@@ -77,6 +81,9 @@ export class LibraryManagerService implements OnModuleInit {
     const startTime = Date.now();
     this.logger.log('[onModuleInit] Starting library manager initialization...');
 
+    // Run migrations for all libraries that need it
+    await this.migrateAllLibraries();
+
     const activeLibrary = this.getActiveLibrary();
     if (activeLibrary) {
       this.logger.log(`[onModuleInit] Auto-loading active library: ${activeLibrary.name} (${activeLibrary.id})`);
@@ -88,6 +95,51 @@ export class LibraryManagerService implements OnModuleInit {
     }
 
     this.logger.log(`[onModuleInit] Total initialization took ${Date.now() - startTime}ms`);
+  }
+
+  /**
+   * Migrate all libraries that need migration
+   * Runs automatically on startup
+   */
+  private async migrateAllLibraries(): Promise<void> {
+    this.logger.log('[Migration] Checking libraries for migration...');
+
+    let migratedCount = 0;
+    let skippedCount = 0;
+
+    for (const library of this.config.libraries) {
+      // Check if migration is needed
+      if (this.migrationService.needsMigration(library.databasePath, library.clipsFolderPath)) {
+        try {
+          this.logger.log(`[Migration] Migrating library: ${library.name} (${library.id})`);
+
+          const newDatabasePath = await this.migrationService.migrateLibrary(
+            library.id,
+            library.databasePath,
+            library.clipsFolderPath,
+          );
+
+          // Update library config with new database path
+          library.databasePath = newDatabasePath;
+          migratedCount++;
+
+          this.logger.log(`[Migration] ✓ Successfully migrated: ${library.name}`);
+        } catch (error: any) {
+          this.logger.error(`[Migration] Failed to migrate library ${library.name}: ${error.message}`);
+          this.logger.error(error.stack);
+        }
+      } else {
+        skippedCount++;
+      }
+    }
+
+    // Save updated config if any migrations occurred
+    if (migratedCount > 0) {
+      this.saveConfig();
+      this.logger.log(`[Migration] Updated library configuration with ${migratedCount} migrated libraries`);
+    }
+
+    this.logger.log(`[Migration] Complete: ${migratedCount} migrated, ${skippedCount} already up-to-date`);
   }
 
   /**
@@ -152,18 +204,14 @@ export class LibraryManagerService implements OnModuleInit {
    */
   async createLibrary(name: string, clipsFolderPath: string): Promise<ClipLibrary> {
     const id = `lib_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const libraryPath = path.join(this.librariesBasePath, id);
-
-    // Create library directory for database
-    fs.mkdirSync(libraryPath, { recursive: true });
 
     // Ensure clips folder exists (user-provided path)
     if (!fs.existsSync(clipsFolderPath)) {
       fs.mkdirSync(clipsFolderPath, { recursive: true });
     }
 
-    // Database path (stored in system location)
-    const databasePath = path.join(libraryPath, 'library.db');
+    // Database path (stored in clips folder as hidden file)
+    const databasePath = path.join(clipsFolderPath, '.library.db');
 
     const library: ClipLibrary = {
       id,
@@ -190,6 +238,69 @@ export class LibraryManagerService implements OnModuleInit {
     if (this.config.activeLibraryId === id) {
       await this.databaseService.initializeDatabase(databasePath);
     }
+
+    return library;
+  }
+
+  /**
+   * Open an existing library from a folder
+   * Looks for .library.db in the specified folder
+   * @param clipsFolderPath - Path to folder containing .library.db
+   * @param name - Optional name for the library (defaults to folder name)
+   */
+  async openExistingLibrary(clipsFolderPath: string, name?: string): Promise<ClipLibrary> {
+    // Check if folder exists
+    if (!fs.existsSync(clipsFolderPath)) {
+      throw new Error(`Folder does not exist: ${clipsFolderPath}`);
+    }
+
+    // Look for .library.db in the folder
+    const databasePath = path.join(clipsFolderPath, '.library.db');
+    if (!fs.existsSync(databasePath)) {
+      throw new Error(`No .library.db file found in: ${clipsFolderPath}`);
+    }
+
+    // Check if this library is already registered
+    const existingLibrary = this.config.libraries.find(
+      lib => lib.clipsFolderPath === clipsFolderPath
+    );
+    if (existingLibrary) {
+      this.logger.log(`Library already exists: ${existingLibrary.name} (${existingLibrary.id})`);
+      // Update to this library and return it
+      await this.switchLibrary(existingLibrary.id);
+      return existingLibrary;
+    }
+
+    // Create library entry
+    const id = `lib_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const libraryName = name || path.basename(clipsFolderPath);
+
+    const library: ClipLibrary = {
+      id,
+      name: libraryName,
+      databasePath,
+      clipsFolderPath,
+      createdAt: new Date().toISOString(),
+      lastAccessedAt: new Date().toISOString(),
+    };
+
+    // Add to config
+    this.config.libraries.push(library);
+
+    // Set as active if it's the first library
+    if (this.config.libraries.length === 1) {
+      this.config.activeLibraryId = id;
+    } else {
+      // Set as active (user is opening it, so they probably want to use it)
+      this.config.activeLibraryId = id;
+    }
+
+    this.saveConfig();
+
+    this.logger.log(`Opened existing library: ${libraryName} (${id}) from: ${clipsFolderPath}`);
+
+    // Initialize database for this library
+    await this.databaseService.initializeDatabase(databasePath);
 
     return library;
   }

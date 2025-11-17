@@ -30,8 +30,14 @@ function isPackaged(): boolean {
     return true;
   }
 
-  // If process.resourcesPath exists, we're probably packaged
+  // If process.resourcesPath exists, check if it's actually packaged
+  // In development, Electron sets resourcesPath to the Electron binary's resources
   if ((process as any).resourcesPath) {
+    const resPath = (process as any).resourcesPath;
+    // If the path contains 'node_modules/electron', we're in development
+    if (resPath.includes('node_modules/electron') || resPath.includes('node_modules\\electron')) {
+      return false;
+    }
     return true;
   }
 
