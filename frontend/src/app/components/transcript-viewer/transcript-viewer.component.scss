@@ -28,7 +28,7 @@
   height: 100%;
   padding: 2rem;
   text-align: center;
-  color: #6c757d; // Default light mode color
+  color: var(--text-secondary); // Default light mode color
 
   .no-transcript-icon,
   .empty-icon {
@@ -43,7 +43,7 @@
     margin: 0.5rem 0;
     font-size: 1.5rem;
     font-weight: 500;
-    color: #212529; // Default light mode color
+    color: var(--text-primary); // Default light mode color
   }
 
   p {
@@ -68,7 +68,7 @@
 .transcript-header {
   padding: 1rem 1.5rem 0.5rem;
   border-bottom: 1px solid #dee2e6; // Default light mode border
-  background: #f8f9fa; // Default light mode background
+  background: var(--bg-secondary); // Default light mode background
 
   .header-content {
     display: flex;
@@ -84,7 +84,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #212529; // Default light mode color
+    color: var(--text-primary); // Default light mode color
 
     mat-icon {
       font-size: 24px;
@@ -103,20 +103,20 @@
 
     &.enabled {
       opacity: 1;
-      color: #ff6600;
+      color: var(--primary-orange);
     }
   }
 
   .transcript-hint {
     margin: 0;
     font-size: 0.875rem;
-    color: #6c757d; // Default light mode color
+    color: var(--text-secondary); // Default light mode color
   }
 }
 
 .transcript-search-bar {
   padding: 0.75rem 1.5rem;
-  background: #f8f9fa; // Default light mode background
+  background: var(--bg-secondary); // Default light mode background
   border-bottom: 1px solid #dee2e6; // Default light mode border
   display: flex;
   align-items: center;
@@ -181,22 +181,22 @@
       border-left-color: rgba(255, 102, 0, 0.3);
 
       .timestamp {
-        color: #ff6600; // Orange for light mode
+        color: var(--primary-orange); // Orange for light mode
       }
     }
   }
 
   &.active {
     background: rgba(255, 102, 0, 0.1); // Default light mode active
-    border-left-color: #ff6600;
+    border-left-color: var(--primary-orange);
 
     .timestamp {
-      color: #ff6600;
+      color: var(--primary-orange);
       font-weight: 600;
     }
 
     .line-text {
-      color: #212529; // Dark text for light mode
+      color: var(--text-primary); // Dark text for light mode
     }
   }
 
@@ -211,14 +211,14 @@
 
     .line-text ::ng-deep mark {
       background: rgba(251, 191, 36, 0.5);
-      color: #212529; // Dark text for light mode
+      color: var(--text-primary); // Dark text for light mode
       font-weight: 600;
     }
   }
 
   .line-text ::ng-deep mark {
     background: rgba(251, 191, 36, 0.3);
-    color: #212529; // Dark text for light mode
+    color: var(--text-primary); // Dark text for light mode
     padding: 0.125rem 0.25rem;
     border-radius: 2px;
   }
@@ -227,7 +227,7 @@
     flex-shrink: 0;
     font-size: 0.7rem;
     font-weight: 500;
-    color: #6c757d; // Default light mode color
+    color: var(--text-secondary); // Default light mode color
     font-family: 'Courier New', monospace;
     min-width: 42px;
     transition: color 0.2s ease;
@@ -236,7 +236,7 @@
   .line-text {
     flex: 1;
     line-height: 1.6;
-    color: #212529; // Default light mode color
+    color: var(--text-primary); // Default light mode color
     font-size: 0.95rem;
     word-wrap: break-word;
   }
@@ -247,7 +247,7 @@
     padding-left: calc(1.5rem + 42px + 0.75rem); // Align with lines that have timestamps
 
     .line-text {
-      color: #6c757d; // Default light mode for non-clickable lines
+      color: var(--text-secondary); // Default light mode for non-clickable lines
     }
   }
 }

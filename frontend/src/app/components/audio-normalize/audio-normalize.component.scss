@@ -184,12 +184,12 @@
     }
 
     &.success {
-      background: #4caf50;
+      background: var(--success-text);
       opacity: 1;
     }
 
     &.error {
-      background: #f44336;
+      background: var(--danger-text);
       opacity: 1;
     }
   }
@@ -244,7 +244,7 @@
     color: var(--text-secondary);
 
     &:hover {
-      color: #f44336;
+      color: var(--danger-text);
       background: rgba(244, 67, 54, 0.1);
     }
   }
@@ -274,7 +274,7 @@
       background: rgba(76, 175, 80, 0.1);
 
       mat-icon {
-        color: #4caf50;
+        color: var(--success-text);
       }
     }
   }
@@ -284,7 +284,7 @@
       background: rgba(244, 67, 54, 0.1);
 
       mat-icon {
-        color: #f44336;
+        color: var(--danger-text);
       }
     }
   }
@@ -439,7 +439,7 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: linear-gradient(135deg, var(--primary-orange) 0%, #ff8c47 100%) !important;
+  background: linear-gradient(135deg, var(--primary-orange) 0%, var(--light-orange) 100%) !important;
   box-shadow: 0 6px 20px rgba(255, 143, 71, 0.3);
   transition: all 0.2s ease;
   position: relative;
@@ -489,11 +489,11 @@
 :root,
 :host {
   .file-card {
-    background: #ffffff;
-    border-color: #d1d5db;
+    background: var(--bg-card);
+    border-color: var(--border-color);
 
     &:hover {
-      background: #f8f9fa;
+      background: var(--bg-secondary);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
   }

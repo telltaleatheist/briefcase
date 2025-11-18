@@ -121,12 +121,10 @@ interface CompletedVideo {
       display: flex;
       align-items: center;
       gap: 12px;
-      color: var(--primary-orange);
       padding-top: 24px !important;
       margin-top: 0;
 
       mat-icon {
-        color: var(--primary-orange);
         font-size: 28px;
         width: 28px;
         height: 28px;
@@ -151,14 +149,13 @@ interface CompletedVideo {
 
         .label {
           font-size: 12px;
-          color: var(--text-secondary, #4a5568);
           font-weight: 500;
+          opacity: 0.7;
         }
 
         .value {
           font-size: 18px;
           font-weight: 600;
-          color: var(--text-primary, #1a202c);
 
           &.failed {
             color: #f44336;
@@ -186,13 +183,13 @@ interface CompletedVideo {
       align-items: center;
       gap: 12px;
       padding: 16px;
-      background: rgba(255, 143, 71, 0.1);
-      border-left: 4px solid var(--primary-orange);
+      background: rgba(255, 107, 53, 0.1);
+      border-left: 4px solid #ff6b35;
       border-radius: 4px;
       margin-bottom: 24px;
 
       mat-icon {
-        color: var(--primary-orange);
+        color: #ff6b35;
         font-size: 24px;
         width: 24px;
         height: 24px;
@@ -207,14 +204,13 @@ interface CompletedVideo {
 
         .label {
           font-size: 12px;
-          color: var(--text-secondary, #4a5568);
           font-weight: 500;
+          opacity: 0.7;
         }
 
         .filename {
           font-size: 14px;
           font-weight: 500;
-          color: var(--text-primary, #1a202c);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -222,7 +218,7 @@ interface CompletedVideo {
 
         .stage {
           font-size: 12px;
-          color: var(--primary-orange);
+          color: #ff6b35;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;
@@ -238,10 +234,8 @@ interface CompletedVideo {
       }
 
       mat-list-item {
-        border-bottom: 1px solid var(--border-color, #e0e0e0);
-
-        &:last-child {
-          border-bottom: none;
+        &:not(:last-child) {
+          border-bottom: 1px solid rgba(0, 0, 0, 0.12);
         }
 
         .status-icon {
@@ -258,7 +252,7 @@ interface CompletedVideo {
           }
 
           &.processing {
-            color: var(--primary-orange);
+            color: #ff6b35;
           }
         }
 
@@ -277,8 +271,8 @@ interface CompletedVideo {
           letter-spacing: 0.5px;
 
           &.processing {
-            background: rgba(255, 143, 71, 0.2);
-            color: var(--primary-orange);
+            background: rgba(255, 107, 53, 0.2);
+            color: #ff6b35;
           }
 
           &.success {
@@ -294,7 +288,7 @@ interface CompletedVideo {
 
         .timestamp {
           font-size: 12px;
-          color: var(--text-secondary, #4a5568);
+          opacity: 0.6;
         }
 
         .error-message {
@@ -304,13 +298,19 @@ interface CompletedVideo {
       }
     }
 
+    @media (prefers-color-scheme: dark) {
+      .videos-list mat-list-item:not(:last-child) {
+        border-bottom-color: rgba(255, 255, 255, 0.12);
+      }
+    }
+
     .empty-state {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 48px 24px;
-      color: var(--text-secondary, #4a5568);
+      opacity: 0.7;
 
       mat-icon {
         font-size: 48px;
@@ -328,40 +328,6 @@ interface CompletedVideo {
 
     mat-dialog-actions {
       padding: 16px 24px;
-      border-top: 1px solid var(--border-color, #e0e0e0);
-    }
-
-    // Dark mode support
-    @media (prefers-color-scheme: dark) {
-      .progress-summary .stat {
-        .label {
-          color: #a0aec0;
-        }
-
-        .value {
-          color: #f7fafc;
-        }
-      }
-
-      .current-video .current-video-info {
-        .label {
-          color: #a0aec0;
-        }
-
-        .filename {
-          color: #e2e8f0;
-        }
-      }
-
-      .videos-list mat-list-item {
-        .timestamp {
-          color: #a0aec0;
-        }
-      }
-
-      .empty-state {
-        color: #a0aec0;
-      }
     }
   `]
 })

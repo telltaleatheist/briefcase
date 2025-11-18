@@ -4,15 +4,8 @@
      (dragleave)="onDragLeave($event)"
      (drop)="onDrop($event)">
 
-  <!-- Drag and Drop Overlay (always in DOM for performance) -->
-  <div class="drop-zone-overlay" [class.show]="isDragging">
-    <div class="drop-zone-content">
-      <mat-icon>cloud_upload</mat-icon>
-      <h2>Drop media files or folders here</h2>
-      <p>Choose: Import, Transcribe, or Analyze</p>
-      <p class="hint">Folders will be scanned recursively</p>
-    </div>
-  </div>
+  <!-- Drag and Drop Overlay -->
+  <app-drop-zone-overlay [isVisible]="isDragging"></app-drop-zone-overlay>
 
   <!-- Library Header Component -->
   <app-library-header
@@ -47,143 +40,68 @@
       (filtersExpandedChange)="searchFiltersExpanded = $event">
     </app-search-bar>
 
-  <!-- Results count and selection buttons -->
-  <div class="results-header" *ngIf="filteredVideos.length > 0 || (!isLoading && filteredVideos.length === 0)">
-    <div class="results-count">
-      <div class="selection-buttons">
-        <!-- Selection buttons only show when there are videos -->
-        <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0"
-                (click)="toggleAllSelection()"
-                [color]="isAllSelected ? 'primary' : undefined"
-                matTooltip="Select all visible videos (Cmd/Ctrl+A)">
-          <mat-icon>select_all</mat-icon>
-          All
-        </button>
-        <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0"
-                (click)="selectAllMissingTranscript()"
-                [color]="isMissingTranscriptSelected ? 'primary' : undefined"
-                matTooltip="Select all videos missing transcription">
-          <mat-icon>subtitles_off</mat-icon>
-          No Transcript
-        </button>
-        <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0"
-                (click)="selectAllMissingAnalysis()"
-                [color]="isMissingAnalysisSelected ? 'primary' : undefined"
-                matTooltip="Select all videos missing AI analysis">
-          <mat-icon>psychology</mat-icon>
-          No Analysis
-        </button>
+  <!-- Results Toolbar -->
+  <app-results-toolbar
+    [totalResults]="filteredVideos.length"
+    [totalVideos]="videos.length"
+    [selectedCount]="getSelectedCount()"
+    [isAllSelected]="isAllSelected"
+    [isMissingTranscriptSelected]="isMissingTranscriptSelected"
+    [isMissingAnalysisSelected]="isMissingAnalysisSelected"
+    [isSearching]="!!searchQuery"
+    [showWhenEmpty]="!isLoading"
+    (selectAllClick)="toggleAllSelection()"
+    (selectMissingTranscriptClick)="selectAllMissingTranscript()"
+    (selectMissingAnalysisClick)="selectAllMissingAnalysis()"
+    (collapseAllClick)="collapseAllSections()"
+    (expandAllClick)="expandAllSections()"
+    (analyzeClick)="analyzeSelected()"
+    (openEditorClick)="openVideoEditor()"
+    (viewDetailsClick)="openMetadataEditorForSelected()">
 
-        <!-- Section collapse/expand buttons (hidden when searching) -->
-        <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0 && !searchQuery"
-                (click)="collapseAllSections()"
-                matTooltip="Collapse all week sections">
-          <mat-icon>unfold_less</mat-icon>
-          Collapse All
-        </button>
-        <button mat-stroked-button
-                *ngIf="filteredVideos.length > 0 && !searchQuery"
-                (click)="expandAllSections()"
-                matTooltip="Expand all week sections">
-          <mat-icon>unfold_more</mat-icon>
-          Expand All
-        </button>
-
-        <!-- File Type Filter Button - always visible -->
-        <button mat-stroked-button
-                [matMenuTriggerFor]="fileTypeMenu"
-                #fileTypeMenuTrigger="matMenuTrigger"
-                matTooltip="Filter by file type">
-          <mat-icon>filter_list</mat-icon>
-          File Types
+    <!-- File type menu items -->
+    <ng-container fileTypeMenuItems>
+      <div class="menu-header" (click)="$event.stopPropagation()">
+        <span>Show File Types</span>
+        <button mat-button (click)="selectAllFileTypes()">All</button>
+        <button mat-icon-button (click)="closeFileTypeMenu()" matTooltip="Close menu">
+          <mat-icon>close</mat-icon>
         </button>
       </div>
-
-      <mat-menu #fileTypeMenu="matMenu" class="file-type-menu" [hasBackdrop]="true" backdropClass="menu-backdrop">
-        <div class="menu-header" (click)="$event.stopPropagation()">
-          <span>Show File Types</span>
-          <button mat-button (click)="selectAllFileTypes()">All</button>
-          <button mat-icon-button (click)="closeFileTypeMenu()" matTooltip="Close menu">
-            <mat-icon>close</mat-icon>
-          </button>
-        </div>
-        <mat-divider></mat-divider>
-        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('video')">
-          <mat-checkbox [checked]="fileTypeFilters.video" (change)="toggleFileTypeFilter('video')" (click)="$event.stopPropagation()"></mat-checkbox>
-          <mat-icon>movie</mat-icon>
-          <span>Video (.mov, .mp4, .avi, .mkv, .webm, .m4v, .flv)</span>
-        </button>
-        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('audio')">
-          <mat-checkbox [checked]="fileTypeFilters.audio" (change)="toggleFileTypeFilter('audio')" (click)="$event.stopPropagation()"></mat-checkbox>
-          <mat-icon>audiotrack</mat-icon>
-          <span>Audio (.mp3, .m4a, .aac, .flac, .wav, .ogg)</span>
-        </button>
-        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('document')">
-          <mat-checkbox [checked]="fileTypeFilters.document" (change)="toggleFileTypeFilter('document')" (click)="$event.stopPropagation()"></mat-checkbox>
-          <mat-icon>description</mat-icon>
-          <span>Document (.pdf, .epub, .mobi, .txt, .md)</span>
-        </button>
-        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('image')">
-          <mat-checkbox [checked]="fileTypeFilters.image" (change)="toggleFileTypeFilter('image')" (click)="$event.stopPropagation()"></mat-checkbox>
-          <mat-icon>image</mat-icon>
-          <span>Image (.jpg, .png, .gif, .webp, .bmp)</span>
-        </button>
-        <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('webpage')">
-          <mat-checkbox [checked]="fileTypeFilters.webpage" (change)="toggleFileTypeFilter('webpage')" (click)="$event.stopPropagation()"></mat-checkbox>
-          <mat-icon>public</mat-icon>
-          <span>Webpage (.html, .htm, .mhtml)</span>
-        </button>
-      </mat-menu>
-
-      <span class="count-text">
-        Showing {{ filteredVideos.length }} of {{ videos.length }} videos
-        <span *ngIf="selectedTags.length > 0"> (filtered by {{ selectedTags.length }} tag{{ selectedTags.length > 1 ? 's' : '' }})</span>
-        <span *ngIf="getSelectedCount() > 0" class="selected-info"> • {{ getSelectedCount() }} selected</span>
-        <span *ngIf="isInitialLoad && filteredVideos.length > 0" class="loading-more">
-          <mat-spinner diameter="16" style="display: inline-block; margin-left: 8px;"></mat-spinner>
-          <span style="margin-left: 8px; font-size: 0.9em; color: #666;">Loading more...</span>
-        </span>
-      </span>
-    </div>
-    <div class="selection-actions">
-      <button
-        mat-raised-button
-        color="primary"
-        [disabled]="getSelectedCount() === 0"
-        (click)="analyzeSelected()"
-        matTooltip="Analyze or transcribe selected videos">
-        <mat-icon>psychology</mat-icon>
-        Analyze ({{ getSelectedCount() }})
+      <mat-divider></mat-divider>
+      <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('video')">
+        <mat-checkbox [checked]="fileTypeFilters.video" (change)="toggleFileTypeFilter('video')" (click)="$event.stopPropagation()"></mat-checkbox>
+        <mat-icon>movie</mat-icon>
+        <span>Video (.mov, .mp4, .avi, .mkv, .webm, .m4v, .flv)</span>
       </button>
-      <button
-        mat-raised-button
-        color="accent"
-        [disabled]="getSelectedCount() !== 1"
-        (click)="openVideoEditor()"
-        matTooltip="Open video editor (requires exactly one video selected)">
-        <mat-icon>video_settings</mat-icon>
-        Video Editor
+      <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('audio')">
+        <mat-checkbox [checked]="fileTypeFilters.audio" (change)="toggleFileTypeFilter('audio')" (click)="$event.stopPropagation()"></mat-checkbox>
+        <mat-icon>audiotrack</mat-icon>
+        <span>Audio (.mp3, .m4a, .aac, .flac, .wav, .ogg)</span>
       </button>
-      <button
-        mat-raised-button
-        [disabled]="getSelectedCount() !== 1"
-        (click)="openMetadataEditorForSelected()"
-        matTooltip="View details for selected video">
-        <mat-icon>info</mat-icon>
-        View Details
+      <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('document')">
+        <mat-checkbox [checked]="fileTypeFilters.document" (change)="toggleFileTypeFilter('document')" (click)="$event.stopPropagation()"></mat-checkbox>
+        <mat-icon>description</mat-icon>
+        <span>Document (.pdf, .epub, .mobi, .txt, .md)</span>
       </button>
-    </div>
-  </div>
+      <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('image')">
+        <mat-checkbox [checked]="fileTypeFilters.image" (change)="toggleFileTypeFilter('image')" (click)="$event.stopPropagation()"></mat-checkbox>
+        <mat-icon>image</mat-icon>
+        <span>Image (.jpg, .png, .gif, .webp, .bmp)</span>
+      </button>
+      <button mat-menu-item (click)="$event.stopPropagation(); toggleFileTypeFilter('webpage')">
+        <mat-checkbox [checked]="fileTypeFilters.webpage" (change)="toggleFileTypeFilter('webpage')" (click)="$event.stopPropagation()"></mat-checkbox>
+        <mat-icon>public</mat-icon>
+        <span>Webpage (.html, .htm, .mhtml)</span>
+      </button>
+    </ng-container>
+  </app-results-toolbar>
 
-  <!-- Loading spinner (only show when truly loading with no videos yet) -->
-  <div class="loading-container" *ngIf="isLoading && filteredVideos.length === 0">
-    <mat-spinner></mat-spinner>
-    <p>Loading video library...</p>
-  </div>
+  <!-- Loading State -->
+  <app-loading-state
+    *ngIf="isLoading && filteredVideos.length === 0"
+    message="Loading video library...">
+  </app-loading-state>
 
   <!-- Video List with CascadeListComponent -->
   <cascade-list
@@ -211,79 +129,23 @@
     (contextMenu)="onListContextMenu($event)">
   </cascade-list>
 
-  <!-- Context Menu (Right-click) - positioned at cursor -->
-  <div style="visibility: hidden; position: fixed;"
-       [style.left.px]="contextMenuPosition.x"
-       [style.top.px]="contextMenuPosition.y"
-       [matMenuTriggerFor]="videoContextMenu"
-       #contextMenuTrigger="matMenuTrigger">
-  </div>
+  <!-- Video Context Menu -->
+  <app-video-context-menu
+    [video]="contextMenuVideo"
+    [position]="contextMenuPosition"
+    [selectedCount]="getSelectedCount()"
+    [canAnalyze]="canAnalyzeMedia(contextMenuVideo)"
+    [hasSuggestedTitle]="!!contextMenuVideo?.suggested_title"
+    (menuAction)="handleContextMenuAction($event)">
+  </app-video-context-menu>
 
-  <mat-menu #videoContextMenu="matMenu">
-    <ng-container *ngIf="contextMenuVideo">
-      <!-- Single video actions -->
-      <button mat-menu-item (click)="startRenamingVideo(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
-        <mat-icon>edit</mat-icon>
-        <span>Rename</span>
-      </button>
-      <button mat-menu-item (click)="openVideoPlayer(contextMenuVideo)" *ngIf="getSelectedCount() === 1 && canAnalyzeMedia(contextMenuVideo)">
-        <mat-icon>play_arrow</mat-icon>
-        <span>Open in Video Editor</span>
-      </button>
-      <button mat-menu-item (click)="openMetadataEditor(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
-        <mat-icon>info</mat-icon>
-        <span>View Details</span>
-      </button>
-      <button mat-menu-item (click)="copyFilename(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
-        <mat-icon>content_copy</mat-icon>
-        <span>Copy Filename</span>
-      </button>
-      <button mat-menu-item (click)="openFileLocation(contextMenuVideo)" *ngIf="getSelectedCount() === 1">
-        <mat-icon>folder_open</mat-icon>
-        <span>Open File Location</span>
-      </button>
-
-      <!-- Edit Suggested Title option (only show for videos with suggested titles) -->
-      <button mat-menu-item (click)="showNameSuggestionDialog(contextMenuVideo)" *ngIf="getSelectedCount() === 1 && contextMenuVideo?.suggested_title">
-        <mat-icon>auto_awesome</mat-icon>
-        <span>Edit Suggested Title</span>
-      </button>
-
-      <mat-divider></mat-divider>
-
-      <!-- Add to Tab action -->
-      <button mat-menu-item (click)="addSelectedToTab()">
-        <mat-icon>tab</mat-icon>
-        <span>Add to Tab{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
-      </button>
-
-      <mat-divider></mat-divider>
-
-      <!-- Analysis actions -->
-      <button mat-menu-item (click)="analyzeSelected()">
-        <mat-icon>psychology</mat-icon>
-        <span>Run Analysis{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
-      </button>
-      <button mat-menu-item (click)="moveToLibrary()">
-        <mat-icon>drive_file_move</mat-icon>
-        <span>Move to...{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
-      </button>
-      <mat-divider></mat-divider>
-      <button mat-menu-item (click)="deleteSelected()">
-        <mat-icon color="warn">delete</mat-icon>
-        <span>Delete{{ getSelectedCount() > 1 ? ' (' + getSelectedCount() + ')' : '' }}</span>
-      </button>
-    </ng-container>
-  </mat-menu>
-
-  <!-- Empty state -->
-  <div class="empty-state" *ngIf="!isLoading && filteredVideos.length === 0">
-    <mat-icon>video_library</mat-icon>
-    <h2>No videos found</h2>
-    <p *ngIf="searchQuery">Try adjusting your search query</p>
-    <p *ngIf="!searchQuery && videos.length === 0">Click "Import Videos" to select specific videos or "Scan All" to import all videos from your clips directory</p>
-    <p *ngIf="!searchQuery && videos.length > 0">No videos match the current filters</p>
-  </div>
+  <!-- Empty State -->
+  <app-empty-state
+    *ngIf="!isLoading && filteredVideos.length === 0"
+    icon="video_library"
+    title="No videos found"
+    [message]="getEmptyStateMessage()">
+  </app-empty-state>
 
   <!-- FLOATING PREVIEW PANEL FOR LIST VIEW -->
   <!-- Preview dialog is now handled by MatDialog -->

@@ -1,89 +1,75 @@
 @use '@angular/material' as mat;
 
-// Cyberpunk-inspired dark theme palette
-$cyberpunk-primary: (
-  50: #e0f2f1,    // Lightest teal
-  100: #b2dfdb,   // Light teal
-  200: #80cbc4,   // Medium teal
-  300: #4db6ac,   // Deeper teal
-  400: #26a69a,   // Rich teal
-  500: #1de9b6,   // Vibrant mint (updated main color)
-  600: #00897b,   // Dark teal
-  700: #00796b,   // Darker teal
-  800: #00695c,   // Deep teal
-  900: #004d40,   // Darkest teal
-  A100: #a7ffeb,  // Bright mint accent
-  A200: #64ffda,  // Vibrant mint
-  A400: #1de9b6, // Strong mint
-  A700: #00bfa5  // Deep mint
-);
+@include mat.core();
 
-$cyberpunk-accent: (
-  50: #f3e5f5,    // Lightest purple
-  100: #e1bee7,   // Light purple
-  200: #ce93d8,   // Medium purple
-  300: #ba68c8,   // Deep purple
-  400: #ab47bc,   // Rich purple
-  500: #9c27b0,   // Base purple
-  600: #8e24aa,   // Dark purple
-  700: #7b1fa2,   // Darker purple
-  800: #6a1b9a,   // Deep purple
-  900: #4a148c,   // Darkest purple
-  A100: #ea80fc,  // Bright pink accent
-  A200: #e040fb,  // Vibrant pink
-  A400: #d500f9, // Strong pink
-  A700: #aa00ff  // Deep pink
-);
-
-$cyberpunk-warn: (
-  50: #ffebee,    // Lightest red
-  100: #ffcdd2,   // Light red
-  200: #ef9a9a,   // Medium red
-  300: #e57373,   // Deep red
-  400: #ef5350,   // Rich red
-  500: #f44336,   // Base red
-  600: #e53935,   // Dark red
-  700: #d32f2f,   // Darker red
-  800: #c62828,   // Deep red
-  900: #b71c1c,   // Darkest red
-  A100: #ff8a80,  // Bright coral accent
-  A200: #ff5252,  // Vibrant coral
-  A400: #ff1744, // Strong coral
-  A700: #d50000  // Deep coral
-);
-
-// Light theme (for reference)
-$my-light-theme: mat.define-light-theme((
+// Define the light theme with creamsicle orange (var(--primary-orange))
+$light-theme: mat.define-theme((
   color: (
-    primary: mat.define-palette($cyberpunk-primary),
-    accent: mat.define-palette($cyberpunk-accent, A200, A100, A400),
-    warn: mat.define-palette($cyberpunk-warn),
-  )
+    theme-type: light,
+    primary: mat.$orange-palette,
+    tertiary: mat.$orange-palette,
+  ),
 ));
 
-// Create the dark theme with cyberpunk color palette
-$cyberpunk-dark-theme: mat.define-dark-theme((
+// Define the dark theme
+$dark-theme: mat.define-theme((
   color: (
-    primary: mat.define-palette($cyberpunk-primary),
-    accent: mat.define-palette($cyberpunk-accent, A200, A100, A400),
-    warn: mat.define-palette($cyberpunk-warn),
-  )
+    theme-type: dark,
+    primary: mat.$orange-palette,
+    tertiary: mat.$orange-palette,
+  ),
 ));
 
+// Apply the light theme by default
+html {
+  @include mat.all-component-themes($light-theme);
 
-// 🌞 GLOBAL — Load Light Theme by default
-@include mat.all-component-themes($my-light-theme);
+  // Override ALL Material color tokens to use exact creamsicle orange
+  --mat-sys-primary: var(--primary-orange);
+  --mat-sys-on-primary: #ffffff;
+  --mat-sys-primary-container: #ffd9cc;
+  --mat-sys-on-primary-container: #3a0800;
 
-// 🌑 DARK — Only when .theme-dark class exists
-.theme-dark {
-  @include mat.all-component-themes($cyberpunk-dark-theme);
+  // Chip colors - subtle background, orange on select
+  --mdc-chip-elevated-container-color: var(--bg-secondary);
+  --mdc-chip-flat-selected-outline-color: var(--primary-orange);
+  --mdc-chip-label-text-color: var(--text-primary);
+  --mdc-chip-with-icon-selected-icon-color: var(--primary-orange);
+  --mat-chip-selected-container-background-color: var(--primary-orange);
+  --mat-chip-selected-label-text-color: #ffffff;
 
-  // Custom Dark Theme CSS variables
-  --primary-color: #{mat.get-color-from-palette($cyberpunk-primary, 500)};
-  --accent-color: #{mat.get-color-from-palette($cyberpunk-accent, A200)};
-  --warn-color: #{mat.get-color-from-palette($cyberpunk-warn, 500)};
-  background-color: #121212;
-  color: #e0e0e0;
-  --highlight-color: #{mat.get-color-from-palette($cyberpunk-accent, A400)};
-  --border-color: #{mat.get-color-from-palette($cyberpunk-primary, 700)};
+  // Button colors
+  --mdc-filled-button-container-color: var(--primary-orange);
+  --mdc-protected-button-container-color: var(--primary-orange);
+
+  // Checkbox colors - creamsicle orange
+  --mdc-checkbox-selected-checkmark-color: #ffffff;
+  --mdc-checkbox-selected-focus-icon-color: var(--primary-orange);
+  --mdc-checkbox-selected-hover-icon-color: var(--primary-orange);
+  --mdc-checkbox-selected-icon-color: var(--primary-orange);
+  --mdc-checkbox-selected-pressed-icon-color: var(--primary-orange);
+  --mdc-checkbox-unselected-focus-icon-color: var(--text-secondary);
+  --mdc-checkbox-unselected-hover-icon-color: var(--text-primary);
+  --mdc-checkbox-unselected-icon-color: var(--text-secondary);
+
+  // Form field colors
+  --mdc-filled-text-field-focus-active-indicator-color: var(--primary-orange);
+  --mdc-filled-text-field-focus-label-text-color: var(--primary-orange);
+  --mdc-outlined-text-field-focus-outline-color: var(--primary-orange);
+  --mdc-outlined-text-field-focus-label-text-color: var(--primary-orange);
+
+  // Tab colors
+  --mat-tab-header-active-label-text-color: var(--primary-orange);
+  --mat-tab-header-inactive-label-text-color: var(--text-secondary);
+  --mdc-tab-indicator-active-indicator-color: var(--primary-orange);
+  --mat-tab-header-label-text-color: var(--text-secondary);
+
+  // Prevent Material from setting page backgrounds
+  background-color: transparent !important;
+}
+
+// Dark theme for explicit dark mode OR auto dark mode
+body.dark-theme,
+body[data-theme="dark"] {
+  @include mat.all-component-colors($dark-theme);
 }

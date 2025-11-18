@@ -236,24 +236,24 @@
   }
 
   &.status-queued {
-    border-left: 3px solid #2196f3;
+    border-left: 3px solid var(--info-text);
   }
 
   &.status-downloading {
-    border-left: 3px solid #ff8f47;
+    border-left: 3px solid var(--light-orange);
   }
 
   &.status-processing,
   &.status-transcribing {
-    border-left: 3px solid #ff9800;
+    border-left: 3px solid var(--warning-text);
   }
 
   &.status-completed {
-    border-left: 3px solid #4caf50;
+    border-left: 3px solid var(--success-text);
   }
 
   &.status-failed {
-    border-left: 3px solid #f44336;
+    border-left: 3px solid var(--danger-text);
   }
 
   // Checkbox
@@ -364,16 +364,16 @@
 
   // Status-specific progress bar colors
   &.status-downloading .progress-indicator ::ng-deep .mat-mdc-progress-bar .mdc-linear-progress__bar-inner {
-    border-color: #ff8f47 !important;
+    border-color: var(--light-orange) !important;
   }
 
   &.status-processing .progress-indicator ::ng-deep .mat-mdc-progress-bar .mdc-linear-progress__bar-inner,
   &.status-transcribing .progress-indicator ::ng-deep .mat-mdc-progress-bar .mdc-linear-progress__bar-inner {
-    border-color: #ff9800 !important;
+    border-color: var(--warning-text) !important;
   }
 
   &.status-queued .progress-indicator ::ng-deep .mat-mdc-progress-bar .mdc-linear-progress__bar-inner {
-    border-color: #2196f3 !important;
+    border-color: var(--info-text) !important;
   }
 
   // Actions - always visible
@@ -479,7 +479,7 @@
         }
 
         &.error-text {
-          color: #f44336;
+          color: var(--danger-text);
           font-family: monospace;
           font-size: 12px;
         }

@@ -1,0 +1,127 @@
+.results-header {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .results-count {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius);
+    flex-wrap: wrap;
+    gap: 12px;
+
+    .selection-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+
+      button {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
+
+    .count-text {
+      color: var(--text-secondary);
+      font-size: 14px;
+
+      .selected-count {
+        color: var(--primary-orange);
+        font-weight: 600;
+      }
+    }
+  }
+
+  .selection-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+
+    button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
+  }
+}
+
+// File type filter menu (content projected from parent)
+::ng-deep .file-type-menu {
+  .menu-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-weight: 500;
+
+    span {
+      flex: 1;
+    }
+
+    button {
+      font-size: 12px;
+      min-width: 0;
+      padding: 4px 8px;
+    }
+
+    .mat-mdc-icon-button {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
+  }
+
+  .mat-mdc-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    min-height: 40px;
+
+    mat-checkbox {
+      pointer-events: none;
+    }
+
+    mat-icon {
+      margin-right: 8px;
+      color: var(--text-color);
+      opacity: 0.7;
+    }
+
+    span {
+      flex: 1;
+      font-size: 13px;
+    }
+
+    &:hover {
+      mat-icon {
+        opacity: 1;
+      }
+    }
+  }
+}

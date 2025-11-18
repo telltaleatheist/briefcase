@@ -76,20 +76,11 @@ import { firstValueFrom } from 'rxjs';
                 </div>
               </div>
 
-              <div class="info-row">
-                <div class="info-item compact">
-                  <mat-icon>event</mat-icon>
-                  <div class="info-text">
-                    <span class="label">Created</span>
-                    <span class="value">{{ library.createdAt | date:'short' }}</span>
-                  </div>
-                </div>
-                <div class="info-item compact">
-                  <mat-icon>access_time</mat-icon>
-                  <div class="info-text">
-                    <span class="label">Last Used</span>
-                    <span class="value">{{ library.lastAccessedAt | date:'short' }}</span>
-                  </div>
+              <div class="info-item compact">
+                <mat-icon>event</mat-icon>
+                <div class="info-text">
+                  <span class="label">Created</span>
+                  <span class="value">{{ library.createdAt | date:'short' }}</span>
                 </div>
               </div>
             </div>
@@ -147,6 +138,7 @@ import { firstValueFrom } from 'rxjs';
           </button>
           <button
             mat-raised-button
+            class="link-library-btn"
             (click)="showLinkForm = true; showCreateForm = false">
             <mat-icon>link</mat-icon>
             Link Existing Library
@@ -264,7 +256,7 @@ import { firstValueFrom } from 'rxjs';
       margin: 0 auto;
       padding: 30px;
       animation: fadeIn 0.3s ease-in;
-      background: #fafafa;
+      background: var(--bg-secondary);
     }
 
     @keyframes fadeIn {
@@ -290,19 +282,19 @@ import { firstValueFrom } from 'rxjs';
         font-size: 32px;
         font-weight: 700;
         margin: 0 0 10px 0;
-        color: var(--text-primary, #1a202c);
+        color: var(--text-primary);
 
         mat-icon {
           font-size: 40px;
           width: 40px;
           height: 40px;
-          color: #ff6b00;
+          color: var(--primary-orange);
         }
       }
 
       .subtitle {
         margin: 0;
-        color: var(--text-secondary, #4a5568);
+        color: var(--text-secondary);
         font-size: 16px;
       }
     }
@@ -314,7 +306,7 @@ import { firstValueFrom } from 'rxjs';
         margin: 0 0 24px 0;
         font-size: 20px;
         font-weight: 600;
-        color: var(--text-primary, #2d3748);
+        color: var(--text-primary);
         text-align: center;
       }
 
@@ -325,28 +317,28 @@ import { firstValueFrom } from 'rxjs';
       }
 
       .library-card {
-        background: #ffffff;
-        border: 2px solid #e0e0e0;
-        border-radius: 16px;
-        padding: 24px;
-        transition: all 0.3s ease;
+        background: var(--bg-card);
+        border: 2px solid var(--border-color);
+        border-radius: 0;
+        padding: 16px;
+        transition: var(--transition);
         position: relative;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 
         &:hover {
           transform: translateY(-2px);
           box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-          border-color: #c0c0c0;
+          border-color: var(--border-color);
         }
 
         &.active {
-          border-color: #ff6b00;
-          background: #ffffff;
-          box-shadow: 0 4px 20px rgba(255, 107, 0, 0.15);
+          border-color: var(--primary-orange);
+          background: var(--bg-card);
+          box-shadow: 0 4px 20px rgba(255, 107, 53, 0.15);
 
           &:hover {
-            border-color: #ea580c;
-            box-shadow: 0 12px 28px rgba(255, 107, 0, 0.25);
+            border-color: var(--dark-orange);
+            box-shadow: 0 12px 28px rgba(255, 107, 53, 0.25);
           }
         }
 
@@ -354,20 +346,20 @@ import { firstValueFrom } from 'rxjs';
           display: flex;
           align-items: center;
           gap: 16px;
-          margin-bottom: 20px;
-          padding-bottom: 20px;
-          border-bottom: 2px solid #f0f0f0;
+          margin-bottom: 12px;
+          padding-bottom: 12px;
+          border-bottom: 2px solid var(--border-color);
 
           .library-icon-wrapper {
             width: 56px;
             height: 56px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #ff6b00 0%, #ea580c 100%);
+            border-radius: 0;
+            background: linear-gradient(135deg, var(--primary-orange) 0%, var(--dark-orange) 100%);
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            box-shadow: 0 4px 12px rgba(255, 107, 0, 0.3);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
 
             mat-icon {
               font-size: 32px;
@@ -384,7 +376,7 @@ import { firstValueFrom } from 'rxjs';
               margin: 0 0 8px 0;
               font-size: 20px;
               font-weight: 700;
-              color: var(--text-primary, #1a202c);
+              color: var(--text-primary);
             }
 
             .status-badge {
@@ -394,7 +386,7 @@ import { firstValueFrom } from 'rxjs';
               padding: 6px 14px;
               background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
               color: white;
-              border-radius: 20px;
+              border-radius: 0;
               font-size: 12px;
               font-weight: 700;
               text-transform: uppercase;
@@ -411,15 +403,15 @@ import { firstValueFrom } from 'rxjs';
         }
 
         .library-card-body {
-          margin-bottom: 20px;
+          margin-bottom: 12px;
 
           .info-item {
             display: flex;
             gap: 12px;
             margin-bottom: 16px;
-            background: var(--bg-secondary, #f7fafc);
+            background: var(--bg-secondary);
             padding: 12px;
-            border-radius: 8px;
+            border-radius: 0;
 
             &.compact {
               margin-bottom: 0;
@@ -429,7 +421,7 @@ import { firstValueFrom } from 'rxjs';
               font-size: 20px;
               width: 20px;
               height: 20px;
-              color: #ff6b00;
+              color: var(--primary-orange);
               flex-shrink: 0;
               margin-top: 2px;
             }
@@ -443,7 +435,7 @@ import { firstValueFrom } from 'rxjs';
 
               .label {
                 font-size: 11px;
-                color: var(--text-secondary, #718096);
+                color: var(--text-secondary);
                 text-transform: uppercase;
                 font-weight: 700;
                 letter-spacing: 0.8px;
@@ -451,7 +443,7 @@ import { firstValueFrom } from 'rxjs';
 
               .value {
                 font-size: 13px;
-                color: var(--text-primary, #2d3748);
+                color: var(--text-primary);
                 word-break: break-all;
                 font-family: 'Monaco', 'Courier New', monospace;
                 font-weight: 500;
@@ -471,12 +463,12 @@ import { firstValueFrom } from 'rxjs';
           gap: 10px;
           align-items: center;
           padding-top: 16px;
-          border-top: 2px solid #e2e8f0;
+          border-top: 2px solid var(--border-color);
 
           .switch-btn {
             flex: 1;
             height: 42px;
-            border-radius: 10px;
+            border-radius: var(--border-radius);
             font-weight: 600;
             font-size: 14px;
             letter-spacing: 0.3px;
@@ -492,9 +484,9 @@ import { firstValueFrom } from 'rxjs';
           .action-btn {
             width: 42px;
             height: 42px;
-            border-radius: 10px;
-            color: #4a5568;
-            transition: all 0.2s ease;
+            border-radius: var(--border-radius);
+            color: var(--text-secondary);
+            transition: var(--transition);
 
             mat-icon {
               font-size: 20px;
@@ -503,8 +495,8 @@ import { firstValueFrom } from 'rxjs';
             }
 
             &:hover:not(:disabled) {
-              color: #ff6b00;
-              background: rgba(255, 107, 0, 0.1);
+              color: var(--primary-orange);
+              background: rgba(255, 107, 53, 0.1);
               transform: scale(1.05);
             }
 
@@ -527,9 +519,9 @@ import { firstValueFrom } from 'rxjs';
     .empty-state {
       text-align: center;
       padding: 60px 30px;
-      background: #ffffff;
-      border-radius: 16px;
-      border: 2px dashed #d0d0d0;
+      background: var(--bg-card);
+      border-radius: 0;
+      border: 2px dashed var(--border-color);
       margin-bottom: 40px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 
@@ -537,29 +529,29 @@ import { firstValueFrom } from 'rxjs';
         font-size: 80px;
         width: 80px;
         height: 80px;
-        color: #a0aec0;
-        margin-bottom: 20px;
+        color: var(--text-muted);
+        margin-bottom: 12px;
       }
 
       h3 {
         margin: 0 0 10px 0;
         font-size: 24px;
         font-weight: 700;
-        color: var(--text-primary, #1a202c);
+        color: var(--text-primary);
       }
 
       p {
         margin: 0;
-        color: var(--text-secondary, #4a5568);
+        color: var(--text-secondary);
         font-size: 16px;
       }
     }
 
     .create-section {
       padding: 30px;
-      background: #ffffff;
-      border-radius: 16px;
-      border: 2px solid #e0e0e0;
+      background: var(--bg-card);
+      border-radius: 0;
+      border: 2px solid var(--border-color);
       margin-bottom: 32px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 
@@ -567,7 +559,7 @@ import { firstValueFrom } from 'rxjs';
         margin: 0 0 24px 0;
         font-size: 22px;
         font-weight: 700;
-        color: var(--text-primary, #1a202c);
+        color: var(--text-primary);
         text-align: center;
       }
 
@@ -579,11 +571,11 @@ import { firstValueFrom } from 'rxjs';
 
         button {
           height: 56px;
-          border-radius: 12px;
+          border-radius: var(--border-radius);
           font-weight: 600;
           font-size: 15px;
           letter-spacing: 0.3px;
-          transition: all 0.2s ease;
+          transition: var(--transition);
 
           mat-icon {
             margin-right: 10px;
@@ -596,15 +588,21 @@ import { firstValueFrom } from 'rxjs';
             transform: translateY(-2px);
             box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
           }
+
+          &.link-library-btn {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+          }
         }
       }
 
       .create-form,
       .link-form {
-        padding: 24px;
-        background: #fafafa;
-        border-radius: 12px;
-        border: 2px solid #e8e8e8;
+        padding: 16px;
+        background: var(--bg-secondary);
+        border-radius: 0;
+        border: 2px solid var(--border-color);
         animation: slideDown 0.3s ease-out;
 
         h4 {
@@ -614,10 +612,10 @@ import { firstValueFrom } from 'rxjs';
           margin: 0 0 20px 0;
           font-size: 18px;
           font-weight: 700;
-          color: var(--text-primary, #1a202c);
+          color: var(--text-primary);
 
           mat-icon {
-            color: #ff6b00;
+            color: var(--primary-orange);
             font-size: 24px;
             width: 24px;
             height: 24px;
@@ -627,7 +625,7 @@ import { firstValueFrom } from 'rxjs';
         .helper-text {
           margin: 0 0 20px 0;
           font-size: 14px;
-          color: var(--text-secondary, #4a5568);
+          color: var(--text-secondary);
           line-height: 1.6;
         }
 
@@ -644,7 +642,7 @@ import { firstValueFrom } from 'rxjs';
 
           button {
             height: 44px;
-            border-radius: 10px;
+            border-radius: 0;
             font-weight: 600;
             min-width: 100px;
 
@@ -670,13 +668,13 @@ import { firstValueFrom } from 'rxjs';
     .info-box {
       display: flex;
       gap: 16px;
-      padding: 20px;
-      background: #fff8f0;
-      border-radius: 12px;
-      border: 2px solid #ffe0cc;
+      padding: 12px;
+      background: var(--bg-tertiary);
+      border-radius: 0;
+      border: 2px solid var(--border-color);
 
       mat-icon {
-        color: #ff6b00;
+        color: var(--primary-orange);
         flex-shrink: 0;
         font-size: 28px;
         width: 28px;
@@ -689,14 +687,14 @@ import { firstValueFrom } from 'rxjs';
         strong {
           display: block;
           margin-bottom: 8px;
-          color: var(--text-primary, #1a202c);
+          color: var(--text-primary);
           font-size: 16px;
           font-weight: 700;
         }
 
         p {
           margin: 0;
-          color: var(--text-secondary, #4a5568);
+          color: var(--text-secondary);
           font-size: 14px;
           line-height: 1.6;
         }
@@ -704,138 +702,6 @@ import { firstValueFrom } from 'rxjs';
     }
 
     // Dark mode support
-    @media (prefers-color-scheme: dark) {
-      .library-config-container {
-        background: #0a0a0a;
-      }
-
-      .header h2 {
-        color: #f7fafc;
-      }
-
-      .library-card {
-        background: #1f1f1f !important;
-        border-color: #3a3a3a !important;
-
-        &:hover {
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
-          border-color: #4a4a4a !important;
-        }
-
-        &.active {
-          background: #1f1f1f !important;
-          border-color: #ff6b00 !important;
-          box-shadow: 0 8px 24px rgba(255, 107, 0, 0.3);
-        }
-
-        .library-card-header {
-          border-bottom-color: #3a3a3a !important;
-
-          .library-info h4 {
-            color: #f7fafc !important;
-          }
-        }
-
-        .library-card-body {
-          .info-item {
-            background: #0a0a0a !important;
-
-            .info-text {
-              .label {
-                color: #a0aec0;
-              }
-
-              .value {
-                color: #e2e8f0;
-              }
-            }
-          }
-        }
-
-        .library-card-actions {
-          border-top-color: #3a3a3a !important;
-
-          .action-btn {
-            color: #cbd5e0 !important;
-
-            &:hover:not(:disabled) {
-              color: #f7fafc;
-              background: rgba(255, 107, 0, 0.2);
-            }
-
-            &.delete-btn:hover:not(:disabled) {
-              color: #fc8181;
-              background: rgba(252, 129, 129, 0.2);
-            }
-          }
-        }
-      }
-
-      .empty-state {
-        background: linear-gradient(135deg, rgba(255, 107, 0, 0.1) 0%, rgba(234, 88, 12, 0.1) 100%);
-        border-color: #3a3a3a;
-
-        h3 {
-          color: #f7fafc;
-        }
-
-        mat-icon {
-          color: #888888;
-        }
-      }
-
-      .create-section {
-        background: #1f1f1f !important;
-        border-color: #3a3a3a !important;
-
-        h3 {
-          color: #f7fafc !important;
-        }
-
-        .action-buttons button {
-          background: #2a2a2a !important;
-          border-color: #3a3a3a !important;
-          color: #e2e8f0 !important;
-
-          &:hover {
-            background: #333333 !important;
-            border-color: #4a4a4a !important;
-          }
-        }
-
-        .create-form,
-        .link-form {
-          background: #0a0a0a !important;
-          border-color: #3a3a3a !important;
-
-          h4 {
-            color: #f7fafc;
-          }
-        }
-      }
-
-      .info-box {
-        background: linear-gradient(135deg, rgba(255, 107, 0, 0.12) 0%, rgba(234, 88, 12, 0.12) 100%);
-        border-color: rgba(255, 107, 0, 0.3);
-
-        .info-content strong {
-          color: #f7fafc;
-        }
-      }
-
-      button {
-        &.mat-mdc-button,
-        &.mat-mdc-raised-button,
-        &.mat-mdc-stroked-button {
-          color: #e2e8f0 !important;
-        }
-
-        &.mat-mdc-raised-button[color="primary"] {
-          background: #ff6b00 !important;
-          color: white !important;
-        }
-      }
-    }
   `]
 })
 export class LibraryConfigComponent implements OnInit {

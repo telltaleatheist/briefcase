@@ -415,9 +415,10 @@
   gap: 8px;
   padding: 0 24px !important;
   height: 48px !important;
-  border-radius: 10px !important;
-  font-weight: 500;
-  border: 2px solid var(--border-color) !important;
+  border-radius: var(--border-radius) !important;
+  font-weight: 600;
+  border: 1px solid var(--border-color) !important;
+  transition: var(--transition);
 
   mat-icon {
     font-size: 20px;
@@ -427,6 +428,7 @@
 
   &:hover {
     border-color: var(--primary-orange) !important;
+    transform: translateY(-2px);
     background: rgba(255, 143, 71, 0.05) !important;
   }
 }
@@ -441,7 +443,7 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: linear-gradient(135deg, var(--primary-orange) 0%, #ff8c47 100%) !important;
+  background: linear-gradient(135deg, var(--primary-orange) 0%, var(--light-orange) 100%) !important;
   box-shadow: 0 6px 20px rgba(255, 143, 71, 0.3);
   transition: all 0.2s ease;
   position: relative;
@@ -512,12 +514,12 @@
 :host {
   .modern-input,
   .modern-select {
-    background: #ffffff;
-    border-color: #d1d5db;
-    color: #212529;
+    background: var(--bg-card);
+    border-color: var(--border-color);
+    color: var(--text-primary);
 
     &::placeholder {
-      color: #9ca3af;
+      color: var(--text-muted);
     }
 
     &:hover {
@@ -527,8 +529,8 @@
 
   .checkbox-group,
   .theme-toggle {
-    background: #ffffff;
-    border-color: #d1d5db;
+    background: var(--bg-card);
+    border-color: var(--border-color);
   }
 }
 
@@ -648,12 +650,12 @@
 
         &.configured {
           background: rgba(72, 187, 120, 0.1);
-          color: #38a169;
+          color: var(--success-text);
         }
 
         &.not-configured {
           background: rgba(237, 137, 54, 0.1);
-          color: #ed8936;
+          color: var(--warning-text);
         }
       }
     }
@@ -707,16 +709,16 @@
   padding: 20px;
   text-align: left;
   background: var(--bg-card) !important;
-  border: 2px solid var(--border-color) !important;
-  border-radius: 12px;
-  transition: all 0.2s ease;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--border-radius-large);
+  transition: var(--transition);
   height: auto;
   min-height: 100px;
 
   &:hover {
     border-color: var(--primary-orange) !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-4px);
   }
 
   mat-icon {

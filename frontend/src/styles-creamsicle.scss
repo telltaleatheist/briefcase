@@ -39,9 +39,9 @@
   --info-text: #2563eb;
 }
 
-/* Dark Theme */
-[data-theme="dark"],
-.dark-theme {
+/* Dark Theme - applies when body has dark-theme class or data-theme="dark" */
+body[data-theme="dark"],
+body.dark-theme {
   --bg-primary: #0f0f0f;
   --bg-secondary: #1a1a1a;
   --bg-tertiary: #2d2d2d;
@@ -50,7 +50,7 @@
   --text-secondary: #d1d5db;
   --text-muted: #9ca3af;
   --border-color: #374151;
-  --shadow-color: rgba(0, 0, 0, 0.5);
+  --shadow-color: rgba(0, 0, 0, 0.3);
 
   // Status colors for dark mode
   --success-bg: #14532d;
@@ -323,12 +323,167 @@
     --mdc-protected-button-label-text-color: var(--text-muted) !important;
     opacity: 0.6 !important;
   }
+
+  // Material chips dark mode
+  mat-chip {
+    .mdc-evolution-chip__text-label,
+    .mat-mdc-chip-action-label {
+      color: #e5e7eb !important;
+    }
+  }
+
+  // Material tabs dark mode
+  mat-tab-group {
+    .mdc-tab__text-label {
+      color: rgba(255, 255, 255, 0.7) !important;
+    }
+
+    .mdc-tab--active .mdc-tab__text-label {
+      color: #ff8f47 !important;
+    }
+  }
+
+  // Material Menu dark mode styling (applies globally to all menus)
+  .mat-mdc-menu-panel {
+    background-color: #2d2d2d !important;
+    color: rgba(255, 255, 255, 0.87) !important;
+
+    .mat-mdc-menu-content {
+      background-color: #2d2d2d !important;
+    }
+
+    .mat-mdc-menu-item {
+      color: rgba(255, 255, 255, 0.87) !important;
+      border: 2px solid transparent !important;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                  box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+
+      // Remove default focus styling when not using keyboard
+      &:focus:not(:focus-visible):not(:hover) {
+        background-color: transparent !important;
+        border: 2px solid transparent !important;
+        box-shadow: none !important;
+      }
+
+      // Only apply focus styles when actually focused via keyboard
+      &:focus-visible {
+        background-color: rgba(255, 102, 0, 0.18) !important;
+        border: 2px solid rgba(255, 102, 0, 0.7) !important;
+        box-shadow:
+          -4px 0 10px rgba(255, 102, 0, 0.25),
+          4px 0 10px rgba(255, 102, 0, 0.25),
+          0 0 8px rgba(255, 102, 0, 0.25),
+          inset 0 0 4px rgba(255, 102, 0, 0.1) !important;
+      }
+
+      // Hover always wins (must come last for specificity)
+      &:hover {
+        background-color: rgba(255, 102, 0, 0.18) !important;
+        border: 2px solid rgba(255, 102, 0, 0.7) !important;
+        box-shadow:
+          -4px 0 10px rgba(255, 102, 0, 0.25),
+          4px 0 10px rgba(255, 102, 0, 0.25),
+          0 0 8px rgba(255, 102, 0, 0.25),
+          inset 0 0 4px rgba(255, 102, 0, 0.1) !important;
+      }
+
+      // Icons in menu items
+      .mat-icon,
+      mat-icon {
+        color: rgba(255, 255, 255, 0.7) !important;
+      }
+
+      // Text spans in menu items
+      span {
+        color: rgba(255, 255, 255, 0.87) !important;
+      }
+
+      // Checkbox in menu items
+      .mat-mdc-checkbox {
+        .mdc-checkbox__background {
+          border-color: rgba(255, 255, 255, 0.5) !important;
+        }
+
+        .mdc-checkbox__checkmark {
+          color: #fff !important;
+        }
+      }
+    }
+
+    // Dividers in menus
+    .mat-divider,
+    mat-divider {
+      border-top-color: rgba(255, 255, 255, 0.12) !important;
+    }
+
+    // Menu header (for file type menu)
+    .menu-header {
+      color: rgba(255, 255, 255, 0.87) !important;
+      border-bottom-color: rgba(255, 255, 255, 0.12) !important;
+
+      button,
+      .mat-mdc-button,
+      .mat-mdc-icon-button {
+        color: rgba(255, 255, 255, 0.87) !important;
+
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.08) !important;
+        }
+      }
+
+      span {
+        color: rgba(255, 255, 255, 0.87) !important;
+      }
+
+      mat-icon {
+        color: rgba(255, 255, 255, 0.7) !important;
+      }
+    }
+  }
 }
 
 /* Fix placeholder overlap with Material floating label */
 .mat-mdc-form-field:not(.mat-focused) input::placeholder,
 .mat-mdc-form-field:not(.mat-focused) textarea::placeholder {
   opacity: 0;
+}
+
+/* Material Menu light mode styling (applies globally to all menus) */
+.mat-mdc-menu-panel {
+  .mat-mdc-menu-item {
+    border: 2px solid transparent !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+
+    // Remove default focus styling when not using keyboard
+    &:focus:not(:focus-visible):not(:hover) {
+      background-color: transparent !important;
+      border: 2px solid transparent !important;
+      box-shadow: none !important;
+    }
+
+    // Only apply focus styles when actually focused via keyboard
+    &:focus-visible {
+      background-color: rgba(255, 102, 0, 0.12) !important;
+      border: 2px solid rgba(255, 102, 0, 0.6) !important;
+      box-shadow:
+        -3px 0 8px rgba(255, 102, 0, 0.2),
+        3px 0 8px rgba(255, 102, 0, 0.2),
+        0 0 6px rgba(255, 102, 0, 0.2),
+        inset 0 0 3px rgba(255, 102, 0, 0.08) !important;
+    }
+
+    // Hover always wins (must come last for specificity)
+    &:hover {
+      background-color: rgba(255, 102, 0, 0.12) !important;
+      border: 2px solid rgba(255, 102, 0, 0.6) !important;
+      box-shadow:
+        -3px 0 8px rgba(255, 102, 0, 0.2),
+        3px 0 8px rgba(255, 102, 0, 0.2),
+        0 0 6px rgba(255, 102, 0, 0.2),
+        inset 0 0 3px rgba(255, 102, 0, 0.08) !important;
+    }
+  }
 }
 
 /* Override Material Theme Colors */
@@ -348,6 +503,10 @@
 .mat-mdc-raised-button.mat-accent {
   --mdc-protected-button-container-color: var(--primary-orange) !important;
   --mdc-protected-button-label-text-color: white !important;
+}
+
+.mat-mdc-raised-button.mat-accent:hover:not(:disabled) {
+  --mdc-protected-button-container-color: var(--dark-orange) !important;
 }
 
 .mat-toolbar.mat-primary {
@@ -387,4 +546,28 @@ router-outlet + * {
   display: flex !important;
   flex: 1 !important;
   min-height: 0 !important;
+}
+
+// Auto dark mode based on system preference (only if no explicit theme is set)
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]):not([data-theme="dark"]) {
+    --bg-primary: #0f0f0f;
+    --bg-secondary: #1a1a1a;
+    --bg-tertiary: #2d2d2d;
+    --bg-card: #1e1e1e;
+    --text-primary: #ffffff;
+    --text-secondary: #d1d5db;
+    --text-muted: #9ca3af;
+    --border-color: #374151;
+    --shadow-color: rgba(0, 0, 0, 0.3);
+
+    --success-bg: #14532d;
+    --success-text: #86efac;
+    --warning-bg: #713f12;
+    --warning-text: #fcd34d;
+    --danger-bg: #7f1d1d;
+    --danger-text: #fca5a5;
+    --info-bg: #1e3a8a;
+    --info-text: #93c5fd;
+  }
 }

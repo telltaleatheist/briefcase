@@ -15,7 +15,7 @@
   
   p {
     margin-top: 1rem;
-    color: #666;
+    color: var(--text-secondary);
   }
 }
 
@@ -31,12 +31,12 @@
     font-size: 3rem;
     width: 3rem;
     height: 3rem;
-    color: #ccc;
+    color: var(--text-muted);
     margin-bottom: 1rem;
   }
   
   p {
-    color: #666;
+    color: var(--text-secondary);
     font-size: 1.1rem;
   }
 }
@@ -53,7 +53,7 @@
   padding: 0;
   
   &:hover {
-    background-color: #f8f8f8;
+    background-color: var(--bg-secondary);
   }
 }
 
@@ -86,7 +86,7 @@
   display: flex;
   gap: 1rem;
   margin: 0 0 0.5rem 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9rem;
   
   @media (max-width: 600px) {
@@ -97,7 +97,7 @@
 
 .item-source {
   margin: 0;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 0.9rem;
   white-space: nowrap;
   overflow: hidden;

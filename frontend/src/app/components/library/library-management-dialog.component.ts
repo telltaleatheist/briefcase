@@ -35,7 +35,9 @@ export interface LibraryManagementDialogData {
   `,
   styles: [`
     :host ::ng-deep .mat-mdc-dialog-surface {
-      background: #fafafa;
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border-radius: 0 !important;
     }
 
     .library-management-dialog {
@@ -56,8 +58,8 @@ export interface LibraryManagementDialogData {
 
     mat-dialog-actions {
       padding: 16px 24px;
-      border-top: 2px solid #e0e0e0;
-      background: #ffffff;
+      border-top: 2px solid var(--border-color);
+      background: var(--bg-card);
 
       .close-button {
         display: flex;
@@ -65,10 +67,10 @@ export interface LibraryManagementDialogData {
         gap: 8px;
         height: 44px;
         padding: 0 20px;
-        border-radius: 10px;
+        border-radius: var(--border-radius);
         font-weight: 600;
-        color: #4a5568;
-        transition: all 0.2s ease;
+        color: var(--text-secondary);
+        transition: var(--transition);
 
         mat-icon {
           font-size: 20px;
@@ -77,28 +79,8 @@ export interface LibraryManagementDialogData {
         }
 
         &:hover {
-          background: rgba(255, 107, 0, 0.1);
-          color: #ff6b00;
-        }
-      }
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :host ::ng-deep .mat-mdc-dialog-surface {
-        background: #0a0a0a;
-      }
-
-      mat-dialog-actions {
-        border-top-color: #3a3a3a;
-        background: #1f1f1f;
-
-        .close-button {
-          color: #e2e8f0 !important;
-
-          &:hover {
-            background: rgba(255, 107, 0, 0.2);
-            color: #f7fafc !important;
-          }
+          background: rgba(255, 107, 53, 0.1);
+          color: var(--primary-orange);
         }
       }
     }

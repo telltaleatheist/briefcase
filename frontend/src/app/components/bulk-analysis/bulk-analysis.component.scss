@@ -20,7 +20,7 @@
 
   .subtitle {
     margin: 8px 0 0 0;
-    color: rgba(0, 0, 0, 0.6);
+    color: var(--text-secondary);
     font-size: 16px;
   }
 }
@@ -89,14 +89,14 @@
   align-items: center;
   gap: 8px;
   padding: 12px;
-  background: rgba(33, 150, 243, 0.1);
-  border-left: 3px solid #2196f3;
+  background: var(--info-bg);
+  border-left: 3px solid var(--info-text);
   border-radius: 4px;
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.7);
+  color: var(--text-primary);
 
   mat-icon {
-    color: #2196f3;
+    color: var(--info-text);
     font-size: 20px;
     width: 20px;
     height: 20px;
@@ -131,12 +131,12 @@
     text-align: center;
     padding: 16px;
     border-radius: 8px;
-    background: rgba(0, 0, 0, 0.04);
+    background: var(--bg-secondary);
     min-width: 100px;
 
     .stat-label {
       font-size: 12px;
-      color: rgba(0, 0, 0, 0.6);
+      color: var(--text-secondary);
       text-transform: uppercase;
       margin-bottom: 8px;
     }
@@ -146,11 +146,11 @@
       font-weight: 500;
 
       &.success {
-        color: #4caf50;
+        color: var(--success-text);
       }
 
       &.error {
-        color: #f44336;
+        color: var(--danger-text);
       }
     }
   }
@@ -170,14 +170,14 @@
   .current-video {
     display: block;
     margin-top: 8px;
-    color: rgba(0, 0, 0, 0.6);
+    color: var(--text-secondary);
     font-size: 12px;
   }
 
   .time-estimate {
     display: block;
     margin-top: 4px;
-    color: rgba(0, 0, 0, 0.7);
+    color: var(--text-secondary);
     font-size: 13px;
     font-weight: 500;
   }
@@ -197,7 +197,7 @@
 .total-duration {
   font-size: 14px;
   font-weight: normal;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--text-primary);
   margin-left: 16px;
 }
 
@@ -212,7 +212,7 @@
 
   p {
     margin-top: 16px;
-    color: rgba(0, 0, 0, 0.6);
+    color: var(--text-secondary);
   }
 }
 
@@ -229,7 +229,7 @@
     font-size: 64px;
     width: 64px;
     height: 64px;
-    color: #4caf50;
+    color: var(--success-text);
     margin-bottom: 16px;
   }
 
@@ -241,7 +241,7 @@
 
   p {
     margin: 0 0 24px 0;
-    color: rgba(0, 0, 0, 0.6);
+    color: var(--text-secondary);
   }
 
   button mat-icon {
@@ -256,7 +256,7 @@
   height: 1100px;
   width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   box-sizing: border-box;
 
@@ -290,37 +290,4 @@
   }
 }
 
-// Dark mode support
-@media (prefers-color-scheme: dark) {
-  .page-header .subtitle {
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .progress-stats .stat-item {
-    background: rgba(255, 255, 255, 0.08);
-
-    .stat-label {
-      color: rgba(255, 255, 255, 0.7);
-    }
-  }
-
-  .queue-subtitle {
-    background: rgba(33, 150, 243, 0.15);
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .cascade-container {
-    border-color: rgba(255, 255, 255, 0.12);
-  }
-
-  .loading-state p,
-  .empty-state p,
-  .progress-text .current-video,
-  .progress-text .time-estimate {
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .total-duration {
-    color: rgba(255, 255, 255, 0.7);
-  }
-}
+// Theme colors automatically adapt via CSS variables

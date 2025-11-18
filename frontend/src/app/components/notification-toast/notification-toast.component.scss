@@ -39,10 +39,10 @@
   }
 
   &.toast-error {
-    border-left: 4px solid #f44336;
+    border-left: 4px solid var(--danger-text);
 
     .toast-icon {
-      background: linear-gradient(135deg, #f44336, #d32f2f);
+      background: var(--danger-text);
     }
   }
 

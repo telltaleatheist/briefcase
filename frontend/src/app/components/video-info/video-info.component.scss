@@ -55,7 +55,7 @@
     font-weight: 600;
 
     mat-icon {
-      color: var(--primary-color);
+      color: var(--primary-orange);
     }
 
     .file-count {
@@ -70,17 +70,17 @@
   padding: 32px;
   text-align: center;
   border: 2px dashed var(--border-color);
-  background-color: var(--surface-elevated);
+  background-color: var(--bg-card);
   transition: all 0.3s ease;
   cursor: pointer;
 
   &:hover {
-    border-color: var(--primary-color);
+    border-color: var(--primary-orange);
     background-color: rgba(255, 107, 53, 0.05);
   }
 
   &.dragging {
-    border-color: var(--primary-color);
+    border-color: var(--primary-orange);
     background-color: rgba(255, 107, 53, 0.1);
     transform: scale(1.02);
   }
@@ -95,7 +95,7 @@
       font-size: 48px;
       width: 48px;
       height: 48px;
-      color: var(--primary-color);
+      color: var(--primary-orange);
       opacity: 0.7;
     }
 
@@ -134,13 +134,13 @@
       font-size: 64px;
       width: 64px;
       height: 64px;
-      color: var(--primary-color);
+      color: var(--primary-orange);
       animation: bounce 0.5s ease infinite alternate;
     }
 
     h3 {
       margin: 0;
-      color: var(--primary-color);
+      color: var(--primary-orange);
       font-size: 20px;
       font-weight: 600;
     }
@@ -161,7 +161,7 @@
   border: 1px solid var(--border-color);
   border-radius: 4px;
   overflow: hidden;
-  background-color: var(--surface);
+  background-color: var(--bg-card);
 
   // Customize the cascade-list for children display
   ::ng-deep cascade-list {
@@ -203,23 +203,7 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  background-color: var(--background);
-
-  // Default to light theme
-  --background: #ffffff;
-  --surface: #ffffff;
-  --surface-elevated: #f8f9fa;
-  --text-primary: #212529;
-  --text-secondary: #6c757d;
-  --text-disabled: #adb5bd;
-  --border-color: #dee2e6;
-  --primary-color: #ff6b35;
-  --timestamp-bg: #fff5f0;
-  --timestamp-text: #d63e14;
-  --chip-bg: #f8f9fa;
-  --chip-text: #212529;
-  --chip-border: #dee2e6;
-  --chip-icon: #ff6b35;
+  background-color: var(--bg-card);
 }
 
 // Container for video info
@@ -259,7 +243,7 @@
   position: sticky;
   top: 0;
   z-index: 100;
-  background-color: var(--background);
+  background-color: var(--bg-primary);
   padding: 16px 24px;
   margin-left: -24px;
   margin-right: -24px;
@@ -319,7 +303,7 @@
         font-size: 20px;
         width: 20px;
         height: 20px;
-        color: var(--primary-color);
+        color: var(--primary-orange);
       }
     }
 
@@ -498,7 +482,7 @@
   .video-error {
     width: 100%;
     aspect-ratio: 16 / 9;
-    background-color: var(--surface);
+    background-color: var(--bg-card);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -539,7 +523,7 @@
   .audio-container {
     width: 100%;
     aspect-ratio: 16 / 9;
-    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-elevated) 100%);
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card) 100%);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -553,7 +537,7 @@
       font-size: 72px;
       width: 72px;
       height: 72px;
-      color: var(--primary-color);
+      color: var(--primary-orange);
       opacity: 0.8;
     }
 
@@ -567,7 +551,7 @@
   .video-error {
     width: 100%;
     aspect-ratio: 16 / 9;
-    background-color: var(--surface);
+    background-color: var(--bg-card);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -612,14 +596,14 @@
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     object-fit: contain;
-    background-color: var(--surface);
+    background-color: var(--bg-card);
   }
 
   .no-video,
   .video-error {
     width: 100%;
     aspect-ratio: 16 / 9;
-    background-color: var(--surface);
+    background-color: var(--bg-card);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -659,7 +643,7 @@
 .other-media-preview {
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-elevated) 100%);
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-card) 100%);
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -674,7 +658,7 @@
       font-size: 72px;
       width: 72px;
       height: 72px;
-      color: var(--primary-color);
+      color: var(--primary-orange);
       opacity: 0.8;
       margin-bottom: 16px;
     }
@@ -733,7 +717,7 @@
       letter-spacing: 0.5px;
 
       mat-icon {
-        color: var(--primary-color);
+        color: var(--primary-orange);
         font-size: 18px;
         width: 18px;
         height: 18px;
@@ -889,7 +873,7 @@
   gap: 12px;
 
   mat-icon {
-    color: var(--primary-color);
+    color: var(--primary-orange);
     font-size: 20px;
     width: 20px;
     height: 20px;
@@ -939,7 +923,7 @@
     letter-spacing: 0.5px;
 
     mat-icon {
-      color: var(--primary-color);
+      color: var(--primary-orange);
       font-size: 18px;
       width: 18px;
       height: 18px;
@@ -1008,7 +992,7 @@
   max-width: 100%;
   box-sizing: border-box;
   padding: 24px;
-  background-color: var(--surface);
+  background-color: var(--bg-card);
   border-radius: 8px;
 }
 
@@ -1030,7 +1014,7 @@
     color: var(--text-primary);
 
     mat-icon {
-      color: var(--primary-color);
+      color: var(--primary-orange);
       font-size: 20px;
       width: 20px;
       height: 20px;
@@ -1072,7 +1056,7 @@
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   position: relative;
-  background-color: var(--surface-elevated) !important;
+  background-color: var(--bg-card) !important;
 
   &:hover {
     transform: translateY(-2px);
@@ -1132,7 +1116,7 @@
       font-size: 16px;
       width: 16px;
       height: 16px;
-      color: var(--primary-color);
+      color: var(--primary-orange);
     }
   }
 
@@ -1170,7 +1154,7 @@
   max-width: 100%;
   box-sizing: border-box;
   padding: 24px;
-  background-color: var(--surface);
+  background-color: var(--bg-card);
   border-radius: 8px;
 }
 
@@ -1192,7 +1176,7 @@
     color: var(--text-primary);
 
     mat-icon {
-      color: var(--primary-color);
+      color: var(--primary-orange);
       font-size: 20px;
       width: 20px;
       height: 20px;
@@ -1313,7 +1297,7 @@
 .floating-search-panel {
   position: fixed;
   z-index: 1000;
-  background-color: var(--surface);
+  background-color: var(--bg-card);
   border: 2px solid var(--border-color);
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
@@ -1336,7 +1320,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    background-color: var(--surface-elevated);
+    background-color: var(--bg-card);
     border-bottom: 1px solid var(--border-color);
     cursor: move;
     user-select: none;
@@ -1415,8 +1399,8 @@
 // Search button active state
 .transcript-actions button.active {
   background-color: rgba(255, 102, 0, 0.1);
-  border-color: #ff6600;
-  color: #ff6600;
+  border-color: var(--primary-orange);
+  color: var(--primary-orange);
 }
 
 // Tags Section
@@ -1443,7 +1427,7 @@
       font-size: 20px;
       width: 20px;
       height: 20px;
-      color: var(--primary-color);
+      color: var(--primary-orange);
     }
   }
 }
@@ -1501,8 +1485,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background-color: var(--surface-elevated);
-  border: 2px solid;
+  background-color: var(--chip-bg);
+  border: 2px solid var(--chip-border);
   border-radius: 16px;
   transition: all 0.2s ease;
 
@@ -1520,7 +1504,7 @@
   .tag-name {
     font-size: 14px;
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--chip-text);
     line-height: 1.2;
   }
 
@@ -1530,6 +1514,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     line-height: 1;
+    color: var(--chip-text);
   }
 
   .delete-tag-button {
@@ -1578,173 +1563,10 @@
   }
 }
 
-// Dark theme support
-@media (prefers-color-scheme: dark) {
-  .video-info-container {
-    --background: #0f0f0f;
-    --surface: #1e1e1e;
-    --surface-elevated: #2d2d2d;
-    --text-primary: #ffffff;
-    --text-secondary: #d1d5db;
-    --text-disabled: #9ca3af;
-    --border-color: #374151;
-    --primary-color: #ff6b35;
-    --timestamp-bg: #2d2d2d;
-    --timestamp-text: #ff8c5a;
-    --chip-bg: #2d2d2d;
-    --chip-text: #e5e7eb;
-    --chip-border: #374151;
-    --chip-icon: #ff8c5a;
-  }
+// Dark theme support handled by global styles-creamsicle.scss
 
-  // Adjust header shadow for dark mode
-  .header {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  }
 
-  // Make chip text more visible in dark mode - use multiple selectors for specificity
-  .analysis-meta,
-  .transcript-meta {
-    ::ng-deep mat-chip {
-      background-color: #2d2d2d !important;
-
-      .mdc-evolution-chip__text-label,
-      .mat-mdc-chip-action-label,
-      span:not(.mat-icon) {
-        color: #e5e7eb !important;
-      }
-
-      // Also ensure icon colors are visible
-      mat-icon,
-      .mat-icon {
-        color: #ff8c5a !important;
-      }
-    }
-  }
-}
-
-// Explicit dark theme class support (in addition to prefers-color-scheme)
-:host-context([data-theme="dark"]),
-:host-context(.dark-theme) {
-  .video-info-container {
-    --background: #0f0f0f;
-    --surface: #1e1e1e;
-    --surface-elevated: #2d2d2d;
-    --text-primary: #ffffff;
-    --text-secondary: #d1d5db;
-    --text-disabled: #9ca3af;
-    --border-color: #374151;
-    --primary-color: #ff6b35;
-    --timestamp-bg: #2d2d2d;
-    --timestamp-text: #ff8c5a;
-    --chip-bg: #2d2d2d;
-    --chip-text: #e5e7eb;
-    --chip-border: #374151;
-    --chip-icon: #ff8c5a;
-  }
-
-  // Adjust header shadow for dark mode
-  .header {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  }
-
-  // Make chip text more visible in dark mode
-  .analysis-meta,
-  .transcript-meta {
-    ::ng-deep mat-chip {
-      background-color: #2d2d2d !important;
-
-      .mdc-evolution-chip__text-label,
-      .mat-mdc-chip-action-label,
-      span:not(.mat-icon) {
-        color: #e5e7eb !important;
-      }
-
-      mat-icon,
-      .mat-icon {
-        color: #ff8c5a !important;
-      }
-    }
-  }
-}
-
-// Light theme
-@media (prefers-color-scheme: light) {
-  .video-info-container {
-    --background: #ffffff;
-    --surface: #ffffff;
-    --surface-elevated: #f8f9fa;
-    --text-primary: #212529;
-    --text-secondary: #6c757d;
-    --text-disabled: #adb5bd;
-    --border-color: #dee2e6;
-    --primary-color: #ff6b35;
-    --timestamp-bg: #fff5f0;
-    --timestamp-text: #d63e14;
-    --chip-bg: #f8f9fa;
-    --chip-text: #212529;
-    --chip-border: #dee2e6;
-    --chip-icon: #ff6b35;
-  }
-
-  // Ensure chip text is visible in light mode
-  .analysis-meta,
-  .transcript-meta {
-    ::ng-deep mat-chip {
-      background-color: #f8f9fa !important;
-
-      .mdc-evolution-chip__text-label,
-      .mat-mdc-chip-action-label,
-      span:not(.mat-icon) {
-        color: #212529 !important;
-      }
-
-      mat-icon,
-      .mat-icon {
-        color: #ff6b35 !important;
-      }
-    }
-  }
-}
-
-// Explicit light theme class support
-:host-context([data-theme="light"]),
-:host-context(.light-theme) {
-  .video-info-container {
-    --background: #ffffff;
-    --surface: #ffffff;
-    --surface-elevated: #f8f9fa;
-    --text-primary: #212529;
-    --text-secondary: #6c757d;
-    --text-disabled: #adb5bd;
-    --border-color: #dee2e6;
-    --primary-color: #ff6b35;
-    --timestamp-bg: #fff5f0;
-    --timestamp-text: #d63e14;
-    --chip-bg: #f8f9fa;
-    --chip-text: #212529;
-    --chip-border: #dee2e6;
-    --chip-icon: #ff6b35;
-  }
-
-  .analysis-meta,
-  .transcript-meta {
-    ::ng-deep mat-chip {
-      background-color: #f8f9fa !important;
-
-      .mdc-evolution-chip__text-label,
-      .mat-mdc-chip-action-label,
-      span:not(.mat-icon) {
-        color: #212529 !important;
-      }
-
-      mat-icon,
-      .mat-icon {
-        color: #ff6b35 !important;
-      }
-    }
-  }
-}
+// Light theme support handled by global styles-creamsicle.scss
 
 // ============================================================================
 // DROP ZONE BUTTONS
@@ -1777,7 +1599,7 @@
 }
 
 .library-picker-content {
-  background-color: var(--surface);
+  background-color: var(--bg-card);
   border-radius: 12px;
   width: 90%;
   max-width: 900px;
@@ -1804,7 +1626,7 @@
     color: var(--text-primary);
 
     mat-icon {
-      color: var(--primary-color);
+      color: var(--primary-orange);
     }
   }
 }
@@ -1823,5 +1645,5 @@
   gap: 12px;
   padding: 16px 24px;
   border-top: 1px solid var(--border-color);
-  background-color: var(--surface-elevated);
+  background-color: var(--bg-card);
 }

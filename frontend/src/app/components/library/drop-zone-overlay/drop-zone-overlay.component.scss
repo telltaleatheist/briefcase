@@ -1,0 +1,76 @@
+.drop-zone-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--primary-orange);
+  opacity: 0.95;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  border: 8px dashed rgba(255, 255, 255, 0.9); // White dashed border for contrast on orange
+  pointer-events: none;
+
+  // Hidden by default
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.98);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out, visibility 0s linear 0.12s;
+  will-change: opacity, transform;
+
+  // Show when active
+  &.show {
+    opacity: 0.95;
+    visibility: visible;
+    transform: scale(1);
+    transition: opacity 0.12s ease-out, transform 0.12s ease-out, visibility 0s linear 0s;
+  }
+
+  .drop-zone-content {
+    text-align: center;
+    color: white;
+
+    mat-icon {
+      font-size: 96px;
+      width: 96px;
+      height: 96px;
+      margin-bottom: 16px;
+      animation: bounce 1s infinite;
+    }
+
+    h2 {
+      margin: 0 0 8px 0;
+      font-size: 32px;
+      font-weight: 600;
+    }
+
+    p {
+      margin: 4px 0;
+      font-size: 18px;
+      opacity: 0.9;
+    }
+
+    p.hint {
+      margin-top: 12px;
+      font-size: 16px;
+      font-weight: 500;
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.2); // Semi-transparent white pill on orange
+      padding: 8px 16px;
+      border-radius: 20px;
+      display: inline-block;
+    }
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}

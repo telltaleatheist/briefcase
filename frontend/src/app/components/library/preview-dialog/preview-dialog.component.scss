@@ -7,7 +7,7 @@
   background: var(--bg-card, #ffffff);
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-xl);
 
   // CDK Drag styling
   &.cdk-drag-dragging {
@@ -72,7 +72,7 @@
 
 .preview-dialog-content {
   flex: 1;
-  background: #000;
+  background: #000; // Keep black for proper video display
   display: flex;
   align-items: center;
   justify-content: center;

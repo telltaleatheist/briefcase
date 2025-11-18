@@ -47,6 +47,9 @@ import { VideoProcessingJob, getProcessIcon } from '../../models/video-processin
 import { VideoStateService, VideoState } from '../../services/video-state.service';
 import { TabsService } from '../../services/tabs.service';
 import { FrontendBatchAnalysisService } from '../../services/frontend-batch-analysis.service';
+import { VideoUrlService } from '../../services/video-url.service';
+import { VideoGroupingService } from '../../services/video-grouping.service';
+import { VideoDisplayService } from '../../services/video-display.service';
 import { VideoAnalysisDialogComponent } from '../video-analysis-dialog/video-analysis-dialog.component';
 import { RenameDialogComponent } from './rename-dialog.component';
 import { NameSuggestionDialogComponent } from './name-suggestion-dialog.component';
@@ -54,6 +57,11 @@ import { PreviewDialogComponent, PreviewDialogData } from './preview-dialog/prev
 import { AddToTabDialogComponent, AddToTabDialogResult } from './add-to-tab-dialog.component';
 import { SearchBarComponent, SearchCriteriaChange, TagData } from './search-bar/search-bar.component';
 import { LibraryHeaderComponent } from './library-header/library-header.component';
+import { ResultsToolbarComponent } from './results-toolbar/results-toolbar.component';
+import { DropZoneOverlayComponent } from './drop-zone-overlay/drop-zone-overlay.component';
+import { EmptyStateComponent } from './empty-state/empty-state.component';
+import { LoadingStateComponent } from './loading-state/loading-state.component';
+import { VideoContextMenuComponent } from './video-context-menu/video-context-menu.component';
 import { ImportIndicatorComponent } from './import-indicator.component';
 import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
 import {
@@ -106,6 +114,11 @@ interface ClipLibrary {
     AngularSplitModule,
     SearchBarComponent,
     LibraryHeaderComponent,
+    ResultsToolbarComponent,
+    DropZoneOverlayComponent,
+    EmptyStateComponent,
+    LoadingStateComponent,
+    VideoContextMenuComponent,
     ImportIndicatorComponent,
     CascadeListComponent
   ],
@@ -241,7 +254,11 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Video player state
   @ViewChild('detailVideoPlayer') detailVideoPlayer?: ElementRef<HTMLVideoElement>;
-  @ViewChild('contextMenuTrigger') contextMenuTrigger?: MatMenuTrigger;
+  @ViewChild(VideoContextMenuComponent) videoContextMenuComponent?: VideoContextMenuComponent;
+
+  get contextMenuTrigger(): MatMenuTrigger | undefined {
+    return this.videoContextMenuComponent?.menuTrigger;
+  }
   @ViewChild('managementContextMenuTrigger') managementContextMenuTrigger?: MatMenuTrigger;
   @ViewChild('fileTypeMenuTrigger') fileTypeMenuTrigger?: MatMenuTrigger;
   @ViewChild('cascadeList') cascadeList?: CascadeListComponent<DatabaseVideo>;
@@ -319,7 +336,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
         return 'NEW_VIDEOS_24H';
       }
 
-      return this.getWeekIdentifier(downloadDate);
+      return this.videoGroupingService.getWeekIdentifier(downloadDate);
     },
     groupLabel: (weekKey) => {
       if (weekKey === 'SEARCH_RESULTS') {
@@ -398,7 +415,10 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     private videoProcessingQueueService: VideoProcessingQueueService,
     private videoStateService: VideoStateService,
     private tabsService: TabsService,
-    private frontendBatchAnalysisService: FrontendBatchAnalysisService
+    private frontendBatchAnalysisService: FrontendBatchAnalysisService,
+    private videoUrlService: VideoUrlService,
+    private videoGroupingService: VideoGroupingService,
+    private videoDisplayService: VideoDisplayService
   ) {
     console.log('[LibraryComponent] Constructor called at', new Date().toISOString());
     console.log('[LibraryComponent] Constructor completed at', new Date().toISOString());
@@ -1302,58 +1322,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Group videos by date folder/week using download date (when you downloaded it)
    */
   groupVideosByWeek() {
-    const groups = new Map<string, DatabaseVideo[]>();
-
-    for (const video of this.filteredVideos) {
-      // Use video.download_date (file creation timestamp) for weekly grouping
-      // This represents when YOU downloaded/created the file, not the content date
-      const downloadDate = this.parseDateSafely(video.download_date || video.added_at);
-      const week = this.getWeekIdentifier(downloadDate);
-
-      if (!groups.has(week)) {
-        groups.set(week, []);
-      }
-
-      // If this is a child video, insert a ghost parent reference first
-      if (video.parent_id) {
-        const parent = this.filteredVideos.find(v => v.id === video.parent_id);
-        if (parent) {
-          // Create a ghost parent reference (marked with a special property)
-          const ghostParent = {
-            ...parent,
-            isGhostParent: true,
-            ghostChildId: video.id  // Track which child this ghost belongs to
-          } as any;
-          groups.get(week)!.push(ghostParent);
-        }
-      }
-
-      groups.get(week)!.push(video);
-    }
-
-    // Convert to array and sort by week name (descending - newest first)
-    this.groupedVideos = Array.from(groups.entries())
-      .map(([week, videos]) => ({ week, videos }))
-      .sort((a, b) => b.week.localeCompare(a.week));
-  }
-
-  /**
-   * Get week identifier for a date
-   */
-  private getWeekIdentifier(date: Date): string {
-    const tempDate = new Date(date.getTime());
-    tempDate.setHours(0, 0, 0, 0);
-
-    // Get the Sunday of this week (start of week)
-    const day = tempDate.getDay();
-    const diff = tempDate.getDate() - day; // Sunday is 0, so subtract current day
-    tempDate.setDate(diff);
-
-    // Format as yyyy-mm-dd
-    const year = tempDate.getFullYear();
-    const month = String(tempDate.getMonth() + 1).padStart(2, '0');
-    const dayOfMonth = String(tempDate.getDate()).padStart(2, '0');
-    return `${year}-${month}-${dayOfMonth}`;
+    this.groupedVideos = this.videoGroupingService.groupVideosByWeek(this.filteredVideos);
   }
 
   /**
@@ -1381,9 +1350,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Format week label for display
    */
   private formatWeekLabel(weekStart: string | Date): string {
-    const date = typeof weekStart === 'string' ? this.parseDateSafely(weekStart) : weekStart;
-    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
-    return `Week of ${date.toLocaleDateString('en-US', options)}`;
+    return this.videoGroupingService.formatWeekLabel(weekStart);
   }
 
   /**
@@ -1561,211 +1528,63 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Get thumbnail URL for a video
    */
   getVideoThumbnailUrl(video: DatabaseVideo): string {
-    return `${this.backendUrl}/api/database/videos/${video.id}/thumbnail`;
+    return this.videoUrlService.getVideoThumbnailUrl(video, this.backendUrl);
   }
 
   /**
    * Get streaming URL for a video
    */
+  getVideoStreamUrl(video: DatabaseVideo): string {
+    return this.videoUrlService.getVideoStreamUrl(video, this.backendUrl);
+  }
+
   /**
    * Infer media type from filename if not provided
    */
   private inferMediaType(video: DatabaseVideo): string {
-    if (video.media_type) {
-      return video.media_type;
-    }
-
-    // Fallback: infer from file extension
-    const ext = (video.file_extension || video.filename.substring(video.filename.lastIndexOf('.'))).toLowerCase();
-
-    // Video extensions
-    if (['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv', '.ogg'].includes(ext)) {
-      return 'video';
-    }
-
-    // Audio extensions
-    if (['.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.oga'].includes(ext)) {
-      return 'audio';
-    }
-
-    // Image extensions
-    if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext)) {
-      return 'image';
-    }
-
-    // Document extensions
-    if (['.pdf', '.txt', '.md'].includes(ext)) {
-      return 'document';
-    }
-
-    // Web archive extensions
-    if (['.html', '.htm', '.mhtml'].includes(ext)) {
-      return 'webpage';
-    }
-
-    return 'video'; // default
-  }
-
-  getVideoStreamUrl(video: DatabaseVideo): string {
-    // Properly encode Unicode path to base64
-    // Convert string -> UTF-8 bytes -> base64
-    const utf8Bytes = new TextEncoder().encode(video.current_path);
-    const binaryString = Array.from(utf8Bytes, byte => String.fromCharCode(byte)).join('');
-    const encodedPath = btoa(binaryString);
-
-    const mediaType = this.inferMediaType(video);
-
-    // Use dedicated image endpoint for images, video endpoint for everything else
-    const endpoint = mediaType === 'image'
-      ? '/api/library/images/custom'
-      : '/api/library/videos/custom';
-
-    const url = `${this.backendUrl}${endpoint}?path=${encodeURIComponent(encodedPath)}`;
-    console.log(`[Preview] Media type: ${mediaType}, Path: ${video.current_path}`);
-    console.log(`[Preview] Generated URL: ${url}`);
-    return url;
+    return this.videoUrlService.inferMediaType(video);
   }
 
   /**
    * Get display name for video (remove extension and clean up)
    */
   getVideoDisplayName(video: DatabaseVideo): string {
-    let name = video.filename;
-
-    // Remove extension if present
-    if (video.file_extension) {
-      name = name.replace(new RegExp(video.file_extension + '$'), '');
-    }
-
-    // Remove leading date patterns from display:
-    // - YYYY-MM-DD: "2025-11-02 - filename"
-    // - YYYY-MM-TT: "2025-11-T1" or "2025-11-T2" or "2025-11-T3" (trimester format)
-    // - YYYY-MM: "2025-11 filename"
-    // - YYYY: "2025 filename"
-    // Followed by optional separators: space, dash, underscore
-    name = name.replace(/^\d{4}(-\d{2}(-(\d{2}|T[123]))?)?[\s_-]*/, '');
-
-    return name;
+    return this.videoDisplayService.getVideoDisplayName(video);
   }
 
   /**
    * Format secondary text for video display
    */
   formatVideoSecondaryText(video: DatabaseVideo): string {
-    const parts: string[] = [];
-
-    // Name suggestion with preview
-    if (video.suggested_title) {
-      // Show first 60 characters of suggested title
-      const preview = video.suggested_title.length > 60
-        ? video.suggested_title.substring(0, 60) + '...'
-        : video.suggested_title;
-
-      // Show preview of suggested title with instruction to right-click
-      // Use CSS class for proper Angular styling (inline styles get sanitized)
-      parts.push(`<span class="suggested-title">💡 Suggested: ${preview} <em>(right-click to edit)</em></span>`);
-    }
-
-    // Upload date (from filename) - when content was created/filmed by the person
-    if (video.upload_date) {
-      const uploadDate = this.parseDateSafely(video.upload_date);
-      parts.push(`Uploaded: ${uploadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
-    }
-
-    // Download date (when file was created/downloaded) - when user downloaded the video
-    if (video.download_date) {
-      const downloadDate = this.parseDateSafely(video.download_date);
-      parts.push(`Downloaded: ${downloadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`);
-    }
-
-    return parts.join(' • ');
+    return this.videoDisplayService.formatVideoSecondaryText(video);
   }
 
   /**
    * Parse date string safely, handling YYYY-MM-DD format without timezone shifting
    */
   private parseDateSafely(dateString: string): Date {
-    // If it's a date-only string (YYYY-MM-DD), parse as local date to avoid timezone shifting
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-      const [year, month, day] = dateString.split('-').map(Number);
-      return new Date(year, month - 1, day);
-    }
-    // Otherwise parse normally (full timestamp)
-    return new Date(dateString);
+    return this.videoGroupingService.parseDateSafely(dateString);
   }
 
   /**
    * Format video duration for display
    */
   formatVideoDuration(video: DatabaseVideo): string {
-    if (!video.duration_seconds) {
-      return '';
-    }
-
-    const hours = Math.floor(video.duration_seconds / 3600);
-    const mins = Math.floor((video.duration_seconds % 3600) / 60);
-    const secs = Math.floor(video.duration_seconds % 60);
-
-    if (hours > 0) {
-      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    } else {
-      return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
+    return this.videoDisplayService.formatVideoDuration(video);
   }
 
   /**
    * Get media type icon
    */
   getMediaIcon(video: DatabaseVideo): string {
-    const mediaType = this.inferMediaType(video);
-    switch (mediaType) {
-      case 'video': return 'movie';
-      case 'audio': return 'audiotrack';
-      case 'document': return 'description';
-      case 'image': return 'image';
-      case 'webpage': return 'language';
-      default: return 'description';
-    }
+    return this.videoDisplayService.getMediaIcon(video);
   }
 
   /**
    * Map video status to visual indicator
    */
   getVideoStatusMapper = (video: DatabaseVideo): ItemStatus | null => {
-    // FIX: Always look up the video from this.videos to get correct flags
-    // The video object passed in might have lost properties during filtering/mapping
-    const sourceVideo = this.videos.find(v => v.id === video.id);
-    if (!sourceVideo) {
-      console.warn(`[getVideoStatusMapper] Video ${video.id} not found in this.videos`);
-      return { color: '#999999', tooltip: 'Unknown status' }; // Gray
-    }
-
-    // Use flags from sourceVideo (which always has correct data)
-    const has_transcript = sourceVideo.has_transcript;
-    const has_analysis = sourceVideo.has_analysis;
-    const duration_seconds = sourceVideo.duration_seconds || video.duration_seconds;
-
-    // Non-video/audio files (documents, webpages, images) are always green
-    const mediaType = this.inferMediaType(sourceVideo);
-    if (mediaType !== 'video' && mediaType !== 'audio') {
-      return { color: '#198754', tooltip: 'Document/webpage/image' }; // Green
-    }
-
-    // Priority: missing both > has transcript only > has analysis (complete)
-    if (!has_transcript && !has_analysis) {
-      return { color: '#dc3545', tooltip: 'Missing transcript and analysis' }; // Red
-    }
-    if (!has_analysis) {
-      // Has transcript but no analysis
-      return { color: '#ff6600', tooltip: 'Missing analysis' }; // Orange
-    }
-    // If has_analysis is true, transcript must exist (can't analyze without transcript)
-    // Long videos (>10 min) get blue marker
-    if (duration_seconds && duration_seconds > 600) {
-      return { color: '#0dcaf0', tooltip: 'Complete (>10 min)' }; // Blue
-    }
-    // Short videos (<10 min) get green marker
-    return { color: '#198754', tooltip: 'Complete' }; // Green
+    return this.videoDisplayService.getVideoStatusMapper(video, this.videos);
   };
 
   /**
@@ -1777,7 +1596,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
     const videoMap = new Map(this.filteredVideos.map(v => [v.id, v]));
 
     const getWeekForVideo = (video: any) => {
-      return this.getWeekIdentifier(this.parseDateSafely(video.download_date || video.added_at));
+      return this.videoGroupingService.getWeekIdentifier(this.parseDateSafely(video.download_date || video.added_at));
     };
 
     const hasChildren = new Set<string>();
@@ -2940,12 +2759,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Format helpers
    */
   formatDate(dateString: string | null): string {
-    if (!dateString) return 'Unknown';
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
+    return this.videoDisplayService.formatDate(dateString);
   }
 
   encodeURIComponent(str: string): string {
@@ -2953,18 +2767,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   formatTimeRemaining(seconds: number | undefined): string {
-    if (!seconds) return 'Calculating...';
-
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-
-    if (hours > 0) {
-      return `~${hours}h ${minutes}m remaining`;
-    } else if (minutes > 0) {
-      return `~${minutes}m remaining`;
-    } else {
-      return `<1m remaining`;
-    }
+    return this.videoDisplayService.formatTimeRemaining(seconds);
   }
 
   /**
@@ -3052,6 +2855,60 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
   getSelectedCount(): number {
     return this.selectedCount; // Use cached value instead of recalculating
+  }
+
+  /**
+   * Get appropriate message for empty state
+   */
+  getEmptyStateMessage(): string {
+    if (this.searchQuery) {
+      return 'Try adjusting your search query';
+    }
+    if (this.videos.length === 0) {
+      return 'Click "Import Videos" to select specific videos or "Scan All" to import all videos from your clips directory';
+    }
+    return 'No videos match the current filters';
+  }
+
+  /**
+   * Handle context menu actions from video-context-menu component
+   */
+  handleContextMenuAction(event: { action: string; video?: any }) {
+    const video = event.video || this.contextMenuVideo;
+    if (!video) return;
+
+    switch (event.action) {
+      case 'rename':
+        this.startRenamingVideo(video);
+        break;
+      case 'openEditor':
+        this.openVideoPlayer(video);
+        break;
+      case 'viewDetails':
+        this.openMetadataEditor(video);
+        break;
+      case 'copyFilename':
+        this.copyFilename(video);
+        break;
+      case 'openLocation':
+        this.openFileLocation(video);
+        break;
+      case 'editSuggestedTitle':
+        this.showNameSuggestionDialog(video);
+        break;
+      case 'addToTab':
+        this.addSelectedToTab();
+        break;
+      case 'analyze':
+        this.analyzeSelected();
+        break;
+      case 'moveToLibrary':
+        this.moveToLibrary();
+        break;
+      case 'delete':
+        this.deleteSelected();
+        break;
+    }
   }
 
   /**
@@ -3843,15 +3700,7 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Format date for display in chip
    */
   formatDateChip(date: string): string {
-    if (!date) return '';
-
-    // Check if it's a trimester format
-    if (date.match(/^\d{4}-\d{2}-T[123]$/)) {
-      return date; // Display as-is for trimester format
-    }
-
-    // Standard date format - could format differently if needed
-    return date;
+    return this.videoDisplayService.formatDateChip(date);
   }
 
   /**
@@ -4418,40 +4267,14 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Get media type icon for a media item
    */
   getMediaTypeIcon(mediaType: string): string {
-    switch (mediaType) {
-      case 'video':
-        return 'videocam';
-      case 'audio':
-        return 'audiotrack';
-      case 'document':
-        return 'description';
-      case 'image':
-        return 'image';
-      case 'webpage':
-        return 'public';
-      default:
-        return 'video_library';
-    }
+    return this.videoDisplayService.getMediaTypeIcon(mediaType);
   }
 
   /**
    * Get media type label for a media item
    */
   getMediaTypeLabel(mediaType: string): string {
-    switch (mediaType) {
-      case 'video':
-        return 'Video';
-      case 'audio':
-        return 'Audio';
-      case 'document':
-        return 'Document';
-      case 'image':
-        return 'Image';
-      case 'webpage':
-        return 'Web Page';
-      default:
-        return 'Media';
-    }
+    return this.videoDisplayService.getMediaTypeLabel(mediaType);
   }
 
   /**

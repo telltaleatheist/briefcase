@@ -1,0 +1,19 @@
+<div
+  class="selection-window"
+  [style]="selectionStyle"
+  (mousedown)="onWindowMouseDown($event)">
+
+  <!-- Left handle -->
+  <div
+    class="selection-handle selection-handle-left"
+    (mousedown)="onLeftHandleMouseDown($event)">
+    <div class="handle-line"></div>
+  </div>
+
+  <!-- Right handle -->
+  <div
+    class="selection-handle selection-handle-right"
+    (mousedown)="onRightHandleMouseDown($event)">
+    <div class="handle-line"></div>
+  </div>
+</div>

@@ -1,0 +1,138 @@
+/**
+ * Timeline Theme Variables
+ *
+ * CSS Custom Properties for timeline styling.
+ * These can be overridden via TimelineConfigService or directly in CSS.
+ */
+
+:root {
+  // === Theme Colors ===
+  --timeline-primary-color: #ff6600;
+  --timeline-secondary-color: #ff8833;
+  --timeline-selection-color: #ffcc00;
+  --timeline-playhead-color: #212529;
+  --timeline-waveform-color: rgba(255, 143, 71, 0.8);
+
+  // Auto colors (light mode defaults)
+  --timeline-background-color: #f8f9fa;
+  --timeline-background-secondary: #e9ecef;
+  --timeline-border-color: #dee2e6;
+  --timeline-border-color-secondary: #adb5bd;
+  --timeline-text-color: #212529;
+  --timeline-text-color-secondary: #666;
+
+  // === Sizing (in pixels) ===
+  --timeline-ruler-height: 40px;
+  --timeline-zoom-bar-height: 24px;
+  --timeline-playhead-width: 2px;
+  --timeline-handle-size: 16px;
+  --timeline-border-width: 2px;
+  --timeline-border-radius: 4px;
+  --timeline-spacing: 8px;
+
+  // === Spacing ===
+  --timeline-ruler-margin: 0px;
+  --timeline-zoom-bar-margin: 4px;
+  --timeline-component-padding: 4px;
+  --timeline-handle-offset: -8px;
+
+  // === Derived Colors (Light Mode) ===
+  --timeline-background-overlay: rgba(0, 0, 0, 0.03);
+  --timeline-background-hover: rgba(0, 0, 0, 0.05);
+  --timeline-background-active: rgba(0, 0, 0, 0.1);
+
+  // Primary color variations
+  --timeline-primary-light: #ff8833;
+  --timeline-primary-lighter: #ff9944;
+  --timeline-primary-lightest: #ffaa55;
+  --timeline-primary-dark: #cc5200;
+  --timeline-primary-overlay: rgba(255, 102, 0, 0.05);
+  --timeline-primary-overlay-medium: rgba(255, 102, 0, 0.15);
+  --timeline-primary-overlay-strong: rgba(255, 102, 0, 0.3);
+
+  // Selection color variations
+  --timeline-selection-light: #ffee00;
+  --timeline-selection-overlay: rgba(255, 204, 0, 0.2);
+  --timeline-selection-overlay-strong: rgba(255, 204, 0, 0.3);
+
+  // Section color variations
+  --timeline-section-border-color: var(--timeline-primary-color);
+  --timeline-section-border-width: 4px;
+  --timeline-section-background-opacity: 0.4;
+  --timeline-section-border-opacity: 0.9;
+  --timeline-section-overlay-light: rgba(255, 102, 0, 0.2);
+  --timeline-section-overlay-medium: rgba(255, 102, 0, 0.3);
+  --timeline-section-overlay-strong: rgba(255, 102, 0, 0.4);
+
+  // Shadows
+  --timeline-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --timeline-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.15);
+  --timeline-playhead-glow: 0 0 8px rgba(33, 37, 41, 0.5);
+  --timeline-handle-glow: 0 0 6px rgba(255, 102, 0, 0.6);
+}
+
+// === Dark Mode ===
+@media (prefers-color-scheme: dark) {
+  :root {
+    // Auto colors (dark mode)
+    --timeline-playhead-color: #ffffff;
+    --timeline-background-color: #1a1a1a;
+    --timeline-background-secondary: #2a2a2a;
+    --timeline-border-color: #444;
+    --timeline-border-color-secondary: #555;
+    --timeline-text-color: #ddd;
+    --timeline-text-color-secondary: #999;
+
+    // Derived colors (dark mode)
+    --timeline-background-overlay: rgba(255, 255, 255, 0.03);
+    --timeline-background-hover: rgba(255, 255, 255, 0.05);
+    --timeline-background-active: rgba(255, 255, 255, 0.1);
+
+    // Shadows (dark mode - more prominent)
+    --timeline-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --timeline-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4);
+    --timeline-playhead-glow: 0 0 8px rgba(255, 255, 255, 0.5);
+  }
+}
+
+// === Component-Specific Variables ===
+
+// Ruler
+:root {
+  --timeline-ruler-tick-major-height: 16px;
+  --timeline-ruler-tick-minor-height: 10px;
+  --timeline-ruler-label-font-size: 10px;
+  --timeline-ruler-label-padding: 2px 4px;
+  --timeline-ruler-label-border-radius: 3px;
+}
+
+// Zoom Bar
+:root {
+  --timeline-zoom-bar-track-height: var(--timeline-zoom-bar-height);
+  --timeline-zoom-bar-handle-width: 14px;
+  --timeline-zoom-bar-handle-width-hover: 16px;
+  --timeline-zoom-bar-min-width: 30px;
+  --timeline-zoom-bar-border-radius-lg: 6px;
+}
+
+// Playhead
+:root {
+  --timeline-playhead-offset-top: -35px;
+  --timeline-playhead-height-extend: calc(100% + 35px);
+  --timeline-playhead-handle-border-width: 2px;
+}
+
+// Selection
+:root {
+  --timeline-selection-border-width: 3px;
+  --timeline-selection-handle-width: 24px;
+  --timeline-selection-handle-line-width: 4px;
+  --timeline-selection-handle-line-width-hover: 5px;
+}
+
+// === Transition Variables ===
+:root {
+  --timeline-transition-fast: 0.15s ease;
+  --timeline-transition-normal: 0.2s ease;
+  --timeline-transition-slow: 0.3s ease;
+}

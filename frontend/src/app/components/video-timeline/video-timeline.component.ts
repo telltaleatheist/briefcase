@@ -4,35 +4,19 @@ import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { TimelineWaveformComponent } from '../../video-editor/components/timeline/timeline-waveform/timeline-waveform.component';
-import { TimelinePlayheadComponent } from '../../video-editor/components/timeline/timeline-playhead/timeline-playhead.component';
-import { TimelineRulerComponent } from '../../video-editor/components/timeline/timeline-ruler/timeline-ruler.component';
-import { TimelineZoomBarComponent } from '../../video-editor/components/timeline/timeline-zoom-bar/timeline-zoom-bar.component';
-import { TimelineSectionsLayerComponent } from '../../video-editor/components/timeline/timeline-sections-layer/timeline-sections-layer.component';
-import { TimelineSelectionComponent } from '../../video-editor/components/timeline/timeline-selection/timeline-selection.component';
-import { ZoomState } from '../../video-editor/models';
-
-export interface TimelineSection {
-  startTime: number;
-  endTime: number;
-  category: string;
-  description: string;
-  color: string;
-}
-
-export interface TimelineSelection {
-  startTime: number;
-  endTime: number;
-}
-
-export type TimelineTool = 'cursor' | 'highlight';
-
-export interface CategoryFilter {
-  category: string;
-  label: string;
-  color: string;
-  enabled: boolean;
-}
+import {
+  TimelineWaveformComponent,
+  TimelinePlayheadComponent,
+  TimelineRulerComponent,
+  TimelineZoomBarComponent,
+  TimelineSectionsLayerComponent,
+  TimelineSelectionComponent,
+  ZoomState,
+  TimelineSection,
+  TimelineSelection,
+  TimelineTool,
+  CategoryFilter
+} from 'ngx-video-timeline-editor';
 
 @Component({
   selector: 'app-video-timeline',

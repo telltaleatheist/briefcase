@@ -38,14 +38,14 @@ import { ThemeService } from '../../services/theme.service';
     }
     
     .theme-icon.dark-mode {
-      color: #1de9b6; // Cyberpunk mint for dark mode
-      text-shadow: 0 0 10px rgba(64, 255, 208, 0.5);
+      color: var(--primary-orange);
+      text-shadow: 0 0 10px rgba(255, 107, 53, 0.5); // Orange glow for dark mode
       animation: pulse-dark 2s infinite alternate;
     }
-    
+
     .theme-icon.light-mode {
-      color: #ffd54f; // Warm yellow for light mode
-      text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+      color: var(--primary-orange);
+      text-shadow: 0 0 10px rgba(255, 107, 53, 0.4); // Orange glow for light mode
       animation: pulse-light 2s infinite alternate;
     }
     

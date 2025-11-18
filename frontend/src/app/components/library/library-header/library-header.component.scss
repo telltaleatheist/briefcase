@@ -42,7 +42,7 @@
           align-items: center;
           gap: 8px;
           padding: 8px 12px;
-          color: #666;
+          color: var(--text-secondary);
           font-size: 14px;
         }
 
@@ -83,7 +83,7 @@
         margin-left: 4px;
         padding: 2px 6px;
         border-radius: 10px;
-        background: #f44336;
+        background: var(--danger-text);
         color: white;
         font-size: 11px;
         font-weight: 600;
@@ -135,27 +135,45 @@
 }
 
 // Dark mode styling
-:host-context(.dark-theme),
-:host-context(.theme-dark) {
+:host-context(body.dark-theme),
+:host-context(body[data-theme="dark"]) {
   .library-header {
-    border-bottom-color: #444;
+    border-bottom-color: var(--border-color);
 
     .header-content {
       .title-and-selector {
         h1 {
-          color: rgba(255, 255, 255, 0.87);
+          color: var(--text-primary);
         }
 
         .library-selector {
           .library-loading {
-            color: #999;
+            color: var(--text-muted);
           }
 
           .library-dropdown {
             ::ng-deep .mat-mdc-text-field-wrapper {
-              background-color: #2a2a2a;
+              background-color: var(--bg-tertiary);
             }
           }
+        }
+      }
+    }
+
+    .header-actions {
+      // Analytics button - specific contrast styling for dark mode
+      button[matTooltip*="analytics"],
+      button[mattooltip*="analytics"] {
+        background-color: var(--bg-card) !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border-color) !important;
+
+        mat-icon {
+          color: var(--text-primary) !important;
+        }
+
+        &:hover {
+          background-color: var(--bg-tertiary) !important;
         }
       }
     }

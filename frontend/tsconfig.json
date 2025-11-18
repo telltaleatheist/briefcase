@@ -18,6 +18,11 @@
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "ngx-video-timeline-editor": [
+        "./dist/ngx-video-timeline-editor"
+      ]
+    },
     "sourceMap": true,
     "declaration": false,
     "downlevelIteration": true,

@@ -111,8 +111,8 @@
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background-color: inherit;
-  color: inherit;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .app-toolbar {
@@ -157,7 +157,7 @@
 
 // Sidebar Navigation
 .app-sidenav {
-  width: 250px;
+  width: 200px;
   background-color: var(--bg-secondary) !important;
   border-right: 1px solid var(--border-color);
 
@@ -272,7 +272,7 @@
   flex: 1;
   padding: 0;
   overflow: auto;
-  background-color: inherit;
+  background-color: var(--bg-primary);
   min-height: 0;
   display: flex;
   flex-direction: column;

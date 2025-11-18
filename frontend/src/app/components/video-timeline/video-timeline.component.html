@@ -94,11 +94,11 @@
   <!-- Timeline track -->
   <div class="timeline-wrapper">
     <!-- Time markers with detailed ticks -->
-    <app-timeline-ruler
+    <ngx-vte-timeline-ruler
       [duration]="duration"
       [zoomState]="getZoomState()"
       (markerMouseDown)="onTimeMarkerMouseDown($event)">
-    </app-timeline-ruler>
+    </ngx-vte-timeline-ruler>
 
     <div
       #timeline
@@ -109,23 +109,23 @@
       (contextmenu)="onTimelineContextMenu($event)">
 
       <!-- Waveform layer (background) -->
-      <app-timeline-waveform
+      <ngx-vte-timeline-waveform
         [waveformData]="waveformData"
         [duration]="duration"
         [zoomState]="getZoomState()"
         [mediaElement]="mediaElement"
         [autoGenerate]="true">
-      </app-timeline-waveform>
+      </ngx-vte-timeline-waveform>
 
       <!-- Section markers (background) -->
-      <app-timeline-sections-layer
+      <ngx-vte-timeline-sections-layer
         [sections]="filteredSections"
         [duration]="duration"
         [zoomState]="getZoomState()">
-      </app-timeline-sections-layer>
+      </ngx-vte-timeline-sections-layer>
 
       <!-- Selection window -->
-      <app-timeline-selection
+      <ngx-vte-timeline-selection
         [selection]="{ startTime: selectionStart, endTime: selectionEnd }"
         [duration]="duration"
         [zoomState]="getZoomState()"
@@ -133,25 +133,25 @@
         (windowDragStart)="onWindowMouseDown($event)"
         (leftHandleDragStart)="onLeftHandleMouseDown($event)"
         (rightHandleDragStart)="onRightHandleMouseDown($event)">
-      </app-timeline-selection>
+      </ngx-vte-timeline-selection>
 
       <!-- Playhead -->
-      <app-timeline-playhead
+      <ngx-vte-timeline-playhead
         [currentTime]="currentTime"
         [duration]="duration"
         [zoomState]="getZoomState()"
         [isDraggable]="true"
         (playheadDragStart)="onPlayheadMouseDown($event)">
-      </app-timeline-playhead>
+      </ngx-vte-timeline-playhead>
     </div>
 
     <!-- Custom horizontal scrollbar with zoom handles -->
-    <app-timeline-zoom-bar
+    <ngx-vte-timeline-zoom-bar
       [duration]="duration"
       [zoomState]="getZoomState()"
       (viewportDragStart)="onScrollbarMouseDown($event)"
       (leftHandleDragStart)="onLeftZoomHandleMouseDown($event)"
       (rightHandleDragStart)="onRightZoomHandleMouseDown($event)">
-    </app-timeline-zoom-bar>
+    </ngx-vte-timeline-zoom-bar>
   </div>
 </div>
