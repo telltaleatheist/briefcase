@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 16px 20px var(--timeline-container-padding-bottom, 0px) 20px;
   // Default to light theme colors - will be overridden by dark theme if active
   background-color: var(--bg-card);
   border-top: 1px solid #dee2e6;
@@ -163,17 +163,15 @@
   flex-direction: column;
   gap: 0;
   position: relative;
-  // Remove negative margin that was causing layout issues
   padding-top: 0;
-  margin-top: 0;
-  // Add space below timeline for separation from scrollbar
-  margin-bottom: 24px;
+  margin-top: var(--timeline-wrapper-margin-top, 0px);
+  margin-bottom: var(--timeline-wrapper-margin-bottom, 5px);
 }
 
 .timeline {
   position: relative;
   height: 50px;
-  margin-top: 20px; // Minimal space for tight layout with playhead overlap
+  margin-top: var(--timeline-margin-top, 5px);
   // Light theme default
   background: linear-gradient(to bottom, #f8f9fa 0%, #e9ecef 50%, #f8f9fa 100%);
   border-radius: 6px;

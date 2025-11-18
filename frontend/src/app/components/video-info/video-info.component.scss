@@ -1023,23 +1023,23 @@
 
   .analysis-meta {
     ::ng-deep mat-chip {
-      background-color: var(--chip-bg) !important;
-      color: var(--chip-text) !important;
-      border: 1px solid var(--chip-border) !important;
+      background-color: var(--bg-secondary) !important;
+      color: var(--text-primary) !important;
+      border: 1px solid var(--border-color) !important;
 
       mat-icon {
         font-size: 16px;
         width: 16px;
         height: 16px;
         margin-right: 4px;
-        color: var(--chip-icon) !important;
+        color: var(--primary-orange) !important;
       }
 
       // Force text color on Material chip internals - all possible selectors
       .mdc-evolution-chip__text-label,
       .mat-mdc-chip-action-label,
       span {
-        color: var(--chip-text) !important;
+        color: var(--text-primary) !important;
       }
     }
   }
@@ -1206,23 +1206,23 @@
   margin-bottom: 20px;
 
   ::ng-deep mat-chip {
-    background-color: var(--chip-bg) !important;
-    color: var(--chip-text) !important;
-    border: 1px solid var(--chip-border) !important;
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
 
     mat-icon {
       font-size: 16px;
       width: 16px;
       height: 16px;
       margin-right: 4px;
-      color: var(--chip-icon) !important;
+      color: var(--primary-orange) !important;
     }
 
     // Force text color on Material chip internals - all possible selectors
     .mdc-evolution-chip__text-label,
     .mat-mdc-chip-action-label,
     span {
-      color: var(--chip-text) !important;
+      color: var(--text-primary) !important;
     }
   }
 }
@@ -1485,8 +1485,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background-color: var(--chip-bg);
-  border: 2px solid var(--chip-border);
+  background-color: var(--bg-secondary);
+  border: 2px solid var(--border-color);
   border-radius: 16px;
   transition: all 0.2s ease;
 
@@ -1504,7 +1504,7 @@
   .tag-name {
     font-size: 14px;
     font-weight: 500;
-    color: var(--chip-text);
+    color: var(--text-primary);
     line-height: 1.2;
   }
 
@@ -1514,7 +1514,7 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     line-height: 1;
-    color: var(--chip-text);
+    color: var(--text-primary);
   }
 
   .delete-tag-button {

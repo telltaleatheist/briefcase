@@ -431,6 +431,29 @@ export class VideoInfoComponent implements OnInit {
     return categoryColors[normalizedCategory] || '#ff6b35';
   }
 
+  getCategoryBadgeClass(category: string): string {
+    if (!category) return '';
+
+    const normalizedCategory = category.toLowerCase().trim();
+
+    const categoryBadgeClasses: { [key: string]: string } = {
+      'routine': 'type-philosophical',        // Purple badge
+      'extremism': 'level-5',                 // Dark red badge (highest severity)
+      'hate': 'level-4',                      // Red badge
+      'violence': 'level-5',                  // Dark red badge
+      'conspiracy': 'level-3',                // Amber badge
+      'misinformation': 'level-3',            // Amber badge
+      'false prophecy': 'level-4',            // Red badge
+      'interesting': 'type-religious',        // Blue badge
+      'notable': 'status-verified',           // Light blue badge
+      'important': 'status-active',           // Green badge
+      'controversial': 'type-political',      // Red badge
+      'custom': 'status-active',              // Green badge
+    };
+
+    return categoryBadgeClasses[normalizedCategory] || '';
+  }
+
   async runAnalysis() {
     if (!this.video) return;
 

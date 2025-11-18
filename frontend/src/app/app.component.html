@@ -19,7 +19,7 @@
   <!-- Sidebar + Content Layout -->
   <mat-sidenav-container class="sidenav-container">
     <!-- Left Sidebar Navigation -->
-    <mat-sidenav #sidenav mode="side" opened class="app-sidenav">
+    <mat-sidenav #sidenav mode="side" opened class="app-sidenav" [style.width.px]="sidebarWidth">
       <div class="sidenav-content">
         <mat-nav-list class="nav-list">
           <a mat-list-item routerLink="/library" routerLinkActive="active-link" (click)="onLibraryClick()">

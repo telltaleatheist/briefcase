@@ -37,15 +37,15 @@
     <!-- Status Chips -->
     <div class="status-section">
       <mat-chip-set>
-        <mat-chip *ngIf="data.needs_transcript === 1" color="accent" highlighted>
+        <mat-chip *ngIf="data.needs_transcript === 1" class="tag warning">
           <mat-icon>subtitles</mat-icon>
           Needs Transcript
         </mat-chip>
-        <mat-chip *ngIf="data.needs_analysis === 1" color="primary" highlighted>
+        <mat-chip *ngIf="data.needs_analysis === 1" class="tag warning">
           <mat-icon>analytics</mat-icon>
           Needs Analysis
         </mat-chip>
-        <mat-chip *ngIf="data.needs_transcript === 0 && data.needs_analysis === 0">
+        <mat-chip *ngIf="data.needs_transcript === 0 && data.needs_analysis === 0" class="tag success">
           <mat-icon>check_circle</mat-icon>
           Processed
         </mat-chip>

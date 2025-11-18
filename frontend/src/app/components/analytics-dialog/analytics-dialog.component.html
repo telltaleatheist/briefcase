@@ -61,7 +61,7 @@
               <div class="tag-cloud">
                 <mat-chip
                   *ngFor="let topic of topics.slice(0, 30)"
-                  [class]="'chip-' + topic.type"
+                  [class]="'tag info chip-' + topic.type"
                   [style.font-size.px]="12 + Math.min(topic.count * 2, 24)">
                   {{ topic.name }} ({{ topic.count }})
                 </mat-chip>
@@ -174,7 +174,7 @@
                   <div class="timeline-stats">
                     <span class="video-count">{{ period.videoCount }} videos</span>
                     <div class="period-tags">
-                      <mat-chip *ngFor="let tag of period.topTags.slice(0, 5)" class="small-chip">
+                      <mat-chip *ngFor="let tag of period.topTags.slice(0, 5)" class="tag info small-chip">
                         {{ tag.name }} ({{ tag.count }})
                       </mat-chip>
                     </div>

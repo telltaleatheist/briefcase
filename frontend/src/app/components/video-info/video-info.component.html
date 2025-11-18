@@ -484,15 +484,15 @@
         </h2>
       </div>
       <mat-chip-set class="analysis-meta" *ngIf="analysis">
-          <mat-chip>
+          <mat-chip class="badge">
             <mat-icon>psychology</mat-icon>
             {{ analysis.ai_model }}
           </mat-chip>
-          <mat-chip *ngIf="analysis.ai_provider">
+          <mat-chip *ngIf="analysis.ai_provider" class="badge">
             <mat-icon>cloud</mat-icon>
             {{ analysis.ai_provider }}
           </mat-chip>
-          <mat-chip>
+          <mat-chip class="badge">
             <mat-icon>segment</mat-icon>
             {{ analysisSections.length }} sections
           </mat-chip>
@@ -512,11 +512,10 @@
               <span>{{ formatTimestamp(section.start_seconds) }}</span>
               <span *ngIf="section.end_seconds"> - {{ formatTimestamp(section.end_seconds) }}</span>
             </div>
-            <span class="section-category"
-                  [style.background-color]="getCategoryColor(section.category || 'General')"
-                  *ngIf="section.category">
+            <mat-chip *ngIf="section.category"
+                      [class]="'badge ' + getCategoryBadgeClass(section.category)">
               {{ section.category }}
-            </span>
+            </mat-chip>
           </div>
           <!-- Only show title if there's no description, or if they're different -->
           <h3 class="section-title" *ngIf="section.title && (!section.description || section.title !== section.description)">
@@ -553,15 +552,15 @@
         </div>
       </div>
       <mat-chip-set class="transcript-meta">
-        <mat-chip *ngIf="transcript.whisper_model">
+        <mat-chip *ngIf="transcript.whisper_model" class="badge">
           <mat-icon>mic</mat-icon>
           {{ transcript.whisper_model }}
         </mat-chip>
-        <mat-chip *ngIf="transcript.language">
+        <mat-chip *ngIf="transcript.language" class="badge">
           <mat-icon>language</mat-icon>
           {{ transcript.language }}
           </mat-chip>
-        <mat-chip>
+        <mat-chip class="badge">
           <mat-icon>schedule</mat-icon>
           {{ formatDate(transcript.transcribed_at) }}
         </mat-chip>

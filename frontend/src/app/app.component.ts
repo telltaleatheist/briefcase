@@ -59,6 +59,9 @@ export class AppComponent implements OnInit, OnDestroy {
   isDownloading = false;
   currentYear = new Date().getFullYear();
 
+  // Single source of truth for sidebar width
+  readonly sidebarWidth = 220;
+
   @ViewChild('sidenav') sidenav!: MatSidenav;
 
   private socketService = inject(SocketService);

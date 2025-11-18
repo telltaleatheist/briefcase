@@ -182,48 +182,7 @@
       }
     }
 
-    .compact-chip {
-      height: 24px;
-      font-size: 11px;
-      cursor: pointer;
-      transition: all 0.2s;
-      background-color: var(--bg-secondary) !important;
-      border: 1px solid var(--border-color);
-
-      ::ng-deep .mdc-evolution-chip__text-label {
-        color: var(--text-primary) !important;
-        font-size: 11px;
-        font-weight: 500;
-      }
-
-      .chip-count {
-        opacity: 0.6;
-        margin-left: 2px;
-      }
-
-      &:hover {
-        background-color: var(--bg-tertiary) !important;
-        border-color: var(--primary-orange);
-
-        ::ng-deep .mdc-evolution-chip__text-label {
-          color: var(--primary-orange) !important;
-        }
-      }
-
-      &.selected {
-        background-color: var(--primary-orange) !important;
-        border-color: var(--primary-orange);
-
-        ::ng-deep .mdc-evolution-chip__text-label {
-          color: white !important;
-          font-weight: 600;
-        }
-
-        .chip-count {
-          opacity: 0.9;
-        }
-      }
-    }
+    /* Compact chip styles now in global stylesheet (styles-creamsicle.scss) */
   }
 }
 
@@ -284,32 +243,6 @@
       color: var(--text-muted);
     }
 
-    .compact-chip {
-      background-color: var(--bg-secondary) !important;
-      border-color: var(--border-color);
-
-      ::ng-deep .mdc-evolution-chip__text-label {
-        color: var(--text-primary) !important;
-        font-weight: 500;
-      }
-
-      &:hover {
-        background-color: var(--bg-tertiary) !important;
-        border-color: var(--primary-orange);
-
-        ::ng-deep .mdc-evolution-chip__text-label {
-          color: var(--primary-orange) !important;
-        }
-      }
-
-      &.selected {
-        background-color: var(--primary-orange) !important;
-        border-color: var(--primary-orange);
-
-        ::ng-deep .mdc-evolution-chip__text-label {
-          color: white !important;
-        }
-      }
-    }
+    /* Dark mode compact chip styles handled by global stylesheet via CSS variables */
   }
 }

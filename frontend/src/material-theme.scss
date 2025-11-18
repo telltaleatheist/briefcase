@@ -30,27 +30,37 @@ html {
   --mat-sys-primary-container: #ffd9cc;
   --mat-sys-on-primary-container: #3a0800;
 
-  // Chip colors - subtle background, orange on select
+  // Chip colors - clean template-inspired style
+  --mdc-chip-container-shape-radius: 8px;
+  --mdc-chip-label-text-size: 0.875rem;
   --mdc-chip-elevated-container-color: var(--bg-secondary);
+  --mdc-chip-flat-container-color: var(--bg-secondary);
   --mdc-chip-flat-selected-outline-color: var(--primary-orange);
   --mdc-chip-label-text-color: var(--text-primary);
   --mdc-chip-with-icon-selected-icon-color: var(--primary-orange);
   --mat-chip-selected-container-background-color: var(--primary-orange);
   --mat-chip-selected-label-text-color: #ffffff;
+  --mdc-chip-outline-color: var(--border-color);
+  --mdc-chip-outline-width: 1px;
+  --mdc-chip-flat-outline-color: var(--border-color);
+  --mdc-chip-flat-outline-width: 1px;
 
   // Button colors
   --mdc-filled-button-container-color: var(--primary-orange);
   --mdc-protected-button-container-color: var(--primary-orange);
 
-  // Checkbox colors - creamsicle orange
+  // Checkbox colors - creamsicle orange with rounded corners
+  --mdc-checkbox-state-layer-size: 40px;
   --mdc-checkbox-selected-checkmark-color: #ffffff;
   --mdc-checkbox-selected-focus-icon-color: var(--primary-orange);
   --mdc-checkbox-selected-hover-icon-color: var(--primary-orange);
   --mdc-checkbox-selected-icon-color: var(--primary-orange);
   --mdc-checkbox-selected-pressed-icon-color: var(--primary-orange);
   --mdc-checkbox-unselected-focus-icon-color: var(--text-secondary);
-  --mdc-checkbox-unselected-hover-icon-color: var(--text-primary);
+  --mdc-checkbox-unselected-hover-icon-color: var(--primary-orange);
   --mdc-checkbox-unselected-icon-color: var(--text-secondary);
+  --mdc-checkbox-unselected-outline-color: var(--border-color);
+  --mdc-checkbox-unselected-outline-width: 2px;
 
   // Form field colors
   --mdc-filled-text-field-focus-active-indicator-color: var(--primary-orange);

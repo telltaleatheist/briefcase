@@ -16,19 +16,19 @@
     <h2>Saved for Later</h2>
     <div class="stats">
       <mat-chip-set>
-        <mat-chip class="stat-chip" [highlighted]="!filterStatus" (click)="filterByStatus(undefined)">
+        <mat-chip class="badge stat-chip" [highlighted]="!filterStatus" (click)="filterByStatus(undefined)">
           All ({{ savedLinks.length }})
         </mat-chip>
-        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'pending'" (click)="filterByStatus('pending')">
+        <mat-chip class="badge status-active stat-chip" [highlighted]="filterStatus === 'pending'" (click)="filterByStatus('pending')">
           Pending ({{ pendingCount }})
         </mat-chip>
-        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'downloading'" (click)="filterByStatus('downloading')">
+        <mat-chip class="badge status-active stat-chip" [highlighted]="filterStatus === 'downloading'" (click)="filterByStatus('downloading')">
           Downloading ({{ downloadingCount }})
         </mat-chip>
-        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'completed'" (click)="filterByStatus('completed')">
+        <mat-chip class="tag success stat-chip" [highlighted]="filterStatus === 'completed'" (click)="filterByStatus('completed')">
           Completed ({{ completedCount }})
         </mat-chip>
-        <mat-chip class="stat-chip" [highlighted]="filterStatus === 'failed'" (click)="filterByStatus('failed')">
+        <mat-chip class="tag warning stat-chip" [highlighted]="filterStatus === 'failed'" (click)="filterByStatus('failed')">
           Failed ({{ failedCount }})
         </mat-chip>
       </mat-chip-set>

@@ -106,6 +106,11 @@
   }
   
 
+// Single source of truth for sidebar width
+:host {
+  --sidebar-width: 160px;
+}
+
 .app-container {
   display: flex;
   flex-direction: column;
@@ -153,11 +158,22 @@
   overflow: hidden;
   min-height: 0;
   position: relative;
+
+  // Target the actual Angular Material drawer elements to set width
+  ::ng-deep .mat-drawer.app-sidenav {
+    width: var(--sidebar-width) !important;
+    min-width: var(--sidebar-width) !important;
+    max-width: var(--sidebar-width) !important;
+  }
+
+  ::ng-deep .mat-drawer-inner-container {
+    width: var(--sidebar-width) !important;
+  }
 }
 
 // Sidebar Navigation
 .app-sidenav {
-  width: 200px;
+  width: var(--sidebar-width);
   background-color: var(--bg-secondary) !important;
   border-right: 1px solid var(--border-color);
 

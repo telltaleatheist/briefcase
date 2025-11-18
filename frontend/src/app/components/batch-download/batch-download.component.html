@@ -25,15 +25,15 @@
       <!-- Stats chips -->
       <div class="stats-chips" *ngIf="batchQueueStatus">
         <mat-chip-set>
-          <mat-chip *ngIf="getActiveJobsForDisplay().length > 0">
+          <mat-chip *ngIf="getActiveJobsForDisplay().length > 0" class="badge status-active">
             <mat-icon>downloading</mat-icon>
             {{ getActiveJobsForDisplay().length }} Active
           </mat-chip>
-          <mat-chip *ngIf="batchQueueStatus.completedJobs && batchQueueStatus.completedJobs.length > 0">
+          <mat-chip *ngIf="batchQueueStatus.completedJobs && batchQueueStatus.completedJobs.length > 0" class="tag success">
             <mat-icon>check_circle</mat-icon>
             {{ batchQueueStatus.completedJobs.length }} Completed
           </mat-chip>
-          <mat-chip *ngIf="batchQueueStatus.failedJobs && batchQueueStatus.failedJobs.length > 0">
+          <mat-chip *ngIf="batchQueueStatus.failedJobs && batchQueueStatus.failedJobs.length > 0" class="tag warning">
             <mat-icon>error</mat-icon>
             {{ batchQueueStatus.failedJobs.length }} Failed
           </mat-chip>
