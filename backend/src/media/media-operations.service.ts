@@ -714,4 +714,18 @@ export class MediaOperationsService {
 
     return seconds;
   }
+
+  /**
+   * Set a video flag in the database
+   * Used to track processing state (aspect_ratio_fixed, audio_normalized, etc.)
+   */
+  async setVideoFlag(
+    videoId: string,
+    flagName: 'aspect_ratio_fixed' | 'audio_normalized',
+    value: 0 | 1,
+  ): Promise<void> {
+    const db = this.databaseService.getDatabase();
+    db.prepare(`UPDATE videos SET ${flagName} = ? WHERE id = ?`).run(value, videoId);
+    this.logger.log(`Set ${flagName} = ${value} for video ${videoId}`);
+  }
 }

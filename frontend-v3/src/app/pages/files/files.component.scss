@@ -1,0 +1,195 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+.files-page {
+  min-height: calc(100vh - 70px);
+  padding: $spacing-2xl $spacing-lg $spacing-4xl;
+  background: var(--bg-secondary);
+}
+
+.page-header {
+  text-align: center;
+  margin-bottom: $spacing-2xl;
+  @include flex-column;
+  align-items: center;
+  gap: $spacing-lg;
+}
+
+.page-title {
+  font-size: $font-size-5xl;
+  font-weight: $font-weight-extrabold;
+  margin-bottom: $spacing-md;
+}
+
+.page-subtitle {
+  font-size: $font-size-xl;
+  color: var(--text-secondary);
+}
+
+.library-manager-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-xl;
+  background: var(--primary-orange);
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+  box-shadow: $shadow-md;
+
+  &:hover {
+    background: lighten(#ff6b35, 5%);
+    transform: translateY(-2px);
+    box-shadow: $shadow-lg;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  .btn-icon {
+    font-size: $font-size-xl;
+  }
+}
+
+// Features Card
+.features-card {
+  margin-bottom: $spacing-2xl;
+  animation-delay: 100ms;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-md;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.feature-item {
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-orange);
+    transform: translateY(-2px);
+  }
+}
+
+// Instructions
+.instructions-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-lg;
+  margin-bottom: $spacing-2xl;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.instruction-list {
+  list-style: none;
+  @include flex-column;
+  gap: $spacing-sm;
+
+  li {
+    padding: $spacing-sm $spacing-md;
+    background: var(--bg-secondary);
+    border-radius: $radius-sm;
+    font-size: $font-size-sm;
+    line-height: $line-height-relaxed;
+    border-left: 3px solid var(--primary-orange);
+
+    strong {
+      color: var(--primary-orange);
+    }
+  }
+}
+
+kbd {
+  padding: $spacing-xs $spacing-sm;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-family: monospace;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  box-shadow: $shadow-sm;
+}
+
+// Library Container
+.library-container {
+  margin-bottom: $spacing-2xl;
+  animation-delay: 200ms;
+}
+
+// Tips Card
+.tips-card {
+  animation-delay: 300ms;
+}
+
+.tips-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-lg;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.tip-item {
+  display: flex;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: var(--primary-orange);
+    transform: translateY(-2px);
+    box-shadow: $shadow-md;
+
+    .tip-icon {
+      transform: scale(1.1) rotate(5deg);
+    }
+  }
+}
+
+.tip-icon {
+  font-size: $font-size-3xl;
+  flex-shrink: 0;
+  transition: transform $transition-base;
+}
+
+.tip-content {
+  flex: 1;
+
+  h4 {
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin-bottom: $spacing-xs;
+  }
+
+  p {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+}

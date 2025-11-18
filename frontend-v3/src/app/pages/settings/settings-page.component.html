@@ -1,0 +1,142 @@
+<div class="settings-page">
+  <!-- Page Header -->
+  <div class="page-header">
+    <h1 class="page-title">Settings</h1>
+    <p class="page-subtitle">Configure your ClipChimp preferences</p>
+  </div>
+
+  <!-- Settings Content -->
+  <div class="settings-content">
+    <!-- AI Configuration Section -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">🤖</div>
+        <div class="section-info">
+          <h2>AI Configuration</h2>
+          <p>Set up AI providers for video analysis and transcription</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        <!-- Status Card -->
+        <div class="status-card" [class.configured]="aiConfigured()">
+          @if (aiConfigured()) {
+            <div class="status-indicator success">
+              <span class="status-icon">✓</span>
+              <span class="status-text">AI Features Enabled</span>
+            </div>
+            <div class="provider-badges">
+              @for (provider of activeProviders(); track provider) {
+                <span class="provider-badge">{{ provider }}</span>
+              }
+            </div>
+          } @else {
+            <div class="status-indicator pending">
+              <span class="status-icon">○</span>
+              <span class="status-text">Not Configured</span>
+            </div>
+            <p class="status-description">
+              Set up an AI provider to enable smart video analysis, transcription, and content search.
+            </p>
+          }
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="section-actions">
+          <button class="action-btn primary" (click)="openAiWizard()">
+            <span class="btn-icon">⚙️</span>
+            <span>{{ aiConfigured() ? 'Reconfigure AI' : 'Set Up AI' }}</span>
+          </button>
+        </div>
+
+        <!-- Feature List -->
+        <div class="feature-list">
+          <h3>AI-Powered Features</h3>
+          <ul>
+            <li>
+              <span class="feature-icon">🎯</span>
+              <span>Automatic video analysis and summaries</span>
+            </li>
+            <li>
+              <span class="feature-icon">📝</span>
+              <span>Speech-to-text transcription</span>
+            </li>
+            <li>
+              <span class="feature-icon">🏷️</span>
+              <span>Smart tagging and categorization</span>
+            </li>
+            <li>
+              <span class="feature-icon">🔍</span>
+              <span>Content-based search across all videos</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Library Section (Placeholder) -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">📚</div>
+        <div class="section-info">
+          <h2>Library Settings</h2>
+          <p>Manage your video libraries and storage</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        <div class="placeholder-content">
+          <p>Library management settings coming soon...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Downloads Section (Placeholder) -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">⬇️</div>
+        <div class="section-info">
+          <h2>Download Settings</h2>
+          <p>Configure download preferences and quality</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        <div class="placeholder-content">
+          <p>Download settings coming soon...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- About Section -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">ℹ️</div>
+        <div class="section-info">
+          <h2>About</h2>
+          <p>Application information and credits</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        <div class="about-content">
+          <div class="app-info">
+            <span class="app-name">ClipChimp</span>
+            <span class="app-version">v0.1.0</span>
+          </div>
+          <p class="app-description">
+            A powerful video library manager with AI-powered analysis and organization.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- AI Setup Wizard Modal -->
+@if (wizardOpen()) {
+  <app-ai-setup-wizard
+    (closed)="closeAiWizard()"
+    (completed)="onWizardCompleted()"
+  />
+}

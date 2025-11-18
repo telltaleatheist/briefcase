@@ -66,20 +66,20 @@ export class EnvironmentUtil {
       // Try all possible paths in order - works for both packaged and unpackaged
       const possiblePaths = [
         // Unpackaged/development paths (from project root)
-        path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend'),
-        path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(__dirname, '..', '..', 'frontend', 'dist', 'clippy-frontend'),
-        path.join(app.getAppPath(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(app.getAppPath(), 'frontend', 'dist', 'clippy-frontend'),
+        path.join(process.cwd(), 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
+        path.join(process.cwd(), 'frontend-v3', 'dist', 'frontend-v3'),
+        path.join(__dirname, '..', '..', 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
+        path.join(__dirname, '..', '..', 'frontend-v3', 'dist', 'frontend-v3'),
+        path.join(app.getAppPath(), 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
+        path.join(app.getAppPath(), 'frontend-v3', 'dist', 'frontend-v3'),
 
         // Packaged paths (inside app bundle)
-        path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend'),
-        path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend', 'browser'),
-        path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend'),
-        path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend'),
-        path.join(process.resourcesPath, 'frontend')
+        path.join(process.resourcesPath, 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
+        path.join(process.resourcesPath, 'frontend-v3', 'dist', 'frontend-v3'),
+        path.join(process.resourcesPath, 'app.asar', 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
+        path.join(process.resourcesPath, 'app.asar', 'frontend-v3', 'dist', 'frontend-v3'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend-v3'),
+        path.join(process.resourcesPath, 'frontend-v3')
       ];
 
       // Find the first path that exists

@@ -1,0 +1,90 @@
+<div class="modal-backdrop" *ngIf="visible" (click)="onBackdropClick($event)">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h2 class="modal-title">
+        {{ inputType === 'url' ? 'Process URL' : 'Process Selected Files' }}
+      </h2>
+      <button class="close-btn" (click)="onClose()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- URL Input Section (only for URL mode) -->
+      <div class="input-section" *ngIf="inputType === 'url'">
+        <label class="input-label">Video URL</label>
+        <input
+          type="text"
+          [(ngModel)]="url"
+          placeholder="https://youtube.com/watch?v=..."
+          class="url-input"
+          autofocus
+        />
+        <p class="input-hint">
+          Supports YouTube, Twitter, TikTok, and most video platforms
+        </p>
+      </div>
+
+      <!-- Selected Files Info (only for files mode) -->
+      <div class="selected-info" *ngIf="inputType === 'files'">
+        <span class="info-icon">📁</span>
+        <span class="info-text">
+          {{ selectedFileCount }} file{{ selectedFileCount !== 1 ? 's' : '' }} selected
+        </span>
+      </div>
+
+      <!-- Task Selection -->
+      <div class="tasks-section">
+        <h3 class="section-title">Select Tasks</h3>
+        <p class="section-description">
+          Choose which operations to perform on your {{ inputType === 'url' ? 'video' : 'files' }}
+        </p>
+
+        <div class="tasks-list">
+          <div
+            *ngFor="let task of availableTasks()"
+            class="task-item"
+            [class.selected]="isTaskSelected(task.type)"
+            (click)="toggleTask(task.type)"
+          >
+            <div class="task-checkbox">
+              <input
+                type="checkbox"
+                [checked]="isTaskSelected(task.type)"
+                (click)="$event.stopPropagation()"
+                (change)="toggleTask(task.type)"
+              />
+            </div>
+            <div class="task-icon">{{ task.icon }}</div>
+            <div class="task-details">
+              <div class="task-label">{{ task.label }}</div>
+              <div class="task-description">{{ task.description }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Special Note for Download+Import -->
+        <div class="note" *ngIf="inputType === 'url' && isTaskSelected('download-import')">
+          <span class="note-icon">💡</span>
+          <span class="note-text">
+            Download and Import is required for URL inputs. Other tasks will run after import.
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" (click)="onClose()">
+        Cancel
+      </button>
+      <button
+        class="btn btn-primary"
+        [disabled]="!canSubmit()"
+        (click)="onSubmit()"
+      >
+        <span>Start Processing</span>
+        <span class="task-count" *ngIf="selectedTasks().size > 0">
+          ({{ selectedTasks().size }} task{{ selectedTasks().size !== 1 ? 's' : '' }})
+        </span>
+      </button>
+    </div>
+  </div>
+</div>

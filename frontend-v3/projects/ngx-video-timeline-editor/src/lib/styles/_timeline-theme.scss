@@ -1,0 +1,163 @@
+/**
+ * Timeline Theme Variables - Creamsicle Design System
+ *
+ * CSS Custom Properties for timeline styling.
+ * These can be overridden via TimelineConfigService or directly in CSS.
+ */
+
+:root {
+  // === Theme Colors - Creamsicle ===
+  --timeline-primary-color: #ff6b35;
+  --timeline-secondary-color: #ff8c5a;
+  --timeline-selection-color: #ffa366;
+  --timeline-playhead-color: #0f0f0f;
+  --timeline-waveform-color: rgba(255, 107, 53, 0.7);
+
+  // Auto colors (light mode defaults) - Creamsicle
+  --timeline-background-color: #f8f9fa;
+  --timeline-background-secondary: #e9ecef;
+  --timeline-border-color: #d1d5db;
+  --timeline-border-color-secondary: #9ca3af;
+  --timeline-text-color: #0f0f0f;
+  --timeline-text-color-secondary: #6c757d;
+
+  // === Sizing (in pixels) ===
+  --timeline-ruler-height: 40px;
+  --timeline-zoom-bar-height: 24px;
+  --timeline-playhead-width: 2px;
+  --timeline-handle-size: 16px;
+  --timeline-border-width: 2px;
+  --timeline-border-radius: 4px;
+  --timeline-spacing: 8px;
+
+  // === Spacing ===
+  --timeline-ruler-margin: 0px;
+  --timeline-zoom-bar-margin: 4px;
+  --timeline-component-padding: 4px;
+  --timeline-handle-offset: -8px;
+
+  // Container spacing
+  --timeline-container-padding-bottom: 0px;
+  --timeline-wrapper-margin-top: 0px;
+  --timeline-wrapper-margin-bottom: 5px;
+  --timeline-margin-top: 5px;
+
+  // === Derived Colors (Light Mode) ===
+  --timeline-background-overlay: rgba(0, 0, 0, 0.03);
+  --timeline-background-hover: rgba(0, 0, 0, 0.05);
+  --timeline-background-active: rgba(0, 0, 0, 0.1);
+
+  // Primary color variations - Creamsicle
+  --timeline-primary-light: #ff8c5a;
+  --timeline-primary-lighter: #ffa366;
+  --timeline-primary-lightest: #ffb380;
+  --timeline-primary-dark: #e55529;
+  --timeline-primary-overlay: rgba(255, 107, 53, 0.05);
+  --timeline-primary-overlay-medium: rgba(255, 107, 53, 0.15);
+  --timeline-primary-overlay-strong: rgba(255, 107, 53, 0.3);
+
+  // Selection color variations - Creamsicle
+  --timeline-selection-light: #ffb380;
+  --timeline-selection-overlay: rgba(255, 163, 102, 0.2);
+  --timeline-selection-overlay-strong: rgba(255, 163, 102, 0.3);
+
+  // Section color variations
+  --timeline-section-border-color: var(--timeline-primary-color);
+  --timeline-section-border-width: 4px;
+  --timeline-section-background-opacity: 0.4;
+  --timeline-section-border-opacity: 0.9;
+  --timeline-section-overlay-light: rgba(255, 107, 53, 0.2);
+  --timeline-section-overlay-medium: rgba(255, 107, 53, 0.3);
+  --timeline-section-overlay-strong: rgba(255, 107, 53, 0.4);
+
+  // Shadows
+  --timeline-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --timeline-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.15);
+  --timeline-playhead-glow: 0 0 8px rgba(15, 15, 15, 0.5);
+  --timeline-handle-glow: 0 0 6px rgba(255, 107, 53, 0.6);
+}
+
+// === Dark Mode - Creamsicle ===
+// Support both data-theme attribute and prefers-color-scheme
+[data-theme='dark'],
+:root:has([data-theme='dark']) {
+  // Auto colors (dark mode) - Creamsicle
+  --timeline-playhead-color: #ffffff;
+  --timeline-background-color: #1a1a1a;
+  --timeline-background-secondary: #252525;
+  --timeline-border-color: #374151;
+  --timeline-border-color-secondary: #4b5563;
+  --timeline-text-color: #ffffff;
+  --timeline-text-color-secondary: #9ca3af;
+
+  // Derived colors (dark mode)
+  --timeline-background-overlay: rgba(255, 255, 255, 0.03);
+  --timeline-background-hover: rgba(255, 255, 255, 0.05);
+  --timeline-background-active: rgba(255, 255, 255, 0.1);
+
+  // Shadows (dark mode - more prominent)
+  --timeline-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --timeline-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --timeline-playhead-glow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+// Fallback for prefers-color-scheme
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --timeline-playhead-color: #ffffff;
+    --timeline-background-color: #1a1a1a;
+    --timeline-background-secondary: #252525;
+    --timeline-border-color: #374151;
+    --timeline-border-color-secondary: #4b5563;
+    --timeline-text-color: #ffffff;
+    --timeline-text-color-secondary: #9ca3af;
+    --timeline-background-overlay: rgba(255, 255, 255, 0.03);
+    --timeline-background-hover: rgba(255, 255, 255, 0.05);
+    --timeline-background-active: rgba(255, 255, 255, 0.1);
+    --timeline-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --timeline-shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4);
+    --timeline-playhead-glow: 0 0 8px rgba(255, 255, 255, 0.5);
+  }
+}
+
+// === Component-Specific Variables ===
+
+// Ruler
+:root {
+  --timeline-ruler-tick-major-height: 16px;
+  --timeline-ruler-tick-minor-height: 10px;
+  --timeline-ruler-label-font-size: 10px;
+  --timeline-ruler-label-padding: 2px 4px;
+  --timeline-ruler-label-border-radius: 3px;
+}
+
+// Zoom Bar
+:root {
+  --timeline-zoom-bar-track-height: var(--timeline-zoom-bar-height);
+  --timeline-zoom-bar-handle-width: 14px;
+  --timeline-zoom-bar-handle-width-hover: 16px;
+  --timeline-zoom-bar-min-width: 30px;
+  --timeline-zoom-bar-border-radius-lg: 6px;
+}
+
+// Playhead
+:root {
+  --timeline-playhead-offset-top: -35px;
+  --timeline-playhead-height-extend: calc(100% + 35px);
+  --timeline-playhead-handle-border-width: 2px;
+}
+
+// Selection
+:root {
+  --timeline-selection-border-width: 3px;
+  --timeline-selection-handle-width: 24px;
+  --timeline-selection-handle-line-width: 4px;
+  --timeline-selection-handle-line-width-hover: 5px;
+}
+
+// === Transition Variables ===
+:root {
+  --timeline-transition-fast: 0.15s ease;
+  --timeline-transition-normal: 0.2s ease;
+  --timeline-transition-slow: 0.3s ease;
+}

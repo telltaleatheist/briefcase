@@ -1,0 +1,227 @@
+<div class="modal-backdrop" *ngIf="isOpen()" (click)="onBackdropClick($event)">
+  <div class="modal-container">
+    <div class="modal-header">
+      <h2 class="modal-title">Configure Tasks</h2>
+      <button class="close-btn" (click)="onClose()" aria-label="Close">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <p class="modal-description">
+        Select which tasks to run and configure their settings
+      </p>
+
+      <div class="tasks-list">
+        <div
+          *ngFor="let task of getAvailableTasks()"
+          class="task-item"
+          [class.selected]="isTaskSelected(task.type)"
+        >
+          <!-- Task Header -->
+          <div class="task-header">
+            <label class="task-checkbox">
+              <input
+                type="checkbox"
+                [checked]="isTaskSelected(task.type)"
+                (change)="toggleTask(task)"
+              />
+              <span class="task-icon">{{ task.icon }}</span>
+              <div class="task-info">
+                <span class="task-label">{{ task.label }}</span>
+                <span class="task-description">{{ task.description }}</span>
+              </div>
+            </label>
+
+            <button
+              *ngIf="isTaskSelected(task.type)"
+              class="config-toggle"
+              (click)="toggleExpanded(task.type)"
+              [attr.aria-label]="'Configure ' + task.label"
+            >
+              <span class="config-icon">⚙️</span>
+              <span class="expand-arrow">{{ expandedTask() === task.type ? '▼' : '▶' }}</span>
+            </button>
+          </div>
+
+          <!-- Task Configuration (Expanded) -->
+          <div class="task-config" *ngIf="isTaskSelected(task.type) && expandedTask() === task.type">
+
+            <!-- Download & Import Config -->
+            <div *ngIf="task.type === 'download-import'" class="config-form">
+              <div class="form-group">
+                <label>Quality</label>
+                <select
+                  [value]="getTaskConfig(task.type).quality"
+                  (change)="updateTaskConfig(task.type, { quality: $any($event.target).value })"
+                >
+                  <option value="best">Best Available</option>
+                  <option value="2160">4K (2160p)</option>
+                  <option value="1440">1440p</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Format</label>
+                <select
+                  [value]="getTaskConfig(task.type).format"
+                  (change)="updateTaskConfig(task.type, { format: $any($event.target).value })"
+                >
+                  <option value="mp4">MP4</option>
+                  <option value="webm">WebM</option>
+                  <option value="mkv">MKV</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Transcribe Config -->
+            <div *ngIf="task.type === 'transcribe'" class="config-form">
+              <div class="form-group">
+                <label>Whisper Model</label>
+                <select
+                  [value]="getTaskConfig(task.type).model"
+                  (change)="updateTaskConfig(task.type, { model: $any($event.target).value })"
+                >
+                  <option value="tiny">Tiny (Fastest, Less Accurate)</option>
+                  <option value="base">Base</option>
+                  <option value="small">Small</option>
+                  <option value="medium">Medium</option>
+                  <option value="large">Large (Slowest, Most Accurate)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Language (optional)</label>
+                <input
+                  type="text"
+                  placeholder="Auto-detect"
+                  [value]="getTaskConfig(task.type).language || ''"
+                  (input)="updateTaskConfig(task.type, { language: $any($event.target).value })"
+                />
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    [checked]="getTaskConfig(task.type).translate"
+                    (change)="updateTaskConfig(task.type, { translate: $any($event.target).checked })"
+                  />
+                  <span>Translate to English</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- AI Analyze Config -->
+            <div *ngIf="task.type === 'ai-analyze'" class="config-form">
+              <div class="form-group">
+                <label>AI Model</label>
+                <select
+                  [value]="getTaskConfig(task.type).aiModel"
+                  (change)="updateTaskConfig(task.type, { aiModel: $any($event.target).value })"
+                >
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-4">GPT-4</option>
+                  <option value="claude-3-opus">Claude 3 Opus</option>
+                  <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Custom Instructions</label>
+                <textarea
+                  rows="3"
+                  placeholder="Add specific instructions for the AI analysis..."
+                  [value]="getTaskConfig(task.type).customInstructions || ''"
+                  (input)="updateTaskConfig(task.type, { customInstructions: $any($event.target).value })"
+                ></textarea>
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    [checked]="getTaskConfig(task.type).generateSummary"
+                    (change)="updateTaskConfig(task.type, { generateSummary: $any($event.target).checked })"
+                  />
+                  <span>Generate Summary</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    [checked]="getTaskConfig(task.type).extractKeyPoints"
+                    (change)="updateTaskConfig(task.type, { extractKeyPoints: $any($event.target).checked })"
+                  />
+                  <span>Extract Key Points</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Fix Aspect Ratio Config -->
+            <div *ngIf="task.type === 'fix-aspect-ratio'" class="config-form">
+              <div class="form-group">
+                <label>Target Ratio</label>
+                <select
+                  [value]="getTaskConfig(task.type).targetRatio"
+                  (change)="updateTaskConfig(task.type, { targetRatio: $any($event.target).value })"
+                >
+                  <option value="auto">Auto-detect</option>
+                  <option value="16:9">16:9 (Widescreen)</option>
+                  <option value="4:3">4:3 (Standard)</option>
+                  <option value="1:1">1:1 (Square)</option>
+                  <option value="9:16">9:16 (Vertical)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Crop Mode</label>
+                <select
+                  [value]="getTaskConfig(task.type).cropMode"
+                  (change)="updateTaskConfig(task.type, { cropMode: $any($event.target).value })"
+                >
+                  <option value="smart">Smart Crop</option>
+                  <option value="center">Center Crop</option>
+                  <option value="letterbox">Letterbox (Add Bars)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Normalize Audio Config -->
+            <div *ngIf="task.type === 'normalize-audio'" class="config-form">
+              <div class="form-group">
+                <label>Target Level (dB)</label>
+                <input
+                  type="number"
+                  min="-30"
+                  max="0"
+                  step="1"
+                  [value]="getTaskConfig(task.type).targetLevel"
+                  (input)="updateTaskConfig(task.type, { targetLevel: +$any($event.target).value })"
+                />
+                <small>Recommended: -16dB to -23dB</small>
+              </div>
+              <div class="form-group">
+                <label>Peak Level (dB)</label>
+                <input
+                  type="number"
+                  min="-10"
+                  max="0"
+                  step="0.5"
+                  [value]="getTaskConfig(task.type).peakLevel"
+                  (input)="updateTaskConfig(task.type, { peakLevel: +$any($event.target).value })"
+                />
+                <small>Maximum peak level allowed</small>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" (click)="onClose()">Cancel</button>
+      <button class="btn btn-primary" (click)="onSave()" [disabled]="tasks().size === 0">
+        <span>Save Configuration</span>
+        <span class="task-count" *ngIf="tasks().size > 0">({{ tasks().size }} {{ tasks().size === 1 ? 'task' : 'tasks' }})</span>
+      </button>
+    </div>
+  </div>
+</div>

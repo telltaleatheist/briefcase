@@ -160,8 +160,9 @@ export interface AnalyzeResult extends TaskResult {
 // Queue job interface
 export interface QueueJob {
   id: string;
-  queueType: 'batch' | 'analysis';
   url?: string; // For download tasks
+  videoPath?: string; // For local file tasks
+  videoId?: string; // For library video tasks
   displayName?: string;
   tasks: Task[];
   currentTaskIndex: number;
@@ -178,8 +179,6 @@ export interface QueueJob {
     uploadDate: string;
     thumbnail: string;
   };
-  videoPath?: string; // Set by download task
-  videoId?: string; // Set by import task
   transcriptPath?: string; // Set by transcribe task
   analysisPath?: string; // Set by analyze task
 

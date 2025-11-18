@@ -23,6 +23,8 @@ export interface VideoRecord {
   media_type: string;
   file_extension: string | null;
   parent_id: string | null;
+  aspect_ratio_fixed: number;
+  audio_normalized: number;
   suggested_title?: string | null;
   date_folder?: string | null;
   title?: string | null;
@@ -387,8 +389,12 @@ export class DatabaseService {
         media_type TEXT DEFAULT 'video',
         file_extension TEXT,
         parent_id TEXT,
+        aspect_ratio_fixed INTEGER DEFAULT 0,
+        audio_normalized INTEGER DEFAULT 0,
         FOREIGN KEY (parent_id) REFERENCES videos(id) ON DELETE CASCADE,
-        CHECK (is_linked IN (0, 1))
+        CHECK (is_linked IN (0, 1)),
+        CHECK (aspect_ratio_fixed IN (0, 1)),
+        CHECK (audio_normalized IN (0, 1))
       );
 
       -- Transcripts table: Stores both plain text and SRT format transcripts
@@ -965,6 +971,44 @@ export class DatabaseService {
           `);
           this.saveDatabase();
           this.logger.log('Migration complete: has_analysis column added and populated');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 15: Add aspect_ratio_fixed column to videos table if it doesn't exist
+      db.exec("SELECT aspect_ratio_fixed FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: aspect_ratio_fixed')) {
+        this.logger.log('Running migration: Adding aspect_ratio_fixed column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN aspect_ratio_fixed INTEGER DEFAULT 0;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: aspect_ratio_fixed column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    try {
+      // Migration 16: Add audio_normalized column to videos table if it doesn't exist
+      db.exec("SELECT audio_normalized FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: audio_normalized')) {
+        this.logger.log('Running migration: Adding audio_normalized column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN audio_normalized INTEGER DEFAULT 0;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: audio_normalized column added');
         } catch (migrationError: any) {
           this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
         }

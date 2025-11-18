@@ -1,0 +1,133 @@
+// ============================================================================
+// CREAMSICLE DESIGN SYSTEM - CSS RESET
+// ============================================================================
+
+@use 'variables' as *;
+
+// Box sizing
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+// HTML & Body
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: $font-family;
+  font-size: $font-size-base;
+  font-weight: $font-weight-regular;
+  line-height: $line-height-normal;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+// Headings
+h1, h2, h3, h4, h5, h6 {
+  font-weight: $font-weight-bold;
+  line-height: $line-height-tight;
+  color: var(--text-primary);
+}
+
+h1 { font-size: $font-size-5xl; }
+h2 { font-size: $font-size-4xl; }
+h3 { font-size: $font-size-3xl; }
+h4 { font-size: $font-size-2xl; }
+h5 { font-size: $font-size-xl; }
+h6 { font-size: $font-size-lg; }
+
+// Paragraphs
+p {
+  margin-bottom: $spacing-md;
+  color: var(--text-secondary);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+// Links
+a {
+  color: var(--primary-orange);
+  text-decoration: none;
+  transition: color $transition-fast;
+
+  &:hover {
+    color: var(--dark-orange);
+  }
+}
+
+// Lists
+ul, ol {
+  list-style: none;
+}
+
+// Images
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+// Forms
+input,
+button,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+// Remove button focus outline on click
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+// Accessibility
+:focus-visible {
+  outline: 2px solid var(--primary-orange);
+  outline-offset: 2px;
+}
+
+// Smooth scroll
+html {
+  scroll-behavior: smooth;
+}
+
+// Selection
+::selection {
+  background: var(--primary-orange);
+  color: white;
+}
+
+::-moz-selection {
+  background: var(--primary-orange);
+  color: white;
+}
+
+// Webkit autofill
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-input) inset;
+  -webkit-text-fill-color: var(--text-primary);
+}

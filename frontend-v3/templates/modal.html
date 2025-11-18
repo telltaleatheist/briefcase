@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modal System - Owen Morgan</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <link rel="stylesheet" href="../css/modal.css">
+</head>
+<body data-page="modal-demo">
+
+    <!-- Add this section to test the modals -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Modal System Demo</h2>
+                <p class="section-subtitle">Click the buttons below to see different modal types</p>
+            </div>
+            
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <button class="btn" onclick="showInfoModal()">Info Modal</button>
+                <button class="btn" onclick="showConfirmModal()">Confirm Modal</button>
+                <button class="btn" onclick="showFormModal()">Form Modal</button>
+                <button class="btn" onclick="showCustomModal()">Custom Modal</button>
+                <button class="btn" onclick="modalSystem.loading('Processing your request...')">Loading Modal</button>
+            </div>
+        </div>
+    </section>
+
+    <script src="../js/scripts.js"></script>
+    <script src="../js/modal.js"></script>
+</body>
+</html>

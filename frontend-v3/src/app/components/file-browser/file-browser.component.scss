@@ -1,0 +1,250 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+.file-browser {
+  display: flex;
+  flex-direction: column;
+  height: 600px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  overflow: hidden;
+  box-shadow: $shadow-md;
+}
+
+// Toolbar
+.browser-toolbar {
+  @include flex-between;
+  padding: $spacing-md $spacing-lg;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.toolbar-title {
+  @include flex-center;
+  gap: $spacing-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+}
+
+.toolbar-icon {
+  font-size: $font-size-xl;
+}
+
+.toolbar-info {
+  font-size: $font-size-sm;
+}
+
+.selection-count {
+  padding: $spacing-xs $spacing-md;
+  background: var(--primary-orange);
+  color: white;
+  border-radius: $radius-full;
+  font-weight: $font-weight-medium;
+  animation: fadeIn 0.2s ease-out;
+}
+
+// Browser Content
+.browser-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-md;
+  @include custom-scrollbar;
+}
+
+.file-tree {
+  @include flex-column;
+  gap: 2px;
+}
+
+// Tree Nodes
+.tree-node-wrapper {
+  @include flex-column;
+}
+
+.tree-node {
+  @include flex-center;
+  justify-content: flex-start;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: all $transition-fast;
+  user-select: none;
+  position: relative;
+
+  &:hover {
+    background: var(--bg-secondary);
+
+    .node-icon {
+      transform: scale(1.1);
+    }
+  }
+
+  &.selected {
+    background: rgba(255, 107, 53, 0.1);
+    border: 1px solid var(--primary-orange);
+
+    .node-name {
+      color: var(--primary-orange);
+      font-weight: $font-weight-semibold;
+    }
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+.expand-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  @include flex-center;
+  transition: all $transition-fast;
+  border-radius: $radius-sm;
+
+  &:hover {
+    background: var(--bg-tertiary);
+  }
+}
+
+.expand-icon {
+  font-size: $font-size-xs;
+  transition: transform $transition-fast;
+  display: inline-block;
+
+  &.expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.expand-placeholder {
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.node-icon {
+  font-size: $font-size-lg;
+  flex-shrink: 0;
+  transition: transform $transition-fast;
+}
+
+.node-name {
+  flex: 1;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  @include truncate;
+  transition: color $transition-fast;
+}
+
+.node-count,
+.node-size {
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.node-count {
+  opacity: 0.7;
+}
+
+// Tree Children (Indentation)
+.tree-children {
+  margin-left: $spacing-xl;
+  padding-left: $spacing-md;
+  border-left: 1px solid var(--border-color);
+
+  .tree-children {
+    margin-left: $spacing-lg;
+  }
+}
+
+// Details Panel
+.details-panel {
+  padding: $spacing-lg;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.details-content {
+  text-align: center;
+}
+
+.details-icon {
+  font-size: 4rem;
+  margin-bottom: $spacing-md;
+}
+
+.details-name {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin-bottom: $spacing-lg;
+  word-break: break-all;
+}
+
+.details-info {
+  @include flex-column;
+  gap: $spacing-sm;
+  text-align: left;
+}
+
+.detail-row {
+  @include flex-between;
+  gap: $spacing-md;
+  padding: $spacing-sm;
+  background: var(--bg-card);
+  border-radius: $radius-sm;
+}
+
+.detail-label {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+}
+
+.detail-value {
+  font-size: $font-size-sm;
+  color: var(--text-primary);
+
+  &.path {
+    font-family: 'Monaco', monospace;
+    font-size: $font-size-xs;
+    word-break: break-all;
+  }
+}
+
+// Responsive
+@media (max-width: 768px) {
+  .file-browser {
+    height: auto;
+    min-height: 400px;
+  }
+
+  .browser-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: $spacing-sm;
+  }
+
+  .tree-children {
+    margin-left: $spacing-md;
+  }
+}

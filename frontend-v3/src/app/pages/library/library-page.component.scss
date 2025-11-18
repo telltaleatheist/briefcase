@@ -1,0 +1,247 @@
+.library-page {
+  height: 100vh;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px;
+  gap: 16px;
+}
+
+.main-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-card);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  flex-shrink: 0;
+
+  &.mini {
+    .page-title {
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .header-content {
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+    }
+  }
+
+  .header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .page-title {
+      margin: 0 0 8px 0;
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .page-subtitle {
+      margin: 0;
+      font-size: 16px;
+      color: var(--text-secondary);
+    }
+
+    .expand-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 14px;
+      font-weight: 500;
+
+      &:hover {
+        background: var(--bg-tertiary);
+        border-color: var(--primary-orange);
+      }
+
+      .selected-count {
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+}
+
+.filters-section {
+  flex-shrink: 0;
+}
+
+.library-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-icon {
+    font-size: 18px;
+  }
+}
+
+.btn-primary {
+  background: var(--primary-orange);
+  color: white;
+
+  &:hover:not(:disabled) {
+    background: var(--dark-orange);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+}
+
+.btn-secondary {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 2px solid var(--border-color);
+
+  &:hover:not(:disabled) {
+    border-color: var(--primary-orange);
+    background: var(--bg-secondary);
+  }
+
+}
+
+.badge {
+  background: var(--primary-orange);
+  color: white;
+  min-width: 20px;
+  height: 20px;
+  padding: 1px 6px 0;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: grid;
+  place-content: center;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+
+  .empty-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+  }
+
+  .empty-title {
+    margin: 0 0 8px 0;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .empty-description {
+    margin: 0 0 24px 0;
+    font-size: 16px;
+    color: var(--text-secondary);
+    max-width: 400px;
+  }
+}
+
+@media (max-width: 768px) {
+  .library-page {
+    padding: 16px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+
+    .header-content {
+      .page-title {
+        font-size: 24px;
+      }
+
+      .page-subtitle {
+        font-size: 14px;
+      }
+    }
+
+    .header-actions {
+      width: 100%;
+      flex-direction: column;
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  }
+
+  .library-section {
+    padding: 16px;
+  }
+
+  .empty-state {
+    padding: 40px 20px;
+
+    .empty-icon {
+      font-size: 48px;
+    }
+
+    .empty-title {
+      font-size: 20px;
+    }
+
+    .empty-description {
+      font-size: 14px;
+    }
+  }
+}

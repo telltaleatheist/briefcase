@@ -1,0 +1,114 @@
+<div class="video-library" (click)="clearSelection()">
+  <!-- Toolbar -->
+  <div class="library-toolbar">
+    <div class="toolbar-title">
+      <span class="toolbar-icon">🎬</span>
+      <span class="toolbar-text">Media Library</span>
+    </div>
+    <div class="toolbar-info">
+      @if (selectedCount() > 0) {
+        <span class="selection-count">{{ selectedCount() }} selected</span>
+      }
+    </div>
+  </div>
+
+  <!-- Empty State (outside virtual scroll) -->
+  @if (virtualItems().length === 0) {
+    <div class="library-content empty">
+      <div class="empty-state">
+        <div class="empty-icon">🎬</div>
+        <h3>No videos yet</h3>
+        <p>Your video library will appear here</p>
+      </div>
+    </div>
+  } @else {
+    <!-- Virtual Scroll Video List -->
+    <cdk-virtual-scroll-viewport
+      itemSize="56"
+      class="library-content"
+      minBufferPx="400"
+      maxBufferPx="800"
+    >
+      <ng-container *cdkVirtualFor="let item of virtualItems(); trackBy: trackItem">
+        <!-- Week Header -->
+        @if (item.type === 'header') {
+          <div
+            class="week-header"
+            (click)="toggleWeek(item.week, $event)"
+          >
+            <button class="week-toggle" (click)="toggleWeek(item.week, $event)">
+              <span class="toggle-icon" [class.expanded]="item.week.expanded">▶</span>
+            </button>
+            <span class="week-label">{{ item.week.weekLabel.toUpperCase() }}</span>
+            <span class="week-count">({{ item.week.videos.length }})</span>
+          </div>
+        }
+
+        <!-- Video Item -->
+        @if (item.type === 'video') {
+          <div
+            class="video-item"
+            [class.selected]="isSelected(item.itemId)"
+            (click)="selectVideo(item.itemId, item.video, $event)"
+            (contextmenu)="onContextMenu(item.itemId, item.video, $event)"
+          >
+            <!-- Processing Status Indicator -->
+            <div class="selection-indicator" [ngClass]="getProcessingStatus(item.video)"></div>
+
+            <!-- Video Icon -->
+            <div class="video-icon">📹</div>
+
+            <!-- Video Content -->
+            <div class="video-content">
+              <!-- Title -->
+              <div class="video-title">{{ item.video.name }}</div>
+
+              <!-- Suggested Filename Row -->
+              <div class="video-meta">
+                <span class="meta-icon">💡</span>
+                <span class="meta-label">Suggested:</span>
+                <span class="meta-filename">{{ item.video.suggestedFilename }}</span>
+                <span
+                  class="meta-action"
+                  (click)="openFilenameModal(item.video); $event.stopPropagation()"
+                >View</span>
+                <span class="meta-separator">•</span>
+                <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
+              </div>
+            </div>
+
+            <!-- Duration & Delete -->
+            <div class="video-actions">
+              <span class="video-duration">{{ item.video.duration }}</span>
+              <button
+                class="delete-btn"
+                (click)="onDeleteClick(item.video, $event)"
+                title="Delete video"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        }
+      </ng-container>
+    </cdk-virtual-scroll-viewport>
+  }
+
+  <!-- Context Menu -->
+  <app-context-menu
+    [visible]="contextMenuVisible()"
+    [position]="contextMenuPosition()"
+    [actions]="contextMenuActions()"
+    (actionSelected)="onContextMenuAction($event)"
+    (closed)="closeContextMenu()"
+  />
+
+  <!-- Filename Edit Modal -->
+  <app-filename-modal
+    [show]="filenameModalVisible()"
+    [filename]="editingVideo()?.suggestedFilename || ''"
+    [original]="editingVideo()?.name || ''"
+    (saved)="onFilenameSaved($event)"
+    (closed)="onFilenameModalClosed()"
+  />
+</div>

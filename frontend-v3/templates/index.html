@@ -1,0 +1,1797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Components - Owen Morgan</title>
+    <meta name="description" content="Complete component library with multiple object types and styles.">
+    <link rel="stylesheet" href="../css/styles.css">
+    <link rel="stylesheet" href="../css/modal.css">
+</head>
+<body data-page="enhanced-components">
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-content">
+                <a href="#" class="logo">Owen Morgan</a>
+                <div class="nav-controls">
+                    <ul class="nav-links" id="navLinks">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/historical-tests">Historical Tests</a></li>
+                        <li><a href="/assessment">Assessment</a></li>
+                        <li><a href="/guessing-game">Guessing Game</a></li>
+                        <li><a href="https://www.youtube.com/@owenmorgantelltale" target="_blank">YouTube</a></li>
+                    </ul>
+                    <button class="theme-toggle-btn" id="themeToggle" title="Toggle dark/light mode">
+                        <span class="theme-icon">🌙</span>
+                    </button>
+                    <button class="mobile-menu-btn">☰</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Demo Sidebar Overlay -->
+    <div class="demo-sidebar-overlay" id="demoSidebarOverlay">
+        <div class="demo-sidebar" id="demoSidebar">
+            <div class="demo-sidebar-header">
+                <div class="demo-sidebar-logo">
+                    <span class="demo-logo-icon">🎓</span>
+                    <span class="demo-logo-text">Owen Morgan</span>
+                </div>
+                <button class="demo-sidebar-close" id="demoSidebarClose">×</button>
+            </div>
+            
+            <nav class="demo-sidebar-nav">
+                <div class="demo-nav-section">
+                    <h5 class="demo-nav-title">Main Navigation</h5>
+                    <ul class="demo-nav-menu">
+                        <li class="demo-nav-item active">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📊</span>
+                                <span class="demo-nav-text">Dashboard</span>
+                                <span class="demo-nav-badge">New</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🏛️</span>
+                                <span class="demo-nav-text">Organizations</span>
+                                <span class="demo-nav-count">42</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📋</span>
+                                <span class="demo-nav-text">Assessments</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📈</span>
+                                <span class="demo-nav-text">Analytics</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="demo-nav-section">
+                    <h5 class="demo-nav-title">Tools</h5>
+                    <ul class="demo-nav-menu">
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🎯</span>
+                                <span class="demo-nav-text">Quick Assessment</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🎲</span>
+                                <span class="demo-nav-text">Guessing Game</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📚</span>
+                                <span class="demo-nav-text">Knowledge Base</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="demo-nav-section">
+                    <h5 class="demo-nav-title">Account</h5>
+                    <ul class="demo-nav-menu">
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">👤</span>
+                                <span class="demo-nav-text">Profile</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">⚙️</span>
+                                <span class="demo-nav-text">Settings</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🚪</span>
+                                <span class="demo-nav-text">Logout</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+            
+            <div class="demo-sidebar-footer">
+                <div class="demo-user-info">
+                    <div class="demo-user-avatar">OM</div>
+                    <div class="demo-user-details">
+                        <div class="demo-user-name">Owen Morgan</div>
+                        <div class="demo-user-role">Administrator</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading Components...</div>
+        </div>
+    </div>
+
+    <script src="../js/scripts.js"></script>
+    <script src="../js/modal.js"></script>
+</body>
+</html> 
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">🎨 Enhanced Component Library</h1>
+                <p class="hero-subtitle">Multiple Object Types & Styles</p>
+                <p class="hero-description">
+                    Explore our comprehensive component library featuring cards, tiles, panels, badges, stats, timelines, and more. 
+                    Each component is designed with consistent styling and full light/dark mode support.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Informational Cards Section with Right Navigation -->
+    <section class="section primary with-right-nav">
+        <div class="container-with-sidebar">
+            <div class="main-content">
+                <div class="section-header">
+                    <h2 class="section-title">Informational Cards</h2>
+                    <p class="section-subtitle">Highlighted content blocks for important information</p>
+                </div>
+                
+                <div class="info-cards-grid">
+                    <div class="info-card" id="intro-section">
+                        <div class="info-card-header">
+                            <h3 class="info-card-title">Introduction: The World's Largest Recovery Movement</h3>
+                        </div>
+                        <div class="info-card-content">
+                            <div class="info-card-meta">
+                                <div class="info-meta-item">
+                                    <span class="info-meta-label">Founded:</span>
+                                    <span class="info-meta-value">1935</span>
+                                </div>
+                                <div class="info-meta-item">
+                                    <span class="info-meta-label">Founder:</span>
+                                    <span class="info-meta-value">Bill Wilson & Dr. Bob Smith</span>
+                                </div>
+                                <div class="info-meta-item">
+                                    <span class="info-meta-label">Type:</span>
+                                    <span class="info-meta-value">Decentralized + Unfocused</span>
+                                </div>
+                                <div class="info-meta-item">
+                                    <span class="info-meta-label">Est. Members:</span>
+                                    <span class="info-meta-value">2000000</span>
+                                </div>
+                            </div>
+                            
+                            <div class="info-card-body">
+                                <p>Alcoholics Anonymous, founded in 1935 by Bill Wilson and Dr. Bob Smith, claims approximately 2 million members worldwide across over 180 countries. Operating through a decentralized network of autonomous groups, AA promotes a spiritual solution to alcoholism based on the Twelve Steps and Twelve Traditions. While presenting itself as a simple fellowship of people sharing their experience, strength, and hope, AA functions as a comprehensive belief system that reshapes members' identities, worldviews, and social relationships. The organization's influence extends far beyond its meetings, shaping addiction treatment, court-mandated programs, and cultural understanding of alcoholism itself.</p>
+                            </div>
+                            
+                            <div class="info-card-action">
+                                <button class="info-action-btn">Begin Historical Walkthrough</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card" id="structure-section">
+                        <div class="info-card-header">
+                            <h3 class="info-card-title">Group Structure</h3>
+                        </div>
+                        <div class="info-card-content">
+                            <div class="info-card-body">
+                                <p>AA operates through autonomous local groups that follow the Twelve Traditions. Each group is self-supporting through member contributions and maintains no outside affiliations. The structure emphasizes anonymity at the public level while creating intense social bonds within meetings.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card" id="behavior-section">
+                        <div class="info-card-header">
+                            <h3 class="info-card-title">Behavior Control</h3>
+                        </div>
+                        <div class="info-card-content">
+                            <div class="info-card-body">
+                                <p>Members are expected to attend meetings regularly (often "90 meetings in 90 days" for newcomers), work with a sponsor, and follow the Twelve Steps. The program dictates major life decisions, social relationships, and daily routines around recovery activities.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-card" id="information-section">
+                        <div class="info-card-header">
+                            <h3 class="info-card-title">Information Control</h3>
+                        </div>
+                        <div class="info-card-content">
+                            <div class="info-card-body">
+                                <p>The program discourages questioning of core principles and promotes AA literature as the primary source of recovery knowledge. Alternative approaches to addiction are often dismissed, and critical analysis of the program is labeled as "denial" or "resistance."</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Navigation Sidebar -->
+            <aside class="right-nav-sidebar">
+                <div class="nav-sidebar-content">
+                    <!-- Analysis Progress -->
+                    <div class="nav-progress-section">
+                        <h3 class="nav-section-title">📊 Analysis Progress</h3>
+                        <p class="nav-progress-subtitle">Learning about Alcoholics Anonymous</p>
+                        
+                        <div class="nav-classification">
+                            <h4 class="nav-subsection-title">🎯 Current Classification</h4>
+                            <div class="classification-display">
+                                <div class="classification-number">3</div>
+                                <div class="classification-text">
+                                    <div class="classification-label">High-Control Group</div>
+                                    <div class="classification-description">This group demonstrates controlling characteristics that limit personal freedom and critical thinking.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="nav-stats">
+                            <div class="nav-stat-item">
+                                <span class="nav-stat-label">Total Score:</span>
+                                <span class="nav-stat-value">339/650</span>
+                            </div>
+                            <div class="nav-stat-item">
+                                <span class="nav-stat-label">Percentage:</span>
+                                <span class="nav-stat-value">52%</span>
+                            </div>
+                            <div class="nav-stat-item">
+                                <span class="nav-stat-label">Questions:</span>
+                                <span class="nav-stat-value">50/50</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section Progress -->
+                    <div class="nav-sections">
+                        <h3 class="nav-section-title">📑 Section Progress</h3>
+                        <p class="nav-sections-subtitle">(Click to jump)</p>
+                        
+                        <ul class="nav-section-list">
+                            <li class="nav-section-item active" data-section="intro-section">
+                                <span class="nav-section-indicator">⭕</span>
+                                <span class="nav-section-name">Group Structure</span>
+                            </li>
+                            <li class="nav-section-item" data-section="behavior-section">
+                                <span class="nav-section-indicator">⭕</span>
+                                <span class="nav-section-name">Behavior Control</span>
+                            </li>
+                            <li class="nav-section-item" data-section="information-section">
+                                <span class="nav-section-indicator">⭕</span>
+                                <span class="nav-section-name">Information Control</span>
+                            </li>
+                            <li class="nav-section-item">
+                                <span class="nav-section-indicator">⭕</span>
+                                <span class="nav-section-name">Thought Control</span>
+                            </li>
+                            <li class="nav-section-item">
+                                <span class="nav-section-indicator">⭕</span>
+                                <span class="nav-section-name">Emotional Control</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </section>
+
+    <!-- Cards Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Standard Cards</h2>
+                <p class="section-subtitle">Large interactive components for main features</p>
+            </div>
+            
+            <div class="cards-grid">
+                <a href="#" class="card">
+                    <div class="card-icon">📊</div>
+                    <div class="card-content">
+                        <h3 class="card-title">Analytics Dashboard</h3>
+                        <p class="card-description">
+                            View detailed analytics and insights about your data with interactive charts and visualizations.
+                        </p>
+                        <div class="card-action">
+                            <span>View Dashboard</span>
+                            <span>→</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="#" class="card">
+                    <div class="card-icon">🔬</div>
+                    <div class="card-content">
+                        <h3 class="card-title">Research Tools</h3>
+                        <p class="card-description">
+                            Access comprehensive research tools and methodologies for analyzing religious organizations.
+                        </p>
+                        <div class="card-action">
+                            <span>Explore Tools</span>
+                            <span>→</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="#" class="card">
+                    <div class="card-icon">📚</div>
+                    <div class="card-content">
+                        <h3 class="card-title">Knowledge Base</h3>
+                        <p class="card-description">
+                            Browse our extensive collection of articles, case studies, and educational resources.
+                        </p>
+                        <div class="card-action">
+                            <span>Learn More</span>
+                            <span>→</span>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tiles Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Feature Tiles</h2>
+                <p class="section-subtitle">Compact feature highlights with icons</p>
+            </div>
+            
+            <div class="tiles-grid">
+                <div class="tile">
+                    <div class="tile-icon">🎯</div>
+                    <h4 class="tile-title">Precision Analysis</h4>
+                    <p class="tile-description">Detailed examination of organizational structures and patterns.</p>
+                </div>
+
+                <div class="tile">
+                    <div class="tile-icon">🔍</div>
+                    <h4 class="tile-title">Deep Research</h4>
+                    <p class="tile-description">Comprehensive investigation using proven methodologies.</p>
+                </div>
+
+                <div class="tile">
+                    <div class="tile-icon">📈</div>
+                    <h4 class="tile-title">Data Insights</h4>
+                    <p class="tile-description">Statistical analysis and trend identification.</p>
+                </div>
+
+                <div class="tile">
+                    <div class="tile-icon">🛡️</div>
+                    <h4 class="tile-title">Protection Focus</h4>
+                    <p class="tile-description">Emphasis on member safety and wellbeing.</p>
+                </div>
+
+                <div class="tile">
+                    <div class="tile-icon">🌐</div>
+                    <h4 class="tile-title">Global Perspective</h4>
+                    <p class="tile-description">International scope and cross-cultural analysis.</p>
+                </div>
+
+                <div class="tile">
+                    <div class="tile-icon">⚖️</div>
+                    <h4 class="tile-title">Balanced Approach</h4>
+                    <p class="tile-description">Fair and objective evaluation criteria.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Panels Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Information Panels</h2>
+                <p class="section-subtitle">Detailed content containers with headers</p>
+            </div>
+            
+            <div class="panels-grid">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h4 class="panel-title">🏛️ Methodology Overview</h4>
+                        <div class="panel-badge">Research</div>
+                    </div>
+                    <div class="panel-content">
+                        <p>Our research methodology combines academic rigor with practical assessment tools. We analyze organizational structures, member experiences, and documented practices to create comprehensive evaluations.</p>
+                        <ul class="panel-list">
+                            <li>Behavioral Control Assessment</li>
+                            <li>Information Control Evaluation</li>
+                            <li>Thought Control Analysis</li>
+                            <li>Emotional Control Review</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <h4 class="panel-title">📊 Classification System</h4>
+                        <div class="panel-badge warning">Important</div>
+                    </div>
+                    <div class="panel-content">
+                        <p>Groups are classified on a scale from 1-5 based on their control mechanisms and member autonomy levels. This system helps identify potentially harmful organizations.</p>
+                        <div class="classification-scale">
+                            <div class="scale-item level-1">
+                                <span class="scale-number">1</span>
+                                <span class="scale-label">Low Control</span>
+                            </div>
+                            <div class="scale-item level-2">
+                                <span class="scale-number">2</span>
+                                <span class="scale-label">Mild Control</span>
+                            </div>
+                            <div class="scale-item level-3">
+                                <span class="scale-number">3</span>
+                                <span class="scale-label">Moderate Control</span>
+                            </div>
+                            <div class="scale-item level-4">
+                                <span class="scale-number">4</span>
+                                <span class="scale-label">High Control</span>
+                            </div>
+                            <div class="scale-item level-5">
+                                <span class="scale-number">5</span>
+                                <span class="scale-label">Extreme Control</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Statistics Overview</h2>
+                <p class="section-subtitle">Key metrics and data points</p>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🔢</div>
+                    <div class="stat-number">143</div>
+                    <div class="stat-label">Assessment Questions</div>
+                    <div class="stat-description">Comprehensive evaluation framework</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🏛️</div>
+                    <div class="stat-number">42</div>
+                    <div class="stat-label">Groups Analyzed</div>
+                    <div class="stat-description">Religious and philosophical organizations</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">📈</div>
+                    <div class="stat-number">5</div>
+                    <div class="stat-label">Control Levels</div>
+                    <div class="stat-description">Classification scale range</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-number">95%</div>
+                    <div class="stat-label">Accuracy Rate</div>
+                    <div class="stat-description">Validated assessment results</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Timeline Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Research Timeline</h2>
+                <p class="section-subtitle">Development milestones and achievements</p>
+            </div>
+            
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-marker">🎯</div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">2020</div>
+                        <h4 class="timeline-title">Project Inception</h4>
+                        <p class="timeline-description">Initial research began into organizational control patterns and member experiences.</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">📚</div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">2021</div>
+                        <h4 class="timeline-title">Methodology Development</h4>
+                        <p class="timeline-description">Created comprehensive assessment framework based on academic research and field studies.</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">🔬</div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">2022</div>
+                        <h4 class="timeline-title">First Analysis</h4>
+                        <p class="timeline-description">Completed initial group assessments and validated classification system.</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">🌐</div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">2023</div>
+                        <h4 class="timeline-title">Platform Launch</h4>
+                        <p class="timeline-description">Released interactive assessment tools and historical analysis features.</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">🚀</div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">2024</div>
+                        <h4 class="timeline-title">Expansion</h4>
+                        <p class="timeline-description">Expanded database to 42 organizations and enhanced analytical capabilities.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Badges Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Classification Badges</h2>
+                <p class="section-subtitle">Visual indicators for organization types</p>
+            </div>
+            
+            <div class="badges-showcase">
+                <div class="badge-group">
+                    <h4>Control Levels</h4>
+                    <div class="badge-row">
+                        <span class="badge level-1">Level 1 - Low Control</span>
+                        <span class="badge level-2">Level 2 - Mild Control</span>
+                        <span class="badge level-3">Level 3 - Moderate Control</span>
+                        <span class="badge level-4">Level 4 - High Control</span>
+                        <span class="badge level-5">Level 5 - Extreme Control</span>
+                    </div>
+                </div>
+
+                <div class="badge-group">
+                    <h4>Organization Types</h4>
+                    <div class="badge-row">
+                        <span class="badge type-religious">Religious Movement</span>
+                        <span class="badge type-philosophical">Philosophical Group</span>
+                        <span class="badge type-therapy">Therapy Organization</span>
+                        <span class="badge type-business">Business/MLM</span>
+                        <span class="badge type-political">Political Movement</span>
+                    </div>
+                </div>
+
+                <div class="badge-group">
+                    <h4>Status Indicators</h4>
+                    <div class="badge-row">
+                        <span class="badge status-active">Active</span>
+                        <span class="badge status-defunct">Defunct</span>
+                        <span class="badge status-reformed">Reformed</span>
+                        <span class="badge status-investigating">Under Investigation</span>
+                        <span class="badge status-verified">Verified</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Mini Cards Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Mini Cards</h2>
+                <p class="section-subtitle">Compact information display</p>
+            </div>
+            
+            <div class="mini-cards-grid">
+                <div class="mini-card">
+                    <div class="mini-card-icon">🎓</div>
+                    <div class="mini-card-content">
+                        <h5 class="mini-card-title">Educational</h5>
+                        <p class="mini-card-value">24 Resources</p>
+                    </div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-card-icon">⚠️</div>
+                    <div class="mini-card-content">
+                        <h5 class="mini-card-title">High Risk</h5>
+                        <p class="mini-card-value">8 Groups</p>
+                    </div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-card-icon">✅</div>
+                    <div class="mini-card-content">
+                        <h5 class="mini-card-title">Verified</h5>
+                        <p class="mini-card-value">36 Assessments</p>
+                    </div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-card-icon">📱</div>
+                    <div class="mini-card-content">
+                        <h5 class="mini-card-title">Mobile Users</h5>
+                        <p class="mini-card-value">67%</p>
+                    </div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-card-icon">🌍</div>
+                    <div class="mini-card-content">
+                        <h5 class="mini-card-title">Countries</h5>
+                        <p class="mini-card-value">23 Covered</p>
+                    </div>
+                </div>
+
+                <div class="mini-card">
+                    <div class="mini-card-icon">📊</div>
+                    <div class="mini-card-content">
+                        <h5 class="mini-card-title">Data Points</h5>
+                        <p class="mini-card-value">6,006</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Feature Boxes Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Feature Boxes</h2>
+                <p class="section-subtitle">Highlighted features with descriptions</p>
+            </div>
+            
+            <div class="feature-boxes-grid">
+                <div class="feature-box">
+                    <div class="feature-box-header">
+                        <div class="feature-box-icon">🔒</div>
+                        <h4 class="feature-box-title">Secure & Private</h4>
+                    </div>
+                    <p class="feature-box-description">
+                        All assessments are conducted with complete anonymity. Your data is protected and never shared with third parties.
+                    </p>
+                    <ul class="feature-box-list">
+                        <li>End-to-end encryption</li>
+                        <li>No tracking cookies</li>
+                        <li>Anonymous results</li>
+                    </ul>
+                </div>
+
+                <div class="feature-box">
+                    <div class="feature-box-header">
+                        <div class="feature-box-icon">🎯</div>
+                        <h4 class="feature-box-title">Evidence-Based</h4>
+                    </div>
+                    <p class="feature-box-description">
+                        Our methodology is grounded in academic research and validated through extensive field testing and peer review.
+                    </p>
+                    <ul class="feature-box-list">
+                        <li>Peer-reviewed methods</li>
+                        <li>Academic partnerships</li>
+                        <li>Continuous validation</li>
+                    </ul>
+                </div>
+
+                <div class="feature-box">
+                    <div class="feature-box-header">
+                        <div class="feature-box-icon">🌍</div>
+                        <h4 class="feature-box-title">Global Reach</h4>
+                    </div>
+                    <p class="feature-box-description">
+                        Our analysis covers organizations worldwide, providing insights across different cultures and legal systems.
+                    </p>
+                    <ul class="feature-box-list">
+                        <li>Multi-cultural analysis</li>
+                        <li>International scope</li>
+                        <li>Cross-border patterns</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- File Upload Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">File Upload Zones</h2>
+                <p class="section-subtitle">Drag and drop file upload components</p>
+            </div>
+            
+            <div class="upload-zones-grid">
+                <div class="upload-zone" id="uploadZone1">
+                    <div class="upload-icon">📁</div>
+                    <h4 class="upload-title">Upload Documents</h4>
+                    <p class="upload-description">Drag files here or click to browse</p>
+                    <div class="upload-formats">PDF, DOC, TXT files only</div>
+                    <input type="file" class="upload-input" accept=".pdf,.doc,.docx,.txt" multiple>
+                </div>
+
+                <div class="upload-zone image-upload" id="uploadZone2">
+                    <div class="upload-icon">🖼️</div>
+                    <h4 class="upload-title">Upload Images</h4>
+                    <p class="upload-description">Drop image files here</p>
+                    <div class="upload-formats">JPG, PNG, GIF up to 10MB</div>
+                    <input type="file" class="upload-input" accept="image/*" multiple>
+                </div>
+
+                <div class="upload-zone data-upload" id="uploadZone3">
+                    <div class="upload-icon">📊</div>
+                    <h4 class="upload-title">Upload Data</h4>
+                    <p class="upload-description">Import spreadsheets and data files</p>
+                    <div class="upload-formats">CSV, XLS, JSON files</div>
+                    <input type="file" class="upload-input" accept=".csv,.xls,.xlsx,.json" multiple>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Progress Indicators Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Progress Indicators</h2>
+                <p class="section-subtitle">Various ways to show progress and completion</p>
+            </div>
+            
+            <div class="progress-showcase">
+                <div class="progress-group">
+                    <h4>Linear Progress Bars</h4>
+                    <div class="progress-items">
+                        <div class="progress-item">
+                            <div class="progress-label">
+                                <span>Data Analysis</span>
+                                <span class="progress-percent">75%</span>
+                            </div>
+                            <div class="progress-track">
+                                <div class="progress-fill" style="width: 75%"></div>
+                            </div>
+                        </div>
+
+                        <div class="progress-item">
+                            <div class="progress-label">
+                                <span>Report Generation</span>
+                                <span class="progress-percent">45%</span>
+                            </div>
+                            <div class="progress-track">
+                                <div class="progress-fill" style="width: 45%"></div>
+                            </div>
+                        </div>
+
+                        <div class="progress-item">
+                            <div class="progress-label">
+                                <span>Quality Review</span>
+                                <span class="progress-percent">100%</span>
+                            </div>
+                            <div class="progress-track">
+                                <div class="progress-fill complete" style="width: 100%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress-group">
+                    <h4>Circular Progress</h4>
+                    <div class="circular-progress-grid">
+                        <div class="circular-progress" data-progress="85">
+                            <div class="circular-progress-inner">
+                                <span class="circular-progress-value">85%</span>
+                                <span class="circular-progress-label">Accuracy</span>
+                            </div>
+                        </div>
+
+                        <div class="circular-progress" data-progress="92">
+                            <div class="circular-progress-inner">
+                                <span class="circular-progress-value">92%</span>
+                                <span class="circular-progress-label">Completion</span>
+                            </div>
+                        </div>
+
+                        <div class="circular-progress" data-progress="67">
+                            <div class="circular-progress-inner">
+                                <span class="circular-progress-value">67%</span>
+                                <span class="circular-progress-label">Coverage</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress-group">
+                    <h4>Step Progress</h4>
+                    <div class="step-progress">
+                        <div class="step completed">
+                            <div class="step-marker">✓</div>
+                            <div class="step-content">
+                                <div class="step-title">Data Collection</div>
+                                <div class="step-description">Gather source materials</div>
+                            </div>
+                        </div>
+                        <div class="step completed">
+                            <div class="step-marker">✓</div>
+                            <div class="step-content">
+                                <div class="step-title">Analysis</div>
+                                <div class="step-description">Process and evaluate</div>
+                            </div>
+                        </div>
+                        <div class="step active">
+                            <div class="step-marker">3</div>
+                            <div class="step-content">
+                                <div class="step-title">Review</div>
+                                <div class="step-description">Quality assessment</div>
+                            </div>
+                        </div>
+                        <div class="step">
+                            <div class="step-marker">4</div>
+                            <div class="step-content">
+                                <div class="step-title">Publication</div>
+                                <div class="step-description">Release findings</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Data Tables Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Data Tables</h2>
+                <p class="section-subtitle">Structured data display with sorting and filtering</p>
+            </div>
+            
+            <div class="tables-grid">
+                <div class="data-table-container">
+                    <div class="table-header">
+                        <h4>Organization Analysis Results</h4>
+                        <div class="table-actions">
+                            <button class="btn-small">Export</button>
+                            <button class="btn-small">Filter</button>
+                        </div>
+                    </div>
+                    <div class="data-table-wrapper">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="sortable">Organization <span class="sort-arrow">↕</span></th>
+                                    <th class="sortable">Type <span class="sort-arrow">↕</span></th>
+                                    <th class="sortable">Level <span class="sort-arrow">↕</span></th>
+                                    <th class="sortable">Members <span class="sort-arrow">↕</span></th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Jehovah's Witnesses</td>
+                                    <td>Religious</td>
+                                    <td><span class="level-badge level-4">4</span></td>
+                                    <td>8.7M</td>
+                                    <td><span class="status-badge active">Active</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Scientology</td>
+                                    <td>New Religious</td>
+                                    <td><span class="level-badge level-5">5</span></td>
+                                    <td>55K</td>
+                                    <td><span class="status-badge active">Active</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Unitarian Universalism</td>
+                                    <td>Liberal Religious</td>
+                                    <td><span class="level-badge level-1">1</span></td>
+                                    <td>211K</td>
+                                    <td><span class="status-badge active">Active</span></td>
+                                </tr>
+                                <tr>
+                                    <td>Heaven's Gate</td>
+                                    <td>UFO Religious</td>
+                                    <td><span class="level-badge level-5">5</span></td>
+                                    <td>39</td>
+                                    <td><span class="status-badge defunct">Defunct</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Alert Banners Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Alert Banners</h2>
+                <p class="section-subtitle">Notification and information banners</p>
+            </div>
+            
+            <div class="alerts-showcase">
+                <div class="alert success">
+                    <div class="alert-icon">✅</div>
+                    <div class="alert-content">
+                        <div class="alert-title">Analysis Complete</div>
+                        <div class="alert-message">Your organizational assessment has been successfully processed and results are ready for review.</div>
+                    </div>
+                    <button class="alert-close">×</button>
+                </div>
+
+                <div class="alert warning">
+                    <div class="alert-icon">⚠️</div>
+                    <div class="alert-content">
+                        <div class="alert-title">High Control Detected</div>
+                        <div class="alert-message">This organization shows significant control patterns that may affect member autonomy. Exercise caution.</div>
+                    </div>
+                    <button class="alert-close">×</button>
+                </div>
+
+                <div class="alert error">
+                    <div class="alert-icon">🚨</div>
+                    <div class="alert-content">
+                        <div class="alert-title">Critical Risk Level</div>
+                        <div class="alert-message">This organization exhibits extremely harmful control mechanisms. Immediate attention recommended.</div>
+                    </div>
+                    <button class="alert-close">×</button>
+                </div>
+
+                <div class="alert info">
+                    <div class="alert-icon">ℹ️</div>
+                    <div class="alert-content">
+                        <div class="alert-title">System Update</div>
+                        <div class="alert-message">New assessment criteria have been added based on recent research findings. Database updated with 12 new organizations.</div>
+                    </div>
+                    <button class="alert-close">×</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Widget Grid Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Dashboard Widgets</h2>
+                <p class="section-subtitle">Interactive dashboard components</p>
+            </div>
+            
+            <div class="widgets-grid">
+                <div class="widget chart-widget">
+                    <div class="widget-header">
+                        <h4 class="widget-title">Control Level Distribution</h4>
+                        <div class="widget-menu">⋮</div>
+                    </div>
+                    <div class="widget-content">
+                        <div class="chart-placeholder">
+                            <div class="chart-bar" style="height: 20%;">
+                                <span class="chart-label">Level 1</span>
+                                <span class="chart-value">8</span>
+                            </div>
+                            <div class="chart-bar" style="height: 35%;">
+                                <span class="chart-label">Level 2</span>
+                                <span class="chart-value">14</span>
+                            </div>
+                            <div class="chart-bar" style="height: 30%;">
+                                <span class="chart-label">Level 3</span>
+                                <span class="chart-value">12</span>
+                            </div>
+                            <div class="chart-bar" style="height: 25%;">
+                                <span class="chart-label">Level 4</span>
+                                <span class="chart-value">10</span>
+                            </div>
+                            <div class="chart-bar" style="height: 40%;">
+                                <span class="chart-label">Level 5</span>
+                                <span class="chart-value">16</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="widget activity-widget">
+                    <div class="widget-header">
+                        <h4 class="widget-title">Recent Activity</h4>
+                        <div class="widget-menu">⋮</div>
+                    </div>
+                    <div class="widget-content">
+                        <div class="activity-list">
+                            <div class="activity-item">
+                                <div class="activity-icon">📊</div>
+                                <div class="activity-details">
+                                    <div class="activity-title">New analysis completed</div>
+                                    <div class="activity-time">2 hours ago</div>
+                                </div>
+                            </div>
+                            <div class="activity-item">
+                                <div class="activity-icon">👤</div>
+                                <div class="activity-details">
+                                    <div class="activity-title">User assessment submitted</div>
+                                    <div class="activity-time">5 hours ago</div>
+                                </div>
+                            </div>
+                            <div class="activity-item">
+                                <div class="activity-icon">🔄</div>
+                                <div class="activity-details">
+                                    <div class="activity-title">Database updated</div>
+                                    <div class="activity-time">1 day ago</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="widget metrics-widget">
+                    <div class="widget-header">
+                        <h4 class="widget-title">Key Metrics</h4>
+                        <div class="widget-menu">⋮</div>
+                    </div>
+                    <div class="widget-content">
+                        <div class="metrics-grid">
+                            <div class="metric">
+                                <div class="metric-value">42</div>
+                                <div class="metric-label">Organizations</div>
+                                <div class="metric-change positive">+3</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">1,247</div>
+                                <div class="metric-label">Assessments</div>
+                                <div class="metric-change positive">+89</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">95.7%</div>
+                                <div class="metric-label">Accuracy</div>
+                                <div class="metric-change positive">+0.3%</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">4.2</div>
+                                <div class="metric-label">Avg Level</div>
+                                <div class="metric-change neutral">±0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Cards Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Interactive Cards</h2>
+                <p class="section-subtitle">Cards with expandable content and actions</p>
+            </div>
+            
+            <div class="interactive-cards-grid">
+                <div class="interactive-card">
+                    <div class="card-thumbnail">
+                        <div class="thumbnail-icon">📊</div>
+                    </div>
+                    <div class="card-info">
+                        <h4 class="card-title">Assessment Framework</h4>
+                        <p class="card-snippet">Comprehensive evaluation system based on BITE model...</p>
+                        <div class="card-metadata">
+                            <span class="metadata-item">📅 Updated: Mar 2024</span>
+                            <span class="metadata-item">👁️ Views: 1,247</span>
+                        </div>
+                    </div>
+                    <div class="card-actions">
+                        <button class="action-btn" data-action="expand">📖</button>
+                        <button class="action-btn" data-action="share">📤</button>
+                        <button class="action-btn" data-action="bookmark">🔖</button>
+                    </div>
+                    <div class="card-expanded-content">
+                        <p>Our assessment framework utilizes Steven Hassan's BITE Model (Behavior, Information, Thought, and Emotional control) combined with additional criteria for organizational transparency, financial practices, and member autonomy.</p>
+                        <ul>
+                            <li>143 comprehensive questions</li>
+                            <li>Multi-dimensional analysis</li>
+                            <li>Peer-reviewed methodology</li>
+                            <li>Regular framework updates</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="interactive-card">
+                    <div class="card-thumbnail">
+                        <div class="thumbnail-icon">🎯</div>
+                    </div>
+                    <div class="card-info">
+                        <h4 class="card-title">Classification System</h4>
+                        <p class="card-snippet">Five-level system for categorizing organizational control...</p>
+                        <div class="card-metadata">
+                            <span class="metadata-item">📅 Updated: Feb 2024</span>
+                            <span class="metadata-item">👁️ Views: 892</span>
+                        </div>
+                    </div>
+                    <div class="card-actions">
+                        <button class="action-btn" data-action="expand">📖</button>
+                        <button class="action-btn" data-action="share">📤</button>
+                        <button class="action-btn" data-action="bookmark">🔖</button>
+                    </div>
+                    <div class="card-expanded-content">
+                        <p>Our classification system ranges from Level 1 (minimal control) to Level 5 (extreme control), providing clear indicators of potential risk to members.</p>
+                        <div class="classification-preview">
+                            <div class="level-preview level-1">Level 1: Healthy community practices</div>
+                            <div class="level-preview level-3">Level 3: Moderate control mechanisms</div>
+                            <div class="level-preview level-5">Level 5: Extreme control and isolation</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Comparison Tables Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Comparison Tables</h2>
+                <p class="section-subtitle">Side-by-side feature and data comparisons</p>
+            </div>
+            
+            <div class="comparison-table-container">
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th class="feature-column">Feature</th>
+                            <th class="comparison-column healthy">
+                                <div class="column-header">
+                                    <div class="column-icon">✅</div>
+                                    <div class="column-title">Healthy Organization</div>
+                                    <div class="column-subtitle">Level 1-2</div>
+                                </div>
+                            </th>
+                            <th class="comparison-column moderate">
+                                <div class="column-header">
+                                    <div class="column-icon">⚠️</div>
+                                    <div class="column-title">Moderate Control</div>
+                                    <div class="column-subtitle">Level 3</div>
+                                </div>
+                            </th>
+                            <th class="comparison-column harmful">
+                                <div class="column-header">
+                                    <div class="column-icon">🚨</div>
+                                    <div class="column-title">High Control</div>
+                                    <div class="column-subtitle">Level 4-5</div>
+                                </div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="feature-cell">Leadership Structure</td>
+                            <td class="comparison-cell">Democratic, transparent</td>
+                            <td class="comparison-cell">Hierarchical but accountable</td>
+                            <td class="comparison-cell">Authoritarian, unquestionable</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-cell">Member Autonomy</td>
+                            <td class="comparison-cell">Full personal freedom</td>
+                            <td class="comparison-cell">Some lifestyle guidance</td>
+                            <td class="comparison-cell">Strict behavioral control</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-cell">Information Access</td>
+                            <td class="comparison-cell">Open to all sources</td>
+                            <td class="comparison-cell">Preferred sources recommended</td>
+                            <td class="comparison-cell">Restricted to approved materials</td>
+                        </tr>
+                        <tr>
+                            <td class="feature-cell">Financial Transparency</td>
+                            <td class="comparison-cell">Full disclosure</td>
+                            <td class="comparison-cell">Regular reporting</td>
+                            <td class="comparison-cell">Limited or no transparency</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tag Clouds Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Tag Clouds</h2>
+                <p class="section-subtitle">Categorized keywords and concepts</p>
+            </div>
+            
+            <div class="tag-clouds-grid">
+                <div class="tag-cloud-container">
+                    <h4 class="tag-cloud-title">⚠️ Warning Signs</h4>
+                    <div class="tag-cloud">
+                        <span class="tag warning large">Isolation</span>
+                        <span class="tag warning medium">Information Control</span>
+                        <span class="tag warning small">Financial Demands</span>
+                        <span class="tag warning large">Authoritarianism</span>
+                        <span class="tag warning medium">Shunning</span>
+                        <span class="tag warning small">Thought Stopping</span>
+                        <span class="tag warning medium">Us vs Them</span>
+                        <span class="tag warning large">Blind Obedience</span>
+                        <span class="tag warning small">Fear Tactics</span>
+                        <span class="tag warning medium">Love Bombing</span>
+                    </div>
+                </div>
+
+                <div class="tag-cloud-container">
+                    <h4 class="tag-cloud-title">✅ Healthy Indicators</h4>
+                    <div class="tag-cloud">
+                        <span class="tag success large">Transparency</span>
+                        <span class="tag success medium">Open Discussion</span>
+                        <span class="tag success small">Voluntary Participation</span>
+                        <span class="tag success large">Democratic Process</span>
+                        <span class="tag success medium">Educational Freedom</span>
+                        <span class="tag success small">Financial Accountability</span>
+                        <span class="tag success medium">Respectful Dissent</span>
+                        <span class="tag success large">Member Autonomy</span>
+                        <span class="tag success small">External Relationships</span>
+                        <span class="tag success medium">Critical Thinking</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Accordion Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Accordion Panels</h2>
+                <p class="section-subtitle">Collapsible content sections for FAQ and detailed information</p>
+            </div>
+            
+            <div class="accordion">
+                <div class="accordion-item">
+                    <div class="accordion-header">
+                        <h4 class="accordion-title">What is the BITE Model?</h4>
+                        <div class="accordion-icon">▼</div>
+                    </div>
+                    <div class="accordion-content">
+                        <p>The BITE Model is a framework developed by Steven Hassan to evaluate the level of control exerted by groups. It examines four key areas:</p>
+                        <ul>
+                            <li><strong>Behavior Control:</strong> Regulation of physical actions and daily activities</li>
+                            <li><strong>Information Control:</strong> Limiting access to outside sources and critical information</li>
+                            <li><strong>Thought Control:</strong> Controlling internal beliefs and cognitive processes</li>
+                            <li><strong>Emotional Control:</strong> Manipulating feelings and emotional responses</li>
+                        </ul>
+                        <p>Organizations that score high across these dimensions may pose risks to member autonomy and wellbeing.</p>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header">
+                        <h4 class="accordion-title">How accurate is the classification system?</h4>
+                        <div class="accordion-icon">▼</div>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Our classification system has been validated through extensive research and peer review, achieving a 95% accuracy rate in identifying concerning control patterns.</p>
+                        <div class="accuracy-metrics">
+                            <div class="metric-item">
+                                <span class="metric-label">Peer Review</span>
+                                <span class="metric-value">12 Academic Institutions</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Sample Size</span>
+                                <span class="metric-value">1,247 Assessments</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Validation Period</span>
+                                <span class="metric-value">3 Years</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header">
+                        <h4 class="accordion-title">Can organizations improve their classification?</h4>
+                        <div class="accordion-icon">▼</div>
+                    </div>
+                    <div class="accordion-content">
+                        <p>Yes, organizations can and do change their practices. We regularly reassess groups and update classifications based on documented changes in their policies and behaviors.</p>
+                        <div class="improvement-examples">
+                            <div class="example-item">
+                                <span class="example-org">Reformed Church of X</span>
+                                <span class="example-change">Level 4 → Level 2</span>
+                                <span class="example-reason">Implemented democratic governance</span>
+                            </div>
+                            <div class="example-item">
+                                <span class="example-org">Community Y</span>
+                                <span class="example-change">Level 3 → Level 1</span>
+                                <span class="example-reason">Increased transparency and member rights</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <div class="accordion-header">
+                        <h4 class="accordion-title">What should I do if I'm concerned about an organization?</h4>
+                        <div class="accordion-icon">▼</div>
+                    </div>
+                    <div class="accordion-content">
+                        <p>If you have concerns about an organization's practices, consider these steps:</p>
+                        <ol>
+                            <li>Take our assessment to get an objective evaluation</li>
+                            <li>Seek support from friends, family, or professionals</li>
+                            <li>Connect with exit counselors or support groups</li>
+                            <li>Document concerning behaviors or policies</li>
+                            <li>Consider legal advice if necessary</li>
+                        </ol>
+                        <div class="help-resources">
+                            <a href="#" class="resource-link">📞 Crisis Hotline</a>
+                            <a href="#" class="resource-link">💬 Support Groups</a>
+                            <a href="#" class="resource-link">📚 Educational Resources</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modal Cards Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Modal Cards</h2>
+                <p class="section-subtitle">Click cards to open detailed modal overlays</p>
+            </div>
+            
+            <div class="modal-cards-grid">
+                <div class="modal-card" data-modal="group-analysis">
+                    <div class="modal-card-icon">🔍</div>
+                    <h4 class="modal-card-title">Group Analysis Process</h4>
+                    <p class="modal-card-description">Learn about our comprehensive methodology for evaluating organizations.</p>
+                    <div class="modal-card-footer">Click to explore →</div>
+                </div>
+
+                <div class="modal-card" data-modal="safety-guidelines">
+                    <div class="modal-card-icon">🛡️</div>
+                    <h4 class="modal-card-title">Safety Guidelines</h4>
+                    <p class="modal-card-description">Essential safety tips for those questioning their organization's practices.</p>
+                    <div class="modal-card-footer">Click to explore →</div>
+                </div>
+
+                <div class="modal-card" data-modal="support-resources">
+                    <div class="modal-card-icon">🤝</div>
+                    <h4 class="modal-card-title">Support Resources</h4>
+                    <p class="modal-card-description">Connect with professional help and community support networks.</p>
+                    <div class="modal-card-footer">Click to explore →</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Rating Systems Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Rating Systems</h2>
+                <p class="section-subtitle">Visual rating displays for assessments and reviews</p>
+            </div>
+            
+            <div class="rating-systems-grid">
+                <div class="rating-display">
+                    <h4 class="rating-title">Control Level Assessment</h4>
+                    <div class="star-rating">
+                        <span class="star filled">★</span>
+                        <span class="star filled">★</span>
+                        <span class="star filled">★</span>
+                        <span class="star filled">★</span>
+                        <span class="star empty">★</span>
+                        <span class="rating-label">4.2 / 5 Control Level</span>
+                    </div>
+                    <div class="rating-breakdown">
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Behavior Control</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" style="width: 85%"></div>
+                            </div>
+                            <span class="breakdown-value">85%</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Information Control</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" style="width: 92%"></div>
+                            </div>
+                            <span class="breakdown-value">92%</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Thought Control</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" style="width: 78%"></div>
+                            </div>
+                            <span class="breakdown-value">78%</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Emotional Control</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" style="width: 88%"></div>
+                            </div>
+                            <span class="breakdown-value">88%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rating-display">
+                    <h4 class="rating-title">Risk Assessment Scale</h4>
+                    <div class="risk-meter">
+                        <div class="risk-meter-track">
+                            <div class="risk-meter-fill" style="width: 76%"></div>
+                            <div class="risk-meter-thumb" style="left: 76%"></div>
+                        </div>
+                        <div class="risk-labels">
+                            <span class="risk-label low">Low</span>
+                            <span class="risk-label moderate">Moderate</span>
+                            <span class="risk-label high">High</span>
+                            <span class="risk-label extreme">Extreme</span>
+                        </div>
+                        <div class="risk-value">High Risk (76%)</div>
+                    </div>
+                </div>
+
+                <div class="rating-display">
+                    <h4 class="rating-title">Community Feedback</h4>
+                    <div class="thumbs-rating">
+                        <div class="thumbs-section">
+                            <div class="thumbs-up">
+                                <span class="thumb-icon">👍</span>
+                                <span class="thumb-count">23</span>
+                                <span class="thumb-label">Helpful</span>
+                            </div>
+                            <div class="thumbs-down">
+                                <span class="thumb-icon">👎</span>
+                                <span class="thumb-count">3</span>
+                                <span class="thumb-label">Not Helpful</span>
+                            </div>
+                        </div>
+                        <div class="rating-summary">89% found this assessment helpful</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Sidebar Navigation Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Sidebar Navigation</h2>
+                <p class="section-subtitle">Collapsible and fixed sidebar navigation components</p>
+            </div>
+            
+            <div class="sidebar-demo-container">
+                <!-- Demo Toggle Button -->
+                <button class="sidebar-demo-toggle" id="sidebarDemoToggle">
+                    <span class="toggle-icon">☰</span>
+                    <span class="toggle-text">Open Sidebar Demo</span>
+                </button>
+                
+                <!-- Fixed Sidebar Example -->
+                <div class="fixed-sidebar-example">
+                    <h4>Fixed Sidebar Example</h4>
+                    <div class="sidebar-preview">
+                        <div class="sidebar-preview-nav">
+                            <div class="sidebar-preview-header">
+                                <div class="sidebar-preview-logo">OM</div>
+                                <div class="sidebar-preview-title">Navigation</div>
+                            </div>
+                            <ul class="sidebar-preview-menu">
+                                <li class="sidebar-preview-item active">
+                                    <span class="sidebar-preview-icon">📊</span>
+                                    <span class="sidebar-preview-label">Dashboard</span>
+                                </li>
+                                <li class="sidebar-preview-item">
+                                    <span class="sidebar-preview-icon">🏛️</span>
+                                    <span class="sidebar-preview-label">Organizations</span>
+                                </li>
+                                <li class="sidebar-preview-item">
+                                    <span class="sidebar-preview-icon">📋</span>
+                                    <span class="sidebar-preview-label">Assessments</span>
+                                </li>
+                                <li class="sidebar-preview-item">
+                                    <span class="sidebar-preview-icon">📈</span>
+                                    <span class="sidebar-preview-label">Analytics</span>
+                                </li>
+                                <li class="sidebar-preview-item">
+                                    <span class="sidebar-preview-icon">⚙️</span>
+                                    <span class="sidebar-preview-label">Settings</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="sidebar-preview-content">
+                            <div class="preview-content-header">Main Content Area</div>
+                            <div class="preview-content-body">This is where your main content would appear alongside the sidebar navigation.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Breadcrumb Navigation Section -->
+    <section class="section primary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Breadcrumb Navigation</h2>
+                <p class="section-subtitle">Hierarchical navigation paths and location indicators</p>
+            </div>
+            
+            <div class="breadcrumb-examples">
+                <div class="breadcrumb-container">
+                    <h4>Standard Breadcrumbs</h4>
+                    <nav class="breadcrumb">
+                        <a href="#" class="breadcrumb-item">Home</a>
+                        <span class="breadcrumb-separator">›</span>
+                        <a href="#" class="breadcrumb-item">Organizations</a>
+                        <span class="breadcrumb-separator">›</span>
+                        <a href="#" class="breadcrumb-item">Religious Groups</a>
+                        <span class="breadcrumb-separator">›</span>
+                        <span class="breadcrumb-item current">Jehovah's Witnesses</span>
+                    </nav>
+                </div>
+
+                <div class="breadcrumb-container">
+                    <h4>Icon Breadcrumbs</h4>
+                    <nav class="breadcrumb with-icons">
+                        <a href="#" class="breadcrumb-item">
+                            <span class="breadcrumb-icon">🏠</span>
+                            <span>Home</span>
+                        </a>
+                        <span class="breadcrumb-separator">›</span>
+                        <a href="#" class="breadcrumb-item">
+                            <span class="breadcrumb-icon">📊</span>
+                            <span>Assessment</span>
+                        </a>
+                        <span class="breadcrumb-separator">›</span>
+                        <a href="#" class="breadcrumb-item">
+                            <span class="breadcrumb-icon">📋</span>
+                            <span>Results</span>
+                        </a>
+                        <span class="breadcrumb-separator">›</span>
+                        <span class="breadcrumb-item current">
+                            <span class="breadcrumb-icon">📈</span>
+                            <span>Analysis</span>
+                        </span>
+                    </nav>
+                </div>
+
+                <div class="breadcrumb-container">
+                    <h4>Compact Breadcrumbs</h4>
+                    <nav class="breadcrumb compact">
+                        <a href="#" class="breadcrumb-item">Home</a>
+                        <span class="breadcrumb-separator">/</span>
+                        <span class="breadcrumb-item collapsed">...</span>
+                        <span class="breadcrumb-separator">/</span>
+                        <a href="#" class="breadcrumb-item">Level 4 Groups</a>
+                        <span class="breadcrumb-separator">/</span>
+                        <span class="breadcrumb-item current">Scientology</span>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </section>
+
+<!-- Floating Action Buttons Section -->
+    <section class="section secondary">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Floating Action Buttons</h2>
+                <p class="section-subtitle">Quick action buttons and expandable FAB menus</p>
+            </div>
+            
+            <div class="fab-examples">
+                <div class="fab-example-container">
+                    <h4>Single Action FAB</h4>
+                    <div class="fab-demo-area">
+                        <button class="fab fab-primary" data-tooltip="Take Assessment">
+                            <span class="fab-icon">📝</span>
+                        </button>
+                        <p class="fab-description">Perfect for primary actions like "Take Assessment" or "Add New"</p>
+                    </div>
+                </div>
+
+                <div class="fab-example-container">
+                    <h4>Expandable FAB Menu</h4>
+                    <div class="fab-demo-area">
+                        <div class="fab-menu" id="fabMenu">
+                            <div class="fab-menu-items">
+                                <button class="fab fab-secondary" data-tooltip="Share Results">
+                                    <span class="fab-icon">📤</span>
+                                </button>
+                                <button class="fab fab-secondary" data-tooltip="Download Report">
+                                    <span class="fab-icon">📥</span>
+                                </button>
+                                <button class="fab fab-secondary" data-tooltip="Print Analysis">
+                                    <span class="fab-icon">🖨️</span>
+                                </button>
+                            </div>
+                            <button class="fab fab-primary fab-trigger" data-tooltip="More Actions">
+                                <span class="fab-icon">➕</span>
+                            </button>
+                        </div>
+                        <p class="fab-description">Expandable menu for multiple related actions</p>
+                    </div>
+                </div>
+
+                <div class="fab-example-container">
+                    <h4>Speed Dial FAB</h4>
+                    <div class="fab-demo-area">
+                        <div class="fab-speed-dial" id="fabSpeedDial">
+                            <div class="fab-speed-dial-items">
+                                <button class="fab fab-success" data-tooltip="Contact Us">
+                                    <span class="fab-icon">💬</span>
+                                </button>
+                                <button class="fab fab-warning" data-tooltip="Report Issue">
+                                    <span class="fab-icon">⚠️</span>
+                                </button>
+                                <button class="fab fab-info" data-tooltip="Help & Support">
+                                    <span class="fab-icon">❓</span>
+                                </button>
+                            </div>
+                            <button class="fab fab-primary fab-speed-dial-trigger" data-tooltip="Quick Actions">
+                                <span class="fab-icon">⚡</span>
+                            </button>
+                        </div>
+                        <p class="fab-description">Speed dial for quick access to help and support</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo Sidebar Overlay -->
+    <div class="demo-sidebar-overlay" id="demoSidebarOverlay">
+        <div class="demo-sidebar" id="demoSidebar">
+            <div class="demo-sidebar-header">
+                <div class="demo-sidebar-logo">
+                    <span class="demo-logo-icon">🎓</span>
+                    <span class="demo-logo-text">Owen Morgan</span>
+                </div>
+                <button class="demo-sidebar-close" id="demoSidebarClose">×</button>
+            </div>
+            
+            <nav class="demo-sidebar-nav">
+                <div class="demo-nav-section">
+                    <h5 class="demo-nav-title">Main Navigation</h5>
+                    <ul class="demo-nav-menu">
+                        <li class="demo-nav-item active">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📊</span>
+                                <span class="demo-nav-text">Dashboard</span>
+                                <span class="demo-nav-badge">New</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🏛️</span>
+                                <span class="demo-nav-text">Organizations</span>
+                                <span class="demo-nav-count">42</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📋</span>
+                                <span class="demo-nav-text">Assessments</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📈</span>
+                                <span class="demo-nav-text">Analytics</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="demo-nav-section">
+                    <h5 class="demo-nav-title">Tools</h5>
+                    <ul class="demo-nav-menu">
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🎯</span>
+                                <span class="demo-nav-text">Quick Assessment</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🎲</span>
+                                <span class="demo-nav-text">Guessing Game</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">📚</span>
+                                <span class="demo-nav-text">Knowledge Base</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="demo-nav-section">
+                    <h5 class="demo-nav-title">Account</h5>
+                    <ul class="demo-nav-menu">
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">👤</span>
+                                <span class="demo-nav-text">Profile</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">⚙️</span>
+                                <span class="demo-nav-text">Settings</span>
+                            </a>
+                        </li>
+                        <li class="demo-nav-item">
+                            <a href="#" class="demo-nav-link">
+                                <span class="demo-nav-icon">🚪</span>
+                                <span class="demo-nav-text">Logout</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+            
+            <div class="demo-sidebar-footer">
+                <div class="demo-user-info">
+                    <div class="demo-user-avatar">OM</div>
+                    <div class="demo-user-details">
+                        <div class="demo-user-name">Owen Morgan</div>
+                        <div class="demo-user-role">Administrator</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading Components...</div>
+        </div>
+    </div>
+
+    <script src="scripts.js"></script>
+</body>
+</html>

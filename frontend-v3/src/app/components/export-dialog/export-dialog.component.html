@@ -1,0 +1,111 @@
+<div class="export-dialog">
+  <h2 mat-dialog-title>
+    <mat-icon>file_download</mat-icon>
+    Export Clips
+  </h2>
+
+  <mat-dialog-content class="export-content">
+    <!-- Export Progress -->
+    <div *ngIf="isExporting" class="export-progress">
+      <p class="progress-text">Exporting clip {{ currentClip }} of {{ totalClips }}...</p>
+      <mat-progress-bar mode="determinate" [value]="exportProgress"></mat-progress-bar>
+      <p class="progress-detail" *ngIf="currentClipName">{{ currentClipName }}</p>
+    </div>
+
+    <!-- Export Complete -->
+    <div *ngIf="exportComplete" class="export-complete">
+      <mat-icon class="success-icon">check_circle</mat-icon>
+      <h3>Export Complete!</h3>
+      <p>Successfully exported {{ successCount }} clips</p>
+      <p *ngIf="failedCount > 0" class="error-text">Failed to export {{ failedCount }} clips</p>
+    </div>
+
+    <!-- Export Options and Selection -->
+    <div class="export-options-wrapper" *ngIf="!isExporting && !exportComplete">
+      <!-- Output Location -->
+      <div class="output-location">
+        <label class="location-label">
+          <mat-icon>folder</mat-icon>
+          Output Location:
+        </label>
+        <div class="location-value">
+          {{ outputDirectory || 'Default (Weekly folder based on date)' }}
+        </div>
+        <button mat-stroked-button (click)="chooseOutputDirectory()">
+          <mat-icon>folder_open</mat-icon>
+          Choose Folder
+        </button>
+      </div>
+
+      <!-- Category Sections (includes selection if available) -->
+      <div class="categories-container" *ngIf="sections.length > 0">
+        <div class="export-header">
+          <p class="hint-text">Select clips to export:</p>
+          <div class="collapse-controls">
+            <button mat-icon-button
+                    (click)="allCollapsed ? expandAll() : collapseAll()"
+                    [matTooltip]="allCollapsed ? 'Expand All' : 'Collapse All'"
+                    class="collapse-toggle">
+              <mat-icon>{{ allCollapsed ? 'unfold_more' : 'unfold_less' }}</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        <cascade-list
+          [items]="sections"
+          [displayConfig]="displayConfig"
+          [groupConfig]="groupConfig"
+          [selectionMode]="selectionMode"
+          [selectedItemIds]="selectedSectionIds"
+          [statusMapper]="getItemStatus"
+          (itemsSelected)="onSectionsSelected($event)"
+          (itemsDeselected)="onSectionsDeselected($event)"
+          (groupToggle)="onGroupToggle($event)"
+          emptyMessage="No markers or sections available"
+          emptyIcon="bookmark_border">
+        </cascade-list>
+      </div>
+
+      <!-- No Sections Message -->
+      <div class="no-sections" *ngIf="sections.length === 0">
+        <mat-icon class="no-sections-icon">info</mat-icon>
+        <p>No markers or sections available to export.</p>
+        <p class="hint">Add markers using <kbd>M</kbd> or right-click on the timeline.</p>
+      </div>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions class="export-actions">
+    <button mat-button (click)="exportComplete ? close() : cancel()" [disabled]="isExporting">
+      {{ exportComplete ? 'Close' : 'Cancel' }}
+    </button>
+    <div class="export-options" *ngIf="!exportComplete">
+      <mat-checkbox
+        [(ngModel)]="overwriteOriginal"
+        [disabled]="isExporting || !canOverwriteOriginal()"
+        color="warn"
+        matTooltip="Replace the original video file with the highlighted section. This will DELETE all metadata (transcript, analysis, markers). Only available when selecting the current timeline selection."
+        matTooltipPosition="above">
+        Overwrite Original
+      </mat-checkbox>
+      <mat-checkbox
+        [(ngModel)]="reEncode"
+        [disabled]="isExporting"
+        color="primary"
+        matTooltip="Re-encoding creates new video files. Turn this OFF for faster extraction if videos use common codecs (H.264/AAC). Turn this ON if clips have playback issues or use uncommon codecs."
+        matTooltipPosition="above">
+        Re-encode
+      </mat-checkbox>
+    </div>
+    <button
+      *ngIf="!exportComplete"
+      mat-raised-button
+      color="primary"
+      (click)="export()"
+      [disabled]="getSelectedCount() === 0 || isExporting">
+      <mat-spinner diameter="20" *ngIf="isExporting" style="display: inline-block; margin-right: 8px;"></mat-spinner>
+      <mat-icon *ngIf="!isExporting">file_download</mat-icon>
+      Export {{ getSelectedCount() }} {{ getSelectedCount() === 1 ? 'Clip' : 'Clips' }}
+    </button>
+  </mat-dialog-actions>
+</div>

@@ -1,0 +1,125 @@
+<!-- Hero Section -->
+<section class="hero">
+  <div class="hero-background">
+    <div class="floating-shape shape-1"></div>
+    <div class="floating-shape shape-2"></div>
+    <div class="floating-shape shape-3"></div>
+  </div>
+
+  <div class="container hero-container">
+    <div class="hero-content fade-in">
+      <h1 class="hero-title">
+        <span class="gradient-text">Creamsicle</span>
+        <br>
+        Design System
+      </h1>
+      <p class="hero-subtitle">
+        A beautiful, modern Angular template with stunning components,
+        smooth animations, and perfect light/dark mode support.
+      </p>
+
+      <div class="hero-actions">
+        <app-button variant="gradient" size="lg" icon="🚀" iconRight="→">
+          <a routerLink="/components" style="color: inherit; text-decoration: none;">
+            Explore Components
+          </a>
+        </app-button>
+        <app-button variant="outline" size="lg" icon="📊">
+          <a routerLink="/dashboard" style="color: inherit; text-decoration: none;">
+            View Dashboard
+          </a>
+        </app-button>
+      </div>
+    </div>
+
+    <div class="hero-visual slide-in">
+      <div class="visual-card glass">
+        <div class="visual-content">
+          <div class="code-preview">
+            <div class="code-line">
+              <span class="code-tag">&lt;app-card</span>
+            </div>
+            <div class="code-line indent">
+              <span class="code-attr">title</span>=<span class="code-value">"Hello"</span>
+            </div>
+            <div class="code-line indent">
+              <span class="code-attr">icon</span>=<span class="code-value">"🍊"</span>
+            </div>
+            <div class="code-line">
+              <span class="code-tag">/&gt;</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Stats Section -->
+<section class="stats-section">
+  <div class="container">
+    <div class="stats-grid">
+      @for (stat of stats; track stat.label) {
+        <div class="stat-item scale-in">
+          <div class="stat-icon">{{ stat.icon }}</div>
+          <div class="stat-value gradient-text">{{ stat.value }}</div>
+          <div class="stat-label">{{ stat.label }}</div>
+        </div>
+      }
+    </div>
+  </div>
+</section>
+
+<!-- Features Section -->
+<section class="features-section">
+  <div class="container">
+    <div class="section-header">
+      <h2 class="section-title">
+        <span class="gradient-text">Amazing Features</span>
+      </h2>
+      <p class="section-subtitle">
+        Everything you need to build beautiful, modern applications
+      </p>
+    </div>
+
+    <div class="features-grid">
+      @for (feature of features; track feature.title; let i = $index) {
+        <app-card
+          [icon]="feature.icon"
+          [title]="feature.title"
+          [badge]="feature.badge"
+          [badgeClass]="feature.badgeClass"
+          [hoverable]="true"
+          class="feature-card"
+          [style.animation-delay.ms]="i * 100"
+        >
+          <p>{{ feature.description }}</p>
+        </app-card>
+      }
+    </div>
+  </div>
+</section>
+
+<!-- CTA Section -->
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-content glass">
+      <h2 class="cta-title">Ready to Get Started?</h2>
+      <p class="cta-subtitle">
+        Explore our component library and see what you can build
+      </p>
+      <div class="cta-actions">
+        <app-button variant="primary" size="lg" icon="🎨" iconRight="→">
+          <a routerLink="/components" style="color: inherit; text-decoration: none;">
+            Browse Components
+          </a>
+        </app-button>
+        <app-button variant="ghost" size="lg" icon="🖼️">
+          <a routerLink="/gallery" style="color: inherit; text-decoration: none;">
+            View Gallery
+          </a>
+        </app-button>
+      </div>
+    </div>
+  </div>
+</section>

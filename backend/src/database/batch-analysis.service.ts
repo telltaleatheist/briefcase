@@ -341,7 +341,6 @@ export class BatchAnalysisService implements OnModuleInit {
 
         // Create queue job with videoId and tasks
         const jobId = this.queueManager.addJob({
-          queueType: 'analysis',
           videoId: video.id,
           displayName: currentFilename,
           tasks,

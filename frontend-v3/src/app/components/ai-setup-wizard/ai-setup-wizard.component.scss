@@ -1,0 +1,822 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ==================== BACKDROP ====================
+.wizard-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(12px);
+  @include flex-center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+// ==================== CONTAINER ====================
+.wizard-container {
+  background: var(--bg-card);
+  border-radius: $radius-xl;
+  box-shadow: $shadow-xl, 0 0 60px rgba(255, 107, 53, 0.1);
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border: 2px solid var(--border-color);
+  @include custom-scrollbar;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(40px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+// ==================== CLOSE BUTTON ====================
+.close-btn {
+  position: absolute;
+  top: $spacing-md;
+  right: $spacing-md;
+  width: 36px;
+  height: 36px;
+  border-radius: $radius-md;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  font-size: $font-size-2xl;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+  @include flex-center;
+  z-index: 10;
+
+  &:hover {
+    background: var(--error);
+    border-color: var(--error);
+    color: white;
+    transform: rotate(90deg);
+  }
+}
+
+// ==================== PROGRESS DOTS ====================
+.progress-dots {
+  position: absolute;
+  top: $spacing-lg;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: $spacing-sm;
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: $radius-full;
+    background: var(--border-color);
+    transition: all $transition-base;
+
+    &.active {
+      background: var(--primary-orange);
+      width: 24px;
+    }
+
+    &.completed {
+      background: var(--success);
+    }
+  }
+}
+
+// ==================== WIZARD STEP ====================
+.wizard-step {
+  padding: $spacing-3xl;
+}
+
+.step-header {
+  text-align: center;
+  margin-bottom: $spacing-xl;
+}
+
+.step-icon {
+  font-size: 4rem;
+  display: block;
+  margin-bottom: $spacing-md;
+
+  &.success {
+    animation: bounce 0.6s ease-out;
+  }
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.step-title {
+  font-size: $font-size-3xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0 0 $spacing-sm;
+}
+
+.step-subtitle {
+  font-size: $font-size-base;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+// ==================== BACK BUTTON ====================
+.back-btn {
+  position: absolute;
+  top: $spacing-lg;
+  left: $spacing-lg;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+}
+
+// ==================== INFO BANNER ====================
+.info-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: $spacing-md;
+  padding: $spacing-md $spacing-lg;
+  background: rgba(255, 107, 53, 0.08);
+  border: 1px solid rgba(255, 107, 53, 0.2);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-xl;
+
+  .banner-icon {
+    font-size: $font-size-xl;
+    flex-shrink: 0;
+  }
+
+  .banner-content {
+    strong {
+      color: var(--primary-orange);
+      display: block;
+      margin-bottom: $spacing-xs;
+    }
+
+    p {
+      margin: 0;
+      font-size: $font-size-sm;
+      color: var(--text-secondary);
+    }
+  }
+}
+
+// ==================== FEATURE PREVIEW ====================
+.feature-preview {
+  margin-bottom: $spacing-xl;
+
+  h3 {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 $spacing-md;
+    text-align: center;
+  }
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: $spacing-sm;
+}
+
+.feature-item {
+  @include flex-center;
+  flex-direction: column;
+  gap: $spacing-xs;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border-radius: $radius-md;
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+
+  .feature-icon {
+    font-size: $font-size-xl;
+  }
+}
+
+// ==================== SECTION TITLE ====================
+.section-title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 $spacing-lg;
+  text-align: center;
+}
+
+// ==================== PROVIDER CARDS (Welcome) ====================
+.provider-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-md;
+  margin-bottom: $spacing-xl;
+}
+
+.provider-card {
+  position: relative;
+  padding: $spacing-lg;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-lg;
+  cursor: pointer;
+  transition: all $transition-base;
+
+  &:hover {
+    border-color: var(--text-tertiary);
+    transform: translateY(-2px);
+    box-shadow: $shadow-lg;
+  }
+
+  &.recommended {
+    border-color: var(--primary-orange);
+    background: rgba(255, 107, 53, 0.05);
+
+    &:hover {
+      border-color: var(--primary-orange);
+      box-shadow: $shadow-lg, 0 0 20px rgba(255, 107, 53, 0.15);
+    }
+  }
+}
+
+.card-badge {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: $spacing-xs $spacing-md;
+  background: var(--primary-orange);
+  color: white;
+  font-size: 10px;
+  font-weight: $font-weight-bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: $radius-full;
+  white-space: nowrap;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+
+  .card-icon {
+    font-size: $font-size-2xl;
+  }
+
+  .card-titles {
+    h4 {
+      margin: 0;
+      font-size: $font-size-base;
+      font-weight: $font-weight-semibold;
+      color: var(--text-primary);
+    }
+
+    .card-tagline {
+      font-size: $font-size-xs;
+      color: var(--text-tertiary);
+    }
+  }
+}
+
+.card-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 $spacing-md;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    font-size: $font-size-xs;
+    padding: $spacing-xs 0;
+    color: var(--text-secondary);
+
+    span {
+      width: 16px;
+      text-align: center;
+    }
+
+    &.pro span {
+      color: var(--success);
+    }
+
+    &.con span {
+      color: var(--text-tertiary);
+    }
+  }
+}
+
+.card-btn {
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+  transition: all $transition-fast;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+
+  &:hover {
+    background: var(--bg-card);
+  }
+
+  &.primary {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+
+    &:hover {
+      background: lighten(#ff6b35, 5%);
+    }
+  }
+}
+
+// ==================== INSTRUCTION CARD ====================
+.instruction-card {
+  padding: $spacing-xl;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-xl;
+
+  h3 {
+    margin: 0 0 $spacing-md;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+}
+
+.instruction-list {
+  margin: 0 0 $spacing-lg;
+  padding-left: $spacing-xl;
+
+  li {
+    padding: $spacing-sm 0;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    line-height: $line-height-relaxed;
+  }
+}
+
+// ==================== ACTION BUTTONS ====================
+.action-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-xl;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-card);
+    border-color: var(--text-tertiary);
+  }
+
+  &.primary {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+
+    &:hover:not(:disabled) {
+      background: lighten(#ff6b35, 5%);
+      transform: translateY(-2px);
+      box-shadow: $shadow-lg;
+    }
+  }
+
+  &.large {
+    padding: $spacing-lg $spacing-3xl;
+    font-size: $font-size-base;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.skip-btn {
+  padding: $spacing-md $spacing-lg;
+  background: transparent;
+  border: none;
+  font-size: $font-size-sm;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color $transition-fast;
+
+  &:hover {
+    color: var(--text-secondary);
+  }
+}
+
+// ==================== MODELS SECTION ====================
+.models-section {
+  margin-bottom: $spacing-xl;
+
+  h3 {
+    margin: 0 0 $spacing-sm;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+
+  .models-hint {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
+    margin-bottom: $spacing-lg;
+
+    .hint-icon {
+      font-size: $font-size-sm;
+    }
+  }
+}
+
+.model-cards {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.model-card {
+  position: relative;
+  padding: $spacing-lg;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+
+  &.recommended {
+    border-color: var(--primary-orange);
+    background: rgba(255, 107, 53, 0.05);
+  }
+
+  .model-badge {
+    position: absolute;
+    top: $spacing-md;
+    right: $spacing-md;
+    padding: $spacing-xs $spacing-sm;
+    background: var(--primary-orange);
+    color: white;
+    font-size: 10px;
+    font-weight: $font-weight-bold;
+    text-transform: uppercase;
+    border-radius: $radius-sm;
+  }
+}
+
+.model-header {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-xs;
+
+  h4 {
+    margin: 0;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+
+  .model-size {
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
+  }
+}
+
+.model-ram {
+  margin: 0 0 $spacing-xs;
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+}
+
+.model-desc {
+  margin: 0 0 $spacing-md;
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+}
+
+.download-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-lg;
+  background: var(--primary-orange);
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: lighten(#ff6b35, 5%);
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+.command {
+  padding: $spacing-sm $spacing-md;
+  background: var(--bg-tertiary);
+  border-radius: $radius-sm;
+  font-family: 'Monaco', monospace;
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+}
+
+// ==================== STATUS SECTION ====================
+.status-section {
+  text-align: center;
+  padding: $spacing-xl;
+  background: var(--bg-secondary);
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-xl;
+}
+
+.check-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  margin: 0 auto $spacing-md;
+  padding: $spacing-md $spacing-xl;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    border-color: var(--primary-orange);
+    color: var(--primary-orange);
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+.status-result {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+
+  &.success {
+    color: var(--success);
+
+    span {
+      color: var(--success);
+    }
+  }
+}
+
+// ==================== API INPUT SECTION ====================
+.api-input-section {
+  margin-bottom: $spacing-xl;
+
+  label {
+    display: block;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+}
+
+.input-wrapper {
+  position: relative;
+
+  input {
+    width: 100%;
+    padding: $spacing-md $spacing-lg;
+    padding-right: $spacing-4xl;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: $radius-md;
+    font-size: $font-size-base;
+    font-family: 'Monaco', monospace;
+    color: var(--text-primary);
+    transition: all $transition-fast;
+    box-sizing: border-box;
+
+    &::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary-orange);
+      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+    }
+  }
+
+  .input-icon {
+    position: absolute;
+    right: $spacing-md;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: $font-size-lg;
+  }
+}
+
+.input-hint {
+  margin: $spacing-sm 0 0;
+  font-size: $font-size-xs;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+// ==================== STEP FOOTER ====================
+.step-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: $spacing-lg;
+  border-top: 1px solid var(--border-color);
+
+  &.centered {
+    justify-content: center;
+  }
+}
+
+// ==================== SUCCESS/DONE STEP ====================
+.success-card,
+.next-steps-card {
+  padding: $spacing-xl;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-lg;
+
+  h3 {
+    margin: 0 0 $spacing-md;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+}
+
+.provider-list {
+  @include flex-column;
+  gap: $spacing-sm;
+}
+
+.provider-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  background: var(--bg-card);
+  border-radius: $radius-md;
+
+  .check-icon {
+    width: 24px;
+    height: 24px;
+    @include flex-center;
+    background: var(--success);
+    color: white;
+    border-radius: $radius-full;
+    font-size: $font-size-sm;
+  }
+
+  div {
+    @include flex-column;
+    gap: 2px;
+
+    strong {
+      font-size: $font-size-sm;
+      color: var(--text-primary);
+    }
+
+    span {
+      font-size: $font-size-xs;
+      color: var(--text-tertiary);
+    }
+  }
+}
+
+.next-steps-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-sm 0;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+
+    span:first-child {
+      font-size: $font-size-base;
+    }
+  }
+}
+
+// ==================== SPINNER ====================
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+// ==================== RESPONSIVE ====================
+@media (max-width: 768px) {
+  .wizard-container {
+    width: 95%;
+    max-height: 95vh;
+  }
+
+  .wizard-step {
+    padding: $spacing-xl;
+  }
+
+  .provider-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .step-footer {
+    flex-direction: column;
+    gap: $spacing-md;
+
+    .skip-btn {
+      order: 2;
+    }
+
+    .action-btn {
+      width: 100%;
+    }
+  }
+}

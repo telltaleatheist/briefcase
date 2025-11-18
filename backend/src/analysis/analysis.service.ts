@@ -1517,7 +1517,6 @@ export class AnalysisService implements OnModuleInit {
 
         // Create queue job with videoId and tasks
         const createdJobId = this.queueManager.addJob({
-          queueType: 'analysis',
           videoId: video.id,
           displayName: video.filename,
           tasks,

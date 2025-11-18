@@ -1,0 +1,269 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// Hero Section
+.hero {
+  position: relative;
+  min-height: calc(100vh - 70px);
+  @include flex-center;
+  overflow: hidden;
+  background: var(--gradient-hero);
+}
+
+.hero-background {
+  @include overlay(0);
+}
+
+.floating-shape {
+  position: absolute;
+  border-radius: $radius-full;
+  background: var(--gradient-primary);
+  opacity: 0.1;
+  animation: float 6s ease-in-out infinite;
+
+  &.shape-1 {
+    top: 10%;
+    left: 10%;
+    width: 300px;
+    height: 300px;
+    animation-delay: 0s;
+  }
+
+  &.shape-2 {
+    top: 60%;
+    right: 15%;
+    width: 200px;
+    height: 200px;
+    animation-delay: 2s;
+  }
+
+  &.shape-3 {
+    bottom: 10%;
+    left: 50%;
+    width: 250px;
+    height: 250px;
+    animation-delay: 4s;
+  }
+}
+
+.hero-container {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-3xl;
+  align-items: center;
+  padding: $spacing-3xl $spacing-lg;
+
+  @include respond-to(lg) {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.hero-content {
+  text-align: center;
+
+  @include respond-to(lg) {
+    text-align: left;
+  }
+}
+
+.hero-title {
+  font-size: $font-size-4xl;
+  font-weight: $font-weight-extrabold;
+  line-height: $line-height-tight;
+  margin-bottom: $spacing-lg;
+
+  @include respond-to(md) {
+    font-size: $font-size-5xl;
+  }
+
+  @include respond-to(lg) {
+    font-size: 4rem;
+  }
+}
+
+.hero-subtitle {
+  font-size: $font-size-lg;
+  color: var(--text-secondary);
+  margin-bottom: $spacing-2xl;
+  line-height: $line-height-relaxed;
+
+  @include respond-to(md) {
+    font-size: $font-size-xl;
+  }
+}
+
+.hero-actions {
+  @include flex-center;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+
+  @include respond-to(lg) {
+    justify-content: flex-start;
+  }
+}
+
+.hero-visual {
+  @include flex-center;
+}
+
+.visual-card {
+  width: 100%;
+  max-width: 500px;
+  padding: $spacing-2xl;
+  border-radius: $radius-2xl;
+  box-shadow: $shadow-2xl;
+  animation: glowPulse 3s ease-in-out infinite;
+}
+
+.code-preview {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: $font-size-lg;
+  line-height: 2;
+}
+
+.code-line {
+  display: block;
+
+  &.indent {
+    padding-left: $spacing-lg;
+  }
+}
+
+.code-tag {
+  color: var(--primary-orange);
+  font-weight: $font-weight-bold;
+}
+
+.code-attr {
+  color: var(--info);
+}
+
+.code-value {
+  color: var(--success);
+}
+
+// Stats Section
+.stats-section {
+  padding: $spacing-4xl $spacing-lg;
+  background: var(--bg-primary);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-xl;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.stat-item {
+  text-align: center;
+  padding: $spacing-xl;
+  border-radius: $radius-lg;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  transition: all $transition-base;
+
+  &:hover {
+    transform: translateY(-8px);
+    box-shadow: $shadow-xl;
+    border-color: var(--primary-orange);
+
+    .stat-icon {
+      transform: scale(1.2) rotate(360deg);
+    }
+  }
+}
+
+.stat-icon {
+  font-size: $font-size-4xl;
+  margin-bottom: $spacing-md;
+  transition: transform 0.6s ease;
+}
+
+.stat-value {
+  font-size: $font-size-4xl;
+  font-weight: $font-weight-extrabold;
+  margin-bottom: $spacing-xs;
+}
+
+.stat-label {
+  font-size: $font-size-base;
+  color: var(--text-secondary);
+  font-weight: $font-weight-medium;
+}
+
+// Features Section
+.features-section {
+  padding: $spacing-4xl $spacing-lg;
+  background: var(--bg-secondary);
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: $spacing-3xl;
+}
+
+.section-title {
+  font-size: $font-size-4xl;
+  font-weight: $font-weight-extrabold;
+  margin-bottom: $spacing-md;
+}
+
+.section-subtitle {
+  font-size: $font-size-xl;
+  color: var(--text-secondary);
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-xl;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @include respond-to(lg) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.feature-card {
+  animation: fadeIn 0.6s ease-out backwards;
+}
+
+// CTA Section
+.cta-section {
+  padding: $spacing-4xl $spacing-lg;
+  background: var(--gradient-hero);
+}
+
+.cta-content {
+  text-align: center;
+  padding: $spacing-3xl $spacing-2xl;
+  border-radius: $radius-2xl;
+  box-shadow: $shadow-2xl;
+}
+
+.cta-title {
+  font-size: $font-size-4xl;
+  font-weight: $font-weight-extrabold;
+  margin-bottom: $spacing-md;
+}
+
+.cta-subtitle {
+  font-size: $font-size-xl;
+  color: var(--text-secondary);
+  margin-bottom: $spacing-2xl;
+}
+
+.cta-actions {
+  @include flex-center;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+}

@@ -1,0 +1,312 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+// ==================== PAGE HEADER ====================
+.page-header {
+  padding: $spacing-xl $spacing-2xl;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.page-title {
+  font-size: $font-size-3xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0 0 $spacing-xs;
+}
+
+.page-subtitle {
+  font-size: $font-size-base;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+// ==================== SETTINGS CONTENT ====================
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-xl $spacing-2xl;
+  @include custom-scrollbar;
+}
+
+// ==================== SETTINGS SECTION ====================
+.settings-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-xl;
+  overflow: hidden;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+  padding: $spacing-lg $spacing-xl;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.section-icon {
+  font-size: $font-size-2xl;
+  width: 48px;
+  height: 48px;
+  @include flex-center;
+  background: var(--bg-tertiary);
+  border-radius: $radius-md;
+  flex-shrink: 0;
+}
+
+.section-info {
+  flex: 1;
+
+  h2 {
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0 0 $spacing-xs;
+  }
+
+  p {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+}
+
+.section-content {
+  padding: $spacing-xl;
+}
+
+// ==================== STATUS CARD ====================
+.status-card {
+  padding: $spacing-lg;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-lg;
+
+  &.configured {
+    border-color: var(--success);
+    background: rgba(34, 197, 94, 0.05);
+  }
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+
+  .status-icon {
+    width: 20px;
+    height: 20px;
+    @include flex-center;
+    border-radius: $radius-full;
+    font-size: $font-size-xs;
+  }
+
+  .status-text {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+  }
+
+  &.success {
+    .status-icon {
+      background: var(--success);
+      color: white;
+    }
+    .status-text {
+      color: var(--success);
+    }
+  }
+
+  &.pending {
+    .status-icon {
+      background: var(--bg-tertiary);
+      color: var(--text-tertiary);
+    }
+    .status-text {
+      color: var(--text-secondary);
+    }
+  }
+}
+
+.status-description {
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: $line-height-relaxed;
+}
+
+.provider-badges {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.provider-badge {
+  padding: $spacing-xs $spacing-md;
+  background: var(--success);
+  color: white;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  border-radius: $radius-full;
+}
+
+// ==================== SECTION ACTIONS ====================
+.section-actions {
+  margin-bottom: $spacing-xl;
+}
+
+.action-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-xl;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  .btn-icon {
+    font-size: $font-size-base;
+  }
+
+  &:hover {
+    background: var(--bg-secondary);
+    border-color: var(--text-tertiary);
+  }
+
+  &.primary {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+
+    &:hover {
+      background: lighten(#ff6b35, 5%);
+      transform: translateY(-2px);
+      box-shadow: $shadow-lg;
+    }
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+// ==================== FEATURE LIST ====================
+.feature-list {
+  h3 {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 $spacing-md;
+  }
+
+  ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    padding: $spacing-sm 0;
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+
+    .feature-icon {
+      font-size: $font-size-base;
+      width: 24px;
+      text-align: center;
+    }
+  }
+}
+
+// ==================== PLACEHOLDER CONTENT ====================
+.placeholder-content {
+  padding: $spacing-xl;
+  text-align: center;
+
+  p {
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
+    font-style: italic;
+    margin: 0;
+  }
+}
+
+// ==================== ABOUT CONTENT ====================
+.about-content {
+  text-align: center;
+}
+
+.app-info {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+
+  .app-name {
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    color: var(--primary-orange);
+  }
+
+  .app-version {
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
+  }
+}
+
+.app-description {
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+// ==================== RESPONSIVE ====================
+@media (max-width: 768px) {
+  .page-header {
+    padding: $spacing-lg;
+  }
+
+  .settings-content {
+    padding: $spacing-lg;
+  }
+
+  .section-header {
+    padding: $spacing-md $spacing-lg;
+  }
+
+  .section-content {
+    padding: $spacing-lg;
+  }
+
+  .section-icon {
+    width: 40px;
+    height: 40px;
+    font-size: $font-size-xl;
+  }
+}

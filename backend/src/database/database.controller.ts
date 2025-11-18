@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param, Res, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
-import { Response } from 'express';
+import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Response, Request } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
+import { createReadStream, statSync } from 'fs';
 import { DatabaseService } from './database.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
@@ -780,6 +781,106 @@ export class DatabaseController {
       throw new NotFoundException(`Video not found: ${videoId}`);
     }
     return video;
+  }
+
+  /**
+   * GET /api/database/videos/:id/stream
+   * Stream video file by video ID
+   * Supports range requests for seeking
+   */
+  @Get('videos/:id/stream')
+  async streamVideoById(
+    @Param('id') videoId: string,
+    @Req() req: Request,
+    @Res() res: Response
+  ) {
+    try {
+      const video = this.databaseService.getVideoById(videoId);
+
+      if (!video) {
+        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
+      }
+
+      const videoPath = video.current_path;
+
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        throw new HttpException('Video file not found on disk', HttpStatus.NOT_FOUND);
+      }
+
+      const stat = statSync(videoPath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      // Determine content type from file extension
+      const ext = path.extname(videoPath).toLowerCase();
+      const contentTypeMap: Record<string, string> = {
+        // Video formats
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogg': 'video/ogg',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.m4v': 'video/x-m4v',
+        '.flv': 'video/x-flv',
+        // Audio formats
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.m4b': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.flac': 'audio/flac',
+        '.wav': 'audio/wav',
+        '.oga': 'audio/ogg',
+        // Image formats
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+      };
+      const contentType = contentTypeMap[ext] || 'application/octet-stream';
+
+      if (range) {
+        // Handle range request for seeking
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 10 * 1024 * 1024, fileSize - 1);
+        const chunkSize = end - start + 1;
+
+        const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 });
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=3600',
+        });
+
+        stream.pipe(res);
+      } else {
+        // No range request, stream entire file
+        const stream = createReadStream(videoPath, { highWaterMark: 256 * 1024 });
+
+        res.writeHead(200, {
+          'Content-Length': fileSize,
+          'Content-Type': contentType,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+
+        stream.pipe(res);
+      }
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to stream video: ${(error as Error).message}`);
+      throw new HttpException(
+        `Failed to stream video: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
   }
 
   /**

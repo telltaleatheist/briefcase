@@ -1,0 +1,55 @@
+<div class="gallery-page">
+  <div class="container">
+    <!-- Header -->
+    <div class="page-header fade-in">
+      <h1 class="page-title gradient-text">Gallery</h1>
+      <p class="page-subtitle">
+        A beautiful showcase of creative works and designs
+      </p>
+    </div>
+
+    <!-- Category Filter -->
+    <div class="category-filter scale-in">
+      @for (category of categories; track category) {
+        <button
+          class="category-btn"
+          [class.active]="selectedCategory === category"
+          (click)="selectCategory(category)"
+        >
+          {{ category }}
+        </button>
+      }
+    </div>
+
+    <!-- Gallery Grid -->
+    <div class="gallery-grid">
+      @for (item of filteredItems; track item.id; let i = $index) {
+        <div
+          class="gallery-item"
+          [style.animation-delay.ms]="i * 50"
+        >
+          <div
+            class="gallery-card"
+            [style.background]="'linear-gradient(135deg, ' + item.color + ', ' + item.color + 'dd)'"
+          >
+            <div class="gallery-emoji">{{ item.emoji }}</div>
+            <div class="gallery-overlay">
+              <div class="gallery-content">
+                <h3 class="gallery-title">{{ item.title }}</h3>
+                <span class="gallery-category">{{ item.category }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+
+    @if (filteredItems.length === 0) {
+      <div class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <h3>No items found</h3>
+        <p>Try selecting a different category</p>
+      </div>
+    }
+  </div>
+</div>

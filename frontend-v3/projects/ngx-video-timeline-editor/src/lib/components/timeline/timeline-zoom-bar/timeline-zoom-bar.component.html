@@ -1,0 +1,20 @@
+<div class="zoom-track">
+  <!-- Viewport window (the visible range indicator) -->
+  <div
+    class="zoom-viewport"
+    [style]="viewportStyle"
+    (mousedown)="onViewportMouseDown($event)">
+
+    <!-- Left zoom handle -->
+    <div
+      class="zoom-handle left"
+      (mousedown)="onLeftHandleMouseDown($event)">
+    </div>
+
+    <!-- Right zoom handle -->
+    <div
+      class="zoom-handle right"
+      (mousedown)="onRightHandleMouseDown($event)">
+    </div>
+  </div>
+</div>

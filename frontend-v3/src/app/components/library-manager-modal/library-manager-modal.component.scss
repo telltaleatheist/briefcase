@@ -1,0 +1,624 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ==================== BACKDROP ====================
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  @include flex-center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+// ==================== MODAL CONTAINER ====================
+.modal-container {
+  background: var(--bg-card);
+  border-radius: $radius-lg;
+  box-shadow: $shadow-xl;
+  width: 90%;
+  max-width: 700px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.3s ease-out;
+  border: 2px solid var(--border-color);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+// ==================== HEADER ====================
+.modal-header {
+  @include flex-between;
+  padding: $spacing-lg $spacing-xl;
+  background: var(--bg-secondary);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.header-content {
+  @include flex-center;
+  gap: $spacing-md;
+}
+
+.header-icon {
+  font-size: $font-size-3xl;
+}
+
+.modal-title {
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.close-btn {
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  border-radius: $radius-md;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  font-size: $font-size-xl;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+  line-height: 0;
+  padding: 0;
+  padding-bottom: 2px; // Optical centering for × character
+
+  &:hover {
+    background: var(--error);
+    border-color: var(--error);
+    color: white;
+    transform: rotate(90deg);
+  }
+
+  &:active {
+    transform: rotate(90deg) scale(0.9);
+  }
+}
+
+// ==================== MODE TABS ====================
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  background: var(--bg-tertiary);
+  padding: $spacing-sm;
+  gap: $spacing-sm;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.tab-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-lg;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  &.active {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+    box-shadow: $shadow-md;
+  }
+}
+
+.tab-icon {
+  font-size: $font-size-xl;
+}
+
+// ==================== MODAL BODY ====================
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  @include custom-scrollbar;
+  padding: $spacing-xl;
+  background: var(--bg-primary);
+}
+
+// ==================== SELECT MODE ====================
+.select-mode {
+  min-height: 300px;
+}
+
+.libraries-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  overflow: hidden;
+}
+
+.library-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
+
+  &.selected {
+    background: rgba(255, 107, 53, 0.08);
+
+    .library-name {
+      color: var(--primary-orange);
+    }
+
+    .library-check {
+      display: flex;
+    }
+  }
+}
+
+.library-icon {
+  font-size: $font-size-base;
+  flex-shrink: 0;
+}
+
+.library-info {
+  @include flex-column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.library-name {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  transition: color $transition-fast;
+  @include truncate;
+}
+
+.library-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  @include truncate;
+}
+
+.library-check {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: var(--primary-orange);
+  border-radius: $radius-full;
+  color: white;
+  font-size: 11px;
+  font-weight: $font-weight-bold;
+  flex-shrink: 0;
+}
+
+// Empty State
+.empty-state {
+  @include flex-center;
+  flex-direction: column;
+  padding: $spacing-4xl $spacing-lg;
+  text-align: center;
+  min-height: 300px;
+}
+
+.empty-icon {
+  font-size: 5rem;
+  margin-bottom: $spacing-lg;
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin-bottom: $spacing-sm;
+}
+
+.empty-state p {
+  font-size: $font-size-base;
+  color: var(--text-secondary);
+  margin-bottom: $spacing-xl;
+}
+
+.create-first-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-xl;
+  background: var(--primary-orange);
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: lighten(#ff6b35, 5%);
+    transform: translateY(-2px);
+    box-shadow: $shadow-lg;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+// ==================== CREATE MODE ====================
+.create-mode {
+  min-height: 300px;
+}
+
+.form-section {
+  @include flex-column;
+  gap: $spacing-xl;
+}
+
+.section-title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: $spacing-md;
+}
+
+.form-group {
+  @include flex-column;
+  gap: $spacing-sm;
+}
+
+.form-label {
+  @include flex-center;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  justify-content: flex-start;
+}
+
+.label-icon {
+  font-size: $font-size-base;
+}
+
+.form-input {
+  padding: $spacing-md $spacing-lg;
+  background: var(--bg-card);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: all $transition-fast;
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+  }
+
+  &:hover:not(:focus) {
+    border-color: var(--text-tertiary);
+  }
+}
+
+.path-input-group {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: $spacing-sm;
+}
+
+.path-input {
+  font-family: 'Monaco', monospace;
+}
+
+.browse-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-lg;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all $transition-fast;
+  white-space: nowrap;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-orange);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.browse-icon {
+  font-size: $font-size-base;
+}
+
+.input-hint {
+  font-size: $font-size-xs;
+  color: var(--text-tertiary);
+  margin: 0;
+  font-style: italic;
+}
+
+// Preview Section
+.preview-section {
+  padding: $spacing-lg;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+}
+
+.preview-title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: $spacing-md;
+}
+
+.preview-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  background: var(--bg-card);
+  border: 2px solid var(--primary-orange);
+  border-radius: $radius-md;
+  align-items: center;
+}
+
+.preview-icon {
+  font-size: $font-size-4xl;
+}
+
+.preview-info {
+  @include flex-column;
+  gap: $spacing-xs;
+  min-width: 0;
+}
+
+.preview-name {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: var(--primary-orange);
+  @include truncate;
+}
+
+.preview-path {
+  font-size: $font-size-sm;
+  font-family: 'Monaco', monospace;
+  color: var(--text-secondary);
+  @include truncate;
+}
+
+// ==================== RELINK MODE ====================
+.relink-mode {
+  min-height: 300px;
+}
+
+.section-description {
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  line-height: $line-height-relaxed;
+  margin-bottom: $spacing-lg;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border-left: 3px solid var(--primary-orange);
+  border-radius: $radius-sm;
+}
+
+// Info Box
+.info-box {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: $spacing-md;
+  padding: $spacing-lg;
+  background: var(--bg-card);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-lg;
+}
+
+.info-icon {
+  font-size: $font-size-3xl;
+}
+
+.info-content {
+  @include flex-column;
+  gap: $spacing-sm;
+}
+
+.info-title {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.info-list {
+  margin: 0;
+  padding-left: $spacing-lg;
+  @include flex-column;
+  gap: $spacing-xs;
+
+  li {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    line-height: $line-height-relaxed;
+  }
+}
+
+.relink-preview {
+  border-color: #4ecdc4;
+
+  .preview-icon {
+    color: #4ecdc4;
+  }
+
+  .preview-label {
+    font-size: $font-size-xs;
+    font-weight: $font-weight-semibold;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: $spacing-xs;
+  }
+
+  .preview-path {
+    color: #4ecdc4;
+  }
+}
+
+// ==================== FOOTER ====================
+.modal-footer {
+  @include flex-between;
+  padding: $spacing-lg $spacing-xl;
+  background: var(--bg-secondary);
+  border-top: 2px solid var(--border-color);
+  gap: $spacing-md;
+}
+
+.footer-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-xl;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+  transition: all $transition-fast;
+  border: 2px solid transparent;
+  flex: 1;
+  max-width: 200px;
+
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+}
+
+.cancel-btn {
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+
+  &:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.confirm-btn {
+  background: var(--primary-orange);
+  border-color: var(--primary-orange);
+  color: white;
+
+  &:hover:not(:disabled) {
+    background: lighten(#ff6b35, 5%);
+    transform: translateY(-2px);
+    box-shadow: $shadow-lg;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-icon {
+  font-size: $font-size-lg;
+}
+
+// ==================== RESPONSIVE ====================
+@media (max-width: 768px) {
+  .modal-container {
+    width: 95%;
+    max-height: 90vh;
+  }
+
+  .library-card {
+    grid-template-columns: 60px 1fr;
+
+    .selection-badge {
+      position: absolute;
+      top: $spacing-sm;
+      right: $spacing-sm;
+      width: 28px;
+      height: 28px;
+      font-size: $font-size-base;
+    }
+  }
+
+  .library-thumbnail {
+    width: 60px;
+    height: 60px;
+  }
+
+  .detail-text {
+    max-width: 200px;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+
+    .footer-btn {
+      max-width: 100%;
+      width: 100%;
+    }
+  }
+}

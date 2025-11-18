@@ -1,0 +1,23 @@
+@import '../../../styles/timeline-theme';
+
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.waveform-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0.6;
+  transition: opacity var(--timeline-transition-normal);
+
+  &:hover {
+    opacity: 0.8;
+  }
+}

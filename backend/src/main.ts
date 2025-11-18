@@ -54,7 +54,8 @@ async function bootstrap() {
       'http://localhost:8080',     // Default Electron frontend port
       'http://localhost:3000',     // Fallback backend port
       'http://localhost:3001',     // Alternative backend port
-      'http://localhost:4200',     // Angular dev server
+      'http://localhost:4200',     // Angular dev server (old frontend)
+      'http://localhost:4201',     // Angular dev server (new frontend-v2)
       '*'                          // Allow all origins as fallback
     ];
 

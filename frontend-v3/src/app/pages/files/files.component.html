@@ -1,0 +1,98 @@
+<div class="files-page">
+  <div class="container">
+    <!-- Header -->
+    <div class="page-header fade-in">
+      <h1 class="page-title gradient-text">Video Library Manager</h1>
+      <p class="page-subtitle">
+        Organize and manage your video downloads by week
+      </p>
+      <button class="library-manager-btn" (click)="openLibraryManager()">
+        <span class="btn-icon">📚</span>
+        <span>Manage Libraries</span>
+      </button>
+    </div>
+
+    <!-- Features -->
+    <app-card title="Features" icon="⚡" class="features-card scale-in">
+      <div class="features-grid">
+        @for (feature of features; track feature) {
+          <div class="feature-item">
+            {{ feature }}
+          </div>
+        }
+      </div>
+    </app-card>
+
+    <!-- Instructions -->
+    <div class="instructions-grid">
+      <app-card title="How to Use" icon="💡" class="slide-in">
+        <ul class="instruction-list">
+          <li><strong>Click</strong> a video to select it</li>
+          <li><strong>Ctrl/Cmd + Click</strong> for multi-select</li>
+          <li><strong>Click "click to view"</strong> to edit filename</li>
+          <li><strong>Click X</strong> to delete a video</li>
+          <li><strong>Right-click</strong> for more options</li>
+        </ul>
+      </app-card>
+
+      <app-card title="Organization" icon="📅" class="slide-in" [style.animation-delay.ms]="100">
+        <ul class="instruction-list">
+          <li>Videos are organized by week</li>
+          <li>Week dividers separate each batch</li>
+          <li>Each video shows duration and size</li>
+          <li>Suggested filenames are auto-generated</li>
+          <li>Edit any filename with one click</li>
+        </ul>
+      </app-card>
+    </div>
+
+    <!-- Video Library -->
+    <div class="library-container fade-in">
+      <app-video-library [weeks]="videoLibrary" />
+    </div>
+
+    <!-- Tips -->
+    <app-card title="Pro Tips" icon="🎯" badge="Tips" badgeClass="badge-info" class="tips-card scale-in">
+      <div class="tips-grid">
+        <div class="tip-item">
+          <div class="tip-icon">📝</div>
+          <div class="tip-content">
+            <h4>Filename Suggestions</h4>
+            <p>Backend generates organized filenames with dates and descriptions</p>
+          </div>
+        </div>
+        <div class="tip-item">
+          <div class="tip-icon">🎨</div>
+          <div class="tip-content">
+            <h4>Visual Feedback</h4>
+            <p>Selected videos highlight with orange theme for easy tracking</p>
+          </div>
+        </div>
+        <div class="tip-item">
+          <div class="tip-icon">⚡</div>
+          <div class="tip-content">
+            <h4>Quick Actions</h4>
+            <p>Hover over videos to reveal delete button and context menu</p>
+          </div>
+        </div>
+        <div class="tip-item">
+          <div class="tip-icon">📊</div>
+          <div class="tip-content">
+            <h4>Week Organization</h4>
+            <p>Automatic grouping by week keeps your library organized</p>
+          </div>
+        </div>
+      </div>
+    </app-card>
+  </div>
+</div>
+
+<!-- Library Manager Modal -->
+<app-library-manager-modal
+  [show]="showLibraryModal()"
+  [existingLibraries]="existingLibraries"
+  (closed)="closeLibraryModal()"
+  (librarySelected)="onLibrarySelected($event)"
+  (libraryCreated)="onLibraryCreated($event)"
+  (libraryRelinked)="onLibraryRelinked($event)"
+/>

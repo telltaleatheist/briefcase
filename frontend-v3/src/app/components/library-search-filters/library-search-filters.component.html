@@ -1,0 +1,111 @@
+<div class="search-filters">
+  <!-- Search Bar (Always Visible) -->
+  <div class="search-bar">
+    <div class="search-input-wrapper">
+      <span class="search-icon">🔍</span>
+      <input
+        type="text"
+        [(ngModel)]="filters.searchQuery"
+        (ngModelChange)="onSearchChange()"
+        placeholder="Search media..."
+        class="search-input"
+      />
+    </div>
+    <button
+      class="accordion-toggle"
+      (click)="toggleAccordion()"
+      [attr.aria-expanded]="expanded()"
+    >
+      <span class="toggle-icon">{{ expanded() ? '▲' : '▼' }}</span>
+      <span>Filters</span>
+    </button>
+  </div>
+
+  <!-- Advanced Filters (Accordion Content) -->
+  <div class="accordion-content" [class.expanded]="expanded()">
+    <div class="filters-grid">
+      <!-- Date Range -->
+      <div class="filter-group">
+        <label>Date Range</label>
+        <select
+          [(ngModel)]="filters.dateRange"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option value="all">All Time</option>
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="year">This Year</option>
+        </select>
+      </div>
+
+      <!-- Has Transcript -->
+      <div class="filter-group">
+        <label>Transcript</label>
+        <select
+          [(ngModel)]="filters.hasTranscript"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option [ngValue]="null">Any</option>
+          <option [ngValue]="true">Has Transcript</option>
+          <option [ngValue]="false">No Transcript</option>
+        </select>
+      </div>
+
+      <!-- Has Analysis -->
+      <div class="filter-group">
+        <label>Analysis</label>
+        <select
+          [(ngModel)]="filters.hasAnalysis"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option [ngValue]="null">Any</option>
+          <option [ngValue]="true">Has Analysis</option>
+          <option [ngValue]="false">No Analysis</option>
+        </select>
+      </div>
+
+      <!-- Sort By -->
+      <div class="filter-group">
+        <label>Sort By</label>
+        <select
+          [(ngModel)]="filters.sortBy"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option value="date">Date Added</option>
+          <option value="name">Name</option>
+          <option value="size">File Size</option>
+          <option value="duration">Duration</option>
+        </select>
+      </div>
+
+      <!-- Sort Order -->
+      <div class="filter-group">
+        <label>Order</label>
+        <select
+          [(ngModel)]="filters.sortOrder"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option value="desc">Descending</option>
+          <option value="asc">Ascending</option>
+        </select>
+      </div>
+
+      <!-- Clear Filters Button -->
+      <div class="filter-group">
+        <label>&nbsp;</label>
+        <button
+          class="clear-filters-btn"
+          (click)="clearFilters()"
+        >
+          Clear All
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

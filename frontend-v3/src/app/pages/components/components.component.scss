@@ -1,0 +1,208 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+.components-page {
+  min-height: calc(100vh - 70px);
+  padding: $spacing-2xl $spacing-lg;
+  background: var(--bg-primary);
+}
+
+.page-header {
+  text-align: center;
+  margin-bottom: $spacing-4xl;
+}
+
+.page-title {
+  font-size: $font-size-5xl;
+  font-weight: $font-weight-extrabold;
+  margin-bottom: $spacing-md;
+}
+
+.page-subtitle {
+  font-size: $font-size-xl;
+  color: var(--text-secondary);
+}
+
+.component-section {
+  margin-bottom: $spacing-4xl;
+}
+
+.section-title {
+  font-size: $font-size-3xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: $spacing-lg;
+  color: var(--text-primary);
+
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 1.5rem;
+    background: var(--gradient-primary);
+    margin-right: $spacing-md;
+    border-radius: $radius-full;
+  }
+}
+
+// Button Showcase
+.button-showcase {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+  align-items: center;
+}
+
+// Cards Grid
+.cards-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-lg;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @include respond-to(lg) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+// Badges Showcase
+.badges-showcase {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+  align-items: center;
+}
+
+.badge {
+  padding: $spacing-xs $spacing-md;
+  border-radius: $radius-full;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    transform: scale(1.05);
+  }
+
+  &.badge-success {
+    background: rgba(34, 197, 94, 0.1);
+    color: $success;
+  }
+
+  &.badge-warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: $warning;
+  }
+
+  &.badge-error {
+    background: rgba(239, 68, 68, 0.1);
+    color: $error;
+  }
+
+  &.badge-info {
+    background: rgba(59, 130, 246, 0.1);
+    color: $info;
+  }
+}
+
+// Progress Bars
+.progress-list {
+  @include flex-column;
+  gap: $spacing-lg;
+}
+
+.progress-item {
+  @include flex-column;
+  gap: $spacing-sm;
+}
+
+.progress-header {
+  @include flex-between;
+  font-size: $font-size-sm;
+}
+
+.progress-label {
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+}
+
+.progress-value {
+  font-weight: $font-weight-semibold;
+  color: var(--primary-orange);
+}
+
+.progress-track {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: $radius-full;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: $radius-full;
+  transition: width 1s ease-out;
+  animation: progressGrow 1s ease-out;
+}
+
+@keyframes progressGrow {
+  from {
+    width: 0 !important;
+  }
+}
+
+// Color Palette
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-lg;
+
+  @include respond-to(md) {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.color-swatch {
+  text-align: center;
+  transition: transform $transition-base;
+
+  &:hover {
+    transform: translateY(-4px);
+
+    .color-preview {
+      transform: scale(1.05);
+      box-shadow: $shadow-xl;
+    }
+  }
+}
+
+.color-preview {
+  width: 100%;
+  height: 100px;
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-md;
+  box-shadow: $shadow-md;
+  transition: all $transition-base;
+}
+
+.color-name {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin-bottom: $spacing-xs;
+}
+
+.color-hex {
+  font-size: $font-size-xs;
+  font-family: 'Monaco', monospace;
+  color: var(--text-secondary);
+}
+
+// Utility classes
+.mb-lg {
+  margin-bottom: $spacing-lg;
+}

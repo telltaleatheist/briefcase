@@ -1,0 +1,97 @@
+// ============================================================================
+// CREAMSICLE DESIGN SYSTEM - THEMES
+// ============================================================================
+
+@use 'variables' as *;
+
+// Light Theme
+:root,
+[data-theme='light'] {
+  // Primary colors
+  --primary-orange: #{$primary-orange};
+  --light-orange: #{$light-orange};
+  --dark-orange: #{$dark-orange};
+  --accent-orange: #{$accent-orange};
+
+  // Background colors
+  --bg-primary: #{$white};
+  --bg-secondary: #{$light-gray};
+  --bg-tertiary: #{$medium-gray};
+  --bg-card: #{$white};
+  --bg-elevated: #{$white};
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+  --bg-input: rgba(255, 163, 102, 0.08);
+
+  // Text colors
+  --text-primary: #{$almost-black};
+  --text-secondary: #{$text-gray};
+  --text-tertiary: #{$border-gray};
+  --text-muted: #{$text-gray};
+  --text-inverse: #{$white};
+
+  // Border colors
+  --border-color: #{$border-gray};
+  --border-light: #{$medium-gray};
+  --border-dark: #{$dark-gray};
+
+  // Shadow
+  --shadow-color: rgba(0, 0, 0, 0.1);
+
+  // Semantic colors
+  --success: #{$success};
+  --warning: #{$warning};
+  --error: #{$error};
+  --info: #{$info};
+
+  // Gradients
+  --gradient-primary: #{$gradient-sunset};
+  --gradient-secondary: #{$gradient-sunrise};
+  --gradient-hero: linear-gradient(135deg, #fff5f0 0%, #ffffff 100%);
+
+  // Special effects
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.2);
+}
+
+// Dark Theme
+[data-theme='dark'] {
+  // Background colors
+  --bg-primary: #{$almost-black};
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #{$charcoal};
+  --bg-card: #1e1e1e;
+  --bg-elevated: #252525;
+  --bg-overlay: rgba(0, 0, 0, 0.7);
+  --bg-input: rgba(255, 163, 102, 0.05);
+
+  // Text colors
+  --text-primary: #{$white};
+  --text-secondary: #{$border-gray};
+  --text-tertiary: #{$text-gray};
+  --text-muted: #9ca3af;
+  --text-inverse: #{$almost-black};
+
+  // Border colors
+  --border-color: #374151;
+  --border-light: #{$charcoal};
+  --border-dark: #4b5563;
+
+  // Shadow
+  --shadow-color: rgba(0, 0, 0, 0.4);
+
+  // Gradients
+  --gradient-hero: linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%);
+
+  // Special effects
+  --glass-bg: rgba(0, 0, 0, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+// Theme transition
+html,
+body,
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 300ms;
+  transition-timing-function: ease;
+}

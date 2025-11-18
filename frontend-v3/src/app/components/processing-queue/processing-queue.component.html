@@ -1,0 +1,162 @@
+<div class="queue-container" [class.expanded]="expanded">
+  <div class="queue-header">
+    <div class="queue-title">
+      <span class="queue-icon">📋</span>
+      <h3>Processing Queue</h3>
+      <span class="queue-count">({{ items.length }} {{ items.length === 1 ? 'item' : 'items' }})</span>
+    </div>
+    <div class="queue-actions">
+      <button class="btn-icon" (click)="toggleExpanded.emit()" [attr.aria-label]="expanded ? 'Collapse queue' : 'Expand queue'">
+        {{ expanded ? '▼' : '▲' }}
+      </button>
+      <button class="btn-icon" (click)="close.emit()" aria-label="Close queue">
+        ✕
+      </button>
+    </div>
+  </div>
+
+  <div class="queue-content" *ngIf="expanded">
+    <!-- URL Input Section -->
+    <div class="url-input-section">
+      <button class="add-url-btn" (click)="showUrlInput.set(!showUrlInput())" *ngIf="!showUrlInput()">
+        <span class="btn-icon">➕</span>
+        <span>Add URL</span>
+      </button>
+
+      <div class="url-input-wrapper" *ngIf="showUrlInput()">
+        <input
+          #urlInputEl
+          type="text"
+          [(ngModel)]="urlInput"
+          (paste)="onUrlInputPaste($event)"
+          (keydown)="onUrlInputKeydown($event)"
+          placeholder="Paste URL(s) here... (one per line or press Enter)"
+          class="url-input"
+          autofocus
+        />
+        <button class="url-add-btn" (click)="addUrlClick()" [disabled]="!urlInput().trim()">
+          Add
+        </button>
+      </div>
+      <p class="url-hint" *ngIf="showUrlInput()">
+        💡 Paste multiple URLs at once, or type one and press Enter
+      </p>
+    </div>
+
+    <!-- Queue Items List -->
+    <div class="queue-items" *ngIf="items.length > 0">
+      <div class="queue-item" *ngFor="let item of items" [class]="getItemStatusClass(item)">
+        <!-- Status Indicator (8px column) -->
+        <div class="status-indicator"></div>
+
+        <!-- Item Icon (32px column) -->
+        <span class="item-icon">{{ item.source === 'url' ? '🔗' : '📹' }}</span>
+
+        <!-- Item Content (1fr column) -->
+        <div class="item-content">
+          <div class="item-title-row">
+            <span class="item-name">{{ getItemDisplayName(item) }}</span>
+          </div>
+
+            <!-- Progress Bar with Task Segments -->
+            <div class="progress-container" *ngIf="item.tasks.length > 0">
+              <div class="progress-bar">
+                <div
+                  class="progress-segment"
+                  *ngFor="let segment of getTaskSegments(item)"
+                  [style.width]="segment.width"
+                  [class.completed]="getTaskStatus(segment.task) === 'completed'"
+                  [class.running]="getTaskStatus(segment.task) === 'running'"
+                  [class.failed]="getTaskStatus(segment.task) === 'failed'"
+                  [attr.title]="segment.label"
+                >
+                  <div
+                    class="progress-fill"
+                    [style.width.%]="getTaskProgress(segment.task)"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Task Labels -->
+              <div class="task-labels">
+                <span
+                  class="task-label"
+                  *ngFor="let segment of getTaskSegments(item)"
+                  [style.width]="segment.width"
+                  [class.active]="getTaskStatus(segment.task) === 'running'"
+                >
+                  <span class="task-icon-small">{{ getTaskIcon(segment.task.type) }}</span>
+                  <span class="task-name">{{ segment.label }}</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- No Tasks Configured -->
+            <div class="no-tasks" *ngIf="item.tasks.length === 0">
+              <span class="warning-icon">⚠️</span>
+              <span>No tasks configured</span>
+              <button class="configure-link" (click)="openConfigModal(item)">Configure now</button>
+            </div>
+
+          <!-- Item Info (URL) -->
+          <div class="item-info" *ngIf="item.source === 'url' && item.url">
+            <span class="info-label">URL:</span>
+            <span class="info-text">{{ item.url }}</span>
+          </div>
+        </div>
+
+        <!-- Item Actions (auto column) -->
+        <div class="item-actions">
+          <button
+            class="config-btn"
+            (click)="openConfigModal(item); $event.stopPropagation()"
+            [attr.aria-label]="'Configure tasks for ' + getItemDisplayName(item)"
+            title="Configure Tasks"
+          >
+            ⚙️
+          </button>
+          <button
+            class="remove-btn"
+            (click)="removeItem.emit(item.id); $event.stopPropagation()"
+            aria-label="Remove item"
+            title="Remove from Queue"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div class="queue-empty" *ngIf="items.length === 0">
+      <div class="empty-icon">📋</div>
+      <p class="empty-text">Queue is empty</p>
+      <p class="empty-hint">Select items from the library or add URLs</p>
+    </div>
+
+    <!-- Queue Footer -->
+    <div class="queue-footer" *ngIf="items.length > 0">
+      <button class="btn btn-secondary" (click)="clearQueue.emit()">
+        Clear Queue
+      </button>
+      <button
+        class="btn btn-primary"
+        (click)="processQueue.emit()"
+        [disabled]="!canProcess()"
+      >
+        <span>Start Processing</span>
+        <span class="task-count" *ngIf="getTotalTaskCount() > 0">
+          ({{ getTotalTaskCount() }} {{ getTotalTaskCount() === 1 ? 'task' : 'tasks' }})</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Task Configuration Modal -->
+<app-queue-item-config-modal
+  [isOpen]="configModalOpen()"
+  [itemSource]="configModalSource()"
+  [existingTasks]="configModalTasks()"
+  (close)="closeConfigModal()"
+  (save)="saveConfigModal($event)"
+/>

@@ -208,9 +208,8 @@ export class SavedLinksService implements OnModuleInit {
         }
       }
 
-      // Add to batch queue using new queue system
+      // Add to unified queue using new queue system
       const jobId = this.queueManagerService.addJob({
-        queueType: 'batch',
         url: savedLink.url,
         displayName: savedLink.title || savedLink.url,
         tasks: [

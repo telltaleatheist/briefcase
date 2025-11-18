@@ -1,4 +1,4 @@
-// Queue Controller - Manage batch and analysis queues
+// Queue Controller - Manage unified job queue
 
 import {
   Controller,
@@ -7,7 +7,6 @@ import {
   Delete,
   Body,
   Param,
-  Query,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
@@ -19,25 +18,21 @@ export class QueueController {
   constructor(private readonly queueManager: QueueManagerService) {}
 
   /**
-   * Add a job to a queue
-   * POST /queue/add
-   * Body: { queueType, url?, videoId?, displayName?, tasks: Task[] }
+   * Add a job to the unified queue
+   * POST /queue/jobs
+   * Body: { url?, videoId?, videoPath?, displayName?, tasks: Task[] }
    */
-  @Post('add')
+  @Post('jobs')
   async addJob(
     @Body()
     body: {
-      queueType: 'batch' | 'analysis';
       url?: string;
       videoId?: string; // For transcribe/analyze tasks on existing library videos
+      videoPath?: string; // For local file processing
       displayName?: string;
       tasks: Task[];
     },
   ) {
-    if (!body.queueType) {
-      throw new HttpException('Queue type is required', HttpStatus.BAD_REQUEST);
-    }
-
     if (!body.tasks || body.tasks.length === 0) {
       throw new HttpException(
         'At least one task is required',
@@ -46,9 +41,9 @@ export class QueueController {
     }
 
     const jobId = this.queueManager.addJob({
-      queueType: body.queueType,
       url: body.url,
       videoId: body.videoId,
+      videoPath: body.videoPath,
       displayName: body.displayName,
       tasks: body.tasks,
     });
@@ -61,15 +56,14 @@ export class QueueController {
   }
 
   /**
-   * Add multiple jobs to a queue (bulk add)
-   * POST /queue/add-bulk
-   * Body: { queueType, jobs: Array<{ url?, videoId?, videoPath?, displayName?, tasks }> }
+   * Add multiple jobs to the unified queue (bulk add)
+   * POST /queue/jobs/bulk
+   * Body: { jobs: Array<{ url?, videoId?, videoPath?, displayName?, tasks }> }
    */
-  @Post('add-bulk')
+  @Post('jobs/bulk')
   async addBulkJobs(
     @Body()
     body: {
-      queueType: 'batch' | 'analysis';
       jobs: Array<{
         url?: string;
         videoId?: string;
@@ -79,10 +73,6 @@ export class QueueController {
       }>;
     },
   ) {
-    if (!body.queueType) {
-      throw new HttpException('Queue type is required', HttpStatus.BAD_REQUEST);
-    }
-
     if (!body.jobs || body.jobs.length === 0) {
       throw new HttpException('At least one job is required', HttpStatus.BAD_REQUEST);
     }
@@ -91,7 +81,6 @@ export class QueueController {
 
     for (const job of body.jobs) {
       const jobId = this.queueManager.addJob({
-        queueType: body.queueType,
         url: job.url,
         videoId: job.videoId,
         videoPath: job.videoPath,
@@ -109,16 +98,12 @@ export class QueueController {
   }
 
   /**
-   * Get queue status
-   * GET /queue/status?type=batch|analysis
+   * Get unified queue status
+   * GET /queue/status
    */
   @Get('status')
-  async getStatus(@Query('type') type: 'batch' | 'analysis') {
-    if (!type) {
-      throw new HttpException('Queue type is required', HttpStatus.BAD_REQUEST);
-    }
-
-    const status = this.queueManager.getQueueStatus(type);
+  async getStatus() {
+    const status = this.queueManager.getQueueStatus();
 
     return {
       success: true,
@@ -127,16 +112,12 @@ export class QueueController {
   }
 
   /**
-   * Get all jobs in a queue
-   * GET /queue/jobs?type=batch|analysis
+   * Get all jobs in the unified queue
+   * GET /queue/jobs
    */
   @Get('jobs')
-  async getJobs(@Query('type') type: 'batch' | 'analysis') {
-    if (!type) {
-      throw new HttpException('Queue type is required', HttpStatus.BAD_REQUEST);
-    }
-
-    const jobs = this.queueManager.getAllJobs(type);
+  async getJobs() {
+    const jobs = this.queueManager.getAllJobs();
 
     return {
       success: true,
@@ -202,20 +183,69 @@ export class QueueController {
   }
 
   /**
-   * Clear completed/failed jobs
-   * DELETE /queue/clear?type=batch|analysis
+   * Clear completed/failed jobs from unified queue
+   * DELETE /queue/jobs/completed
    */
-  @Delete('clear')
-  async clearCompleted(@Query('type') type: 'batch' | 'analysis') {
-    if (!type) {
-      throw new HttpException('Queue type is required', HttpStatus.BAD_REQUEST);
-    }
-
-    this.queueManager.clearCompletedJobs(type);
+  @Delete('jobs/completed')
+  async clearCompleted() {
+    this.queueManager.clearCompletedJobs();
 
     return {
       success: true,
       message: 'Completed and failed jobs cleared',
+    };
+  }
+
+  /**
+   * Quick add for browser extension (simplified endpoint)
+   * POST /queue/quick-add
+   * Body: { url: string, displayName?: string }
+   * Creates a standard download+import+transcribe+analyze job
+   */
+  @Post('quick-add')
+  async quickAdd(
+    @Body()
+    body: {
+      url: string;
+      displayName?: string;
+      includeTranscript?: boolean;
+      includeAnalysis?: boolean;
+      aiModel?: string;
+    },
+  ) {
+    if (!body.url) {
+      throw new HttpException('URL is required', HttpStatus.BAD_REQUEST);
+    }
+
+    // Build standard task list
+    const tasks: Task[] = [
+      { type: 'get-info' },
+      { type: 'download', options: {} },
+      { type: 'import', options: {} },
+    ];
+
+    // Add optional tasks
+    if (body.includeTranscript !== false) {
+      tasks.push({ type: 'transcribe', options: {} });
+    }
+
+    if (body.includeAnalysis) {
+      tasks.push({
+        type: 'analyze',
+        options: { aiModel: body.aiModel || 'claude-3.5-sonnet' },
+      });
+    }
+
+    const jobId = this.queueManager.addJob({
+      url: body.url,
+      displayName: body.displayName,
+      tasks,
+    });
+
+    return {
+      success: true,
+      jobId,
+      message: 'Quick job added to queue',
     };
   }
 }

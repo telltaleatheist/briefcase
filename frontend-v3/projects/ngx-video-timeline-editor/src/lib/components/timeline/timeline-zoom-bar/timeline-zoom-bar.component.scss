@@ -1,0 +1,79 @@
+@import '../../../styles/timeline-theme';
+
+:host {
+  display: block;
+  width: 100%;
+  margin: var(--timeline-zoom-bar-margin) 0;
+  padding: var(--timeline-zoom-bar-margin) var(--timeline-spacing);
+  background: var(--timeline-background-color);
+  border-radius: var(--timeline-zoom-bar-border-radius-lg);
+}
+
+.zoom-track {
+  position: relative;
+  height: var(--timeline-zoom-bar-track-height);
+  background: linear-gradient(to bottom, var(--timeline-background-secondary), var(--timeline-background-color));
+  border: 1px solid var(--timeline-border-color);
+  border-radius: var(--timeline-zoom-bar-border-radius-lg);
+  cursor: pointer;
+}
+
+.zoom-viewport {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    var(--timeline-primary-light),
+    var(--timeline-primary-color),
+    var(--timeline-primary-light)
+  );
+  border: 1px solid var(--timeline-primary-color);
+  border-radius: var(--timeline-border-radius);
+  cursor: grab;
+  min-width: var(--timeline-zoom-bar-min-width);
+  opacity: 0.7;
+  transition: opacity var(--timeline-transition-fast);
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &:active {
+    cursor: grabbing;
+    opacity: 1;
+  }
+}
+
+.zoom-handle {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: var(--timeline-zoom-bar-handle-width);
+  background: linear-gradient(
+    to bottom,
+    var(--timeline-primary-color),
+    var(--timeline-primary-lighter),
+    var(--timeline-primary-lightest),
+    var(--timeline-primary-lighter),
+    var(--timeline-primary-color)
+  );
+  cursor: ew-resize;
+  transition: width var(--timeline-transition-fast);
+
+  &.left {
+    left: 0;
+    border-top-left-radius: var(--timeline-border-radius);
+    border-bottom-left-radius: var(--timeline-border-radius);
+  }
+
+  &.right {
+    right: 0;
+    border-top-right-radius: var(--timeline-border-radius);
+    border-bottom-right-radius: var(--timeline-border-radius);
+  }
+
+  &:hover {
+    width: var(--timeline-zoom-bar-handle-width-hover);
+  }
+}

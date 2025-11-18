@@ -1,0 +1,235 @@
+@if (show) {
+  <div class="modal-backdrop" (click)="onBackdropClick($event)">
+    <div class="modal-container" (click)="$event.stopPropagation()">
+      <!-- Header -->
+      <div class="modal-header">
+        <div class="header-content">
+          <span class="header-icon">📚</span>
+          <h2 class="modal-title">Library Manager</h2>
+        </div>
+        <button class="close-btn" (click)="close()" title="Close">×</button>
+      </div>
+
+      <!-- Mode Tabs -->
+      <div class="mode-tabs">
+        <button
+          class="tab-btn"
+          [class.active]="mode() === 'select'"
+          (click)="switchMode('select')"
+        >
+          <span class="tab-icon">📂</span>
+          <span class="tab-label">Select</span>
+        </button>
+        <button
+          class="tab-btn"
+          [class.active]="mode() === 'create'"
+          (click)="switchMode('create')"
+        >
+          <span class="tab-icon">➕</span>
+          <span class="tab-label">Create</span>
+        </button>
+        <button
+          class="tab-btn"
+          [class.active]="mode() === 'relink'"
+          (click)="switchMode('relink')"
+        >
+          <span class="tab-icon">🔗</span>
+          <span class="tab-label">Relink</span>
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="modal-body">
+        <!-- Select Existing Library Mode -->
+        @if (mode() === 'select') {
+          <div class="select-mode">
+            @if (existingLibraries.length > 0) {
+              <div class="libraries-list">
+                @for (library of existingLibraries; track library.id) {
+                  <div
+                    class="library-item"
+                    [class.selected]="selectedLibrary()?.id === library.id"
+                    (click)="selectLibrary(library)"
+                  >
+                    <span class="library-icon">📁</span>
+                    <div class="library-info">
+                      <span class="library-name">{{ library.name }}</span>
+                      <span class="library-meta">{{ library.videoCount }} videos • {{ library.path }}</span>
+                    </div>
+                    @if (selectedLibrary()?.id === library.id) {
+                      <span class="library-check">✓</span>
+                    }
+                  </div>
+                }
+              </div>
+            } @else {
+              <div class="empty-state">
+                <div class="empty-icon">📚</div>
+                <h3>No Libraries Found</h3>
+                <p>Create a new library to get started</p>
+                <button class="create-first-btn" (click)="switchMode('create')">
+                  <span>➕</span>
+                  Create Your First Library
+                </button>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Create New Library Mode -->
+        @if (mode() === 'create') {
+          <div class="create-mode">
+            <div class="form-section">
+              <h3 class="section-title">Library Details</h3>
+
+              <!-- Library Name -->
+              <div class="form-group">
+                <label class="form-label" for="library-name">
+                  <span class="label-icon">✏️</span>
+                  Library Name
+                </label>
+                <input
+                  id="library-name"
+                  type="text"
+                  class="form-input"
+                  placeholder="e.g., My Video Collection"
+                  [value]="newLibraryName()"
+                  (input)="newLibraryName.set($any($event.target).value)"
+                  autofocus
+                />
+              </div>
+
+              <!-- Library Location -->
+              <div class="form-group">
+                <label class="form-label" for="library-path">
+                  <span class="label-icon">📂</span>
+                  Library Location
+                </label>
+                <div class="path-input-group">
+                  <input
+                    id="library-path"
+                    type="text"
+                    class="form-input path-input"
+                    placeholder="e.g., /Users/username/Videos"
+                    [value]="newLibraryPath()"
+                    (input)="newLibraryPath.set($any($event.target).value)"
+                  />
+                  <button class="browse-btn" (click)="browsePath()">
+                    <span class="browse-icon">🔍</span>
+                    Browse
+                  </button>
+                </div>
+                <p class="input-hint">Choose a folder where your videos will be stored</p>
+              </div>
+
+              <!-- Preview -->
+              @if (newLibraryName() || newLibraryPath()) {
+                <div class="preview-section">
+                  <h4 class="preview-title">Preview</h4>
+                  <div class="preview-card">
+                    <div class="preview-icon">🎬</div>
+                    <div class="preview-info">
+                      <div class="preview-name">
+                        {{ newLibraryName() || 'Untitled Library' }}
+                      </div>
+                      <div class="preview-path">
+                        {{ newLibraryPath() || 'No location selected' }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        <!-- Relink Library Mode -->
+        @if (mode() === 'relink') {
+          <div class="relink-mode">
+            <div class="form-section">
+              <h3 class="section-title">Reconnect to Existing Library</h3>
+              <p class="section-description">
+                Browse to the folder containing an existing library to reconnect it.
+                This is useful if you've moved a library or need to access one from a different location.
+              </p>
+
+              <!-- Library Location -->
+              <div class="form-group">
+                <label class="form-label" for="relink-path">
+                  <span class="label-icon">📂</span>
+                  Library Folder Path
+                </label>
+                <div class="path-input-group">
+                  <input
+                    id="relink-path"
+                    type="text"
+                    class="form-input path-input"
+                    placeholder="e.g., /Users/username/Videos/MyLibrary"
+                    [value]="relinkPath()"
+                    (input)="relinkPath.set($any($event.target).value)"
+                    autofocus
+                  />
+                  <button class="browse-btn" (click)="browseRelinkPath()">
+                    <span class="browse-icon">🔍</span>
+                    Browse
+                  </button>
+                </div>
+                <p class="input-hint">Select the folder that contains your existing library files</p>
+              </div>
+
+              <!-- Info Box -->
+              <div class="info-box">
+                <div class="info-icon">💡</div>
+                <div class="info-content">
+                  <h4 class="info-title">What happens when relinking?</h4>
+                  <ul class="info-list">
+                    <li>The app will scan the folder for existing library data</li>
+                    <li>Your videos and organization will be preserved</li>
+                    <li>The library will appear in your libraries list</li>
+                  </ul>
+                </div>
+              </div>
+
+              <!-- Preview -->
+              @if (relinkPath()) {
+                <div class="preview-section">
+                  <h4 class="preview-title">Selected Path</h4>
+                  <div class="preview-card relink-preview">
+                    <div class="preview-icon">🔗</div>
+                    <div class="preview-info">
+                      <div class="preview-label">Relinking to:</div>
+                      <div class="preview-path">{{ relinkPath() }}</div>
+                    </div>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="modal-footer">
+        <button class="footer-btn cancel-btn" (click)="close()">
+          Cancel
+        </button>
+        <button
+          class="footer-btn confirm-btn"
+          [disabled]="!isValid()"
+          (click)="confirm()"
+        >
+          @if (mode() === 'select') {
+            <span class="btn-icon">✓</span>
+            <span>Select Library</span>
+          } @else if (mode() === 'create') {
+            <span class="btn-icon">➕</span>
+            <span>Create Library</span>
+          } @else {
+            <span class="btn-icon">🔗</span>
+            <span>Relink Library</span>
+          }
+        </button>
+      </div>
+    </div>
+  </div>
+}

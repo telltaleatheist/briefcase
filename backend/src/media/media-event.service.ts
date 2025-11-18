@@ -347,12 +347,97 @@ export class MediaEventService {
   }
 
   /**
-   * Queue status updated event
+   * Queue status updated event (Legacy - kept for backward compatibility)
    */
   emitQueueStatusUpdated(queueType: 'batch' | 'analysis', status: any): void {
     this.emitEvent('queue-status-updated', {
       queueType,
       status,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Unified Queue Events (5+1 Pool Model)
+   */
+
+  /**
+   * Generic emit method that supports any event name
+   * This is used by the queue manager to emit task events
+   */
+  emit(eventName: string, data: any): void {
+    this.emitEvent(eventName, data);
+  }
+
+  /**
+   * Emit task started event
+   */
+  emitTaskStarted(taskId: string, jobId: string, videoId: string | undefined, type: string, pool: 'main' | 'ai'): void {
+    this.emitEvent('task.started', {
+      taskId,
+      jobId,
+      videoId,
+      type,
+      pool,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Emit task progress event
+   */
+  emitTaskProgressUpdate(taskId: string, jobId: string, videoId: string | undefined, type: string, progress: number, message?: string): void {
+    this.emitEvent('task.progress', {
+      taskId,
+      jobId,
+      videoId,
+      type,
+      progress: this.normalizeProgress(progress),
+      message,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Emit task completed event
+   */
+  emitTaskCompleted(taskId: string, jobId: string, videoId: string | undefined, type: string, result?: any, duration?: number): void {
+    this.emitEvent('task.completed', {
+      taskId,
+      jobId,
+      videoId,
+      type,
+      result,
+      duration,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Emit task failed event
+   */
+  emitTaskFailed(taskId: string, jobId: string, videoId: string | undefined, type: string, error: { code: string; message: string }, canRetry: boolean): void {
+    this.emitEvent('task.failed', {
+      taskId,
+      jobId,
+      videoId,
+      type,
+      error,
+      canRetry,
+      timestamp: this.getTimestamp()
+    });
+  }
+
+  /**
+   * Emit system status event (unified queue status)
+   */
+  emitSystemStatus(status: {
+    mainPool: { active: number; maxConcurrent: number; tasks: any[] };
+    aiPool: { active: number; maxConcurrent: number; task: any | null };
+    queue: { total: number; pending: number; processing: number; completed: number; failed: number };
+  }): void {
+    this.emitEvent('system.status', {
+      ...status,
       timestamp: this.getTimestamp()
     });
   }

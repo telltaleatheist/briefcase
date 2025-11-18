@@ -1,0 +1,87 @@
+<div class="library-page">
+  <!-- Page Header -->
+  <div class="page-header" [class.mini]="queueExpanded()">
+    <div class="header-content">
+      <h1 class="page-title">Media Library</h1>
+      <p class="page-subtitle" *ngIf="!queueExpanded()">
+        <span *ngIf="currentLibrary()">{{ currentLibrary()?.name }}</span>
+        <span *ngIf="!currentLibrary()">No library selected</span>
+      </p>
+      <button class="expand-btn" *ngIf="queueExpanded()" (click)="onToggleQueue()">
+        <span>▲ Show Library</span>
+        <span class="selected-count" *ngIf="selectedCount() > 0">({{ selectedCount() }} selected)</span>
+      </button>
+    </div>
+    <div class="header-actions" *ngIf="!queueExpanded()">
+      <button
+        class="btn btn-primary"
+        [disabled]="selectedCount() !== 1"
+        (click)="openInEditor()"
+        [title]="selectedCount() === 1 ? 'Open in Video Editor' : 'Select exactly one video'">
+        <span class="btn-icon">🎬</span>
+        <span>Video Editor</span>
+      </button>
+      <button class="btn btn-secondary" (click)="selectedCount() > 0 ? onAddSelectedToQueue() : onPasteUrls()">
+        <span class="btn-icon">{{ selectedCount() > 0 ? '➕' : '📋' }}</span>
+        <span>{{ selectedCount() > 0 ? 'Add Selected' : 'Paste URLs' }}</span>
+        <span class="badge" *ngIf="selectedCount() > 0">{{ selectedCount() }}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Search and Filters (Only show when not collapsed) -->
+  <div class="filters-section" *ngIf="!queueExpanded()">
+    <app-library-search-filters
+      (filtersChanged)="onFiltersChanged($event)"
+    />
+  </div>
+
+  <!-- Unified Container for Library + Queue -->
+  <div class="main-container">
+    <!-- Video Library List (Only show when not collapsed) -->
+    <div class="library-section" *ngIf="!queueExpanded()">
+      <app-video-library
+        [weeks]="filteredWeeks()"
+        (selectionChanged)="onSelectionChanged($event)"
+        (videoAction)="onVideoAction($event)"
+      />
+
+      <!-- Empty State -->
+      <div class="empty-state" *ngIf="filteredWeeks().length === 0">
+        <div class="empty-icon">📹</div>
+        <h3 class="empty-title">No media found</h3>
+        <p class="empty-description">
+          <span *ngIf="currentFilters?.searchQuery">
+            Try adjusting your search filters
+          </span>
+          <span *ngIf="!currentFilters?.searchQuery">
+            Select items and add them to the queue to process
+          </span>
+        </p>
+      </div>
+    </div>
+
+    <!-- Processing Queue -->
+    <app-processing-queue
+      [items]="queueItems()"
+      [expanded]="queueExpanded()"
+      (close)="onCloseQueue()"
+      (removeItem)="onRemoveQueueItem($event)"
+      (clearQueue)="onClearQueue()"
+      (processQueue)="onProcessQueue()"
+      (urlAdded)="onUrlAdded($event)"
+      (toggleExpanded)="onToggleQueue()"
+      (itemTasksUpdated)="onItemTasksUpdated($event)"
+    />
+  </div>
+</div>
+
+<!-- Library Manager Modal -->
+<app-library-manager-modal
+  [show]="libraryManagerOpen()"
+  [existingLibraries]="libraries()"
+  (closed)="closeLibraryManager()"
+  (librarySelected)="onLibrarySelected($event)"
+  (libraryCreated)="onLibraryCreated($event)"
+  (libraryRelinked)="onLibraryRelinked($event)"
+/>

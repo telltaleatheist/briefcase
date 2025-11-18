@@ -1,0 +1,174 @@
+<div class="components-page">
+  <div class="container">
+    <!-- Header -->
+    <div class="page-header fade-in">
+      <h1 class="page-title gradient-text">Component Library</h1>
+      <p class="page-subtitle">
+        Explore our comprehensive collection of beautiful, reusable components
+      </p>
+    </div>
+
+    <!-- Buttons Section -->
+    <section class="component-section">
+      <h2 class="section-title">Buttons</h2>
+
+      <!-- Button Variants -->
+      <app-card title="Button Variants" class="mb-lg">
+        <div class="button-showcase">
+          @for (variant of buttonVariants; track variant) {
+            <app-button [variant]="variant">
+              {{ variant | titlecase }}
+            </app-button>
+          }
+        </div>
+      </app-card>
+
+      <!-- Button Sizes -->
+      <app-card title="Button Sizes" class="mb-lg">
+        <div class="button-showcase">
+          @for (size of buttonSizes; track size) {
+            <app-button [size]="size" variant="primary">
+              {{ size | uppercase }} Button
+            </app-button>
+          }
+        </div>
+      </app-card>
+
+      <!-- Buttons with Icons -->
+      <app-card title="Buttons with Icons">
+        <div class="button-showcase">
+          <app-button variant="gradient" icon="🚀" iconRight="→">
+            Launch Project
+          </app-button>
+          <app-button variant="primary" icon="💾">
+            Save Changes
+          </app-button>
+          <app-button variant="outline" icon="🗑️">
+            Delete
+          </app-button>
+          <app-button variant="ghost" icon="⚙️">
+            Settings
+          </app-button>
+        </div>
+      </app-card>
+    </section>
+
+    <!-- Cards Section -->
+    <section class="component-section">
+      <h2 class="section-title">Cards</h2>
+
+      <div class="cards-grid">
+        @for (card of sampleCards; track card.title) {
+          <app-card
+            [icon]="card.icon"
+            [title]="card.title"
+            [badge]="card.badge"
+            [badgeClass]="card.badgeClass"
+            [footer]="true"
+          >
+            <p>{{ card.content }}</p>
+
+            <div footer>
+              <app-button variant="ghost" size="sm" iconRight="→">
+                Learn More
+              </app-button>
+            </div>
+          </app-card>
+        }
+      </div>
+    </section>
+
+    <!-- Badges Section -->
+    <section class="component-section">
+      <h2 class="section-title">Badges</h2>
+
+      <app-card title="Badge Variants">
+        <div class="badges-showcase">
+          @for (badge of badges; track badge.text) {
+            <span class="badge" [class]="badge.class">
+              {{ badge.text }}
+            </span>
+          }
+        </div>
+      </app-card>
+    </section>
+
+    <!-- Progress Bars Section -->
+    <section class="component-section">
+      <h2 class="section-title">Progress Bars</h2>
+
+      <app-card title="Project Progress">
+        <div class="progress-list">
+          @for (progress of progressBars; track progress.label) {
+            <div class="progress-item">
+              <div class="progress-header">
+                <span class="progress-label">{{ progress.label }}</span>
+                <span class="progress-value">{{ progress.value }}%</span>
+              </div>
+              <div class="progress-track">
+                <div
+                  class="progress-fill"
+                  [style.width.%]="progress.value"
+                  [style.background]="progress.color"
+                ></div>
+              </div>
+            </div>
+          }
+        </div>
+      </app-card>
+    </section>
+
+    <!-- Color Palette Section -->
+    <section class="component-section">
+      <h2 class="section-title">Color Palette</h2>
+
+      <app-card title="Brand Colors">
+        <div class="color-grid">
+          <div class="color-swatch">
+            <div class="color-preview" style="background: #ff6b35;"></div>
+            <div class="color-name">Primary Orange</div>
+            <div class="color-hex">#ff6b35</div>
+          </div>
+          <div class="color-swatch">
+            <div class="color-preview" style="background: #ff8c5a;"></div>
+            <div class="color-name">Light Orange</div>
+            <div class="color-hex">#ff8c5a</div>
+          </div>
+          <div class="color-swatch">
+            <div class="color-preview" style="background: #e55529;"></div>
+            <div class="color-name">Dark Orange</div>
+            <div class="color-hex">#e55529</div>
+          </div>
+          <div class="color-swatch">
+            <div class="color-preview" style="background: #ffa366;"></div>
+            <div class="color-name">Accent Orange</div>
+            <div class="color-hex">#ffa366</div>
+          </div>
+        </div>
+      </app-card>
+    </section>
+
+    <!-- Typography Section -->
+    <section class="component-section">
+      <h2 class="section-title">Typography</h2>
+
+      <app-card title="Heading Styles">
+        <h1>Heading 1 - Extra Large</h1>
+        <h2>Heading 2 - Large</h2>
+        <h3>Heading 3 - Medium</h3>
+        <h4>Heading 4 - Regular</h4>
+        <h5>Heading 5 - Small</h5>
+        <h6>Heading 6 - Extra Small</h6>
+
+        <p style="margin-top: 1rem;">
+          This is a paragraph of body text. It uses the Inter font family
+          with comfortable line spacing for excellent readability.
+        </p>
+
+        <p class="gradient-text" style="font-size: 1.5rem; font-weight: 800;">
+          Gradient text looks amazing!
+        </p>
+      </app-card>
+    </section>
+  </div>
+</div>

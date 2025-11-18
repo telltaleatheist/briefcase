@@ -1,0 +1,104 @@
+@import '../../../styles/timeline-theme';
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.time-markers {
+  position: relative;
+  height: var(--timeline-ruler-height);
+  margin-bottom: var(--timeline-ruler-margin);
+  padding-bottom: var(--timeline-spacing);
+  background: linear-gradient(to bottom, transparent 0%, var(--timeline-background-overlay) 100%);
+  border-bottom: var(--timeline-border-width) solid var(--timeline-border-color);
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    background: linear-gradient(to bottom, transparent 0%, var(--timeline-primary-overlay) 100%);
+  }
+}
+
+.time-marker {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+
+  .time-tick {
+    width: 1px;
+    background-color: var(--timeline-border-color-secondary);
+    margin-top: var(--timeline-component-padding);
+    box-shadow: var(--timeline-shadow-sm);
+  }
+
+  &.major {
+    .time-tick {
+      height: var(--timeline-ruler-tick-major-height);
+      background: linear-gradient(to top, var(--timeline-primary-color), var(--timeline-secondary-color));
+      width: var(--timeline-border-width);
+      box-shadow: 0 0 4px var(--timeline-primary-overlay-medium);
+    }
+
+    .time-label {
+      font-size: var(--timeline-ruler-label-font-size);
+      color: var(--timeline-text-color);
+      font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+      white-space: nowrap;
+      font-weight: 600;
+      text-shadow: 0 1px 1px rgba(255, 255, 255, 0.8);
+      background: rgba(255, 255, 255, 0.9);
+      padding: var(--timeline-ruler-label-padding);
+      border-radius: var(--timeline-ruler-label-border-radius);
+      border: 1px solid var(--timeline-primary-overlay-medium);
+      cursor: default;
+      pointer-events: none;
+      user-select: none;
+      transition: var(--timeline-transition-normal);
+
+      // Fix fuzzy text rendering
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-feature-settings: "kern" 1;
+      backface-visibility: hidden;
+      transform: translateZ(0);
+    }
+  }
+
+  &.minor {
+    .time-tick {
+      height: var(--timeline-ruler-tick-minor-height);
+      background-color: var(--timeline-border-color-secondary);
+      width: 1px;
+    }
+  }
+
+  &:first-child {
+    transform: translateX(0);
+
+    .time-label {
+      margin-left: 4px;
+    }
+  }
+
+  &:last-child {
+    transform: translateX(-100%);
+
+    .time-label {
+      margin-right: 4px;
+    }
+  }
+}
+
+// Dark mode - handled by media query from theme file
+@media (prefers-color-scheme: dark) {
+  .time-marker.major .time-label {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.6);
+  }
+}

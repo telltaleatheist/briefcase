@@ -1,0 +1,905 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+.video-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+// ==================== HEADER ====================
+.editor-header {
+  @include flex-between;
+  padding: $spacing-md $spacing-lg;
+  background: var(--bg-card);
+  border-bottom: 2px solid var(--border-color);
+  box-shadow: $shadow-md;
+  z-index: 100;
+  gap: $spacing-lg;
+}
+
+.header-left {
+  @include flex-center;
+  gap: $spacing-md;
+  flex: 1;
+}
+
+.editor-title {
+  @include flex-center;
+  gap: $spacing-sm;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0;
+
+  .title-icon {
+    font-size: $font-size-2xl;
+  }
+}
+
+.project-name {
+  padding: $spacing-xs $spacing-md;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-family: 'Monaco', monospace;
+  color: var(--text-secondary);
+}
+
+.header-center {
+  @include flex-center;
+  gap: $spacing-md;
+  flex: 1;
+  justify-content: center;
+}
+
+.control-btn {
+  @include flex-center;
+  width: 44px;
+  height: 44px;
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  cursor: pointer;
+  transition: all $transition-fast;
+  font-size: $font-size-xl;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-orange);
+    transform: translateY(-2px);
+    box-shadow: $shadow-md;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  &.play-btn {
+    width: 52px;
+    height: 52px;
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+    font-size: $font-size-2xl;
+
+    &:hover {
+      background: lighten(#ff6b35, 5%);
+      transform: scale(1.05);
+    }
+
+    &:active {
+      transform: scale(0.95);
+    }
+  }
+}
+
+.time-display {
+  @include flex-center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-lg;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-family: 'Monaco', monospace;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  min-width: 180px;
+  justify-content: center;
+
+  .current-time {
+    color: var(--primary-orange);
+  }
+
+  .time-separator {
+    color: var(--text-tertiary);
+  }
+
+  .total-time {
+    color: var(--text-secondary);
+  }
+}
+
+.header-right {
+  @include flex-center;
+  gap: $spacing-sm;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.sidebar-toggle {
+  @include flex-center;
+  width: 40px;
+  height: 40px;
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  cursor: pointer;
+  transition: all $transition-fast;
+  font-size: $font-size-xl;
+  opacity: 0.6;
+
+  &:hover {
+    opacity: 1;
+    border-color: var(--primary-orange);
+    transform: translateY(-2px);
+  }
+
+  &.active {
+    opacity: 1;
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+  }
+}
+
+// ==================== MAIN EDITOR ====================
+.editor-main {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  flex: 1;
+  overflow: hidden;
+  gap: 0;
+}
+
+// ==================== SIDEBARS ====================
+.sidebar {
+  width: 280px;
+  background: var(--bg-card);
+  border-right: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  &.info-sidebar {
+    border-right: none;
+    border-left: 2px solid var(--border-color);
+  }
+}
+
+.sidebar-header {
+  padding: $spacing-lg;
+  background: var(--bg-secondary);
+  border-bottom: 2px solid var(--border-color);
+}
+
+.sidebar-title {
+  @include flex-center;
+  gap: $spacing-sm;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0;
+
+  .sidebar-icon {
+    font-size: $font-size-xl;
+  }
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  @include custom-scrollbar;
+  padding: $spacing-lg;
+}
+
+// ==================== SETTINGS ====================
+.settings-section {
+  margin-bottom: $spacing-2xl;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.section-title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: $spacing-md;
+}
+
+.setting-item {
+  margin-bottom: $spacing-lg;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.setting-label {
+  display: block;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  margin-bottom: $spacing-sm;
+}
+
+.speed-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-xs;
+}
+
+.speed-btn {
+  padding: $spacing-sm;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-orange);
+    color: var(--text-primary);
+  }
+
+  &.active {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+  }
+}
+
+.volume-slider {
+  width: 100%;
+  height: 6px;
+  border-radius: $radius-full;
+  background: var(--bg-secondary);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-orange);
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:hover {
+      transform: scale(1.2);
+      box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.2);
+    }
+  }
+
+  &::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-orange);
+    cursor: pointer;
+    border: none;
+    transition: all $transition-fast;
+
+    &:hover {
+      transform: scale(1.2);
+      box-shadow: 0 0 0 4px rgba(255, 107, 53, 0.2);
+    }
+  }
+}
+
+.zoom-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: $spacing-xs;
+}
+
+.zoom-btn {
+  padding: $spacing-sm;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-orange);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.setting-checkbox {
+  @include flex-center;
+  gap: $spacing-sm;
+  cursor: pointer;
+  user-select: none;
+
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    border-radius: $radius-sm;
+    border: 2px solid var(--border-color);
+    cursor: pointer;
+    transition: all $transition-fast;
+
+    &:checked {
+      background: var(--primary-orange);
+      border-color: var(--primary-orange);
+    }
+  }
+
+  span {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+  }
+}
+
+.export-btn {
+  @include flex-center;
+  gap: $spacing-sm;
+  width: 100%;
+  padding: $spacing-md;
+  background: var(--primary-orange);
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: lighten(#ff6b35, 5%);
+    transform: translateY(-2px);
+    box-shadow: $shadow-lg;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  .btn-icon {
+    font-size: $font-size-lg;
+  }
+}
+
+// ==================== INFO SIDEBAR ====================
+.info-section {
+  margin-bottom: $spacing-2xl;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  padding: $spacing-sm;
+  background: var(--bg-secondary);
+  border-radius: $radius-sm;
+  border-left: 3px solid var(--primary-orange);
+}
+
+.info-label {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.info-value {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  font-family: 'Monaco', monospace;
+}
+
+// ==================== EDITOR CONTENT ====================
+.editor-content {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+// ==================== VIDEO PLAYER ====================
+.video-player-area {
+  flex: 1;
+  @include flex-center;
+  padding: $spacing-2xl;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+}
+
+.video-container {
+  width: 100%;
+  max-width: 1200px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  box-shadow: $shadow-xl;
+  position: relative;
+}
+
+.video-placeholder {
+  @include flex-center;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+}
+
+.placeholder-icon {
+  font-size: 6rem;
+  margin-bottom: $spacing-lg;
+  opacity: 0.5;
+}
+
+.placeholder-text {
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: $spacing-xs;
+}
+
+.placeholder-subtitle {
+  font-size: $font-size-base;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: 'Monaco', monospace;
+}
+
+.video-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.video-progress-bar {
+  height: 100%;
+  background: var(--primary-orange);
+  transition: width 0.1s linear;
+  box-shadow: 0 0 10px rgba(255, 107, 53, 0.5);
+}
+
+// ==================== TIMELINE ====================
+.timeline-area {
+  height: 450px;
+  background: var(--bg-card);
+  border-top: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.timeline-header {
+  @include flex-between;
+  padding: $spacing-sm $spacing-lg;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.timeline-title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.timeline-info {
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  font-weight: $font-weight-medium;
+}
+
+// Timeline Ruler
+.timeline-ruler {
+  height: 30px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  overflow-y: hidden;
+  @include custom-scrollbar;
+  position: relative;
+}
+
+.ruler-marks {
+  position: relative;
+  height: 100%;
+  min-width: 100%;
+}
+
+.ruler-mark {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--border-color);
+  @include flex-center;
+  padding: 0 $spacing-xs;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 8px;
+    background: var(--text-tertiary);
+  }
+}
+
+.ruler-time {
+  font-size: $font-size-xs;
+  font-family: 'Monaco', monospace;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+// Timeline Tracks
+.timeline-tracks {
+  flex: 1;
+  position: relative;
+  background: var(--bg-primary);
+  overflow: auto;
+  @include custom-scrollbar;
+}
+
+.timeline-scroll {
+  position: relative;
+  min-height: 100%;
+  min-width: 100%;
+}
+
+// Playhead
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  pointer-events: none;
+  transition: left 0.1s linear;
+}
+
+.playhead-handle {
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 16px;
+  height: 20px;
+  background: var(--primary-orange);
+  border-radius: 0 0 $radius-sm $radius-sm;
+  box-shadow: $shadow-md;
+  pointer-events: all;
+  cursor: ew-resize;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid white;
+  }
+}
+
+.playhead-line {
+  position: absolute;
+  top: 20px;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--primary-orange);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.5);
+}
+
+// Timeline Markers
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.marker-flag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(-50%);
+  padding: $spacing-xs $spacing-sm;
+  background: var(--marker-color, var(--primary-orange));
+  color: white;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  border-radius: $radius-sm;
+  white-space: nowrap;
+  box-shadow: $shadow-md;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.marker-line {
+  position: absolute;
+  top: 24px;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--marker-color, var(--primary-orange));
+  opacity: 0.5;
+}
+
+// Video Clips
+.timeline-clip {
+  position: absolute;
+  height: 120px;
+  background: var(--bg-card);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  cursor: move;
+  transition: all $transition-fast;
+  overflow: hidden;
+  box-shadow: $shadow-sm;
+
+  &:hover {
+    border-color: var(--primary-orange);
+    box-shadow: $shadow-md;
+    z-index: 10;
+  }
+
+  &.selected {
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.2);
+    z-index: 20;
+  }
+}
+
+.clip-header {
+  @include flex-between;
+  padding: $spacing-xs $spacing-sm;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.clip-name {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  @include truncate;
+}
+
+.clip-delete {
+  @include flex-center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: $radius-sm;
+  font-size: $font-size-base;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--error);
+    border-color: var(--error);
+    color: white;
+    transform: scale(1.1);
+  }
+}
+
+// Waveform
+.clip-waveform {
+  height: calc(100% - 30px);
+  padding: $spacing-sm;
+  @include flex-center;
+}
+
+.waveform-svg {
+  width: 100%;
+  height: 100%;
+  color: var(--primary-orange);
+  opacity: 0.6;
+  filter: drop-shadow(0 2px 4px rgba(255, 107, 53, 0.3));
+}
+
+.waveform-path {
+  fill: currentColor;
+}
+
+// Timeline Scrollbar with Zoom/Pan Handles
+.timeline-scrollbar {
+  height: 48px;
+  background: var(--bg-secondary);
+  border-top: 2px solid var(--border-color);
+  padding: $spacing-md $spacing-lg;
+  @include flex-center;
+}
+
+.scrollbar-track {
+  position: relative;
+  height: 20px;
+  width: 100%;
+  background: var(--bg-tertiary);
+  border-radius: $radius-full;
+  border: 2px solid var(--border-color);
+  overflow: visible;
+}
+
+.scrollbar-thumb {
+  position: absolute;
+  height: 100%;
+  background: var(--primary-orange);
+  border-radius: $radius-full;
+  cursor: grab;
+  transition: background $transition-fast;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 60px;
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
+
+  &:hover {
+    background: lighten(#ff6b35, 5%);
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+  }
+
+  &:active {
+    cursor: grabbing;
+    background: darken(#ff6b35, 5%);
+  }
+}
+
+.scrollbar-handle {
+  width: 20px;
+  height: 28px;
+  background: var(--bg-card);
+  border: 2px solid var(--primary-orange);
+  border-radius: $radius-md;
+  cursor: ew-resize;
+  position: relative;
+  z-index: 2;
+  transition: all $transition-fast;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &::before {
+    content: '';
+    width: 3px;
+    height: 12px;
+    background: var(--primary-orange);
+    border-radius: $radius-full;
+    box-shadow: 4px 0 0 var(--primary-orange);
+  }
+
+  &.left {
+    margin-left: -2px;
+  }
+
+  &.right {
+    margin-right: -2px;
+  }
+
+  &:hover {
+    background: var(--primary-orange);
+    transform: scaleX(1.2);
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.2);
+
+    &::before {
+      background: white;
+      box-shadow: 4px 0 0 white;
+    }
+  }
+
+  &:active {
+    transform: scaleX(1.1);
+  }
+}
+
+.scrollbar-center {
+  flex: 1;
+  height: 100%;
+  cursor: grab;
+  border-radius: $radius-full;
+  position: relative;
+
+  &::before {
+    content: '⋮';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-bold;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  &:hover::before {
+    opacity: 0.8;
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+// ==================== RESPONSIVE ====================
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 240px;
+  }
+
+  .editor-header {
+    flex-wrap: wrap;
+  }
+
+  .header-center {
+    order: 3;
+    flex-basis: 100%;
+    margin-top: $spacing-sm;
+  }
+}
+
+@media (max-width: 768px) {
+  .editor-main {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .timeline-area {
+    height: 200px;
+  }
+}

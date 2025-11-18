@@ -11,21 +11,35 @@ import {
 } from '../common/interfaces/task.interface';
 import { v4 as uuidv4 } from 'uuid';
 
+// Active task tracking
+export interface ActiveTask {
+  taskId: string;
+  jobId: string;
+  taskIndex: number;
+  type: string;
+  pool: 'main' | 'ai';
+  progress: number;
+  message: string;
+  startedAt: Date;
+}
+
 @Injectable()
 export class QueueManagerService implements OnModuleDestroy {
   private readonly logger = new Logger(QueueManagerService.name);
 
-  // Separate queues for batch and analysis
-  private batchJobs = new Map<string, QueueJob>();
-  private analysisJobs = new Map<string, QueueJob>();
+  // Unified job queue (no more separate batch/analysis queues)
+  private jobQueue = new Map<string, QueueJob>();
+
+  // Task pools - tracks actively running tasks
+  private mainPool = new Map<string, ActiveTask>();  // Max 5 concurrent
+  private aiPool: ActiveTask | null = null;           // Max 1 concurrent
 
   // Queue processing state
-  private batchProcessing = false;
-  private analysisProcessing = false;
+  private processing = false;
 
-  // Concurrency limits
-  private readonly BATCH_MAX_CONCURRENCY = 15; // High concurrency for batch downloads
-  private readonly ANALYSIS_MAX_CONCURRENCY = 1; // Sequential for AI-heavy work
+  // Concurrency limits (5+1 model)
+  private readonly MAX_MAIN_CONCURRENT = 5;  // 5 general tasks
+  private readonly MAX_AI_CONCURRENT = 1;     // 1 AI task
 
   constructor(
     private readonly mediaOps: MediaOperationsService,
@@ -38,29 +52,24 @@ export class QueueManagerService implements OnModuleDestroy {
    */
   onModuleDestroy() {
     // Mark all pending and processing jobs as failed
-    const allJobs = [
-      ...Array.from(this.batchJobs.values()),
-      ...Array.from(this.analysisJobs.values())
-    ];
-
-    for (const job of allJobs) {
+    for (const job of this.jobQueue.values()) {
       if (job.status === 'pending' || job.status === 'processing') {
         job.status = 'failed';
         job.error = 'Application shutdown - job cancelled';
       }
     }
 
-    // Clear the queues
-    this.batchJobs.clear();
-    this.analysisJobs.clear();
+    // Clear the queue and pools
+    this.jobQueue.clear();
+    this.mainPool.clear();
+    this.aiPool = null;
 
-    // Reset processing flags
-    this.batchProcessing = false;
-    this.analysisProcessing = false;
+    // Reset processing flag
+    this.processing = false;
   }
 
   /**
-   * Add a job to a queue
+   * Add a job to the queue
    */
   addJob(job: Omit<QueueJob, 'id' | 'createdAt' | 'status' | 'progress' | 'currentPhase' | 'currentTaskIndex'>): string {
     const jobId = uuidv4();
@@ -75,17 +84,13 @@ export class QueueManagerService implements OnModuleDestroy {
       createdAt: new Date(),
     };
 
-    if (job.queueType === 'batch') {
-      this.batchJobs.set(jobId, fullJob);
-      this.emitQueueStatus('batch');
-      // Start processing if not already running
-      setImmediate(() => this.processBatchQueue());
-    } else {
-      this.analysisJobs.set(jobId, fullJob);
-      this.emitQueueStatus('analysis');
-      // Start processing if not already running
-      setImmediate(() => this.processAnalysisQueue());
-    }
+    // Add to unified queue
+    this.jobQueue.set(jobId, fullJob);
+
+    // Start processing if not already running
+    setImmediate(() => this.processQueue());
+
+    this.logger.log(`Added job ${jobId} with ${job.tasks.length} tasks`);
 
     return jobId;
   }
@@ -94,25 +99,37 @@ export class QueueManagerService implements OnModuleDestroy {
    * Get job by ID
    */
   getJob(jobId: string): QueueJob | undefined {
-    return this.batchJobs.get(jobId) || this.analysisJobs.get(jobId);
+    return this.jobQueue.get(jobId);
   }
 
   /**
-   * Get all jobs in a queue
+   * Get all jobs in the queue
    */
-  getAllJobs(queueType: 'batch' | 'analysis'): QueueJob[] {
-    const jobs = queueType === 'batch' ? this.batchJobs : this.analysisJobs;
-    return Array.from(jobs.values());
+  getAllJobs(): QueueJob[] {
+    return Array.from(this.jobQueue.values());
+  }
+
+  /**
+   * Get main pool status (for API/monitoring)
+   */
+  getMainPool(): Map<string, ActiveTask> {
+    return this.mainPool;
+  }
+
+  /**
+   * Get AI pool status (for API/monitoring)
+   */
+  getAIPool(): ActiveTask | null {
+    return this.aiPool;
   }
 
   /**
    * Delete a job
    */
   deleteJob(jobId: string): boolean {
-    const deleted = this.batchJobs.delete(jobId) || this.analysisJobs.delete(jobId);
+    const deleted = this.jobQueue.delete(jobId);
     if (deleted) {
-      this.emitQueueStatus('batch');
-      this.emitQueueStatus('analysis');
+      this.logger.log(`Deleted job ${jobId}`);
     }
     return deleted;
   }
@@ -130,193 +147,283 @@ export class QueueManagerService implements OnModuleDestroy {
     job.error = 'Cancelled by user';
     job.completedAt = new Date();
 
-    this.emitQueueStatus(job.queueType);
+    this.logger.log(`Cancelled job ${jobId}`);
     return true;
   }
 
   /**
    * Clear completed/failed jobs
    */
-  clearCompletedJobs(queueType: 'batch' | 'analysis'): void {
-    const jobs = queueType === 'batch' ? this.batchJobs : this.analysisJobs;
-
-    for (const [jobId, job] of jobs.entries()) {
+  clearCompletedJobs(): void {
+    for (const [jobId, job] of this.jobQueue.entries()) {
       if (job.status === 'completed' || job.status === 'failed') {
-        jobs.delete(jobId);
+        this.jobQueue.delete(jobId);
       }
     }
 
-    this.emitQueueStatus(queueType);
+    this.logger.log('Cleared completed/failed jobs');
   }
 
   /**
-   * Get queue status
+   * Get unified queue status
    */
-  getQueueStatus(queueType: 'batch' | 'analysis'): QueueStatus {
-    const jobs = Array.from((queueType === 'batch' ? this.batchJobs : this.analysisJobs).values());
-
-    const pendingJobs = jobs.filter(j => j.status === 'pending');
-    const processingJobs = jobs.filter(j => j.status === 'processing');
-    const completedJobs = jobs.filter(j => j.status === 'completed');
-    const failedJobs = jobs.filter(j => j.status === 'failed');
+  getQueueStatus() {
+    const jobs = Array.from(this.jobQueue.values());
 
     return {
-      queueType,
-      pendingJobs,
-      processingJobs,
-      completedJobs,
-      failedJobs,
-      activeJobCount: processingJobs.length,
-      maxConcurrency: queueType === 'batch' ? this.BATCH_MAX_CONCURRENCY : this.ANALYSIS_MAX_CONCURRENCY,
+      mainPool: {
+        active: this.mainPool.size,
+        maxConcurrent: this.MAX_MAIN_CONCURRENT,
+        tasks: Array.from(this.mainPool.values()),
+      },
+      aiPool: {
+        active: this.aiPool ? 1 : 0,
+        maxConcurrent: this.MAX_AI_CONCURRENT,
+        task: this.aiPool,
+      },
+      queue: {
+        total: jobs.length,
+        pending: jobs.filter(j => j.status === 'pending').length,
+        processing: jobs.filter(j => j.status === 'processing').length,
+        completed: jobs.filter(j => j.status === 'completed').length,
+        failed: jobs.filter(j => j.status === 'failed').length,
+      },
     };
   }
 
+
   /**
-   * Process batch queue (high concurrency)
+   * Unified queue processing with 5+1 pool model
+   * Main loop that fills both pools with tasks
    */
-  private async processBatchQueue(): Promise<void> {
-    if (this.batchProcessing) {
+  private async processQueue(): Promise<void> {
+    if (this.processing) {
       return; // Already processing
     }
 
-    this.batchProcessing = true;
+    this.processing = true;
 
     try {
       while (true) {
-        const pendingJobs = Array.from(this.batchJobs.values())
-          .filter(j => j.status === 'pending');
+        // Fill main pool (up to 5 concurrent tasks)
+        while (this.mainPool.size < this.MAX_MAIN_CONCURRENT) {
+          const nextTask = this.getNextMainTask();
+          if (!nextTask) break;
 
-        if (pendingJobs.length === 0) {
-          break; // No more pending jobs
-        }
-
-        const processingJobs = Array.from(this.batchJobs.values())
-          .filter(j => j.status === 'processing');
-
-        const availableSlots = this.BATCH_MAX_CONCURRENCY - processingJobs.length;
-
-        if (availableSlots <= 0) {
-          break; // Queue is full, wait for jobs to complete
-        }
-
-        // Start processing multiple jobs in parallel
-        const jobsToStart = pendingJobs.slice(0, availableSlots);
-
-        for (const job of jobsToStart) {
-          this.processJob(job).catch(error => {
-            this.logger.error(`Job ${job.id} failed: ${error.message}`);
+          // Execute task without awaiting (parallel execution)
+          this.executeTask(nextTask, 'main').catch(err => {
+            this.logger.error(`Main pool task failed: \${err.message}`);
           });
         }
 
-        // Wait a bit before checking again
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Fill AI pool (up to 1 concurrent task)
+        if (!this.aiPool) {
+          const nextTask = this.getNextAITask();
+          if (nextTask) {
+            // Execute task without awaiting (parallel execution)
+            this.executeTask(nextTask, 'ai').catch(err => {
+              this.logger.error(`AI pool task failed: \${err.message}`);
+            });
+          }
+        }
+
+        // Check if queue is empty and all pools are empty
+        if (this.jobQueue.size === 0 && this.mainPool.size === 0 && !this.aiPool) {
+          break; // Nothing left to do
+        }
+
+        // Wait before checking again
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     } finally {
-      this.batchProcessing = false;
+      this.processing = false;
     }
   }
 
   /**
-   * Process analysis queue (sequential, one at a time)
+   * Get next non-AI task from any job
    */
-  private async processAnalysisQueue(): Promise<void> {
-    if (this.analysisProcessing) {
-      return; // Already processing
-    }
+  private getNextMainTask(): { task: Task; job: QueueJob } | null {
+    for (const job of this.jobQueue.values()) {
+      if (job.status !== 'pending' && job.status !== 'processing') continue;
 
-    this.analysisProcessing = true;
+      const currentTask = job.tasks[job.currentTaskIndex];
+      if (!currentTask) continue;
 
-    try {
-      while (true) {
-        const pendingJobs = Array.from(this.analysisJobs.values())
-          .filter(j => j.status === 'pending')
-          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      // Skip if this task is already running
+      if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
 
-        if (pendingJobs.length === 0) {
-          break; // No more pending jobs
-        }
-
-        const processingJobs = Array.from(this.analysisJobs.values())
-          .filter(j => j.status === 'processing');
-
-        if (processingJobs.length >= this.ANALYSIS_MAX_CONCURRENCY) {
-          break; // Queue is full (1 job at a time)
-        }
-
-        // Process next job
-        const job = pendingJobs[0];
-        await this.processJob(job);
+      // Only return non-AI tasks
+      if (currentTask.type !== 'analyze') {
+        return { task: currentTask, job };
       }
-    } finally {
-      this.analysisProcessing = false;
     }
+    return null;
   }
 
   /**
-   * Process a single job by executing its tasks sequentially
+   * Get next AI task from any job
    */
-  private async processJob(job: QueueJob): Promise<void> {
-    job.status = 'processing';
-    job.startedAt = new Date();
-    job.currentTaskIndex = 0;
-    this.emitQueueStatus(job.queueType);
+  private getNextAITask(): { task: Task; job: QueueJob } | null {
+    for (const job of this.jobQueue.values()) {
+      if (job.status !== 'pending' && job.status !== 'processing') continue;
+
+      const currentTask = job.tasks[job.currentTaskIndex];
+      if (!currentTask) continue;
+
+      if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
+
+      // Only return AI tasks
+      if (currentTask.type === 'analyze') {
+        return { task: currentTask, job };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check if a specific task is already running
+   */
+  private isTaskRunning(jobId: string, taskIndex: number): boolean {
+    // Check main pool
+    for (const activeTask of this.mainPool.values()) {
+      if (activeTask.jobId === jobId && activeTask.taskIndex === taskIndex) {
+        return true;
+      }
+    }
+
+    // Check AI pool
+    if (this.aiPool?.jobId === jobId && this.aiPool.taskIndex === taskIndex) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Execute a task in the appropriate pool
+   */
+  private async executeTask(
+    { task, job }: { task: Task; job: QueueJob },
+    pool: 'main' | 'ai',
+  ): Promise<void> {
+    const taskId = uuidv4();
+    const activeTask: ActiveTask = {
+      taskId,
+      jobId: job.id,
+      taskIndex: job.currentTaskIndex,
+      type: task.type,
+      pool,
+      progress: 0,
+      message: 'Starting...',
+      startedAt: new Date(),
+    };
+
+    // Add to appropriate pool
+    if (pool === 'main') {
+      this.mainPool.set(taskId, activeTask);
+    } else {
+      this.aiPool = activeTask;
+    }
+
+    // Update job status
+    if (job.status === 'pending') {
+      job.status = 'processing';
+      job.startedAt = new Date();
+    }
+
+    job.currentPhase = `\${task.type} (\${job.currentTaskIndex + 1}/\${job.tasks.length})`;
+
+    this.logger.log(
+      `[\${pool.toUpperCase()} POOL] Starting task \${taskId}: \${task.type} for job \${job.id}`,
+    );
+
+    // Emit task started event (will be added in Step 5)
+    this.eventService.emit('task.started', {
+      taskId,
+      jobId: job.id,
+      videoId: job.videoId,
+      type: task.type,
+      pool,
+      timestamp: new Date().toISOString(),
+    });
 
     try {
-      // Execute each task sequentially
-      for (let i = 0; i < job.tasks.length; i++) {
-        job.currentTaskIndex = i;
-        const task = job.tasks[i];
+      // Execute the task
+      const result = await this.executeTaskLogic(job, task, taskId);
 
-        job.currentPhase = `${task.type} (${i + 1}/${job.tasks.length})`;
-        this.emitQueueStatus(job.queueType);
-
-        const result = await this.executeTask(job, task);
-
-        if (!result.success) {
-          throw new Error(result.error || `Task ${task.type} failed`);
-        }
-
-        // Update progress
-        job.progress = Math.round(((i + 1) / job.tasks.length) * 100);
-        this.emitQueueStatus(job.queueType);
+      if (!result.success) {
+        throw new Error(result.error || 'Task failed');
       }
 
-      // All tasks completed successfully
-      job.status = 'completed';
-      job.progress = 100;
-      job.currentPhase = 'Completed';
-      job.completedAt = new Date();
+      // Emit task completed event
+      this.eventService.emit('task.completed', {
+        taskId,
+        jobId: job.id,
+        videoId: job.videoId,
+        type: task.type,
+        result: result.data,
+        duration: (Date.now() - activeTask.startedAt.getTime()) / 1000,
+        timestamp: new Date().toISOString(),
+      });
 
-      this.emitQueueStatus(job.queueType);
+      // Move to next task in job
+      job.currentTaskIndex++;
+      job.progress = Math.round((job.currentTaskIndex / job.tasks.length) * 100);
 
-      // Continue processing the queue
-      if (job.queueType === 'batch') {
-        setImmediate(() => this.processBatchQueue());
-      } else {
-        setImmediate(() => this.processAnalysisQueue());
+      // Check if job is complete
+      if (job.currentTaskIndex >= job.tasks.length) {
+        job.status = 'completed';
+        job.progress = 100;
+        job.currentPhase = 'Completed';
+        job.completedAt = new Date();
+
+        this.logger.log(`Job \${job.id} completed successfully`);
+
+        // Remove from queue after a delay
+        setTimeout(() => this.jobQueue.delete(job.id), 5000);
       }
-
     } catch (error) {
+      // Task failed
       job.status = 'failed';
       job.error = error instanceof Error ? error.message : 'Unknown error';
       job.completedAt = new Date();
 
-      this.logger.error(`Job ${job.id} failed: ${job.error}`);
-      this.emitQueueStatus(job.queueType);
+      this.logger.error(`Task \${taskId} failed: \${job.error}`);
 
-      // Continue processing the queue
-      if (job.queueType === 'batch') {
-        setImmediate(() => this.processBatchQueue());
+      // Emit task failed event
+      this.eventService.emit('task.failed', {
+        taskId,
+        jobId: job.id,
+        type: task.type,
+        error: {
+          code: 'TASK_FAILED',
+          message: job.error,
+        },
+        canRetry: false,
+        timestamp: new Date().toISOString(),
+      });
+    } finally {
+      // Remove from pool
+      if (pool === 'main') {
+        this.mainPool.delete(taskId);
       } else {
-        setImmediate(() => this.processAnalysisQueue());
+        this.aiPool = null;
       }
+
+      // Continue processing
+      setImmediate(() => this.processQueue());
     }
   }
 
   /**
-   * Execute a single task and update job context
+   * Execute task logic and update database flags
    */
-  private async executeTask(job: QueueJob, task: Task): Promise<TaskResult> {
+  private async executeTaskLogic(
+    job: QueueJob,
+    task: Task,
+    taskId: string,
+  ): Promise<TaskResult> {
     let result: TaskResult;
 
     switch (task.type) {
@@ -324,7 +431,7 @@ export class QueueManagerService implements OnModuleDestroy {
         if (!job.url) {
           return { success: false, error: 'No URL provided for get-info task' };
         }
-        result = await this.mediaOps.getVideoInfo(job.url, job.id);
+        result = await this.mediaOps.getVideoInfo(job.url, taskId);
         if (result.success && result.data) {
           job.videoInfo = result.data;
           job.displayName = job.displayName || result.data.title;
@@ -341,7 +448,7 @@ export class QueueManagerService implements OnModuleDestroy {
             ...task.options,
             displayName: job.displayName,
           },
-          job.id,
+          taskId,
         );
         if (result.success && result.data) {
           job.videoPath = result.data.videoPath;
@@ -353,7 +460,7 @@ export class QueueManagerService implements OnModuleDestroy {
         if (!job.videoPath) {
           return { success: false, error: 'No video path available for import task' };
         }
-        result = await this.mediaOps.importToLibrary(job.videoPath, task.options, job.id);
+        result = await this.mediaOps.importToLibrary(job.videoPath, task.options, taskId);
         if (result.success && result.data) {
           job.videoId = result.data.videoId;
         }
@@ -361,31 +468,87 @@ export class QueueManagerService implements OnModuleDestroy {
 
       case 'fix-aspect-ratio':
         if (!job.videoId && !job.videoPath) {
-          return { success: false, error: 'No video ID or path available for fix-aspect-ratio task' };
+          return {
+            success: false,
+            error: 'No video ID or path available for fix-aspect-ratio task',
+          };
         }
-        result = await this.mediaOps.fixAspectRatio(job.videoId || job.videoPath!, task.options, job.id);
+        result = await this.mediaOps.fixAspectRatio(
+          job.videoId || job.videoPath!,
+          task.options,
+          taskId,
+        );
         if (result.success && result.data && result.data.outputPath) {
           job.videoPath = result.data.outputPath;
+        }
+        // UPDATE DATABASE FLAG
+        if (result.success && job.videoId) {
+          try {
+            await this.mediaOps.setVideoFlag(job.videoId, 'aspect_ratio_fixed', 1);
+          } catch (error) {
+            this.logger.warn(
+              `Failed to update aspect_ratio_fixed flag: \${error instanceof Error ? error.message : 'Unknown error'}`,
+            );
+          }
         }
         break;
 
       case 'normalize-audio':
         if (!job.videoId && !job.videoPath) {
-          return { success: false, error: 'No video ID or path available for normalize-audio task' };
+          return {
+            success: false,
+            error: 'No video ID or path available for normalize-audio task',
+          };
         }
-        result = await this.mediaOps.normalizeAudio(job.videoId || job.videoPath!, task.options, job.id);
+        result = await this.mediaOps.normalizeAudio(
+          job.videoId || job.videoPath!,
+          task.options,
+          taskId,
+        );
         if (result.success && result.data && result.data.outputPath) {
           job.videoPath = result.data.outputPath;
+        }
+        // UPDATE DATABASE FLAG
+        if (result.success && job.videoId) {
+          try {
+            await this.mediaOps.setVideoFlag(job.videoId, 'audio_normalized', 1);
+          } catch (error) {
+            this.logger.warn(
+              `Failed to update audio_normalized flag: \${error instanceof Error ? error.message : 'Unknown error'}`,
+            );
+          }
         }
         break;
 
       case 'process-video':
         if (!job.videoId && !job.videoPath) {
-          return { success: false, error: 'No video ID or path available for process-video task' };
+          return {
+            success: false,
+            error: 'No video ID or path available for process-video task',
+          };
         }
-        result = await this.mediaOps.processVideo(job.videoId || job.videoPath!, task.options, job.id);
+        result = await this.mediaOps.processVideo(
+          job.videoId || job.videoPath!,
+          task.options,
+          taskId,
+        );
         if (result.success && result.data && result.data.outputPath) {
           job.videoPath = result.data.outputPath;
+        }
+        // UPDATE DATABASE FLAGS based on what was processed
+        if (result.success && job.videoId && task.options) {
+          try {
+            if (task.options.fixAspectRatio) {
+              await this.mediaOps.setVideoFlag(job.videoId, 'aspect_ratio_fixed', 1);
+            }
+            if (task.options.normalizeAudio) {
+              await this.mediaOps.setVideoFlag(job.videoId, 'audio_normalized', 1);
+            }
+          } catch (error) {
+            this.logger.warn(
+              `Failed to update video flags: \${error instanceof Error ? error.message : 'Unknown error'}`,
+            );
+          }
         }
         break;
 
@@ -393,10 +556,15 @@ export class QueueManagerService implements OnModuleDestroy {
         if (!job.videoId && !job.videoPath) {
           return { success: false, error: 'No video ID or path available for transcribe task' };
         }
-        result = await this.mediaOps.transcribeVideo(job.videoId || job.videoPath!, task.options, job.id);
+        result = await this.mediaOps.transcribeVideo(
+          job.videoId || job.videoPath!,
+          task.options,
+          taskId,
+        );
         if (result.success && result.data) {
           job.transcriptPath = result.data.transcriptPath;
         }
+        // Note: has_transcript flag is automatically set by database trigger
         break;
 
       case 'analyze':
@@ -406,24 +574,17 @@ export class QueueManagerService implements OnModuleDestroy {
         if (!task.options || !task.options.aiModel) {
           return { success: false, error: 'AI model is required for analyze task' };
         }
-        result = await this.mediaOps.analyzeVideo(job.videoId, task.options as any, job.id);
+        result = await this.mediaOps.analyzeVideo(job.videoId, task.options as any, taskId);
         if (result.success && result.data) {
           job.analysisPath = result.data.analysisPath;
         }
+        // Note: has_analysis flag is automatically set by database trigger
         break;
 
       default:
-        return { success: false, error: `Unknown task type: ${(task as any).type}` };
+        return { success: false, error: `Unknown task type: \${(task as any).type}` };
     }
 
     return result;
-  }
-
-  /**
-   * Emit queue status update
-   */
-  private emitQueueStatus(queueType: 'batch' | 'analysis'): void {
-    const status = this.getQueueStatus(queueType);
-    this.eventService.emitQueueStatusUpdated(queueType, status);
   }
 }

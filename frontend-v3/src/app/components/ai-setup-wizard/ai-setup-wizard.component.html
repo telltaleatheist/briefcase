@@ -1,0 +1,400 @@
+<div class="wizard-backdrop">
+  <div class="wizard-container">
+    <!-- Close Button -->
+    <button class="close-btn" (click)="skipSetup()" title="Close">×</button>
+
+    <!-- Progress Indicator -->
+    <div class="progress-dots" *ngIf="currentStep() !== 'welcome'">
+      <span class="dot" [class.active]="currentStep() !== 'done'" [class.completed]="currentStep() === 'done'"></span>
+      <span class="dot" [class.active]="currentStep() === 'done'"></span>
+    </div>
+
+    <!-- ==================== WELCOME STEP ==================== -->
+    @if (currentStep() === 'welcome') {
+      <div class="wizard-step welcome-step">
+        <div class="step-header">
+          <span class="step-icon">🤖</span>
+          <h2 class="step-title">AI Features Setup</h2>
+          <p class="step-subtitle">Configure AI providers for smart video analysis</p>
+        </div>
+
+        <div class="info-banner">
+          <span class="banner-icon">💡</span>
+          <div class="banner-content">
+            <strong>AI features are optional</strong>
+            <p>You can use all library and editing features without AI setup.</p>
+          </div>
+        </div>
+
+        <div class="feature-preview">
+          <h3>AI-Powered Features</h3>
+          <div class="features-grid">
+            <div class="feature-item">
+              <span class="feature-icon">🎯</span>
+              <span>Auto Analysis</span>
+            </div>
+            <div class="feature-item">
+              <span class="feature-icon">📝</span>
+              <span>Transcription</span>
+            </div>
+            <div class="feature-item">
+              <span class="feature-icon">🏷️</span>
+              <span>Smart Tags</span>
+            </div>
+            <div class="feature-item">
+              <span class="feature-icon">🔍</span>
+              <span>Content Search</span>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="section-title">Choose a Provider</h3>
+
+        <div class="provider-cards">
+          <!-- Ollama Card -->
+          <div class="provider-card recommended" (click)="selectProvider('ollama')">
+            <div class="card-badge">Recommended</div>
+            <div class="card-header">
+              <span class="card-icon">💻</span>
+              <div class="card-titles">
+                <h4>Ollama</h4>
+                <span class="card-tagline">Free & Private</span>
+              </div>
+            </div>
+            <ul class="card-features">
+              <li class="pro"><span>✓</span> No API costs ever</li>
+              <li class="pro"><span>✓</span> Data stays on your machine</li>
+              <li class="pro"><span>✓</span> Works offline</li>
+              <li class="con"><span>✗</span> 4+ GB download required</li>
+            </ul>
+            <button class="card-btn primary">Configure Ollama</button>
+          </div>
+
+          <!-- Claude Card -->
+          <div class="provider-card" (click)="selectProvider('claude')">
+            <div class="card-header">
+              <span class="card-icon">🧠</span>
+              <div class="card-titles">
+                <h4>Claude API</h4>
+                <span class="card-tagline">Best Quality</span>
+              </div>
+            </div>
+            <ul class="card-features">
+              <li class="pro"><span>✓</span> Highest quality results</li>
+              <li class="pro"><span>✓</span> No installation needed</li>
+              <li class="pro"><span>✓</span> Fast processing</li>
+              <li class="con"><span>✗</span> ~$0.01-0.05 per video</li>
+            </ul>
+            <button class="card-btn">Configure Claude</button>
+          </div>
+
+          <!-- OpenAI Card -->
+          <div class="provider-card" (click)="selectProvider('openai')">
+            <div class="card-header">
+              <span class="card-icon">⚡</span>
+              <div class="card-titles">
+                <h4>OpenAI API</h4>
+                <span class="card-tagline">Fast & Reliable</span>
+              </div>
+            </div>
+            <ul class="card-features">
+              <li class="pro"><span>✓</span> Good quality results</li>
+              <li class="pro"><span>✓</span> No installation needed</li>
+              <li class="pro"><span>✓</span> Very fast</li>
+              <li class="con"><span>✗</span> ~$0.01-0.03 per video</li>
+            </ul>
+            <button class="card-btn">Configure OpenAI</button>
+          </div>
+        </div>
+
+        <div class="step-footer">
+          <button class="skip-btn" (click)="skipSetup()">
+            Skip for now
+          </button>
+        </div>
+      </div>
+    }
+
+    <!-- ==================== OLLAMA STEP ==================== -->
+    @if (currentStep() === 'ollama') {
+      <div class="wizard-step ollama-step">
+        <button class="back-btn" (click)="goBack()">
+          <span>←</span> Back
+        </button>
+
+        <div class="step-header">
+          <span class="step-icon">💻</span>
+          <h2 class="step-title">Install Ollama</h2>
+          <p class="step-subtitle">Set up local AI on your {{ platform() }} machine</p>
+        </div>
+
+        <div class="instruction-card">
+          <h3>Installation Steps</h3>
+          <ol class="instruction-list">
+            @for (step of getInstallInstructions(); track step) {
+              <li>{{ step }}</li>
+            }
+          </ol>
+          <button class="action-btn primary" (click)="openOllamaWebsite()">
+            <span>🌐</span> Open Ollama Website
+          </button>
+        </div>
+
+        <div class="models-section">
+          <h3>Download a Model</h3>
+          <p class="models-hint">
+            <span class="hint-icon">ℹ️</span>
+            The "B" stands for billions of parameters - larger = smarter but needs more RAM
+          </p>
+
+          <div class="model-cards">
+            @for (model of recommendedModels; track model.name) {
+              <div class="model-card" [class.recommended]="model.recommended">
+                @if (model.recommended) {
+                  <div class="model-badge">Best Choice</div>
+                }
+                <div class="model-header">
+                  <h4>{{ model.name }}</h4>
+                  <span class="model-size">{{ model.size }}</span>
+                </div>
+                <p class="model-ram">{{ model.ramRequirement }}</p>
+                <p class="model-desc">{{ model.description }}</p>
+                <div class="model-actions">
+                  <button
+                    class="download-btn"
+                    (click)="pullModel(model.name)"
+                    [disabled]="pullingModel() === model.name"
+                  >
+                    @if (pullingModel() === model.name) {
+                      <span class="spinner"></span> Downloading...
+                    } @else {
+                      <span>⬇️</span> Download
+                    }
+                  </button>
+                  <code class="command">{{ model.pullCommand }}</code>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <div class="status-section">
+          <button
+            class="check-btn"
+            (click)="checkOllama()"
+            [disabled]="isCheckingOllama()"
+          >
+            @if (isCheckingOllama()) {
+              <span class="spinner"></span> Checking...
+            } @else {
+              Check Ollama Status
+            }
+          </button>
+
+          @if (ollamaAvailable()) {
+            <div class="status-result success">
+              <span>✓</span> Ollama is running with {{ ollamaModels().length }} model(s)
+            </div>
+          }
+        </div>
+
+        <div class="step-footer">
+          <button class="skip-btn" (click)="skipSetup()">Skip for now</button>
+          @if (ollamaAvailable() && ollamaModels().length > 0) {
+            <button class="action-btn primary" (click)="goToStep('done')">
+              Continue
+            </button>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- ==================== CLAUDE STEP ==================== -->
+    @if (currentStep() === 'claude') {
+      <div class="wizard-step api-step">
+        <button class="back-btn" (click)="goBack()">
+          <span>←</span> Back
+        </button>
+
+        <div class="step-header">
+          <span class="step-icon">🧠</span>
+          <h2 class="step-title">Claude API Setup</h2>
+          <p class="step-subtitle">Connect to Anthropic's Claude API</p>
+        </div>
+
+        <div class="instruction-card">
+          <h3>Get Your API Key</h3>
+          <ol class="instruction-list">
+            <li>Sign up or log in to Anthropic Console</li>
+            <li>Navigate to API Keys section</li>
+            <li>Click "Create Key"</li>
+            <li>Copy the key and paste below</li>
+          </ol>
+          <button class="action-btn" (click)="openClaudeWebsite()">
+            <span>🌐</span> Open Anthropic Console
+          </button>
+        </div>
+
+        <div class="api-input-section">
+          <label for="claude-key">Claude API Key</label>
+          <div class="input-wrapper">
+            <input
+              id="claude-key"
+              type="password"
+              placeholder="sk-ant-api03-..."
+              [value]="claudeApiKey()"
+              (input)="claudeApiKey.set($any($event.target).value)"
+            />
+            <span class="input-icon">🔑</span>
+          </div>
+          <p class="input-hint">Your key is stored locally and never sent anywhere except Anthropic</p>
+        </div>
+
+        <div class="step-footer">
+          <button class="skip-btn" (click)="skipSetup()">Skip for now</button>
+          <button
+            class="action-btn primary"
+            (click)="saveClaudeKey()"
+            [disabled]="!claudeApiKey() || isSavingKeys()"
+          >
+            @if (isSavingKeys()) {
+              <span class="spinner"></span> Saving...
+            } @else {
+              Save & Continue
+            }
+          </button>
+        </div>
+      </div>
+    }
+
+    <!-- ==================== OPENAI STEP ==================== -->
+    @if (currentStep() === 'openai') {
+      <div class="wizard-step api-step">
+        <button class="back-btn" (click)="goBack()">
+          <span>←</span> Back
+        </button>
+
+        <div class="step-header">
+          <span class="step-icon">⚡</span>
+          <h2 class="step-title">OpenAI API Setup</h2>
+          <p class="step-subtitle">Connect to OpenAI's GPT API</p>
+        </div>
+
+        <div class="instruction-card">
+          <h3>Get Your API Key</h3>
+          <ol class="instruction-list">
+            <li>Sign up or log in to OpenAI Platform</li>
+            <li>Navigate to API Keys page</li>
+            <li>Click "Create new secret key"</li>
+            <li>Copy the key and paste below</li>
+          </ol>
+          <button class="action-btn" (click)="openOpenAIWebsite()">
+            <span>🌐</span> Open OpenAI Platform
+          </button>
+        </div>
+
+        <div class="api-input-section">
+          <label for="openai-key">OpenAI API Key</label>
+          <div class="input-wrapper">
+            <input
+              id="openai-key"
+              type="password"
+              placeholder="sk-..."
+              [value]="openaiApiKey()"
+              (input)="openaiApiKey.set($any($event.target).value)"
+            />
+            <span class="input-icon">🔑</span>
+          </div>
+          <p class="input-hint">Your key is stored locally and never sent anywhere except OpenAI</p>
+        </div>
+
+        <div class="step-footer">
+          <button class="skip-btn" (click)="skipSetup()">Skip for now</button>
+          <button
+            class="action-btn primary"
+            (click)="saveOpenAIKey()"
+            [disabled]="!openaiApiKey() || isSavingKeys()"
+          >
+            @if (isSavingKeys()) {
+              <span class="spinner"></span> Saving...
+            } @else {
+              Save & Continue
+            }
+          </button>
+        </div>
+      </div>
+    }
+
+    <!-- ==================== DONE STEP ==================== -->
+    @if (currentStep() === 'done') {
+      <div class="wizard-step done-step">
+        <div class="step-header">
+          <span class="step-icon success">✨</span>
+          <h2 class="step-title">All Set!</h2>
+          <p class="step-subtitle">AI features are ready to use</p>
+        </div>
+
+        <div class="success-card">
+          <h3>Active Providers</h3>
+          <div class="provider-list">
+            @if (ollamaAvailable() && ollamaModels().length > 0) {
+              <div class="provider-item">
+                <span class="check-icon">✓</span>
+                <div>
+                  <strong>Ollama</strong>
+                  <span>{{ ollamaModels().length }} model(s) available</span>
+                </div>
+              </div>
+            }
+            @if (claudeKeySet()) {
+              <div class="provider-item">
+                <span class="check-icon">✓</span>
+                <div>
+                  <strong>Claude API</strong>
+                  <span>Ready to use</span>
+                </div>
+              </div>
+            }
+            @if (openaiKeySet()) {
+              <div class="provider-item">
+                <span class="check-icon">✓</span>
+                <div>
+                  <strong>OpenAI API</strong>
+                  <span>Ready to use</span>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <div class="next-steps-card">
+          <h3>What's Next?</h3>
+          <ul class="next-steps-list">
+            <li>
+              <span>🎬</span>
+              <span>Analyze videos from your library</span>
+            </li>
+            <li>
+              <span>📝</span>
+              <span>Get automatic transcriptions</span>
+            </li>
+            <li>
+              <span>🔍</span>
+              <span>Search videos by content</span>
+            </li>
+            <li>
+              <span>🏷️</span>
+              <span>Auto-generate tags and summaries</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="step-footer centered">
+          <button class="action-btn primary large" (click)="complete()">
+            Get Started
+          </button>
+        </div>
+      </div>
+    }
+  </div>
+</div>

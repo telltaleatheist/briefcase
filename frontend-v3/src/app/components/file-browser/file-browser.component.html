@@ -1,0 +1,159 @@
+<div class="file-browser" (click)="clearSelection()">
+  <!-- Toolbar -->
+  <div class="browser-toolbar">
+    <div class="toolbar-title">
+      <span class="toolbar-icon">📁</span>
+      <span class="toolbar-text">File Browser</span>
+    </div>
+    <div class="toolbar-info">
+      @if (selectedCount() > 0) {
+        <span class="selection-count">
+          {{ selectedCount() }} item{{ selectedCount() > 1 ? 's' : '' }} selected
+        </span>
+      }
+    </div>
+  </div>
+
+  <!-- File Tree -->
+  <div class="browser-content">
+    <div class="file-tree">
+      @for (node of fileTree(); track node.id) {
+        <div class="tree-node-wrapper">
+          @if (node.type === 'folder') {
+            <!-- Folder -->
+            <div
+              class="tree-node folder-node"
+              [class.selected]="isSelected(node)"
+              (click)="selectFile(node, $event)"
+              (contextmenu)="onContextMenu(node, $event)"
+            >
+              <button
+                class="expand-btn"
+                (click)="toggleFolder(node, $event)"
+              >
+                <span class="expand-icon" [class.expanded]="node.expanded">▶</span>
+              </button>
+              <span class="node-icon">{{ getFileIcon(node) }}</span>
+              <span class="node-name">{{ node.name }}</span>
+              @if (node.children?.length) {
+                <span class="node-count">({{ node.children?.length }})</span>
+              }
+            </div>
+
+            <!-- Children -->
+            @if (node.expanded && node.children) {
+              <div class="tree-children">
+                @for (child of node.children; track child.id) {
+                  <div
+                    class="tree-node"
+                    [class.file-node]="child.type === 'file'"
+                    [class.folder-node]="child.type === 'folder'"
+                    [class.selected]="isSelected(child)"
+                    (click)="selectFile(child, $event)"
+                    (contextmenu)="onContextMenu(child, $event)"
+                  >
+                    @if (child.type === 'folder' && child.children) {
+                      <button
+                        class="expand-btn"
+                        (click)="toggleFolder(child, $event)"
+                      >
+                        <span class="expand-icon" [class.expanded]="child.expanded">▶</span>
+                      </button>
+                    } @else {
+                      <span class="expand-placeholder"></span>
+                    }
+                    <span class="node-icon">{{ getFileIcon(child) }}</span>
+                    <span class="node-name">{{ child.name }}</span>
+                    @if (child.type === 'file') {
+                      <span class="node-size">{{ formatFileSize(child.size) }}</span>
+                    }
+                  </div>
+
+                  <!-- Nested children -->
+                  @if (child.type === 'folder' && child.expanded && child.children) {
+                    <div class="tree-children">
+                      @for (grandchild of child.children; track grandchild.id) {
+                        <div
+                          class="tree-node"
+                          [class.file-node]="grandchild.type === 'file'"
+                          [class.selected]="isSelected(grandchild)"
+                          (click)="selectFile(grandchild, $event)"
+                          (contextmenu)="onContextMenu(grandchild, $event)"
+                        >
+                          <span class="expand-placeholder"></span>
+                          <span class="node-icon">{{ getFileIcon(grandchild) }}</span>
+                          <span class="node-name">{{ grandchild.name }}</span>
+                          @if (grandchild.type === 'file') {
+                            <span class="node-size">{{ formatFileSize(grandchild.size) }}</span>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                }
+              </div>
+            }
+          } @else {
+            <!-- File -->
+            <div
+              class="tree-node file-node"
+              [class.selected]="isSelected(node)"
+              (click)="selectFile(node, $event)"
+              (contextmenu)="onContextMenu(node, $event)"
+            >
+              <span class="expand-placeholder"></span>
+              <span class="node-icon">{{ getFileIcon(node) }}</span>
+              <span class="node-name">{{ node.name }}</span>
+              <span class="node-size">{{ formatFileSize(node.size) }}</span>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Details Panel -->
+  @if (selectedCount() === 1) {
+    <div class="details-panel">
+      @for (node of fileTree(); track node.id) {
+        @if (isSelected(node)) {
+          <div class="details-content">
+            <div class="details-icon">{{ getFileIcon(node) }}</div>
+            <h3 class="details-name">{{ node.name }}</h3>
+            <div class="details-info">
+              <div class="detail-row">
+                <span class="detail-label">Type:</span>
+                <span class="detail-value">{{ node.type === 'folder' ? 'Folder' : 'File' }}</span>
+              </div>
+              @if (node.size) {
+                <div class="detail-row">
+                  <span class="detail-label">Size:</span>
+                  <span class="detail-value">{{ formatFileSize(node.size) }}</span>
+                </div>
+              }
+              @if (node.modifiedDate) {
+                <div class="detail-row">
+                  <span class="detail-label">Modified:</span>
+                  <span class="detail-value">{{ formatDate(node.modifiedDate) }}</span>
+                </div>
+              }
+              <div class="detail-row">
+                <span class="detail-label">Path:</span>
+                <span class="detail-value path">{{ node.path }}</span>
+              </div>
+            </div>
+          </div>
+        }
+      }
+    </div>
+  }
+
+  <!-- Context Menu -->
+  <app-context-menu
+    [visible]="contextMenuVisible()"
+    [position]="contextMenuPosition()"
+    [actions]="contextMenuActions"
+    (actionSelected)="onContextMenuAction($event)"
+    (closed)="closeContextMenu()"
+  />
+</div>

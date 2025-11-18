@@ -77,7 +77,7 @@ export class WebSocketService {
   }
 
   /**
-   * Analysis & Processing Events
+   * Analysis & Processing Events (Legacy - kept for backward compatibility)
    */
   emitAnalysisProgress(payload: WebSocketEventMap[WebSocketEvent.ANALYSIS_PROGRESS]): void {
     const jobId = payload.jobId || payload.id;
@@ -93,6 +93,44 @@ export class WebSocketService {
   emitProcessingFailed(payload: WebSocketEventMap[WebSocketEvent.PROCESSING_FAILED]): void {
     this.logger.warn(`Processing failed: jobId=${payload.jobId}, error=${payload.error}`);
     this.emit(WebSocketEvent.PROCESSING_FAILED, payload);
+  }
+
+  /**
+   * Unified Queue Events (5+1 Pool Model)
+   */
+  emitTaskStarted(payload: WebSocketEventMap[WebSocketEvent.TASK_STARTED]): void {
+    this.logger.log(
+      `Task started: taskId=${payload.taskId}, jobId=${payload.jobId}, type=${payload.type}, pool=${payload.pool}`,
+    );
+    this.emit(WebSocketEvent.TASK_STARTED, payload);
+  }
+
+  emitTaskProgress(payload: WebSocketEventMap[WebSocketEvent.TASK_PROGRESS]): void {
+    this.logger.debug(
+      `Task progress: taskId=${payload.taskId}, progress=${payload.progress}%, message=${payload.message}`,
+    );
+    this.emit(WebSocketEvent.TASK_PROGRESS, payload);
+  }
+
+  emitTaskCompleted(payload: WebSocketEventMap[WebSocketEvent.TASK_COMPLETED]): void {
+    this.logger.log(
+      `Task completed: taskId=${payload.taskId}, jobId=${payload.jobId}, type=${payload.type}, duration=${payload.duration}s`,
+    );
+    this.emit(WebSocketEvent.TASK_COMPLETED, payload);
+  }
+
+  emitTaskFailed(payload: WebSocketEventMap[WebSocketEvent.TASK_FAILED]): void {
+    this.logger.error(
+      `Task failed: taskId=${payload.taskId}, jobId=${payload.jobId}, error=${payload.error.message}`,
+    );
+    this.emit(WebSocketEvent.TASK_FAILED, payload);
+  }
+
+  emitSystemStatus(payload: WebSocketEventMap[WebSocketEvent.SYSTEM_STATUS]): void {
+    this.logger.debug(
+      `System status: mainPool=${payload.mainPool.active}/${payload.mainPool.maxConcurrent}, aiPool=${payload.aiPool.active}/${payload.aiPool.maxConcurrent}, queue=${payload.queue.total}`,
+    );
+    this.emit(WebSocketEvent.SYSTEM_STATUS, payload);
   }
 
   /**

@@ -156,7 +156,7 @@ import { firstValueFrom } from 'rxjs';
             <input
               matInput
               [(ngModel)]="newLibraryName"
-              placeholder="My Video Library"
+              placeholder="My Media Library"
               (keyup.enter)="chooseFolderForNew()">
             <mat-icon matPrefix>label</mat-icon>
           </mat-form-field>

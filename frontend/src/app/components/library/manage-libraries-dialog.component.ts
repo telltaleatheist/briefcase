@@ -53,7 +53,7 @@ interface ClipLibrary {
               matInput
               [(ngModel)]="newLibraryName"
               (ngModelChange)="onNameChange()"
-              placeholder="My Video Library">
+              placeholder="My Media Library">
             <mat-error *ngIf="nameAlreadyExists">
               This name is already taken
             </mat-error>

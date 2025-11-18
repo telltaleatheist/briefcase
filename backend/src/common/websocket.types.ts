@@ -4,7 +4,7 @@
 import { SavedLink } from '../saved-links/saved-links.service';
 
 /**
- * Analysis & Processing Events
+ * Analysis & Processing Events (Legacy - kept for backward compatibility)
  */
 export interface AnalysisProgressPayload {
   jobId?: string;
@@ -31,6 +31,72 @@ export interface ProcessingFailedPayload {
 }
 
 /**
+ * Unified Queue Events (5+1 Pool Model)
+ */
+export interface TaskStartedPayload {
+  taskId: string;
+  jobId: string;
+  videoId?: string;
+  type: string;
+  pool: 'main' | 'ai';
+  timestamp: string;
+}
+
+export interface TaskProgressPayload {
+  taskId: string;
+  jobId: string;
+  videoId?: string;
+  type: string;
+  progress: number;
+  message?: string;
+  timestamp: string;
+}
+
+export interface TaskCompletedPayload {
+  taskId: string;
+  jobId: string;
+  videoId?: string;
+  type: string;
+  result?: any;
+  duration?: number;
+  timestamp: string;
+}
+
+export interface TaskFailedPayload {
+  taskId: string;
+  jobId: string;
+  videoId?: string;
+  type: string;
+  error: {
+    code: string;
+    message: string;
+  };
+  canRetry: boolean;
+  timestamp: string;
+}
+
+export interface SystemStatusPayload {
+  mainPool: {
+    active: number;
+    maxConcurrent: number;
+    tasks: any[];
+  };
+  aiPool: {
+    active: number;
+    maxConcurrent: number;
+    task: any | null;
+  };
+  queue: {
+    total: number;
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+  };
+  timestamp: string;
+}
+
+/**
  * Saved Links Events
  */
 export interface SavedLinkAddedPayload {
@@ -54,10 +120,17 @@ export interface SavedLinksCountPayload {
  * Using const enum for type safety and better autocomplete
  */
 export enum WebSocketEvent {
-  // Analysis & Processing
+  // Analysis & Processing (Legacy)
   ANALYSIS_PROGRESS = 'analysisProgress',
   PROCESSING_PROGRESS = 'processingProgress',
   PROCESSING_FAILED = 'processing-failed',
+
+  // Unified Queue Events (5+1 Pool Model)
+  TASK_STARTED = 'task.started',
+  TASK_PROGRESS = 'task.progress',
+  TASK_COMPLETED = 'task.completed',
+  TASK_FAILED = 'task.failed',
+  SYSTEM_STATUS = 'system.status',
 
   // Saved Links
   SAVED_LINK_ADDED = 'saved-link-added',
@@ -75,9 +148,17 @@ export enum WebSocketEvent {
  * These are used with @OnEvent decorators
  */
 export enum InternalEvent {
+  // Legacy events
   ANALYSIS_PROGRESS = 'analysis.progress',
   PROCESSING_PROGRESS = 'processing.progress',
   PROCESSING_FAILED = 'processing.failed',
+
+  // Unified queue events
+  TASK_STARTED = 'task.started',
+  TASK_PROGRESS = 'task.progress',
+  TASK_COMPLETED = 'task.completed',
+  TASK_FAILED = 'task.failed',
+  SYSTEM_STATUS = 'system.status',
 }
 
 /**
@@ -85,9 +166,19 @@ export enum InternalEvent {
  * Maps WebSocket events to their expected payload types
  */
 export interface WebSocketEventMap {
+  // Legacy events
   [WebSocketEvent.ANALYSIS_PROGRESS]: AnalysisProgressPayload;
   [WebSocketEvent.PROCESSING_PROGRESS]: ProcessingProgressPayload;
   [WebSocketEvent.PROCESSING_FAILED]: ProcessingFailedPayload;
+
+  // Unified queue events
+  [WebSocketEvent.TASK_STARTED]: TaskStartedPayload;
+  [WebSocketEvent.TASK_PROGRESS]: TaskProgressPayload;
+  [WebSocketEvent.TASK_COMPLETED]: TaskCompletedPayload;
+  [WebSocketEvent.TASK_FAILED]: TaskFailedPayload;
+  [WebSocketEvent.SYSTEM_STATUS]: SystemStatusPayload;
+
+  // Saved links events
   [WebSocketEvent.SAVED_LINK_ADDED]: SavedLinkAddedPayload;
   [WebSocketEvent.SAVED_LINK_UPDATED]: SavedLinkUpdatedPayload;
   [WebSocketEvent.SAVED_LINK_DELETED]: SavedLinkDeletedPayload;

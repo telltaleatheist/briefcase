@@ -1,0 +1,31 @@
+{
+  "name": "@clippy/cascade",
+  "version": "1.0.0",
+  "description": "A powerful Angular list component with hierarchical child items, progress tracking, and advanced selection management",
+  "keywords": [
+    "angular",
+    "list",
+    "hierarchy",
+    "selection",
+    "progress",
+    "accordion",
+    "tree",
+    "cascade"
+  ],
+  "author": "Clippy Team",
+  "license": "MIT",
+  "peerDependencies": {
+    "@angular/common": "^18.0.0",
+    "@angular/core": "^18.0.0",
+    "@angular/cdk": "^18.0.0",
+    "@angular/material": "^18.0.0",
+    "rxjs": "^7.8.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/cascade"
+  },
+  "main": "./src/public-api.ts",
+  "module": "./src/public-api.ts",
+  "typings": "./src/public-api.ts"
+}

@@ -1,0 +1,95 @@
+<div class="dashboard">
+  <div class="container">
+    <!-- Header -->
+    <div class="dashboard-header fade-in">
+      <div>
+        <h1 class="dashboard-title">Dashboard</h1>
+        <p class="dashboard-subtitle">Welcome back! Here's what's happening today.</p>
+      </div>
+      <app-button variant="gradient" icon="📥">
+        Download Report
+      </app-button>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div class="metrics-grid">
+      @for (metric of metrics; track metric.label; let i = $index) {
+        <div
+          class="metric-card scale-in"
+          [style.animation-delay.ms]="i * 100"
+        >
+          <div class="metric-header">
+            <div class="metric-icon" [style.background]="metric.color">
+              {{ metric.icon }}
+            </div>
+            <div
+              class="metric-trend"
+              [class.trend-up]="metric.trend === 'up'"
+              [class.trend-down]="metric.trend === 'down'"
+            >
+              {{ metric.change }}
+            </div>
+          </div>
+          <div class="metric-value">{{ metric.value }}</div>
+          <div class="metric-label">{{ metric.label }}</div>
+        </div>
+      }
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="content-grid">
+      <!-- Chart Card -->
+      <app-card title="Performance Overview" class="chart-card slide-in">
+        <div class="chart-placeholder">
+          <div class="chart-bars">
+            @for (height of [60, 80, 65, 90, 75, 85, 70]; track $index) {
+              <div class="chart-bar">
+                <div
+                  class="chart-bar-fill"
+                  [style.height.%]="height"
+                ></div>
+              </div>
+            }
+          </div>
+          <div class="chart-labels">
+            @for (day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; track day) {
+              <span>{{ day }}</span>
+            }
+          </div>
+        </div>
+      </app-card>
+
+      <!-- Activity Feed -->
+      <app-card title="Recent Activity" badge="Live" badgeClass="badge-success" class="activity-card slide-in">
+        <div class="activity-feed">
+          @for (activity of recentActivity; track activity.time) {
+            <div class="activity-item">
+              <div class="activity-avatar">{{ activity.avatar }}</div>
+              <div class="activity-content">
+                <div class="activity-text">
+                  <strong>{{ activity.user }}</strong>
+                  {{ activity.action }}
+                </div>
+                <div class="activity-time">{{ activity.time }}</div>
+              </div>
+            </div>
+          }
+        </div>
+      </app-card>
+    </div>
+
+    <!-- Quick Actions -->
+    <app-card title="Quick Actions" class="quick-actions-card fade-in">
+      <div class="quick-actions-grid">
+        @for (action of quickActions; track action.label) {
+          <button class="quick-action-btn">
+            <span class="quick-action-icon" [style.color]="action.color">
+              {{ action.icon }}
+            </span>
+            <span class="quick-action-label">{{ action.label }}</span>
+          </button>
+        }
+      </div>
+    </app-card>
+  </div>
+</div>

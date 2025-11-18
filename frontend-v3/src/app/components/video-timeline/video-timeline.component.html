@@ -1,0 +1,157 @@
+<div class="timeline-container">
+  <!-- Timeline controls -->
+  <div class="timeline-controls">
+    <div class="timeline-tools">
+      <button
+        mat-icon-button
+        (click)="selectTool('cursor')"
+        matTooltip="Cursor Tool (A) - Click to seek, drag to scrub"
+        class="tool-button"
+        [class.active]="selectedTool === 'cursor'">
+        <mat-icon>near_me</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="selectTool('highlight')"
+        matTooltip="Range Tool (R) - Select and edit timeline ranges"
+        class="tool-button"
+        [class.active]="selectedTool === 'highlight'">
+        <mat-icon>highlight_alt</mat-icon>
+      </button>
+
+      <div class="tool-divider"></div>
+
+      <button
+        mat-icon-button
+        (click)="togglePlayPause()"
+        matTooltip="Play/Pause (K)"
+        class="timeline-button playback-button">
+        <mat-icon>{{ isPlaying ? 'pause' : 'play_arrow' }}</mat-icon>
+      </button>
+    </div>
+
+    <div class="time-display">
+      <div class="selection-info">
+        <span class="selection-label">Selection:</span>
+        <span class="selection-time">{{ getSelectionDuration() }}</span>
+      </div>
+      <div class="playhead-info">
+        <span class="playhead-label">Current Position:</span>
+        <span class="playhead-time">{{ formatTime(currentTime) }}</span>
+      </div>
+      <div class="speed-info">
+        <span class="speed-label">Speed:</span>
+        <span class="speed-value">{{ currentPlaybackSpeed === 0 ? 1 : currentPlaybackSpeed }}x</span>
+      </div>
+    </div>
+
+    <div class="timeline-buttons">
+      <button
+        mat-icon-button
+        (click)="setSelectionFromPlayhead()"
+        matTooltip="Set start to playhead (I)"
+        class="timeline-button">
+        <mat-icon>keyboard_tab</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="setSelectionToPlayhead()"
+        matTooltip="Set end to playhead (O)"
+        class="timeline-button">
+        <mat-icon>last_page</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="resetSelection()"
+        matTooltip="Reset selection"
+        class="timeline-button">
+        <mat-icon>reset_tv</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="resetZoom()"
+        [matTooltip]="zoomLevel > 1 ? 'Reset zoom (' + zoomLevel.toFixed(1) + 'x)' : 'Scroll to zoom, Shift+Scroll to pan'"
+        class="timeline-button"
+        [class.active]="zoomLevel > 1">
+        <mat-icon>{{ zoomLevel > 1 ? 'zoom_in' : 'zoom_out_map' }}</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        (click)="toggleAutoFollow()"
+        [matTooltip]="autoFollowPlayhead ? 'Auto-follow playhead: ON' : 'Auto-follow playhead: OFF'"
+        class="timeline-button"
+        [class.active]="autoFollowPlayhead">
+        <mat-icon>{{ autoFollowPlayhead ? 'center_focus_strong' : 'center_focus_weak' }}</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Timeline track -->
+  <div class="timeline-wrapper">
+    <!-- Time markers with detailed ticks -->
+    <ngx-vte-timeline-ruler
+      [duration]="duration"
+      [zoomState]="getZoomState()"
+      (markerMouseDown)="onTimeMarkerMouseDown($event)">
+    </ngx-vte-timeline-ruler>
+
+    <div
+      #timeline
+      class="timeline"
+      [class.zoomed]="zoomLevel > 1"
+      (click)="onTimelineClick($event)"
+      (mousedown)="onTimelineMouseDown($event)"
+      (contextmenu)="onTimelineContextMenu($event)">
+
+      <!-- Waveform layer (background) -->
+      <ngx-vte-timeline-waveform
+        [waveformData]="waveformData"
+        [duration]="duration"
+        [zoomState]="getZoomState()"
+        [mediaElement]="mediaElement"
+        [autoGenerate]="true">
+      </ngx-vte-timeline-waveform>
+
+      <!-- Section markers (background) -->
+      <ngx-vte-timeline-sections-layer
+        [sections]="filteredSections"
+        [duration]="duration"
+        [zoomState]="getZoomState()">
+      </ngx-vte-timeline-sections-layer>
+
+      <!-- Selection window -->
+      <ngx-vte-timeline-selection
+        [selection]="{ startTime: selectionStart, endTime: selectionEnd }"
+        [duration]="duration"
+        [zoomState]="getZoomState()"
+        [selectedTool]="selectedTool"
+        (windowDragStart)="onWindowMouseDown($event)"
+        (leftHandleDragStart)="onLeftHandleMouseDown($event)"
+        (rightHandleDragStart)="onRightHandleMouseDown($event)">
+      </ngx-vte-timeline-selection>
+
+      <!-- Playhead -->
+      <ngx-vte-timeline-playhead
+        [currentTime]="currentTime"
+        [duration]="duration"
+        [zoomState]="getZoomState()"
+        [isDraggable]="true"
+        (playheadDragStart)="onPlayheadMouseDown($event)">
+      </ngx-vte-timeline-playhead>
+    </div>
+
+    <!-- Custom horizontal scrollbar with zoom handles -->
+    <ngx-vte-timeline-zoom-bar
+      [duration]="duration"
+      [zoomState]="getZoomState()"
+      (viewportDragStart)="onScrollbarMouseDown($event)"
+      (leftHandleDragStart)="onLeftZoomHandleMouseDown($event)"
+      (rightHandleDragStart)="onRightZoomHandleMouseDown($event)">
+    </ngx-vte-timeline-zoom-bar>
+  </div>
+</div>
