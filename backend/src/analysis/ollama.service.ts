@@ -408,6 +408,75 @@ Current model status: Not installed
   }
 
   /**
+   * Pull/download a model from Ollama registry
+   * Returns a stream of progress updates
+   */
+  async pullModel(
+    modelName: string,
+    endpoint?: string,
+    onProgress?: (data: { status: string; completed?: number; total?: number; digest?: string }) => void
+  ): Promise<void> {
+    const url = endpoint || this.defaultEndpoint;
+    this.logger.log(`[Ollama Pull] Starting download of model: ${modelName}`);
+
+    try {
+      const response = await axios.post(
+        `${url}/api/pull`,
+        { name: modelName },
+        {
+          responseType: 'stream',
+          timeout: 3600000 // 1 hour timeout for large models
+        }
+      );
+
+      return new Promise((resolve, reject) => {
+        let buffer = '';
+
+        response.data.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            try {
+              const data = JSON.parse(line);
+              this.logger.log(`[Ollama Pull] ${data.status} ${data.completed && data.total ? `(${Math.round(data.completed / data.total * 100)}%)` : ''}`);
+
+              if (onProgress) {
+                onProgress(data);
+              }
+
+              // Check for completion or error
+              if (data.status === 'success') {
+                resolve();
+              } else if (data.error) {
+                reject(new Error(data.error));
+              }
+            } catch (parseError) {
+              this.logger.warn(`[Ollama Pull] Failed to parse progress: ${line}`);
+            }
+          }
+        });
+
+        response.data.on('end', () => {
+          this.logger.log(`[Ollama Pull] Model ${modelName} downloaded successfully`);
+          resolve();
+        });
+
+        response.data.on('error', (error: Error) => {
+          this.logger.error(`[Ollama Pull] Download failed: ${error.message}`);
+          reject(error);
+        });
+      });
+    } catch (error: any) {
+      this.logger.error(`[Ollama Pull] Failed to pull model ${modelName}: ${(error as Error).message}`);
+      throw new Error(`Failed to download model: ${(error as Error).message}`);
+    }
+  }
+
+  /**
    * Cleanup all timers (call on service shutdown)
    */
   onModuleDestroy(): void {

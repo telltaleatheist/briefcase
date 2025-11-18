@@ -401,22 +401,82 @@
 
 .command-box {
   display: flex;
-  align-items: center;
-  background: #1a202c;
-  border-radius: 8px;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 12px;
   margin-top: 15px;
 
-  code {
-    flex: 1;
-    color: #48bb78;
-    font-family: 'Monaco', 'Courier New', monospace;
-    font-size: 13px;
+  .download-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    .download-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      padding: 10px 12px;
+      background: rgba(255, 165, 0, 0.1);
+      border: 1px solid rgba(255, 165, 0, 0.3);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+
+      .info-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: #ff6b00;
+        flex-shrink: 0;
+      }
+
+      strong {
+        color: #ff6b00;
+      }
+    }
+
+    .download-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+      width: 100%;
+      padding: 12px 24px;
+      font-weight: 600;
+
+      mat-spinner {
+        margin-right: 4px;
+      }
+
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
   }
 
-  button {
-    margin-left: 10px;
-    color: #cbd5e0;
+  .command-display {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #1a202c;
+    border-radius: 8px;
+    padding: 10px 12px;
+
+    .command-label {
+      font-size: 11px;
+      color: #a0aec0;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    code {
+      color: #48bb78;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 13px;
+    }
   }
 }
 
@@ -749,6 +809,20 @@
       color: #f7fafc;
       font-weight: 400;
     }
+
+    .download-note {
+      background: rgba(255, 165, 0, 0.15);
+      border-color: rgba(255, 165, 0, 0.4);
+      color: #e2e8f0;
+    }
+
+    .command-display {
+      background: #1a202c;
+
+      .command-label {
+        color: #cbd5e0;
+      }
+    }
   }
 
   .api-provider-card {
@@ -786,5 +860,45 @@
     background-color: #2d3748 !important;
     border-color: #4a5568 !important;
     opacity: 0.6;
+  }
+
+  // Fix enabled buttons in dark mode
+  button.mat-mdc-button,
+  button.mat-mdc-raised-button {
+    color: #e2e8f0 !important;
+
+    &.mat-primary {
+      color: white !important;
+    }
+  }
+
+  // Fix error status box in dark mode
+  .status-result.error {
+    background: rgba(254, 215, 215, 0.2) !important;
+    border: 1px solid #fc8181;
+    color: #feb2b2 !important;
+
+    p {
+      color: #feb2b2 !important;
+    }
+
+    .error-icon {
+      color: #fc8181 !important;
+    }
+  }
+
+  // Fix success status box in dark mode
+  .status-result {
+    background: rgba(198, 246, 213, 0.15) !important;
+    border: 1px solid #68d391;
+    color: #9ae6b4 !important;
+
+    p {
+      color: #9ae6b4 !important;
+    }
+
+    .success-icon {
+      color: #68d391 !important;
+    }
   }
 }

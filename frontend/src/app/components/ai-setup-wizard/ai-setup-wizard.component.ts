@@ -55,6 +55,7 @@ export class AiSetupWizardComponent implements OnInit {
 
   isCheckingOllama: boolean = false;
   isSavingKeys: boolean = false;
+  pullingModel: string | null = null; // Track which model is currently being pulled
 
   installInstructions: { platform: string; steps: string[] } = { platform: '', steps: [] };
   recommendedModels: any[] = [];
@@ -234,5 +235,54 @@ export class AiSetupWizardComponent implements OnInit {
       // Could add a toast notification here
       console.log('Copied to clipboard:', text);
     });
+  }
+
+  /**
+   * Pull an Ollama model directly from the UI
+   */
+  async pullModel(modelName: string) {
+    if (this.pullingModel) {
+      return; // Already pulling a model
+    }
+
+    // Confirm with user first
+    const confirmed = confirm(
+      `This will download ${modelName} (may take several minutes depending on model size and your internet speed).\n\n` +
+      `Make sure Ollama is running before proceeding.\n\n` +
+      `Continue?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    this.pullingModel = modelName;
+
+    try {
+      const url = await this.backendUrlService.getApiUrl('/analysis/pull-model');
+      const response = await this.http.post<{ success: boolean; message: string }>(
+        url,
+        { modelName }
+      ).toPromise();
+
+      if (response?.success) {
+        alert(`Success! ${modelName} has been downloaded.\n\nClick "Check if Ollama is Ready" below to verify.`);
+        // Automatically re-check Ollama status
+        await this.checkOllamaAgain();
+      }
+    } catch (error: any) {
+      console.error('Failed to pull model:', error);
+      let errorMessage = 'Failed to download model.';
+
+      if (error.status === 503) {
+        errorMessage = 'Ollama is not running. Please start Ollama and try again.';
+      } else if (error.error?.message) {
+        errorMessage = error.error.message;
+      }
+
+      alert(`Error: ${errorMessage}`);
+    } finally {
+      this.pullingModel = null;
+    }
   }
 }

@@ -151,14 +151,14 @@ interface CompletedVideo {
 
         .label {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--text-secondary, #4a5568);
           font-weight: 500;
         }
 
         .value {
           font-size: 18px;
           font-weight: 600;
-          color: var(--text-primary);
+          color: var(--text-primary, #1a202c);
 
           &.failed {
             color: #f44336;
@@ -207,14 +207,14 @@ interface CompletedVideo {
 
         .label {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--text-secondary, #4a5568);
           font-weight: 500;
         }
 
         .filename {
           font-size: 14px;
           font-weight: 500;
-          color: var(--text-primary);
+          color: var(--text-primary, #1a202c);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -294,7 +294,7 @@ interface CompletedVideo {
 
         .timestamp {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--text-secondary, #4a5568);
         }
 
         .error-message {
@@ -310,7 +310,7 @@ interface CompletedVideo {
       align-items: center;
       justify-content: center;
       padding: 48px 24px;
-      color: var(--text-secondary);
+      color: var(--text-secondary, #4a5568);
 
       mat-icon {
         font-size: 48px;
@@ -329,6 +329,39 @@ interface CompletedVideo {
     mat-dialog-actions {
       padding: 16px 24px;
       border-top: 1px solid var(--border-color, #e0e0e0);
+    }
+
+    // Dark mode support
+    @media (prefers-color-scheme: dark) {
+      .progress-summary .stat {
+        .label {
+          color: #a0aec0;
+        }
+
+        .value {
+          color: #f7fafc;
+        }
+      }
+
+      .current-video .current-video-info {
+        .label {
+          color: #a0aec0;
+        }
+
+        .filename {
+          color: #e2e8f0;
+        }
+      }
+
+      .videos-list mat-list-item {
+        .timestamp {
+          color: #a0aec0;
+        }
+      }
+
+      .empty-state {
+        color: #a0aec0;
+      }
     }
   `]
 })

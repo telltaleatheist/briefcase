@@ -1,6 +1,7 @@
 // clippy/frontend/src/app/app-routing.module.ts
 import { NgModule } from '@angular/core';
 import { RouterModule, Routes, PreloadAllModules } from '@angular/router';
+import { libraryGuard } from './guards/library.guard';
 
 const routes: Routes = [
   {
@@ -22,7 +23,8 @@ const routes: Routes = [
   },
   {
     path: 'library',
-    loadComponent: () => import('./components/library/library.component').then(m => m.LibraryComponent)
+    loadComponent: () => import('./components/library/library.component').then(m => m.LibraryComponent),
+    canActivate: [libraryGuard]
   },
   {
     path: 'library-management',

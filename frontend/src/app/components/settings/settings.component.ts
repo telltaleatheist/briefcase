@@ -29,6 +29,7 @@ import { finalize } from 'rxjs';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { AiSetupHelperService, AIAvailability } from '../../services/ai-setup-helper.service';
 import { AiSetupWizardComponent } from '../ai-setup-wizard/ai-setup-wizard.component';
+import { LibraryManagementDialogComponent } from '../library/library-management-dialog.component';
 
 @Component({
   selector: 'app-settings',
@@ -188,6 +189,23 @@ export class SettingsComponent implements OnInit {
    */
   openAnalysisParameters(): void {
     this.router.navigate(['/analysis-parameters']);
+  }
+
+  /**
+   * Open Library Management dialog
+   */
+  openLibraryManagement(): void {
+    const dialogRef = this.dialog.open(LibraryManagementDialogComponent, {
+      width: '700px',
+      maxWidth: '90vw',
+      maxHeight: '85vh',
+      disableClose: false,
+      data: { isInitialSetup: false }
+    });
+
+    dialogRef.afterClosed().subscribe(() => {
+      // Dialog closed - no additional action needed
+    });
   }
 
   /**

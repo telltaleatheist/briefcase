@@ -121,13 +121,26 @@
           <p class="model-ram">{{ model.ramRequirement }}</p>
           <p class="model-desc">{{ model.description }}</p>
           <div class="command-box">
-            <code>{{ model.pullCommand }}</code>
-            <button
-              mat-icon-button
-              (click)="copyToClipboard(model.pullCommand)"
-              matTooltip="Copy to clipboard">
-              <mat-icon>content_copy</mat-icon>
-            </button>
+            <div class="download-section">
+              <p class="download-note">
+                <mat-icon class="info-icon">info</mat-icon>
+                <strong>Important:</strong> Ollama must be running to download models
+              </p>
+              <button
+                mat-raised-button
+                color="primary"
+                (click)="pullModel(model.name)"
+                [disabled]="pullingModel === model.name"
+                class="download-button">
+                <mat-spinner *ngIf="pullingModel === model.name" diameter="20"></mat-spinner>
+                <mat-icon *ngIf="pullingModel !== model.name">download</mat-icon>
+                <span>{{ pullingModel === model.name ? 'Downloading...' : 'Download ' + model.name }}</span>
+              </button>
+            </div>
+            <div class="command-display">
+              <span class="command-label">Terminal command:</span>
+              <code>{{ model.pullCommand }}</code>
+            </div>
           </div>
         </div>
       </div>

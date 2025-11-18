@@ -1164,23 +1164,23 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Open manage libraries dialog
    */
   async openManageLibraries() {
-    const { ManageLibrariesDialogComponent } = await import('./manage-libraries-dialog.component');
+    const { LibraryManagementDialogComponent } = await import('./library-management-dialog.component');
 
-    const dialogRef = this.dialog.open(ManageLibrariesDialogComponent, {
+    const dialogRef = this.dialog.open(LibraryManagementDialogComponent, {
       width: '700px',
-      data: { activeLibraryId: this.activeLibrary?.id || null }
+      maxWidth: '90vw',
+      maxHeight: '85vh',
+      data: { isInitialSetup: false }
     });
 
-    const librariesChanged = await dialogRef.afterClosed().toPromise();
+    await dialogRef.afterClosed().toPromise();
 
-    if (librariesChanged) {
-      // Reset to initial load state when library changes
-      this.isInitialLoad = true;
-      await this.loadLibraries();
-      await this.loadStats();
-      await this.loadVideos();
-      await this.loadTags();
-    }
+    // Always reload to catch any changes
+    this.isInitialLoad = true;
+    await this.loadLibraries();
+    await this.loadStats();
+    await this.loadVideos();
+    await this.loadTags();
   }
 
   /**
@@ -1656,9 +1656,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Name suggestion with preview
     if (video.suggested_title) {
-      // DEBUG: Log every video that has a suggested_title when rendering
-      console.log(`[formatVideoSecondaryText] Rendering suggested_title for ${video.id} / ${video.filename}:`, video.suggested_title);
-
       // Show first 60 characters of suggested title
       const preview = video.suggested_title.length > 60
         ? video.suggested_title.substring(0, 60) + '...'
@@ -1701,13 +1698,6 @@ export class LibraryComponent implements OnInit, AfterViewInit, OnDestroy {
    * Format video duration for display
    */
   formatVideoDuration(video: DatabaseVideo): string {
-    console.log('[formatVideoDuration] Called with:', {
-      id: video.id,
-      filename: video.filename?.substring(0, 30),
-      duration_seconds: video.duration_seconds,
-      hasField: 'duration_seconds' in video
-    });
-
     if (!video.duration_seconds) {
       return '';
     }

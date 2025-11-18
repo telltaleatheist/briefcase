@@ -372,6 +372,19 @@ interface OllamaModel {
       }
     }
 
+    // Dark mode support
+    @media (prefers-color-scheme: dark) {
+      mat-dialog-actions {
+        button.mat-mdc-button {
+          color: #e2e8f0 !important;
+        }
+
+        button.mat-mdc-raised-button {
+          color: white !important;
+        }
+      }
+    }
+
     .warning-message {
       display: flex;
       align-items: flex-start;

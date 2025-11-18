@@ -12,15 +12,23 @@
   <div class="main-layout">
     <div class="settings-content">
       <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="settings-form">
-          <!-- Library Management Info -->
-          <div class="form-step info-section">
+          <!-- Library Management -->
+          <div class="form-step">
             <div class="step-content">
-              <div class="info-card">
-                <mat-icon class="info-icon">info</mat-icon>
-                <div class="info-text">
-                  <h3>Library-Based Storage</h3>
-                  <p>All videos and clips are now managed through libraries. Create and manage libraries from the <strong>Video Library</strong> page to organize your content.</p>
-                </div>
+              <h3 class="step-title">
+                <mat-icon>folder_special</mat-icon>
+                Library Management
+              </h3>
+
+              <div class="library-management-card">
+                <p class="library-description">
+                  Manage your video libraries, create new ones, or link existing libraries.
+                </p>
+
+                <button type="button" mat-raised-button color="primary" (click)="openLibraryManagement()" class="setup-button">
+                  <mat-icon>settings</mat-icon>
+                  Manage Libraries
+                </button>
               </div>
             </div>
           </div>

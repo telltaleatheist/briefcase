@@ -121,10 +121,11 @@ export class VideoProcessingQueueService implements OnDestroy {
    */
   private async syncWithBackend(): Promise<void> {
     try {
+      const backendUrl = await this.backendUrlService.getBackendUrl();
 
       // Fetch both batch and analysis queue jobs
-      const batchUrl = `${this.backendUrlService.getBackendUrl()}/queue/jobs?type=batch`;
-      const analysisUrl = `${this.backendUrlService.getBackendUrl()}/queue/jobs?type=analysis`;
+      const batchUrl = `${backendUrl}/queue/jobs?type=batch`;
+      const analysisUrl = `${backendUrl}/queue/jobs?type=analysis`;
 
       const [batchResponse, analysisResponse] = await Promise.all([
         this.http.get<{ success: boolean; jobs: any[] }>(batchUrl).toPromise(),

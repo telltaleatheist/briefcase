@@ -181,6 +181,19 @@ export type ImportAction = 'import-only' | 'import-and-transcribe' | 'import-and
         }
       }
     }
+
+    // Dark mode support
+    @media (prefers-color-scheme: dark) {
+      mat-dialog-actions {
+        button.mat-mdc-button {
+          color: #e2e8f0 !important;
+        }
+
+        button.mat-mdc-raised-button {
+          color: white !important;
+        }
+      }
+    }
   `]
 })
 export class ImportOptionsDialogComponent {

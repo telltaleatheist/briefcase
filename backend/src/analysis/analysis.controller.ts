@@ -157,6 +157,47 @@ export class AnalysisController {
   }
 
   /**
+   * Pull/download an Ollama model
+   * This is a long-running operation - the frontend should show a spinner
+   */
+  @Post('pull-model')
+  async pullModel(@Body() body: { modelName: string; endpoint?: string }) {
+    try {
+      const { modelName, endpoint } = body;
+
+      if (!modelName) {
+        throw new HttpException('modelName is required', HttpStatus.BAD_REQUEST);
+      }
+
+      // Check if Ollama is connected first
+      const connected = await this.ollamaService.checkConnection(endpoint);
+      if (!connected) {
+        throw new HttpException(
+          'Ollama is not running. Please start Ollama first.',
+          HttpStatus.SERVICE_UNAVAILABLE
+        );
+      }
+
+      // Start the pull (this will log progress to backend logs)
+      await this.ollamaService.pullModel(modelName, endpoint);
+
+      return {
+        success: true,
+        message: `Successfully downloaded ${modelName}`,
+        modelName
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to download model: ${(error as Error).message || 'Unknown error'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * Check if a specific model is available
    */
   @Post('check-model')

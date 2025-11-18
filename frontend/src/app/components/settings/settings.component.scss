@@ -144,6 +144,39 @@
 }
 
 // ========================================
+// Library Management Card
+// ========================================
+.library-management-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+
+  .library-description {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  .setup-button {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+  }
+}
+
+// ========================================
 // Settings Groups
 // ========================================
 .setting-group {
