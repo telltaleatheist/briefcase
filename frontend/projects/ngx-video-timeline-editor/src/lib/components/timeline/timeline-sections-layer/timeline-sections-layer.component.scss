@@ -18,8 +18,9 @@
 
 .section-marker {
   position: absolute;
-  top: 0;
-  height: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  height: calc(100% - 8px);
   pointer-events: auto;
   cursor: pointer;
   border: var(--timeline-section-border-width) solid;

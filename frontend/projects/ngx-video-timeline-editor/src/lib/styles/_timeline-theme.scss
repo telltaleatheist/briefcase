@@ -36,6 +36,12 @@
   --timeline-component-padding: 4px;
   --timeline-handle-offset: -8px;
 
+  // Container spacing
+  --timeline-container-padding-bottom: 0px;
+  --timeline-wrapper-margin-top: 0px;
+  --timeline-wrapper-margin-bottom: 5px;
+  --timeline-margin-top: 5px;
+
   // === Derived Colors (Light Mode) ===
   --timeline-background-overlay: rgba(0, 0, 0, 0.03);
   --timeline-background-hover: rgba(0, 0, 0, 0.05);
