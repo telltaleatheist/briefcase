@@ -2186,6 +2186,57 @@ export class DatabaseService {
   }
 
   /**
+   * Update a custom marker
+   */
+  updateCustomMarker(marker: {
+    id: string;
+    startSeconds?: number;
+    endSeconds?: number;
+    timestampText?: string;
+    title?: string;
+    description?: string;
+    category?: string;
+  }) {
+    const db = this.ensureInitialized();
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (marker.startSeconds !== undefined) {
+      updates.push('start_seconds = ?');
+      values.push(marker.startSeconds);
+    }
+    if (marker.endSeconds !== undefined) {
+      updates.push('end_seconds = ?');
+      values.push(marker.endSeconds);
+    }
+    if (marker.timestampText !== undefined) {
+      updates.push('timestamp_text = ?');
+      values.push(marker.timestampText);
+    }
+    if (marker.title !== undefined) {
+      updates.push('title = ?');
+      values.push(marker.title);
+    }
+    if (marker.description !== undefined) {
+      updates.push('description = ?');
+      values.push(marker.description);
+    }
+    if (marker.category !== undefined) {
+      updates.push('category = ?');
+      values.push(marker.category);
+    }
+
+    if (updates.length === 0) return;
+
+    values.push(marker.id);
+    const sql = `UPDATE custom_markers SET ${updates.join(', ')} WHERE id = ?`;
+    db.prepare(sql).run(...values);
+    this.saveDatabase();
+    this.logger.log(`Updated custom marker ${marker.id}`);
+  }
+
+  /**
    * Insert a tag
    */
   insertTag(

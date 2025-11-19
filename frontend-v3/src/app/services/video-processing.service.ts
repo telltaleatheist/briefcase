@@ -200,7 +200,9 @@ export class VideoProcessingService {
   addJob(videoUrl: string, videoName: string, settings: VideoJobSettings, videoId?: string, videoPath?: string): VideoJob {
     const job: VideoJob = {
       id: this.generateId(),
+      videoId, // Store the actual video ID from library
       videoUrl,
+      videoPath,
       videoName,
       status: 'queued',
       addedAt: new Date(),
@@ -225,8 +227,7 @@ export class VideoProcessingService {
 
     // Convert jobs to backend format
     const backendJobs: BackendJobRequest[] = queuedJobs.map(job => {
-      const taskTypes = this.convertSettingsToBackendTasks(job.settings, !!job.videoUrl);
-      const tasks: BackendTask[] = taskTypes.map(type => ({ type: type as BackendTaskType }));
+      const tasks = this.convertSettingsToBackendTasksWithOptions(job.settings, !!job.videoUrl);
 
       if (job.videoUrl) {
         return {
@@ -236,7 +237,7 @@ export class VideoProcessingService {
         };
       } else {
         return {
-          videoId: job.id, // This should be the actual video ID if from library
+          videoId: job.videoId || job.id, // Use actual video ID from library
           displayName: job.videoName,
           tasks
         };
@@ -303,6 +304,55 @@ export class VideoProcessingService {
     return tasks;
   }
 
+  private convertSettingsToBackendTasksWithOptions(settings: VideoJobSettings, isUrl: boolean): BackendTask[] {
+    const tasks: BackendTask[] = [];
+
+    if (isUrl) {
+      tasks.push({ type: 'download' });
+      tasks.push({ type: 'import' });
+    }
+
+    if (settings.fixAspectRatio) {
+      tasks.push({
+        type: 'fix-aspect-ratio',
+        options: {
+          aspectRatio: settings.aspectRatio || '16:9'
+        }
+      });
+    }
+
+    if (settings.normalizeAudio) {
+      tasks.push({
+        type: 'normalize-audio',
+        options: {
+          audioLevel: settings.audioLevel
+        }
+      });
+    }
+
+    if (settings.transcribe) {
+      tasks.push({
+        type: 'transcribe',
+        options: {
+          model: settings.whisperModel || 'base',
+          language: settings.whisperLanguage
+        }
+      });
+    }
+
+    if (settings.aiAnalysis) {
+      tasks.push({
+        type: 'analyze',
+        options: {
+          aiModel: settings.aiModel || 'llama3',
+          customInstructions: settings.customInstructions
+        }
+      });
+    }
+
+    return tasks;
+  }
+
   private createTasks(settings: VideoJobSettings, isUrl: boolean): VideoTask[] {
     const tasks: VideoTask[] = [];
 
@@ -315,16 +365,16 @@ export class VideoProcessingService {
         progress: 0,
         estimatedTime: 30
       });
-    }
 
-    tasks.push({
-      id: this.generateId(),
-      type: 'import',
-      name: 'Import to Database',
-      status: 'pending',
-      progress: 0,
-      estimatedTime: 10
-    });
+      tasks.push({
+        id: this.generateId(),
+        type: 'import',
+        name: 'Import to Database',
+        status: 'pending',
+        progress: 0,
+        estimatedTime: 10
+      });
+    }
 
     if (settings.fixAspectRatio) {
       tasks.push({
@@ -412,6 +462,25 @@ export class VideoProcessingService {
       }
     });
     this.jobs$.next([...jobs]);
+  }
+
+  updateJobFromTaskTypes(jobId: string, taskTypes: string[]): void {
+    const jobs = this.jobs$.value;
+    const job = jobs.find(j => j.id === jobId);
+    if (job && job.status === 'queued') {
+      // Convert task types to settings
+      job.settings = {
+        ...job.settings,
+        fixAspectRatio: taskTypes.includes('fix-aspect-ratio'),
+        normalizeAudio: taskTypes.includes('normalize-audio'),
+        transcribe: taskTypes.includes('transcribe'),
+        aiAnalysis: taskTypes.includes('ai-analyze')
+      };
+      // Recreate tasks
+      job.tasks = this.createTasks(job.settings, !!job.videoUrl);
+      this.jobs$.next([...jobs]);
+      this.updateStats();
+    }
   }
 
   clearCompleted(): void {

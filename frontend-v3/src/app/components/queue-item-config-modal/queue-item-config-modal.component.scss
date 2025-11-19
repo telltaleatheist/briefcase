@@ -94,23 +94,13 @@
 .task-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-}
-
-.task-checkbox {
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
   gap: 12px;
+  padding: 12px 16px;
   cursor: pointer;
+  transition: background 0.15s ease;
 
-  input[type="checkbox"] {
-    margin-top: 2px;
-    cursor: pointer;
-    accent-color: var(--primary-orange);
-    width: 18px;
-    height: 18px;
+  &:hover {
+    background: var(--bg-card);
   }
 }
 
@@ -137,32 +127,10 @@
   color: var(--text-secondary);
 }
 
-.config-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 12px;
-
-  &:hover {
-    background: var(--primary-orange);
-    color: white;
-    border-color: var(--primary-orange);
-  }
-
-  .config-icon {
-    font-size: 14px;
-  }
-
-  .expand-arrow {
-    font-size: 10px;
-  }
+.selection-indicator {
+  font-size: 16px;
+  color: var(--primary-orange);
+  font-weight: bold;
 }
 
 .task-config {

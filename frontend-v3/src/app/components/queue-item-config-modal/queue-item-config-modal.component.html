@@ -18,64 +18,20 @@
           *ngFor="let task of getAvailableTasks()"
           class="task-item"
           [class.selected]="isTaskSelected(task.type)"
+          [class.expanded]="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze')"
         >
-          <!-- Task Header -->
-          <div class="task-header">
-            <label class="task-checkbox">
-              <input
-                type="checkbox"
-                [checked]="isTaskSelected(task.type)"
-                (change)="toggleTask(task)"
-              />
-              <span class="task-icon">{{ task.icon }}</span>
-              <div class="task-info">
-                <span class="task-label">{{ task.label }}</span>
-                <span class="task-description">{{ task.description }}</span>
-              </div>
-            </label>
-
-            <button
-              *ngIf="isTaskSelected(task.type)"
-              class="config-toggle"
-              (click)="toggleExpanded(task.type)"
-              [attr.aria-label]="'Configure ' + task.label"
-            >
-              <span class="config-icon">⚙️</span>
-              <span class="expand-arrow">{{ expandedTask() === task.type ? '▼' : '▶' }}</span>
-            </button>
+          <!-- Task Header (clickable) -->
+          <div class="task-header" (click)="toggleTask(task)">
+            <span class="task-icon">{{ task.icon }}</span>
+            <div class="task-info">
+              <span class="task-label">{{ task.label }}</span>
+              <span class="task-description">{{ task.description }}</span>
+            </div>
+            <span class="selection-indicator" *ngIf="isTaskSelected(task.type)">✓</span>
           </div>
 
-          <!-- Task Configuration (Expanded) -->
-          <div class="task-config" *ngIf="isTaskSelected(task.type) && expandedTask() === task.type">
-
-            <!-- Download & Import Config -->
-            <div *ngIf="task.type === 'download-import'" class="config-form">
-              <div class="form-group">
-                <label>Quality</label>
-                <select
-                  [value]="getTaskConfig(task.type).quality"
-                  (change)="updateTaskConfig(task.type, { quality: $any($event.target).value })"
-                >
-                  <option value="best">Best Available</option>
-                  <option value="2160">4K (2160p)</option>
-                  <option value="1440">1440p</option>
-                  <option value="1080">1080p</option>
-                  <option value="720">720p</option>
-                  <option value="480">480p</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Format</label>
-                <select
-                  [value]="getTaskConfig(task.type).format"
-                  (change)="updateTaskConfig(task.type, { format: $any($event.target).value })"
-                >
-                  <option value="mp4">MP4</option>
-                  <option value="webm">WebM</option>
-                  <option value="mkv">MKV</option>
-                </select>
-              </div>
-            </div>
+          <!-- Task Configuration (auto-expand for transcribe and ai-analyze) -->
+          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze')">
 
             <!-- Transcribe Config -->
             <div *ngIf="task.type === 'transcribe'" class="config-form">
@@ -155,62 +111,6 @@
                   [value]="getTaskConfig(task.type).customInstructions || ''"
                   (input)="updateTaskConfig(task.type, { customInstructions: $any($event.target).value })"
                 ></textarea>
-              </div>
-            </div>
-
-            <!-- Fix Aspect Ratio Config -->
-            <div *ngIf="task.type === 'fix-aspect-ratio'" class="config-form">
-              <div class="form-group">
-                <label>Target Ratio</label>
-                <select
-                  [value]="getTaskConfig(task.type).targetRatio"
-                  (change)="updateTaskConfig(task.type, { targetRatio: $any($event.target).value })"
-                >
-                  <option value="auto">Auto-detect</option>
-                  <option value="16:9">16:9 (Widescreen)</option>
-                  <option value="4:3">4:3 (Standard)</option>
-                  <option value="1:1">1:1 (Square)</option>
-                  <option value="9:16">9:16 (Vertical)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Crop Mode</label>
-                <select
-                  [value]="getTaskConfig(task.type).cropMode"
-                  (change)="updateTaskConfig(task.type, { cropMode: $any($event.target).value })"
-                >
-                  <option value="smart">Smart Crop</option>
-                  <option value="center">Center Crop</option>
-                  <option value="letterbox">Letterbox (Add Bars)</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Normalize Audio Config -->
-            <div *ngIf="task.type === 'normalize-audio'" class="config-form">
-              <div class="form-group">
-                <label>Target Level (dB)</label>
-                <input
-                  type="number"
-                  min="-30"
-                  max="0"
-                  step="1"
-                  [value]="getTaskConfig(task.type).targetLevel"
-                  (input)="updateTaskConfig(task.type, { targetLevel: +$any($event.target).value })"
-                />
-                <small>Recommended: -16dB to -23dB</small>
-              </div>
-              <div class="form-group">
-                <label>Peak Level (dB)</label>
-                <input
-                  type="number"
-                  min="-10"
-                  max="0"
-                  step="0.5"
-                  [value]="getTaskConfig(task.type).peakLevel"
-                  (input)="updateTaskConfig(task.type, { peakLevel: +$any($event.target).value })"
-                />
-                <small>Maximum peak level allowed</small>
               </div>
             </div>
 

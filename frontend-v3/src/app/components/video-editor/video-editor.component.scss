@@ -936,73 +936,35 @@
   background: var(--bg-primary);
   overflow: visible; // Allow playhead to extend above
   z-index: 1000; // Much higher to ensure above toolbar
-  padding-top: 8px; // Add padding between ruler and timeline
 }
 
-// Track Content
+// Track Content - Flex container for vertical centering
 .track-content {
   flex: 1;
   position: relative;
   cursor: pointer;
   z-index: 1; // Normal z-index since playhead is at timeline-area level
-}
-
-// Track Lane
-.track-lane {
-  position: relative;
-  background: transparent;
   display: flex;
-  flex-direction: column;
-  gap: 0; // No gap - connect sections to waveform
-  margin-left: 24px; // Match padding with ruler and other components
-  margin-right: 24px; // Symmetric margins
-
-  &.master {
-    height: auto;
-  }
-}
-
-// Sections header with only top corners rounded
-.track-sections-header {
-  position: relative;
-  height: 36px;
-  background: var(--bg-secondary);
-  border-radius: 8px 8px 0 0; // Only top corners rounded
-  border: 1px solid var(--border-color);
-  border-bottom: none; // Remove bottom border to connect with waveform
-  z-index: 2; // Above waveform for overlap
-  overflow: visible; // Allow vertical lines to extend beyond container
-}
-
-// Waveform container - square, vertically centered
-.track-waveform-container {
-  position: relative;
-  height: 60px; // Fixed height
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-top: none; // No top border to connect seamlessly with sections header
-  overflow: hidden; // Clip content to container
-  display: flex;
-  align-items: center; // Center waveform vertically
+  align-items: center; // Center vertically
   justify-content: stretch; // Fill width
+  padding: 0; // Remove any default padding
+}
 
-  app-timeline-waveform {
+// Track Wrapper - Contains the unified timeline track component
+.track-wrapper {
+  width: 100%;
+  display: flex;
+  align-items: center; // Ensure component is centered
+  justify-content: stretch;
+
+  app-timeline-track {
     flex: 1;
-    height: 40px; // Waveform height within container
+    display: block;
   }
 }
 
-// Selection overlay for highlight tool
-.selection-overlay {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: rgba(255, 107, 53, 0.3);
-  border: 2px solid var(--primary-orange);
-  border-radius: 4px;
-  pointer-events: none;
-  z-index: 50;
-}
+// Note: Track-specific styles like sections-header, waveform-container, and selection-overlay
+// are now handled inside the TimelineTrackComponent's own stylesheet
 
 .timeline-scroll {
   position: relative;

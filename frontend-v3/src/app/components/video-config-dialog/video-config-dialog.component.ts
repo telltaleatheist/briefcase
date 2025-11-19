@@ -1,7 +1,14 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { VideoJobSettings } from '../../models/video-processing.model';
+import { AiSetupService } from '../../services/ai-setup.service';
+
+interface AIModelOption {
+  value: string;
+  label: string;
+  provider: 'ollama' | 'claude' | 'openai';
+}
 
 @Component({
   selector: 'app-video-config-dialog',
@@ -10,113 +17,145 @@ import { VideoJobSettings } from '../../models/video-processing.model';
   templateUrl: './video-config-dialog.component.html',
   styleUrls: ['./video-config-dialog.component.scss']
 })
-export class VideoConfigDialogComponent {
+export class VideoConfigDialogComponent implements OnInit {
+  private aiSetupService = inject(AiSetupService);
+
   @Input() isOpen = false;
-  @Input() videoName = '';
-  @Input() videoUrl = '';
   @Output() closeDialog = new EventEmitter<void>();
-  @Output() submitConfig = new EventEmitter<{ url: string; name: string; settings: VideoJobSettings }>();
+  @Output() submitConfig = new EventEmitter<{ url: string; name: string; settings: VideoJobSettings }[]>();
+
+  urlText = '';
+  loadingModels = false;
+  aiModels: AIModelOption[] = [];
 
   settings: VideoJobSettings = {
     fixAspectRatio: false,
-    aspectRatio: '16:9',
     normalizeAudio: false,
-    audioLevel: -6,
     transcribe: false,
     whisperModel: 'base',
-    whisperLanguage: 'auto',
     aiAnalysis: false,
-    aiModel: 'gpt-3.5-turbo',
+    aiModel: '',
     customInstructions: '',
     outputFormat: 'mp4',
     outputQuality: 'high'
   };
 
-  // Preset configurations
-  presets = [
-    {
-      name: 'Quick Process',
-      description: 'Basic import only',
-      settings: {
-        fixAspectRatio: false,
-        normalizeAudio: false,
-        transcribe: false,
-        aiAnalysis: false
+  ngOnInit() {
+    this.loadAIModels();
+  }
+
+  private async loadAIModels() {
+    this.loadingModels = true;
+
+    try {
+      const availability = await this.aiSetupService.checkAIAvailability();
+      const models: AIModelOption[] = [];
+
+      // Add Ollama models
+      if (availability.hasOllama && availability.ollamaModels.length > 0) {
+        availability.ollamaModels.forEach(model => {
+          models.push({
+            value: `ollama:${model}`,
+            label: model,
+            provider: 'ollama'
+          });
+        });
       }
-    },
-    {
-      name: 'Social Media',
-      description: 'Optimize for sharing',
-      settings: {
-        fixAspectRatio: true,
-        aspectRatio: '1:1' as const,
-        normalizeAudio: true,
-        transcribe: true,
-        aiAnalysis: false,
-        outputQuality: 'medium' as const
+
+      // Add Claude models if API key exists
+      if (availability.hasClaudeKey) {
+        const claudeModels = [
+          { value: 'claude:claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
+          { value: 'claude:claude-3-opus-20240229', label: 'Claude 3 Opus' },
+          { value: 'claude:claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
+        ];
+        claudeModels.forEach(m => {
+          models.push({ ...m, provider: 'claude' });
+        });
       }
-    },
-    {
-      name: 'Full Analysis',
-      description: 'Complete processing',
-      settings: {
-        fixAspectRatio: true,
-        normalizeAudio: true,
-        transcribe: true,
-        aiAnalysis: true,
-        whisperModel: 'large-v3' as const,
-        aiModel: 'gpt-4' as const,
-        outputQuality: 'ultra' as const
+
+      // Add OpenAI models if API key exists
+      if (availability.hasOpenAIKey) {
+        const openaiModels = [
+          { value: 'openai:gpt-4o', label: 'GPT-4o' },
+          { value: 'openai:gpt-4o-mini', label: 'GPT-4o Mini' },
+          { value: 'openai:gpt-4-turbo', label: 'GPT-4 Turbo' }
+        ];
+        openaiModels.forEach(m => {
+          models.push({ ...m, provider: 'openai' });
+        });
       }
-    },
-    {
-      name: 'Accessibility',
-      description: 'Focus on transcription',
-      settings: {
-        fixAspectRatio: false,
-        normalizeAudio: true,
-        transcribe: true,
-        whisperModel: 'large-v3' as const,
-        aiAnalysis: false
+
+      this.aiModels = models;
+
+      // Set default model priority: largest local > claude > openai
+      if (models.length > 0) {
+        const ollamaModels = models.filter(m => m.provider === 'ollama');
+        if (ollamaModels.length > 0) {
+          const sorted = [...ollamaModels].sort((a, b) => {
+            const sizeA = this.extractModelSize(a.label);
+            const sizeB = this.extractModelSize(b.label);
+            return sizeB - sizeA;
+          });
+          this.settings.aiModel = sorted[0].value;
+        } else {
+          const claudeModels = models.filter(m => m.provider === 'claude');
+          if (claudeModels.length > 0) {
+            this.settings.aiModel = claudeModels[0].value;
+          } else {
+            const openaiModels = models.filter(m => m.provider === 'openai');
+            if (openaiModels.length > 0) {
+              this.settings.aiModel = openaiModels[0].value;
+            }
+          }
+        }
       }
+    } catch (error) {
+      console.error('Failed to load AI models:', error);
+    } finally {
+      this.loadingModels = false;
     }
-  ];
+  }
 
-  aspectRatios = ['16:9', '4:3', '1:1', '9:16'];
-  whisperModels = [
-    { value: 'tiny', label: 'Tiny (39M, fastest)' },
-    { value: 'base', label: 'Base (74M, fast)' },
-    { value: 'small', label: 'Small (244M, balanced)' },
-    { value: 'medium', label: 'Medium (769M, accurate)' },
-    { value: 'large', label: 'Large (1550M, slow)' },
-    { value: 'large-v2', label: 'Large V2 (better)' },
-    { value: 'large-v3', label: 'Large V3 (best)' }
-  ];
-  aiModels = [
-    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo (fast)' },
-    { value: 'gpt-4', label: 'GPT-4 (accurate)' },
-    { value: 'claude-2', label: 'Claude 2' },
-    { value: 'claude-3', label: 'Claude 3' },
-    { value: 'llama-2', label: 'Llama 2 (local)' }
-  ];
-  outputFormats = ['mp4', 'webm', 'mov', 'avi'];
-  outputQualities = ['low', 'medium', 'high', 'ultra'];
+  private extractModelSize(modelName: string): number {
+    const match = modelName.match(/(\d+)b/i);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+    return 0;
+  }
 
-  activeTab: 'basic' | 'advanced' | 'ai' = 'basic';
+  getModelsByProvider(provider: 'ollama' | 'claude' | 'openai'): AIModelOption[] {
+    return this.aiModels.filter(m => m.provider === provider);
+  }
 
-  applyPreset(preset: any): void {
-    this.settings = { ...this.settings, ...preset.settings };
+  hasModelsForProvider(provider: 'ollama' | 'claude' | 'openai'): boolean {
+    return this.aiModels.some(m => m.provider === provider);
+  }
+
+  getUrlCount(): number {
+    return this.getUrls().length;
+  }
+
+  private getUrls(): string[] {
+    return this.urlText
+      .split('\n')
+      .map(url => url.trim())
+      .filter(url => url.length > 0 && (url.startsWith('http://') || url.startsWith('https://')));
   }
 
   onSubmit(): void {
-    if (this.videoUrl || this.videoName) {
-      this.submitConfig.emit({
-        url: this.videoUrl,
-        name: this.videoName || this.extractNameFromUrl(this.videoUrl),
-        settings: { ...this.settings }
-      });
-      this.close();
-    }
+    const urls = this.getUrls();
+    if (urls.length === 0) return;
+
+    const configs = urls.map(url => ({
+      url,
+      name: this.extractNameFromUrl(url),
+      settings: { ...this.settings }
+    }));
+
+    this.submitConfig.emit(configs);
+    this.close();
   }
 
   close(): void {
@@ -125,64 +164,36 @@ export class VideoConfigDialogComponent {
   }
 
   private resetForm(): void {
-    this.videoUrl = '';
-    this.videoName = '';
+    this.urlText = '';
     this.settings = {
       fixAspectRatio: false,
-      aspectRatio: '16:9',
       normalizeAudio: false,
-      audioLevel: -6,
       transcribe: false,
       whisperModel: 'base',
-      whisperLanguage: 'auto',
       aiAnalysis: false,
-      aiModel: 'gpt-3.5-turbo',
+      aiModel: this.aiModels.length > 0 ? this.aiModels[0].value : '',
       customInstructions: '',
       outputFormat: 'mp4',
       outputQuality: 'high'
     };
-    this.activeTab = 'basic';
   }
 
   private extractNameFromUrl(url: string): string {
     try {
       const urlObj = new URL(url);
+      // Try to get video ID or title from common platforms
+      if (urlObj.hostname.includes('youtube') || urlObj.hostname.includes('youtu.be')) {
+        const videoId = urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
+        return `YouTube Video ${videoId}`;
+      }
+      if (urlObj.hostname.includes('vimeo')) {
+        return `Vimeo Video ${urlObj.pathname.split('/').pop()}`;
+      }
       const path = urlObj.pathname;
-      const filename = path.split('/').pop() || 'Untitled Video';
+      const filename = path.split('/').pop() || 'Video';
       return filename.replace(/\.[^/.]+$/, '');
     } catch {
-      return 'Untitled Video';
+      return 'Video';
     }
-  }
-
-  calculateEstimatedTime(): number {
-    let time = 10; // Base import time
-    if (this.videoUrl) time += 30; // Download time
-    if (this.settings.fixAspectRatio) time += 45;
-    if (this.settings.normalizeAudio) time += 20;
-    if (this.settings.transcribe) {
-      const modelTime = {
-        'tiny': 30,
-        'base': 40,
-        'small': 50,
-        'medium': 70,
-        'large': 90,
-        'large-v2': 100,
-        'large-v3': 110
-      };
-      time += modelTime[this.settings.whisperModel!] || 40;
-    }
-    if (this.settings.aiAnalysis) time += 30;
-    return time;
-  }
-
-  getActiveTaskCount(): number {
-    let count = 1; // Import is always done
-    if (this.videoUrl) count++; // Download
-    if (this.settings.fixAspectRatio) count++;
-    if (this.settings.normalizeAudio) count++;
-    if (this.settings.transcribe) count++;
-    if (this.settings.aiAnalysis) count++;
-    return count;
   }
 }

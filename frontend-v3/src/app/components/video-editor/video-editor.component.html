@@ -92,7 +92,7 @@
                 class="tool-btn"
                 [class.active]="currentTool() === 'highlight'"
                 (click)="setToolHighlight()"
-                title="Highlight Tool (H)">
+                title="Range Selection Tool (R)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M3.5 18.5l4-4L11 18v3H8l-4.5-2.5zM20.7 7c.4-.4.4-1 0-1.4l-2.3-2.3c-.4-.4-1-.4-1.4 0l-1.5 1.5 3.7 3.7L20.7 7zM6 12.5L16.5 2l3.7 3.7L9.7 16.2l-4.2.5.5-4.2z"/>
                 </svg>
@@ -186,37 +186,22 @@
                (mousedown)="onTimelineMouseDown($event)"
                (click)="onTimelineClick($event)"
                (contextmenu)="onTimelineClick($event)">
-            <!-- Lane 0: Master track -->
-            <div class="track-lane master">
-              <!-- Sections header/topper with rounded edges -->
-              <div class="track-sections-header">
-                <app-timeline-sections-layer
-                  [sections]="filteredSections()"
-                  [duration]="editorState().duration"
-                  [zoomState]="editorState().zoomState"
-                  [selectedSection]="editorState().selectedSection"
-                  (sectionClick)="onSectionClick($event)"
-                  (sectionHover)="onSectionHover($event)">
-                </app-timeline-sections-layer>
-              </div>
-
-              <!-- Waveform container (square) -->
-              <div class="track-waveform-container">
-                <app-timeline-waveform
-                  [waveformData]="waveformData()"
-                  [duration]="editorState().duration"
-                  [zoomState]="editorState().zoomState"
-                  [color]="settings().waveformColor">
-                </app-timeline-waveform>
-              </div>
-
-              <!-- Selection overlay -->
-              @if (highlightSelection()) {
-                <div class="selection-overlay"
-                     [style.left.%]="getSelectionLeft()"
-                     [style.width.%]="getSelectionWidth()">
-                </div>
-              }
+            <!-- Track wrapper for vertical centering -->
+            <div class="track-wrapper">
+              <!-- Unified timeline track component -->
+              <app-timeline-track
+                [sections]="filteredSections()"
+                [duration]="editorState().duration"
+                [zoomState]="editorState().zoomState"
+                [selectedSection]="editorState().selectedSection"
+                [waveformData]="waveformData()"
+                [waveformColor]="settings().waveformColor"
+                [selection]="highlightSelection()"
+                (sectionClick)="onSectionClick($event)"
+                (sectionHover)="onSectionHover($event)"
+                (selectionHandleStart)="onSelectionHandleStart($event.event, $event.handle)"
+                (selectionDragStart)="onSelectionDragStart($event)">
+              </app-timeline-track>
             </div>
           </div>
         </div>
@@ -250,11 +235,42 @@
           [analysisData]="analysisData()"
           [hasAnalysis]="hasAnalysis()"
           [videoId]="videoId() ?? undefined"
+          [transcript]="transcript()"
           (sectionClick)="onSectionClick($event)"
+          (sectionDelete)="onSectionDeleteFromPanel($event)"
           (filterToggle)="onFilterToggle($event)"
-          (generateAnalysis)="onGenerateAnalysis($event)">
+          (generateAnalysis)="onGenerateAnalysis($event)"
+          (transcriptSeek)="seekTo($event)">
         </app-analysis-panel>
       </div>
     }
   </div>
 </div>
+
+<!-- Context Menu -->
+@if (showContextMenu$()) {
+  <app-context-menu
+    [position]="contextMenuPosition()"
+    [actions]="contextMenuActions()"
+    (actionSelected)="onContextMenuAction($event)"
+    (closed)="onContextMenuClose()">
+  </app-context-menu>
+}
+
+<!-- Marker Dialog -->
+@if (showMarkerDialog() && markerDialogData()) {
+  <app-marker-dialog
+    [data]="markerDialogData()!"
+    (save)="onMarkerSave($event)"
+    (cancel)="onMarkerCancel()"
+    (delete)="onMarkerDelete($event)">
+  </app-marker-dialog>
+}
+
+<!-- Export Dialog -->
+@if (showExportDialog() && exportDialogData()) {
+  <app-export-dialog
+    [data]="exportDialogData()!"
+    (close)="onExportDialogClose()">
+  </app-export-dialog>
+}

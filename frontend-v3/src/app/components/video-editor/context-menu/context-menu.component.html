@@ -1,0 +1,18 @@
+<div class="context-menu" [ngStyle]="getMenuStyle()">
+  @for (action of actions(); track action.id) {
+    @if (action.divider) {
+      <div class="menu-divider"></div>
+    } @else {
+      <button
+        class="menu-item"
+        [class.disabled]="action.disabled"
+        (click)="onActionClick(action)"
+        [disabled]="action.disabled">
+        @if (action.icon) {
+          <span class="menu-icon" [innerHTML]="action.icon"></span>
+        }
+        <span class="menu-label">{{ action.label }}</span>
+      </button>
+    }
+  }
+</div>

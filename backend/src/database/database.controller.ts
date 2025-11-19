@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { Response, Request } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -613,6 +613,61 @@ export class DatabaseController {
       return {
         success: false,
         error: error.message || 'Failed to delete section'
+      };
+    }
+  }
+
+  /**
+   * PUT /api/database/markers/:markerId
+   * Update a custom marker
+   */
+  @Put('markers/:markerId')
+  async updateMarker(
+    @Param('markerId') markerId: string,
+    @Body() body: {
+      startSeconds?: number;
+      endSeconds?: number;
+      title?: string;
+      description?: string;
+      category?: string;
+    }
+  ) {
+    try {
+      // Format timestamp text if times changed
+      let timestampText: string | undefined;
+      if (body.startSeconds !== undefined || body.endSeconds !== undefined) {
+        const formatTimestamp = (seconds: number): string => {
+          const mins = Math.floor(seconds / 60);
+          const secs = Math.floor(seconds % 60);
+          return `${mins}:${secs.toString().padStart(2, '0')}`;
+        };
+
+        if (body.startSeconds !== undefined && body.endSeconds !== undefined) {
+          timestampText = `${formatTimestamp(body.startSeconds)} - ${formatTimestamp(body.endSeconds)}`;
+        }
+      }
+
+      this.databaseService.updateCustomMarker({
+        id: markerId,
+        startSeconds: body.startSeconds,
+        endSeconds: body.endSeconds,
+        timestampText,
+        title: body.title,
+        description: body.description,
+        category: body.category
+      });
+
+      this.logger.log(`Updated marker ${markerId}`);
+
+      return {
+        success: true,
+        message: 'Marker updated successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to update marker ${markerId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update marker'
       };
     }
   }

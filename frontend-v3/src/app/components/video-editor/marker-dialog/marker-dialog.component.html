@@ -1,0 +1,61 @@
+<div class="dialog-overlay" (click)="onCancel()">
+  <div class="dialog-content" (click)="$event.stopPropagation()">
+    <div class="dialog-header">
+      <h3>{{ isEditing ? 'Edit Marker' : 'Add Marker' }}</h3>
+      <button class="close-btn" (click)="onCancel()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="dialog-body">
+      <!-- Time display -->
+      <div class="time-info">
+        <div class="time-field">
+          <label>Time</label>
+          <span class="time-value">{{ startTimeFormatted }}</span>
+        </div>
+        @if (isRange() && endTimeFormatted) {
+          <span class="time-separator">→</span>
+          <div class="time-field">
+            <label>End</label>
+            <span class="time-value">{{ endTimeFormatted }}</span>
+          </div>
+        }
+      </div>
+
+      <!-- Message -->
+      <div class="form-field">
+        <label>Description</label>
+        <textarea
+          class="message-input"
+          [ngModel]="message()"
+          (ngModelChange)="message.set($event)"
+          placeholder="Enter a description for this marker..."
+          rows="3"
+          maxlength="500"
+          autofocus>
+        </textarea>
+        <span class="char-count">{{ message().length }}/500</span>
+      </div>
+    </div>
+
+    <div class="dialog-footer">
+      @if (isEditing) {
+        <button class="delete-btn" (click)="onDelete()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+          Delete
+        </button>
+      }
+      <div class="footer-right">
+        <button class="cancel-btn" (click)="onCancel()">Cancel</button>
+        <button class="save-btn" (click)="onSave()" [disabled]="!message()">
+          {{ isEditing ? 'Update' : 'Save' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

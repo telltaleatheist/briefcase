@@ -1,0 +1,40 @@
+<div class="timeline-track-container">
+  <!-- Sections header with rounded top corners -->
+  <div class="track-sections-header">
+    <app-timeline-sections-layer
+      [sections]="sections"
+      [duration]="duration"
+      [zoomState]="zoomState"
+      [selectedSection]="selectedSection"
+      (sectionClick)="onSectionClick($event)"
+      (sectionHover)="onSectionHover($event)">
+    </app-timeline-sections-layer>
+  </div>
+
+  <!-- Waveform container with square corners -->
+  <div class="track-waveform-container">
+    <app-timeline-waveform
+      [waveformData]="waveformData"
+      [duration]="duration"
+      [zoomState]="zoomState"
+      [color]="waveformColor">
+    </app-timeline-waveform>
+
+    <!-- Selection overlay - positioned within waveform container -->
+    @if (selection) {
+      <div class="selection-overlay"
+           [style.left.%]="getSelectionLeft()"
+           [style.width.%]="getSelectionWidth()">
+        <div class="selection-handle left"
+             (mousedown)="onSelectionHandleMouseDown($event, 'left')">
+        </div>
+        <div class="selection-drag-area"
+             (mousedown)="onSelectionDragMouseDown($event)">
+        </div>
+        <div class="selection-handle right"
+             (mousedown)="onSelectionHandleMouseDown($event, 'right')">
+        </div>
+      </div>
+    }
+  </div>
+</div>

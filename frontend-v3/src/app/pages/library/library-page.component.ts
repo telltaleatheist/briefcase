@@ -33,6 +33,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private videoProcessingService = inject(VideoProcessingService);
 
   @ViewChild(CascadeComponent) private videoLibraryComponent?: CascadeComponent;
+  @ViewChild(VideoProcessingQueueComponent) private queueComponent?: VideoProcessingQueueComponent;
 
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
@@ -418,23 +419,34 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private analyzeVideos(videos: VideoItem[]) {
     if (videos.length === 0) return;
 
-    // Add videos to queue with transcribe + analyze tasks via VideoProcessingService
-    videos.forEach(video => {
-      const settings: VideoJobSettings = {
-        fixAspectRatio: false,
-        normalizeAudio: false,
-        transcribe: true,
-        whisperModel: 'base',
-        aiAnalysis: true,
-        aiModel: 'gpt-4',
-        outputFormat: 'mp4',
-        outputQuality: 'high'
-      };
+    // Add videos to queue with transcribe + analyze enabled by default
+    const settings: VideoJobSettings = {
+      fixAspectRatio: false,
+      normalizeAudio: false,
+      transcribe: true,
+      whisperModel: 'base',
+      aiAnalysis: true,
+      outputFormat: 'mp4',
+      outputQuality: 'high'
+    };
 
+    // Add first video and open config modal for it
+    const firstVideo = videos[0];
+    const job = this.videoProcessingService.addJob('', firstVideo.name, settings, firstVideo.id, firstVideo.filePath);
+
+    // Add remaining videos with same settings
+    videos.slice(1).forEach(video => {
       this.videoProcessingService.addJob('', video.name, settings, video.id, video.filePath);
     });
 
     this.queueExpanded.set(true);
+
+    // Open config modal for the first video so user can adjust AI model, etc.
+    setTimeout(() => {
+      if (this.queueComponent) {
+        this.queueComponent.openConfig(job.id);
+      }
+    }, 200);
 
     // Clear selection
     if (this.videoLibraryComponent) {
@@ -502,20 +514,20 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       uniqueVideoIds.add(videoId);
     });
 
-    // Add to VideoProcessingService
+    // Add to VideoProcessingService with transcribe + analyze enabled
+    const settings: VideoJobSettings = {
+      fixAspectRatio: false,
+      normalizeAudio: false,
+      transcribe: true,
+      whisperModel: 'base',
+      aiAnalysis: true,
+      outputFormat: 'mp4',
+      outputQuality: 'high'
+    };
+
     uniqueVideoIds.forEach(videoId => {
       const video = allVideos.find(v => v.id === videoId);
       if (video) {
-        const settings: VideoJobSettings = {
-          fixAspectRatio: false,
-          normalizeAudio: false,
-          transcribe: true,
-          whisperModel: 'base',
-          aiAnalysis: true,
-          aiModel: 'gpt-4',
-          outputFormat: 'mp4',
-          outputQuality: 'high'
-        };
         this.videoProcessingService.addJob('', video.name, settings, video.id, video.filePath);
       }
     });

@@ -1,6 +1,9 @@
 import { Component, signal, computed, effect, ViewChild, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
+import { ExportDialogComponent, ExportDialogData } from '../export-dialog/export-dialog.component';
 import { NavigationService } from '../../services/navigation.service';
 import { LibraryService, LibraryAnalysis, AnalysisSection as LibAnalysisSection } from '../../services/library.service';
 import {
@@ -16,15 +19,17 @@ import {
   TimelineSelection,
   CustomMarker
 } from '../../models/video-editor.model';
+import { TranscriptionSegment } from '../../models/video-info.model';
 
 // Sub-components
 import { VideoPlayerComponent } from './video-player/video-player.component';
 import { AnalysisPanelComponent } from './analysis-panel/analysis-panel.component';
 import { TimelineRulerComponent } from './timeline/timeline-ruler/timeline-ruler.component';
 import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline-playhead.component';
-import { TimelineSectionsLayerComponent } from './timeline/timeline-sections-layer/timeline-sections-layer.component';
-import { TimelineWaveformComponent } from './timeline/timeline-waveform/timeline-waveform.component';
+import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track.component';
 import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
+import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
+import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
 
 // Tool types for editor
 export enum EditorTool {
@@ -86,9 +91,11 @@ const CATEGORY_COLORS: Record<string, string> = {
     AnalysisPanelComponent,
     TimelineRulerComponent,
     TimelinePlayheadComponent,
-    TimelineSectionsLayerComponent,
-    TimelineWaveformComponent,
-    TimelineZoomBarComponent
+    TimelineTrackComponent,
+    TimelineZoomBarComponent,
+    ContextMenuComponent,
+    MarkerDialogComponent,
+    ExportDialogComponent
   ],
   templateUrl: './video-editor.component.html',
   styleUrls: ['./video-editor.component.scss']
@@ -97,6 +104,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private navService = inject(NavigationService);
   private libraryService = inject(LibraryService);
+  private http = inject(HttpClient);
 
   private readonly API_BASE = 'http://localhost:3000/api';
 
@@ -122,6 +130,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     }
 
     // Zoom in/out with Cmd+Plus/Minus (or Ctrl on Windows)
+    // Cmd+E for export dialog
     if (event.metaKey || event.ctrlKey) {
       if (event.key === '=' || event.key === '+') {
         event.preventDefault();
@@ -132,6 +141,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       } else if (event.key === '0') {
         event.preventDefault();
         this.resetZoom();
+      } else if (event.key === 'e' || event.key === 'E') {
+        event.preventDefault();
+        this.openExportDialog();
       }
     }
 
@@ -153,22 +165,33 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       this.setTool(EditorTool.CURSOR);
     }
 
-    // H for highlight tool
-    if (event.key === 'h' || event.key === 'H') {
+    // R for highlight/range tool
+    if (event.key === 'r' || event.key === 'R') {
       event.preventDefault();
       this.setTool(EditorTool.HIGHLIGHT);
     }
 
-    // M for marker
+    // M for marker at playhead, Shift+M for marker on selection
     if (event.key === 'm' || event.key === 'M') {
       event.preventDefault();
-      this.addMarker();
+      if (event.shiftKey && this.highlightSelection()) {
+        // Shift+M: Add marker for current selection
+        const selection = this.highlightSelection()!;
+        this.openMarkerDialog(selection.startTime, selection.endTime);
+      } else {
+        // M: Add marker at playhead
+        this.addMarker();
+      }
     }
 
-    // Cmd+E for export
-    if ((event.metaKey || event.ctrlKey) && (event.key === 'e' || event.key === 'E')) {
-      event.preventDefault();
-      this.openExportDialog();
+    // Escape to close dialogs
+    if (event.key === 'Escape') {
+      if (this.showContextMenu$()) {
+        this.showContextMenu$.set(false);
+      }
+      if (this.showMarkerDialog()) {
+        this.showMarkerDialog.set(false);
+      }
     }
   }
 
@@ -249,11 +272,27 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Custom markers created by user
   customMarkers = signal<CustomMarker[]>([]);
 
+  // Context menu state
+  showContextMenu$ = signal(false);
+  contextMenuPosition = signal<ContextMenuPosition>({ x: 0, y: 0 });
+  contextMenuActions = signal<ContextMenuAction[]>([]);
+
+  // Marker dialog state
+  showMarkerDialog = signal(false);
+  markerDialogData = signal<MarkerDialogData | null>(null);
+
+  // Export dialog
+  showExportDialog = signal(false);
+  exportDialogData = signal<ExportDialogData | null>(null);
+
   // Video URL
   videoUrl = signal<string | undefined>(undefined);
 
   // Timeline sections from analysis
   sections = signal<TimelineSection[]>([]);
+
+  // Transcript for video
+  transcript = signal<TranscriptionSegment[]>([]);
 
   // Category filters
   categoryFilters = signal<CategoryFilter[]>([]);
@@ -421,6 +460,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
               fileSize: video.size || 0
             }));
 
+            // Load transcript separately
+            this.loadTranscriptForVideo(videoId);
+
             // If video has analysis, try to load it
             if (video.hasAnalysis) {
               this.loadAnalysisForVideo(videoId);
@@ -448,16 +490,37 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     }
   }
 
+  private async loadTranscriptForVideo(videoId: string) {
+    try {
+      const data = await firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/transcript`)
+      );
+
+      if (data && data.transcript && Array.isArray(data.transcript)) {
+        this.transcript.set(data.transcript);
+      } else if (data && Array.isArray(data)) {
+        this.transcript.set(data);
+      } else {
+        this.transcript.set([]);
+      }
+    } catch (error) {
+      console.log('Failed to load transcript:', error);
+      this.transcript.set([]);
+    }
+  }
+
   private async loadAnalysisForVideo(videoId: string) {
     try {
       // Fetch analysis from correct endpoint
-      const analysisResponse = await fetch(`${this.API_BASE}/database/videos/${videoId}/analysis`);
-      const analysisData = await analysisResponse.json();
+      const analysisData = await firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/analysis`)
+      );
 
       if (analysisData && !analysisData.error) {
         // Also fetch sections
-        const sectionsResponse = await fetch(`${this.API_BASE}/database/videos/${videoId}/sections`);
-        const sectionsData = await sectionsResponse.json();
+        const sectionsData = await firstValueFrom(
+          this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/sections`)
+        );
 
         this.processAnalysisFromDatabase(analysisData, sectionsData?.sections || []);
       } else {
@@ -581,41 +644,39 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     try {
       // Fetch the analysis JSON file
       const analysisUrl = `${this.API_BASE}/library/analyses/${analysis.id}/analysis`;
-      const response = await fetch(analysisUrl);
+      const analysisJson = await firstValueFrom(
+        this.http.get<any>(analysisUrl)
+      );
 
-      if (response.ok) {
-        const analysisJson = await response.json();
+      // Convert to timeline sections
+      const timelineSections: TimelineSection[] = [];
 
-        // Convert to timeline sections
-        const timelineSections: TimelineSection[] = [];
+      if (analysisJson.analysis?.sections) {
+        analysisJson.analysis.sections.forEach((section: any, index: number) => {
+          const startSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[0] || '0:00');
+          const endSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[1] || '0:00') || startSeconds + 10;
 
-        if (analysisJson.analysis?.sections) {
-          analysisJson.analysis.sections.forEach((section: any, index: number) => {
-            const startSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[0] || '0:00');
-            const endSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[1] || '0:00') || startSeconds + 10;
-
-            timelineSections.push({
-              id: `section-${index}`,
-              startTime: startSeconds,
-              endTime: endSeconds,
-              category: section.category || 'unknown',
-              description: section.description || '',
-              color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
-            });
+          timelineSections.push({
+            id: `section-${index}`,
+            startTime: startSeconds,
+            endTime: endSeconds,
+            category: section.category || 'unknown',
+            description: section.description || '',
+            color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
           });
-        }
-
-        this.sections.set(timelineSections);
-
-        // Set analysis data for sidebar
-        this.analysisData.set({
-          id: analysis.id,
-          title: analysisJson.analysis?.title || analysis.title,
-          summary: analysisJson.analysis?.summary,
-          sections: analysisJson.analysis?.sections || [],
-          quotes: analysisJson.analysis?.quotes || []
         });
       }
+
+      this.sections.set(timelineSections);
+
+      // Set analysis data for sidebar
+      this.analysisData.set({
+        id: analysis.id,
+        title: analysisJson.analysis?.title || analysis.title,
+        summary: analysisJson.analysis?.summary,
+        sections: analysisJson.analysis?.sections || [],
+        quotes: analysisJson.analysis?.quotes || []
+      });
     } catch (error) {
       console.error('Failed to fetch analysis:', error);
     }
@@ -811,12 +872,14 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Get time from mouse position on timeline
   private getTimeFromMousePosition(event: MouseEvent): number | null {
     const target = event.currentTarget as HTMLElement;
-    const trackLane = target.querySelector('.track-lane') as HTMLElement;
-    if (!trackLane) return null;
+    // Look for the timeline track container which has the margins
+    const trackContainer = target.querySelector('.timeline-track-container') ||
+                          target.querySelector('app-timeline-track');
+    if (!trackContainer) return null;
 
-    const laneRect = trackLane.getBoundingClientRect();
-    const clickX = event.clientX - laneRect.left;
-    const trackWidth = laneRect.width;
+    const containerRect = trackContainer.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left;
+    const trackWidth = containerRect.width;
 
     if (clickX < 0 || clickX > trackWidth || trackWidth <= 0) return null;
 
@@ -832,12 +895,14 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     const timelineElement = document.querySelector('.track-content') as HTMLElement;
     if (!timelineElement) return null;
 
-    const trackLane = timelineElement.querySelector('.track-lane') as HTMLElement;
-    if (!trackLane) return null;
+    // Look for the timeline track container which has the margins
+    const trackContainer = timelineElement.querySelector('.timeline-track-container') ||
+                          timelineElement.querySelector('app-timeline-track');
+    if (!trackContainer) return null;
 
-    const laneRect = trackLane.getBoundingClientRect();
-    const clickX = event.clientX - laneRect.left;
-    const trackWidth = laneRect.width;
+    const containerRect = trackContainer.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left;
+    const trackWidth = containerRect.width;
 
     const state = this.editorState();
     const visibleDuration = state.duration / state.zoomState.level;
@@ -848,9 +913,188 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   // Show context menu for highlighted selection
   private showContextMenu(event: MouseEvent) {
-    // This will be implemented with the context menu component
-    console.log('Show context menu at:', event.clientX, event.clientY);
-    // TODO: Show context menu with Export and Add Marker options
+    const actions: ContextMenuAction[] = [
+      {
+        id: 'export',
+        label: 'Export Selection',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+      },
+      {
+        id: 'add-marker',
+        label: 'Add Marker',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L12 22"/><path d="M17 7L12 2 7 7"/></svg>'
+      },
+      { id: 'divider', label: '', divider: true },
+      {
+        id: 'clear',
+        label: 'Clear Selection',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'
+      }
+    ];
+
+    this.contextMenuActions.set(actions);
+    this.contextMenuPosition.set({ x: event.clientX, y: event.clientY });
+    this.showContextMenu$.set(true);
+  }
+
+  // Handle context menu action
+  onContextMenuAction(actionId: string) {
+    this.showContextMenu$.set(false);
+
+    switch (actionId) {
+      case 'export':
+        this.openExportDialog();
+        break;
+      case 'add-marker':
+        this.addMarker();
+        break;
+      case 'clear':
+        this.clearSelection();
+        break;
+    }
+  }
+
+  // Close context menu
+  onContextMenuClose() {
+    this.showContextMenu$.set(false);
+  }
+
+  // Set in-point at current playhead position
+  setInPoint() {
+    const currentTime = this.editorState().currentTime;
+    const selection = this.highlightSelection();
+
+    if (selection) {
+      // Update existing selection start
+      this.highlightSelection.set({
+        startTime: currentTime,
+        endTime: Math.max(currentTime, selection.endTime)
+      });
+    } else {
+      // Create new selection starting at current time
+      this.highlightSelection.set({
+        startTime: currentTime,
+        endTime: currentTime
+      });
+    }
+  }
+
+  // Set out-point at current playhead position
+  setOutPoint() {
+    const currentTime = this.editorState().currentTime;
+    const selection = this.highlightSelection();
+
+    if (selection) {
+      // Update existing selection end
+      this.highlightSelection.set({
+        startTime: Math.min(selection.startTime, currentTime),
+        endTime: currentTime
+      });
+    } else {
+      // Create new selection ending at current time
+      this.highlightSelection.set({
+        startTime: currentTime,
+        endTime: currentTime
+      });
+    }
+  }
+
+  // Clear current selection
+  clearSelection() {
+    this.highlightSelection.set(null);
+    this.selectionStart.set(null);
+    this.isSelecting.set(false);
+  }
+
+  // Track which selection handle is being dragged
+  private draggingHandle: 'left' | 'right' | null = null;
+
+  // Start dragging a selection handle
+  onSelectionHandleStart(event: MouseEvent, handle: 'left' | 'right') {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.draggingHandle = handle;
+    document.body.style.cursor = 'ew-resize';
+
+    const onMouseMove = (e: MouseEvent) => {
+      const time = this.getTimeFromMousePositionDocument(e);
+      if (time === null) return;
+
+      const selection = this.highlightSelection();
+      if (!selection) return;
+
+      if (this.draggingHandle === 'left') {
+        // Dragging left handle - update start time
+        const newStart = Math.min(time, selection.endTime - 0.1);
+        this.highlightSelection.set({
+          startTime: Math.max(0, newStart),
+          endTime: selection.endTime
+        });
+        // Make playhead follow the handle
+        this.seekTo(Math.max(0, newStart));
+      } else if (this.draggingHandle === 'right') {
+        // Dragging right handle - update end time
+        const newEnd = Math.max(time, selection.startTime + 0.1);
+        this.highlightSelection.set({
+          startTime: selection.startTime,
+          endTime: Math.min(this.editorState().duration, newEnd)
+        });
+        // Make playhead follow the handle
+        this.seekTo(Math.min(this.editorState().duration, newEnd));
+      }
+    };
+
+    const onMouseUp = () => {
+      this.draggingHandle = null;
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  // Handle dragging the entire selection to move it
+  onSelectionDragStart(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const selection = this.highlightSelection();
+    if (!selection) return;
+
+    const startTime = this.getTimeFromMousePositionDocument(event);
+    if (startTime === null) return;
+
+    const selectionDuration = selection.endTime - selection.startTime;
+    const initialOffset = startTime - selection.startTime;
+
+    document.body.style.cursor = 'move';
+
+    const onMouseMove = (e: MouseEvent) => {
+      const time = this.getTimeFromMousePositionDocument(e);
+      if (time === null) return;
+
+      // Calculate new position based on where we grabbed
+      const newStart = time - initialOffset;
+      const clampedStart = Math.max(0, Math.min(this.editorState().duration - selectionDuration, newStart));
+      const clampedEnd = clampedStart + selectionDuration;
+
+      this.highlightSelection.set({
+        startTime: clampedStart,
+        endTime: clampedEnd
+      });
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 
   // Add a marker to the current selection or current time
@@ -875,16 +1119,112 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   // Open the marker dialog
   private openMarkerDialog(startTime: number, endTime?: number) {
-    // TODO: Implement marker dialog
-    console.log('Open marker dialog for time:', startTime, endTime);
-    // This will open a dialog to get the marker message from user
+    const videoId = this.videoId();
+    if (!videoId) return;
+
+    this.markerDialogData.set({
+      videoId,
+      startTime,
+      endTime
+    });
+    this.showMarkerDialog.set(true);
+  }
+
+  // Handle marker dialog save
+  async onMarkerSave(marker: Partial<CustomMarker>) {
+    this.showMarkerDialog.set(false);
+
+    try {
+      const result = await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/database/analysis-sections`, {
+          videoId: marker.videoId,
+          startSeconds: marker.startTime,
+          endSeconds: marker.endTime || marker.startTime,
+          title: marker.message,
+          description: marker.message,
+          category: marker.category || 'marker'
+        })
+      );
+
+      if (result.success) {
+        // Refresh sections to include new marker
+        await this.loadAnalysisForVideo(this.videoId()!);
+        // Clear selection after adding marker
+        this.clearSelection();
+      } else {
+        console.error('Failed to save marker:', result.error);
+      }
+    } catch (error) {
+      console.error('Error saving marker:', error);
+    }
+  }
+
+  // Handle marker dialog cancel
+  onMarkerCancel() {
+    this.showMarkerDialog.set(false);
+  }
+
+  // Handle marker delete
+  async onMarkerDelete(markerId: string) {
+    this.showMarkerDialog.set(false);
+
+    const videoId = this.videoId();
+    if (!videoId) return;
+
+    try {
+      const result = await firstValueFrom(
+        this.http.delete<any>(`${this.API_BASE}/database/videos/${videoId}/sections/${markerId}`)
+      );
+
+      if (result.success) {
+        // Refresh sections
+        await this.loadAnalysisForVideo(this.videoId()!);
+      } else {
+        console.error('Failed to delete marker:', result.error);
+      }
+    } catch (error) {
+      console.error('Error deleting marker:', error);
+    }
   }
 
   // Open export dialog
   openExportDialog() {
-    // TODO: Implement export dialog with cascade list
-    console.log('Open export dialog');
-    // This will open the export dialog with cascade list of selections
+    const videoId = this.videoId();
+    const videoPath = this.videoUrl();
+    const videoTitle = this.metadata().filename;
+
+    if (!videoId || !videoPath) {
+      console.error('Cannot open export dialog: missing video info');
+      return;
+    }
+
+    // Prepare sections for export
+    const sections = this.filteredSections().map(section => ({
+      id: section.id,
+      category: section.category,
+      description: section.description,
+      startSeconds: section.startTime,
+      endSeconds: section.endTime,
+      timeRange: `${this.formatTime(section.startTime)} - ${this.formatTime(section.endTime)}`
+    }));
+
+    // Get current selection if any
+    const selection = this.highlightSelection();
+
+    this.exportDialogData.set({
+      sections,
+      selectionStart: selection?.startTime,
+      selectionEnd: selection?.endTime,
+      videoId,
+      videoPath,
+      videoTitle
+    });
+    this.showExportDialog.set(true);
+  }
+
+  onExportDialogClose() {
+    this.showExportDialog.set(false);
+    this.exportDialogData.set(null);
   }
 
   // Calculate selection overlay left position
@@ -932,6 +1272,11 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   onSectionHover(section: TimelineSection | null) {
     // Could show tooltip or highlight
+  }
+
+  // Delete section from analysis panel
+  onSectionDeleteFromPanel(sectionId: string) {
+    this.onMarkerDelete(sectionId);
   }
 
   // Category filter toggle
@@ -1107,15 +1452,15 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Common method to seek based on mouse position
   private seekToMousePosition(event: MouseEvent, element?: HTMLElement) {
     const target = element || event.currentTarget as HTMLElement;
-    const rect = target.getBoundingClientRect();
 
-    // Get the track-lane element which has the actual margins
-    const trackLane = target.querySelector('.track-lane') as HTMLElement;
-    if (!trackLane) return;
+    // Look for the timeline track container which has the actual margins
+    const trackContainer = target.querySelector('.timeline-track-container') ||
+                          target.querySelector('app-timeline-track');
+    if (!trackContainer) return;
 
-    const laneRect = trackLane.getBoundingClientRect();
-    const clickX = event.clientX - laneRect.left;
-    const trackWidth = laneRect.width;
+    const containerRect = trackContainer.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left;
+    const trackWidth = containerRect.width;
 
     if (clickX < 0 || clickX > trackWidth || trackWidth <= 0) return;
 
@@ -1247,9 +1592,10 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Generate waveform from video using Web Audio API
   private async generateWaveformFromVideo(videoUrl: string): Promise<number[]> {
     try {
-      // Fetch the video file
-      const response = await fetch(videoUrl);
-      const arrayBuffer = await response.arrayBuffer();
+      // Fetch the video file using HttpClient with arraybuffer response
+      const arrayBuffer = await firstValueFrom(
+        this.http.get(videoUrl, { responseType: 'arraybuffer' })
+      );
 
       // Decode audio using Web Audio API
       const audioContext = new AudioContext();

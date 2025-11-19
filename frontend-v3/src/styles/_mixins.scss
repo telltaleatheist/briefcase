@@ -136,24 +136,23 @@
   }
 }
 
-// Custom scrollbar
+// Custom scrollbar - subtle styling
 @mixin custom-scrollbar {
   &::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   &::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-    border-radius: $radius-full;
+    background: transparent;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: var(--primary-orange);
+    background: var(--text-tertiary);
     border-radius: $radius-full;
 
     &:hover {
-      background: var(--dark-orange);
+      background: var(--text-secondary);
     }
   }
 }

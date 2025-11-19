@@ -2,7 +2,9 @@
 
 export interface VideoJob {
   id: string;
+  videoId?: string; // Actual video ID from library (different from job id)
   videoUrl?: string;
+  videoPath?: string;
   videoName: string;
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'paused';
   addedAt: Date;
@@ -25,7 +27,7 @@ export interface VideoJobSettings {
   whisperModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large' | 'large-v2' | 'large-v3';
   whisperLanguage?: string;
   aiAnalysis: boolean;
-  aiModel?: 'gpt-3.5-turbo' | 'gpt-4' | 'claude-2' | 'claude-3' | 'llama-2';
+  aiModel?: string; // Full model ID from available models
   customInstructions?: string;
   outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
   outputQuality?: 'low' | 'medium' | 'high' | 'ultra';

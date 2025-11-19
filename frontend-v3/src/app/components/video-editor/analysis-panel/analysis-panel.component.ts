@@ -1,11 +1,13 @@
-import { Component, Input, Output, EventEmitter, computed, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { TimelineSection, CategoryFilter, AnalysisData } from '../../../models/video-editor.model';
+import { TranscriptionSegment } from '../../../models/video-info.model';
 
 @Component({
   selector: 'app-analysis-panel',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './analysis-panel.component.html',
   styleUrls: ['./analysis-panel.component.scss']
 })
@@ -16,9 +18,47 @@ export class AnalysisPanelComponent {
   @Input() analysisData?: AnalysisData;
   @Input() hasAnalysis = false;
   @Input() videoId?: string;
+  @Input() transcript: TranscriptionSegment[] = [];
   @Output() sectionClick = new EventEmitter<TimelineSection>();
+  @Output() sectionDelete = new EventEmitter<string>(); // section id
   @Output() filterToggle = new EventEmitter<string>();
   @Output() generateAnalysis = new EventEmitter<string>();
+  @Output() transcriptSeek = new EventEmitter<number>();
+
+  // Tab state
+  activeTab = signal<'analysis' | 'transcript'>('analysis');
+
+  // Transcript search
+  transcriptSearch = signal('');
+
+  get filteredTranscript(): TranscriptionSegment[] {
+    const query = this.transcriptSearch().toLowerCase().trim();
+    if (!query) return this.transcript;
+
+    return this.transcript.filter(segment =>
+      segment.text.toLowerCase().includes(query)
+    );
+  }
+
+  get transcriptResultCount(): number {
+    return this.filteredTranscript.length;
+  }
+
+  setActiveTab(tab: 'analysis' | 'transcript'): void {
+    this.activeTab.set(tab);
+  }
+
+  onTranscriptSearchChange(value: string): void {
+    this.transcriptSearch.set(value);
+  }
+
+  clearTranscriptSearch(): void {
+    this.transcriptSearch.set('');
+  }
+
+  onTranscriptSegmentClick(segment: TranscriptionSegment): void {
+    this.transcriptSeek.emit(segment.startTime);
+  }
 
   onGenerateAnalysis(): void {
     if (this.videoId) {
@@ -70,6 +110,10 @@ export class AnalysisPanelComponent {
 
   onFilterToggle(category: string): void {
     this.filterToggle.emit(category);
+  }
+
+  onSectionDelete(section: TimelineSection): void {
+    this.sectionDelete.emit(section.id);
   }
 
   formatTime(seconds: number): string {

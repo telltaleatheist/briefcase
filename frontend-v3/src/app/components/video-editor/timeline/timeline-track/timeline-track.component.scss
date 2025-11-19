@@ -1,0 +1,116 @@
+@use '../../../../../styles/variables' as *;
+@use '../../../../../styles/mixins' as *;
+
+:host {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.timeline-track-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: calc(100% - 48px); // Account for margins (24px on each side)
+  margin: 0 24px; // Horizontal margins to align with ruler
+  // Component is vertically centered by parent container
+}
+
+// Sections header with rounded top corners
+.track-sections-header {
+  position: relative;
+  height: 36px;
+  background: var(--bg-secondary);
+  border-radius: 8px 8px 0 0; // Only top corners rounded
+  border: 1px solid var(--border-color);
+  border-bottom: none; // Remove bottom border to connect with waveform
+  overflow: visible; // Allow lines to extend below
+
+  app-timeline-sections-layer {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+// Waveform container with square corners
+.track-waveform-container {
+  position: relative;
+  height: 60px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-top: none; // Connect seamlessly with sections header
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+
+  app-timeline-waveform {
+    flex: 1;
+    height: 40px; // Waveform height within container
+  }
+
+  // Selection overlay - positioned within waveform container
+  .selection-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(255, 107, 53, 0.2);
+    border: 1px solid var(--primary-orange);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 50;
+    display: flex;
+    align-items: stretch;
+
+    // Selection handles for resizing - smaller and less obtrusive
+    .selection-handle {
+      width: 6px;
+      background: var(--primary-orange);
+      cursor: ew-resize;
+      pointer-events: all;
+      transition: all 0.15s ease;
+      opacity: 0.8;
+      position: relative;
+
+      &::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 2px;
+        height: 12px;
+        background: white;
+        border-radius: 1px;
+        opacity: 0.6;
+      }
+
+      &:hover {
+        background: var(--light-orange);
+        opacity: 1;
+        width: 8px;
+
+        &::before {
+          opacity: 1;
+          height: 16px;
+        }
+      }
+
+      &.left {
+        border-radius: 2px 0 0 2px;
+      }
+
+      &.right {
+        border-radius: 0 2px 2px 0;
+      }
+    }
+
+    // Drag area in the center of selection
+    .selection-drag-area {
+      flex: 1;
+      cursor: move;
+      pointer-events: all;
+    }
+  }
+}

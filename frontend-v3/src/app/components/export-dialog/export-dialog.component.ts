@@ -1,19 +1,12 @@
-import { Component, Inject, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
-import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { MatCheckboxModule } from '@angular/material/checkbox';
-import { MatTooltipModule } from '@angular/material/tooltip';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 
-interface ExportSection {
+export interface ExportSection {
   id: string;
   category: string;
   description: string;
@@ -23,24 +16,25 @@ interface ExportSection {
   icon?: string;
 }
 
+export interface ExportDialogData {
+  sections: ExportSection[];
+  selectionStart?: number;
+  selectionEnd?: number;
+  videoId: string;
+  videoPath: string;
+  videoTitle: string;
+}
+
 @Component({
   selector: 'app-export-dialog',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    MatDialogModule,
-    MatButtonModule,
-    MatIconModule,
-    MatProgressSpinnerModule,
-    MatProgressBarModule,
-    MatCheckboxModule,
-    MatTooltipModule
-  ],
+  imports: [CommonModule, FormsModule],
   templateUrl: './export-dialog.component.html',
   styleUrls: ['./export-dialog.component.scss']
 })
 export class ExportDialogComponent implements OnInit {
+  @Input() data!: ExportDialogData;
+  @Output() close = new EventEmitter<{ exported: boolean }>();
 
   // Selection state
   hasSelection = false;
@@ -72,15 +66,6 @@ export class ExportDialogComponent implements OnInit {
   allCollapsed = true;
 
   constructor(
-    @Inject(MAT_DIALOG_DATA) public data: {
-      sections: ExportSection[];
-      selectionStart?: number;
-      selectionEnd?: number;
-      videoId: string;
-      videoPath: string;
-      videoTitle: string;
-    },
-    private dialogRef: MatDialogRef<ExportDialogComponent>,
     private http: HttpClient,
     private notificationService: NotificationService,
     private backendUrlService: BackendUrlService
@@ -100,7 +85,6 @@ export class ExportDialogComponent implements OnInit {
         this.selectionDuration = this.formatTime(duration);
 
         // Add selection as a cascade list item at the top
-        // Use a leading space to ensure it sorts first
         cascadeSections.push({
           id: '__selection__',
           category: ' Current Selection',
@@ -127,8 +111,14 @@ export class ExportDialogComponent implements OnInit {
       Array.from(categories).filter(cat => cat.trim() !== 'Current Selection')
     );
 
-    // Update the allCollapsed state based on actual collapsed groups
     this.updateAllCollapsedState();
+  }
+
+  onOverlayClick(event: MouseEvent) {
+    // Only close if clicking directly on the overlay, not the content
+    if (event.target === event.currentTarget) {
+      this.cancel();
+    }
   }
 
   getCategoryColor(category: string): string {
@@ -165,8 +155,6 @@ export class ExportDialogComponent implements OnInit {
     return this.sections.filter(section => this.selectedSectionIds.has(section.id));
   }
 
-  // Check if overwrite option should be enabled
-  // Only allow overwriting when exactly one section is selected and it's the current selection
   canOverwriteOriginal(): boolean {
     if (!this.hasSelection) {
       return false;
@@ -175,7 +163,6 @@ export class ExportDialogComponent implements OnInit {
     return selectedSections.length === 1 && selectedSections[0].id === '__selection__';
   }
 
-  // Handle group toggle to track collapsed state
   onGroupToggle(groupId: string) {
     if (this.collapsedGroups.has(groupId)) {
       this.collapsedGroups.delete(groupId);
@@ -185,7 +172,6 @@ export class ExportDialogComponent implements OnInit {
     this.updateAllCollapsedState();
   }
 
-  // Toggle section selection
   toggleSection(section: ExportSection) {
     if (this.selectedSectionIds.has(section.id)) {
       this.selectedSectionIds.delete(section.id);
@@ -194,12 +180,10 @@ export class ExportDialogComponent implements OnInit {
     }
   }
 
-  // Check if section is selected
   isSectionSelected(section: ExportSection): boolean {
     return this.selectedSectionIds.has(section.id);
   }
 
-  // Get sections grouped by category
   getSectionsByCategory(): Map<string, ExportSection[]> {
     const grouped = new Map<string, ExportSection[]>();
     for (const section of this.sections) {
@@ -211,28 +195,23 @@ export class ExportDialogComponent implements OnInit {
     return grouped;
   }
 
-  // Get category list
   getCategories(): string[] {
     return Array.from(this.getSectionsByCategory().keys()).sort((a, b) => {
-      // Put " Current Selection" first
       if (a.trim() === 'Current Selection') return -1;
       if (b.trim() === 'Current Selection') return 1;
       return a.localeCompare(b);
     });
   }
 
-  // Check if group is collapsed
   isGroupCollapsed(category: string): boolean {
     return this.collapsedGroups.has(category);
   }
 
-  // Expand all groups
   expandAll() {
     this.collapsedGroups.clear();
     this.allCollapsed = false;
   }
 
-  // Collapse all groups (except Current Selection which stays expanded)
   collapseAll() {
     const categories = new Set(this.sections.map(s => s.category));
     this.collapsedGroups = new Set(
@@ -241,25 +220,41 @@ export class ExportDialogComponent implements OnInit {
     this.allCollapsed = true;
   }
 
-  // Update the allCollapsed state based on current collapsed groups
-  // (Current Selection is always expanded and doesn't count toward collapse state)
+  selectAll() {
+    this.sections.forEach(section => this.selectedSectionIds.add(section.id));
+  }
+
+  deselectAll() {
+    this.selectedSectionIds.clear();
+  }
+
+  areAllSelected(): boolean {
+    return this.sections.length > 0 && this.selectedSectionIds.size === this.sections.length;
+  }
+
+  getSelectedDuration(): string {
+    const totalSeconds = this.getSelectedSections().reduce(
+      (total, section) => total + (section.endSeconds - section.startSeconds),
+      0
+    );
+    return this.formatTime(totalSeconds);
+  }
+
   private updateAllCollapsedState() {
     const categories = new Set(this.sections.map(s => s.category));
     const collapsibleCategories = Array.from(categories).filter(cat => cat.trim() !== 'Current Selection');
     const totalCollapsibleGroups = collapsibleCategories.length;
-
-    // Count how many collapsible groups are actually collapsed
     const collapsedCount = Array.from(this.collapsedGroups).filter(cat => cat.trim() !== 'Current Selection').length;
-
     this.allCollapsed = collapsedCount === totalCollapsibleGroups;
   }
 
   cancel() {
-    this.dialogRef.close();
+    if (!this.isExporting) {
+      this.close.emit({ exported: false });
+    }
   }
 
   async chooseOutputDirectory() {
-    // Use Electron dialog if available (desktop app)
     const electron = (window as any).electron;
     if (electron && electron.showOpenDialog) {
       try {
@@ -276,7 +271,6 @@ export class ExportDialogComponent implements OnInit {
         this.notificationService.error('Error', 'Failed to open directory picker');
       }
     } else {
-      // Web mode - inform user that default location will be used
       this.notificationService.info(
         'Default Location',
         'Clips will be exported to your library folder. Directory picker is only available in the desktop app.'
@@ -291,14 +285,11 @@ export class ExportDialogComponent implements OnInit {
       return;
     }
 
-    // If overwrite is enabled, show confirmation dialog
     if (this.overwriteOriginal && this.canOverwriteOriginal()) {
       const confirmed = await this.confirmOverwrite();
       if (!confirmed) {
         return;
       }
-
-      // Perform the overwrite operation
       await this.performOverwrite(selectedSections[0]);
       return;
     }
@@ -393,7 +384,7 @@ export class ExportDialogComponent implements OnInit {
     );
   }
 
-  close() {
-    this.dialogRef.close({ exported: this.exportComplete });
+  closeDialog() {
+    this.close.emit({ exported: this.exportComplete });
   }
 }

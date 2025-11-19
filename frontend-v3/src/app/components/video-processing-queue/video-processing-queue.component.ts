@@ -1,87 +1,124 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
-import { VideoProcessingService } from '../../services/video-processing.service';
-import { VideoJob, VideoTask, QueueStats, VideoJobSettings } from '../../models/video-processing.model';
+import { QueueItem, QueueItemTask } from '../../models/queue.model';
+import { AVAILABLE_TASKS, TaskType } from '../../models/task.model';
+import { QueueItemConfigModalComponent } from '../queue-item-config-modal/queue-item-config-modal.component';
 import { VideoConfigDialogComponent } from '../video-config-dialog/video-config-dialog.component';
+import { VideoProcessingService } from '../../services/video-processing.service';
+import { VideoJob } from '../../models/video-processing.model';
 
 @Component({
   selector: 'app-video-processing-queue',
   standalone: true,
-  imports: [CommonModule, FormsModule, VideoConfigDialogComponent],
+  imports: [CommonModule, FormsModule, QueueItemConfigModalComponent, VideoConfigDialogComponent],
   templateUrl: './video-processing-queue.component.html',
   styleUrls: ['./video-processing-queue.component.scss']
 })
 export class VideoProcessingQueueComponent implements OnInit, OnDestroy {
-  jobs: VideoJob[] = [];
-  queueStats: QueueStats | null = null;
-  activeJobId: string | null = null;
-  selectedJobs: Set<string> = new Set();
+  private videoProcessingService = inject(VideoProcessingService);
 
-  // Layout options
-  layoutMode: 'compact' | 'detailed' | 'cards' | 'timeline' = 'detailed';
+  // Queue items
+  items = signal<QueueItem[]>([]);
 
-  // Dialog state
-  isConfigDialogOpen = false;
+  // Expanded item (accordion)
+  expandedItemId = signal<string | null>(null);
 
-  // Batch edit mode
-  isBatchEditMode = false;
-  batchSettings: Partial<VideoJobSettings> = {
-    transcribe: true,
-    aiAnalysis: true,
-    normalizeAudio: false,
-    fixAspectRatio: false,
-    whisperModel: 'base' as const,
-    aiModel: 'gpt-4' as const,
-    outputQuality: 'high' as const
-  };
+  // Modal states
+  configModalOpen = signal(false);
+  addVideoDialogOpen = signal(false);
 
-  // Individual job editing
-  editingJobId: string | null = null;
-  editingJobSettings: VideoJobSettings | null = null;
+  // Config modal context
+  configItemId = signal<string | null>(null);
+  configBulkMode = signal(false);
 
-  // Filter and sort
-  filterStatus: 'all' | 'queued' | 'processing' | 'completed' | 'failed' = 'all';
-  sortBy: 'date' | 'name' | 'progress' | 'status' = 'date';
+  // Accordion
+  completedOpen = signal(false);
+
+  // Processing state
+  isProcessing = signal(false);
 
   private destroy$ = new Subject<void>();
 
-  constructor(private videoService: VideoProcessingService) {}
+  // Computed values
+  pendingItems = computed(() =>
+    this.items().filter(i => i.status === 'pending' || i.status === 'running')
+  );
+
+  completedItems = computed(() =>
+    this.items().filter(i => i.status === 'completed' || i.status === 'failed')
+  );
+
+  stats = computed(() => ({
+    total: this.items().length,
+    pending: this.items().filter(i => i.status === 'pending').length,
+    running: this.items().filter(i => i.status === 'running').length,
+    completed: this.items().filter(i => i.status === 'completed').length,
+    failed: this.items().filter(i => i.status === 'failed').length
+  }));
 
   ngOnInit(): void {
-    // Subscribe to jobs
-    this.videoService.getJobs()
+    // Subscribe to VideoProcessingService jobs
+    this.videoProcessingService.getJobs()
       .pipe(takeUntil(this.destroy$))
       .subscribe(jobs => {
-        this.jobs = this.sortJobs(this.filterJobs(jobs));
-      });
-
-    // Subscribe to queue stats
-    this.videoService.getQueueStats()
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(stats => {
-        this.queueStats = stats;
-      });
-
-    // Subscribe to active job
-    this.videoService.getActiveJobId()
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(id => {
-        this.activeJobId = id;
-      });
-
-    // Subscribe to progress updates
-    this.videoService.getProgressUpdates()
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(update => {
-        // Handle real-time updates
-        console.log('Progress update:', update);
+        const queueItems = jobs.map(job => this.convertJobToQueueItem(job));
+        this.items.set(queueItems);
       });
   }
 
-  processQueue(): void {
-    this.videoService.processQueue();
+  private convertJobToQueueItem(job: VideoJob): QueueItem {
+    const tasks: QueueItemTask[] = job.tasks.map(task => ({
+      type: this.mapTaskType(task.type),
+      status: this.mapTaskStatus(task.status),
+      progress: task.progress,
+      config: {}
+    }));
+
+    return {
+      id: job.id,
+      source: job.videoUrl ? 'url' : 'library',
+      url: job.videoUrl,
+      urlTitle: job.videoName,
+      tasks,
+      status: this.mapJobStatus(job.status),
+      overallProgress: job.progress
+    };
+  }
+
+  private mapTaskType(type: string): TaskType {
+    const mapping: Record<string, TaskType> = {
+      'download': 'download-import',
+      'import': 'download-import',
+      'aspect-ratio': 'fix-aspect-ratio',
+      'normalize-audio': 'normalize-audio',
+      'transcribe': 'transcribe',
+      'ai-analysis': 'ai-analyze'
+    };
+    return mapping[type] || 'download-import';
+  }
+
+  private mapTaskStatus(status: string): 'pending' | 'running' | 'completed' | 'failed' {
+    const mapping: Record<string, 'pending' | 'running' | 'completed' | 'failed'> = {
+      'pending': 'pending',
+      'in-progress': 'running',
+      'completed': 'completed',
+      'failed': 'failed',
+      'skipped': 'completed'
+    };
+    return mapping[status] || 'pending';
+  }
+
+  private mapJobStatus(status: string): 'pending' | 'running' | 'completed' | 'failed' {
+    const mapping: Record<string, 'pending' | 'running' | 'completed' | 'failed'> = {
+      'queued': 'pending',
+      'processing': 'running',
+      'completed': 'completed',
+      'failed': 'failed',
+      'paused': 'pending'
+    };
+    return mapping[status] || 'pending';
   }
 
   ngOnDestroy(): void {
@@ -89,182 +126,119 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  openConfigDialog(): void {
-    this.isConfigDialogOpen = true;
-  }
-
-  closeConfigDialog(): void {
-    this.isConfigDialogOpen = false;
-  }
-
-  onJobConfigSubmit(config: { url: string; name: string; settings: any }): void {
-    this.videoService.addJob(config.url, config.name, config.settings);
-  }
-
-  removeJob(jobId: string): void {
-    this.videoService.removeJob(jobId);
-    this.selectedJobs.delete(jobId);
-  }
-
-  pauseJob(jobId: string): void {
-    this.videoService.pauseJob(jobId);
-  }
-
-  resumeJob(jobId: string): void {
-    this.videoService.resumeJob(jobId);
-  }
-
-  retryJob(jobId: string): void {
-    this.videoService.retryJob(jobId);
-  }
-
-  toggleJobSelection(jobId: string): void {
-    if (this.selectedJobs.has(jobId)) {
-      this.selectedJobs.delete(jobId);
+  // Accordion
+  toggleItemExpanded(id: string): void {
+    if (this.expandedItemId() === id) {
+      this.expandedItemId.set(null);
     } else {
-      this.selectedJobs.add(jobId);
+      this.expandedItemId.set(id);
     }
   }
 
-  selectAllJobs(): void {
-    this.jobs.forEach(job => this.selectedJobs.add(job.id));
+  isItemExpanded(id: string): boolean {
+    return this.expandedItemId() === id;
   }
 
-  deselectAllJobs(): void {
-    this.selectedJobs.clear();
+  // Configuration modal
+  openConfig(itemId: string): void {
+    this.configItemId.set(itemId);
+    this.configBulkMode.set(false);
+    this.configModalOpen.set(true);
   }
 
-  removeSelectedJobs(): void {
-    this.selectedJobs.forEach(id => this.videoService.removeJob(id));
-    this.selectedJobs.clear();
+
+  closeConfig(): void {
+    this.configModalOpen.set(false);
+    this.configItemId.set(null);
+    this.configBulkMode.set(false);
   }
 
-  applyBatchSettings(): void {
-    const jobIds = Array.from(this.selectedJobs);
-    this.videoService.updateBatchSettings(jobIds, this.batchSettings);
-    this.isBatchEditMode = false;
-    this.selectedJobs.clear();
+  onConfigSave(tasks: QueueItemTask[]): void {
+    const itemId = this.configItemId();
+    if (itemId) {
+      // Update the VideoProcessingService with the task types
+      const taskTypes = tasks.map(t => t.type);
+      this.videoProcessingService.updateJobFromTaskTypes(itemId, taskTypes);
+    }
+    this.closeConfig();
   }
 
-  applyToAll(): void {
-    const allJobIds = this.jobs.filter(j => j.status === 'queued').map(j => j.id);
-    if (allJobIds.length === 0) return;
-
-    this.videoService.updateBatchSettings(allJobIds, this.batchSettings);
-    this.isBatchEditMode = false;
-    this.selectedJobs.clear();
+  // Add video dialog
+  openAddDialog(): void {
+    this.addVideoDialogOpen.set(true);
   }
 
-  openJobEditor(job: VideoJob): void {
-    if (job.status !== 'queued') return; // Only edit queued jobs
-    this.editingJobId = job.id;
-    this.editingJobSettings = { ...job.settings };
+  closeAddDialog(): void {
+    this.addVideoDialogOpen.set(false);
   }
 
-  closeJobEditor(): void {
-    this.editingJobId = null;
-    this.editingJobSettings = null;
+  onAddVideo(configs: { url: string; name: string; settings: any }[]): void {
+    // Add all jobs via the service
+    configs.forEach(config => {
+      this.videoProcessingService.addJob(config.url, config.name, config.settings);
+    });
+    this.closeAddDialog();
   }
 
-  saveJobSettings(): void {
-    if (!this.editingJobId || !this.editingJobSettings) return;
-    this.videoService.updateBatchSettings([this.editingJobId], this.editingJobSettings);
-    this.closeJobEditor();
+  // Queue actions
+  processQueue(): void {
+    this.isProcessing.set(true);
+    this.videoProcessingService.processQueue();
   }
+
+  removeItem(id: string): void {
+    this.videoProcessingService.removeJob(id);
+    // Collapse if this was the expanded item
+    if (this.expandedItemId() === id) {
+      this.expandedItemId.set(null);
+    }
+  }
+
 
   clearCompleted(): void {
-    this.videoService.clearCompleted();
+    this.videoProcessingService.clearCompleted();
   }
 
-  clearAll(): void {
-    if (confirm('Are you sure you want to clear all jobs? This action cannot be undone.')) {
-      this.videoService.clearAll();
-      this.selectedJobs.clear();
+  // Accordion
+  toggleCompleted(): void {
+    this.completedOpen.set(!this.completedOpen());
+  }
+
+  // Helpers
+  getTaskIcon(type: TaskType): string {
+    const task = AVAILABLE_TASKS.find(t => t.type === type);
+    return task?.icon || '📋';
+  }
+
+  getTaskLabel(type: TaskType): string {
+    const task = AVAILABLE_TASKS.find(t => t.type === type);
+    return task?.label || type;
+  }
+
+  getItemName(item: QueueItem): string {
+    if (item.video) {
+      return item.video.name;
     }
+    return item.urlTitle || item.url || 'Unknown';
   }
 
-  private filterJobs(jobs: VideoJob[]): VideoJob[] {
-    if (this.filterStatus === 'all') {
-      return jobs;
-    }
-    return jobs.filter(job => job.status === this.filterStatus);
+  getItemSource(itemId: string | null): 'url' | 'library' {
+    if (!itemId) return 'library';
+    const item = this.items().find(i => i.id === itemId);
+    return item?.source || 'library';
   }
 
-  private sortJobs(jobs: VideoJob[]): VideoJob[] {
-    return jobs.sort((a, b) => {
-      switch (this.sortBy) {
-        case 'date':
-          return b.addedAt.getTime() - a.addedAt.getTime();
-        case 'name':
-          return a.videoName.localeCompare(b.videoName);
-        case 'progress':
-          return b.progress - a.progress;
-        case 'status':
-          return a.status.localeCompare(b.status);
-        default:
-          return 0;
-      }
-    });
+  getExistingTasks(itemId: string | null): QueueItemTask[] {
+    if (!itemId) return [];
+    const item = this.items().find(i => i.id === itemId);
+    return item?.tasks || [];
   }
 
-  getTaskIcon(taskType: VideoTask['type']): string {
-    const icons: Record<VideoTask['type'], string> = {
-      'download': '⬇️',
-      'import': '💾',
-      'aspect-ratio': '📐',
-      'normalize-audio': '🔊',
-      'transcribe': '💬',
-      'ai-analysis': '🤖'
-    };
-    return icons[taskType] || '📋';
+  formatProgress(progress: number | undefined): string {
+    return `${Math.round(progress || 0)}%`;
   }
 
-  getStatusIcon(status: VideoJob['status']): string {
-    const icons: Record<VideoJob['status'], string> = {
-      'queued': '⏳',
-      'processing': '⚡',
-      'completed': '✅',
-      'failed': '❌',
-      'paused': '⏸️'
-    };
-    return icons[status] || '❓';
-  }
-
-  getStatusColor(status: VideoJob['status']): string {
-    const colors: Record<VideoJob['status'], string> = {
-      'queued': 'status-queued',
-      'processing': 'status-processing',
-      'completed': 'status-completed',
-      'failed': 'status-failed',
-      'paused': 'status-paused'
-    };
-    return colors[status] || '';
-  }
-
-  formatFileSize(bytes?: number): string {
-    if (!bytes) return 'Unknown';
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
-  }
-
-  formatDuration(seconds?: number): string {
-    if (!seconds) return 'Unknown';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }
-
-  formatTime(date?: Date): string {
-    if (!date) return 'N/A';
-    return new Date(date).toLocaleTimeString();
-  }
-
-  getProcessingTime(job: VideoJob): string {
-    if (!job.startedAt) return 'Not started';
-    const end = job.completedAt || new Date();
-    const diff = end.getTime() - job.startedAt.getTime();
-    const seconds = Math.floor(diff / 1000);
-    return this.formatDuration(seconds);
+  private generateId(): string {
+    return Math.random().toString(36).substr(2, 9);
   }
 }

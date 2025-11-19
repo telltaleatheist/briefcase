@@ -1,4 +1,4 @@
-import { Component, signal, input, output, inject, OnInit } from '@angular/core';
+import { Component, signal, input, output, inject, OnInit, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -51,8 +51,16 @@ export class QueueItemConfigModalComponent implements OnInit {
   loadingModels = signal(false);
   defaultAIModel = 'ollama:qwen2.5:7b';
 
+  constructor() {
+    // Re-initialize tasks when modal opens
+    effect(() => {
+      if (this.isOpen()) {
+        this.initializeTasks();
+      }
+    }, { allowSignalWrites: true });
+  }
+
   ngOnInit() {
-    this.initializeTasks();
     this.loadAIModels();
   }
 
@@ -100,9 +108,30 @@ export class QueueItemConfigModalComponent implements OnInit {
 
       this.aiModels.set(models);
 
-      // Set default model to first available
-      if (models.length > 0 && !this.getTaskConfig('ai-analyze').aiModel) {
-        this.defaultAIModel = models[0].value;
+      // Set default model priority: largest local > claude > openai
+      if (models.length > 0) {
+        // Try to get largest Ollama model first (prefer models with larger numbers)
+        const ollamaModels = models.filter(m => m.provider === 'ollama');
+        if (ollamaModels.length > 0) {
+          // Sort by model size hints in name (e.g., 70b > 7b > 3b)
+          const sorted = [...ollamaModels].sort((a, b) => {
+            const sizeA = this.extractModelSize(a.label);
+            const sizeB = this.extractModelSize(b.label);
+            return sizeB - sizeA;
+          });
+          this.defaultAIModel = sorted[0].value;
+        } else {
+          // Fall back to Claude, then OpenAI
+          const claudeModels = models.filter(m => m.provider === 'claude');
+          if (claudeModels.length > 0) {
+            this.defaultAIModel = claudeModels[0].value;
+          } else {
+            const openaiModels = models.filter(m => m.provider === 'openai');
+            if (openaiModels.length > 0) {
+              this.defaultAIModel = openaiModels[0].value;
+            }
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to load AI models:', error);
@@ -113,6 +142,15 @@ export class QueueItemConfigModalComponent implements OnInit {
 
   getModelsByProvider(provider: 'ollama' | 'claude' | 'openai'): AIModelOption[] {
     return this.aiModels().filter(m => m.provider === provider);
+  }
+
+  private extractModelSize(modelName: string): number {
+    // Extract size from model names like "qwen2.5:70b", "llama3:8b", etc.
+    const match = modelName.match(/(\d+)b/i);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+    return 0;
   }
 
   hasModelsForProvider(provider: 'ollama' | 'claude' | 'openai'): boolean {
@@ -191,7 +229,7 @@ export class QueueItemConfigModalComponent implements OnInit {
       case 'download-import':
         return { quality: 'best', format: 'mp4' } as DownloadImportConfig;
       case 'transcribe':
-        return { model: 'large', translate: false } as TranscribeConfig;
+        return { model: 'base', translate: false } as TranscribeConfig;
       case 'ai-analyze':
         return {
           aiModel: this.defaultAIModel

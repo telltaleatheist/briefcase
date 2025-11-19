@@ -100,20 +100,31 @@ export class ClipExtractorService {
 
       if (reEncode) {
         // Re-encode mode: Frame-accurate extraction with no black frames
-        // Use output seeking (after decoding) for maximum accuracy
+        // Use two-pass seeking for best accuracy with reasonable performance
         this.logger.log('Using re-encoding mode for frame-accurate extraction');
 
-        // Output seeking: decode from start, then seek precisely before encoding
-        // This is the most accurate method but slower
-        command.outputOptions([`-ss ${startTime}`]);
+        // First, input seek to nearest keyframe before startTime for speed
+        // Then use output seeking for frame-accurate trim
+        const seekBuffer = Math.max(0, startTime - 10); // Seek to 10 seconds before
+        if (seekBuffer > 0) {
+          command.inputOptions([`-ss ${seekBuffer}`]);
+        }
+
+        // Calculate adjusted start time after input seek
+        const adjustedStart = startTime - seekBuffer;
 
         command
+          .outputOptions([`-ss ${adjustedStart}`])  // Precise output seeking
           .videoCodec('libx264')  // Use H.264 encoder
           .audioCodec('aac')      // Use AAC audio encoder
           .outputOptions([
-            '-preset ultrafast',     // Fastest encoding preset
+            '-preset medium',        // Better quality preset (good balance)
             '-crf 18',               // High quality (lower = better, 18 is visually lossless)
+            '-pix_fmt yuv420p',      // Ensure broad compatibility
             '-movflags +faststart',  // Enable fast start for web playback
+            '-avoid_negative_ts make_zero',  // Fix timestamp issues
+            '-async 1',              // Audio sync fix
+            '-vsync cfr',            // Constant frame rate for stability
           ]);
       } else {
         // Stream copy mode: Fast extraction using input seeking
@@ -125,6 +136,7 @@ export class ClipExtractorService {
         command.outputOptions([
           '-c copy',  // Copy streams without re-encoding
           '-avoid_negative_ts make_zero',  // Fix timestamp issues
+          '-async 1', // Audio sync fix
         ]);
       }
 
