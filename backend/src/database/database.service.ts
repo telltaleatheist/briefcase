@@ -1234,6 +1234,30 @@ export class DatabaseService {
         // Ignore errors from individual FTS tables
       }
 
+      // Also do LIKE-based substring search on filename for better partial matching
+      // This catches cases like "video" matching "MyVideo-final.mp4"
+      try {
+        const likePattern = `%${query.trim().replace(/\s+/g, '%')}%`;
+        const likeResults = db.prepare(`
+          SELECT id as video_id
+          FROM videos
+          WHERE filename LIKE ? COLLATE NOCASE
+             OR current_path LIKE ? COLLATE NOCASE
+          LIMIT ?
+        `).all(likePattern, likePattern, limit * 2) as any[];
+
+        for (const row of likeResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += 10; // High score for direct filename match
+          entry.matches.add('filename');
+        }
+      } catch (e) {
+        this.logger.warn('Error in LIKE filename search:', e);
+      }
+
       // Search transcripts_fts
       try {
         const transcriptResults = db.prepare(`
@@ -2612,6 +2636,27 @@ export class DatabaseService {
         }
       } catch (error) {
         this.logger.warn('Error searching videos FTS5 table:', error);
+      }
+
+      // Also do LIKE-based substring search on filename for better partial matching
+      // This catches cases like "video" matching "MyVideo-final.mp4"
+      try {
+        const likePattern = `%${query.trim().replace(/\s+/g, '%')}%`;
+        const stmt = db.prepare(`
+          SELECT id as video_id
+          FROM videos
+          WHERE filename LIKE ? COLLATE NOCASE
+             OR current_path LIKE ? COLLATE NOCASE
+          LIMIT ?
+        `);
+        const rows = stmt.all(likePattern, likePattern, limit) as Array<{ video_id: string }>;
+
+        for (const row of rows) {
+          // Give LIKE matches high priority (95) since they're direct filename matches
+          addResult(row.video_id, 95, 'filename');
+        }
+      } catch (error) {
+        this.logger.warn('Error in LIKE filename search:', error);
       }
     }
 

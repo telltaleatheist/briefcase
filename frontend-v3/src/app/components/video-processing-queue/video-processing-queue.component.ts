@@ -156,9 +156,15 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy {
   onConfigSave(tasks: QueueItemTask[]): void {
     const itemId = this.configItemId();
     if (itemId) {
-      // Update the VideoProcessingService with the task types
+      // Update the VideoProcessingService with task types and configs
       const taskTypes = tasks.map(t => t.type);
-      this.videoProcessingService.updateJobFromTaskTypes(itemId, taskTypes);
+      const taskConfigs = new Map<string, any>();
+      tasks.forEach(t => {
+        if (t.config) {
+          taskConfigs.set(t.type, t.config);
+        }
+      });
+      this.videoProcessingService.updateJobFromTaskTypes(itemId, taskTypes, taskConfigs);
     }
     this.closeConfig();
   }

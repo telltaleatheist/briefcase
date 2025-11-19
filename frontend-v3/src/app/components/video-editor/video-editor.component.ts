@@ -1190,7 +1190,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Open export dialog
   openExportDialog() {
     const videoId = this.videoId();
-    const videoPath = this.videoUrl();
+    const videoPath = this.videoPath();
     const videoTitle = this.metadata().filename;
 
     if (!videoId || !videoPath) {

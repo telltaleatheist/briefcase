@@ -344,7 +344,7 @@ export class VideoProcessingService {
       tasks.push({
         type: 'analyze',
         options: {
-          aiModel: settings.aiModel || 'llama3',
+          aiModel: settings.aiModel || 'qwen2.5:7b',
           customInstructions: settings.customInstructions
         }
       });
@@ -464,7 +464,7 @@ export class VideoProcessingService {
     this.jobs$.next([...jobs]);
   }
 
-  updateJobFromTaskTypes(jobId: string, taskTypes: string[]): void {
+  updateJobFromTaskTypes(jobId: string, taskTypes: string[], taskConfigs?: Map<string, any>): void {
     const jobs = this.jobs$.value;
     const job = jobs.find(j => j.id === jobId);
     if (job && job.status === 'queued') {
@@ -476,6 +476,44 @@ export class VideoProcessingService {
         transcribe: taskTypes.includes('transcribe'),
         aiAnalysis: taskTypes.includes('ai-analyze')
       };
+
+      // Extract config values if provided
+      if (taskConfigs) {
+        // Get transcribe config
+        const transcribeConfig = taskConfigs.get('transcribe');
+        if (transcribeConfig) {
+          job.settings.whisperModel = transcribeConfig.model || 'base';
+          job.settings.whisperLanguage = transcribeConfig.language;
+        }
+
+        // Get AI analyze config
+        const aiConfig = taskConfigs.get('ai-analyze');
+        if (aiConfig && aiConfig.aiModel) {
+          // Strip provider prefix if present (e.g., "ollama:qwen2.5:32b" -> "qwen2.5:32b")
+          let aiModel = aiConfig.aiModel;
+          if (aiModel.includes(':')) {
+            const parts = aiModel.split(':');
+            if (['ollama', 'claude', 'openai'].includes(parts[0])) {
+              aiModel = parts.slice(1).join(':');
+            }
+          }
+          job.settings.aiModel = aiModel;
+          job.settings.customInstructions = aiConfig.customInstructions;
+        }
+
+        // Get fix aspect ratio config
+        const aspectConfig = taskConfigs.get('fix-aspect-ratio');
+        if (aspectConfig) {
+          job.settings.aspectRatio = aspectConfig.targetRatio;
+        }
+
+        // Get normalize audio config
+        const audioConfig = taskConfigs.get('normalize-audio');
+        if (audioConfig) {
+          job.settings.audioLevel = audioConfig.targetLevel;
+        }
+      }
+
       // Recreate tasks
       job.tasks = this.createTasks(job.settings, !!job.videoUrl);
       this.jobs$.next([...jobs]);
