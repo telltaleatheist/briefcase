@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, firstValueFrom } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { map, catchError } from 'rxjs/operators';
 import { VideoWeek, VideoItem } from '../models/video.model';
 import { JobRequest } from '../models/task.model';
 import { Library, NewLibrary } from '../models/library.model';
@@ -16,6 +16,34 @@ export interface JobResponse {
   id: string;
   status: string;
   tasks: any[];
+}
+
+// Backend task types (different from frontend TaskType)
+export type BackendTaskType =
+  | 'get-info'
+  | 'download'
+  | 'import'
+  | 'fix-aspect-ratio'
+  | 'normalize-audio'
+  | 'process-video'
+  | 'transcribe'
+  | 'analyze';
+
+export interface BackendTask {
+  type: BackendTaskType;
+  options?: any;
+}
+
+export interface BackendJobRequest {
+  url?: string;
+  videoId?: string;
+  videoPath?: string;
+  displayName?: string;
+  tasks: BackendTask[];
+}
+
+export interface BulkJobRequest {
+  jobs: BackendJobRequest[];
 }
 
 // Video editor types (from legacy frontend)
@@ -92,7 +120,7 @@ export interface LibraryClip {
   providedIn: 'root'
 })
 export class LibraryService {
-  private readonly API_BASE = 'http://localhost:3001/api';
+  private readonly API_BASE = 'http://localhost:3000/api';
 
   // State management
   videos = signal<VideoItem[]>([]);
@@ -195,10 +223,17 @@ export class LibraryService {
       downloadDate: video.download_date ? new Date(video.download_date) : undefined,
       thumbnailUrl: video.id ? `${this.API_BASE}/database/videos/${video.id}/thumbnail` : undefined,
       // Additional fields for context menu actions
-      filePath: video.file_path || video.filepath,
+      filePath: video.file_path || video.filepath || video.current_path,
       suggestedTitle: video.suggested_title,
       hasTranscript: video.has_transcript === 1 || video.has_transcript === true,
-      hasAnalysis: video.has_analysis === 1 || video.has_analysis === true
+      hasAnalysis: video.has_analysis === 1 || video.has_analysis === true,
+      // Searchable fields
+      aiDescription: video.ai_description,
+      sourceUrl: video.source_url,
+      tags: video.tags || [],
+      // Media type info
+      mediaType: video.media_type,
+      fileExtension: video.file_extension
     };
   }
 
@@ -347,11 +382,99 @@ export class LibraryService {
    * Create a new job with tasks
    * POST /api/queue/jobs
    */
-  createJob(request: JobRequest): Observable<ApiResponse<JobResponse>> {
-    return this.http.post<ApiResponse<JobResponse>>(
+  createJob(request: BackendJobRequest): Observable<ApiResponse<JobResponse>> {
+    return this.http.post<any>(
       `${this.API_BASE}/queue/jobs`,
       request
+    ).pipe(
+      map(response => ({
+        success: response.success,
+        data: {
+          id: response.jobId,
+          status: 'pending',
+          tasks: request.tasks
+        }
+      }))
     );
+  }
+
+  /**
+   * Create multiple jobs in bulk
+   * POST /api/queue/jobs/bulk
+   */
+  createBulkJobs(jobs: BackendJobRequest[]): Observable<ApiResponse<{ jobIds: string[] }>> {
+    return this.http.post<any>(
+      `${this.API_BASE}/queue/jobs/bulk`,
+      { jobs }
+    ).pipe(
+      map(response => ({
+        success: response.success,
+        data: {
+          jobIds: response.jobIds || []
+        }
+      }))
+    );
+  }
+
+  /**
+   * Convert frontend task type to backend tasks
+   * e.g., 'download-import' → ['get-info', 'download', 'import']
+   */
+  convertToBackendTasks(frontendTaskType: string, config?: any): BackendTask[] {
+    switch (frontendTaskType) {
+      case 'download-import':
+        return [
+          { type: 'get-info' },
+          { type: 'download', options: config?.download || {} },
+          { type: 'import', options: config?.import || {} }
+        ];
+
+      case 'fix-aspect-ratio':
+        return [{ type: 'fix-aspect-ratio', options: config || {} }];
+
+      case 'normalize-audio':
+        return [{
+          type: 'normalize-audio',
+          options: {
+            level: config?.targetLevel || -16,
+            method: config?.method || 'ebu-r128'
+          }
+        }];
+
+      case 'transcribe':
+        return [{
+          type: 'transcribe',
+          options: {
+            model: config?.model || 'base',
+            language: config?.language || 'en'
+          }
+        }];
+
+      case 'ai-analyze':
+        // Parse model value in format "provider:model" (e.g., "ollama:qwen2.5:7b")
+        const modelValue = config?.aiModel || 'ollama:qwen2.5:7b';
+        let aiProvider = 'ollama';
+        let aiModel = modelValue;
+
+        if (modelValue.includes(':')) {
+          const colonIndex = modelValue.indexOf(':');
+          aiProvider = modelValue.substring(0, colonIndex);
+          aiModel = modelValue.substring(colonIndex + 1);
+        }
+
+        return [{
+          type: 'analyze',
+          options: {
+            aiModel,
+            aiProvider,
+            customInstructions: config?.customInstructions || ''
+          }
+        }];
+
+      default:
+        console.warn(`Unknown task type: ${frontendTaskType}`);
+        return [];
+    }
   }
 
   /**
@@ -370,7 +493,38 @@ export class LibraryService {
    * GET /api/queue/status
    */
   getQueueStatus(): Observable<ApiResponse<any>> {
-    return this.http.get<ApiResponse<any>>(`${this.API_BASE}/queue/status`);
+    return this.http.get<any>(`${this.API_BASE}/queue/status`).pipe(
+      map(response => ({
+        success: response.success,
+        data: response.status
+      }))
+    );
+  }
+
+  /**
+   * Get all jobs in queue
+   * GET /api/queue/jobs
+   */
+  getQueueJobs(): Observable<ApiResponse<any[]>> {
+    return this.http.get<any>(`${this.API_BASE}/queue/jobs`).pipe(
+      map(response => ({
+        success: response.success,
+        data: response.jobs || []
+      }))
+    );
+  }
+
+  /**
+   * Get a specific job
+   * GET /api/queue/job/:jobId
+   */
+  getJob(jobId: string): Observable<ApiResponse<any>> {
+    return this.http.get<any>(`${this.API_BASE}/queue/job/${jobId}`).pipe(
+      map(response => ({
+        success: response.success,
+        data: response.job
+      }))
+    );
   }
 
   /**
@@ -381,6 +535,28 @@ export class LibraryService {
     return this.http.patch<ApiResponse<VideoItem>>(
       `${this.API_BASE}/library/videos/${id}`,
       { filename }
+    );
+  }
+
+  /**
+   * Update suggested title for a video
+   * PATCH /api/database/videos/:id/suggested-title
+   */
+  updateSuggestedTitle(id: string, suggestedTitle: string): Observable<ApiResponse<any>> {
+    return this.http.patch<ApiResponse<any>>(
+      `${this.API_BASE}/database/videos/${id}/suggested-title`,
+      { suggestedTitle }
+    );
+  }
+
+  /**
+   * Accept suggested title - renames file and clears suggested title
+   * POST /api/database/videos/:id/accept-suggested-title
+   */
+  acceptSuggestedTitle(id: string, customFilename: string): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(
+      `${this.API_BASE}/database/videos/${id}/accept-suggested-title`,
+      { customFilename }
     );
   }
 
@@ -509,6 +685,19 @@ export class LibraryService {
   }
 
   /**
+   * Update a library's name and path
+   * PUT /api/database/libraries/:id
+   */
+  updateLibrary(libraryId: string, name: string, path: string): Observable<ApiResponse<Library>> {
+    return this.http.put<any>(`${this.API_BASE}/database/libraries/${libraryId}`, { name, path }).pipe(
+      map(response => ({
+        success: response.success,
+        data: response.library
+      }))
+    );
+  }
+
+  /**
    * Delete a library
    * DELETE /api/database/libraries/:id
    */
@@ -601,6 +790,70 @@ export class LibraryService {
     }
     return firstValueFrom(
       this.http.get<LibraryAnalysis[]>(`${this.API_BASE}/library/analyses`, { params })
+    );
+  }
+
+  /**
+   * Get video transcript by video ID
+   * GET /api/database/videos/:id/transcript
+   */
+  getVideoTranscript(videoId: string): Observable<ApiResponse<any>> {
+    return this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/transcript`).pipe(
+      map(response => ({
+        success: true,
+        data: response.transcript || response
+      })),
+      catchError(error => {
+        if (error.status === 404) {
+          return of({ success: true, data: null });
+        }
+        throw error;
+      })
+    );
+  }
+
+  /**
+   * Get video analysis by video ID
+   * GET /api/database/videos/:id/analysis
+   */
+  getVideoAnalysis(videoId: string): Observable<ApiResponse<any>> {
+    return this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/analysis`).pipe(
+      map(response => ({
+        success: true,
+        data: response.analysis || response
+      })),
+      catchError(error => {
+        if (error.status === 404) {
+          return of({ success: true, data: null });
+        }
+        throw error;
+      })
+    );
+  }
+
+  /**
+   * Get video tags by video ID
+   * GET /api/database/videos/:id/tags
+   */
+  getVideoTags(videoId: string): Observable<ApiResponse<string[]>> {
+    return this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/tags`).pipe(
+      map(response => ({
+        success: true,
+        data: response.tags || []
+      }))
+    );
+  }
+
+  /**
+   * Get video analysis sections by video ID
+   * GET /api/database/videos/:id/sections
+   */
+  getVideoSections(videoId: string): Observable<ApiResponse<any[]>> {
+    return this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/sections`).pipe(
+      map(response => ({
+        success: true,
+        data: response.sections || []
+      }))
     );
   }
 }

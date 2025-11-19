@@ -213,13 +213,14 @@ export class MediaOperationsService {
       this.logger.log(`[${jobId || 'standalone'}] Fixing aspect ratio for: ${videoIdOrPath}`);
 
       // Determine if this is a video ID or file path
+      // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
 
-      if (fs.existsSync(videoIdOrPath)) {
-        // It's a file path
-        videoPath = videoIdOrPath;
-      } else {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isUUID = uuidPattern.test(videoIdOrPath);
+
+      if (isUUID || !fs.existsSync(videoIdOrPath)) {
         // It's a video ID - get path from database
         const video = this.databaseService.getVideoById(videoIdOrPath);
         if (!video) {
@@ -227,6 +228,9 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+      } else {
+        // It's a file path
+        videoPath = videoIdOrPath;
       }
 
       this.eventService.emitTaskProgress(jobId || '', 'fix-aspect-ratio', 5, 'Analyzing video dimensions...');
@@ -275,13 +279,14 @@ export class MediaOperationsService {
       this.logger.log(`[${jobId || 'standalone'}] Normalizing audio for: ${videoIdOrPath}`);
 
       // Determine if this is a video ID or file path
+      // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
 
-      if (fs.existsSync(videoIdOrPath)) {
-        // It's a file path
-        videoPath = videoIdOrPath;
-      } else {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isUUID = uuidPattern.test(videoIdOrPath);
+
+      if (isUUID || !fs.existsSync(videoIdOrPath)) {
         // It's a video ID - get path from database
         const video = this.databaseService.getVideoById(videoIdOrPath);
         if (!video) {
@@ -289,6 +294,9 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+      } else {
+        // It's a file path
+        videoPath = videoIdOrPath;
       }
 
       this.eventService.emitTaskProgress(jobId || '', 'normalize-audio', 5, 'Analyzing audio levels...');
@@ -342,13 +350,14 @@ export class MediaOperationsService {
       this.logger.log(`[${jobId || 'standalone'}] Processing video: ${videoIdOrPath}`);
 
       // Determine if this is a video ID or file path
+      // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
 
-      if (fs.existsSync(videoIdOrPath)) {
-        // It's a file path
-        videoPath = videoIdOrPath;
-      } else {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isUUID = uuidPattern.test(videoIdOrPath);
+
+      if (isUUID || !fs.existsSync(videoIdOrPath)) {
         // It's a video ID - get path from database
         const video = this.databaseService.getVideoById(videoIdOrPath);
         if (!video) {
@@ -356,6 +365,9 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+      } else {
+        // It's a file path
+        videoPath = videoIdOrPath;
       }
 
       this.eventService.emitTaskProgress(jobId || '', 'process-video', 5, 'Analyzing video...');
@@ -410,13 +422,14 @@ export class MediaOperationsService {
       this.logger.log(`[${jobId || 'standalone'}] Transcribing video: ${videoIdOrPath}`);
 
       // Determine if this is a video ID or file path
+      // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
 
-      if (fs.existsSync(videoIdOrPath)) {
-        // It's a file path
-        videoPath = videoIdOrPath;
-      } else {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isUUID = uuidPattern.test(videoIdOrPath);
+
+      if (isUUID || !fs.existsSync(videoIdOrPath)) {
         // It's a video ID - get path from database
         const video = this.databaseService.getVideoById(videoIdOrPath);
         if (!video) {
@@ -424,6 +437,9 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+      } else {
+        // It's a file path
+        videoPath = videoIdOrPath;
       }
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 0, 'Starting transcription...');

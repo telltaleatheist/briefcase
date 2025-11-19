@@ -12,7 +12,7 @@ import { ButtonComponent } from '../button/button.component';
       <div class="modal-overlay" (click)="onOverlayClick($event)">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h3 class="modal-title">Edit Filename</h3>
+            <h3 class="modal-title">{{ modalTitle() }}</h3>
             <button class="modal-close" (click)="close()">×</button>
           </div>
 
@@ -23,17 +23,22 @@ import { ButtonComponent } from '../button/button.component';
             </div>
 
             <div class="form-group">
-              <label class="form-label">Suggested Filename</label>
-              <input
-                type="text"
-                class="form-input"
+              <label class="form-label">{{ fieldLabel() }}</label>
+              <textarea
+                class="form-textarea"
                 [(ngModel)]="editedFilename"
-                (keydown.enter)="save()"
+                [maxlength]="maxLength"
                 (keydown.escape)="close()"
+                (keydown.meta.enter)="save()"
+                (keydown.control.enter)="save()"
+                rows="6"
                 #filenameInput
-              />
-              <div class="form-hint">
-                Press Enter to save, Esc to cancel
+              ></textarea>
+              <div class="form-meta">
+                <span class="form-hint">Cmd+Enter to save, Esc to cancel</span>
+                <span class="char-count" [class.near-limit]="editedFilename.length > maxLength - 20">
+                  {{ editedFilename.length }}/{{ maxLength }}
+                </span>
               </div>
             </div>
           </div>
@@ -43,7 +48,7 @@ import { ButtonComponent } from '../button/button.component';
               Cancel
             </app-button>
             <app-button variant="gradient" icon="💾" (click)="save()">
-              Save Filename
+              Save
             </app-button>
           </div>
         </div>
@@ -141,7 +146,7 @@ import { ButtonComponent } from '../button/button.component';
       word-break: break-all;
     }
 
-    .form-input {
+    .form-textarea {
       width: 100%;
       padding: $spacing-md;
       background: var(--bg-input);
@@ -151,6 +156,9 @@ import { ButtonComponent } from '../button/button.component';
       color: var(--text-primary);
       font-family: 'Monaco', monospace;
       transition: all $transition-fast;
+      resize: vertical;
+      min-height: 120px;
+      line-height: 1.5;
 
       &:focus {
         outline: none;
@@ -159,11 +167,28 @@ import { ButtonComponent } from '../button/button.component';
       }
     }
 
-    .form-hint {
+    .form-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       margin-top: $spacing-xs;
+    }
+
+    .form-hint {
       font-size: $font-size-xs;
       color: var(--text-tertiary);
       font-style: italic;
+    }
+
+    .char-count {
+      font-size: $font-size-xs;
+      color: var(--text-tertiary);
+      font-family: 'Monaco', monospace;
+
+      &.near-limit {
+        color: var(--warning, #f59e0b);
+        font-weight: $font-weight-semibold;
+      }
     }
 
     .modal-footer {
@@ -187,6 +212,12 @@ export class FilenameModalComponent {
   @Input() set original(value: string) {
     this.originalName.set(value);
   }
+  @Input() set title(value: string) {
+    this.modalTitle.set(value);
+  }
+  @Input() set label(value: string) {
+    this.fieldLabel.set(value);
+  }
 
   @Output() saved = new EventEmitter<string>();
   @Output() closed = new EventEmitter<void>();
@@ -194,7 +225,12 @@ export class FilenameModalComponent {
   visible = signal(false);
   suggestedFilename = signal('');
   originalName = signal('');
+  modalTitle = signal('Edit Filename');
+  fieldLabel = signal('Suggested Filename');
   editedFilename = '';
+
+  // Max filename length (255 is typical for most filesystems)
+  maxLength = 255;
 
   constructor() {
     effect(() => {

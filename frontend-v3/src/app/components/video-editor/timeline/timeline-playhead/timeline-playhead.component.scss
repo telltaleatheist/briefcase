@@ -1,0 +1,48 @@
+.timeline-playhead-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 9999; // Very high z-index
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  pointer-events: auto;
+  cursor: ew-resize;
+  z-index: 100;
+
+  &:hover {
+    .playhead-handle {
+      transform: translateX(-50%) scale(1.2);
+    }
+  }
+}
+
+.playhead-handle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 12px;
+  background: var(--primary-orange, #ff6b35);
+  border-radius: 2px;
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+  transition: transform 0.15s ease;
+}
+
+.playhead-line {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 100%;
+  background: var(--primary-orange, #ff6b35);
+}

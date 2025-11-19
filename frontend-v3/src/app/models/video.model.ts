@@ -1,8 +1,8 @@
 export interface VideoItem {
   id: string;
   name: string;
-  suggestedFilename: string;
-  duration: string; // hh:mm:ss format
+  suggestedFilename?: string;
+  duration?: string; // hh:mm:ss format
   size?: number;
   downloadDate?: Date;
   thumbnailUrl?: string;
@@ -12,6 +12,13 @@ export interface VideoItem {
   suggestedTitle?: string;
   hasTranscript?: boolean;
   hasAnalysis?: boolean;
+  // Searchable fields
+  aiDescription?: string;
+  sourceUrl?: string;
+  tags?: string[];
+  // Media type info
+  mediaType?: string;
+  fileExtension?: string;
 }
 
 export interface VideoWeek {
@@ -26,4 +33,53 @@ export interface VideoContextMenuAction {
   action: string;
   divider?: boolean;
   disabled?: boolean;
+}
+
+/**
+ * Delete mode options for cascade items
+ */
+export type DeleteMode = 'database-only' | 'file-only' | 'everything';
+
+/**
+ * Item progress for visual progress bar indicator
+ */
+export interface ItemProgress {
+  value: number; // Progress value 0-100
+  color?: string; // Optional custom color (defaults to accent color)
+  label?: string; // Optional label for accessibility
+  indeterminate?: boolean; // Show spinner/indeterminate progress instead of bar
+}
+
+/**
+ * Status of a child task/item
+ */
+export type ChildStatus = 'pending' | 'active' | 'completed' | 'failed' | 'skipped';
+
+/**
+ * Child item that belongs to a parent video
+ * Represents a sub-task, step, or related item
+ */
+export interface VideoChild {
+  id: string;
+  parentId: string;
+  label: string;
+  icon?: string;
+  progress?: ItemProgress;
+  status?: ChildStatus;
+  metadata?: string;
+  data?: any;
+}
+
+/**
+ * Configuration for children/sub-items
+ */
+export interface ChildrenConfig {
+  enabled: boolean;
+  expandable: boolean;
+  defaultExpanded: boolean;
+  generator?: (video: VideoItem) => VideoChild[];
+  showMasterProgress: boolean;
+  masterProgressCalculator?: (video: VideoItem) => number;
+  clickable?: boolean;
+  showStatus?: boolean;
 }

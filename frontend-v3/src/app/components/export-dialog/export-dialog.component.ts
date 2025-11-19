@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit, ViewChild, AfterViewInit } from '@angular/core';
+import { Component, Inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
@@ -10,18 +10,17 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
-import { CascadeListComponent } from '../../libs/cascade/src/lib/components/cascade-list/cascade-list.component';
-import { ListItem, ItemDisplayConfig, GroupConfig, SelectionMode, ItemStatus } from '../../libs/cascade/src/lib/types/cascade.types';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 
-interface ExportSection extends ListItem {
+interface ExportSection {
   id: string;
   category: string;
   description: string;
   startSeconds: number;
   endSeconds: number;
   timeRange: string;
+  icon?: string;
 }
 
 @Component({
@@ -36,14 +35,12 @@ interface ExportSection extends ListItem {
     MatProgressSpinnerModule,
     MatProgressBarModule,
     MatCheckboxModule,
-    MatTooltipModule,
-    CascadeListComponent
+    MatTooltipModule
   ],
   templateUrl: './export-dialog.component.html',
   styleUrls: ['./export-dialog.component.scss']
 })
-export class ExportDialogComponent implements OnInit, AfterViewInit {
-  @ViewChild(CascadeListComponent) cascadeList?: CascadeListComponent<ExportSection>;
+export class ExportDialogComponent implements OnInit {
 
   // Selection state
   hasSelection = false;
@@ -66,28 +63,13 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
   successCount = 0;
   failedCount = 0;
 
-  // Cascade list configuration
+  // Sections list configuration
   sections: ExportSection[] = [];
   selectedSectionIds = new Set<string>();
-  displayConfig: ItemDisplayConfig = {
-    primaryField: 'description',
-    secondaryField: 'timeRange',
-    iconField: 'icon'
-  };
-  selectionMode = SelectionMode.Multiple;
 
   // Track which groups are collapsed
   collapsedGroups = new Set<string>();
   allCollapsed = true;
-
-  // Group config with custom sort to put Selection first
-  groupConfig: GroupConfig<ExportSection> = {
-    enabled: true,
-    groupBy: (item: ExportSection) => item.category,
-    groupLabel: (key: string) => key,
-    sortDescending: false,
-    selectableGroups: false
-  };
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: {
@@ -145,25 +127,8 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
       Array.from(categories).filter(cat => cat.trim() !== 'Current Selection')
     );
 
-    // Update groupConfig with custom sort to put Selection first
-    this.groupConfig = {
-      enabled: true,
-      groupBy: (item: ExportSection) => item.category,
-      groupLabel: (key: string) => key,
-      sortDescending: false,
-      selectableGroups: false
-    };
-
     // Update the allCollapsed state based on actual collapsed groups
     this.updateAllCollapsedState();
-  }
-
-  ngAfterViewInit() {
-    // Sync collapsed groups with cascade list after view init
-    if (this.cascadeList) {
-      this.collapsedGroups.forEach(cat => this.cascadeList!.collapsedGroups.add(cat));
-      this.cascadeList['updateGroupedItems']();
-    }
   }
 
   getCategoryColor(category: string): string {
@@ -192,15 +157,6 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
     }
   }
 
-  // Handle section selection from cascade list
-  onSectionsSelected(sections: ExportSection[]) {
-    sections.forEach(section => this.selectedSectionIds.add(section.id));
-  }
-
-  onSectionsDeselected(sections: ExportSection[]) {
-    sections.forEach(section => this.selectedSectionIds.delete(section.id));
-  }
-
   getSelectedCount(): number {
     return this.selectedSectionIds.size;
   }
@@ -219,35 +175,61 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
     return selectedSections.length === 1 && selectedSections[0].id === '__selection__';
   }
 
-  // Status mapper to apply category colors
-  getItemStatus = (item: ExportSection): ItemStatus | null => {
-    const color = this.getCategoryColor(item.category);
-    return {
-      color: color,
-      tooltip: item.category
-    };
-  }
-
   // Handle group toggle to track collapsed state
-  onGroupToggle(event: { groupId: string; collapsed: boolean }) {
-    if (event.collapsed) {
-      this.collapsedGroups.add(event.groupId);
+  onGroupToggle(groupId: string) {
+    if (this.collapsedGroups.has(groupId)) {
+      this.collapsedGroups.delete(groupId);
     } else {
-      this.collapsedGroups.delete(event.groupId);
+      this.collapsedGroups.add(groupId);
     }
     this.updateAllCollapsedState();
+  }
+
+  // Toggle section selection
+  toggleSection(section: ExportSection) {
+    if (this.selectedSectionIds.has(section.id)) {
+      this.selectedSectionIds.delete(section.id);
+    } else {
+      this.selectedSectionIds.add(section.id);
+    }
+  }
+
+  // Check if section is selected
+  isSectionSelected(section: ExportSection): boolean {
+    return this.selectedSectionIds.has(section.id);
+  }
+
+  // Get sections grouped by category
+  getSectionsByCategory(): Map<string, ExportSection[]> {
+    const grouped = new Map<string, ExportSection[]>();
+    for (const section of this.sections) {
+      if (!grouped.has(section.category)) {
+        grouped.set(section.category, []);
+      }
+      grouped.get(section.category)!.push(section);
+    }
+    return grouped;
+  }
+
+  // Get category list
+  getCategories(): string[] {
+    return Array.from(this.getSectionsByCategory().keys()).sort((a, b) => {
+      // Put " Current Selection" first
+      if (a.trim() === 'Current Selection') return -1;
+      if (b.trim() === 'Current Selection') return 1;
+      return a.localeCompare(b);
+    });
+  }
+
+  // Check if group is collapsed
+  isGroupCollapsed(category: string): boolean {
+    return this.collapsedGroups.has(category);
   }
 
   // Expand all groups
   expandAll() {
     this.collapsedGroups.clear();
     this.allCollapsed = false;
-
-    // Trigger cascade list to update
-    if (this.cascadeList) {
-      this.cascadeList.collapsedGroups.clear();
-      this.cascadeList['updateGroupedItems']();
-    }
   }
 
   // Collapse all groups (except Current Selection which stays expanded)
@@ -257,13 +239,6 @@ export class ExportDialogComponent implements OnInit, AfterViewInit {
       Array.from(categories).filter(cat => cat.trim() !== 'Current Selection')
     );
     this.allCollapsed = true;
-
-    // Trigger cascade list to update
-    if (this.cascadeList) {
-      this.cascadeList.collapsedGroups.clear();
-      this.collapsedGroups.forEach(cat => this.cascadeList!.collapsedGroups.add(cat));
-      this.cascadeList['updateGroupedItems']();
-    }
   }
 
   // Update the allCollapsed state based on current collapsed groups

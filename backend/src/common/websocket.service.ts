@@ -29,6 +29,14 @@ export class WebSocketService {
   }
 
   /**
+   * Get the Socket.IO server instance
+   * Used by services that need direct access (e.g., MediaEventService for legacy events)
+   */
+  getServer(): Server | null {
+    return this.server;
+  }
+
+  /**
    * Get current connection count
    */
   getConnectionCount(): number {

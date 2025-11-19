@@ -51,19 +51,37 @@
           </div>
         </div>
 
-        <cascade-list
-          [items]="sections"
-          [displayConfig]="displayConfig"
-          [groupConfig]="groupConfig"
-          [selectionMode]="selectionMode"
-          [selectedItemIds]="selectedSectionIds"
-          [statusMapper]="getItemStatus"
-          (itemsSelected)="onSectionsSelected($event)"
-          (itemsDeselected)="onSectionsDeselected($event)"
-          (groupToggle)="onGroupToggle($event)"
-          emptyMessage="No markers or sections available"
-          emptyIcon="bookmark_border">
-        </cascade-list>
+        <div class="sections-list">
+          <div *ngFor="let category of getCategories()" class="category-group">
+            <div class="category-header" (click)="onGroupToggle(category)">
+              <mat-icon class="collapse-icon">
+                {{ isGroupCollapsed(category) ? 'expand_more' : 'expand_less' }}
+              </mat-icon>
+              <span class="category-label" [style.border-left-color]="getCategoryColor(category)">
+                {{ category }}
+              </span>
+              <span class="category-count">{{ getSectionsByCategory().get(category)?.length || 0 }}</span>
+            </div>
+            <div class="category-sections" *ngIf="!isGroupCollapsed(category)">
+              <div *ngFor="let section of getSectionsByCategory().get(category)"
+                   class="section-item"
+                   [class.selected]="isSectionSelected(section)"
+                   (click)="toggleSection(section)">
+                <mat-checkbox
+                  [checked]="isSectionSelected(section)"
+                  (change)="toggleSection(section)"
+                  (click)="$event.stopPropagation()"
+                  color="primary">
+                </mat-checkbox>
+                <div class="section-info">
+                  <div class="section-description">{{ section.description }}</div>
+                  <div class="section-time">{{ section.timeRange }}</div>
+                </div>
+                <div class="section-indicator" [style.background-color]="getCategoryColor(section.category)"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- No Sections Message -->

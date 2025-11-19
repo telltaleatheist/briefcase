@@ -1,13 +1,16 @@
 <div class="modal-backdrop" *ngIf="isOpen()" (click)="onBackdropClick($event)">
   <div class="modal-container">
     <div class="modal-header">
-      <h2 class="modal-title">Configure Tasks</h2>
+      <h2 class="modal-title">{{ bulkMode() ? 'Apply Settings to All Items' : 'Configure Tasks' }}</h2>
       <button class="close-btn" (click)="onClose()" aria-label="Close">✕</button>
     </div>
 
     <div class="modal-body">
       <p class="modal-description">
-        Select which tasks to run and configure their settings
+        {{ bulkMode()
+          ? 'Configure tasks that will be applied to all ' + itemCount() + ' items in the queue'
+          : 'Select which tasks to run and configure their settings'
+        }}
       </p>
 
       <div class="tasks-list">
@@ -117,41 +120,41 @@
                 <select
                   [value]="getTaskConfig(task.type).aiModel"
                   (change)="updateTaskConfig(task.type, { aiModel: $any($event.target).value })"
+                  [disabled]="loadingModels()"
                 >
-                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                  <option value="gpt-4">GPT-4</option>
-                  <option value="claude-3-opus">Claude 3 Opus</option>
-                  <option value="claude-3-sonnet">Claude 3 Sonnet</option>
+                  <option *ngIf="loadingModels()" value="">Loading models...</option>
+                  <option *ngIf="!loadingModels() && aiModels().length === 0" value="">No models available</option>
+
+                  <!-- Ollama Models -->
+                  <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama (Local)">
+                    <option *ngFor="let model of getModelsByProvider('ollama')" [value]="model.value">
+                      {{ model.label }}
+                    </option>
+                  </optgroup>
+
+                  <!-- Claude Models -->
+                  <optgroup *ngIf="hasModelsForProvider('claude')" label="Claude (Anthropic)">
+                    <option *ngFor="let model of getModelsByProvider('claude')" [value]="model.value">
+                      {{ model.label }}
+                    </option>
+                  </optgroup>
+
+                  <!-- OpenAI Models -->
+                  <optgroup *ngIf="hasModelsForProvider('openai')" label="OpenAI">
+                    <option *ngFor="let model of getModelsByProvider('openai')" [value]="model.value">
+                      {{ model.label }}
+                    </option>
+                  </optgroup>
                 </select>
               </div>
               <div class="form-group">
-                <label>Custom Instructions</label>
+                <label>Custom Instructions (optional)</label>
                 <textarea
                   rows="3"
                   placeholder="Add specific instructions for the AI analysis..."
                   [value]="getTaskConfig(task.type).customInstructions || ''"
                   (input)="updateTaskConfig(task.type, { customInstructions: $any($event.target).value })"
                 ></textarea>
-              </div>
-              <div class="form-group">
-                <label class="checkbox-label">
-                  <input
-                    type="checkbox"
-                    [checked]="getTaskConfig(task.type).generateSummary"
-                    (change)="updateTaskConfig(task.type, { generateSummary: $any($event.target).checked })"
-                  />
-                  <span>Generate Summary</span>
-                </label>
-              </div>
-              <div class="form-group">
-                <label class="checkbox-label">
-                  <input
-                    type="checkbox"
-                    [checked]="getTaskConfig(task.type).extractKeyPoints"
-                    (change)="updateTaskConfig(task.type, { extractKeyPoints: $any($event.target).checked })"
-                  />
-                  <span>Extract Key Points</span>
-                </label>
               </div>
             </div>
 
@@ -219,8 +222,10 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" (click)="onClose()">Cancel</button>
       <button class="btn btn-primary" (click)="onSave()" [disabled]="tasks().size === 0">
-        <span>Save Configuration</span>
-        <span class="task-count" *ngIf="tasks().size > 0">({{ tasks().size }} {{ tasks().size === 1 ? 'task' : 'tasks' }})</span>
+        <span>{{ bulkMode() ? 'Apply to All' : 'Save Configuration' }}</span>
+        <span class="task-count" *ngIf="tasks().size > 0">
+          ({{ tasks().size }} {{ tasks().size === 1 ? 'task' : 'tasks' }}{{ bulkMode() ? ' × ' + itemCount() + ' items' : '' }})
+        </span>
       </button>
     </div>
   </div>

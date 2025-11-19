@@ -1,88 +1,147 @@
-<div class="video-editor">
+<div class="video-editor" [class.fullscreen]="isFullscreen()" [class.timeline-hidden]="isFullscreen() && !showTimelineInFullscreen()">
   <!-- Header with controls -->
   <div class="editor-header">
     <div class="header-left">
-      <h2 class="editor-title">
-        <span class="title-icon">🎬</span>
-        Video Editor
-      </h2>
+      <button class="back-btn" (click)="goBack()" title="Back to Library">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+      </button>
+      <h2 class="editor-title">Video Editor</h2>
       <span class="project-name">{{ metadata().filename }}</span>
     </div>
 
     <div class="header-center">
-      <button class="control-btn" (click)="skipBackward()" title="Skip back 5s">
-        <span>⏮</span>
-      </button>
-      <button class="control-btn play-btn" (click)="togglePlayPause()" title="Play/Pause">
-        <span>{{ editorState().isPlaying ? '⏸' : '▶' }}</span>
-      </button>
-      <button class="control-btn" (click)="skipForward()" title="Skip forward 5s">
-        <span>⏭</span>
-      </button>
-
-      <div class="time-display">
-        <span class="current-time">{{ formattedCurrentTime() }}</span>
-        <span class="time-separator">/</span>
-        <span class="total-time">{{ formattedDuration() }}</span>
-      </div>
+      <!-- Keep header center empty or add other controls later -->
     </div>
 
     <div class="header-right">
       <button
         class="sidebar-toggle"
-        [class.active]="showSettingsSidebar()"
-        (click)="toggleSettingsSidebar()"
-        title="Toggle Settings"
-      >
-        ⚙️
+        [class.active]="showAnalysisSidebar()"
+        (click)="toggleAnalysisSidebar()"
+        title="Toggle Analysis Panel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
       </button>
       <button
-        class="sidebar-toggle"
-        [class.active]="showInfoSidebar()"
-        (click)="toggleInfoSidebar()"
-        title="Toggle Info"
-      >
-        ℹ️
+        class="fullscreen-toggle"
+        [class.active]="isFullscreen()"
+        (click)="toggleFullscreen()"
+        title="Toggle Fullscreen">
+        @if (isFullscreen()) {
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+          </svg>
+        } @else {
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        }
       </button>
     </div>
   </div>
 
   <!-- Main editor area -->
   <div class="editor-main">
-    <!-- Settings Sidebar (Left) -->
-    @if (showSettingsSidebar()) {
-      <div class="settings-sidebar sidebar">
-        <div class="sidebar-header">
-          <h3 class="sidebar-title">
-            <span class="sidebar-icon">⚙️</span>
-            Settings
-          </h3>
-        </div>
+    <!-- Center Content Area -->
+    <div class="editor-content">
+      <!-- Video Player Area -->
+      <div class="video-player-area">
+        <app-video-player
+          [videoUrl]="videoUrl()"
+          [currentTime]="editorState().currentTime"
+          [isPlaying]="editorState().isPlaying"
+          [volume]="editorState().volume"
+          [playbackRate]="editorState().playbackRate"
+          (timeUpdate)="onVideoTimeUpdate($event)"
+          (durationChange)="onVideoDurationChange($event)"
+          (playStateChange)="onVideoPlayStateChange($event)"
+          (ended)="onVideoEnded()"
+          (doubleClick)="toggleFullscreen()">
+        </app-video-player>
+      </div>
 
-        <div class="sidebar-content">
-          <!-- Playback Settings -->
-          <div class="settings-section">
-            <h4 class="section-title">Playback</h4>
+      <!-- Resize Handle -->
+      <div
+        class="resize-handle"
+        [class.dragging]="isResizing()"
+        (mousedown)="onResizeStart($event)">
+      </div>
 
-            <div class="setting-item">
-              <label class="setting-label">Speed</label>
-              <div class="speed-controls">
-                @for (rate of [0.5, 0.75, 1, 1.25, 1.5, 2]; track rate) {
-                  <button
-                    class="speed-btn"
-                    [class.active]="editorState().playbackRate === rate"
-                    (click)="setPlaybackRate(rate)"
-                  >
-                    {{ rate }}x
-                  </button>
-                }
-              </div>
+      <!-- Timeline Area -->
+      <div class="timeline-area" [style.height.px]="timelineHeight()">
+        <!-- Timeline Toolbar -->
+        <div class="timeline-toolbar">
+          <div class="toolbar-left">
+            <!-- Tool buttons -->
+            <div class="tool-buttons">
+              <button
+                class="tool-btn"
+                [class.active]="currentTool() === 'cursor'"
+                (click)="setToolCursor()"
+                title="Cursor Tool (A)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7 2l12 11.2-5.8.5-3.3 5.3L7 2z"/>
+                </svg>
+              </button>
+              <button
+                class="tool-btn"
+                [class.active]="currentTool() === 'highlight'"
+                (click)="setToolHighlight()"
+                title="Highlight Tool (H)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3.5 18.5l4-4L11 18v3H8l-4.5-2.5zM20.7 7c.4-.4.4-1 0-1.4l-2.3-2.3c-.4-.4-1-.4-1.4 0l-1.5 1.5 3.7 3.7L20.7 7zM6 12.5L16.5 2l3.7 3.7L9.7 16.2l-4.2.5.5-4.2z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="toolbar-center">
+            <!-- Play/Pause -->
+            <button class="toolbar-btn play-btn" (click)="togglePlayPause()" title="Play/Pause (Space)">
+              @if (editorState().isPlaying) {
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+              } @else {
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              }
+            </button>
+
+            <!-- Time display -->
+            <div class="time-display compact">
+              <span class="current-time">{{ formattedCurrentTime() }}</span>
+              <span class="time-separator">/</span>
+              <span class="total-time">{{ formattedDuration() }}</span>
             </div>
 
-            <div class="setting-item">
-              <label class="setting-label">
-                Volume: {{ (editorState().volume * 100).toFixed(0) }}%
-              </label>
+            <!-- Playback speed -->
+            <div class="speed-selector">
+              <select
+                [value]="editorState().playbackRate"
+                (change)="setPlaybackRate(+$any($event.target).value)"
+                title="Speed (L/J to adjust)">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1">1x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+                <option value="3">3x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+
+            <!-- Volume -->
+            <div class="volume-control">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+              </svg>
               <input
                 type="range"
                 class="volume-slider"
@@ -94,307 +153,108 @@
               />
             </div>
           </div>
-
-          <!-- Timeline Settings -->
-          <div class="settings-section">
-            <h4 class="section-title">Timeline</h4>
-
-            <div class="setting-item">
-              <label class="setting-label">
-                Zoom: {{ (editorState().zoom * 100).toFixed(0) }}%
-              </label>
-              <div class="zoom-controls">
-                <button class="zoom-btn" (click)="zoomOut()">−</button>
-                <button class="zoom-btn" (click)="resetZoom()">Reset</button>
-                <button class="zoom-btn" (click)="zoomIn()">+</button>
-              </div>
-            </div>
-
-            <div class="setting-item">
-              <label class="setting-checkbox">
-                <input
-                  type="checkbox"
-                  [checked]="settings().snapToGrid"
-                  (change)="updateSetting('snapToGrid', $any($event.target).checked)"
-                />
-                <span>Snap to Grid</span>
-              </label>
-            </div>
-
-            <div class="setting-item">
-              <label class="setting-checkbox">
-                <input
-                  type="checkbox"
-                  [checked]="settings().showThumbnails"
-                  (change)="updateSetting('showThumbnails', $any($event.target).checked)"
-                />
-                <span>Show Thumbnails</span>
-              </label>
-            </div>
-
-            <div class="setting-item">
-              <label class="setting-checkbox">
-                <input
-                  type="checkbox"
-                  [checked]="settings().autoSave"
-                  (change)="updateSetting('autoSave', $any($event.target).checked)"
-                />
-                <span>Auto Save</span>
-              </label>
-            </div>
-          </div>
-
-          <!-- Export Settings -->
-          <div class="settings-section">
-            <h4 class="section-title">Export</h4>
-
-            <button class="export-btn">
-              <span class="btn-icon">⬇️</span>
-              Export Video
+          <div class="toolbar-right">
+            <button
+              class="toolbar-btn"
+              [class.active]="isFullscreen()"
+              (click)="toggleFullscreen()"
+              title="Fullscreen (F)">
+              @if (isFullscreen()) {
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+                </svg>
+              } @else {
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                </svg>
+              }
             </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- Center Content Area -->
-    <div class="editor-content">
-      <!-- Video Player Area -->
-      <div class="video-player-area">
-        <div class="video-container">
-          <div class="video-placeholder">
-            <div class="placeholder-icon">🎥</div>
-            <p class="placeholder-text">Video Player</p>
-            <p class="placeholder-subtitle">{{ metadata().resolution }} • {{ metadata().frameRate }} fps</p>
-
-            <!-- Playback progress bar -->
-            <div class="video-progress">
-              <div
-                class="video-progress-bar"
-                [style.width.%]="timelineProgress()"
-              ></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Timeline Area -->
-      <div class="timeline-area">
-        <div class="timeline-header">
-          <div class="timeline-title">Timeline</div>
-          <div class="timeline-info">
-            {{ clips().length }} clip{{ clips().length !== 1 ? 's' : '' }}
           </div>
         </div>
 
         <!-- Timeline ruler -->
-        <div class="timeline-ruler">
-          <div class="ruler-marks" [style.width.%]="editorState().zoom * 100">
-            @for (mark of [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]; track mark) {
-              @if (mark <= editorState().duration) {
-                <div class="ruler-mark" [style.left.%]="(mark / editorState().duration) * 100">
-                  <span class="ruler-time">{{ formatTime(mark) }}</span>
-                </div>
-              }
-            }
-          </div>
-        </div>
+        <app-timeline-ruler
+          [duration]="editorState().duration"
+          [zoomState]="editorState().zoomState"
+          (seek)="seekTo($event)">
+        </app-timeline-ruler>
 
         <!-- Timeline tracks -->
         <div class="timeline-tracks">
-          <div class="timeline-scroll">
-            <!-- Playhead -->
-            <div
-              class="playhead"
-              [style.left.%]="timelineProgress()"
-            >
-              <div class="playhead-handle"></div>
-              <div class="playhead-line"></div>
-            </div>
-
-            <!-- Markers -->
-            @for (marker of markers(); track marker.id) {
-              <div
-                class="timeline-marker"
-                [style.left.%]="(marker.time / editorState().duration) * 100"
-                [style.--marker-color]="marker.color"
-              >
-                <div class="marker-flag">{{ marker.label }}</div>
-                <div class="marker-line"></div>
+          <!-- Track content -->
+          <div class="track-content"
+               (mousedown)="onTimelineMouseDown($event)"
+               (click)="onTimelineClick($event)"
+               (contextmenu)="onTimelineClick($event)">
+            <!-- Lane 0: Master track -->
+            <div class="track-lane master">
+              <!-- Sections header/topper with rounded edges -->
+              <div class="track-sections-header">
+                <app-timeline-sections-layer
+                  [sections]="filteredSections()"
+                  [duration]="editorState().duration"
+                  [zoomState]="editorState().zoomState"
+                  [selectedSection]="editorState().selectedSection"
+                  (sectionClick)="onSectionClick($event)"
+                  (sectionHover)="onSectionHover($event)">
+                </app-timeline-sections-layer>
               </div>
-            }
 
-            <!-- Video clips -->
-            @for (clip of clips(); track clip.id) {
-              <div
-                class="timeline-clip"
-                [class.selected]="editorState().selectedClip?.id === clip.id"
-                [style.left.%]="(clip.startTime / editorState().duration) * 100"
-                [style.width.%]="((clip.endTime - clip.startTime) / editorState().duration) * 100"
-                [style.top.px]="clip.track * 140"
-                (click)="selectClip(clip)"
-              >
-                <div class="clip-header">
-                  <span class="clip-name">{{ clip.name }}</span>
-                  <button class="clip-delete" (click)="deleteClip(clip.id); $event.stopPropagation()">×</button>
+              <!-- Waveform container (square) -->
+              <div class="track-waveform-container">
+                <app-timeline-waveform
+                  [waveformData]="waveformData()"
+                  [duration]="editorState().duration"
+                  [zoomState]="editorState().zoomState"
+                  [color]="settings().waveformColor">
+                </app-timeline-waveform>
+              </div>
+
+              <!-- Selection overlay -->
+              @if (highlightSelection()) {
+                <div class="selection-overlay"
+                     [style.left.%]="getSelectionLeft()"
+                     [style.width.%]="getSelectionWidth()">
                 </div>
-
-                <!-- Waveform -->
-                @if (clip.waveformData) {
-                  <div class="clip-waveform">
-                    <svg class="waveform-svg" viewBox="0 0 100 40" preserveAspectRatio="none">
-                      <path
-                        class="waveform-path"
-                        [attr.d]="generateWaveformPath(clip.waveformData.samples)"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1"
-                      />
-                    </svg>
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        </div>
-
-        <!-- Timeline scrollbar with zoom/pan handles -->
-        <div class="timeline-scrollbar">
-          <div class="scrollbar-track">
-            <div
-              class="scrollbar-thumb"
-              [style.left.%]="scrollPosition"
-              [style.width.%]="Math.min(100, 100 / editorState().zoom)"
-            >
-              <div class="scrollbar-handle left" title="Drag to zoom"></div>
-              <div class="scrollbar-center" title="Drag to pan"></div>
-              <div class="scrollbar-handle right" title="Drag to zoom"></div>
+              }
             </div>
           </div>
         </div>
+
+        <!-- Playhead wrapper with proper margins -->
+        <div class="playhead-wrapper">
+          <app-timeline-playhead
+            [currentTime]="editorState().currentTime"
+            [duration]="editorState().duration"
+            [zoomState]="editorState().zoomState"
+            (seek)="seekTo($event)">
+          </app-timeline-playhead>
+        </div>
+
+        <!-- Zoom bar -->
+        <app-timeline-zoom-bar
+          [duration]="editorState().duration"
+          [zoomState]="editorState().zoomState"
+          (zoomChange)="onZoomChange($event)">
+        </app-timeline-zoom-bar>
       </div>
     </div>
 
-    <!-- Info Sidebar (Right) -->
-    @if (showInfoSidebar()) {
-      <div class="info-sidebar sidebar">
-        <div class="sidebar-header">
-          <h3 class="sidebar-title">
-            <span class="sidebar-icon">ℹ️</span>
-            Information
-          </h3>
-        </div>
-
-        <div class="sidebar-content">
-          <!-- File Info -->
-          <div class="info-section">
-            <h4 class="section-title">File Information</h4>
-
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="info-label">Filename</span>
-                <span class="info-value">{{ metadata().filename }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Format</span>
-                <span class="info-value">{{ metadata().format }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Resolution</span>
-                <span class="info-value">{{ metadata().resolution }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Frame Rate</span>
-                <span class="info-value">{{ metadata().frameRate }} fps</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Codec</span>
-                <span class="info-value">{{ metadata().codec }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Bitrate</span>
-                <span class="info-value">{{ metadata().bitrate }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Duration</span>
-                <span class="info-value">{{ formatTime(metadata().duration) }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">File Size</span>
-                <span class="info-value">{{ formatFileSize(metadata().fileSize) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Selected Clip Info -->
-          @if (editorState().selectedClip) {
-            <div class="info-section">
-              <h4 class="section-title">Selected Clip</h4>
-
-              <div class="info-grid">
-                <div class="info-item">
-                  <span class="info-label">Name</span>
-                  <span class="info-value">{{ editorState().selectedClip?.name }}</span>
-                </div>
-
-                <div class="info-item">
-                  <span class="info-label">Duration</span>
-                  <span class="info-value">{{ formatTime(editorState().selectedClip?.duration || 0) }}</span>
-                </div>
-
-                <div class="info-item">
-                  <span class="info-label">Start</span>
-                  <span class="info-value">{{ formatTime(editorState().selectedClip?.startTime || 0) }}</span>
-                </div>
-
-                <div class="info-item">
-                  <span class="info-label">End</span>
-                  <span class="info-value">{{ formatTime(editorState().selectedClip?.endTime || 0) }}</span>
-                </div>
-
-                <div class="info-item">
-                  <span class="info-label">Volume</span>
-                  <span class="info-value">{{ ((editorState().selectedClip?.volume || 0) * 100).toFixed(0) }}%</span>
-                </div>
-              </div>
-            </div>
-          }
-
-          <!-- Timeline Stats -->
-          <div class="info-section">
-            <h4 class="section-title">Timeline</h4>
-
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="info-label">Total Clips</span>
-                <span class="info-value">{{ clips().length }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Markers</span>
-                <span class="info-value">{{ markers().length }}</span>
-              </div>
-
-              <div class="info-item">
-                <span class="info-label">Zoom Level</span>
-                <span class="info-value">{{ (editorState().zoom * 100).toFixed(0) }}%</span>
-              </div>
-            </div>
-          </div>
-        </div>
+    <!-- Analysis Sidebar (Right) -->
+    @if (showAnalysisSidebar()) {
+      <div class="analysis-sidebar">
+        <app-analysis-panel
+          [sections]="filteredSections()"
+          [categoryFilters]="categoryFilters()"
+          [selectedSection]="editorState().selectedSection"
+          [analysisData]="analysisData()"
+          [hasAnalysis]="hasAnalysis()"
+          [videoId]="videoId() ?? undefined"
+          (sectionClick)="onSectionClick($event)"
+          (filterToggle)="onFilterToggle($event)"
+          (generateAnalysis)="onGenerateAnalysis($event)">
+        </app-analysis-panel>
       </div>
     }
   </div>
 </div>
-
-<!-- Expose Math to template -->
-@if (false) {
-  {{ Math.min(0, 0) }}
-}

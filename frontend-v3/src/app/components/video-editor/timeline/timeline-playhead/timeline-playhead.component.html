@@ -1,0 +1,11 @@
+<div class="timeline-playhead-container">
+  @if (isVisible) {
+    <div
+      class="playhead"
+      [style.left.%]="playheadPosition"
+      (mousedown)="onDragStart($event)">
+      <div class="playhead-handle"></div>
+      <div class="playhead-line"></div>
+    </div>
+  }
+</div>

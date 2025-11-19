@@ -1,81 +1,283 @@
-import { Component, signal, computed, effect } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
+import { NavigationService } from '../../services/navigation.service';
+import { LibraryService, LibraryAnalysis, AnalysisSection as LibAnalysisSection } from '../../services/library.service';
 import {
   VideoEditorState,
   VideoClip,
   VideoMetadata,
   EditorSettings,
-  TimelineMarker
+  TimelineSection,
+  CategoryFilter,
+  ZoomState,
+  AnalysisData,
+  WaveformData,
+  TimelineSelection,
+  CustomMarker
 } from '../../models/video-editor.model';
+
+// Sub-components
+import { VideoPlayerComponent } from './video-player/video-player.component';
+import { AnalysisPanelComponent } from './analysis-panel/analysis-panel.component';
+import { TimelineRulerComponent } from './timeline/timeline-ruler/timeline-ruler.component';
+import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline-playhead.component';
+import { TimelineSectionsLayerComponent } from './timeline/timeline-sections-layer/timeline-sections-layer.component';
+import { TimelineWaveformComponent } from './timeline/timeline-waveform/timeline-waveform.component';
+import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
+
+// Tool types for editor
+export enum EditorTool {
+  CURSOR = 'cursor',
+  HIGHLIGHT = 'highlight'
+}
+
+// Category colors for different analysis types
+const CATEGORY_COLORS: Record<string, string> = {
+  'violence': '#dc3545',
+  'conspiracy': '#6f42c1',
+  'misinformation': '#fd7e14',
+  'hate speech': '#e83e8c',
+  'harmful content': '#ffc107',
+  'medical misinformation': '#20c997',
+  'political': '#0d6efd',
+  'educational': '#198754',
+  'entertainment': '#6610f2',
+  'news': '#0dcaf0',
+  'routine': '#6f42c1',
+  'false-prophecy': '#ffc107',
+  'false prophecy': '#ffc107',
+  'prophecy': '#fd7e14',
+  'spiritual': '#20c997',
+  'testimony': '#0dcaf0',
+  'teaching': '#198754',
+  'worship': '#6610f2',
+  'prayer': '#e83e8c',
+  'christian nationalism': '#dc3545',
+  'nationalism': '#e83e8c',
+  'extremism': '#dc3545',
+  'hate/extremism': '#8b0000',
+  'political violence': '#990000',
+  'rhetoric': '#fd7e14',
+  'propaganda': '#ffc107',
+  'fear-mongering': '#e83e8c',
+  'apocalyptic': '#6f42c1',
+  'end times': '#6f42c1',
+  'biblical': '#0d6efd',
+  'scripture': '#0dcaf0',
+  'sermon': '#198754',
+  'commentary': '#17a2b8',
+  'interview': '#6610f2',
+  'discussion': '#20c997',
+  'introduction': '#adb5bd',
+  'conclusion': '#adb5bd',
+  'music': '#e83e8c',
+  'advertisement': '#ffc107',
+  'promotion': '#fd7e14',
+  'default': '#6c757d'
+};
 
 @Component({
   selector: 'app-video-editor',
   standalone: true,
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    VideoPlayerComponent,
+    AnalysisPanelComponent,
+    TimelineRulerComponent,
+    TimelinePlayheadComponent,
+    TimelineSectionsLayerComponent,
+    TimelineWaveformComponent,
+    TimelineZoomBarComponent
+  ],
   templateUrl: './video-editor.component.html',
   styleUrls: ['./video-editor.component.scss']
 })
-export class VideoEditorComponent {
+export class VideoEditorComponent implements OnInit, OnDestroy {
+  private router = inject(Router);
+  private navService = inject(NavigationService);
+  private libraryService = inject(LibraryService);
+
+  private readonly API_BASE = 'http://localhost:3000/api';
+
+  @ViewChild(VideoPlayerComponent) videoPlayer?: VideoPlayerComponent;
+
+  // Keyboard shortcuts
+  @HostListener('document:keydown', ['$event'])
+  handleKeyboardEvent(event: KeyboardEvent) {
+    // Don't trigger if user is typing in an input
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    if (event.code === 'Space') {
+      event.preventDefault();
+      this.togglePlayPause();
+    }
+
+    // Fullscreen with F key
+    if (event.key === 'f' || event.key === 'F') {
+      event.preventDefault();
+      this.toggleFullscreen();
+    }
+
+    // Zoom in/out with Cmd+Plus/Minus (or Ctrl on Windows)
+    if (event.metaKey || event.ctrlKey) {
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault();
+        this.zoomIn();
+      } else if (event.key === '-') {
+        event.preventDefault();
+        this.zoomOut();
+      } else if (event.key === '0') {
+        event.preventDefault();
+        this.resetZoom();
+      }
+    }
+
+    // L to increase speed (and start playing if stopped)
+    if (event.key === 'l' || event.key === 'L') {
+      event.preventDefault();
+      this.increasePlaybackSpeed();
+    }
+
+    // J to decrease speed
+    if (event.key === 'j' || event.key === 'J') {
+      event.preventDefault();
+      this.decreasePlaybackSpeed();
+    }
+
+    // A for cursor tool
+    if (event.key === 'a' || event.key === 'A') {
+      event.preventDefault();
+      this.setTool(EditorTool.CURSOR);
+    }
+
+    // H for highlight tool
+    if (event.key === 'h' || event.key === 'H') {
+      event.preventDefault();
+      this.setTool(EditorTool.HIGHLIGHT);
+    }
+
+    // M for marker
+    if (event.key === 'm' || event.key === 'M') {
+      event.preventDefault();
+      this.addMarker();
+    }
+
+    // Cmd+E for export
+    if ((event.metaKey || event.ctrlKey) && (event.key === 'e' || event.key === 'E')) {
+      event.preventDefault();
+      this.openExportDialog();
+    }
+  }
+
+  // Bound wheel handler for proper cleanup
+  private wheelHandler = (event: WheelEvent) => {
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.deltaY < 0) {
+        this.zoomIn();
+      } else if (event.deltaY > 0) {
+        this.zoomOut();
+      }
+    }
+  };
+
+  zoomIn() {
+    const currentZoom = this.editorState().zoomState;
+    const newLevel = Math.min(currentZoom.level * 1.25, 20); // Max zoom 20x
+    this.onZoomChange({
+      level: newLevel,
+      offset: currentZoom.offset
+    });
+  }
+
+  zoomOut() {
+    const currentZoom = this.editorState().zoomState;
+    const newLevel = Math.max(currentZoom.level / 1.25, 1); // Min zoom 1x
+
+    // Adjust offset if needed to keep view within bounds
+    const duration = this.editorState().duration;
+    const visibleDuration = duration / newLevel;
+    const maxOffset = Math.max(0, duration - visibleDuration);
+
+    this.onZoomChange({
+      level: newLevel,
+      offset: Math.min(currentZoom.offset, maxOffset)
+    });
+  }
+
+  resetZoom() {
+    this.onZoomChange({
+      level: 1,
+      offset: 0
+    });
+  }
+
+  // Video data from route state
+  videoId = signal<string | null>(null);
+  private videoPath = signal<string | null>(null);
+  private videoTitle = signal<string>('Untitled Video');
+
+  // Track if video has analysis
+  hasAnalysis = signal(false);
+
+  // Loading state
+  isLoading = signal(true);
+  errorMessage = signal<string | null>(null);
+
   // Editor state
   editorState = signal<VideoEditorState>({
     currentTime: 0,
-    duration: 120, // Default 2 minutes for demo
+    duration: 120,
     isPlaying: false,
     volume: 1,
     playbackRate: 1,
-    zoom: 1
+    zoomState: { level: 1, offset: 0 }
   });
 
-  // Clips on timeline
-  clips = signal<VideoClip[]>([
-    {
-      id: '1',
-      name: 'Sample Video Clip',
-      url: '',
-      duration: 45,
-      startTime: 0,
-      endTime: 45,
-      track: 0,
-      volume: 1,
-      waveformData: {
-        samples: this.generateDemoWaveform(45),
-        sampleRate: 44100,
-        duration: 45
-      }
-    },
-    {
-      id: '2',
-      name: 'Second Clip',
-      url: '',
-      duration: 30,
-      startTime: 50,
-      endTime: 80,
-      track: 0,
-      volume: 0.8,
-      waveformData: {
-        samples: this.generateDemoWaveform(30),
-        sampleRate: 44100,
-        duration: 30
-      }
-    }
-  ]);
+  // Current active tool
+  currentTool = signal<EditorTool>(EditorTool.CURSOR);
 
-  // Timeline markers
-  markers = signal<TimelineMarker[]>([
-    { id: '1', time: 15, label: 'Intro End', color: '#ff6b35' },
-    { id: '2', time: 60, label: 'Main Section', color: '#4ecdc4' }
-  ]);
+  // Selection state for highlighting
+  highlightSelection = signal<TimelineSelection | null>(null);
+  isSelecting = signal(false);
+  selectionStart = signal<number | null>(null);
+
+  // Custom markers created by user
+  customMarkers = signal<CustomMarker[]>([]);
+
+  // Video URL
+  videoUrl = signal<string | undefined>(undefined);
+
+  // Timeline sections from analysis
+  sections = signal<TimelineSection[]>([]);
+
+  // Category filters
+  categoryFilters = signal<CategoryFilter[]>([]);
+
+  // Analysis data
+  analysisData = signal<AnalysisData | undefined>(undefined);
+
+  // Waveform data
+  waveformData = signal<WaveformData>({
+    samples: [],
+    sampleRate: 44100,
+    duration: 0
+  });
 
   // Video metadata
   metadata = signal<VideoMetadata>({
-    filename: 'sample-video.mp4',
-    format: 'MP4',
-    resolution: '1920x1080',
-    frameRate: 30,
-    bitrate: '5.2 Mbps',
-    codec: 'H.264',
-    fileSize: 125829120, // bytes
-    duration: 120,
+    filename: 'Loading...',
+    format: '',
+    resolution: '',
+    frameRate: 0,
+    bitrate: '',
+    codec: '',
+    fileSize: 0,
+    duration: 0,
     createdDate: new Date()
   });
 
@@ -98,26 +300,381 @@ export class VideoEditorComponent {
     return (state.currentTime / state.duration) * 100;
   });
 
-  // Sidebar visibility
-  showInfoSidebar = signal(true);
-  showSettingsSidebar = signal(true);
+  // Filtered sections based on category filters
+  filteredSections = computed(() => {
+    const filters = this.categoryFilters();
+    const allSections = this.sections();
 
-  // Timeline scroll position (0-100%)
-  scrollPosition = 0;
+    if (filters.length === 0) return allSections;
+
+    const enabledCategories = new Set(
+      filters.filter(f => f.enabled).map(f => f.category)
+    );
+
+    return allSections.filter(s =>
+      enabledCategories.has(s.category.toLowerCase())
+    );
+  });
+
+  // Sidebar visibility
+  showAnalysisSidebar = signal(true);
+
+  // Timeline resizing
+  timelineHeight = signal(280); // Increased default height
+  isResizing = signal(false);
+
+  // Fullscreen mode
+  isFullscreen = signal(false);
+  showTimelineInFullscreen = signal(true);
+  private fullscreenTimeout?: any;
+
+  private playbackInterval?: any;
+
+  // Track playing state separately to avoid effect re-triggering
+  private wasPlaying = false;
 
   constructor() {
-    // Set up effects for playback
+    // Initialize category filters from sections
     effect(() => {
-      const state = this.editorState();
-      if (state.isPlaying) {
-        this.startPlayback();
-      } else {
-        this.stopPlayback();
+      const sections = this.sections();
+      this.updateCategoryFilters(sections);
+    }, { allowSignalWrites: true });
+
+    // Set up playback effect - only react to isPlaying changes
+    effect(() => {
+      const isPlaying = this.editorState().isPlaying;
+      if (isPlaying !== this.wasPlaying) {
+        this.wasPlaying = isPlaying;
+        if (isPlaying) {
+          this.startPlayback();
+          // Hide timeline in fullscreen when playing
+          if (this.isFullscreen()) {
+            this.hideTimelineAfterDelay();
+          }
+        } else {
+          this.stopPlayback();
+          // Show timeline in fullscreen when paused
+          if (this.isFullscreen()) {
+            this.showTimelineInFullscreen.set(true);
+            this.clearFullscreenTimeout();
+          }
+        }
       }
     }, { allowSignalWrites: true });
   }
 
-  private playbackInterval?: any;
+  ngOnInit() {
+    // Hide the side navigation when entering the editor
+    this.navService.hideNav();
+
+    // Add wheel listener with passive: false to allow preventDefault
+    window.addEventListener('wheel', this.wheelHandler, { passive: false });
+
+    // Add fullscreen event listeners
+    document.addEventListener('fullscreenchange', this.onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', this.onFullscreenChange);
+    document.addEventListener('mousemove', this.onMouseMoveInFullscreen);
+
+    // Get video data from route state
+    const navigation = this.router.getCurrentNavigation();
+    const state = navigation?.extras?.state || history.state;
+    const videoEditorData = state?.videoEditorData;
+
+    if (videoEditorData) {
+      this.videoId.set(videoEditorData.videoId);
+      this.videoPath.set(videoEditorData.videoPath || null);
+      this.videoTitle.set(videoEditorData.videoTitle || 'Untitled Video');
+
+      // Set video URL for streaming
+      if (videoEditorData.videoId) {
+        this.videoUrl.set(`${this.API_BASE}/database/videos/${videoEditorData.videoId}/stream`);
+      }
+
+      // Update metadata filename
+      this.metadata.update(m => ({
+        ...m,
+        filename: videoEditorData.videoTitle || 'Untitled Video'
+      }));
+
+      // Load video details and analysis
+      this.loadVideoData(videoEditorData.videoId);
+    } else {
+      this.isLoading.set(false);
+      this.errorMessage.set('No video data provided. Please select a video from the library.');
+      this.hasAnalysis.set(false);
+    }
+  }
+
+  private async loadVideoData(videoId: string) {
+    try {
+      this.isLoading.set(true);
+      this.errorMessage.set(null);
+
+      // Load video details
+      this.libraryService.getVideo(videoId).subscribe({
+        next: (response) => {
+          if (response.success && response.data) {
+            const video = response.data;
+            this.metadata.update(m => ({
+              ...m,
+              filename: video.name,
+              fileSize: video.size || 0
+            }));
+
+            // If video has analysis, try to load it
+            if (video.hasAnalysis) {
+              this.loadAnalysisForVideo(videoId);
+            } else {
+              // No analysis - show generate button
+              this.hasAnalysis.set(false);
+              this.sections.set([]);
+              this.analysisData.set(undefined);
+            }
+          } else {
+            this.hasAnalysis.set(false);
+          }
+        },
+        error: (error) => {
+          console.error('Failed to load video details:', error);
+          this.hasAnalysis.set(false);
+        }
+      });
+
+      this.isLoading.set(false);
+    } catch (error) {
+      console.error('Failed to load video data:', error);
+      this.errorMessage.set('Failed to load video data. Please try again.');
+      this.isLoading.set(false);
+    }
+  }
+
+  private async loadAnalysisForVideo(videoId: string) {
+    try {
+      // Fetch analysis from correct endpoint
+      const analysisResponse = await fetch(`${this.API_BASE}/database/videos/${videoId}/analysis`);
+      const analysisData = await analysisResponse.json();
+
+      if (analysisData && !analysisData.error) {
+        // Also fetch sections
+        const sectionsResponse = await fetch(`${this.API_BASE}/database/videos/${videoId}/sections`);
+        const sectionsData = await sectionsResponse.json();
+
+        this.processAnalysisFromDatabase(analysisData, sectionsData?.sections || []);
+      } else {
+        console.log('No analysis found for video');
+      }
+    } catch (error: any) {
+      console.log('Failed to load analysis:', error);
+    }
+  }
+
+  private processAnalysisFromDatabase(analysis: any, sections: any[]) {
+    // Convert database sections to timeline sections
+    const timelineSections: TimelineSection[] = sections.map((section: any, index: number) => ({
+      id: section.id || `section-${index}`,
+      startTime: section.start_seconds || 0,
+      endTime: section.end_seconds || section.start_seconds + 10,
+      category: section.category || 'unknown',
+      description: section.description || section.content || '',
+      color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
+    }));
+
+    this.sections.set(timelineSections);
+    this.hasAnalysis.set(true);
+
+    // Set analysis data for sidebar
+    this.analysisData.set({
+      id: analysis.id || 'analysis',
+      title: analysis.suggested_title || analysis.title || this.videoTitle(),
+      summary: analysis.description || analysis.summary || '',
+      sections: timelineSections.map(s => ({
+        timeRange: `${this.formatTime(s.startTime)} - ${this.formatTime(s.endTime)}`,
+        startSeconds: s.startTime,
+        endSeconds: s.endTime,
+        category: s.category,
+        description: s.description
+      })),
+      quotes: analysis.quotes || []
+    });
+
+    // Update metadata
+    if (analysis.suggested_title) {
+      this.metadata.update(m => ({
+        ...m,
+        filename: analysis.suggested_title
+      }));
+    }
+  }
+
+  private setDemoSections() {
+    // Set demo sections for visualization
+    const demoSections: TimelineSection[] = [
+      {
+        id: '1',
+        startTime: 5,
+        endTime: 15,
+        category: 'violence',
+        description: 'Scene contains violent imagery',
+        color: CATEGORY_COLORS['violence']
+      },
+      {
+        id: '2',
+        startTime: 30,
+        endTime: 45,
+        category: 'misinformation',
+        description: 'Claims without factual basis',
+        color: CATEGORY_COLORS['misinformation']
+      },
+      {
+        id: '3',
+        startTime: 60,
+        endTime: 80,
+        category: 'educational',
+        description: 'Educational content',
+        color: CATEGORY_COLORS['educational']
+      }
+    ];
+    this.sections.set(demoSections);
+
+    // Set demo analysis data
+    this.analysisData.set({
+      id: 'demo',
+      title: 'Demo Analysis',
+      summary: 'This is demo data. Run analysis to see actual results.',
+      sections: demoSections.map(s => ({
+        timeRange: `${this.formatTime(s.startTime)} - ${this.formatTime(s.endTime)}`,
+        startSeconds: s.startTime,
+        endSeconds: s.endTime,
+        category: s.category,
+        description: s.description
+      })),
+      quotes: []
+    });
+  }
+
+  private processAnalysisData(analysis: LibraryAnalysis) {
+    // Parse the analysis file if it exists
+    if (analysis.files?.analysis) {
+      // The analysis file path needs to be fetched and parsed
+      this.fetchAndParseAnalysis(analysis);
+    }
+
+    // Set metadata
+    this.metadata.update(m => ({
+      ...m,
+      filename: analysis.title || m.filename,
+      duration: analysis.video?.durationSeconds || m.duration
+    }));
+
+    // Update duration in editor state
+    if (analysis.video?.durationSeconds) {
+      this.editorState.update(state => ({
+        ...state,
+        duration: analysis.video.durationSeconds!
+      }));
+
+      // Waveform will be generated when video loads via onVideoDurationChange
+    }
+  }
+
+  private async fetchAndParseAnalysis(analysis: LibraryAnalysis) {
+    try {
+      // Fetch the analysis JSON file
+      const analysisUrl = `${this.API_BASE}/library/analyses/${analysis.id}/analysis`;
+      const response = await fetch(analysisUrl);
+
+      if (response.ok) {
+        const analysisJson = await response.json();
+
+        // Convert to timeline sections
+        const timelineSections: TimelineSection[] = [];
+
+        if (analysisJson.analysis?.sections) {
+          analysisJson.analysis.sections.forEach((section: any, index: number) => {
+            const startSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[0] || '0:00');
+            const endSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[1] || '0:00') || startSeconds + 10;
+
+            timelineSections.push({
+              id: `section-${index}`,
+              startTime: startSeconds,
+              endTime: endSeconds,
+              category: section.category || 'unknown',
+              description: section.description || '',
+              color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
+            });
+          });
+        }
+
+        this.sections.set(timelineSections);
+
+        // Set analysis data for sidebar
+        this.analysisData.set({
+          id: analysis.id,
+          title: analysisJson.analysis?.title || analysis.title,
+          summary: analysisJson.analysis?.summary,
+          sections: analysisJson.analysis?.sections || [],
+          quotes: analysisJson.analysis?.quotes || []
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch analysis:', error);
+    }
+  }
+
+  private parseTimeToSeconds(timeStr: string): number {
+    if (!timeStr) return 0;
+    const parts = timeStr.split(':').map(p => parseInt(p, 10));
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return 0;
+  }
+
+  ngOnDestroy() {
+    // Show the side navigation when leaving the editor
+    this.navService.showNav();
+    this.stopPlayback();
+
+    // Remove event listeners
+    window.removeEventListener('wheel', this.wheelHandler);
+    document.removeEventListener('fullscreenchange', this.onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange);
+    document.removeEventListener('mousemove', this.onMouseMoveInFullscreen);
+
+    // Clean up timeline dragging listeners
+    document.removeEventListener('mousemove', this.onDocumentMouseMove);
+    document.removeEventListener('mouseup', this.onDocumentMouseUp);
+
+    this.clearFullscreenTimeout();
+  }
+
+  // Navigate back to library
+  goBack() {
+    this.router.navigate(['/']);
+  }
+
+  private updateCategoryFilters(sections: TimelineSection[]): void {
+    const categories = new Map<string, CategoryFilter>();
+
+    sections.forEach(section => {
+      const category = section.category.toLowerCase();
+      if (!categories.has(category)) {
+        categories.set(category, {
+          category,
+          label: section.category,
+          color: section.color,
+          enabled: true
+        });
+      }
+    });
+
+    const filters = Array.from(categories.values())
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    this.categoryFilters.set(filters);
+  }
 
   private startPlayback() {
     this.stopPlayback();
@@ -158,16 +715,19 @@ export class VideoEditorComponent {
 
   seekTo(time: number) {
     this.updateCurrentTime(time);
+    if (this.videoPlayer) {
+      this.videoPlayer.seekTo(time);
+    }
   }
 
   skipBackward(seconds: number = 5) {
     const state = this.editorState();
-    this.updateCurrentTime(state.currentTime - seconds);
+    this.seekTo(state.currentTime - seconds);
   }
 
   skipForward(seconds: number = 5) {
     const state = this.editorState();
-    this.updateCurrentTime(state.currentTime + seconds);
+    this.seekTo(state.currentTime + seconds);
   }
 
   setPlaybackRate(rate: number) {
@@ -177,6 +737,56 @@ export class VideoEditorComponent {
     }));
   }
 
+  // Increase playback speed with L key
+  increasePlaybackSpeed() {
+    const currentRate = this.editorState().playbackRate;
+    const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+    // If not playing, start playing first
+    if (!this.editorState().isPlaying) {
+      this.startPlayback();
+      return;
+    }
+
+    // Find next higher speed
+    let nextSpeed = currentRate;
+    for (const speed of speeds) {
+      if (speed > currentRate) {
+        nextSpeed = speed;
+        break;
+      }
+    }
+
+    // Max out at 4x
+    if (currentRate >= 4) {
+      nextSpeed = 4;
+    }
+
+    this.setPlaybackRate(nextSpeed);
+  }
+
+  // Decrease playback speed with J key
+  decreasePlaybackSpeed() {
+    const currentRate = this.editorState().playbackRate;
+    const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+    // Find next lower speed
+    let nextSpeed = currentRate;
+    for (let i = speeds.length - 1; i >= 0; i--) {
+      if (speeds[i] < currentRate) {
+        nextSpeed = speeds[i];
+        break;
+      }
+    }
+
+    // Min out at 0.25x
+    if (currentRate <= 0.25) {
+      nextSpeed = 0.25;
+    }
+
+    this.setPlaybackRate(nextSpeed);
+  }
+
   setVolume(volume: number) {
     this.editorState.update(state => ({
       ...state,
@@ -184,53 +794,427 @@ export class VideoEditorComponent {
     }));
   }
 
-  setZoom(zoom: number) {
+  // Tool management
+  setTool(tool: EditorTool) {
+    this.currentTool.set(tool);
+    console.log('Switched to tool:', tool);
+  }
+
+  setToolCursor() {
+    this.setTool(EditorTool.CURSOR);
+  }
+
+  setToolHighlight() {
+    this.setTool(EditorTool.HIGHLIGHT);
+  }
+
+  // Get time from mouse position on timeline
+  private getTimeFromMousePosition(event: MouseEvent): number | null {
+    const target = event.currentTarget as HTMLElement;
+    const trackLane = target.querySelector('.track-lane') as HTMLElement;
+    if (!trackLane) return null;
+
+    const laneRect = trackLane.getBoundingClientRect();
+    const clickX = event.clientX - laneRect.left;
+    const trackWidth = laneRect.width;
+
+    if (clickX < 0 || clickX > trackWidth || trackWidth <= 0) return null;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+    const percentage = clickX / trackWidth;
+
+    return state.zoomState.offset + (percentage * visibleDuration);
+  }
+
+  // Get time from mouse position for document-level events
+  private getTimeFromMousePositionDocument(event: MouseEvent): number | null {
+    const timelineElement = document.querySelector('.track-content') as HTMLElement;
+    if (!timelineElement) return null;
+
+    const trackLane = timelineElement.querySelector('.track-lane') as HTMLElement;
+    if (!trackLane) return null;
+
+    const laneRect = trackLane.getBoundingClientRect();
+    const clickX = event.clientX - laneRect.left;
+    const trackWidth = laneRect.width;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+    const percentage = Math.max(0, Math.min(1, clickX / trackWidth));
+
+    return state.zoomState.offset + (percentage * visibleDuration);
+  }
+
+  // Show context menu for highlighted selection
+  private showContextMenu(event: MouseEvent) {
+    // This will be implemented with the context menu component
+    console.log('Show context menu at:', event.clientX, event.clientY);
+    // TODO: Show context menu with Export and Add Marker options
+  }
+
+  // Add a marker to the current selection or current time
+  addMarker() {
+    const selection = this.highlightSelection();
+    const videoId = this.videoId();
+
+    if (!videoId) {
+      console.error('No video ID available');
+      return;
+    }
+
+    if (selection) {
+      // Add marker for selected range
+      this.openMarkerDialog(selection.startTime, selection.endTime);
+    } else {
+      // Add marker at current playhead position
+      const currentTime = this.editorState().currentTime;
+      this.openMarkerDialog(currentTime);
+    }
+  }
+
+  // Open the marker dialog
+  private openMarkerDialog(startTime: number, endTime?: number) {
+    // TODO: Implement marker dialog
+    console.log('Open marker dialog for time:', startTime, endTime);
+    // This will open a dialog to get the marker message from user
+  }
+
+  // Open export dialog
+  openExportDialog() {
+    // TODO: Implement export dialog with cascade list
+    console.log('Open export dialog');
+    // This will open the export dialog with cascade list of selections
+  }
+
+  // Calculate selection overlay left position
+  getSelectionLeft(): number {
+    const selection = this.highlightSelection();
+    if (!selection) return 0;
+
+    const state = this.editorState();
+    const visibleStart = state.zoomState.offset;
+    const visibleDuration = state.duration / state.zoomState.level;
+
+    const relativeStart = selection.startTime - visibleStart;
+    return (relativeStart / visibleDuration) * 100;
+  }
+
+  // Calculate selection overlay width
+  getSelectionWidth(): number {
+    const selection = this.highlightSelection();
+    if (!selection) return 0;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+
+    const duration = selection.endTime - selection.startTime;
+    return (duration / visibleDuration) * 100;
+  }
+
+  // Zoom controls
+  onZoomChange(zoomState: ZoomState) {
     this.editorState.update(state => ({
       ...state,
-      zoom: Math.max(0.5, Math.min(4, zoom))
+      zoomState
     }));
   }
 
-  // Timeline controls
-  zoomIn() {
-    const state = this.editorState();
-    this.setZoom(state.zoom * 1.2);
-  }
-
-  zoomOut() {
-    const state = this.editorState();
-    this.setZoom(state.zoom / 1.2);
-  }
-
-  resetZoom() {
-    this.setZoom(1);
-  }
-
-  // Clip management
-  selectClip(clip: VideoClip) {
+  // Section interaction
+  onSectionClick(section: TimelineSection) {
     this.editorState.update(state => ({
       ...state,
-      selectedClip: clip
+      selectedSection: section
+    }));
+    // Seek to section start
+    this.seekTo(section.startTime);
+  }
+
+  onSectionHover(section: TimelineSection | null) {
+    // Could show tooltip or highlight
+  }
+
+  // Category filter toggle
+  onFilterToggle(category: string) {
+    this.categoryFilters.update(filters =>
+      filters.map(f =>
+        f.category === category
+          ? { ...f, enabled: !f.enabled }
+          : f
+      )
+    );
+  }
+
+  // Sidebar toggle
+  toggleAnalysisSidebar() {
+    this.showAnalysisSidebar.update(v => !v);
+  }
+
+  // Fullscreen toggle
+  async toggleFullscreen() {
+    const element = document.documentElement;
+
+    if (!this.isFullscreen()) {
+      try {
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if ((element as any).webkitRequestFullscreen) {
+          await (element as any).webkitRequestFullscreen();
+        }
+      } catch (err) {
+        console.error('Failed to enter fullscreen:', err);
+      }
+    } else {
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+      } catch (err) {
+        console.error('Failed to exit fullscreen:', err);
+      }
+    }
+  }
+
+  // Handle fullscreen change events
+  private onFullscreenChange = () => {
+    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+    this.isFullscreen.set(isFs);
+
+    if (isFs) {
+      // In fullscreen, hide timeline when playing
+      if (this.editorState().isPlaying) {
+        this.hideTimelineAfterDelay();
+      }
+    } else {
+      // Exiting fullscreen, always show timeline
+      this.showTimelineInFullscreen.set(true);
+      this.clearFullscreenTimeout();
+    }
+  };
+
+  // Handle mouse movement in fullscreen to show timeline
+  private onMouseMoveInFullscreen = () => {
+    if (!this.isFullscreen()) return;
+
+    this.showTimelineInFullscreen.set(true);
+
+    // Hide after delay if playing
+    if (this.editorState().isPlaying) {
+      this.hideTimelineAfterDelay();
+    }
+  };
+
+  private hideTimelineAfterDelay() {
+    this.clearFullscreenTimeout();
+    this.fullscreenTimeout = setTimeout(() => {
+      if (this.isFullscreen() && this.editorState().isPlaying) {
+        this.showTimelineInFullscreen.set(false);
+      }
+    }, 2000);
+  }
+
+  private clearFullscreenTimeout() {
+    if (this.fullscreenTimeout) {
+      clearTimeout(this.fullscreenTimeout);
+      this.fullscreenTimeout = undefined;
+    }
+  }
+
+  // Dragging state
+  private isDraggingTimeline = false;
+
+  // Timeline mouse down to start seeking or selection
+  onTimelineMouseDown(event: MouseEvent) {
+    event.preventDefault(); // Prevent text selection
+
+    if (this.currentTool() === EditorTool.HIGHLIGHT) {
+      // Start selection for highlight tool
+      const time = this.getTimeFromMousePosition(event);
+      if (time !== null) {
+        this.selectionStart.set(time);
+        this.isSelecting.set(true);
+        this.highlightSelection.set({ startTime: time, endTime: time });
+
+        document.body.style.cursor = 'crosshair';
+        document.addEventListener('mousemove', this.onDocumentMouseMove);
+        document.addEventListener('mouseup', this.onDocumentMouseUp);
+      }
+    } else {
+      // Cursor tool - seek to position
+      this.isDraggingTimeline = true;
+      this.seekToMousePosition(event);
+
+      document.body.style.cursor = 'ew-resize';
+      document.addEventListener('mousemove', this.onDocumentMouseMove);
+      document.addEventListener('mouseup', this.onDocumentMouseUp);
+    }
+  }
+
+  // Document mouse move while dragging
+  private onDocumentMouseMove = (event: MouseEvent) => {
+    if (this.isSelecting()) {
+      // Update selection for highlight tool
+      const time = this.getTimeFromMousePositionDocument(event);
+      if (time !== null && this.selectionStart() !== null) {
+        const startTime = Math.min(this.selectionStart()!, time);
+        const endTime = Math.max(this.selectionStart()!, time);
+        this.highlightSelection.set({ startTime, endTime });
+      }
+    } else if (this.isDraggingTimeline) {
+      // Find the timeline element
+      const timelineElement = document.querySelector('.track-content') as HTMLElement;
+      if (timelineElement) {
+        this.seekToMousePosition(event, timelineElement);
+      }
+    }
+  }
+
+  // Document mouse up to stop dragging
+  private onDocumentMouseUp = () => {
+    if (this.isSelecting()) {
+      this.isSelecting.set(false);
+
+      // If selection is too small, clear it
+      const selection = this.highlightSelection();
+      if (selection && Math.abs(selection.endTime - selection.startTime) < 0.1) {
+        this.highlightSelection.set(null);
+      }
+    }
+
+    this.isDraggingTimeline = false;
+    document.body.style.cursor = ''; // Reset cursor
+    document.removeEventListener('mousemove', this.onDocumentMouseMove);
+    document.removeEventListener('mouseup', this.onDocumentMouseUp);
+  }
+
+  // Timeline click to seek (now calls the common seek method)
+  onTimelineClick(event: MouseEvent) {
+    // Handle right-click for context menu
+    if (event.button === 2 && this.highlightSelection()) {
+      event.preventDefault();
+      this.showContextMenu(event);
+      return;
+    }
+
+    // Only seek if not dragging and using cursor tool
+    if (!this.isDraggingTimeline && this.currentTool() === EditorTool.CURSOR) {
+      this.seekToMousePosition(event);
+    }
+  }
+
+  // Common method to seek based on mouse position
+  private seekToMousePosition(event: MouseEvent, element?: HTMLElement) {
+    const target = element || event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+
+    // Get the track-lane element which has the actual margins
+    const trackLane = target.querySelector('.track-lane') as HTMLElement;
+    if (!trackLane) return;
+
+    const laneRect = trackLane.getBoundingClientRect();
+    const clickX = event.clientX - laneRect.left;
+    const trackWidth = laneRect.width;
+
+    if (clickX < 0 || clickX > trackWidth || trackWidth <= 0) return;
+
+    const percentage = clickX / trackWidth;
+    const zoomState = this.editorState().zoomState;
+    const visibleDuration = this.editorState().duration / zoomState.level;
+    const time = zoomState.offset + (percentage * visibleDuration);
+
+    this.seekTo(Math.max(0, Math.min(time, this.editorState().duration)));
+  }
+
+  // Timeline resize
+  onResizeStart(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isResizing.set(true);
+
+    // Add visual feedback
+    document.body.style.cursor = 'ns-resize';
+
+    const startY = event.clientY;
+    const startHeight = this.timelineHeight();
+
+    const onMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const deltaY = startY - e.clientY;
+      const newHeight = Math.max(150, Math.min(600, startHeight + deltaY));
+      this.timelineHeight.set(newHeight);
+    };
+
+    const onMouseUp = () => {
+      this.isResizing.set(false);
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  // Video player events
+  onVideoTimeUpdate(time: number) {
+    this.updateCurrentTime(time);
+  }
+
+  async onVideoDurationChange(duration: number) {
+    // Don't set duration to 0 - keep default if video fails to load
+    if (duration <= 0) return;
+
+    this.editorState.update(state => ({
+      ...state,
+      duration
+    }));
+    this.metadata.update(m => ({
+      ...m,
+      duration
+    }));
+
+    // Generate real waveform from video using Web Audio API
+    const url = this.videoUrl();
+    if (url) {
+      // Set temporary demo waveform while loading
+      this.waveformData.set({
+        samples: this.generateDemoWaveform(duration),
+        sampleRate: 44100,
+        duration
+      });
+
+      // Generate real waveform asynchronously
+      const samples = await this.generateWaveformFromVideo(url);
+      this.waveformData.set({
+        samples,
+        sampleRate: 44100,
+        duration
+      });
+    } else {
+      // Fallback to demo waveform
+      this.waveformData.set({
+        samples: this.generateDemoWaveform(duration),
+        sampleRate: 44100,
+        duration
+      });
+    }
+  }
+
+  onVideoPlayStateChange(isPlaying: boolean) {
+    this.editorState.update(state => ({
+      ...state,
+      isPlaying
     }));
   }
 
-  deleteClip(clipId: string) {
-    this.clips.update(clips => clips.filter(c => c.id !== clipId));
-  }
-
-  // Settings
-  toggleInfoSidebar() {
-    this.showInfoSidebar.update(v => !v);
-  }
-
-  toggleSettingsSidebar() {
-    this.showSettingsSidebar.update(v => !v);
-  }
-
-  updateSetting<K extends keyof EditorSettings>(key: K, value: EditorSettings[K]) {
-    this.settings.update(s => ({
-      ...s,
-      [key]: value
+  onVideoEnded() {
+    this.editorState.update(state => ({
+      ...state,
+      isPlaying: false,
+      currentTime: 0
     }));
   }
 
@@ -260,13 +1244,54 @@ export class VideoEditorComponent {
     return `${size.toFixed(2)} ${units[unitIndex]}`;
   }
 
-  // Generate demo waveform data
+  // Generate waveform from video using Web Audio API
+  private async generateWaveformFromVideo(videoUrl: string): Promise<number[]> {
+    try {
+      // Fetch the video file
+      const response = await fetch(videoUrl);
+      const arrayBuffer = await response.arrayBuffer();
+
+      // Decode audio using Web Audio API
+      const audioContext = new AudioContext();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // Get raw audio data from first channel
+      const rawData = audioBuffer.getChannelData(0);
+      const samples = 1000; // Number of samples for waveform
+      const blockSize = Math.floor(rawData.length / samples);
+      const filteredData: number[] = [];
+
+      // Downsample by averaging blocks
+      for (let i = 0; i < samples; i++) {
+        const blockStart = blockSize * i;
+        let sum = 0;
+        for (let j = 0; j < blockSize; j++) {
+          sum += Math.abs(rawData[blockStart + j]);
+        }
+        filteredData.push(sum / blockSize);
+      }
+
+      // Normalize the data
+      const max = Math.max(...filteredData);
+      const normalizedData = max > 0 ? filteredData.map(n => n / max) : filteredData;
+
+      // Close audio context to free resources
+      await audioContext.close();
+
+      return normalizedData;
+    } catch (error) {
+      console.error('Error generating waveform:', error);
+      // Return demo waveform as fallback
+      return this.generateDemoWaveform(this.editorState().duration);
+    }
+  }
+
+  // Generate demo waveform data (fallback)
   private generateDemoWaveform(duration: number): number[] {
     const samples: number[] = [];
-    const sampleCount = duration * 10; // 10 samples per second for visualization
+    const sampleCount = Math.max(100, duration * 10);
 
     for (let i = 0; i < sampleCount; i++) {
-      // Generate semi-random waveform data
       const baseAmplitude = 0.3 + Math.random() * 0.4;
       const variation = Math.sin(i / 10) * 0.2;
       samples.push(Math.max(0, Math.min(1, baseAmplitude + variation)));
@@ -275,34 +1300,20 @@ export class VideoEditorComponent {
     return samples;
   }
 
-  // Generate SVG path for waveform visualization
-  generateWaveformPath(samples: number[]): string {
-    if (!samples || samples.length === 0) return '';
-
-    const width = 100;
-    const height = 40;
-    const center = height / 2;
-    const stepX = width / samples.length;
-
-    let path = `M 0,${center}`;
-
-    samples.forEach((sample, i) => {
-      const x = i * stepX;
-      const y = center - (sample * center);
-      path += ` L ${x},${y}`;
-    });
-
-    // Mirror for bottom half
-    for (let i = samples.length - 1; i >= 0; i--) {
-      const x = i * stepX;
-      const y = center + (samples[i] * center);
-      path += ` L ${x},${y}`;
-    }
-
-    path += ' Z';
-    return path;
+  // Get category color
+  getCategoryColor(category: string): string {
+    return CATEGORY_COLORS[category.toLowerCase()] || CATEGORY_COLORS['default'];
   }
 
-  // Expose Math to template
-  Math = Math;
+  // Handle generate analysis button click
+  onGenerateAnalysis(videoId: string) {
+    // Navigate to library page with state to trigger analysis
+    this.router.navigate(['/'], {
+      state: {
+        triggerAnalysis: true,
+        videoId: videoId,
+        videoName: this.metadata().filename
+      }
+    });
+  }
 }

@@ -1,0 +1,358 @@
+<!-- Video Configuration Dialog -->
+<div class="dialog-overlay" [class.open]="isOpen" (click)="close()">
+  <div class="dialog-container" (click)="$event.stopPropagation()" [class.open]="isOpen">
+    <!-- Dialog Header -->
+    <div class="dialog-header">
+      <h2 class="dialog-title">
+        <span class="dialog-icon">🎬</span>
+        Configure Video Processing
+      </h2>
+      <button class="dialog-close" (click)="close()">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Preset Cards -->
+    <div class="preset-section">
+      <h3 class="section-label">Quick Presets</h3>
+      <div class="preset-grid">
+        <button
+          *ngFor="let preset of presets"
+          class="preset-card"
+          (click)="applyPreset(preset)">
+          <span class="preset-name">{{ preset.name }}</span>
+          <span class="preset-description">{{ preset.description }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Dialog Body -->
+    <div class="dialog-body">
+      <!-- Video Input Section -->
+      <div class="input-section">
+        <div class="input-group">
+          <label class="input-label">
+            <span class="label-icon">🔗</span>
+            Video Source
+          </label>
+          <input
+            type="url"
+            class="input-field"
+            [(ngModel)]="videoUrl"
+            placeholder="https://example.com/video.mp4 or select from library">
+          <button class="library-button">
+            <span class="button-icon">📚</span>
+            Browse Library
+          </button>
+        </div>
+
+        <div class="input-group">
+          <label class="input-label">
+            <span class="label-icon">🏷️</span>
+            Video Name
+          </label>
+          <input
+            type="text"
+            class="input-field"
+            [(ngModel)]="videoName"
+            placeholder="Enter a name for this video">
+        </div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="tab-nav">
+        <button
+          class="tab-button"
+          [class.active]="activeTab === 'basic'"
+          (click)="activeTab = 'basic'">
+          <span class="tab-icon">⚙️</span>
+          Basic Settings
+        </button>
+        <button
+          class="tab-button"
+          [class.active]="activeTab === 'advanced'"
+          (click)="activeTab = 'advanced'">
+          <span class="tab-icon">🎛️</span>
+          Advanced
+        </button>
+        <button
+          class="tab-button"
+          [class.active]="activeTab === 'ai'"
+          (click)="activeTab = 'ai'">
+          <span class="tab-icon">🤖</span>
+          AI Settings
+        </button>
+      </div>
+
+      <!-- Tab Content -->
+      <div class="tab-content">
+        <!-- Basic Settings Tab -->
+        <div class="tab-panel" *ngIf="activeTab === 'basic'">
+          <!-- Aspect Ratio -->
+          <div class="setting-group">
+            <div class="setting-header">
+              <label class="toggle-label">
+                <input
+                  type="checkbox"
+                  class="toggle-input"
+                  [(ngModel)]="settings.fixAspectRatio">
+                <span class="toggle-switch"></span>
+                <div class="toggle-content">
+                  <span class="setting-title">Fix Aspect Ratio</span>
+                  <span class="setting-description">Adjust video dimensions to standard aspect ratio</span>
+                </div>
+              </label>
+            </div>
+            <div class="setting-options" *ngIf="settings.fixAspectRatio">
+              <div class="aspect-ratio-grid">
+                <label
+                  *ngFor="let ratio of aspectRatios"
+                  class="radio-card">
+                  <input
+                    type="radio"
+                    name="aspectRatio"
+                    [value]="ratio"
+                    [(ngModel)]="settings.aspectRatio">
+                  <span class="radio-card-content">
+                    <span class="ratio-visual" [attr.data-ratio]="ratio">
+                      <span class="ratio-box"></span>
+                    </span>
+                    <span class="ratio-label">{{ ratio }}</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Audio Normalization -->
+          <div class="setting-group">
+            <div class="setting-header">
+              <label class="toggle-label">
+                <input
+                  type="checkbox"
+                  class="toggle-input"
+                  [(ngModel)]="settings.normalizeAudio">
+                <span class="toggle-switch"></span>
+                <div class="toggle-content">
+                  <span class="setting-title">Normalize Audio</span>
+                  <span class="setting-description">Adjust audio levels for consistent volume</span>
+                </div>
+              </label>
+            </div>
+            <div class="setting-options" *ngIf="settings.normalizeAudio">
+              <div class="slider-group">
+                <label class="slider-label">Target Level: {{ settings.audioLevel }} dB</label>
+                <input
+                  type="range"
+                  class="slider-input"
+                  min="-60"
+                  max="0"
+                  [(ngModel)]="settings.audioLevel">
+                <div class="slider-marks">
+                  <span>-60 dB</span>
+                  <span>-30 dB</span>
+                  <span>0 dB</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transcription -->
+          <div class="setting-group">
+            <div class="setting-header">
+              <label class="toggle-label">
+                <input
+                  type="checkbox"
+                  class="toggle-input"
+                  [(ngModel)]="settings.transcribe">
+                <span class="toggle-switch"></span>
+                <div class="toggle-content">
+                  <span class="setting-title">Transcribe Audio</span>
+                  <span class="setting-description">Generate text transcript using Whisper AI</span>
+                </div>
+              </label>
+            </div>
+            <div class="setting-options" *ngIf="settings.transcribe">
+              <div class="select-group">
+                <label class="select-label">Whisper Model</label>
+                <select class="select-input" [(ngModel)]="settings.whisperModel">
+                  <option *ngFor="let model of whisperModels" [value]="model.value">
+                    {{ model.label }}
+                  </option>
+                </select>
+              </div>
+              <div class="input-group-inline">
+                <label class="input-label-inline">Language</label>
+                <input
+                  type="text"
+                  class="input-field-inline"
+                  [(ngModel)]="settings.whisperLanguage"
+                  placeholder="auto">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced Settings Tab -->
+        <div class="tab-panel" *ngIf="activeTab === 'advanced'">
+          <div class="setting-group">
+            <h4 class="group-title">Output Settings</h4>
+
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label">Output Format</label>
+                <select class="select-input" [(ngModel)]="settings.outputFormat">
+                  <option *ngFor="let format of outputFormats" [value]="format">
+                    {{ format | uppercase }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Output Quality</label>
+                <select class="select-input" [(ngModel)]="settings.outputQuality">
+                  <option *ngFor="let quality of outputQualities" [value]="quality">
+                    {{ quality | titlecase }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div class="quality-info">
+              <div class="info-card" [ngSwitch]="settings.outputQuality">
+                <div *ngSwitchCase="'low'" class="info-content">
+                  <span class="info-icon">📉</span>
+                  <span class="info-text">Low: 480p, reduced bitrate, smaller file size</span>
+                </div>
+                <div *ngSwitchCase="'medium'" class="info-content">
+                  <span class="info-icon">📊</span>
+                  <span class="info-text">Medium: 720p, balanced quality and size</span>
+                </div>
+                <div *ngSwitchCase="'high'" class="info-content">
+                  <span class="info-icon">📈</span>
+                  <span class="info-text">High: 1080p, high bitrate, excellent quality</span>
+                </div>
+                <div *ngSwitchCase="'ultra'" class="info-content">
+                  <span class="info-icon">🚀</span>
+                  <span class="info-text">Ultra: 4K, maximum bitrate, best quality</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Settings Tab -->
+        <div class="tab-panel" *ngIf="activeTab === 'ai'">
+          <div class="setting-group">
+            <div class="setting-header">
+              <label class="toggle-label">
+                <input
+                  type="checkbox"
+                  class="toggle-input"
+                  [(ngModel)]="settings.aiAnalysis">
+                <span class="toggle-switch"></span>
+                <div class="toggle-content">
+                  <span class="setting-title">AI Content Analysis</span>
+                  <span class="setting-description">Analyze video content for interesting clips</span>
+                </div>
+              </label>
+            </div>
+
+            <div class="setting-options" *ngIf="settings.aiAnalysis">
+              <div class="form-group">
+                <label class="form-label">AI Model</label>
+                <div class="model-grid">
+                  <label
+                    *ngFor="let model of aiModels"
+                    class="model-card">
+                    <input
+                      type="radio"
+                      name="aiModel"
+                      [value]="model.value"
+                      [(ngModel)]="settings.aiModel">
+                    <span class="model-card-content">
+                      <span class="model-name">{{ model.label }}</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Custom Instructions</label>
+                <textarea
+                  class="textarea-input"
+                  [(ngModel)]="settings.customInstructions"
+                  rows="4"
+                  placeholder="Enter specific instructions for the AI analysis...
+Example: Look for emotional moments, key talking points, or funny segments">
+                </textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary Section -->
+      <div class="summary-section">
+        <div class="summary-header">
+          <h4 class="summary-title">Processing Summary</h4>
+          <div class="summary-stats">
+            <span class="stat-item">
+              <span class="stat-icon">📋</span>
+              <span class="stat-value">{{ getActiveTaskCount() }}</span>
+              <span class="stat-label">Tasks</span>
+            </span>
+            <span class="stat-item">
+              <span class="stat-icon">⏱️</span>
+              <span class="stat-value">~{{ calculateEstimatedTime() }}s</span>
+              <span class="stat-label">Est. Time</span>
+            </span>
+          </div>
+        </div>
+        <div class="task-preview">
+          <div class="task-item" *ngIf="videoUrl">
+            <span class="task-icon">⬇️</span>
+            Download Video
+          </div>
+          <div class="task-item">
+            <span class="task-icon">💾</span>
+            Import to Database
+          </div>
+          <div class="task-item" *ngIf="settings.fixAspectRatio">
+            <span class="task-icon">📐</span>
+            Fix Aspect Ratio ({{ settings.aspectRatio }})
+          </div>
+          <div class="task-item" *ngIf="settings.normalizeAudio">
+            <span class="task-icon">🔊</span>
+            Normalize Audio
+          </div>
+          <div class="task-item" *ngIf="settings.transcribe">
+            <span class="task-icon">💬</span>
+            Transcribe ({{ settings.whisperModel }})
+          </div>
+          <div class="task-item" *ngIf="settings.aiAnalysis">
+            <span class="task-icon">🤖</span>
+            AI Analysis ({{ settings.aiModel }})
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dialog Footer -->
+    <div class="dialog-footer">
+      <button class="button button-secondary" (click)="close()">
+        Cancel
+      </button>
+      <button
+        class="button button-primary"
+        (click)="onSubmit()"
+        [disabled]="!videoUrl && !videoName">
+        <span class="button-icon">➕</span>
+        Add to Queue
+      </button>
+    </div>
+  </div>
+</div>

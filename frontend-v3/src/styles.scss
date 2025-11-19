@@ -13,8 +13,21 @@
 @import '../projects/ngx-video-timeline-editor/src/lib/styles/timeline-theme';
 
 // Additional global styles
+html, body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 body {
-  overflow-x: hidden;
+  overflow: hidden; // Prevent any scrolling on body
+}
+
+app-root {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 // Router animations

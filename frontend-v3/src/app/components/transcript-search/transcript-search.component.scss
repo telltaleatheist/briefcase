@@ -186,23 +186,7 @@
     padding: 8px;
     max-height: 200px;
     overflow-y: auto;
-
-    &::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    &::-webkit-scrollbar-track {
-      background: var(--bg-secondary);
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: #dee2e6;
-      border-radius: 3px;
-
-      &:hover {
-        background: #adb5bd;
-      }
-    }
+    // Uses global orange scrollbar styles from _reset.scss
   }
 
   .saved-search-item {
@@ -426,23 +410,7 @@
   padding: 12px;
   width: 100%;
   box-sizing: border-box;
-
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: var(--bg-secondary); // Light theme default
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: #dee2e6; // Light theme default
-    border-radius: 4px;
-
-    &:hover {
-      background: #adb5bd; // Light theme default
-    }
-  }
+  // Uses global orange scrollbar styles from _reset.scss
 }
 
 // ========================================
@@ -624,20 +592,7 @@
     background-color: #0a0a0a;
   }
 
-  // Scrollbar - Dark Mode
-  .search-results-list {
-    &::-webkit-scrollbar-track {
-      background: #0a0a0a;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: #333;
-
-      &:hover {
-        background: #555;
-      }
-    }
-  }
+  // Uses global orange scrollbar styles from _reset.scss
 
   // Search Result Items - Dark Mode
   .search-result-item {

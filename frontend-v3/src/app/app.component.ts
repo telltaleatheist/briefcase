@@ -2,6 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { NavigationComponent } from './core/navigation/navigation.component';
 import { ThemeService } from './services/theme.service';
+import { NavigationService } from './services/navigation.service';
 
 @Component({
   selector: 'app-root',
@@ -9,8 +10,10 @@ import { ThemeService } from './services/theme.service';
   imports: [RouterOutlet, NavigationComponent],
   template: `
     <div class="app-container" [attr.data-theme]="themeService.currentTheme()">
-      <app-navigation />
-      <main class="main-content">
+      @if (navService.navVisible()) {
+        <app-navigation />
+      }
+      <main class="main-content" [class.nav-hidden]="!navService.navVisible()">
         <router-outlet />
       </main>
     </div>
@@ -30,6 +33,10 @@ import { ThemeService } from './services/theme.service';
       transition: margin-left 0.3s ease;
     }
 
+    .main-content.nav-hidden {
+      margin-left: 0;
+    }
+
     @media (max-width: 768px) {
       .main-content {
         margin-left: 0;
@@ -39,6 +46,7 @@ import { ThemeService } from './services/theme.service';
 })
 export class AppComponent implements OnInit {
   themeService = inject(ThemeService);
+  navService = inject(NavigationService);
 
   ngOnInit() {
     this.themeService.initializeTheme();

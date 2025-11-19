@@ -1,0 +1,73 @@
+// Video Processing Models
+
+export interface VideoJob {
+  id: string;
+  videoUrl?: string;
+  videoName: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'paused';
+  addedAt: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+  settings: VideoJobSettings;
+  tasks: VideoTask[];
+  progress: number; // Overall progress 0-100
+  thumbnail?: string;
+  duration?: number; // in seconds
+  fileSize?: number; // in bytes
+}
+
+export interface VideoJobSettings {
+  fixAspectRatio: boolean;
+  aspectRatio?: '16:9' | '4:3' | '1:1' | '9:16';
+  normalizeAudio: boolean;
+  audioLevel?: number; // -60 to 0 dB
+  transcribe: boolean;
+  whisperModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large' | 'large-v2' | 'large-v3';
+  whisperLanguage?: string;
+  aiAnalysis: boolean;
+  aiModel?: 'gpt-3.5-turbo' | 'gpt-4' | 'claude-2' | 'claude-3' | 'llama-2';
+  customInstructions?: string;
+  outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
+  outputQuality?: 'low' | 'medium' | 'high' | 'ultra';
+}
+
+export interface VideoTask {
+  id: string;
+  type: 'download' | 'import' | 'aspect-ratio' | 'normalize-audio' | 'transcribe' | 'ai-analysis';
+  name: string;
+  status: 'pending' | 'in-progress' | 'completed' | 'failed' | 'skipped';
+  progress: number; // 0-100
+  startedAt?: Date;
+  completedAt?: Date;
+  error?: string;
+  result?: any;
+  estimatedTime?: number; // in seconds
+}
+
+export interface BatchSettings {
+  applyToAll: boolean;
+  selectedJobs: string[];
+  settings: Partial<VideoJobSettings>;
+}
+
+export interface QueueStats {
+  totalJobs: number;
+  completedJobs: number;
+  failedJobs: number;
+  processingJobs: number;
+  queuedJobs: number;
+  averageProcessingTime: number;
+  estimatedTimeRemaining: number;
+}
+
+export interface ProcessingWebSocketMessage {
+  jobId: string;
+  taskId?: string;
+  type: 'progress' | 'status' | 'error' | 'complete';
+  data: {
+    progress?: number;
+    status?: string;
+    error?: string;
+    result?: any;
+  };
+}

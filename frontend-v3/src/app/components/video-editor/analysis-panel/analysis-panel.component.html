@@ -1,0 +1,110 @@
+<div class="analysis-panel">
+  <div class="panel-header">
+    <h3 class="panel-title">Analysis</h3>
+    @if (hasAnalysis && sections.length > 0) {
+      <span class="section-count">{{ sections.length }} sections</span>
+    }
+  </div>
+
+  @if (!hasAnalysis) {
+    <!-- No Analysis State -->
+    <div class="no-analysis-state">
+      <div class="no-analysis-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+        </svg>
+      </div>
+      <h4 class="no-analysis-title">No Analysis Yet</h4>
+      <p class="no-analysis-description">
+        Generate an AI analysis to identify content sections, categories, and notable quotes.
+      </p>
+      <button class="generate-analysis-btn" (click)="onGenerateAnalysis()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+        Generate Analysis
+      </button>
+    </div>
+  } @else {
+    <!-- Summary -->
+    @if (analysisData?.summary) {
+      <div class="summary-section">
+        <h4 class="section-title">Summary</h4>
+        <p class="summary-text">{{ analysisData?.summary }}</p>
+      </div>
+    }
+
+    <!-- Category Filters -->
+    @if (categoryFilters.length > 0) {
+      <div class="filters-section">
+        <h4 class="section-title">Categories</h4>
+        <div class="filter-chips">
+          @for (filter of categoryFilters; track filter.category) {
+            <button
+              class="filter-chip"
+              [class.active]="filter.enabled"
+              [style.--chip-color]="filter.color"
+              (click)="onFilterToggle(filter.category)">
+              <span class="chip-dot" [style.backgroundColor]="filter.color"></span>
+              {{ filter.label }}
+              <span class="chip-count">{{ getSectionsForCategory(filter.category).length }}</span>
+            </button>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Sections List -->
+    <div class="sections-list">
+      @for (category of categories; track category) {
+        @if (isCategoryEnabled(category)) {
+          <div class="category-group">
+            <div class="category-header" [style.--category-color]="getCategoryColor(category)">
+              <span class="category-dot"></span>
+              <span class="category-name">{{ category }}</span>
+            </div>
+
+            <div class="category-sections">
+              @for (section of getSectionsForCategory(category); track section.id) {
+                <button
+                  class="section-item"
+                  [class.selected]="selectedSection?.id === section.id"
+                  [style.--section-color]="section.color"
+                  (click)="onSectionClick(section)">
+                  <div class="section-time">
+                    {{ formatTimeRange(section.startTime, section.endTime) }}
+                  </div>
+                  <div class="section-description">
+                    {{ section.description }}
+                  </div>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      }
+
+      @if (sections.length === 0) {
+        <div class="empty-state">
+          <p>No sections found in analysis</p>
+        </div>
+      }
+    </div>
+  }
+
+  <!-- Quotes -->
+  @if (analysisData?.quotes?.length) {
+    <div class="quotes-section">
+      <h4 class="section-title">Notable Quotes</h4>
+      <div class="quotes-list">
+        @for (quote of analysisData!.quotes!; track quote.timestamp) {
+          <div class="quote-item">
+            <div class="quote-timestamp">{{ quote.timestamp }}</div>
+            <blockquote class="quote-text">"{{ quote.text }}"</blockquote>
+            <div class="quote-significance">{{ quote.significance }}</div>
+          </div>
+        }
+      </div>
+    </div>
+  }
+</div>

@@ -919,4 +919,95 @@ export class FfmpegService {
       return [];
     }
   }
+
+  /**
+   * Generate waveform data from a video/audio file
+   * Uses FFmpeg to extract raw PCM audio and calculate RMS values
+   * @param filePath - Path to the media file
+   * @param samplesCount - Number of samples to generate (default: 500)
+   * @returns Array of amplitude values (0-1) and duration
+   */
+  async generateWaveform(filePath: string, samplesCount: number = 500): Promise<{ samples: number[], duration: number }> {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    this.logger.log(`Generating waveform for: ${filePath} (${samplesCount} samples)`);
+
+    // Get duration first
+    const metadata = await this.getVideoMetadata(filePath);
+    const duration = metadata.duration || 0;
+
+    if (duration <= 0) {
+      return { samples: [], duration: 0 };
+    }
+
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+
+      // Extract raw PCM audio data using FFmpeg
+      ffmpeg(filePath)
+        .audioChannels(1) // Convert to mono
+        .audioFrequency(8000) // Downsample for faster processing
+        .format('s16le') // 16-bit signed little-endian PCM
+        .on('error', (error) => {
+          this.logger.error(`Waveform extraction error: ${error.message}`);
+          // Return flat waveform on error
+          resolve({
+            samples: new Array(samplesCount).fill(0.3),
+            duration
+          });
+        })
+        .on('end', () => {
+          try {
+            const audioBuffer = Buffer.concat(chunks);
+
+            // Convert buffer to Int16 array
+            const int16Array = new Int16Array(
+              audioBuffer.buffer,
+              audioBuffer.byteOffset,
+              Math.floor(audioBuffer.length / 2)
+            );
+
+            const samples: number[] = [];
+            const samplesPerChunk = Math.max(1, Math.floor(int16Array.length / samplesCount));
+
+            for (let i = 0; i < samplesCount; i++) {
+              const start = i * samplesPerChunk;
+              const end = Math.min(start + samplesPerChunk, int16Array.length);
+
+              if (start >= int16Array.length) {
+                samples.push(0);
+                continue;
+              }
+
+              // Calculate RMS (Root Mean Square) for this chunk
+              let sumSquares = 0;
+              for (let j = start; j < end; j++) {
+                sumSquares += int16Array[j] * int16Array[j];
+              }
+              const rms = Math.sqrt(sumSquares / (end - start));
+
+              // Normalize to 0-1 range and scale for visibility
+              // Max int16 value is 32767
+              const normalized = Math.min(1, (rms / 32767) * 4);
+              samples.push(normalized);
+            }
+
+            this.logger.log(`Generated ${samples.length} waveform samples for ${duration}s video`);
+            resolve({ samples, duration });
+          } catch (error) {
+            this.logger.error(`Waveform processing error: ${error}`);
+            resolve({
+              samples: new Array(samplesCount).fill(0.3),
+              duration
+            });
+          }
+        })
+        .pipe()
+        .on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+    });
+  }
 }

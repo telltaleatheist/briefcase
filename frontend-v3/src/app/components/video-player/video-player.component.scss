@@ -826,23 +826,7 @@
   width: 100%;
   box-sizing: border-box;
   min-height: 0; // Critical for flex scrolling
-
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: #0a0a0a;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: #333;
-    border-radius: 4px;
-
-    &:hover {
-      background: #555;
-    }
-  }
+  // Uses global orange scrollbar styles from _reset.scss
 }
 
 .section-item {
@@ -1196,19 +1180,7 @@ app-video-timeline {
     }
   }
 
-  .sections-list {
-    &::-webkit-scrollbar-track {
-      background: var(--bg-secondary);
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: var(--border-color);
-
-      &:hover {
-        background: var(--text-muted);
-      }
-    }
-  }
+  // Uses global orange scrollbar styles from _reset.scss
 
   .category-filters-accordion {
     .category-filters-panel {
@@ -1386,19 +1358,7 @@ app-video-timeline {
     }
   }
 
-  .sections-list {
-    &::-webkit-scrollbar-track {
-      background: #0a0a0a;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: #333;
-
-      &:hover {
-        background: #555;
-      }
-    }
-  }
+  // Uses global orange scrollbar styles from _reset.scss
 
   .section-item {
     background-color: #1a1a1a;

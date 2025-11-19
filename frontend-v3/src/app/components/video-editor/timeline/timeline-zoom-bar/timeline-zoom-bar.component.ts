@@ -1,0 +1,183 @@
+import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ZoomState } from '../../../../models/video-editor.model';
+
+@Component({
+  selector: 'app-timeline-zoom-bar',
+  standalone: true,
+  imports: [CommonModule],
+  templateUrl: './timeline-zoom-bar.component.html',
+  styleUrls: ['./timeline-zoom-bar.component.scss']
+})
+export class TimelineZoomBarComponent {
+  @Input() duration: number = 0;
+  @Input() zoomState: ZoomState = { level: 1, offset: 0 };
+  @Output() zoomChange = new EventEmitter<ZoomState>();
+
+  get thumbWidth(): number {
+    return Math.min(100, 100 / this.zoomState.level);
+  }
+
+  get thumbLeft(): number {
+    if (this.duration <= 0) return 0;
+    const maxOffset = this.duration - (this.duration / this.zoomState.level);
+    return (this.zoomState.offset / maxOffset) * (100 - this.thumbWidth);
+  }
+
+  onTrackClick(event: MouseEvent): void {
+    const track = event.currentTarget as HTMLElement;
+    const rect = track.getBoundingClientRect();
+    const percentage = (event.clientX - rect.left) / rect.width;
+
+    const visibleDuration = this.duration / this.zoomState.level;
+    const maxOffset = this.duration - visibleDuration;
+    const newOffset = Math.max(0, Math.min(maxOffset, percentage * this.duration - visibleDuration / 2));
+
+    this.zoomChange.emit({
+      ...this.zoomState,
+      offset: newOffset
+    });
+  }
+
+  onThumbDragStart(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const track = (event.target as HTMLElement).closest('.zoom-track') as HTMLElement;
+    if (!track) return;
+
+    const startX = event.clientX;
+    const startOffset = this.zoomState.offset;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = track.getBoundingClientRect();
+      const deltaX = e.clientX - startX;
+      const deltaPercentage = deltaX / rect.width;
+
+      const visibleDuration = this.duration / this.zoomState.level;
+      const maxOffset = this.duration - visibleDuration;
+      const newOffset = Math.max(0, Math.min(maxOffset, startOffset + deltaPercentage * this.duration));
+
+      this.zoomChange.emit({
+        ...this.zoomState,
+        offset: newOffset
+      });
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  onLeftHandleDrag(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const track = (event.target as HTMLElement).closest('.zoom-track') as HTMLElement;
+    if (!track) return;
+
+    const startX = event.clientX;
+    const startOffset = this.zoomState.offset;
+    const startVisibleDuration = this.duration / this.zoomState.level;
+    // Right edge stays fixed
+    const rightEdge = startOffset + startVisibleDuration;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = track.getBoundingClientRect();
+      const deltaX = e.clientX - startX;
+      const deltaTime = (deltaX / rect.width) * this.duration;
+
+      // New left edge (offset) moves with drag
+      const newOffset = Math.max(0, Math.min(rightEdge - 0.1, startOffset + deltaTime));
+      // New visible duration is from new offset to fixed right edge
+      const newVisibleDuration = rightEdge - newOffset;
+      // Calculate new zoom level
+      const newLevel = Math.max(1, Math.min(10, this.duration / newVisibleDuration));
+
+      this.zoomChange.emit({
+        level: newLevel,
+        offset: newOffset
+      });
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  onRightHandleDrag(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const track = (event.target as HTMLElement).closest('.zoom-track') as HTMLElement;
+    if (!track) return;
+
+    const startX = event.clientX;
+    const startOffset = this.zoomState.offset;
+    const startVisibleDuration = this.duration / this.zoomState.level;
+    const startRightEdge = startOffset + startVisibleDuration;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = track.getBoundingClientRect();
+      const deltaX = e.clientX - startX;
+      const deltaTime = (deltaX / rect.width) * this.duration;
+
+      // Right edge moves with drag, left edge (offset) stays fixed
+      const newRightEdge = Math.max(startOffset + 0.1, Math.min(this.duration, startRightEdge + deltaTime));
+      // New visible duration
+      const newVisibleDuration = newRightEdge - startOffset;
+      // Calculate new zoom level
+      const newLevel = Math.max(1, Math.min(10, this.duration / newVisibleDuration));
+
+      this.zoomChange.emit({
+        level: newLevel,
+        offset: startOffset
+      });
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  zoomIn(): void {
+    const newLevel = Math.min(10, this.zoomState.level * 1.2);
+    const visibleDuration = this.duration / newLevel;
+    const maxOffset = this.duration - visibleDuration;
+
+    this.zoomChange.emit({
+      level: newLevel,
+      offset: Math.min(this.zoomState.offset, maxOffset)
+    });
+  }
+
+  zoomOut(): void {
+    const newLevel = Math.max(1, this.zoomState.level / 1.2);
+    const visibleDuration = this.duration / newLevel;
+    const maxOffset = this.duration - visibleDuration;
+
+    this.zoomChange.emit({
+      level: newLevel,
+      offset: Math.min(this.zoomState.offset, Math.max(0, maxOffset))
+    });
+  }
+
+  resetZoom(): void {
+    this.zoomChange.emit({
+      level: 1,
+      offset: 0
+    });
+  }
+}

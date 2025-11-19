@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { VideoLibraryComponent } from '../../components/video-library/video-library.component';
+import { CascadeComponent } from '../../components/cascade/cascade.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { VideoWeek } from '../../models/video.model';
 import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
@@ -9,7 +9,7 @@ import { CardComponent } from '../../components/card/card.component';
 @Component({
   selector: 'app-files',
   standalone: true,
-  imports: [CommonModule, VideoLibraryComponent, LibraryManagerModalComponent, CardComponent],
+  imports: [CommonModule, CascadeComponent, LibraryManagerModalComponent, CardComponent],
   templateUrl: './files.component.html',
   styleUrls: ['./files.component.scss']
 })

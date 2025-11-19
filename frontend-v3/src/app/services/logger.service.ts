@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { ElectronService } from './electron.service';
 
 interface LogEntry {
@@ -12,7 +13,9 @@ interface LogEntry {
   providedIn: 'root'
 })
 export class LoggerService {
+  private http = inject(HttpClient);
   private electronService = inject(ElectronService);
+  private readonly API_BASE = 'http://localhost:3000/api';
   private logs: LogEntry[] = [];
   private maxLogs = 1000;
   private autoSaveInterval: any;
@@ -123,14 +126,19 @@ export class LoggerService {
 
   downloadLogs() {
     const content = this.exportLogs();
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `clipchimp-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+
+    // Save to backend (which saves to ~/Library/Logs/clippy/)
+    this.http.post<any>(`${this.API_BASE}/config/save-logs`, { content }).subscribe({
+      next: (response) => {
+        if (response.success) {
+          console.log('Logs saved to:', response.path);
+        } else {
+          console.error('Failed to save logs:', response.message);
+        }
+      },
+      error: (error) => {
+        console.error('Failed to save logs:', error);
+      }
+    });
   }
 }

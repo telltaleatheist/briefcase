@@ -1,0 +1,588 @@
+<!-- Video Processing Queue Component -->
+<div class="queue-container">
+  <!-- Header Section -->
+  <div class="queue-header">
+    <div class="header-content">
+      <h1 class="queue-title">
+        <span class="title-icon">🎬</span>
+        Video Processing Queue
+      </h1>
+      <div class="queue-stats" *ngIf="queueStats">
+        <div class="stat-badge">
+          <span class="stat-value">{{ queueStats.totalJobs }}</span>
+          <span class="stat-label">Total</span>
+        </div>
+        <div class="stat-badge processing">
+          <span class="stat-value">{{ queueStats.processingJobs }}</span>
+          <span class="stat-label">Processing</span>
+        </div>
+        <div class="stat-badge queued">
+          <span class="stat-value">{{ queueStats.queuedJobs }}</span>
+          <span class="stat-label">Queued</span>
+        </div>
+        <div class="stat-badge completed">
+          <span class="stat-value">{{ queueStats.completedJobs }}</span>
+          <span class="stat-label">Completed</span>
+        </div>
+        <div class="stat-badge failed" *ngIf="queueStats.failedJobs > 0">
+          <span class="stat-value">{{ queueStats.failedJobs }}</span>
+          <span class="stat-label">Failed</span>
+        </div>
+      </div>
+    </div>
+    <button class="add-job-button" (click)="openConfigDialog()">
+      <span class="button-icon">➕</span>
+      Add Video
+    </button>
+  </div>
+
+  <!-- Toolbar Section -->
+  <div class="queue-toolbar">
+    <div class="toolbar-left">
+      <!-- Layout Selector -->
+      <div class="layout-selector">
+        <button
+          class="layout-button"
+          [class.active]="layoutMode === 'compact'"
+          (click)="layoutMode = 'compact'"
+          title="Compact View">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="3" y="4" width="18" height="2" rx="1"/>
+            <rect x="3" y="9" width="18" height="2" rx="1"/>
+            <rect x="3" y="14" width="18" height="2" rx="1"/>
+            <rect x="3" y="19" width="18" height="2" rx="1"/>
+          </svg>
+        </button>
+        <button
+          class="layout-button"
+          [class.active]="layoutMode === 'detailed'"
+          (click)="layoutMode = 'detailed'"
+          title="Detailed View">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="3" y="3" width="18" height="4" rx="1"/>
+            <rect x="3" y="10" width="18" height="4" rx="1"/>
+            <rect x="3" y="17" width="18" height="4" rx="1"/>
+          </svg>
+        </button>
+        <button
+          class="layout-button"
+          [class.active]="layoutMode === 'cards'"
+          (click)="layoutMode = 'cards'"
+          title="Card View">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+        </button>
+        <button
+          class="layout-button"
+          [class.active]="layoutMode === 'timeline'"
+          (click)="layoutMode = 'timeline'"
+          title="Timeline View">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="6" cy="6" r="2"/>
+            <circle cx="6" cy="18" r="2"/>
+            <rect x="10" y="4" width="11" height="4" rx="1"/>
+            <rect x="10" y="16" width="11" height="4" rx="1"/>
+            <rect x="5" y="8" width="2" height="8"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Filter Controls -->
+      <div class="filter-controls">
+        <select class="filter-select" [(ngModel)]="filterStatus">
+          <option value="all">All Status</option>
+          <option value="queued">Queued</option>
+          <option value="processing">Processing</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+        </select>
+
+        <select class="filter-select" [(ngModel)]="sortBy">
+          <option value="date">Sort by Date</option>
+          <option value="name">Sort by Name</option>
+          <option value="progress">Sort by Progress</option>
+          <option value="status">Sort by Status</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="toolbar-right">
+      <!-- Batch Actions -->
+      <div class="batch-actions" *ngIf="selectedJobs.size > 0">
+        <span class="selected-count">{{ selectedJobs.size }} selected</span>
+        <button class="batch-button" (click)="isBatchEditMode = !isBatchEditMode">
+          <span class="button-icon">✏️</span>
+          Batch Edit
+        </button>
+        <button class="batch-button danger" (click)="removeSelectedJobs()">
+          <span class="button-icon">🗑️</span>
+          Remove
+        </button>
+      </div>
+
+      <!-- Queue Actions -->
+      <div class="queue-actions">
+        <button class="action-button" (click)="clearCompleted()" [disabled]="!queueStats || queueStats.completedJobs === 0">
+          Clear Completed
+        </button>
+        <button class="action-button danger" (click)="clearAll()" [disabled]="!queueStats || queueStats.totalJobs === 0">
+          Clear All
+        </button>
+        <button class="action-button primary" (click)="processQueue()" [disabled]="!queueStats || queueStats.queuedJobs === 0">
+          <span class="button-icon">▶️</span>
+          Process Queue
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch Edit Panel -->
+  <div class="batch-edit-panel" *ngIf="isBatchEditMode && selectedJobs.size > 0">
+    <h3 class="panel-title">
+      Batch Settings
+      <span class="selected-info">({{ selectedJobs.size }} items selected)</span>
+    </h3>
+    <div class="batch-settings">
+      <!-- Task Toggles -->
+      <div class="setting-group">
+        <h4 class="group-title">Tasks to Perform</h4>
+        <div class="task-toggles">
+          <label class="toggle-item">
+            <input type="checkbox" [(ngModel)]="batchSettings.transcribe">
+            <span class="toggle-icon">💬</span>
+            <span class="toggle-label">Transcribe</span>
+          </label>
+          <label class="toggle-item">
+            <input type="checkbox" [(ngModel)]="batchSettings.aiAnalysis">
+            <span class="toggle-icon">🤖</span>
+            <span class="toggle-label">AI Analysis</span>
+          </label>
+          <label class="toggle-item">
+            <input type="checkbox" [(ngModel)]="batchSettings.normalizeAudio">
+            <span class="toggle-icon">🔊</span>
+            <span class="toggle-label">Normalize Audio</span>
+          </label>
+          <label class="toggle-item">
+            <input type="checkbox" [(ngModel)]="batchSettings.fixAspectRatio">
+            <span class="toggle-icon">📐</span>
+            <span class="toggle-label">Fix Aspect Ratio</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Model Settings -->
+      <div class="setting-group">
+        <h4 class="group-title">Model Settings</h4>
+        <div class="model-settings">
+          <div class="setting-item">
+            <label>Whisper Model</label>
+            <select [(ngModel)]="batchSettings.whisperModel">
+              <option value="tiny">Tiny (fastest)</option>
+              <option value="base">Base</option>
+              <option value="small">Small</option>
+              <option value="medium">Medium</option>
+              <option value="large">Large</option>
+              <option value="large-v3">Large V3 (best)</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>AI Model</label>
+            <select [(ngModel)]="batchSettings.aiModel">
+              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+              <option value="gpt-4">GPT-4</option>
+              <option value="claude-3">Claude 3</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>Output Quality</label>
+            <select [(ngModel)]="batchSettings.outputQuality">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="ultra">Ultra</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="batch-actions-row">
+        <button class="apply-button" (click)="applyBatchSettings()">
+          Apply to Selected ({{ selectedJobs.size }})
+        </button>
+        <button class="apply-all-button" (click)="applyToAll()">
+          Apply to All Jobs
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Queue Content -->
+  <div class="queue-content" [class]="'layout-' + layoutMode">
+    <!-- Empty State -->
+    <div class="empty-state" *ngIf="jobs.length === 0">
+      <div class="empty-icon">📹</div>
+      <h3 class="empty-title">No videos in queue</h3>
+      <p class="empty-description">Add a video to start processing</p>
+      <button class="empty-action" (click)="openConfigDialog()">
+        <span class="button-icon">➕</span>
+        Add Your First Video
+      </button>
+    </div>
+
+    <!-- Compact Layout -->
+    <div class="compact-list" *ngIf="layoutMode === 'compact' && jobs.length > 0">
+      <div class="compact-item" *ngFor="let job of jobs"
+           [class.active]="job.id === activeJobId"
+           [class.selected]="selectedJobs.has(job.id)">
+        <input type="checkbox"
+               class="job-checkbox"
+               [checked]="selectedJobs.has(job.id)"
+               (change)="toggleJobSelection(job.id)">
+
+        <span class="job-status-icon" [class]="getStatusColor(job.status)">
+          {{ getStatusIcon(job.status) }}
+        </span>
+
+        <div class="job-info">
+          <span class="job-name">{{ job.videoName }}</span>
+          <span class="job-meta">{{ formatFileSize(job.fileSize) }} • {{ formatDuration(job.duration) }}</span>
+        </div>
+
+        <div class="job-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" [style.width.%]="job.progress"></div>
+          </div>
+          <span class="progress-text">{{ job.progress | number:'1.0-0' }}%</span>
+        </div>
+
+        <div class="job-actions">
+          <button class="action-icon" *ngIf="job.status === 'processing'" (click)="pauseJob(job.id)">⏸️</button>
+          <button class="action-icon" *ngIf="job.status === 'paused'" (click)="resumeJob(job.id)">▶️</button>
+          <button class="action-icon" *ngIf="job.status === 'failed'" (click)="retryJob(job.id)">🔄</button>
+          <button class="action-icon danger" (click)="removeJob(job.id)">🗑️</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detailed Layout -->
+    <div class="detailed-list" *ngIf="layoutMode === 'detailed' && jobs.length > 0">
+      <div class="detailed-item" *ngFor="let job of jobs"
+           [class.active]="job.id === activeJobId"
+           [class.expanded]="job.status === 'processing'"
+           [class.selected]="selectedJobs.has(job.id)"
+           [class.editing]="editingJobId === job.id">
+
+        <!-- Job Header -->
+        <div class="job-header">
+          <input type="checkbox"
+                 class="job-checkbox"
+                 [checked]="selectedJobs.has(job.id)"
+                 (change)="toggleJobSelection(job.id)">
+
+          <div class="job-thumbnail" (click)="openJobEditor(job)" [class.clickable]="job.status === 'queued'">
+            <span class="thumbnail-icon">🎥</span>
+            <span class="status-badge" [class]="getStatusColor(job.status)">
+              {{ job.status }}
+            </span>
+            <span class="edit-hint" *ngIf="job.status === 'queued'">Click to edit</span>
+          </div>
+
+          <div class="job-details" (click)="openJobEditor(job)" [class.clickable]="job.status === 'queued'">
+            <h3 class="job-title">{{ job.videoName }}</h3>
+            <div class="job-metadata">
+              <span class="meta-item">
+                <span class="meta-icon">📁</span>
+                {{ formatFileSize(job.fileSize) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-icon">⏱️</span>
+                {{ formatDuration(job.duration) }}
+              </span>
+              <span class="meta-item">
+                <span class="meta-icon">📅</span>
+                {{ formatTime(job.addedAt) }}
+              </span>
+              <span class="meta-item" *ngIf="job.status === 'processing'">
+                <span class="meta-icon">⚡</span>
+                Processing: {{ getProcessingTime(job) }}
+              </span>
+            </div>
+
+            <!-- Overall Progress -->
+            <div class="overall-progress">
+              <div class="progress-header">
+                <span class="progress-label">Overall Progress</span>
+                <span class="progress-percentage">{{ job.progress | number:'1.0-0' }}%</span>
+              </div>
+              <div class="progress-bar large">
+                <div class="progress-fill" [style.width.%]="job.progress">
+                  <span class="progress-glow"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="job-controls">
+            <button class="control-button" *ngIf="job.status === 'processing'" (click)="pauseJob(job.id)">
+              <span class="button-icon">⏸️</span>
+              Pause
+            </button>
+            <button class="control-button" *ngIf="job.status === 'paused'" (click)="resumeJob(job.id)">
+              <span class="button-icon">▶️</span>
+              Resume
+            </button>
+            <button class="control-button" *ngIf="job.status === 'failed'" (click)="retryJob(job.id)">
+              <span class="button-icon">🔄</span>
+              Retry
+            </button>
+            <button class="control-button danger" (click)="removeJob(job.id)">
+              <span class="button-icon">🗑️</span>
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <!-- Individual Job Settings Editor -->
+        <div class="job-settings-editor" *ngIf="editingJobId === job.id && editingJobSettings">
+          <h4 class="editor-title">Configure Tasks for this Job</h4>
+
+          <div class="editor-content">
+            <!-- Task Toggles -->
+            <div class="editor-section">
+              <h5 class="section-title">Tasks to Perform</h5>
+              <div class="task-toggles">
+                <label class="toggle-item">
+                  <input type="checkbox" [(ngModel)]="editingJobSettings.transcribe">
+                  <span class="toggle-icon">💬</span>
+                  <span class="toggle-label">Transcribe</span>
+                </label>
+                <label class="toggle-item">
+                  <input type="checkbox" [(ngModel)]="editingJobSettings.aiAnalysis">
+                  <span class="toggle-icon">🤖</span>
+                  <span class="toggle-label">AI Analysis</span>
+                </label>
+                <label class="toggle-item">
+                  <input type="checkbox" [(ngModel)]="editingJobSettings.normalizeAudio">
+                  <span class="toggle-icon">🔊</span>
+                  <span class="toggle-label">Normalize Audio</span>
+                </label>
+                <label class="toggle-item">
+                  <input type="checkbox" [(ngModel)]="editingJobSettings.fixAspectRatio">
+                  <span class="toggle-icon">📐</span>
+                  <span class="toggle-label">Fix Aspect Ratio</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Model Settings -->
+            <div class="editor-section">
+              <h5 class="section-title">Model Settings</h5>
+              <div class="model-settings">
+                <div class="setting-item">
+                  <label>Whisper Model</label>
+                  <select [(ngModel)]="editingJobSettings.whisperModel">
+                    <option value="tiny">Tiny (fastest)</option>
+                    <option value="base">Base</option>
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                    <option value="large-v3">Large V3 (best)</option>
+                  </select>
+                </div>
+                <div class="setting-item">
+                  <label>AI Model</label>
+                  <select [(ngModel)]="editingJobSettings.aiModel">
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    <option value="gpt-4">GPT-4</option>
+                    <option value="claude-3">Claude 3</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="editor-actions">
+            <button class="cancel-button" (click)="closeJobEditor()">Cancel</button>
+            <button class="save-button" (click)="saveJobSettings()">Save Settings</button>
+          </div>
+        </div>
+
+        <!-- Task Details (shown for active/processing jobs) -->
+        <div class="task-details" *ngIf="job.status === 'processing' || job.id === activeJobId">
+          <div class="task-list">
+            <div class="task-item" *ngFor="let task of job.tasks"
+                 [class.completed]="task.status === 'completed'"
+                 [class.active]="task.status === 'in-progress'"
+                 [class.pending]="task.status === 'pending'"
+                 [class.failed]="task.status === 'failed'">
+
+              <div class="task-icon">
+                {{ getTaskIcon(task.type) }}
+              </div>
+
+              <div class="task-content">
+                <div class="task-header">
+                  <span class="task-name">{{ task.name }}</span>
+                  <span class="task-status" [class]="'status-' + task.status">
+                    {{ task.status }}
+                  </span>
+                </div>
+
+                <div class="task-progress" *ngIf="task.status === 'in-progress'">
+                  <div class="progress-bar small">
+                    <div class="progress-fill animated" [style.width.%]="task.progress"></div>
+                  </div>
+                  <span class="task-percentage">{{ task.progress | number:'1.0-0' }}%</span>
+                </div>
+
+                <div class="task-error" *ngIf="task.error">
+                  <span class="error-icon">⚠️</span>
+                  {{ task.error }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cards Layout -->
+    <div class="cards-grid" *ngIf="layoutMode === 'cards' && jobs.length > 0">
+      <div class="job-card" *ngFor="let job of jobs"
+           [class.active]="job.id === activeJobId"
+           [class.selected]="selectedJobs.has(job.id)">
+
+        <div class="card-header">
+          <input type="checkbox"
+                 class="job-checkbox"
+                 [checked]="selectedJobs.has(job.id)"
+                 (change)="toggleJobSelection(job.id)">
+          <span class="status-indicator" [class]="getStatusColor(job.status)">
+            {{ getStatusIcon(job.status) }}
+          </span>
+        </div>
+
+        <div class="card-thumbnail">
+          <span class="thumbnail-icon">🎬</span>
+          <div class="circular-progress" [attr.data-progress]="job.progress">
+            <svg class="progress-ring" width="120" height="120">
+              <circle class="progress-ring-bg" cx="60" cy="60" r="54" />
+              <circle class="progress-ring-fill" cx="60" cy="60" r="54"
+                      [style.stroke-dashoffset]="339.292 * (1 - job.progress / 100)" />
+            </svg>
+            <div class="progress-text">{{ job.progress | number:'1.0-0' }}%</div>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <h4 class="card-title">{{ job.videoName }}</h4>
+          <div class="card-meta">
+            <span>{{ formatFileSize(job.fileSize) }}</span>
+            <span>•</span>
+            <span>{{ formatDuration(job.duration) }}</span>
+          </div>
+
+          <div class="card-tasks">
+            <div class="task-indicator" *ngFor="let task of job.tasks"
+                 [class]="'task-' + task.status"
+                 [title]="task.name">
+              {{ getTaskIcon(task.type) }}
+            </div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button class="card-action" *ngIf="job.status === 'processing'" (click)="pauseJob(job.id)">Pause</button>
+          <button class="card-action" *ngIf="job.status === 'paused'" (click)="resumeJob(job.id)">Resume</button>
+          <button class="card-action" *ngIf="job.status === 'failed'" (click)="retryJob(job.id)">Retry</button>
+          <button class="card-action danger" (click)="removeJob(job.id)">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline Layout -->
+    <div class="timeline-view" *ngIf="layoutMode === 'timeline' && jobs.length > 0">
+      <div class="timeline-line"></div>
+      <div class="timeline-item" *ngFor="let job of jobs; let i = index"
+           [class.active]="job.id === activeJobId"
+           [class.selected]="selectedJobs.has(job.id)"
+           [class.left]="i % 2 === 0"
+           [class.right]="i % 2 === 1">
+
+        <div class="timeline-marker">
+          <span class="marker-icon" [class]="getStatusColor(job.status)">
+            {{ getStatusIcon(job.status) }}
+          </span>
+        </div>
+
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <input type="checkbox"
+                   class="job-checkbox"
+                   [checked]="selectedJobs.has(job.id)"
+                   (change)="toggleJobSelection(job.id)">
+            <h4 class="timeline-title">{{ job.videoName }}</h4>
+            <span class="timeline-time">{{ formatTime(job.addedAt) }}</span>
+          </div>
+
+          <div class="timeline-body">
+            <div class="timeline-meta">
+              <span>{{ formatFileSize(job.fileSize) }}</span>
+              <span>•</span>
+              <span>{{ formatDuration(job.duration) }}</span>
+              <span>•</span>
+              <span>{{ job.tasks.length }} tasks</span>
+            </div>
+
+            <div class="timeline-progress">
+              <div class="progress-bar">
+                <div class="progress-fill" [style.width.%]="job.progress"></div>
+              </div>
+              <span class="progress-label">{{ job.progress | number:'1.0-0' }}%</span>
+            </div>
+
+            <div class="timeline-tasks">
+              <span class="task-badge" *ngFor="let task of job.tasks"
+                    [class]="'task-' + task.status"
+                    [title]="task.name">
+                {{ getTaskIcon(task.type) }}
+              </span>
+            </div>
+          </div>
+
+          <div class="timeline-actions">
+            <button class="timeline-action" *ngIf="job.status === 'processing'" (click)="pauseJob(job.id)">⏸️</button>
+            <button class="timeline-action" *ngIf="job.status === 'paused'" (click)="resumeJob(job.id)">▶️</button>
+            <button class="timeline-action" *ngIf="job.status === 'failed'" (click)="retryJob(job.id)">🔄</button>
+            <button class="timeline-action danger" (click)="removeJob(job.id)">🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estimated Time Footer -->
+  <div class="queue-footer" *ngIf="queueStats && queueStats.estimatedTimeRemaining > 0">
+    <div class="footer-content">
+      <span class="footer-icon">⏱️</span>
+      <span class="footer-text">
+        Estimated time remaining: <strong>{{ formatDuration(queueStats.estimatedTimeRemaining) }}</strong>
+      </span>
+      <div class="processing-indicator">
+        <span class="pulse"></span>
+        <span class="pulse-text">Processing...</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Video Configuration Dialog -->
+<app-video-config-dialog
+  [isOpen]="isConfigDialogOpen"
+  (closeDialog)="closeConfigDialog()"
+  (submitConfig)="onJobConfigSubmit($event)">
+</app-video-config-dialog>

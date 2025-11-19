@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, HostListener } from '@angular/core';
+import { Component, EventEmitter, Input, Output, HostListener, ViewChild, ElementRef, AfterViewChecked, OnChanges, SimpleChanges, ChangeDetectorRef, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model';
 
@@ -9,9 +9,10 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
   template: `
     @if (visible) {
       <div
+        #menuElement
         class="context-menu"
-        [style.left.px]="position.x"
-        [style.top.px]="position.y"
+        [style.left.px]="adjustedPosition.x"
+        [style.top.px]="adjustedPosition.y"
         (click)="$event.stopPropagation()"
       >
         @for (action of actions; track action.action) {
@@ -105,12 +106,37 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
     }
   `]
 })
-export class ContextMenuComponent {
+export class ContextMenuComponent implements AfterViewChecked, OnChanges {
+  private cdr = inject(ChangeDetectorRef);
+
   @Input() visible = false;
   @Input() position: ContextMenuPosition = { x: 0, y: 0 };
   @Input() actions: ContextMenuAction[] = [];
   @Output() actionSelected = new EventEmitter<string>();
   @Output() closed = new EventEmitter<void>();
+
+  @ViewChild('menuElement') menuElement?: ElementRef<HTMLDivElement>;
+
+  adjustedPosition: ContextMenuPosition = { x: 0, y: 0 };
+  private needsPositionRecalc = false;
+
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['position'] || changes['visible']) {
+      // Estimate menu height (typical context menu is ~200-300px)
+      const estimatedHeight = 250;
+      const viewportHeight = window.innerHeight;
+
+      let y = this.position.y;
+
+      // If likely to overflow bottom, flip upward
+      if (y + estimatedHeight > viewportHeight) {
+        y = this.position.y - estimatedHeight;
+      }
+
+      this.adjustedPosition = { x: this.position.x, y };
+      this.needsPositionRecalc = true;
+    }
+  }
 
   @HostListener('document:click')
   onDocumentClick() {
@@ -124,6 +150,36 @@ export class ContextMenuComponent {
     if (this.visible) {
       this.close();
     }
+  }
+
+  ngAfterViewChecked() {
+    if (this.visible && this.menuElement && this.needsPositionRecalc) {
+      this.needsPositionRecalc = false;
+      // Use requestAnimationFrame to ensure DOM has rendered with actual dimensions
+      requestAnimationFrame(() => {
+        this.calculateAdjustedPosition();
+      });
+    }
+  }
+
+  private calculateAdjustedPosition() {
+    const menu = this.menuElement?.nativeElement;
+    if (!menu) {
+      return;
+    }
+
+    const menuRect = menu.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+
+    let y = this.position.y;
+
+    // If menu would go off bottom, open above cursor instead
+    if (this.position.y + menuRect.height > viewportHeight) {
+      y = this.position.y - menuRect.height;
+    }
+
+    this.adjustedPosition = { x: this.position.x, y };
+    this.cdr.detectChanges();
   }
 
 

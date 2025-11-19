@@ -21,6 +21,14 @@
         <span class="btn-icon">🎬</span>
         <span>Video Editor</span>
       </button>
+      <button
+        class="btn btn-secondary"
+        [disabled]="selectedCount() !== 1"
+        (click)="viewMore()"
+        [title]="selectedCount() === 1 ? 'View video details' : 'Select exactly one video'">
+        <span class="btn-icon">ℹ️</span>
+        <span>View More</span>
+      </button>
       <button class="btn btn-secondary" (click)="selectedCount() > 0 ? onAddSelectedToQueue() : onPasteUrls()">
         <span class="btn-icon">{{ selectedCount() > 0 ? '➕' : '📋' }}</span>
         <span>{{ selectedCount() > 0 ? 'Add Selected' : 'Paste URLs' }}</span>
@@ -40,7 +48,7 @@
   <div class="main-container">
     <!-- Video Library List (Only show when not collapsed) -->
     <div class="library-section" *ngIf="!queueExpanded()">
-      <app-video-library
+      <app-cascade
         [weeks]="filteredWeeks()"
         (selectionChanged)="onSelectionChanged($event)"
         (videoAction)="onVideoAction($event)"
@@ -62,17 +70,9 @@
     </div>
 
     <!-- Processing Queue -->
-    <app-processing-queue
-      [items]="queueItems()"
-      [expanded]="queueExpanded()"
-      (close)="onCloseQueue()"
-      (removeItem)="onRemoveQueueItem($event)"
-      (clearQueue)="onClearQueue()"
-      (processQueue)="onProcessQueue()"
-      (urlAdded)="onUrlAdded($event)"
-      (toggleExpanded)="onToggleQueue()"
-      (itemTasksUpdated)="onItemTasksUpdated($event)"
-    />
+    <div class="queue-section" *ngIf="queueExpanded()">
+      <app-video-processing-queue />
+    </div>
   </div>
 </div>
 

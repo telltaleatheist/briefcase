@@ -1180,6 +1180,145 @@ export class DatabaseService {
   }
 
   /**
+   * Full-text search across all content using FTS5
+   * Searches: filenames, transcripts, analyses, tags, descriptions
+   * @param query - Search query (supports FTS5 syntax: OR, AND, NOT, phrases, wildcards)
+   * @param limit - Maximum results to return
+   * @returns Array of video IDs with match info, sorted by relevance
+   */
+  searchFTS(query: string, limit: number = 100): { videoId: string; score: number; matches: string[] }[] {
+    const db = this.ensureInitialized();
+
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+
+    // Convert user-friendly wildcards to FTS5 syntax
+    // FTS5 uses * for prefix matching only
+    let ftsQuery = query.trim()
+      .split(/\s+/)
+      .map(word => {
+        // Handle wildcards: convert * to FTS5 prefix syntax
+        if (word.endsWith('*')) {
+          return word; // FTS5 supports trailing *
+        }
+        // Add * for prefix matching if not already present
+        return word + '*';
+      })
+      .join(' OR '); // OR logic by default
+
+    this.logger.log(`[FTS Search] Query: "${query}" -> FTS: "${ftsQuery}"`);
+
+    try {
+      const results = new Map<string, { score: number; matches: Set<string> }>();
+
+      // Search videos_fts (filename, path, description)
+      try {
+        const videosResults = db.prepare(`
+          SELECT video_id, rank
+          FROM videos_fts
+          WHERE videos_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit * 2) as any[];
+
+        for (const row of videosResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank) * 2; // Videos weighted higher
+          entry.matches.add('filename');
+        }
+      } catch (e) {
+        // Ignore errors from individual FTS tables
+      }
+
+      // Search transcripts_fts
+      try {
+        const transcriptResults = db.prepare(`
+          SELECT video_id, rank
+          FROM transcripts_fts
+          WHERE transcripts_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit * 2) as any[];
+
+        for (const row of transcriptResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank);
+          entry.matches.add('transcript');
+        }
+      } catch (e) {
+        // Ignore errors from individual FTS tables
+      }
+
+      // Search analyses_fts
+      try {
+        const analysesResults = db.prepare(`
+          SELECT video_id, rank
+          FROM analyses_fts
+          WHERE analyses_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit * 2) as any[];
+
+        for (const row of analysesResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
+          entry.matches.add('analysis');
+        }
+      } catch (e) {
+        // Ignore errors from individual FTS tables
+      }
+
+      // Search tags_fts
+      try {
+        const tagsResults = db.prepare(`
+          SELECT video_id, rank
+          FROM tags_fts
+          WHERE tags_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit * 2) as any[];
+
+        for (const row of tagsResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
+          entry.matches.add('tags');
+        }
+      } catch (e) {
+        // Ignore errors from individual FTS tables
+      }
+
+      // Convert to array and sort by score
+      const sortedResults = Array.from(results.entries())
+        .map(([videoId, data]) => ({
+          videoId,
+          score: data.score,
+          matches: Array.from(data.matches)
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      this.logger.log(`[FTS Search] Found ${sortedResults.length} results for "${query}"`);
+      return sortedResults;
+    } catch (error: any) {
+      this.logger.error(`[FTS Search] Search failed: ${error?.message || 'Unknown error'}`);
+      return [];
+    }
+  }
+
+  /**
    * Get the database instance for raw queries
    */
   getDatabase(): Database.Database {

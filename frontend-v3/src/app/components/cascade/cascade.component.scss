@@ -1,0 +1,1054 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// Host element must participate in flex layout
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cascade {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative; // For absolute positioning of viewport
+}
+
+// Toolbar
+.library-toolbar {
+  @include flex-between;
+  padding: $spacing-md $spacing-lg;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.toolbar-title {
+  @include flex-center;
+  gap: $spacing-sm;
+  font-weight: $font-weight-medium;
+  font-size: $font-size-sm;
+  color: var(--text-primary);
+}
+
+.toolbar-icon {
+  font-size: $font-size-xl;
+}
+
+.selection-count {
+  display: grid;
+  place-content: center;
+  padding: 5px 12px 4px;
+  background: var(--primary-orange);
+  color: white;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  animation: fadeIn 0.2s ease-out;
+}
+
+// Content wrapper for virtual scroll
+.library-content {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+
+  // Empty state
+  &.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+// CDK Virtual Scroll - use absolute positioning for reliable height
+cdk-virtual-scroll-viewport.library-content {
+  @include custom-scrollbar;
+  position: absolute !important;
+  top: 53px; // Below toolbar
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+// Week Header (Accordion) - Fixed height for virtual scroll
+.week-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: 0 $spacing-lg;
+  height: 36px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background $transition-fast;
+  box-sizing: border-box;
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
+}
+
+.week-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  @include flex-center;
+  transition: all $transition-fast;
+  border-radius: $radius-sm;
+
+  &:hover {
+    background: var(--bg-tertiary);
+  }
+}
+
+.toggle-icon {
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  transition: transform $transition-base;
+  display: inline-block;
+
+  &.expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.week-label {
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  flex: 1;
+}
+
+.week-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-weight: $font-weight-medium;
+}
+
+// Videos List
+.videos-list {
+  @include flex-column;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// Video Item - Fixed height for virtual scroll
+.video-item {
+  display: grid;
+  grid-template-columns: 8px 32px 1fr auto;
+  gap: $spacing-md;
+  padding: 0 $spacing-lg;
+  height: 60px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all $transition-fast;
+  align-items: center;
+  position: relative;
+  user-select: none;
+  box-sizing: border-box;
+
+  &:hover {
+    background: var(--bg-secondary);
+
+    .delete-btn {
+      opacity: 1;
+    }
+  }
+
+  // Highlighted state (keyboard navigation cursor)
+  &.highlighted,
+  &.selected {
+    background-color: rgba(255, 102, 0, 0.12);
+    box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.6),
+                inset -2px 0 0 rgba(255, 102, 0, 0.6);
+    transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+    .selection-indicator {
+      box-shadow: 0 0 8px rgba(255, 107, 53, 0.5);
+    }
+  }
+
+  // Top edge - add top shadow
+  &.highlighted.selection-edge-top,
+  &.selected.selection-edge-top {
+    box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.6),
+                inset -2px 0 0 rgba(255, 102, 0, 0.6),
+                inset 0 2px 0 rgba(255, 102, 0, 0.6);
+  }
+
+  // Bottom edge - add bottom shadow
+  &.highlighted.selection-edge-bottom,
+  &.selected.selection-edge-bottom {
+    box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.6),
+                inset -2px 0 0 rgba(255, 102, 0, 0.6),
+                inset 0 -2px 0 rgba(255, 102, 0, 0.6);
+  }
+
+  // Single item (both edges)
+  &.highlighted.selection-edge-top.selection-edge-bottom,
+  &.selected.selection-edge-top.selection-edge-bottom {
+    box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.6),
+                inset -2px 0 0 rgba(255, 102, 0, 0.6),
+                inset 0 2px 0 rgba(255, 102, 0, 0.6),
+                inset 0 -2px 0 rgba(255, 102, 0, 0.6);
+  }
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+// Selection/Status Indicator
+.selection-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: $radius-full;
+  background: var(--border-color);
+  transition: all $transition-fast;
+  justify-self: center;
+}
+
+// Processing status colors - separate for specificity
+.video-item .selection-indicator.status-unprocessed {
+  background: #ef4444;
+}
+
+.video-item .selection-indicator.status-transcribed {
+  background: var(--primary-orange);
+}
+
+.video-item .selection-indicator.status-complete {
+  background: #22c55e;
+}
+
+.video-item .selection-indicator.status-complete-long {
+  background: #38bdf8;
+}
+
+.video-item.selected .selection-indicator.status-unprocessed {
+  background: #ef4444;
+}
+
+.video-item.selected .selection-indicator.status-transcribed {
+  background: var(--primary-orange);
+}
+
+.video-item.selected .selection-indicator.status-complete {
+  background: #22c55e;
+}
+
+.video-item.selected .selection-indicator.status-complete-long {
+  background: #38bdf8;
+}
+
+// Video Icon
+.video-icon {
+  font-size: $font-size-xl;
+  @include flex-center;
+  flex-shrink: 0;
+}
+
+// Video Content
+.video-content {
+  @include flex-column;
+  gap: $spacing-xs;
+  min-width: 0;
+  flex: 1;
+}
+
+.video-title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  line-height: $line-height-tight;
+  transition: color $transition-fast;
+  @include truncate;
+}
+
+.video-meta {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.meta-icon {
+  font-size: $font-size-sm;
+}
+
+.meta-label {
+  font-weight: $font-weight-medium;
+}
+
+.meta-filename {
+  color: var(--text-primary);
+  @include truncate;
+  max-width: 400px;
+}
+
+.meta-action {
+  color: var(--primary-orange);
+  cursor: pointer;
+  font-weight: $font-weight-medium;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: var(--dark-orange);
+  }
+}
+
+.meta-hint {
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+.meta-separator {
+  color: var(--text-tertiary);
+}
+
+.meta-downloaded {
+  color: var(--text-tertiary);
+}
+
+// Actions
+.video-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-lg;
+  flex-shrink: 0;
+}
+
+.video-duration {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  font-family: monospace;
+  color: var(--text-secondary);
+  min-width: 50px;
+  text-align: right;
+}
+
+.edit-btn,
+.delete-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: $radius-sm;
+  background: transparent;
+  border: none;
+  font-size: $font-size-base;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all $transition-fast;
+  @include flex-center;
+  opacity: 0.5;
+
+  &:hover {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.edit-btn:hover {
+  color: var(--primary-orange);
+}
+
+.delete-btn {
+  font-size: $font-size-xl;
+
+  &:hover {
+    color: var(--error);
+  }
+}
+
+.video-item:hover .delete-btn {
+  opacity: 0.7;
+}
+
+.video-item.selected .delete-btn {
+  opacity: 0.7;
+}
+
+// Empty State
+.empty-state {
+  text-align: center;
+  padding: $spacing-4xl $spacing-lg;
+}
+
+.empty-icon {
+  font-size: 5rem;
+  margin-bottom: $spacing-lg;
+  opacity: 0.5;
+}
+
+.empty-state h3 {
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: $spacing-sm;
+  color: var(--text-primary);
+}
+
+.empty-state p {
+  font-size: $font-size-lg;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+// Progress Bar
+.item-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+
+  .progress-fill {
+    height: 100%;
+    background-color: var(--primary-orange);
+    transition: width 0.3s ease-out;
+    position: relative;
+    overflow: hidden;
+
+    // Animated shimmer effect for active progress
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 200%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        transparent 40%,
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 60%,
+        transparent 100%
+      );
+      animation: shimmer 3s linear infinite;
+      will-change: transform;
+    }
+
+    // Indeterminate animation
+    &.indeterminate {
+      width: 100%;
+      animation: indeterminate-progress 1.5s ease-in-out infinite;
+      transform-origin: left;
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(50%);
+  }
+}
+
+@keyframes indeterminate-progress {
+  0% {
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  50% {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+  50.1% {
+    transform: scaleX(1);
+    transform-origin: right;
+  }
+  100% {
+    transform: scaleX(0);
+    transform-origin: right;
+  }
+}
+
+// Video Item Wrapper (for children support)
+.video-item-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+// Expand/Collapse Button
+.expand-toggle {
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .expand-icon {
+    font-size: 10px;
+    color: var(--text-secondary);
+    transition: transform $transition-base;
+    display: inline-block;
+
+    &.expanded {
+      transform: rotate(90deg);
+    }
+  }
+}
+
+// Master Progress Bar
+.master-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background-color: rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-orange) 0%, var(--light-orange) 100%);
+    transition: width 0.3s ease-out;
+    position: relative;
+    overflow: hidden;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 200%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        transparent 40%,
+        rgba(255, 255, 255, 0.5) 50%,
+        transparent 60%,
+        transparent 100%
+      );
+      animation: shimmer 3s linear infinite;
+      will-change: transform;
+    }
+  }
+}
+
+// Cascade Children Container
+.cascade-children {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-left: 3px solid var(--border-color);
+  padding: $spacing-xs 0;
+  margin-left: $spacing-xl;
+  overflow: hidden;
+}
+
+// Individual Child Item
+.cascade-child {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  min-height: 32px;
+  cursor: pointer;
+  user-select: none;
+  transition: all $transition-fast;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.03);
+  }
+
+  .child-icon {
+    font-size: $font-size-sm;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .child-label {
+    flex: 1;
+    font-size: 12px;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+    @include truncate;
+  }
+
+  .child-metadata {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    margin-left: auto;
+    padding-left: $spacing-sm;
+  }
+
+  .child-progress-bar {
+    width: 60px;
+    height: 3px;
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+
+    .progress-fill {
+      height: 100%;
+      background: var(--primary-orange);
+      transition: width 0.3s ease-out;
+
+      &.indeterminate {
+        width: 100%;
+        animation: indeterminate-progress 1.5s ease-in-out infinite;
+        transform-origin: left;
+      }
+    }
+  }
+
+  .child-status-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+  }
+
+  // Status-based styling
+  &.child-pending {
+    .child-icon, .child-status-icon {
+      color: var(--text-tertiary);
+    }
+    .child-label {
+      color: var(--text-secondary);
+    }
+  }
+
+  &.child-active {
+    background: rgba(255, 102, 0, 0.08);
+    .child-icon, .child-status-icon {
+      color: var(--primary-orange);
+    }
+    .child-label {
+      color: var(--primary-orange);
+      font-weight: $font-weight-semibold;
+    }
+  }
+
+  &.child-completed {
+    .child-icon, .child-status-icon {
+      color: #22c55e;
+    }
+    .child-label {
+      text-decoration: line-through;
+      opacity: 0.7;
+    }
+  }
+
+  &.child-failed {
+    .child-icon, .child-status-icon {
+      color: var(--error);
+    }
+    .child-label {
+      color: var(--error);
+    }
+  }
+
+  &.child-skipped {
+    opacity: 0.5;
+    .child-label {
+      text-decoration: line-through;
+    }
+  }
+}
+
+// ==================================================
+// Delete Options Modal
+// ==================================================
+.delete-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.delete-modal {
+  background: var(--bg-card);
+  border-radius: $radius-lg;
+  padding: $spacing-xl;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: $shadow-xl;
+  border: 2px solid var(--border-color);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.delete-modal-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.delete-modal-icon {
+  font-size: 2rem;
+}
+
+.delete-modal-title {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.delete-modal-description {
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  margin: 0 0 $spacing-lg 0;
+}
+
+.delete-options {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.delete-option {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  cursor: pointer;
+  transition: all $transition-fast;
+  text-align: left;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-orange);
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  .option-icon {
+    font-size: $font-size-xl;
+    flex-shrink: 0;
+  }
+
+  .option-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .option-label {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+
+  .option-description {
+    font-size: $font-size-xs;
+    color: var(--text-secondary);
+  }
+
+  &.delete-option-danger {
+    border-color: var(--error);
+
+    &:hover {
+      background: rgba(220, 53, 69, 0.1);
+      border-color: var(--error);
+    }
+
+    .option-label {
+      color: var(--error);
+    }
+  }
+}
+
+.delete-cancel-btn {
+  width: 100%;
+  padding: $spacing-md;
+  background: transparent;
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+// Responsive
+@media (max-width: 768px) {
+  .video-item {
+    grid-template-columns: 8px 32px 1fr;
+    gap: $spacing-sm;
+  }
+
+  .video-actions {
+    grid-column: 3;
+    justify-content: space-between;
+    margin-top: $spacing-xs;
+  }
+
+  .meta-filename {
+    max-width: 200px;
+  }
+
+  .delete-btn {
+    opacity: 1;
+  }
+}
+
+// ==================================================
+// Dark Theme Overrides
+// ==================================================
+
+:host-context(.dark-theme),
+:host-context([data-theme="dark"]) {
+  .library-toolbar {
+    background: var(--bg-secondary);
+    border-bottom-color: var(--border-color);
+  }
+
+  .week-header {
+    background: var(--bg-tertiary);
+    border-bottom-color: var(--border-color);
+
+    &:hover {
+      background: var(--bg-secondary);
+    }
+  }
+
+  .week-toggle {
+    &:hover {
+      background: var(--bg-tertiary);
+    }
+  }
+
+  .video-item {
+    background: var(--bg-card);
+    border-bottom-color: var(--border-color);
+
+    &:hover {
+      background: var(--bg-secondary);
+    }
+
+    // Highlighted and selected state in dark mode
+    &.highlighted,
+    &.selected {
+      background-color: rgba(255, 102, 0, 0.18);
+      box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset -2px 0 0 rgba(255, 102, 0, 0.7);
+    }
+
+    // Top edge in dark mode
+    &.highlighted.selection-edge-top,
+    &.selected.selection-edge-top {
+      box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset -2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset 0 2px 0 rgba(255, 102, 0, 0.7);
+    }
+
+    // Bottom edge in dark mode
+    &.highlighted.selection-edge-bottom,
+    &.selected.selection-edge-bottom {
+      box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset -2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset 0 -2px 0 rgba(255, 102, 0, 0.7);
+    }
+
+    // Single item (both edges) in dark mode
+    &.highlighted.selection-edge-top.selection-edge-bottom,
+    &.selected.selection-edge-top.selection-edge-bottom {
+      box-shadow: inset 2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset -2px 0 0 rgba(255, 102, 0, 0.7),
+                  inset 0 2px 0 rgba(255, 102, 0, 0.7),
+                  inset 0 -2px 0 rgba(255, 102, 0, 0.7);
+    }
+  }
+
+  .video-title {
+    color: var(--text-primary);
+  }
+
+  .video-meta {
+    color: var(--text-secondary);
+  }
+
+  .meta-filename {
+    color: var(--text-primary);
+  }
+
+  .meta-action {
+    color: var(--primary-orange);
+
+    &:hover {
+      color: var(--light-orange);
+    }
+  }
+
+  .video-duration {
+    color: var(--text-secondary);
+  }
+
+  .delete-btn {
+    color: var(--text-secondary);
+
+    &:hover {
+      color: var(--error);
+    }
+  }
+
+  .empty-state {
+    .empty-icon {
+      opacity: 0.3;
+    }
+
+    h3 {
+      color: var(--text-primary);
+    }
+
+    p {
+      color: var(--text-secondary);
+    }
+  }
+
+  // Progress bar in dark theme
+  .item-progress-bar {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  // Master progress bar in dark theme
+  .master-progress-bar {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  // Expand toggle in dark theme
+  .expand-toggle {
+    &:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .expand-icon {
+      color: var(--text-secondary);
+    }
+  }
+
+  // Cascade children in dark theme
+  .cascade-children {
+    background: var(--bg-tertiary);
+    border-left-color: var(--border-color);
+  }
+
+  .cascade-child {
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .child-progress-bar {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    &.child-active {
+      background: rgba(255, 102, 0, 0.15);
+    }
+  }
+
+  // Scrollbar styling for dark theme
+  cdk-virtual-scroll-viewport.library-content {
+    &::-webkit-scrollbar-track {
+      background: var(--bg-primary);
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+
+      &:hover {
+        background: var(--text-tertiary);
+      }
+    }
+  }
+}

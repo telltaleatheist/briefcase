@@ -1,17 +1,14 @@
 <div class="queue-container" [class.expanded]="expanded">
-  <div class="queue-header">
+  <div class="queue-header" (click)="toggleExpanded.emit()">
     <div class="queue-title">
       <span class="queue-icon">📋</span>
       <h3>Processing Queue</h3>
       <span class="queue-count">({{ items.length }} {{ items.length === 1 ? 'item' : 'items' }})</span>
     </div>
     <div class="queue-actions">
-      <button class="btn-icon" (click)="toggleExpanded.emit()" [attr.aria-label]="expanded ? 'Collapse queue' : 'Expand queue'">
+      <span class="expand-icon" [attr.aria-label]="expanded ? 'Collapse queue' : 'Expand queue'">
         {{ expanded ? '▼' : '▲' }}
-      </button>
-      <button class="btn-icon" (click)="close.emit()" aria-label="Close queue">
-        ✕
-      </button>
+      </span>
     </div>
   </div>
 
@@ -68,12 +65,19 @@
                   [class.completed]="getTaskStatus(segment.task) === 'completed'"
                   [class.running]="getTaskStatus(segment.task) === 'running'"
                   [class.failed]="getTaskStatus(segment.task) === 'failed'"
-                  [attr.title]="segment.label"
+                  [class.initializing]="getTaskStatus(segment.task) === 'running' && getTaskProgress(segment.task) === 0"
+                  [attr.title]="segment.label + ': ' + getTaskProgress(segment.task) + '%'"
                 >
                   <div
                     class="progress-fill"
                     [style.width.%]="getTaskProgress(segment.task)"
                   ></div>
+                  <span class="progress-percent" *ngIf="getTaskStatus(segment.task) === 'running' && getTaskProgress(segment.task) > 0">
+                    {{ getTaskProgress(segment.task) }}%
+                  </span>
+                  <span class="progress-initializing" *ngIf="getTaskStatus(segment.task) === 'running' && getTaskProgress(segment.task) === 0">
+                    Starting...
+                  </span>
                 </div>
               </div>
 
@@ -136,17 +140,22 @@
 
     <!-- Queue Footer -->
     <div class="queue-footer" *ngIf="items.length > 0">
-      <button class="btn btn-secondary" (click)="clearQueue.emit()">
-        Clear Queue
-      </button>
+      <div class="footer-left">
+        <button class="btn btn-secondary" (click)="clearQueue.emit()">
+          Clear Queue
+        </button>
+        <button class="btn btn-secondary" (click)="openBulkConfigModal()">
+          ⚙️ Apply to All
+        </button>
+      </div>
       <button
         class="btn btn-primary"
         (click)="processQueue.emit()"
         [disabled]="!canProcess()"
       >
         <span>Start Processing</span>
-        <span class="task-count" *ngIf="getTotalTaskCount() > 0">
-          ({{ getTotalTaskCount() }} {{ getTotalTaskCount() === 1 ? 'task' : 'tasks' }})</span>
+        <span class="task-count" *ngIf="items.length > 0">
+          ({{ items.length }} {{ items.length === 1 ? 'job' : 'jobs' }})</span>
       </button>
     </div>
   </div>
@@ -157,6 +166,9 @@
   [isOpen]="configModalOpen()"
   [itemSource]="configModalSource()"
   [existingTasks]="configModalTasks()"
+  [bulkMode]="configModalBulkMode()"
+  [itemCount]="items.length"
   (close)="closeConfigModal()"
   (save)="saveConfigModal($event)"
+  (bulkSave)="saveBulkConfigModal($event)"
 />

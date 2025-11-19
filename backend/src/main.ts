@@ -47,26 +47,43 @@ async function bootstrap() {
     );
 
     // Add this block to enable CORS for HTTP requests
-    // Build CORS origins dynamically based on actual running ports
+    // Allow any localhost port for development
     const port = environment.port || process.env.PORT || 3000;
-    const corsOrigins = [
-      `http://localhost:${port}`,  // Backend port (self)
-      'http://localhost:8080',     // Default Electron frontend port
-      'http://localhost:3000',     // Fallback backend port
-      'http://localhost:3001',     // Alternative backend port
-      'http://localhost:4200',     // Angular dev server (old frontend)
-      'http://localhost:4201',     // Angular dev server (new frontend-v2)
-      '*'                          // Allow all origins as fallback
-    ];
 
     app.enableCors({
-      origin: corsOrigins,
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, curl, etc.)
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        // Allow any localhost port
+        if (origin.match(/^http:\/\/localhost:\d+$/)) {
+          callback(null, true);
+          return;
+        }
+
+        // Allow 127.0.0.1 as well
+        if (origin.match(/^http:\/\/127\.0\.0\.1:\d+$/)) {
+          callback(null, true);
+          return;
+        }
+
+        // Block other origins
+        callback(new Error('Not allowed by CORS'), false);
+      },
       methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
       credentials: true,
-      allowedHeaders: 'Content-Type, Accept, Authorization'
+      allowedHeaders: 'Content-Type, Accept, Authorization, Range',
+      exposedHeaders: 'Content-Range, Accept-Ranges, Content-Length'
     });
 
     app.useWebSocketAdapter(new ExtendedIoAdapter(app));
+
+    // Increase body parser limit for large payloads (e.g., console logs)
+    app.useBodyParser('json', { limit: '10mb' });
+    app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
 
     // Set global prefix but exclude certain routes
     app.setGlobalPrefix(environment.apiPrefix, {

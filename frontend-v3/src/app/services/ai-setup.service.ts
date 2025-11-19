@@ -23,7 +23,7 @@ export interface AISetupStatus {
   providedIn: 'root'
 })
 export class AiSetupService {
-  private readonly API_BASE = 'http://localhost:3001/api';
+  private readonly API_BASE = 'http://localhost:3000/api';
 
   // Reactive state
   availability = signal<AIAvailability>({

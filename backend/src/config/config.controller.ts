@@ -76,4 +76,39 @@ export class ConfigController {
       };
     }
   }
+
+  /**
+   * Save console logs to the logs directory
+   */
+  @Post('save-logs')
+  async saveLogs(@Body() body: { content: string }) {
+    try {
+      // Get logs directory
+      const logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'clippy');
+
+      // Ensure logs directory exists
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      // Create filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `clipchimp-console-${timestamp}.txt`;
+      const filePath = path.join(logsDir, filename);
+
+      // Save logs
+      fs.writeFileSync(filePath, body.content, 'utf8');
+
+      return {
+        success: true,
+        message: 'Logs saved successfully',
+        path: filePath
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to save logs: ${(error as Error).message}`
+      };
+    }
+  }
 }

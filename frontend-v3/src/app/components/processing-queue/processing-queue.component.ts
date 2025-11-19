@@ -23,6 +23,7 @@ export class ProcessingQueueComponent {
   @Output() urlAdded = new EventEmitter<string>();
   @Output() toggleExpanded = new EventEmitter<void>();
   @Output() itemTasksUpdated = new EventEmitter<{ itemId: string, tasks: QueueItemTask[] }>();
+  @Output() bulkTasksUpdated = new EventEmitter<QueueItemTask[]>();
 
   @ViewChild('urlInputEl') urlInputEl?: ElementRef<HTMLInputElement>;
 
@@ -45,6 +46,7 @@ export class ProcessingQueueComponent {
   configModalItemId = signal<string | null>(null);
   configModalSource = signal<'url' | 'library'>('url');
   configModalTasks = signal<QueueItemTask[]>([]);
+  configModalBulkMode = signal(false);
 
   onUrlInputPaste(event: ClipboardEvent): void {
     event.preventDefault();
@@ -132,12 +134,30 @@ export class ProcessingQueueComponent {
     this.configModalItemId.set(item.id);
     this.configModalSource.set(item.source);
     this.configModalTasks.set([...item.tasks]);
+    this.configModalBulkMode.set(false);
+    this.configModalOpen.set(true);
+  }
+
+  openBulkConfigModal(): void {
+    // Determine source based on majority of items (or default to library for mixed)
+    const hasUrlItems = this.items.some(item => item.source === 'url');
+    const hasLibraryItems = this.items.some(item => item.source === 'library');
+
+    // Use 'library' if we have library items, otherwise 'url'
+    // Library items have more task options available
+    const source = hasLibraryItems ? 'library' : 'url';
+
+    this.configModalItemId.set(null);
+    this.configModalSource.set(source);
+    this.configModalTasks.set([]);
+    this.configModalBulkMode.set(true);
     this.configModalOpen.set(true);
   }
 
   closeConfigModal(): void {
     this.configModalOpen.set(false);
     this.configModalItemId.set(null);
+    this.configModalBulkMode.set(false);
   }
 
   saveConfigModal(tasks: QueueItemTask[]): void {
@@ -145,6 +165,11 @@ export class ProcessingQueueComponent {
     if (itemId) {
       this.itemTasksUpdated.emit({ itemId, tasks });
     }
+    this.closeConfigModal();
+  }
+
+  saveBulkConfigModal(tasks: QueueItemTask[]): void {
+    this.bulkTasksUpdated.emit(tasks);
     this.closeConfigModal();
   }
 

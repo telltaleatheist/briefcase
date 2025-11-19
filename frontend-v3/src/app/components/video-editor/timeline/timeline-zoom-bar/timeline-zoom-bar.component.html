@@ -1,0 +1,23 @@
+<div class="zoom-bar">
+  <div class="zoom-controls">
+    <button class="zoom-btn" (click)="zoomOut()" title="Zoom out">-</button>
+    <button class="zoom-btn" (click)="resetZoom()" title="Reset zoom">Reset</button>
+    <button class="zoom-btn" (click)="zoomIn()" title="Zoom in">+</button>
+  </div>
+
+  <div class="zoom-track" (click)="onTrackClick($event)">
+    <div
+      class="zoom-thumb"
+      [style.left.%]="thumbLeft"
+      [style.width.%]="thumbWidth"
+      (mousedown)="onThumbDragStart($event)">
+      <div class="handle left" (mousedown)="onLeftHandleDrag($event)"></div>
+      <div class="handle-center"></div>
+      <div class="handle right" (mousedown)="onRightHandleDrag($event)"></div>
+    </div>
+  </div>
+
+  <div class="zoom-info">
+    {{ (zoomState.level * 100).toFixed(0) }}%
+  </div>
+</div>

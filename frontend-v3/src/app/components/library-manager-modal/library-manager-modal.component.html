@@ -44,24 +44,70 @@
         @if (mode() === 'select') {
           <div class="select-mode">
             @if (existingLibraries.length > 0) {
-              <div class="libraries-list">
-                @for (library of existingLibraries; track library.id) {
-                  <div
-                    class="library-item"
-                    [class.selected]="selectedLibrary()?.id === library.id"
-                    (click)="selectLibrary(library)"
-                  >
-                    <span class="library-icon">📁</span>
-                    <div class="library-info">
-                      <span class="library-name">{{ library.name }}</span>
-                      <span class="library-meta">{{ library.videoCount }} videos • {{ library.path }}</span>
-                    </div>
-                    @if (selectedLibrary()?.id === library.id) {
-                      <span class="library-check">✓</span>
-                    }
-                  </div>
-                }
+              <div class="libraries-cascade">
+                <app-cascade
+                  [weeks]="libraryWeeks()"
+                  [showStatusIndicator]="false"
+                  [showDuration]="false"
+                  [showDeleteButton]="true"
+                  [showEditButton]="true"
+                  [deleteMode]="'simple'"
+                  (selectionChanged)="onCascadeSelectionChanged($event)"
+                  (videoAction)="onCascadeAction($event)"
+                />
               </div>
+
+              <!-- Inline Edit Panel -->
+              @if (editingLibrary()) {
+                <div class="edit-panel">
+                  <div class="edit-panel-header">
+                    <span class="edit-icon">✏️</span>
+                    <span class="edit-title">Edit Library</span>
+                    <button class="edit-close-btn" (click)="cancelEdit()">×</button>
+                  </div>
+                  <div class="edit-panel-body">
+                    <div class="form-group">
+                      <label class="form-label" for="edit-name">
+                        <span class="label-icon">📚</span>
+                        Library Name
+                      </label>
+                      <input
+                        id="edit-name"
+                        type="text"
+                        class="form-input"
+                        [value]="editName()"
+                        (input)="editName.set($any($event.target).value)"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" for="edit-path">
+                        <span class="label-icon">📂</span>
+                        Library Path
+                      </label>
+                      <div class="path-input-group">
+                        <input
+                          id="edit-path"
+                          type="text"
+                          class="form-input path-input"
+                          [value]="editPath()"
+                          (input)="editPath.set($any($event.target).value)"
+                        />
+                        <button class="browse-btn" (click)="browseEditPath()">
+                          <span class="browse-icon">🔍</span>
+                          Browse
+                        </button>
+                      </div>
+                    </div>
+                    <div class="edit-panel-actions">
+                      <button class="edit-cancel-btn" (click)="cancelEdit()">Cancel</button>
+                      <button class="edit-save-btn" (click)="saveEdit()" [disabled]="!isEditValid()">
+                        <span>💾</span>
+                        Save Changes
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              }
             } @else {
               <div class="empty-state">
                 <div class="empty-icon">📚</div>
@@ -230,6 +276,26 @@
           }
         </button>
       </div>
+
+      <!-- Delete Confirmation Dialog -->
+      @if (showDeleteConfirm()) {
+        <div class="confirm-overlay" (click)="cancelDelete()">
+          <div class="confirm-dialog" (click)="$event.stopPropagation()">
+            <div class="confirm-icon">⚠️</div>
+            <h3 class="confirm-title">Delete {{ selectedCount }} {{ selectedCount === 1 ? 'Library' : 'Libraries' }}?</h3>
+            <p class="confirm-message">
+              This action cannot be undone. The library database and all associated metadata will be permanently deleted.
+            </p>
+            <div class="confirm-actions">
+              <button class="confirm-btn-cancel" (click)="cancelDelete()">Cancel</button>
+              <button class="confirm-btn-delete" (click)="confirmDelete()">
+                <span>🗑️</span>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
   </div>
 }

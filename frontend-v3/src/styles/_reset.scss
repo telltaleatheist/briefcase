@@ -124,6 +124,31 @@ html {
   color: white;
 }
 
+// Global scrollbar styling
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary-orange) var(--bg-secondary);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-orange);
+  border-radius: 4px;
+
+  &:hover {
+    background: var(--dark-orange);
+  }
+}
+
 // Webkit autofill
 input:-webkit-autofill,
 input:-webkit-autofill:hover,

@@ -284,6 +284,12 @@ export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
     setTimeout(() => {
       this.initializePlayer();
     }, 100);
+
+    // Trigger change detection after view children are initialized
+    // This fixes the "Expression changed after checked" error for categoryFilters
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
   }
 
   /**

@@ -5,7 +5,7 @@
 .modal-backdrop {
   position: fixed;
   top: 0;
-  left: 0;
+  left: var(--nav-width, 60px); // Account for left nav bar
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.7);
@@ -144,15 +144,197 @@
 // ==================== MODAL BODY ====================
 .modal-body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   @include custom-scrollbar;
   padding: $spacing-xl;
   background: var(--bg-primary);
+  min-height: 0;
 }
 
 // ==================== SELECT MODE ====================
 .select-mode {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   min-height: 300px;
+  overflow-y: auto;
+  @include custom-scrollbar;
+}
+
+// Selection Toolbar
+.selection-toolbar {
+  @include flex-between;
+  padding: $spacing-sm $spacing-md;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-md;
+}
+
+.selection-info {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+}
+
+.delete-selected-btn {
+  @include flex-center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  background: var(--error);
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: darken(#dc3545, 8%);
+    transform: translateY(-1px);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  &:disabled,
+  &.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .btn-icon {
+    font-size: $font-size-base;
+  }
+}
+
+.libraries-cascade {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+// Edit Panel
+.edit-panel {
+  margin-top: $spacing-md;
+  background: var(--bg-secondary);
+  border: 2px solid var(--primary-orange);
+  border-radius: $radius-md;
+  overflow: hidden;
+  animation: slideDown 0.2s ease-out;
+  flex-shrink: 0;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.edit-panel-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: var(--primary-orange);
+  color: white;
+}
+
+.edit-icon {
+  font-size: $font-size-base;
+}
+
+.edit-title {
+  flex: 1;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+}
+
+.edit-close-btn {
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  font-size: $font-size-xl;
+  color: white;
+  cursor: pointer;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+  opacity: 0.8;
+
+  &:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+.edit-panel-body {
+  padding: $spacing-md;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.edit-panel-actions {
+  display: flex;
+  gap: $spacing-sm;
+  justify-content: flex-end;
+  margin-top: $spacing-sm;
+}
+
+.edit-cancel-btn {
+  padding: $spacing-sm $spacing-md;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.edit-save-btn {
+  @include flex-center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  background: var(--primary-orange);
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: lighten(#ff6b35, 5%);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .libraries-list {
@@ -582,6 +764,96 @@
 
 .btn-icon {
   font-size: $font-size-lg;
+}
+
+// ==================== CONFIRMATION DIALOG ====================
+.confirm-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  @include flex-center;
+  z-index: 10;
+  border-radius: $radius-lg;
+}
+
+.confirm-dialog {
+  background: var(--bg-card);
+  border-radius: $radius-lg;
+  padding: $spacing-xl;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: $shadow-xl;
+  border: 2px solid var(--error);
+  animation: slideUp 0.2s ease-out;
+}
+
+.confirm-icon {
+  font-size: 3rem;
+  margin-bottom: $spacing-md;
+}
+
+.confirm-title {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: var(--text-primary);
+  margin: 0 0 $spacing-md 0;
+}
+
+.confirm-message {
+  font-size: $font-size-sm;
+  color: var(--text-secondary);
+  line-height: $line-height-relaxed;
+  margin: 0 0 $spacing-xl 0;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: $spacing-md;
+  justify-content: center;
+}
+
+.confirm-btn-cancel {
+  padding: $spacing-sm $spacing-lg;
+  background: transparent;
+  border: 2px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.confirm-btn-delete {
+  @include flex-center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-lg;
+  background: var(--error);
+  border: 2px solid var(--error);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: darken(#dc3545, 8%);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
 }
 
 // ==================== RESPONSIVE ====================

@@ -275,6 +275,20 @@ export class QueueManagerService implements OnModuleDestroy {
 
       // Only return AI tasks
       if (currentTask.type === 'analyze') {
+        // Check if any previous task in this job is still running
+        // Tasks must be sequential within a job
+        let previousTaskRunning = false;
+        for (let i = 0; i < job.currentTaskIndex; i++) {
+          if (this.isTaskRunning(job.id, i)) {
+            previousTaskRunning = true;
+            break;
+          }
+        }
+
+        if (previousTaskRunning) {
+          continue; // Wait for previous tasks to complete
+        }
+
         return { task: currentTask, job };
       }
     }
@@ -307,7 +321,8 @@ export class QueueManagerService implements OnModuleDestroy {
     { task, job }: { task: Task; job: QueueJob },
     pool: 'main' | 'ai',
   ): Promise<void> {
-    const taskId = uuidv4();
+    // Use job.id for progress tracking so frontend can map it correctly
+    const taskId = job.id;
     const activeTask: ActiveTask = {
       taskId,
       jobId: job.id,

@@ -13,8 +13,18 @@ export const routes: Routes = [
   },
   {
     path: 'editor',
-    loadComponent: () => import('./components/video-player/video-player.component').then(m => m.VideoPlayerComponent),
+    loadComponent: () => import('./components/video-editor/video-editor.component').then(m => m.VideoEditorComponent),
     title: 'Video Editor | ClipChimp'
+  },
+  {
+    path: 'queue',
+    loadComponent: () => import('./components/video-processing-queue/video-processing-queue.component').then(m => m.VideoProcessingQueueComponent),
+    title: 'Processing Queue | ClipChimp'
+  },
+  {
+    path: 'video/:id',
+    loadComponent: () => import('./components/video-info-page/video-info-page.component').then(m => m.VideoInfoPageComponent),
+    title: 'Video Info | ClipChimp'
   },
   {
     path: 'settings',

@@ -1,26 +1,26 @@
 // clippy/backend/src/media/media-event.service.ts
 import { Injectable, Logger } from '@nestjs/common';
-import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { Server } from 'socket.io';
+import { WebSocketService } from '../common/websocket.service';
 
-@WebSocketGateway({ cors: true })
 @Injectable()
 export class MediaEventService {
-  @WebSocketServer()
-  server: Server;
-
   private readonly logger = new Logger(MediaEventService.name);
-  
+
+  constructor(private readonly websocketService: WebSocketService) {}
+
   /**
    * Base method to emit any event with data
+   * Uses WebSocketService to access the shared Socket.IO server
    */
   public emitEvent(eventType: string, data: any): void {
-    if (!this.server) {
+    const server = this.websocketService.getServer();
+
+    if (!server) {
       this.logger.warn(`Cannot emit event: ${eventType} - WebSocket server not initialized`);
       return;
     }
-    
-    this.server.emit(eventType, data);
+
+    server.emit(eventType, data);
   }
   
   /**

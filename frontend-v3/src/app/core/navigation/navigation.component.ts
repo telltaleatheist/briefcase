@@ -23,6 +23,7 @@ export class NavigationComponent {
 
   navLinks = [
     { path: '/', label: 'Media Library', icon: '📹' },
+    { path: '/queue', label: 'Processing Queue', icon: '⚡' },
     { path: '/settings', label: 'Settings', icon: '⚙️' }
   ];
 
@@ -86,6 +87,43 @@ export class NavigationComponent {
         error: (error) => {
           console.error('Failed to relink library:', error);
           alert('Failed to relink library. Please try again.');
+        }
+      });
+    }
+  }
+
+  onLibraryUpdated(update: { id: string; name: string; path: string }) {
+    this.libraryService.updateLibrary(update.id, update.name, update.path).subscribe({
+      next: (response) => {
+        if (response.success) {
+          // Refresh libraries list
+          this.libraryService.refreshLibraries();
+          // Update current library if it was the one edited
+          const currentLib = this.libraryService.currentLibrary();
+          if (currentLib && currentLib.id === update.id) {
+            this.libraryService.currentLibrary.set(response.data);
+          }
+        }
+      },
+      error: (error) => {
+        console.error('Failed to update library:', error);
+        alert('Failed to update library. Please try again.');
+      }
+    });
+  }
+
+  onLibrariesDeleted(ids: string[]) {
+    // Delete each library
+    for (const id of ids) {
+      this.libraryService.deleteLibrary(id).subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.libraryService.refreshLibraries();
+          }
+        },
+        error: (error) => {
+          console.error('Failed to delete library:', error);
+          alert('Failed to delete library. Please try again.');
         }
       });
     }

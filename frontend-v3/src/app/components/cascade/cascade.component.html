@@ -1,0 +1,277 @@
+<div class="cascade" (click)="clearSelection()">
+  <!-- Toolbar -->
+  <div class="library-toolbar">
+    <div class="toolbar-title">
+      <span class="toolbar-icon">🎬</span>
+      <span class="toolbar-text">Media Library</span>
+    </div>
+    <div class="toolbar-info">
+      @if (selectedCount() > 0) {
+        <span class="selection-count">{{ selectedCount() }} selected</span>
+      }
+    </div>
+  </div>
+
+  <!-- Empty State (outside virtual scroll) -->
+  @if (virtualItems().length === 0) {
+    <div class="library-content empty">
+      <div class="empty-state">
+        <div class="empty-icon">🎬</div>
+        <h3>No videos yet</h3>
+        <p>Your video library will appear here</p>
+      </div>
+    </div>
+  } @else {
+    <!-- Virtual Scroll Video List -->
+    <cdk-virtual-scroll-viewport
+      itemSize="56"
+      class="library-content"
+      minBufferPx="400"
+      maxBufferPx="800"
+    >
+      <ng-container *cdkVirtualFor="let item of virtualItems(); let i = index; trackBy: trackItem">
+        <!-- Week Header -->
+        @if (item.type === 'header') {
+          <div
+            class="week-header"
+            (click)="toggleWeek(item.week, $event)"
+          >
+            <button class="week-toggle" (click)="toggleWeek(item.week, $event)">
+              <span class="toggle-icon" [class.expanded]="item.week.expanded">▶</span>
+            </button>
+            <span class="week-label">{{ item.week.weekLabel.toUpperCase() }}</span>
+            <span class="week-count">({{ item.week.videos.length }})</span>
+          </div>
+        }
+
+        <!-- Video Item -->
+        @if (item.type === 'video') {
+          <div class="video-item-wrapper">
+            <div
+              class="video-item"
+              [class.selected]="isSelected(item.itemId)"
+              [class.highlighted]="isHighlighted(item.itemId)"
+              [class.selection-edge-top]="isSelectionEdgeTop(i)"
+              [class.selection-edge-bottom]="isSelectionEdgeBottom(i)"
+              [class.has-children]="hasChildren(item.video)"
+              (click)="selectVideo(item.itemId, item.video, $event)"
+              (contextmenu)="onContextMenu(item.itemId, item.video, $event)"
+            >
+              <!-- Processing Status Indicator -->
+              @if (showStatusIndicator) {
+                <div class="selection-indicator" [ngClass]="getProcessingStatus(item.video)"></div>
+              }
+
+              <!-- Expand/Collapse Button (if children enabled) -->
+              @if (childrenConfig?.expandable && hasChildren(item.video)) {
+                <button
+                  class="expand-toggle"
+                  (click)="toggleExpanded(item.video.id, $event)"
+                  [attr.aria-expanded]="isExpanded(item.video.id)">
+                  <span class="expand-icon" [class.expanded]="isExpanded(item.video.id)">▶</span>
+                </button>
+              } @else {
+                <!-- Video Icon -->
+                <div class="video-icon">📹</div>
+              }
+
+            <!-- Video Content -->
+            <div class="video-content">
+              <!-- Title -->
+              <div class="video-title">{{ item.video.name }}</div>
+
+              <!-- Suggested Title Row (only show if AI suggested title exists) -->
+              @if (item.video.suggestedTitle) {
+                <div class="video-meta">
+                  <span class="meta-icon">✨</span>
+                  <span class="meta-label">AI Title:</span>
+                  <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
+                  <span
+                    class="meta-action"
+                    (click)="openSuggestedTitleModal(item.video); $event.stopPropagation()"
+                  >Edit</span>
+                  @if (item.video.downloadDate) {
+                    <span class="meta-separator">•</span>
+                    <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
+                  }
+                </div>
+              }
+            </div>
+
+            <!-- Duration & Actions -->
+            <div class="video-actions">
+              @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00') {
+                <span class="video-duration">{{ item.video.duration }}</span>
+              }
+              @if (showEditButton) {
+                <button
+                  class="edit-btn"
+                  (click)="onEditClick(item.video, $event)"
+                  title="Edit"
+                >
+                  ✏️
+                </button>
+              }
+              @if (showDeleteButton) {
+                <button
+                  class="delete-btn"
+                  (click)="onDeleteClick(item.video, $event)"
+                  title="Delete"
+                >
+                  ×
+                </button>
+              }
+            </div>
+
+            <!-- Progress Bar -->
+            @if (getProgress(item.video); as progress) {
+              <div class="item-progress-bar"
+                   [attr.aria-label]="progress.label || 'Progress: ' + progress.value + '%'"
+                   role="progressbar"
+                   [attr.aria-valuenow]="progress.value"
+                   aria-valuemin="0"
+                   aria-valuemax="100">
+                @if (!progress.indeterminate) {
+                  <div class="progress-fill"
+                       [style.width.%]="progress.value"
+                       [style.background-color]="progress.color || null"></div>
+                } @else {
+                  <div class="progress-fill indeterminate"
+                       [style.background-color]="progress.color || null"></div>
+                }
+              </div>
+            }
+
+            <!-- Master Progress Bar (when children exist) -->
+            @if (hasChildren(item.video) && getMasterProgress(item.video) !== null) {
+              <div class="master-progress-bar"
+                   role="progressbar"
+                   [attr.aria-valuenow]="getMasterProgress(item.video)"
+                   aria-valuemin="0"
+                   aria-valuemax="100">
+                <div class="progress-fill"
+                     [style.width.%]="getMasterProgress(item.video)"></div>
+              </div>
+            }
+          </div>
+
+            <!-- Cascade Children -->
+            @if (isExpanded(item.video.id) && hasChildren(item.video)) {
+              <div class="cascade-children" [@expandCollapse]>
+                @for (child of getChildren(item.video); track child.id) {
+                  <div
+                    class="cascade-child"
+                    [class.child-pending]="child.status === 'pending'"
+                    [class.child-active]="child.status === 'active'"
+                    [class.child-completed]="child.status === 'completed'"
+                    [class.child-failed]="child.status === 'failed'"
+                    [class.child-skipped]="child.status === 'skipped'"
+                    (click)="handleChildClick(item.video, child, $event)">
+
+                    <!-- Child Icon -->
+                    <span class="child-icon">{{ child.icon || '○' }}</span>
+
+                    <!-- Child Label -->
+                    <span class="child-label">{{ child.label }}</span>
+
+                    <!-- Child Metadata -->
+                    @if (child.metadata) {
+                      <span class="child-metadata">{{ child.metadata }}</span>
+                    }
+
+                    <!-- Child Progress Bar -->
+                    @if (child.progress) {
+                      <div class="child-progress-bar">
+                        @if (!child.progress.indeterminate) {
+                          <div class="progress-fill"
+                               [style.width.%]="child.progress.value"
+                               [style.background-color]="child.progress.color || null"></div>
+                        } @else {
+                          <div class="progress-fill indeterminate"
+                               [style.background-color]="child.progress.color || null"></div>
+                        }
+                      </div>
+                    }
+
+                    <!-- Child Status Icon -->
+                    @if (childrenConfig?.showStatus !== false) {
+                      <span class="child-status-icon">{{ getChildStatusIcon(child.status) }}</span>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+      </ng-container>
+    </cdk-virtual-scroll-viewport>
+  }
+
+  <!-- Context Menu -->
+  <app-context-menu
+    [visible]="contextMenuVisible()"
+    [position]="contextMenuPosition()"
+    [actions]="contextMenuActions()"
+    (actionSelected)="onContextMenuAction($event)"
+    (closed)="closeContextMenu()"
+  />
+
+  <!-- Filename Edit Modal -->
+  <app-filename-modal
+    [show]="filenameModalVisible()"
+    [filename]="editingVideo()?.suggestedFilename || ''"
+    [original]="editingVideo()?.name || ''"
+    (saved)="onFilenameSaved($event)"
+    (closed)="onFilenameModalClosed()"
+  />
+
+  <!-- Suggested Title Edit Modal -->
+  <app-filename-modal
+    [show]="suggestedTitleModalVisible()"
+    [filename]="editingSuggestedTitleVideo()?.suggestedTitle || ''"
+    [original]="editingSuggestedTitleVideo()?.name || ''"
+    [title]="'Edit AI Suggested Title'"
+    [label]="'Suggested Title'"
+    (saved)="onSuggestedTitleSaved($event)"
+    (closed)="onSuggestedTitleModalClosed()"
+  />
+
+  <!-- Delete Options Modal -->
+  @if (deleteModalVisible()) {
+    <div class="delete-modal-backdrop" (click)="closeDeleteModal()">
+      <div class="delete-modal" (click)="$event.stopPropagation()">
+        <div class="delete-modal-header">
+          <span class="delete-modal-icon">🗑️</span>
+          <h3 class="delete-modal-title">
+            Delete {{ deletingVideos().length }} {{ deletingVideos().length === 1 ? 'Item' : 'Items' }}
+          </h3>
+        </div>
+        <p class="delete-modal-description">Choose how to delete the selected items:</p>
+        <div class="delete-options">
+          <button class="delete-option" (click)="onDeleteModeSelected('database-only')">
+            <span class="option-icon">📋</span>
+            <div class="option-content">
+              <span class="option-label">Remove from Library</span>
+              <span class="option-description">Delete database entry but keep file on disk</span>
+            </div>
+          </button>
+          <button class="delete-option" (click)="onDeleteModeSelected('file-only')">
+            <span class="option-icon">📁</span>
+            <div class="option-content">
+              <span class="option-label">Delete File Only</span>
+              <span class="option-description">Delete file from disk but keep database entry</span>
+            </div>
+          </button>
+          <button class="delete-option delete-option-danger" (click)="onDeleteModeSelected('everything')">
+            <span class="option-icon">⚠️</span>
+            <div class="option-content">
+              <span class="option-label">Delete Everything</span>
+              <span class="option-description">Delete both file and database entry permanently</span>
+            </div>
+          </button>
+        </div>
+        <button class="delete-cancel-btn" (click)="closeDeleteModal()">Cancel</button>
+      </div>
+    </div>
+  }
+</div>

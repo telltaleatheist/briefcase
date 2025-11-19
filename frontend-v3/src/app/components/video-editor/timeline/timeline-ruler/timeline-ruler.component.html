@@ -1,0 +1,14 @@
+<div class="timeline-ruler" (click)="onRulerClick($event)">
+  <div class="ruler-content">
+    @for (marker of markers; track marker.position) {
+      <div
+        class="ruler-mark"
+        [class.major]="marker.isMajor"
+        [style.left.%]="marker.position">
+        @if (marker.showLabel) {
+          <span class="ruler-label">{{ marker.label }}</span>
+        }
+      </div>
+    }
+  </div>
+</div>

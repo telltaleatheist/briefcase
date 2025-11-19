@@ -1,0 +1,611 @@
+<!-- Video Info Page -->
+<div class="video-info-container" *ngIf="videoInfo">
+  <!-- Header Section -->
+  <div class="video-header">
+    <div class="video-player-placeholder">
+      <span class="player-icon">▶️</span>
+      <span class="player-text">Video Player Area</span>
+      <div class="player-overlay">
+        <span class="duration-badge">{{ formatDuration(videoInfo.metadata.duration) }}</span>
+      </div>
+    </div>
+
+    <div class="video-title-section">
+      <h1 class="video-title">{{ videoInfo.title }}</h1>
+      <div class="video-meta">
+        <span class="meta-item">
+          <span class="meta-icon">📅</span>
+          {{ formatDate(videoInfo.createdAt) }}
+        </span>
+        <span class="meta-item">
+          <span class="meta-icon">📁</span>
+          {{ formatFileSize(videoInfo.metadata.fileSize) }}
+        </span>
+        <span class="meta-item">
+          <span class="meta-icon">🎬</span>
+          {{ videoInfo.metadata.resolution }} &#64; {{ videoInfo.metadata.frameRate }}fps
+        </span>
+        <span class="meta-item status-badge" [class]="'status-' + videoInfo.processingStatus.overall">
+          {{ videoInfo.processingStatus.overall | titlecase }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab Navigation -->
+  <div class="tab-navigation">
+    <button
+      class="tab-button"
+      [class.active]="activeTab === 'overview'"
+      (click)="activeTab = 'overview'">
+      <span class="tab-icon">📊</span>
+      Overview
+    </button>
+    <button
+      class="tab-button"
+      [class.active]="activeTab === 'metadata'"
+      (click)="activeTab = 'metadata'">
+      <span class="tab-icon">ℹ️</span>
+      Metadata
+    </button>
+    <button
+      class="tab-button"
+      [class.active]="activeTab === 'ai-analysis'"
+      (click)="activeTab = 'ai-analysis'">
+      <span class="tab-icon">🤖</span>
+      AI Analysis
+      <span class="tab-badge">{{ videoInfo.aiAnalyses.length }}</span>
+    </button>
+    <button
+      class="tab-button"
+      [class.active]="activeTab === 'transcription'"
+      (click)="activeTab = 'transcription'">
+      <span class="tab-icon">💬</span>
+      Transcription
+    </button>
+  </div>
+
+  <!-- Tab Content -->
+  <div class="tab-content">
+    <!-- Overview Tab -->
+    <div class="overview-tab" *ngIf="activeTab === 'overview'">
+      <!-- Tags Section -->
+      <div class="section-card">
+        <div class="section-header" (click)="toggleSection('tags')">
+          <h2 class="section-title">
+            <span class="section-icon">🏷️</span>
+            Tags
+          </h2>
+          <button class="section-toggle">
+            <span [class.rotated]="!expandedSections.tags">▶</span>
+          </button>
+        </div>
+        <div class="section-content" *ngIf="expandedSections.tags">
+          <div class="tags-container">
+            <div class="tags-list">
+              <span
+                *ngFor="let tag of videoInfo.tags"
+                class="tag"
+                [style.background-color]="tag.color + '20'"
+                [style.border-color]="tag.color">
+                <span class="tag-name">{{ tag.name }}</span>
+                <span class="tag-category">{{ tag.category }}</span>
+                <button class="tag-remove" (click)="removeTag(tag.id)">×</button>
+              </span>
+
+              <button
+                *ngIf="!isAddingTag"
+                class="add-tag-button"
+                (click)="isAddingTag = true">
+                <span class="button-icon">+</span>
+                Add Tag
+              </button>
+            </div>
+
+            <div class="add-tag-form" *ngIf="isAddingTag">
+              <input
+                type="text"
+                class="tag-input"
+                [(ngModel)]="newTagName"
+                placeholder="Enter tag name"
+                (keyup.enter)="addTag()">
+              <select class="tag-category-select" [(ngModel)]="newTagCategory">
+                <option value="genre">Genre</option>
+                <option value="topic">Topic</option>
+                <option value="mood">Mood</option>
+                <option value="technical">Technical</option>
+                <option value="custom">Custom</option>
+              </select>
+              <button class="save-button" (click)="addTag()">Save</button>
+              <button class="cancel-button" (click)="isAddingTag = false">Cancel</button>
+
+              <div class="suggested-tags">
+                <span class="suggested-label">Suggested:</span>
+                <button
+                  *ngFor="let tag of suggestedTags"
+                  class="suggested-tag"
+                  (click)="addSuggestedTag(tag)">
+                  {{ tag }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Description Section -->
+      <div class="section-card">
+        <div class="section-header" (click)="toggleSection('description')">
+          <h2 class="section-title">
+            <span class="section-icon">📝</span>
+            Description
+          </h2>
+          <div class="section-actions">
+            <button
+              *ngIf="!isEditingDescription && expandedSections.description"
+              class="edit-button"
+              (click)="editDescription(); $event.stopPropagation()">
+              <span class="button-icon">✏️</span>
+              Edit
+            </button>
+            <button class="section-toggle">
+              <span [class.rotated]="!expandedSections.description">▶</span>
+            </button>
+          </div>
+        </div>
+        <div class="section-content" *ngIf="expandedSections.description">
+          <div class="description-container">
+            <p class="description-text" *ngIf="!isEditingDescription">
+              {{ videoInfo.description }}
+            </p>
+            <div class="description-edit" *ngIf="isEditingDescription">
+              <textarea
+                class="description-textarea"
+                [(ngModel)]="editedDescription"
+                rows="6"
+                placeholder="Enter video description...">
+              </textarea>
+              <div class="edit-actions">
+                <button class="save-button" (click)="saveDescription()">Save</button>
+                <button class="cancel-button" (click)="cancelDescriptionEdit()">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Insights -->
+      <div class="section-card">
+        <h2 class="section-title">
+          <span class="section-icon">💡</span>
+          Quick Insights
+        </h2>
+        <div class="insights-grid">
+          <div class="insight-card">
+            <span class="insight-icon">⏱️</span>
+            <span class="insight-value">{{ formatDuration(videoInfo.metadata.duration) }}</span>
+            <span class="insight-label">Duration</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">💬</span>
+            <span class="insight-value">{{ videoInfo.transcription.length }}</span>
+            <span class="insight-label">Transcript Segments</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">🤖</span>
+            <span class="insight-value">{{ videoInfo.aiAnalyses.length }}</span>
+            <span class="insight-label">AI Analyses</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">🏷️</span>
+            <span class="insight-value">{{ videoInfo.tags.length }}</span>
+            <span class="insight-label">Tags</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metadata Tab -->
+    <div class="metadata-tab" *ngIf="activeTab === 'metadata'">
+      <div class="section-card">
+        <h2 class="section-title">
+          <span class="section-icon">🎥</span>
+          Video Properties
+        </h2>
+        <div class="metadata-grid">
+          <div class="metadata-group">
+            <h3 class="group-title">Video</h3>
+            <div class="metadata-item">
+              <span class="metadata-label">Resolution:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.resolution }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Frame Rate:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.frameRate }} fps</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Bitrate:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.bitrate }} kbps</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Codec:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.codec }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Format:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.format }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Aspect Ratio:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.aspectRatio }}</span>
+            </div>
+          </div>
+
+          <div class="metadata-group">
+            <h3 class="group-title">Audio</h3>
+            <div class="metadata-item">
+              <span class="metadata-label">Channels:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.audioChannels }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Bitrate:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.audioBitrate }} kbps</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Codec:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.audioCodec }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Sample Rate:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.audioSampleRate }} Hz</span>
+            </div>
+          </div>
+
+          <div class="metadata-group">
+            <h3 class="group-title">File Info</h3>
+            <div class="metadata-item">
+              <span class="metadata-label">Size:</span>
+              <span class="metadata-value">{{ formatFileSize(videoInfo.metadata.fileSize) }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Duration:</span>
+              <span class="metadata-value">{{ formatDuration(videoInfo.metadata.duration) }}</span>
+            </div>
+            <div class="metadata-item" *ngIf="videoInfo.metadata.capturedDate">
+              <span class="metadata-label">Captured:</span>
+              <span class="metadata-value">{{ formatDate(videoInfo.metadata.capturedDate) }}</span>
+            </div>
+            <div class="metadata-item" *ngIf="videoInfo.metadata.device">
+              <span class="metadata-label">Device:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.device }}</span>
+            </div>
+            <div class="metadata-item" *ngIf="videoInfo.metadata.software">
+              <span class="metadata-label">Software:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.software }}</span>
+            </div>
+          </div>
+
+          <div class="metadata-group" *ngIf="videoInfo.metadata.location">
+            <h3 class="group-title">Location</h3>
+            <div class="metadata-item">
+              <span class="metadata-label">Name:</span>
+              <span class="metadata-value">{{ videoInfo.metadata.location.name || 'Unknown' }}</span>
+            </div>
+            <div class="metadata-item">
+              <span class="metadata-label">Coordinates:</span>
+              <span class="metadata-value">
+                {{ videoInfo.metadata.location.latitude }}, {{ videoInfo.metadata.location.longitude }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Analysis Tab -->
+    <div class="ai-analysis-tab" *ngIf="activeTab === 'ai-analysis'">
+      <div class="analysis-header">
+        <div class="analysis-filters">
+          <button
+            class="filter-button"
+            [class.active]="analysisFilter === 'all'"
+            (click)="analysisFilter = 'all'">
+            All
+          </button>
+          <button
+            class="filter-button"
+            [class.active]="analysisFilter === 'summary'"
+            (click)="analysisFilter = 'summary'">
+            Summary
+          </button>
+          <button
+            class="filter-button"
+            [class.active]="analysisFilter === 'highlights'"
+            (click)="analysisFilter = 'highlights'">
+            Highlights
+          </button>
+          <button
+            class="filter-button"
+            [class.active]="analysisFilter === 'sentiment'"
+            (click)="analysisFilter = 'sentiment'">
+            Sentiment
+          </button>
+          <button
+            class="filter-button"
+            [class.active]="analysisFilter === 'topics'"
+            (click)="analysisFilter = 'topics'">
+            Topics
+          </button>
+        </div>
+      </div>
+
+      <div class="analysis-list">
+        <div
+          *ngFor="let analysis of getFilteredAnalyses()"
+          class="analysis-card"
+          [class.expanded]="selectedAnalysis?.id === analysis.id"
+          (click)="selectAnalysis(analysis)">
+
+          <div class="analysis-card-header">
+            <div class="analysis-info">
+              <h3 class="analysis-title">
+                <span class="analysis-icon" [ngSwitch]="analysis.type">
+                  <span *ngSwitchCase="'summary'">📄</span>
+                  <span *ngSwitchCase="'highlights'">⭐</span>
+                  <span *ngSwitchCase="'sentiment'">😊</span>
+                  <span *ngSwitchCase="'topics'">🏷️</span>
+                  <span *ngSwitchCase="'entities'">👤</span>
+                  <span *ngSwitchCase="'scenes'">🎬</span>
+                  <span *ngSwitchDefault>🔍</span>
+                </span>
+                {{ analysis.title }}
+              </h3>
+              <div class="analysis-meta">
+                <span class="meta-badge model">{{ analysis.model }}</span>
+                <span class="meta-badge confidence" *ngIf="analysis.confidence">
+                  {{ (analysis.confidence * 100) | number:'1.0-0' }}% confidence
+                </span>
+                <span class="meta-badge time">{{ formatDate(analysis.timestamp) }}</span>
+              </div>
+            </div>
+            <button class="expand-button">
+              <span [class.rotated]="selectedAnalysis?.id === analysis.id">▶</span>
+            </button>
+          </div>
+
+          <div class="analysis-card-content" *ngIf="selectedAnalysis?.id === analysis.id">
+            <!-- Summary Type -->
+            <div *ngIf="analysis.type === 'summary'" class="content-summary">
+              <p>{{ analysis.content }}</p>
+              <div class="analysis-tags" *ngIf="analysis.tags">
+                <span *ngFor="let tag of analysis.tags" class="analysis-tag">{{ tag }}</span>
+              </div>
+            </div>
+
+            <!-- Highlights Type -->
+            <div *ngIf="analysis.type === 'highlights'" class="content-highlights">
+              <div
+                *ngFor="let highlight of analysis.highlights"
+                class="highlight-item"
+                [class]="'importance-' + highlight.importance">
+                <div class="highlight-header">
+                  <span class="highlight-time">{{ formatTime(highlight.timestamp) }}</span>
+                  <span class="highlight-category">{{ highlight.category }}</span>
+                  <span class="highlight-importance">{{ highlight.importance }}</span>
+                </div>
+                <p class="highlight-text">{{ highlight.text }}</p>
+              </div>
+            </div>
+
+            <!-- Sentiment Type -->
+            <div *ngIf="analysis.type === 'sentiment'" class="content-sentiment">
+              <div class="sentiment-overall">
+                <span class="sentiment-label">Overall Sentiment:</span>
+                <span class="sentiment-value" [class]="analysis.content.overall">
+                  {{ analysis.content.overall | titlecase }}
+                </span>
+                <span class="sentiment-score">{{ (analysis.content.score * 100) | number:'1.0-0' }}%</span>
+              </div>
+              <div class="sentiment-breakdown">
+                <div class="breakdown-bar">
+                  <div
+                    class="bar-segment positive"
+                    [style.width.%]="analysis.content.breakdown.positive * 100"
+                    title="Positive: {{ (analysis.content.breakdown.positive * 100) | number:'1.0-0' }}%">
+                  </div>
+                  <div
+                    class="bar-segment neutral"
+                    [style.width.%]="analysis.content.breakdown.neutral * 100"
+                    title="Neutral: {{ (analysis.content.breakdown.neutral * 100) | number:'1.0-0' }}%">
+                  </div>
+                  <div
+                    class="bar-segment negative"
+                    [style.width.%]="analysis.content.breakdown.negative * 100"
+                    title="Negative: {{ (analysis.content.breakdown.negative * 100) | number:'1.0-0' }}%">
+                  </div>
+                </div>
+                <div class="breakdown-labels">
+                  <span class="label positive">Positive {{ (analysis.content.breakdown.positive * 100) | number:'1.0-0' }}%</span>
+                  <span class="label neutral">Neutral {{ (analysis.content.breakdown.neutral * 100) | number:'1.0-0' }}%</span>
+                  <span class="label negative">Negative {{ (analysis.content.breakdown.negative * 100) | number:'1.0-0' }}%</span>
+                </div>
+              </div>
+              <div class="sentiment-peaks" *ngIf="analysis.content.peaks">
+                <h4>Key Moments</h4>
+                <div *ngFor="let peak of analysis.content.peaks" class="peak-item">
+                  <span class="peak-time">{{ formatTime(peak.time) }}</span>
+                  <span class="peak-sentiment">{{ (peak.sentiment * 100) | number:'1.0-0' }}%</span>
+                  <span class="peak-note">{{ peak.note }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Topics Type -->
+            <div *ngIf="analysis.type === 'topics'" class="content-topics">
+              <div class="topics-list">
+                <div *ngFor="let topic of analysis.content.topics" class="topic-item">
+                  <div class="topic-header">
+                    <span class="topic-name">{{ topic.name }}</span>
+                    <span class="topic-mentions">{{ topic.mentions }} mentions</span>
+                  </div>
+                  <div class="topic-relevance">
+                    <div class="relevance-bar">
+                      <div class="relevance-fill" [style.width.%]="topic.relevance * 100"></div>
+                    </div>
+                    <span class="relevance-value">{{ (topic.relevance * 100) | number:'1.0-0' }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Generic Content -->
+            <div *ngIf="!['summary', 'highlights', 'sentiment', 'topics'].includes(analysis.type)" class="content-generic">
+              <pre>{{ formatAnalysisContent(analysis) }}</pre>
+            </div>
+
+            <!-- Custom Instructions -->
+            <div class="custom-instructions" *ngIf="analysis.customInstructions">
+              <h4>Custom Instructions:</h4>
+              <p>{{ analysis.customInstructions }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transcription Tab -->
+    <div class="transcription-tab" *ngIf="activeTab === 'transcription'">
+      <div class="transcription-header">
+        <div class="search-container">
+          <div class="search-box">
+            <input
+              type="text"
+              class="search-input"
+              [(ngModel)]="transcriptionSearchQuery"
+              (keyup.enter)="searchTranscription()"
+              placeholder="Search transcription...">
+            <button class="search-button" (click)="searchTranscription()">
+              <span class="button-icon">🔍</span>
+            </button>
+            <button
+              class="clear-button"
+              *ngIf="transcriptionSearchQuery"
+              (click)="clearSearch()">
+              <span class="button-icon">✕</span>
+            </button>
+          </div>
+          <div class="search-results" *ngIf="transcriptionSearchResults.length > 0">
+            <span class="results-count">{{ transcriptionSearchResults.length }} results found</span>
+          </div>
+        </div>
+
+        <div class="transcription-controls">
+          <div class="view-toggle">
+            <button
+              class="toggle-button"
+              [class.active]="transcriptionView === 'continuous'"
+              (click)="transcriptionView = 'continuous'">
+              Continuous
+            </button>
+            <button
+              class="toggle-button"
+              [class.active]="transcriptionView === 'segments'"
+              (click)="transcriptionView = 'segments'">
+              Segments
+            </button>
+          </div>
+
+          <label class="timestamp-toggle">
+            <input
+              type="checkbox"
+              [(ngModel)]="showTimestamps">
+            <span>Show Timestamps</span>
+          </label>
+
+          <div class="export-menu">
+            <button class="export-button">
+              <span class="button-icon">📥</span>
+              Export
+            </button>
+            <div class="export-dropdown">
+              <button (click)="exportTranscription('txt')">Text (.txt)</button>
+              <button (click)="exportTranscription('srt')">Subtitles (.srt)</button>
+              <button (click)="exportTranscription('vtt')">WebVTT (.vtt)</button>
+              <button (click)="exportTranscription('json')">JSON (.json)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Results -->
+      <div class="search-results-list" *ngIf="transcriptionSearchResults.length > 0">
+        <h3>Search Results</h3>
+        <div
+          *ngFor="let result of transcriptionSearchResults"
+          class="search-result-item"
+          (click)="jumpToSegment(result.segment)">
+          <div class="result-time">{{ formatTime(result.segment.startTime) }}</div>
+          <div class="result-text">
+            <span class="context-before">{{ result.context.before }}</span>
+            <span class="matched-text">{{ result.matchedText }}</span>
+            <span class="context-after">{{ result.context.after }}</span>
+          </div>
+          <div class="result-speaker" *ngIf="result.segment.speaker">
+            {{ result.segment.speaker }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Transcription Content -->
+      <div class="transcription-content">
+        <!-- Continuous View -->
+        <div class="continuous-view" *ngIf="transcriptionView === 'continuous'">
+          <p class="continuous-text">
+            <span
+              *ngFor="let segment of videoInfo.transcription"
+              [id]="'segment-' + segment.id"
+              [class.highlighted]="highlightedSegmentId === segment.id"
+              [class.clickable]="showTimestamps"
+              (click)="showTimestamps && jumpToSegment(segment)"
+              [title]="showTimestamps ? formatTime(segment.startTime) : ''">
+              {{ segment.text }}
+            </span>
+          </p>
+        </div>
+
+        <!-- Segments View -->
+        <div class="segments-view" *ngIf="transcriptionView === 'segments'">
+          <div
+            *ngFor="let segment of videoInfo.transcription"
+            [id]="'segment-' + segment.id"
+            class="segment-item"
+            [class.highlighted]="highlightedSegmentId === segment.id"
+            (click)="jumpToSegment(segment)">
+
+            <div class="segment-header">
+              <span class="segment-time" *ngIf="showTimestamps">
+                {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
+              </span>
+              <span class="segment-speaker" *ngIf="segment.speaker">
+                {{ segment.speaker }}
+              </span>
+              <span class="segment-confidence" *ngIf="segment.confidence">
+                {{ (segment.confidence * 100) | number:'1.0-0' }}%
+              </span>
+            </div>
+
+            <div class="segment-text">
+              {{ segment.text }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading State -->
+<div class="loading-state" *ngIf="!videoInfo">
+  <div class="loading-spinner"></div>
+  <p>Loading video information...</p>
+</div>

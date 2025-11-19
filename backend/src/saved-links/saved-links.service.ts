@@ -49,7 +49,8 @@ export class SavedLinksService implements OnModuleInit {
    */
   private setupEventListeners() {
     // Listen for job status updates
-    this.mediaEventService.server?.on('job-status-updated', (data: { jobId: string; status: string; task: string }) => {
+    const server = this.websocketService.getServer();
+    server?.on('job-status-updated', (data: { jobId: string; status: string; task: string }) => {
       // Check if this is a saved-link job
       if (data.jobId.startsWith('saved-link-')) {
         const savedLinkId = data.jobId.replace('saved-link-', '');

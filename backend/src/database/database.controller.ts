@@ -404,11 +404,6 @@ export class DatabaseController {
   searchVideos(
     @Query('q') query: string,
     @Query('limit') limit?: string,
-    @Query('filename') searchFilename?: string,
-    @Query('aiDescription') searchAiDescription?: string,
-    @Query('transcript') searchTranscript?: string,
-    @Query('analysis') searchAnalysis?: string,
-    @Query('tags') searchTags?: string,
   ) {
     if (!query || query.trim() === '') {
       return {
@@ -420,27 +415,19 @@ export class DatabaseController {
 
     const limitNum = limit ? parseInt(limit, 10) : 1000;
 
-    // Parse filter flags (default to true if not specified)
-    const filters = {
-      filename: searchFilename !== 'false',
-      aiDescription: searchAiDescription !== 'false',
-      transcript: searchTranscript !== 'false',
-      analysis: searchAnalysis !== 'false',
-      tags: searchTags !== 'false',
-    };
-
-    const searchResults = this.databaseService.searchVideos(query, limitNum, filters);
+    // Use FTS5 search for efficient full-text searching
+    const searchResults = this.databaseService.searchFTS(query, limitNum);
 
     // Get full video details for each result
     const videos = searchResults.map(result => {
-      const video = this.databaseService.getVideoById(result.id);
+      const video = this.databaseService.getVideoById(result.videoId);
       if (!video) {
         return null;
       }
       return {
         ...video,
         searchScore: result.score,
-        matchType: result.matchType,
+        matchTypes: result.matches, // Array of match sources (filename, transcript, etc.)
       };
     }).filter((v): v is NonNullable<typeof v> => v !== null); // Filter out any null results
 
@@ -884,6 +871,52 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/videos/:id/waveform
+   * Generate and return waveform data for a video
+   */
+  @Get('videos/:id/waveform')
+  async getVideoWaveform(
+    @Param('id') videoId: string,
+    @Query('samples') samples?: string
+  ) {
+    try {
+      const video = this.databaseService.getVideoById(videoId);
+
+      if (!video) {
+        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
+      }
+
+      const videoPath = video.current_path;
+
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        throw new HttpException('Video file not found on disk', HttpStatus.NOT_FOUND);
+      }
+
+      const samplesCount = samples ? parseInt(samples, 10) : 500;
+      const waveformData = await this.ffmpegService.generateWaveform(videoPath, samplesCount);
+
+      return {
+        success: true,
+        data: {
+          samples: waveformData.samples,
+          duration: waveformData.duration,
+          sampleRate: 8000,
+          videoId
+        }
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to generate waveform: ${(error as Error).message}`);
+      throw new HttpException(
+        `Failed to generate waveform: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * POST /api/database/videos/lookup-by-file
    * Lookup a video in the database by computing its hash
    * Returns video data with analysis and transcript if they exist
@@ -1123,6 +1156,51 @@ export class DatabaseController {
       return {
         success: false,
         error: error.message || 'Failed to update video filename'
+      };
+    }
+  }
+
+  /**
+   * PATCH /api/database/videos/:id/suggested-title
+   * Update video suggested title (without renaming file)
+   */
+  @Patch('videos/:id/suggested-title')
+  async updateVideoSuggestedTitle(
+    @Param('id') videoId: string,
+    @Body() body: { suggestedTitle: string }
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Validate suggested title
+      if (!body.suggestedTitle || typeof body.suggestedTitle !== 'string') {
+        return {
+          success: false,
+          error: 'Valid suggested title is required'
+        };
+      }
+
+      // Update suggested title
+      this.databaseService.updateVideoSuggestedTitle(videoId, body.suggestedTitle.trim());
+
+      this.logger.log(`Updated suggested title for video ${videoId}: ${body.suggestedTitle}`);
+
+      return {
+        success: true,
+        message: 'Suggested title updated successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to update suggested title: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Failed to update suggested title'
       };
     }
   }

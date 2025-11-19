@@ -1,15 +1,16 @@
-import { Component, OnInit, signal, inject, ChangeDetectionStrategy, computed, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, computed, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
-import { VideoLibraryComponent } from '../../components/video-library/video-library.component';
-import { ProcessingQueueComponent } from '../../components/processing-queue/processing-queue.component';
+import { CascadeComponent } from '../../components/cascade/cascade.component';
+import { VideoProcessingQueueComponent } from '../../components/video-processing-queue/video-processing-queue.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
-import { QueueItem } from '../../models/queue.model';
-import { JobRequest, TaskType } from '../../models/task.model';
 import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
 import { LibraryService } from '../../services/library.service';
+import { WebsocketService, TaskCompleted } from '../../services/websocket.service';
+import { VideoProcessingService } from '../../services/video-processing.service';
+import { VideoJobSettings } from '../../models/video-processing.model';
 
 @Component({
   selector: 'app-library-page',
@@ -17,26 +18,26 @@ import { LibraryService } from '../../services/library.service';
   imports: [
     CommonModule,
     LibrarySearchFiltersComponent,
-    VideoLibraryComponent,
-    ProcessingQueueComponent,
+    CascadeComponent,
+    VideoProcessingQueueComponent,
     LibraryManagerModalComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class LibraryPageComponent implements OnInit {
+export class LibraryPageComponent implements OnInit, OnDestroy {
   private libraryService = inject(LibraryService);
   private router = inject(Router);
+  private websocketService = inject(WebsocketService);
+  private videoProcessingService = inject(VideoProcessingService);
 
-  @ViewChild(VideoLibraryComponent) private videoLibraryComponent?: VideoLibraryComponent;
-  @ViewChild(ProcessingQueueComponent) private processingQueueComponent?: ProcessingQueueComponent;
+  @ViewChild(CascadeComponent) private videoLibraryComponent?: CascadeComponent;
 
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
 
-  // Queue state
-  queueItems = signal<QueueItem[]>([]);
+  // Queue state - now simplified since VideoProcessingService manages the queue
   queueExpanded = signal(false);
 
   // Library manager state
@@ -54,7 +55,48 @@ export class LibraryPageComponent implements OnInit {
   ngOnInit() {
     this.loadCurrentLibrary();
     this.loadLibraries();
-    // Mock queue items removed - queue starts empty
+
+    // Subscribe to task completions to refresh library when processing completes
+    this.websocketService.connect();
+    this.websocketService.onTaskCompleted((event: TaskCompleted) => {
+      // Refresh library when a task completes
+      if (event.type === 'analyze' || event.type === 'transcribe') {
+        this.loadCurrentLibrary();
+      }
+    });
+
+    // Check for navigation state to trigger analysis
+    const navigation = this.router.getCurrentNavigation();
+    const state = navigation?.extras?.state || history.state;
+
+    if (state?.triggerAnalysis && state?.videoId) {
+      // Wait for library to load, then add video to queue
+      setTimeout(() => {
+        this.addVideoToAnalysisQueue(state.videoId, state.videoName);
+      }, 500);
+    }
+  }
+
+  private addVideoToAnalysisQueue(videoId: string, videoName?: string) {
+    // Find the video in the loaded library
+    const allVideos = this.videoWeeks().flatMap(week => week.videos);
+    const video = allVideos.find(v => v.id === videoId);
+
+    if (video) {
+      this.analyzeVideos([video]);
+    } else {
+      // Video not found in current view, create a minimal video item
+      const minimalVideo: VideoItem = {
+        id: videoId,
+        name: videoName || 'Video',
+        hasAnalysis: false
+      };
+      this.analyzeVideos([minimalVideo]);
+    }
+  }
+
+  ngOnDestroy() {
+    this.websocketService.disconnect();
   }
 
   loadLibrary() {
@@ -183,24 +225,64 @@ export class LibraryPageComponent implements OnInit {
       return;
     }
 
-    let filtered = this.videoWeeks();
-
-    // Apply search query filter
+    // Use backend FTS search for search queries
     if (this.currentFilters.searchQuery) {
-      const query = this.currentFilters.searchQuery.toLowerCase();
-      filtered = filtered.map(week => ({
-        ...week,
-        videos: week.videos.filter(video =>
-          video.name.toLowerCase().includes(query) ||
-          video.suggestedFilename.toLowerCase().includes(query)
-        )
-      })).filter(week => week.videos.length > 0);
+      const query = this.currentFilters.searchQuery.trim();
+
+      if (query) {
+        // Call backend FTS search
+        this.libraryService.searchVideos(query).subscribe({
+          next: (response) => {
+            if (response.success && response.data) {
+              // Group search results by week
+              const searchResults = response.data;
+              const weekMap = new Map<string, VideoItem[]>();
+
+              // Get week labels from original data for grouping
+              const originalWeeks = this.videoWeeks();
+              const videoWeekMap = new Map<string, string>();
+
+              originalWeeks.forEach(week => {
+                week.videos.forEach(video => {
+                  videoWeekMap.set(video.id, week.weekLabel);
+                });
+              });
+
+              // Group search results by week
+              searchResults.forEach(video => {
+                const weekLabel = videoWeekMap.get(video.id) || 'Search Results';
+                if (!weekMap.has(weekLabel)) {
+                  weekMap.set(weekLabel, []);
+                }
+                weekMap.get(weekLabel)!.push(video);
+              });
+
+              // Convert map to VideoWeek array
+              const filtered: VideoWeek[] = [];
+              weekMap.forEach((videos, weekLabel) => {
+                filtered.push({ weekLabel, videos });
+              });
+
+              // Sort by week label (most recent first)
+              filtered.sort((a, b) => b.weekLabel.localeCompare(a.weekLabel));
+
+              this.filteredWeeks.set(filtered);
+            } else {
+              this.filteredWeeks.set([]);
+            }
+          },
+          error: (error) => {
+            console.error('Search failed:', error);
+            // Fall back to showing all videos on error
+            this.filteredWeeks.set(this.videoWeeks());
+          }
+        });
+        return;
+      }
     }
 
-    // TODO: Apply other filters (date range, has transcript, etc.)
-    // These would need data from the backend
-
-    this.filteredWeeks.set(filtered);
+    // No search query - show all videos
+    this.filteredWeeks.set(this.videoWeeks());
   }
 
   onSelectionChanged(event: { count: number; ids: Set<string> }) {
@@ -216,12 +298,6 @@ export class LibraryPageComponent implements OnInit {
         // TODO: Open video details/metadata editor modal
         console.log('View details for:', videos[0]?.name);
         alert(`View details: ${videos[0]?.name}\n\nThis feature will show video metadata, transcript, and analysis.`);
-        break;
-
-      case 'editSuggestedTitle':
-        // TODO: Open suggested title editor modal
-        console.log('Edit suggested title for:', videos[0]?.name);
-        alert(`Edit suggested title: ${videos[0]?.suggestedTitle || videos[0]?.name}\n\nThis feature will open a dialog to edit the AI-suggested title.`);
         break;
 
       case 'addToTab':
@@ -317,29 +393,47 @@ export class LibraryPageComponent implements OnInit {
     });
   }
 
+  viewMore() {
+    const selectedItemIds = this.selectedVideoIds();
+
+    if (selectedItemIds.size === 0) {
+      alert('Please select a video first');
+      return;
+    }
+
+    if (selectedItemIds.size !== 1) {
+      alert('Please select exactly one video to view details');
+      return;
+    }
+
+    // Get the video ID from the itemId (format: "weekLabel|videoId")
+    const itemId = Array.from(selectedItemIds)[0];
+    const parts = itemId.split('|');
+    const videoId = parts.length > 1 ? parts[1] : itemId;
+
+    // Navigate to video info page
+    this.router.navigate(['/video', videoId]);
+  }
+
   private analyzeVideos(videos: VideoItem[]) {
     if (videos.length === 0) return;
 
-    const confirm = window.confirm(
-      `Run analysis on ${videos.length} video(s)?\n\nThis will transcribe and analyze the selected videos.`
-    );
+    // Add videos to queue with transcribe + analyze tasks via VideoProcessingService
+    videos.forEach(video => {
+      const settings: VideoJobSettings = {
+        fixAspectRatio: false,
+        normalizeAudio: false,
+        transcribe: true,
+        whisperModel: 'base',
+        aiAnalysis: true,
+        aiModel: 'gpt-4',
+        outputFormat: 'mp4',
+        outputQuality: 'high'
+      };
 
-    if (!confirm) return;
+      this.videoProcessingService.addJob('', video.name, settings, video.id, video.filePath);
+    });
 
-    // Add videos to queue with transcribe + analyze tasks
-    const newQueueItems: QueueItem[] = videos.map(video => ({
-      id: `queue-${Date.now()}-${Math.random()}`,
-      source: 'library' as const,
-      video,
-      tasks: [
-        { type: 'transcribe' as any, status: 'pending', progress: 0 },
-        { type: 'analyze' as any, status: 'pending', progress: 0 }
-      ],
-      status: 'pending',
-      overallProgress: 0
-    }));
-
-    this.queueItems.set([...this.queueItems(), ...newQueueItems]);
     this.queueExpanded.set(true);
 
     // Clear selection
@@ -393,7 +487,6 @@ export class LibraryPageComponent implements OnInit {
     }
 
     // Get selected videos and add them to queue
-    // selectedVideoIds contains itemIds in format "weekLabel|videoId"
     const allVideos: VideoItem[] = [];
     this.videoWeeks().forEach(week => {
       allVideos.push(...week.videos);
@@ -409,23 +502,24 @@ export class LibraryPageComponent implements OnInit {
       uniqueVideoIds.add(videoId);
     });
 
-    const newQueueItems: QueueItem[] = [];
+    // Add to VideoProcessingService
     uniqueVideoIds.forEach(videoId => {
       const video = allVideos.find(v => v.id === videoId);
       if (video) {
-        newQueueItems.push({
-          id: `queue-${Date.now()}-${Math.random()}`,
-          source: 'library',
-          video,
-          tasks: [], // Start with no tasks - user configures them
-          status: 'pending',
-          overallProgress: 0
-        });
+        const settings: VideoJobSettings = {
+          fixAspectRatio: false,
+          normalizeAudio: false,
+          transcribe: true,
+          whisperModel: 'base',
+          aiAnalysis: true,
+          aiModel: 'gpt-4',
+          outputFormat: 'mp4',
+          outputQuality: 'high'
+        };
+        this.videoProcessingService.addJob('', video.name, settings, video.id, video.filePath);
       }
     });
 
-    // Add to queue and expand
-    this.queueItems.set([...this.queueItems(), ...newQueueItems]);
     this.queueExpanded.set(true);
 
     // Clear selection
@@ -434,147 +528,16 @@ export class LibraryPageComponent implements OnInit {
     }
   }
 
-  onItemTasksUpdated(event: { itemId: string, tasks: any[] }) {
-    const items = this.queueItems();
-    const updatedItems = items.map(item => {
-      if (item.id === event.itemId) {
-        return { ...item, tasks: event.tasks };
-      }
-      return item;
-    });
-    this.queueItems.set(updatedItems);
-  }
-
-  onUrlAdded(url: string) {
-    // Add URL to queue with default download task
-    const newItem: QueueItem = {
-      id: `queue-${Date.now()}-${Math.random()}`,
-      source: 'url',
-      url,
-      urlTitle: new URL(url).hostname,
-      tasks: [
-        { type: 'download-import', status: 'pending', progress: 0 }
-      ],
-      status: 'pending',
-      overallProgress: 0
-    };
-
-    this.queueItems.set([...this.queueItems(), newItem]);
+  onPasteUrls() {
+    // Expand queue to show it - the VideoProcessingQueueComponent handles URL input
     this.queueExpanded.set(true);
-  }
-
-  onRemoveQueueItem(itemId: string) {
-    this.queueItems.set(this.queueItems().filter(item => item.id !== itemId));
-  }
-
-  onClearQueue() {
-    if (confirm('Clear all items from the queue?')) {
-      this.queueItems.set([]);
-      this.queueExpanded.set(false);
-    }
-  }
-
-  onProcessQueue() {
-    const items = this.queueItems();
-    if (items.length === 0) return;
-
-    // Group items by type and create job requests
-    const urlItems = items.filter(i => i.source === 'url');
-    const libraryItems = items.filter(i => i.source === 'library');
-
-    let jobsCreated = 0;
-    const totalJobs = urlItems.length + (libraryItems.length > 0 ? 1 : 0);
-
-    // Process URL items (each gets its own job with download task)
-    urlItems.forEach(item => {
-      if (item.url) {
-        const request: JobRequest = {
-          inputType: 'url',
-          url: item.url,
-          tasks: item.tasks.map(t => t.type)
-        };
-
-        this.libraryService.createJob(request).subscribe({
-          next: (response) => {
-            if (response.success) {
-              jobsCreated++;
-              if (jobsCreated === totalJobs) {
-                this.onJobsComplete(totalJobs);
-              }
-            }
-          },
-          error: (error) => {
-            console.error('Failed to create job:', error);
-          }
-        });
-      }
-    });
-
-    // Process library items (batch into one job)
-    if (libraryItems.length > 0) {
-      const fileIds = libraryItems
-        .filter(item => item.video)
-        .map(item => item.video!.id);
-
-      // Collect all unique tasks
-      const allTasks = new Set<TaskType>();
-      libraryItems.forEach(item => {
-        item.tasks.forEach(task => allTasks.add(task.type));
-      });
-
-      const request: JobRequest = {
-        inputType: 'files',
-        fileIds,
-        tasks: Array.from(allTasks)
-      };
-
-      this.libraryService.createJob(request).subscribe({
-        next: (response) => {
-          if (response.success) {
-            jobsCreated++;
-            if (jobsCreated === totalJobs) {
-              this.onJobsComplete(totalJobs);
-            }
-          }
-        },
-        error: (error) => {
-          console.error('Failed to create job:', error);
-        }
-      });
-    }
-  }
-
-  onJobsComplete(count: number) {
-    alert(`${count} ${count === 1 ? 'job' : 'jobs'} created successfully!`);
-    this.queueItems.set([]);
-    this.queueExpanded.set(false);
-    this.loadLibrary(); // Refresh library
   }
 
   onToggleQueue() {
     this.queueExpanded.set(!this.queueExpanded());
   }
 
-  onPasteUrls() {
-    this.queueExpanded.set(true);
-    // Wait for queue to expand, then focus URL input
-    setTimeout(() => {
-      this.processingQueueComponent?.focusUrlInput();
-    }, 100);
-  }
-
   onCloseQueue() {
-    if (this.queueItems().length > 0) {
-      if (confirm('Close queue? Items will be cleared.')) {
-        this.queueItems.set([]);
-        this.queueExpanded.set(false);
-      }
-    } else {
-      this.queueExpanded.set(false);
-    }
+    this.queueExpanded.set(false);
   }
-
-  hasQueueItems = computed(() => {
-    return this.queueItems().length > 0;
-  });
 }
