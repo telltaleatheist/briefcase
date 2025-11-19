@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { QueueItem, QueueItemTask } from '../../models/queue.model';
 import { AVAILABLE_TASKS, TaskType } from '../../models/task.model';
@@ -18,6 +19,7 @@ import { VideoJob } from '../../models/video-processing.model';
 })
 export class VideoProcessingQueueComponent implements OnInit, OnDestroy {
   private videoProcessingService = inject(VideoProcessingService);
+  private router = inject(Router);
 
   // Queue items
   items = signal<QueueItem[]>([]);
@@ -66,6 +68,16 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy {
         const queueItems = jobs.map(job => this.convertJobToQueueItem(job));
         this.items.set(queueItems);
       });
+
+    // Check for navigation state to open config modal
+    const navigation = this.router.getCurrentNavigation();
+    const state = navigation?.extras?.state || history.state;
+    if (state?.openConfigForJob) {
+      // Delay to ensure items are loaded
+      setTimeout(() => {
+        this.openConfig(state.openConfigForJob);
+      }, 100);
+    }
   }
 
   private convertJobToQueueItem(job: VideoJob): QueueItem {

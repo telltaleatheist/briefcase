@@ -49,7 +49,8 @@ function isPackaged(): boolean {
  */
 function getResourcesPath(): string {
   // In packaged app, use process.resourcesPath
-  if ((process as any).resourcesPath) {
+  // Must check isPackaged() because Electron sets resourcesPath even in development
+  if ((process as any).resourcesPath && isPackaged()) {
     return (process as any).resourcesPath;
   }
 

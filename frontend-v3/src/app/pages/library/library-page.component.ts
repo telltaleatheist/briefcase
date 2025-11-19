@@ -439,14 +439,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       this.videoProcessingService.addJob('', video.name, settings, video.id, video.filePath);
     });
 
-    this.queueExpanded.set(true);
-
-    // Open config modal for the first video so user can adjust AI model, etc.
-    setTimeout(() => {
-      if (this.queueComponent) {
-        this.queueComponent.openConfig(job.id);
-      }
-    }, 200);
+    // Navigate to queue page
+    this.router.navigate(['/queue'], {
+      state: { openConfigForJob: job.id }
+    });
 
     // Clear selection
     if (this.videoLibraryComponent) {
@@ -532,7 +528,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    this.queueExpanded.set(true);
+    // Navigate to queue page
+    this.router.navigate(['/queue']);
 
     // Clear selection
     if (this.videoLibraryComponent) {
@@ -541,8 +538,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   onPasteUrls() {
-    // Expand queue to show it - the VideoProcessingQueueComponent handles URL input
-    this.queueExpanded.set(true);
+    // Navigate to queue page where user can add URLs
+    this.router.navigate(['/queue']);
   }
 
   onToggleQueue() {

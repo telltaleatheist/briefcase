@@ -123,6 +123,17 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       this.togglePlayPause();
     }
 
+    // Arrow keys to seek
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      this.skipBackward(5);
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      this.skipForward(5);
+    }
+
     // Fullscreen with F key
     if (event.key === 'f' || event.key === 'F') {
       event.preventDefault();

@@ -3,8 +3,10 @@
 .queue-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  width: 100%;
   background: var(--bg-primary);
+  overflow: hidden;
 }
 
 // Header
@@ -120,7 +122,9 @@
 .queue-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: $spacing-lg $spacing-xl;
+  min-height: 0; // Important for flex child scrolling
 }
 
 // Empty State
