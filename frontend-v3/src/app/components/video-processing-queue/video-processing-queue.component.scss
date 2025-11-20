@@ -58,6 +58,13 @@
   }
 }
 
+// URL Input Section
+.url-input-section {
+  padding: $spacing-md $spacing-xl;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
 // Buttons
 .btn-primary,
 .btn-secondary {
@@ -427,17 +434,27 @@
     }
   }
 
+  .url-input-section {
+    padding: $spacing-sm $spacing-md;
+  }
+
+  .queue-list {
+    padding: $spacing-md;
+  }
+
   .queue-item {
-    flex-direction: column;
-    align-items: stretch;
+    .item-header {
+      flex-wrap: wrap;
+    }
 
     .item-progress {
+      width: 100%;
       margin-top: $spacing-sm;
+      order: 10;
     }
 
     .item-actions {
       justify-content: flex-end;
-      margin-top: $spacing-sm;
     }
   }
 }

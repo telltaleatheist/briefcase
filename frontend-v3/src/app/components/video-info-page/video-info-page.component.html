@@ -2,12 +2,18 @@
 <div class="video-info-container" *ngIf="videoInfo">
   <!-- Header Section -->
   <div class="video-header">
-    <div class="video-player-placeholder">
-      <span class="player-icon">▶️</span>
-      <span class="player-text">Video Player Area</span>
-      <div class="player-overlay">
-        <span class="duration-badge">{{ formatDuration(videoInfo.metadata.duration) }}</span>
-      </div>
+    <button class="back-btn" (click)="goBack()">
+      <span>←</span> Back to Library
+    </button>
+    <div class="video-player-container">
+      <video
+        #videoPlayer
+        class="video-player"
+        controls
+        [src]="getVideoStreamUrl()"
+        preload="metadata">
+        Your browser does not support the video tag.
+      </video>
     </div>
 
     <div class="video-title-section">
@@ -89,7 +95,7 @@
                 [style.background-color]="tag.color + '20'"
                 [style.border-color]="tag.color">
                 <span class="tag-name">{{ tag.name }}</span>
-                <span class="tag-category">{{ tag.category }}</span>
+                <span class="tag-category" *ngIf="tag.category && tag.category !== 'custom'">{{ tag.category }}</span>
                 <button class="tag-remove" (click)="removeTag(tag.id)">×</button>
               </span>
 
@@ -285,6 +291,49 @@
             </div>
           </div>
 
+          <div class="metadata-group">
+            <div class="group-header">
+              <h3 class="group-title">Dates</h3>
+              <button
+                *ngIf="!isEditingDates"
+                class="edit-button-small"
+                (click)="editDates()">
+                ✏️
+              </button>
+            </div>
+            <ng-container *ngIf="!isEditingDates">
+              <div class="metadata-item">
+                <span class="metadata-label">Upload Date:</span>
+                <span class="metadata-value">{{ videoInfo.uploadDate ? formatDate(videoInfo.uploadDate) : 'Not set' }}</span>
+              </div>
+              <div class="metadata-item">
+                <span class="metadata-label">Download Date:</span>
+                <span class="metadata-value">{{ formatDate(videoInfo.downloadDate) }}</span>
+              </div>
+            </ng-container>
+            <ng-container *ngIf="isEditingDates">
+              <div class="metadata-item edit-mode">
+                <span class="metadata-label">Upload Date:</span>
+                <input
+                  type="date"
+                  class="date-input"
+                  [(ngModel)]="editedUploadDate"
+                  placeholder="When content was filmed">
+              </div>
+              <div class="metadata-item edit-mode">
+                <span class="metadata-label">Download Date:</span>
+                <input
+                  type="date"
+                  class="date-input"
+                  [(ngModel)]="editedDownloadDate">
+              </div>
+              <div class="edit-actions">
+                <button class="save-button" (click)="saveDates()">Save</button>
+                <button class="cancel-button" (click)="cancelDatesEdit()">Cancel</button>
+              </div>
+            </ng-container>
+          </div>
+
           <div class="metadata-group" *ngIf="videoInfo.metadata.location">
             <h3 class="group-title">Location</h3>
             <div class="metadata-item">
@@ -339,137 +388,72 @@
         </div>
       </div>
 
-      <div class="analysis-list">
-        <div
-          *ngFor="let analysis of getFilteredAnalyses()"
-          class="analysis-card"
-          [class.expanded]="selectedAnalysis?.id === analysis.id"
-          (click)="selectAnalysis(analysis)">
-
-          <div class="analysis-card-header">
-            <div class="analysis-info">
-              <h3 class="analysis-title">
-                <span class="analysis-icon" [ngSwitch]="analysis.type">
-                  <span *ngSwitchCase="'summary'">📄</span>
-                  <span *ngSwitchCase="'highlights'">⭐</span>
-                  <span *ngSwitchCase="'sentiment'">😊</span>
-                  <span *ngSwitchCase="'topics'">🏷️</span>
-                  <span *ngSwitchCase="'entities'">👤</span>
-                  <span *ngSwitchCase="'scenes'">🎬</span>
-                  <span *ngSwitchDefault>🔍</span>
-                </span>
-                {{ analysis.title }}
-              </h3>
-              <div class="analysis-meta">
-                <span class="meta-badge model">{{ analysis.model }}</span>
-                <span class="meta-badge confidence" *ngIf="analysis.confidence">
-                  {{ (analysis.confidence * 100) | number:'1.0-0' }}% confidence
-                </span>
-                <span class="meta-badge time">{{ formatDate(analysis.timestamp) }}</span>
+      <!-- Section Cards - Each section is its own card -->
+      <div class="section-cards-list">
+        <ng-container *ngFor="let analysis of getFilteredAnalyses()">
+          <!-- For highlights type, render each highlight as its own card -->
+          <ng-container *ngIf="analysis.type === 'highlights'">
+            <div
+              *ngFor="let highlight of analysis.highlights; let i = index"
+              class="section-card"
+              [attr.data-category]="highlight.category">
+              <div class="section-card-header">
+                <span class="section-timestamp">{{ formatTime(highlight.timestamp) }}</span>
+                <span class="section-category-badge">{{ highlight.category }}</span>
+                <button
+                  class="section-delete-btn"
+                  (click)="deleteSection(i, $event)"
+                  title="Delete this section">
+                  ×
+                </button>
               </div>
+              <p class="section-text">{{ highlight.text }}</p>
             </div>
-            <button class="expand-button">
-              <span [class.rotated]="selectedAnalysis?.id === analysis.id">▶</span>
-            </button>
-          </div>
+          </ng-container>
 
-          <div class="analysis-card-content" *ngIf="selectedAnalysis?.id === analysis.id">
-            <!-- Summary Type -->
-            <div *ngIf="analysis.type === 'summary'" class="content-summary">
-              <p>{{ analysis.content }}</p>
-              <div class="analysis-tags" *ngIf="analysis.tags">
-                <span *ngFor="let tag of analysis.tags" class="analysis-tag">{{ tag }}</span>
-              </div>
-            </div>
-
-            <!-- Highlights Type -->
-            <div *ngIf="analysis.type === 'highlights'" class="content-highlights">
-              <div
-                *ngFor="let highlight of analysis.highlights"
-                class="highlight-item"
-                [class]="'importance-' + highlight.importance">
-                <div class="highlight-header">
-                  <span class="highlight-time">{{ formatTime(highlight.timestamp) }}</span>
-                  <span class="highlight-category">{{ highlight.category }}</span>
-                  <span class="highlight-importance">{{ highlight.importance }}</span>
-                </div>
-                <p class="highlight-text">{{ highlight.text }}</p>
-              </div>
-            </div>
-
-            <!-- Sentiment Type -->
-            <div *ngIf="analysis.type === 'sentiment'" class="content-sentiment">
-              <div class="sentiment-overall">
-                <span class="sentiment-label">Overall Sentiment:</span>
-                <span class="sentiment-value" [class]="analysis.content.overall">
-                  {{ analysis.content.overall | titlecase }}
-                </span>
-                <span class="sentiment-score">{{ (analysis.content.score * 100) | number:'1.0-0' }}%</span>
-              </div>
-              <div class="sentiment-breakdown">
-                <div class="breakdown-bar">
-                  <div
-                    class="bar-segment positive"
-                    [style.width.%]="analysis.content.breakdown.positive * 100"
-                    title="Positive: {{ (analysis.content.breakdown.positive * 100) | number:'1.0-0' }}%">
-                  </div>
-                  <div
-                    class="bar-segment neutral"
-                    [style.width.%]="analysis.content.breakdown.neutral * 100"
-                    title="Neutral: {{ (analysis.content.breakdown.neutral * 100) | number:'1.0-0' }}%">
-                  </div>
-                  <div
-                    class="bar-segment negative"
-                    [style.width.%]="analysis.content.breakdown.negative * 100"
-                    title="Negative: {{ (analysis.content.breakdown.negative * 100) | number:'1.0-0' }}%">
-                  </div>
-                </div>
-                <div class="breakdown-labels">
-                  <span class="label positive">Positive {{ (analysis.content.breakdown.positive * 100) | number:'1.0-0' }}%</span>
-                  <span class="label neutral">Neutral {{ (analysis.content.breakdown.neutral * 100) | number:'1.0-0' }}%</span>
-                  <span class="label negative">Negative {{ (analysis.content.breakdown.negative * 100) | number:'1.0-0' }}%</span>
+          <!-- For other analysis types, keep the card format -->
+          <div
+            *ngIf="analysis.type !== 'highlights'"
+            class="analysis-card"
+            [class.expanded]="selectedAnalysis?.id === analysis.id"
+            (click)="selectAnalysis(analysis)">
+            <div class="analysis-card-header">
+              <div class="analysis-info">
+                <h3 class="analysis-title">
+                  <span class="analysis-icon" [ngSwitch]="analysis.type">
+                    <span *ngSwitchCase="'summary'">📄</span>
+                    <span *ngSwitchCase="'sentiment'">😊</span>
+                    <span *ngSwitchCase="'topics'">🏷️</span>
+                    <span *ngSwitchCase="'entities'">👤</span>
+                    <span *ngSwitchCase="'scenes'">🎬</span>
+                    <span *ngSwitchDefault>🔍</span>
+                  </span>
+                  {{ analysis.title }}
+                </h3>
+                <div class="analysis-meta">
+                  <span class="meta-badge model">{{ analysis.model }}</span>
+                  <span class="meta-badge confidence" *ngIf="analysis.confidence">
+                    {{ (analysis.confidence * 100) | number:'1.0-0' }}% confidence
+                  </span>
+                  <span class="meta-badge time">{{ formatDate(analysis.timestamp) }}</span>
                 </div>
               </div>
-              <div class="sentiment-peaks" *ngIf="analysis.content.peaks">
-                <h4>Key Moments</h4>
-                <div *ngFor="let peak of analysis.content.peaks" class="peak-item">
-                  <span class="peak-time">{{ formatTime(peak.time) }}</span>
-                  <span class="peak-sentiment">{{ (peak.sentiment * 100) | number:'1.0-0' }}%</span>
-                  <span class="peak-note">{{ peak.note }}</span>
+              <button class="expand-button">
+                <span [class.rotated]="selectedAnalysis?.id === analysis.id">▶</span>
+              </button>
+            </div>
+
+            <div class="analysis-card-content" *ngIf="selectedAnalysis?.id === analysis.id">
+              <!-- Summary Type -->
+              <div *ngIf="analysis.type === 'summary'" class="content-summary">
+                <p>{{ analysis.content }}</p>
+                <div class="analysis-tags" *ngIf="analysis.tags">
+                  <span *ngFor="let tag of analysis.tags" class="analysis-tag">{{ tag }}</span>
                 </div>
               </div>
-            </div>
-
-            <!-- Topics Type -->
-            <div *ngIf="analysis.type === 'topics'" class="content-topics">
-              <div class="topics-list">
-                <div *ngFor="let topic of analysis.content.topics" class="topic-item">
-                  <div class="topic-header">
-                    <span class="topic-name">{{ topic.name }}</span>
-                    <span class="topic-mentions">{{ topic.mentions }} mentions</span>
-                  </div>
-                  <div class="topic-relevance">
-                    <div class="relevance-bar">
-                      <div class="relevance-fill" [style.width.%]="topic.relevance * 100"></div>
-                    </div>
-                    <span class="relevance-value">{{ (topic.relevance * 100) | number:'1.0-0' }}%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Generic Content -->
-            <div *ngIf="!['summary', 'highlights', 'sentiment', 'topics'].includes(analysis.type)" class="content-generic">
-              <pre>{{ formatAnalysisContent(analysis) }}</pre>
-            </div>
-
-            <!-- Custom Instructions -->
-            <div class="custom-instructions" *ngIf="analysis.customInstructions">
-              <h4>Custom Instructions:</h4>
-              <p>{{ analysis.customInstructions }}</p>
             </div>
           </div>
-        </div>
+        </ng-container>
       </div>
     </div>
 
@@ -605,7 +589,14 @@
 </div>
 
 <!-- Loading State -->
-<div class="loading-state" *ngIf="!videoInfo">
+<div class="loading-state" *ngIf="loading">
   <div class="loading-spinner"></div>
   <p>Loading video information...</p>
+</div>
+
+<!-- Error State -->
+<div class="error-state" *ngIf="error && !loading">
+  <span class="error-icon">⚠️</span>
+  <p>{{ error }}</p>
+  <button class="back-button" (click)="goBack()">Back to Library</button>
 </div>

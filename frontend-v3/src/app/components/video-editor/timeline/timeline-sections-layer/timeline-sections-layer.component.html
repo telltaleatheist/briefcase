@@ -8,13 +8,10 @@
       [style.backgroundColor]="getSectionStyle(section).backgroundColor"
       [style.borderColor]="getSectionStyle(section).borderColor"
       [style.display]="getSectionStyle(section).display"
-      [title]="section.description"
+      [title]="section.category + ': ' + section.description"
       (click)="onSectionClick(section, $event)"
       (mouseenter)="onSectionMouseEnter(section)"
       (mouseleave)="onSectionMouseLeave()">
-      <span class="section-label">{{ section.category }}</span>
-      <!-- Vertical line extending from section -->
-      <div class="section-line" [style.backgroundColor]="getSectionStyle(section).backgroundColor"></div>
     </div>
   }
 </div>

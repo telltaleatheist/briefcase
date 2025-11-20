@@ -1,0 +1,23 @@
+<div class="url-input-container">
+  <textarea
+    #urlInput
+    class="url-textarea"
+    [class.processing]="isProcessing()"
+    placeholder="Paste URLs here (one per line, or press Enter to add)"
+    [ngModel]="inputValue()"
+    (ngModelChange)="inputValue.set($event)"
+    (keydown)="onKeydown($event)"
+    (paste)="onPaste($event)"
+    [disabled]="isProcessing()"
+    rows="1"
+  ></textarea>
+  <div class="input-status">
+    <span class="hint" *ngIf="!inputValue() && !isProcessing()">
+      Press Enter to add URLs to queue
+    </span>
+    <span class="loading" *ngIf="isProcessing()">
+      <span class="spinner"></span>
+      Fetching video info...
+    </span>
+  </div>
+</div>

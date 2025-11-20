@@ -3,6 +3,7 @@ import { DatabaseService } from './database.service';
 import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
+import { FilenameDateUtil } from '../common/utils/filename-date.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -326,12 +327,14 @@ export class FileScannerService {
             const ext = path.extname(entry.name).toLowerCase();
 
             if (this.ALL_MEDIA_EXTENSIONS.includes(ext)) {
-              // First, try to extract upload date from filename (format: YYYY-MM-DD Title.ext)
-              const filenameDateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\s/);
+              // Extract upload date from filename using FilenameDateUtil
+              // Handles: YYYY-MM-DD, YYYY-MM-T#, YYYY-MM, YYYY formats
+              const dateInfo = FilenameDateUtil.extractDateInfo(entry.name);
               let uploadDate: string | undefined;
 
-              if (filenameDateMatch) {
-                uploadDate = filenameDateMatch[1];
+              if (dateInfo.hasDate) {
+                // Convert to ISO date for database (T1=01, T2=10, T3=20)
+                uploadDate = FilenameDateUtil.toISODate(dateInfo.date) || undefined;
               } else {
                 // Fallback: Extract date folder from path
                 // e.g., /Volumes/Callisto/clips/2021-08-08/video.mov -> "2021-08-08"
@@ -604,12 +607,13 @@ export class FileScannerService {
         let destinationPath: string;
         let uploadDate: string | null = null;
 
-        // First, try to extract upload date from filename (format: YYYY-MM-DD Title.ext)
-        // This is the date the content was created/filmed by the person
-        const filenameDateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})\s/);
-        if (filenameDateMatch) {
-          uploadDate = filenameDateMatch[1];
-          this.logger.log(`Extracted upload date from filename: ${uploadDate}`);
+        // Extract upload date from filename using FilenameDateUtil
+        // Handles: YYYY-MM-DD, YYYY-MM-T#, YYYY-MM, YYYY formats
+        const dateInfo = FilenameDateUtil.extractDateInfo(filename);
+        if (dateInfo.hasDate) {
+          // Convert to ISO date for database (T1=01, T2=10, T3=20)
+          uploadDate = FilenameDateUtil.toISODate(dateInfo.date);
+          this.logger.log(`Extracted upload date from filename: ${dateInfo.date} -> ${uploadDate}`);
         }
 
         // Get file creation date (download date - when you downloaded/created the file)

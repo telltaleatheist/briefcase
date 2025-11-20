@@ -291,6 +291,7 @@ export class DownloaderService implements OnModuleInit {
       ytDlpManager.addOption('--verbose')
                   .addOption('--no-check-certificates')
                   .addOption('--no-playlist')
+                  .addOption('--playlist-items', '1')  // Only download first video if multiple found
                   .addOption('--force-overwrites');
       
       if (options.convertToMp4) {
@@ -347,11 +348,7 @@ export class DownloaderService implements OnModuleInit {
         // For other sites, use standard format selection
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
         ytDlpManager.addOption('--merge-output-format', 'mp4');
-
-        // Use cookies for other sites if specified
-        if (options.useCookies && options.browser) {
-          ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
-        }
+        // Note: Cookies only used for YouTube - other sites work better without them
       }
       
       let outputFile: string | null = null;
@@ -398,6 +395,7 @@ export class DownloaderService implements OnModuleInit {
               newYtDlpManager.addOption('--verbose')
                             .addOption('--no-check-certificates')
                             .addOption('--no-playlist')
+                            .addOption('--playlist-items', '1')  // Only download first video if multiple found
                             .addOption('--force-overwrites');
 
               if (options.convertToMp4) {

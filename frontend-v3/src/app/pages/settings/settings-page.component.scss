@@ -4,7 +4,7 @@
 .settings-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
   overflow: hidden;
 }
 
@@ -284,6 +284,228 @@
   font-size: $font-size-sm;
   color: var(--text-secondary);
   margin: 0;
+}
+
+// ==================== CATEGORIES LIST ====================
+.categories-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.category-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: var(--text-tertiary);
+  }
+
+  &.disabled {
+    opacity: 0.5;
+  }
+}
+
+.category-color {
+  width: 16px;
+  height: 16px;
+  border-radius: $radius-sm;
+  flex-shrink: 0;
+}
+
+.category-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.category-name {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.category-description {
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.category-actions {
+  display: flex;
+  gap: $spacing-xs;
+  flex-shrink: 0;
+
+  button {
+    width: 28px;
+    height: 28px;
+    @include flex-center;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    cursor: pointer;
+    font-size: $font-size-xs;
+    transition: all $transition-fast;
+
+    &:hover {
+      background: var(--bg-card);
+      border-color: var(--text-tertiary);
+    }
+  }
+
+  .btn-toggle {
+    &.enabled {
+      background: rgba(34, 197, 94, 0.1);
+      border-color: var(--success);
+      color: var(--success);
+    }
+  }
+
+  .btn-delete:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: #ef4444;
+    color: #ef4444;
+  }
+}
+
+// Category Edit/Add Forms
+.category-edit-form,
+.add-category-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.add-category-form {
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border: 2px dashed var(--border-color);
+  border-radius: $radius-md;
+  margin-bottom: $spacing-lg;
+}
+
+.form-row {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.category-name-input {
+  flex: 1;
+  padding: $spacing-sm $spacing-md;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  color: var(--text-primary);
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+  }
+}
+
+.category-color-input {
+  width: 40px;
+  height: 36px;
+  padding: 2px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  cursor: pointer;
+
+  &::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+  &::-webkit-color-swatch {
+    border: none;
+    border-radius: $radius-sm;
+  }
+}
+
+.category-description-input {
+  padding: $spacing-sm $spacing-md;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  color: var(--text-primary);
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+  }
+}
+
+.form-actions {
+  display: flex;
+  gap: $spacing-sm;
+  justify-content: flex-end;
+
+  button {
+    padding: $spacing-sm $spacing-md;
+    border-radius: $radius-sm;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    cursor: pointer;
+    transition: all $transition-fast;
+  }
+
+  .btn-save {
+    background: var(--primary-orange);
+    border: none;
+    color: white;
+
+    &:hover {
+      background: lighten(#ff6b35, 5%);
+    }
+  }
+
+  .btn-cancel {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+
+    &:hover {
+      background: var(--bg-card);
+    }
+  }
+}
+
+.section-actions {
+  display: flex;
+  gap: $spacing-sm;
+
+  .action-btn.secondary {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+
+    &:hover {
+      background: var(--bg-secondary);
+    }
+  }
 }
 
 // ==================== RESPONSIVE ====================

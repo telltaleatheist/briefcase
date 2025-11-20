@@ -62,7 +62,9 @@ export class YtDlpManager extends EventEmitter {
       throw new Error('yt-dlp path is not defined');
     }
 
-    if (!fs.existsSync(ytDlpPath)) {
+    // Only check fs.existsSync for absolute paths
+    // For PATH-based commands (like 'yt-dlp'), skip the check
+    if (path.isAbsolute(ytDlpPath) && !fs.existsSync(ytDlpPath)) {
       logger.error(`yt-dlp not found at: ${ytDlpPath}`);
       throw new Error(`yt-dlp executable not found at path: ${ytDlpPath}`);
     }
@@ -205,24 +207,23 @@ export class YtDlpManager extends EventEmitter {
       // Spawn the yt-dlp process with bundled Python
       this.isRunning = true;
 
-      // Get bundled Python to execute yt-dlp with the correct Python version
-      const pythonConfig = getPythonConfig();
-
-      // If we have bundled Python, execute yt-dlp with it explicitly
-      // Otherwise, execute yt-dlp directly (which will use the shebang)
+      // Determine how to execute yt-dlp based on whether it's an absolute path or a PATH command
       let command: string;
       let args: string[];
 
-      if (pythonConfig.fullPath) {
+      if (path.isAbsolute(this.ytDlpPath)) {
+        // Bundled yt-dlp: execute with bundled Python
         // Execute: python3 /path/to/yt-dlp [args...]
-        command = pythonConfig.fullPath;
+        const pythonConfig = getPythonConfig();
+        command = pythonConfig.fullPath || 'python3';
         args = [this.ytDlpPath, ...finalArgs];
-        logger.info(`Using bundled Python to run yt-dlp: ${pythonConfig.fullPath} ${this.ytDlpPath}`);
+        logger.info(`Using Python to run bundled yt-dlp: ${command} ${this.ytDlpPath}`);
       } else {
-        // Execute: /path/to/yt-dlp [args...] (uses shebang)
+        // System yt-dlp: execute directly (it's a standalone executable)
+        // Execute: yt-dlp [args...]
         command = this.ytDlpPath;
         args = finalArgs;
-        logger.info(`Running yt-dlp directly (system Python): ${this.ytDlpPath}`);
+        logger.info(`Running system yt-dlp directly: ${this.ytDlpPath}`);
       }
 
       this.currentProcess = spawn(command, args);
@@ -232,6 +233,15 @@ export class YtDlpManager extends EventEmitter {
         const chunk = data.toString();
         logger.info(`[STDOUT] Received ${chunk.length} bytes`);
         stdoutBuffer += chunk;
+
+        // Also check stdout for progress (--progress-template output goes to stdout)
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.trim()) {
+            logger.debug(`[STDOUT LINE]: ${line}`);
+            this.parseProgressUpdate(line);
+          }
+        }
 
         // Process output line by line (but skip for JSON dumps)
         const isDumpJson = this.options.includes('--dump-json');
@@ -254,10 +264,15 @@ export class YtDlpManager extends EventEmitter {
         
         stderrReader.on('line', (line) => {
           stderrBuffer += line + '\n';
-          
+
+          // Log stderr lines for debugging
+          if (line.includes('[download]') || line.includes('%')) {
+            logger.info(`[STDERR LINE]: ${line}`);
+          }
+
           // Process the line for progress information
           this.parseProgressUpdate(line);
-          
+
           // Check for download phase
           if (line.includes('[download]')) {
             this.parseDownloadProgress(line);
@@ -320,7 +335,45 @@ export class YtDlpManager extends EventEmitter {
    */
   private parseProgressUpdate(line: string): void {
     // Try several patterns to extract progress information
-    this.parseDownloadProgress(line) || this.parseGenericProgress(line);
+    this.parseProgressTemplate(line) || this.parseDownloadProgress(line) || this.parseGenericProgress(line);
+  }
+
+  /**
+   * Parse progress template output
+   * Matches format: 261120/1693770 32046367.64044944 eta 0 [ 15.4%]
+   */
+  private parseProgressTemplate(line: string): boolean {
+    // Match progress template format: bytes/total speed eta time [percent%]
+    // Speed is raw bytes/s, eta is seconds or NA, percent has optional leading space
+    const templateRegex = /(\d+)\/(\d+)\s+([\d.]+)\s+eta\s+(\S+)\s+\[\s*([\d.]+)%\]/;
+    const match = line.match(templateRegex);
+
+    if (match) {
+      const [, downloaded, total, speed, eta, percent] = match;
+
+      // Speed is already in bytes/s
+      const bytesPerSec = parseFloat(speed);
+
+      // Parse ETA (could be number of seconds or "NA")
+      let etaSeconds = 0;
+      if (eta !== 'NA' && !isNaN(parseFloat(eta))) {
+        etaSeconds = parseFloat(eta);
+      }
+
+      logger.info(`[PROGRESS TEMPLATE] ${percent}% - ${downloaded}/${total} bytes at ${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`);
+
+      this.emit('progress', {
+        percent: parseFloat(percent),
+        totalSize: parseInt(total),
+        downloadedBytes: parseInt(downloaded),
+        downloadSpeed: bytesPerSec,
+        eta: etaSeconds
+      });
+
+      return true;
+    }
+
+    return false;
   }
   
   /**

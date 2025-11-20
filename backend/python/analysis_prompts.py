@@ -139,14 +139,14 @@ Return a JSON object with this EXACT structure:
     {{
       "start_phrase": "exact first 5-10 words from transcript",
       "end_phrase": "exact last 5-10 words from transcript",
-      "category": "hate|conspiracy|false-prophecy|misinformation|violence|christian-nationalism|prosperity-gospel|extremism|political-violence|routine",
+      "category": "ONE of: hate, conspiracy, false-prophecy, misinformation, violence, christian-nationalism, prosperity-gospel, extremism, political-violence, routine",
       "description": "One sentence explaining the content",
       "quote": "An interesting/representative quote from this section (exact words from transcript)"
     }},
     {{
       "start_phrase": "exact first 5-10 words from transcript",
       "end_phrase": "exact last 5-10 words from transcript",
-      "category": "hate|conspiracy|false-prophecy|misinformation|violence|christian-nationalism|prosperity-gospel|extremism|political-violence|routine",
+      "category": "ONE of: hate, conspiracy, false-prophecy, misinformation, violence, christian-nationalism, prosperity-gospel, extremism, political-violence, routine",
       "description": "One sentence explaining the content",
       "quote": "An interesting/representative quote from this section (exact words from transcript)"
     }}
@@ -156,7 +156,7 @@ Return a JSON object with this EXACT structure:
 IMPORTANT RULES:
 - Return ONLY valid JSON, nothing else
 - Start and End phrases MUST be exact quotes from the transcript below
-- Categories: hate, conspiracy, false-prophecy, misinformation, violence, christian-nationalism, prosperity-gospel, extremism, political-violence, OR routine
+- Category must be EXACTLY ONE of: hate, conspiracy, false-prophecy, misinformation, violence, christian-nationalism, prosperity-gospel, extremism, political-violence, routine (pick the SINGLE most relevant category, do NOT combine multiple)
 - Keep descriptions to ONE sentence
 - ALWAYS include a "quote" field with actual words spoken (for ALL categories, including routine)
 - **For short transcripts (a few sentences)**: Just create ONE section analyzing what's there

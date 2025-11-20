@@ -122,10 +122,7 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" (click)="onClose()">Cancel</button>
       <button class="btn btn-primary" (click)="onSave()" [disabled]="tasks().size === 0">
-        <span>{{ bulkMode() ? 'Apply to All' : 'Save Configuration' }}</span>
-        <span class="task-count" *ngIf="tasks().size > 0">
-          ({{ tasks().size }} {{ tasks().size === 1 ? 'task' : 'tasks' }}{{ bulkMode() ? ' × ' + itemCount() + ' items' : '' }})
-        </span>
+        Apply
       </button>
     </div>
   </div>

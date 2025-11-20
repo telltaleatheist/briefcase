@@ -4,7 +4,9 @@ export interface VideoItem {
   suggestedFilename?: string;
   duration?: string; // hh:mm:ss format
   size?: number;
-  downloadDate?: Date;
+  uploadDate?: Date; // When content was filmed/created
+  downloadDate?: Date; // When you downloaded the file
+  lastProcessedDate?: Date; // When any task was last run on this video
   thumbnailUrl?: string;
   selected?: boolean;
   // Additional fields for context menu actions

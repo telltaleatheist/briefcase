@@ -1,18 +1,14 @@
 <div class="library-page">
   <!-- Page Header -->
-  <div class="page-header" [class.mini]="queueExpanded()">
+  <div class="page-header">
     <div class="header-content">
       <h1 class="page-title">Media Library</h1>
-      <p class="page-subtitle" *ngIf="!queueExpanded()">
+      <p class="page-subtitle">
         <span *ngIf="currentLibrary()">{{ currentLibrary()?.name }}</span>
         <span *ngIf="!currentLibrary()">No library selected</span>
       </p>
-      <button class="expand-btn" *ngIf="queueExpanded()" (click)="onToggleQueue()">
-        <span>▲ Show Library</span>
-        <span class="selected-count" *ngIf="selectedCount() > 0">({{ selectedCount() }} selected)</span>
-      </button>
     </div>
-    <div class="header-actions" *ngIf="!queueExpanded()">
+    <div class="header-actions">
       <button
         class="btn btn-primary"
         [disabled]="selectedCount() !== 1"
@@ -29,33 +25,65 @@
         <span class="btn-icon">ℹ️</span>
         <span>View More</span>
       </button>
-      <button class="btn btn-secondary" (click)="selectedCount() > 0 ? onAddSelectedToQueue() : onPasteUrls()">
-        <span class="btn-icon">{{ selectedCount() > 0 ? '➕' : '📋' }}</span>
-        <span>{{ selectedCount() > 0 ? 'Add Selected' : 'Paste URLs' }}</span>
-        <span class="badge" *ngIf="selectedCount() > 0">{{ selectedCount() }}</span>
+      <!-- Configure button for queue items -->
+      <button
+        class="btn btn-secondary"
+        *ngIf="hasQueueItemsSelected"
+        (click)="onConfigureSelected()"
+        title="Configure tasks for selected items">
+        <span class="btn-icon">⚙️</span>
+        <span>Configure</span>
+      </button>
+      <!-- Add to queue button for library items -->
+      <button
+        class="btn btn-secondary"
+        *ngIf="selectedCount() > 0 && !hasQueueItemsSelected"
+        (click)="onAddSelectedToQueue()">
+        <span class="btn-icon">➕</span>
+        <span>Add to Queue</span>
+        <span class="badge">{{ selectedCount() }}</span>
       </button>
     </div>
   </div>
 
-  <!-- Search and Filters (Only show when not collapsed) -->
-  <div class="filters-section" *ngIf="!queueExpanded()">
+  <!-- Search and Filters -->
+  <div class="filters-section">
     <app-library-search-filters
       (filtersChanged)="onFiltersChanged($event)"
     />
   </div>
 
-  <!-- Unified Container for Library + Queue -->
+  <!-- URL Input Bar -->
+  <div class="url-input-bar">
+    <span class="url-input-label">Add to Queue:</span>
+    <app-url-input (urlsAdded)="onUrlsAdded($event)" />
+    @if (hasPendingItems) {
+      <button
+        class="start-queue-btn"
+        (click)="startProcessing()"
+        title="Start processing all pending items">
+        <span class="btn-icon">▶</span>
+        <span>Start Processing</span>
+        <span class="badge">{{ queueStats.pending }}</span>
+      </button>
+    }
+  </div>
+
+  <!-- Main Container -->
   <div class="main-container">
-    <!-- Video Library List (Only show when not collapsed) -->
-    <div class="library-section" *ngIf="!queueExpanded()">
+    <div class="unified-content">
+      <!-- Media Library Cascade (includes queue items) -->
       <app-cascade
-        [weeks]="filteredWeeks()"
+        [weeks]="combinedWeeks()"
+        [progressMapper]="queueProgressMapper"
+        [childrenConfig]="processingChildrenConfig"
         (selectionChanged)="onSelectionChanged($event)"
         (videoAction)="onVideoAction($event)"
+        (configureItem)="onConfigureItem($event)"
       />
 
       <!-- Empty State -->
-      <div class="empty-state" *ngIf="filteredWeeks().length === 0">
+      <div class="empty-state" *ngIf="filteredWeeks().length === 0 && processingQueue().length === 0">
         <div class="empty-icon">📹</div>
         <h3 class="empty-title">No media found</h3>
         <p class="empty-description">
@@ -63,18 +91,25 @@
             Try adjusting your search filters
           </span>
           <span *ngIf="!currentFilters?.searchQuery">
-            Select items and add them to the queue to process
+            Paste URLs above or select items to add to the queue
           </span>
         </p>
       </div>
     </div>
-
-    <!-- Processing Queue -->
-    <div class="queue-section" *ngIf="queueExpanded()">
-      <app-video-processing-queue />
-    </div>
   </div>
 </div>
+
+<!-- Config Modal -->
+<app-queue-item-config-modal
+  [isOpen]="configModalOpen()"
+  [itemSource]="configItemSource()"
+  [bulkMode]="configBulkMode()"
+  [existingTasks]="configExistingTasks()"
+  [itemCount]="configItemIds().length"
+  (close)="closeConfigModal()"
+  (save)="onConfigSave($event)"
+  (bulkSave)="onConfigSave($event)"
+/>
 
 <!-- Library Manager Modal -->
 <app-library-manager-modal
@@ -85,3 +120,11 @@
   (libraryCreated)="onLibraryCreated($event)"
   (libraryRelinked)="onLibraryRelinked($event)"
 />
+
+<!-- AI Setup Wizard -->
+@if (aiWizardOpen()) {
+  <app-ai-setup-wizard
+    (completed)="onAiWizardCompleted()"
+    (closed)="onAiWizardClosed()"
+  />
+}

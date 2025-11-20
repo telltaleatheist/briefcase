@@ -19,6 +19,52 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+// Unified Content Area
+.unified-content {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 0; // Force flex to calculate height
+  overflow: hidden;
+  position: relative;
+
+  // Queue items list at top (scrolls if too many)
+  .queue-items-list {
+    flex-shrink: 0;
+    max-height: 40vh;
+    overflow-y: auto;
+
+    // Custom scrollbar styling
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 3px;
+
+      &:hover {
+        background: var(--text-muted);
+      }
+    }
+  }
+
+  // Cascade component fills remaining space
+  app-cascade {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 0; // Force flex to calculate height
+    overflow: hidden;
+  }
+}
+
+
 .page-header {
   display: flex;
   align-items: center;
@@ -93,6 +139,64 @@
 
 .filters-section {
   flex-shrink: 0;
+}
+
+// URL Input Bar
+.url-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  flex-shrink: 0;
+
+  .url-input-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  app-url-input {
+    flex: 1;
+  }
+
+  .start-queue-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 20px;
+    height: 44px;
+    background: var(--primary-orange);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+
+    &:hover {
+      background: var(--dark-orange);
+    }
+
+    .btn-icon {
+      font-size: 12px;
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, 0.25);
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      font-size: 11px;
+      display: grid;
+      place-content: center;
+    }
+  }
 }
 
 .library-section {

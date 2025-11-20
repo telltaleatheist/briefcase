@@ -1,7 +1,7 @@
-import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, effect, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, effect, inject, HostListener, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { ScrollingModule } from '@angular/cdk/scrolling';
+import { ScrollingModule, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { DragDropModule, CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import { trigger, transition, style, animate } from '@angular/animations';
 import { VideoWeek, VideoItem, VideoContextMenuAction, ItemProgress, VideoChild, ChildrenConfig, ChildStatus, DeleteMode } from '../../models/video.model';
@@ -76,9 +76,30 @@ export class CascadeComponent {
   @Output() videoAction = new EventEmitter<{ action: string; videos: VideoItem[] }>();
   @Output() childClicked = new EventEmitter<{ parent: VideoItem; child: VideoChild }>();
   @Output() itemsReordered = new EventEmitter<{ weekLabel: string; videos: VideoItem[] }>();
+  @Output() configureItem = new EventEmitter<VideoItem>();
+
+  @ViewChild(CdkVirtualScrollViewport) private viewport?: CdkVirtualScrollViewport;
 
   // Track expanded items for children
   expandedItems = signal<Set<string>>(new Set());
+
+  /**
+   * Scroll to the top of the list (where processing queue items are)
+   */
+  scrollToTop(): void {
+    if (this.viewport) {
+      this.viewport.scrollToIndex(0, 'smooth');
+    }
+  }
+
+  /**
+   * Scroll to a specific index in the list
+   */
+  scrollToIndex(index: number, behavior: 'auto' | 'smooth' = 'smooth'): void {
+    if (this.viewport) {
+      this.viewport.scrollToIndex(index, behavior);
+    }
+  }
 
   /**
    * Get progress for a video item
@@ -106,6 +127,7 @@ export class CascadeComponent {
   // Delete options modal
   deleteModalVisible = signal(false);
   deletingVideos = signal<VideoItem[]>([]);
+  selectedDeleteMode = signal<DeleteMode | null>(null);
 
   selectedCount = computed(() => this.selectedVideos().size);
 
@@ -199,9 +221,20 @@ export class CascadeComponent {
     const count = this.selectedCount();
     const video = this.contextMenuVideo();
     const hasSuggestedTitle = video?.suggestedTitle && video.suggestedTitle !== video.name;
+    const isQueue = video ? this.isQueueItem(video) : false;
 
     const actions: VideoContextMenuAction[] = [];
+    const countSuffix = count > 1 ? ` (${count})` : '';
 
+    // Queue item specific actions
+    if (isQueue) {
+      actions.push({ label: `Configure Tasks${countSuffix}`, icon: '⚙️', action: 'analyze' });
+      actions.push({ label: '', icon: '', action: '', divider: true });
+      actions.push({ label: `Remove from Queue${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
+      return actions;
+    }
+
+    // Library item actions
     // Single video actions
     if (count <= 1) {
       actions.push({ label: 'Open in Editor', icon: '🎬', action: 'openInEditor' });
@@ -221,7 +254,6 @@ export class CascadeComponent {
     }
 
     // Multi-select capable actions
-    const countSuffix = count > 1 ? ` (${count})` : '';
     actions.push({ label: `Add to Tab${countSuffix}`, icon: '📑', action: 'addToTab' });
 
     // Another divider
@@ -367,7 +399,17 @@ export class CascadeComponent {
         break;
 
       case 'delete':
-        this.openDeleteModal(videos);
+        // For queue items, emit delete directly (removes from queue, no modal needed)
+        if (videos.every(v => this.isQueueItem(v))) {
+          this.videoAction.emit({ action: 'delete', videos });
+        } else {
+          this.openDeleteModal(videos);
+        }
+        break;
+
+      case 'removeFromQueue':
+        // Remove queue items from processing queue
+        this.videoAction.emit({ action: 'removeFromQueue', videos });
         break;
     }
   }
@@ -387,11 +429,19 @@ export class CascadeComponent {
   }
 
   /**
-   * Handle delete mode selection
+   * Select delete mode (doesn't confirm yet)
    */
-  onDeleteModeSelected(mode: DeleteMode) {
+  selectDeleteMode(mode: DeleteMode) {
+    this.selectedDeleteMode.set(mode);
+  }
+
+  /**
+   * Confirm and execute the delete
+   */
+  confirmDelete() {
+    const mode = this.selectedDeleteMode();
     const videos = this.deletingVideos();
-    if (videos.length > 0) {
+    if (mode && videos.length > 0) {
       this.videoAction.emit({ action: `delete:${mode}`, videos });
     }
     this.closeDeleteModal();
@@ -403,6 +453,7 @@ export class CascadeComponent {
   closeDeleteModal() {
     this.deleteModalVisible.set(false);
     this.deletingVideos.set([]);
+    this.selectedDeleteMode.set(null);
   }
 
   /**
@@ -489,6 +540,13 @@ export class CascadeComponent {
    */
   onDeleteClick(video: VideoItem, event: Event) {
     event.stopPropagation();
+
+    // For queue items, emit delete directly (removes from queue, no modal needed)
+    if (this.isQueueItem(video)) {
+      this.videoAction.emit({ action: 'delete', videos: [video] });
+      return;
+    }
+
     this.openDeleteModal([video]);
   }
 
@@ -498,6 +556,39 @@ export class CascadeComponent {
   onEditClick(video: VideoItem, event: Event) {
     event.stopPropagation();
     this.videoAction.emit({ action: 'edit', videos: [video] });
+  }
+
+  /**
+   * Check if a video is a queue item (not yet in library)
+   */
+  isQueueItem(video: VideoItem): boolean {
+    return video.id.startsWith('queue-') || video.tags?.some(t => t.startsWith('queue:')) || false;
+  }
+
+  /**
+   * Handle configure button click for queue items
+   */
+  onConfigureClick(video: VideoItem, event: Event) {
+    event.stopPropagation();
+    this.configureItem.emit(video);
+  }
+
+  /**
+   * Handle keyboard shortcuts for delete
+   */
+  @HostListener('document:keydown', ['$event'])
+  onKeyDown(event: KeyboardEvent) {
+    // Check for Delete key or Cmd/Ctrl+Backspace
+    const isDelete = event.key === 'Delete';
+    const isCmdBackspace = event.key === 'Backspace' && (event.metaKey || event.ctrlKey);
+
+    if (isDelete || isCmdBackspace) {
+      const selectedVideos = this.getSelectedVideos();
+      if (selectedVideos.length > 0) {
+        event.preventDefault();
+        this.openDeleteModal(selectedVideos);
+      }
+    }
   }
 
   /**
@@ -696,7 +787,7 @@ export class CascadeComponent {
       case 'active': return '⟳';
       case 'failed': return '✗';
       case 'skipped': return '⊘';
-      case 'pending':
+      case 'pending': return '⏳';
       default: return '○';
     }
   }

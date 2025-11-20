@@ -23,7 +23,6 @@ export class NavigationComponent {
 
   navLinks = [
     { path: '/', label: 'Media Library', icon: '📹' },
-    { path: '/queue', label: 'Processing Queue', icon: '⚡' },
     { path: '/settings', label: 'Settings', icon: '⚙️' }
   ];
 

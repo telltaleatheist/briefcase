@@ -3,6 +3,8 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaOperationsService } from '../media/media-operations.service';
+import { LibraryManagerService } from '../database/library-manager.service';
+import { DatabaseService } from '../database/database.service';
 import {
   QueueJob,
   QueueStatus,
@@ -44,7 +46,49 @@ export class QueueManagerService implements OnModuleDestroy {
   constructor(
     private readonly mediaOps: MediaOperationsService,
     private readonly eventService: MediaEventService,
+    private readonly libraryManager: LibraryManagerService,
+    private readonly databaseService: DatabaseService,
   ) {}
+
+  /**
+   * Calculate the nearest Sunday date folder name
+   * Returns date in YYYY-MM-DD format
+   */
+  private calculateSundayFolder(date: Date = new Date()): string {
+    const d = new Date(date);
+    const dayOfWeek = d.getDay(); // 0 = Sunday
+    const sunday = new Date(d);
+    sunday.setDate(d.getDate() - dayOfWeek);
+
+    // Format as YYYY-MM-DD
+    return sunday.toISOString().split('T')[0];
+  }
+
+  /**
+   * Get the output directory for a download job
+   * If libraryId is specified, uses that library's clips folder
+   * Otherwise uses active library or falls back to default
+   * Note: The downloader service already adds a Sunday subfolder
+   */
+  private getDownloadOutputDir(libraryId?: string): string | undefined {
+    // Get the target library
+    let library;
+    if (libraryId) {
+      const allLibraries = this.libraryManager.getAllLibraries();
+      library = allLibraries.find(lib => lib.id === libraryId);
+    } else {
+      library = this.libraryManager.getActiveLibrary();
+    }
+
+    if (!library) {
+      this.logger.warn('No library found for download output directory');
+      return undefined;
+    }
+
+    // Return the library's clips folder path
+    // The downloader service will add the Sunday subfolder automatically
+    return library.clipsFolderPath;
+  }
 
   /**
    * Lifecycle hook - called when the module is being destroyed
@@ -371,6 +415,17 @@ export class QueueManagerService implements OnModuleDestroy {
         throw new Error(result.error || 'Task failed');
       }
 
+      // Update last_processed_date for tasks that process the video
+      // (not for get-info or download which don't have a video ID yet)
+      const processingTasks = ['import', 'transcribe', 'analyze', 'fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      if (job.videoId && processingTasks.includes(task.type)) {
+        try {
+          this.databaseService.updateLastProcessedDate(job.videoId);
+        } catch (err) {
+          this.logger.warn(`Failed to update last_processed_date for video ${job.videoId}: ${err}`);
+        }
+      }
+
       // Emit task completed event
       this.eventService.emit('task.completed', {
         taskId,
@@ -457,11 +512,19 @@ export class QueueManagerService implements OnModuleDestroy {
         if (!job.url) {
           return { success: false, error: 'No URL provided for download task' };
         }
+
+        // Determine output directory based on library
+        const outputDir = this.getDownloadOutputDir(job.libraryId);
+        if (outputDir) {
+          this.logger.log(`[${taskId}] Download output directory: ${outputDir}`);
+        }
+
         result = await this.mediaOps.downloadVideo(
           job.url,
           {
             ...task.options,
             displayName: job.displayName,
+            outputDir: outputDir,
           },
           taskId,
         );
@@ -475,6 +538,16 @@ export class QueueManagerService implements OnModuleDestroy {
         if (!job.videoPath) {
           return { success: false, error: 'No video path available for import task' };
         }
+
+        // Switch to target library if specified (import uses active library)
+        if (job.libraryId) {
+          const currentLibrary = this.libraryManager.getActiveLibrary();
+          if (!currentLibrary || currentLibrary.id !== job.libraryId) {
+            this.logger.log(`[${taskId}] Switching to target library: ${job.libraryId}`);
+            await this.libraryManager.switchLibrary(job.libraryId);
+          }
+        }
+
         result = await this.mediaOps.importToLibrary(job.videoPath, task.options, taskId);
         if (result.success && result.data) {
           job.videoId = result.data.videoId;

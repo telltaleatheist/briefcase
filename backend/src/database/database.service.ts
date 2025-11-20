@@ -22,6 +22,7 @@ export interface VideoRecord {
   is_linked: number;
   media_type: string;
   file_extension: string | null;
+  last_processed_date: string | null;
   parent_id: string | null;
   aspect_ratio_fixed: number;
   audio_normalized: number;
@@ -391,6 +392,7 @@ export class DatabaseService {
         parent_id TEXT,
         aspect_ratio_fixed INTEGER DEFAULT 0,
         audio_normalized INTEGER DEFAULT 0,
+        last_processed_date TEXT,
         FOREIGN KEY (parent_id) REFERENCES videos(id) ON DELETE CASCADE,
         CHECK (is_linked IN (0, 1)),
         CHECK (aspect_ratio_fixed IN (0, 1)),
@@ -1015,6 +1017,25 @@ export class DatabaseService {
       }
     }
 
+    try {
+      // Migration 17: Add last_processed_date column to videos table if it doesn't exist
+      db.exec("SELECT last_processed_date FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: last_processed_date')) {
+        this.logger.log('Running migration: Adding last_processed_date column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN last_processed_date TEXT;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: last_processed_date column added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
   }
 
   /**
@@ -1182,7 +1203,16 @@ export class DatabaseService {
   /**
    * Full-text search across all content using FTS5
    * Searches: filenames, transcripts, analyses, tags, descriptions
-   * @param query - Search query (supports FTS5 syntax: OR, AND, NOT, phrases, wildcards)
+   *
+   * Search features:
+   * - Multiple words: ALL words must match (AND logic), but can be in different fields
+   *   e.g., "foo bar" matches if "foo" is in filename and "bar" is in transcript
+   * - Wildcards: * for prefix matching (e.g., "test*" matches "testing", "tests")
+   *              ? for single character (converted to * for FTS5)
+   * - Quoted phrases: "exact phrase" for consecutive word matching
+   * - Special operators: OR, NOT (must be uppercase)
+   *
+   * @param query - Search query
    * @param limit - Maximum results to return
    * @returns Array of video IDs with match info, sorted by relevance
    */
@@ -1193,139 +1223,104 @@ export class DatabaseService {
       return [];
     }
 
-    // Convert user-friendly wildcards to FTS5 syntax
-    // FTS5 uses * for prefix matching only
-    let ftsQuery = query.trim()
-      .split(/\s+/)
-      .map(word => {
-        // Handle wildcards: convert * to FTS5 prefix syntax
-        if (word.endsWith('*')) {
-          return word; // FTS5 supports trailing *
-        }
-        // Add * for prefix matching if not already present
-        return word + '*';
-      })
-      .join(' OR '); // OR logic by default
+    const trimmedQuery = query.trim();
 
-    this.logger.log(`[FTS Search] Query: "${query}" -> FTS: "${ftsQuery}"`);
+    // Parse the query into tokens (words, phrases, operators)
+    const tokens = this.parseSearchQuery(trimmedQuery);
+
+    if (tokens.length === 0) {
+      return [];
+    }
+
+    this.logger.log(`[FTS Search] Query: "${trimmedQuery}" -> Tokens: ${JSON.stringify(tokens)}`);
 
     try {
-      const results = new Map<string, { score: number; matches: Set<string> }>();
+      // For each token, find matching videos across all FTS tables
+      // Then intersect results to find videos matching ALL tokens (AND logic)
+      const tokenMatches: Map<string, { score: number; matches: Set<string> }>[] = [];
 
-      // Search videos_fts (filename, path, description)
-      try {
-        const videosResults = db.prepare(`
-          SELECT video_id, rank
-          FROM videos_fts
-          WHERE videos_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit * 2) as any[];
-
-        for (const row of videosResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank) * 2; // Videos weighted higher
-          entry.matches.add('filename');
-        }
-      } catch (e) {
-        // Ignore errors from individual FTS tables
+      for (const token of tokens) {
+        const tokenResults = this.searchSingleToken(db, token, limit * 3);
+        tokenMatches.push(tokenResults);
       }
 
-      // Also do LIKE-based substring search on filename for better partial matching
+      // Intersect results: video must match ALL tokens
+      let finalResults: Map<string, { score: number; matches: Set<string> }>;
+
+      if (tokenMatches.length === 1) {
+        finalResults = tokenMatches[0];
+      } else {
+        // Start with first token's results
+        finalResults = new Map(tokenMatches[0]);
+
+        // Intersect with each subsequent token
+        for (let i = 1; i < tokenMatches.length; i++) {
+          const currentToken = tokenMatches[i];
+          const newResults = new Map<string, { score: number; matches: Set<string> }>();
+
+          // Only keep videos that exist in both sets
+          for (const [videoId, data] of finalResults) {
+            if (currentToken.has(videoId)) {
+              const otherData = currentToken.get(videoId)!;
+              // Combine scores and matches
+              newResults.set(videoId, {
+                score: data.score + otherData.score,
+                matches: new Set([...data.matches, ...otherData.matches])
+              });
+            }
+          }
+
+          finalResults = newResults;
+
+          // Early exit if no matches
+          if (finalResults.size === 0) {
+            break;
+          }
+        }
+      }
+
+      // Also do LIKE-based substring search for better partial matching
       // This catches cases like "video" matching "MyVideo-final.mp4"
       try {
-        const likePattern = `%${query.trim().replace(/\s+/g, '%')}%`;
-        const likeResults = db.prepare(`
-          SELECT id as video_id
-          FROM videos
-          WHERE filename LIKE ? COLLATE NOCASE
-             OR current_path LIKE ? COLLATE NOCASE
-          LIMIT ?
-        `).all(likePattern, likePattern, limit * 2) as any[];
+        // Build LIKE pattern that requires all words
+        const words = trimmedQuery.match(/"[^"]+"|[^\s]+/g) || [];
+        const cleanWords = words.map(w => w.replace(/^"|"$/g, '').replace(/[*?]/g, ''));
 
-        for (const row of likeResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
+        if (cleanWords.length > 0 && cleanWords.every(w => w.length > 0)) {
+          // Each word must appear somewhere in filename or path
+          const conditions = cleanWords.map(() =>
+            '(filename LIKE ? COLLATE NOCASE OR current_path LIKE ? COLLATE NOCASE OR ai_description LIKE ? COLLATE NOCASE)'
+          ).join(' AND ');
+
+          const params: string[] = [];
+          for (const word of cleanWords) {
+            const pattern = `%${word}%`;
+            params.push(pattern, pattern, pattern);
           }
-          const entry = results.get(row.video_id)!;
-          entry.score += 10; // High score for direct filename match
-          entry.matches.add('filename');
+          params.push(String(limit * 2));
+
+          const likeResults = db.prepare(`
+            SELECT id as video_id
+            FROM videos
+            WHERE ${conditions}
+            LIMIT ?
+          `).all(...params) as any[];
+
+          for (const row of likeResults) {
+            if (!finalResults.has(row.video_id)) {
+              finalResults.set(row.video_id, { score: 0, matches: new Set() });
+            }
+            const entry = finalResults.get(row.video_id)!;
+            entry.score += 15; // High score for direct match
+            entry.matches.add('filename');
+          }
         }
       } catch (e) {
         this.logger.warn('Error in LIKE filename search:', e);
       }
 
-      // Search transcripts_fts
-      try {
-        const transcriptResults = db.prepare(`
-          SELECT video_id, rank
-          FROM transcripts_fts
-          WHERE transcripts_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit * 2) as any[];
-
-        for (const row of transcriptResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank);
-          entry.matches.add('transcript');
-        }
-      } catch (e) {
-        // Ignore errors from individual FTS tables
-      }
-
-      // Search analyses_fts
-      try {
-        const analysesResults = db.prepare(`
-          SELECT video_id, rank
-          FROM analyses_fts
-          WHERE analyses_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit * 2) as any[];
-
-        for (const row of analysesResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
-          entry.matches.add('analysis');
-        }
-      } catch (e) {
-        // Ignore errors from individual FTS tables
-      }
-
-      // Search tags_fts
-      try {
-        const tagsResults = db.prepare(`
-          SELECT video_id, rank
-          FROM tags_fts
-          WHERE tags_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit * 2) as any[];
-
-        for (const row of tagsResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
-          entry.matches.add('tags');
-        }
-      } catch (e) {
-        // Ignore errors from individual FTS tables
-      }
-
       // Convert to array and sort by score
-      const sortedResults = Array.from(results.entries())
+      const sortedResults = Array.from(finalResults.entries())
         .map(([videoId, data]) => ({
           videoId,
           score: data.score,
@@ -1334,12 +1329,183 @@ export class DatabaseService {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
 
-      this.logger.log(`[FTS Search] Found ${sortedResults.length} results for "${query}"`);
+      this.logger.log(`[FTS Search] Found ${sortedResults.length} results for "${trimmedQuery}"`);
       return sortedResults;
     } catch (error: any) {
       this.logger.error(`[FTS Search] Search failed: ${error?.message || 'Unknown error'}`);
       return [];
     }
+  }
+
+  /**
+   * Parse search query into tokens
+   * Handles: quoted phrases, wildcards, operators
+   */
+  private parseSearchQuery(query: string): string[] {
+    const tokens: string[] = [];
+
+    // Match quoted phrases or individual words
+    const regex = /"([^"]+)"|(\S+)/g;
+    let match;
+
+    while ((match = regex.exec(query)) !== null) {
+      const token = match[1] || match[2]; // match[1] is quoted content, match[2] is word
+
+      // Skip OR operator (will be handled within tokens)
+      // Keep NOT operator as part of the token
+      if (token.toUpperCase() === 'OR') {
+        // If previous token exists, mark it for OR logic
+        if (tokens.length > 0) {
+          tokens[tokens.length - 1] += ' OR';
+        }
+        continue;
+      }
+
+      if (token && token.trim().length > 0) {
+        tokens.push(token.trim());
+      }
+    }
+
+    return tokens;
+  }
+
+  /**
+   * Search for a single token across all FTS tables
+   */
+  private searchSingleToken(
+    db: any,
+    token: string,
+    limit: number
+  ): Map<string, { score: number; matches: Set<string> }> {
+    const results = new Map<string, { score: number; matches: Set<string> }>();
+
+    // Check if token has OR suffix (from parseSearchQuery)
+    const hasOr = token.endsWith(' OR');
+    const cleanToken = hasOr ? token.slice(0, -3) : token;
+
+    // Convert token to FTS5 query
+    let ftsQuery = this.tokenToFTS5Query(cleanToken);
+
+    // Search videos_fts (filename, path, description)
+    try {
+      const videosResults = db.prepare(`
+        SELECT video_id, rank
+        FROM videos_fts
+        WHERE videos_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
+
+      for (const row of videosResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
+        }
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank) * 2; // Videos weighted higher
+        entry.matches.add('filename');
+      }
+    } catch (e) {
+      // FTS5 query syntax error - try escaping
+      this.logger.debug(`FTS5 videos search error for "${ftsQuery}":`, e);
+    }
+
+    // Search transcripts_fts
+    try {
+      const transcriptResults = db.prepare(`
+        SELECT video_id, rank
+        FROM transcripts_fts
+        WHERE transcripts_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
+
+      for (const row of transcriptResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
+        }
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank);
+        entry.matches.add('transcript');
+      }
+    } catch (e) {
+      this.logger.debug(`FTS5 transcript search error for "${ftsQuery}":`, e);
+    }
+
+    // Search analyses_fts
+    try {
+      const analysesResults = db.prepare(`
+        SELECT video_id, rank
+        FROM analyses_fts
+        WHERE analyses_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
+
+      for (const row of analysesResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
+        }
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
+        entry.matches.add('analysis');
+      }
+    } catch (e) {
+      this.logger.debug(`FTS5 analysis search error for "${ftsQuery}":`, e);
+    }
+
+    // Search tags_fts
+    try {
+      const tagsResults = db.prepare(`
+        SELECT video_id, rank
+        FROM tags_fts
+        WHERE tags_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
+
+      for (const row of tagsResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
+        }
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
+        entry.matches.add('tags');
+      }
+    } catch (e) {
+      this.logger.debug(`FTS5 tags search error for "${ftsQuery}":`, e);
+    }
+
+    return results;
+  }
+
+  /**
+   * Convert a token to FTS5 query syntax
+   */
+  private tokenToFTS5Query(token: string): string {
+    // Check if it's a phrase (contains spaces, originally was quoted)
+    if (token.includes(' ')) {
+      // Phrase query - must match consecutively
+      return `"${token}"`;
+    }
+
+    // Handle NOT prefix
+    if (token.toUpperCase().startsWith('NOT ')) {
+      const term = token.slice(4);
+      return `NOT ${this.tokenToFTS5Query(term)}`;
+    }
+
+    // Handle wildcards
+    // * is already FTS5 compatible for prefix matching
+    // ? is converted to * (FTS5 doesn't support single-char wildcards)
+    let processed = token.replace(/\?/g, '*');
+
+    // If no wildcard at end, add * for prefix matching (more forgiving search)
+    // But not if it already has special characters or is very short
+    if (!processed.includes('*') && processed.length >= 2) {
+      processed = processed + '*';
+    }
+
+    return processed;
   }
 
   /**
@@ -1720,6 +1886,28 @@ export class DatabaseService {
       this.saveDatabase();
     } catch (error) {
       this.logger.error(`Failed to update download date for video ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update video's last processed date (set when any task completes on this video)
+   */
+  updateLastProcessedDate(id: string, date?: string) {
+    const db = this.ensureInitialized();
+    const processedDate = date || new Date().toISOString();
+
+    try {
+      db.prepare(
+        `UPDATE videos
+         SET last_processed_date = ?
+         WHERE id = ?`
+      ).run(processedDate, id);
+
+      this.saveDatabase();
+      this.logger.log(`Updated last_processed_date for video ${id}: ${processedDate}`);
+    } catch (error) {
+      this.logger.error(`Failed to update last_processed_date for video ${id}:`, error);
       throw error;
     }
   }

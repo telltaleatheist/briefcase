@@ -82,8 +82,8 @@ async function bootstrap() {
     app.useWebSocketAdapter(new ExtendedIoAdapter(app));
 
     // Increase body parser limit for large payloads (e.g., console logs)
-    app.useBodyParser('json', { limit: '10mb' });
-    app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
+    app.useBodyParser('json', { limit: '50mb' });
+    app.useBodyParser('urlencoded', { limit: '50mb', extended: true });
 
     // Set global prefix but exclude certain routes
     app.setGlobalPrefix(environment.apiPrefix, {

@@ -13,14 +13,24 @@
       </div>
     </div>
     <div class="header-actions">
+      <button
+        class="btn-secondary"
+        (click)="openBulkConfig()"
+        [disabled]="pendingItems().length === 0"
+        title="Configure all items at once"
+      >
+        ⚙️ Configure All
+      </button>
       <button class="btn-primary" (click)="processQueue()" [disabled]="stats().pending === 0">
         ▶ Process
       </button>
-      <button class="btn-secondary" (click)="openAddDialog()">
-        + Add Video
-      </button>
     </div>
   </header>
+
+  <!-- URL Input Section -->
+  <div class="url-input-section">
+    <app-url-input (urlsAdded)="onUrlsAdded($event)" />
+  </div>
 
 
   <!-- Queue List -->
@@ -141,12 +151,13 @@
 <!-- Config Modal -->
 <app-queue-item-config-modal
   [isOpen]="configModalOpen()"
-  [itemSource]="getItemSource(configItemId())"
-  [existingTasks]="getExistingTasks(configItemId())"
-  [bulkMode]="false"
-  [itemCount]="0"
+  [itemSource]="configItemSource()"
+  [existingTasks]="configExistingTasks()"
+  [bulkMode]="configBulkMode()"
+  [itemCount]="pendingItems().length"
   (close)="closeConfig()"
   (save)="onConfigSave($event)"
+  (bulkSave)="onBulkConfigSave($event)"
 ></app-queue-item-config-modal>
 
 <!-- Add Video Dialog -->

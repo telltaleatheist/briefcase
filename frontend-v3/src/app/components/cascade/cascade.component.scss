@@ -654,9 +654,19 @@ cdk-virtual-scroll-viewport.library-content {
   &.child-pending {
     .child-icon, .child-status-icon {
       color: var(--text-tertiary);
+      animation: pulse-pending 1.5s ease-in-out infinite;
     }
     .child-label {
       color: var(--text-secondary);
+    }
+  }
+
+  @keyframes pulse-pending {
+    0%, 100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 1;
     }
   }
 
@@ -799,6 +809,12 @@ cdk-virtual-scroll-viewport.library-content {
     transform: scale(0.98);
   }
 
+  &.selected {
+    background: rgba(255, 102, 0, 0.1);
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 1px var(--primary-orange);
+  }
+
   .option-icon {
     font-size: $font-size-xl;
     flex-shrink: 0;
@@ -836,8 +852,14 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
+.delete-modal-actions {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: $spacing-lg;
+}
+
 .delete-cancel-btn {
-  width: 100%;
+  flex: 1;
   padding: $spacing-md;
   background: transparent;
   border: 2px solid var(--border-color);
@@ -855,6 +877,33 @@ cdk-virtual-scroll-viewport.library-content {
 
   &:active {
     transform: scale(0.98);
+  }
+}
+
+.delete-submit-btn {
+  flex: 1;
+  padding: $spacing-md;
+  background: var(--error);
+  border: 2px solid var(--error);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: white;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: darken(#dc3545, 10%);
+    border-color: darken(#dc3545, 10%);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 

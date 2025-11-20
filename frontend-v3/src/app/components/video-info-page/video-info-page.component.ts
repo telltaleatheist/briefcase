@@ -1,6 +1,7 @@
 import { Component, OnInit, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HttpClient, HttpClientModule } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import {
@@ -15,7 +16,7 @@ import { LibraryService } from '../../services/library.service';
 @Component({
   selector: 'app-video-info-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, HttpClientModule],
   templateUrl: './video-info-page.component.html',
   styleUrls: ['./video-info-page.component.scss']
 })
@@ -23,6 +24,7 @@ export class VideoInfoPageComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private libraryService = inject(LibraryService);
+  private http = inject(HttpClient);
 
   @Input() videoId?: string;
 
@@ -41,6 +43,11 @@ export class VideoInfoPageComponent implements OnInit {
   // Description Editing
   isEditingDescription = false;
   editedDescription = '';
+
+  // Date Editing
+  isEditingDates = false;
+  editedUploadDate = '';
+  editedDownloadDate = '';
 
   // AI Analysis
   selectedAnalysis: AIAnalysis | null = null;
@@ -82,6 +89,12 @@ export class VideoInfoPageComponent implements OnInit {
     this.router.navigate(['/library']);
   }
 
+  getVideoStreamUrl(): string {
+    const id = this.videoId || this.route.snapshot.paramMap.get('id');
+    if (!id) return '';
+    return `http://localhost:3000/api/database/videos/${id}/stream`;
+  }
+
   private loadVideoInfo(videoId: string): void {
     this.loading = true;
     this.error = null;
@@ -109,6 +122,12 @@ export class VideoInfoPageComponent implements OnInit {
 
         // Transform backend data to VideoInfo format
         this.videoInfo = this.transformToVideoInfo(video, transcript, analysis, tags, sections);
+
+        // Auto-expand the first analysis by default
+        if (this.videoInfo.aiAnalyses.length > 0) {
+          this.selectedAnalysis = this.videoInfo.aiAnalyses[0];
+        }
+
         this.loading = false;
       },
       error: (err) => {
@@ -142,26 +161,30 @@ export class VideoInfoPageComponent implements OnInit {
     };
 
     // Transform tags to VideoTag format
-    const videoTags: VideoTag[] = tags.map((tag, index) => ({
-      id: `tag-${index}`,
-      name: tag,
-      category: 'custom' as const,
+    // Backend returns TagRecord[] with tag_name, tag_type, etc.
+    const videoTags: VideoTag[] = tags.map((tag: any, index: number) => ({
+      id: tag.id || `tag-${index}`,
+      name: tag.tag_name || tag,
+      category: (tag.tag_type || 'custom') as VideoTag['category'],
       color: this.generateTagColor()
     }));
 
     // Transform transcript to TranscriptionSegment format
     let transcriptionSegments: TranscriptionSegment[] = [];
     if (transcript) {
-      // Parse SRT format if available
-      if (transcript.srt_content) {
-        transcriptionSegments = this.parseSrtToSegments(transcript.srt_content);
-      } else if (transcript.txt_content) {
+      // Parse SRT format if available (database uses srt_format)
+      const srtContent = transcript.srt_format || transcript.srt_content;
+      const plainText = transcript.plain_text || transcript.txt_content;
+
+      if (srtContent) {
+        transcriptionSegments = this.parseSrtToSegments(srtContent);
+      } else if (plainText) {
         // Simple text format - create single segment
         transcriptionSegments = [{
           id: 'seg-0',
           startTime: 0,
-          endTime: parseDuration(video.duration),
-          text: transcript.txt_content,
+          endTime: parseDuration(video.duration || '0'),
+          text: plainText,
           confidence: 1
         }];
       }
@@ -170,8 +193,8 @@ export class VideoInfoPageComponent implements OnInit {
     // Transform analysis to AIAnalysis format
     const aiAnalyses: AIAnalysis[] = [];
     if (analysis) {
-      // Try to parse content as JSON if it's a string
-      let analysisContent = analysis.content;
+      // Get the AI analysis content (database uses ai_analysis field)
+      let analysisContent = analysis.ai_analysis || analysis.content || '';
       if (typeof analysisContent === 'string') {
         try {
           analysisContent = JSON.parse(analysisContent);
@@ -180,32 +203,22 @@ export class VideoInfoPageComponent implements OnInit {
         }
       }
 
-      aiAnalyses.push({
-        id: analysis.id || 'analysis-1',
-        type: 'summary',
-        model: analysis.model || 'Unknown',
-        timestamp: new Date(analysis.created_at || Date.now()),
-        title: 'AI Analysis',
-        content: typeof analysisContent === 'string' ? analysisContent : JSON.stringify(analysisContent, null, 2),
-        confidence: 0.9
-      });
-
-      // Add sections as highlights
+      // Only add individual sections as highlights (not the raw summary)
       if (sections.length > 0) {
         const highlights = sections.map(section => ({
-          text: section.title || section.content,
-          timestamp: section.start_time || 0,
-          duration: (section.end_time || 0) - (section.start_time || 0),
+          text: section.description || section.content,
+          timestamp: section.start_seconds || section.start_time || 0,
+          duration: (section.end_seconds || section.end_time || 0) - (section.start_seconds || section.start_time || 0),
           importance: 'medium' as const,
-          category: section.type || 'Section'
+          category: (section.category || section.title || 'routine').toLowerCase()
         }));
 
         aiAnalyses.push({
           id: 'highlights-1',
           type: 'highlights',
-          model: analysis.model || 'Unknown',
-          timestamp: new Date(),
-          title: 'Key Sections',
+          model: analysis.ai_model || analysis.model || 'Unknown',
+          timestamp: new Date(analysis.analyzed_at || analysis.created_at || Date.now()),
+          title: 'Video Sections',
           content: '',
           highlights,
           confidence: 0.85
@@ -213,43 +226,56 @@ export class VideoInfoPageComponent implements OnInit {
       }
     }
 
+    // Get duration from database field
+    const durationSeconds = video.duration_seconds || video.durationSeconds || parseDuration(video.duration || '0');
+
+    // Get file size from database field
+    const fileSize = video.file_size_bytes || video.fileSizeBytes || video.size || 0;
+
+    // Get file extension/format
+    const format = video.file_extension || video.fileExtension || '';
+
     return {
       id: video.id,
       title: video.name || video.filename || 'Untitled',
-      description: video.aiDescription || video.ai_description || '',
+      description: video.ai_description || video.aiDescription || '',
       tags: videoTags,
       metadata: {
-        duration: parseDuration(video.duration),
-        fileSize: video.size || video.file_size || 0,
-        resolution: video.resolution || '',
-        frameRate: video.frame_rate || 0,
-        bitrate: video.bitrate || 0,
-        codec: video.codec || '',
-        format: video.format || video.fileExtension || '',
-        aspectRatio: video.aspect_ratio || '',
-        audioChannels: video.audio_channels || 0,
-        audioBitrate: video.audio_bitrate || 0,
-        audioCodec: video.audio_codec || '',
-        audioSampleRate: video.audio_sample_rate || 0,
-        capturedDate: video.downloadDate ? new Date(video.downloadDate) : undefined
+        duration: durationSeconds,
+        fileSize: fileSize,
+        resolution: 'N/A', // Not stored in database
+        frameRate: 0,
+        bitrate: 0,
+        codec: 'N/A',
+        format: format,
+        aspectRatio: video.aspect_ratio_fixed ? 'Fixed' : 'Original',
+        audioChannels: 0,
+        audioBitrate: 0,
+        audioCodec: 'N/A',
+        audioSampleRate: 0,
+        capturedDate: video.download_date ? new Date(video.download_date) :
+                     video.downloadDate ? new Date(video.downloadDate) : undefined
       },
       aiAnalyses,
       transcription: transcriptionSegments,
-      thumbnail: video.thumbnailUrl,
-      videoUrl: video.filePath,
-      createdAt: video.downloadDate ? new Date(video.downloadDate) : new Date(),
-      updatedAt: new Date(),
+      thumbnail: video.thumbnailUrl || video.thumbnail_url,
+      videoUrl: video.current_path || video.filePath,
+      uploadDate: video.uploadDate ? new Date(video.uploadDate) : undefined,
+      downloadDate: video.downloadDate ? new Date(video.downloadDate) : new Date(),
+      createdAt: video.download_date ? new Date(video.download_date) :
+                video.downloadDate ? new Date(video.downloadDate) : new Date(),
+      updatedAt: video.last_verified ? new Date(video.last_verified) : new Date(),
       processingStatus: {
         transcription: {
-          status: video.hasTranscript ? 'completed' : 'pending',
-          progress: video.hasTranscript ? 100 : 0
+          status: transcriptionSegments.length > 0 ? 'completed' : 'pending',
+          progress: transcriptionSegments.length > 0 ? 100 : 0
         },
         aiAnalysis: {
-          status: video.hasAnalysis ? 'completed' : 'pending',
-          progress: video.hasAnalysis ? 100 : 0
+          status: aiAnalyses.length > 0 ? 'completed' : 'pending',
+          progress: aiAnalyses.length > 0 ? 100 : 0
         },
         metadata: { status: 'completed', progress: 100 },
-        overall: (video.hasTranscript && video.hasAnalysis) ? 'completed' : 'pending'
+        overall: (transcriptionSegments.length > 0 && aiAnalyses.length > 0) ? 'completed' : 'pending'
       }
     };
   }
@@ -370,6 +396,61 @@ export class VideoInfoPageComponent implements OnInit {
     this.editedDescription = '';
   }
 
+  // Date Methods
+  editDates(): void {
+    if (this.videoInfo) {
+      this.editedUploadDate = this.videoInfo.uploadDate
+        ? this.formatDateForInput(this.videoInfo.uploadDate)
+        : '';
+      this.editedDownloadDate = this.formatDateForInput(this.videoInfo.downloadDate);
+      this.isEditingDates = true;
+    }
+  }
+
+  saveDates(): void {
+    if (this.videoInfo) {
+      const id = this.videoId || this.route.snapshot.paramMap.get('id');
+      if (!id) return;
+
+      console.log('Saving dates:', {
+        uploadDate: this.editedUploadDate || null,
+        downloadDate: this.editedDownloadDate
+      });
+
+      // Call backend to update dates
+      this.http.patch<any>(`http://localhost:3000/api/database/videos/${id}/metadata`, {
+        uploadDate: this.editedUploadDate || null,
+        downloadDate: this.editedDownloadDate
+      }).subscribe({
+        next: (result) => {
+          console.log('Save result:', result);
+          if (result.success) {
+            // Reload the video info to get updated filename and dates
+            this.loadVideoInfo(id);
+            this.isEditingDates = false;
+          } else {
+            console.error('Failed to save dates:', result.error);
+            alert('Failed to save dates: ' + result.error);
+          }
+        },
+        error: (err) => {
+          console.error('Error saving dates:', err);
+          alert('Error saving dates: ' + err.message);
+        }
+      });
+    }
+  }
+
+  cancelDatesEdit(): void {
+    this.isEditingDates = false;
+    this.editedUploadDate = '';
+    this.editedDownloadDate = '';
+  }
+
+  private formatDateForInput(date: Date): string {
+    return new Date(date).toISOString().split('T')[0];
+  }
+
   // AI Analysis Methods
   selectAnalysis(analysis: AIAnalysis): void {
     this.selectedAnalysis = this.selectedAnalysis?.id === analysis.id ? null : analysis;
@@ -386,6 +467,21 @@ export class VideoInfoPageComponent implements OnInit {
       return analysis.content;
     }
     return JSON.stringify(analysis.content, null, 2);
+  }
+
+  deleteSection(index: number, event: Event): void {
+    event.stopPropagation();
+    if (!this.videoInfo) return;
+
+    // Find the highlights analysis and remove the section at the given index
+    const highlightsAnalysis = this.videoInfo.aiAnalyses.find(a => a.type === 'highlights');
+    if (highlightsAnalysis && highlightsAnalysis.highlights) {
+      highlightsAnalysis.highlights.splice(index, 1);
+
+      // TODO: Call backend to delete the section from database
+      // const videoId = this.videoId || this.route.snapshot.paramMap.get('id');
+      // this.libraryService.deleteSection(videoId, sectionId).subscribe();
+    }
   }
 
   // Transcription Methods

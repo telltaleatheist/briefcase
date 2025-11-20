@@ -15,7 +15,7 @@ export interface DateInfo {
   /** The extracted date string (e.g., "2025-01-15" or "2025-01-T1") */
   date: string;
   /** The original date format found */
-  originalFormat: 'YYYY-MM-DD' | 'YYYY-MM-T#' | 'YYYYMMDD' | 'none';
+  originalFormat: 'YYYY-MM-DD' | 'YYYY-MM-T#' | 'YYYY-MM' | 'YYYY' | 'YYYYMMDD' | 'none';
   /** The title portion after the date */
   title: string;
   /** Whether a valid date was found */
@@ -29,11 +29,17 @@ export class FilenameDateUtil {
   // Trimester format: YYYY-MM-T[1-3]
   private static readonly TRIMESTER_DATE_PATTERN = /^(\d{4}-\d{2}-T[123])\s+(.+)$/;
 
+  // Partial date format: YYYY-MM (month only)
+  private static readonly MONTH_DATE_PATTERN = /^(\d{4}-\d{2})\s+(.+)$/;
+
+  // Year only format: YYYY
+  private static readonly YEAR_DATE_PATTERN = /^(\d{4})\s+(.+)$/;
+
   // Old format: YYYYMMDD
   private static readonly OLD_DATE_PATTERN = /^(\d{8})[-_ ](.+)$/;
 
   // Combined pattern to detect any date at start
-  private static readonly ANY_DATE_AT_START = /^(\d{4}-\d{2}-(?:\d{2}|T[123]))\s+/;
+  private static readonly ANY_DATE_AT_START = /^(\d{4}-\d{2}-(?:\d{2}|T[123])|\d{4}-\d{2}|\d{4})\s+/;
 
   /**
    * Extract date information from a filename
@@ -61,6 +67,28 @@ export class FilenameDateUtil {
         date: trimesterMatch[1],
         originalFormat: 'YYYY-MM-T#',
         title: trimesterMatch[2],
+        hasDate: true
+      };
+    }
+
+    // Check for month format (YYYY-MM) - must check after trimester to avoid false matches
+    const monthMatch = nameWithoutExt.match(this.MONTH_DATE_PATTERN);
+    if (monthMatch) {
+      return {
+        date: monthMatch[1],
+        originalFormat: 'YYYY-MM',
+        title: monthMatch[2],
+        hasDate: true
+      };
+    }
+
+    // Check for year only format (YYYY)
+    const yearMatch = nameWithoutExt.match(this.YEAR_DATE_PATTERN);
+    if (yearMatch) {
+      return {
+        date: yearMatch[1],
+        originalFormat: 'YYYY',
+        title: yearMatch[2],
         hasDate: true
       };
     }
@@ -166,10 +194,10 @@ export class FilenameDateUtil {
   }
 
   /**
-   * Convert trimester format to approximate standard date
-   * T1 -> 05 (mid-point of 1-9)
-   * T2 -> 15 (mid-point of 10-19)
-   * T3 -> 25 (mid-point of 20-31)
+   * Convert trimester format to standard date (first day of range)
+   * T1 -> 01 (first day of 1-9)
+   * T2 -> 10 (first day of 10-19)
+   * T3 -> 20 (first day of 20-31)
    */
   static trimesterToStandardDate(trimesterDate: string): string {
     const match = trimesterDate.match(/^(\d{4})-(\d{2})-T([123])$/);
@@ -177,12 +205,43 @@ export class FilenameDateUtil {
 
     const [, year, month, trimester] = match;
     const dayMap: { [key: string]: string } = {
-      '1': '05',
-      '2': '15',
-      '3': '25'
+      '1': '01',
+      '2': '10',
+      '3': '20'
     };
 
     return `${year}-${month}-${dayMap[trimester]}`;
+  }
+
+  /**
+   * Convert any filename date format to ISO date string for database storage
+   * Handles: YYYY-MM-DD, YYYY-MM-T#, YYYY-MM, YYYY
+   * Returns null if no valid date
+   */
+  static toISODate(dateStr: string): string | null {
+    if (!dateStr) return null;
+
+    // Standard format YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr;
+    }
+
+    // Trimester format YYYY-MM-T#
+    if (/^\d{4}-\d{2}-T[123]$/.test(dateStr)) {
+      return this.trimesterToStandardDate(dateStr);
+    }
+
+    // Month only YYYY-MM -> first day of month
+    if (/^\d{4}-\d{2}$/.test(dateStr)) {
+      return `${dateStr}-01`;
+    }
+
+    // Year only YYYY -> first day of year
+    if (/^\d{4}$/.test(dateStr)) {
+      return `${dateStr}-01-01`;
+    }
+
+    return null;
   }
 
   /**

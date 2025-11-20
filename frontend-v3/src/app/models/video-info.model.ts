@@ -10,6 +10,8 @@ export interface VideoInfo {
   transcription: TranscriptionSegment[];
   thumbnail?: string;
   videoUrl: string;
+  uploadDate?: Date; // When content was filmed/created
+  downloadDate: Date; // When you downloaded the file
   createdAt: Date;
   updatedAt: Date;
   processingStatus: ProcessingStatus;

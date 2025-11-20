@@ -97,12 +97,26 @@ export class MediaEventService {
   }
   
   emitDownloadProgress(progress: number, task: string, jobId?: string, additionalInfo?: any): void {
+    const normalizedProgress = this.normalizeProgress(progress);
+
+    // Emit legacy download-progress event
     this.emitEvent('download-progress', {
-      progress: this.normalizeProgress(progress),
+      progress: normalizedProgress,
       task,
       jobId,
       ...additionalInfo
     });
+
+    // Also emit task-progress event for the new queue system
+    if (jobId) {
+      this.emitEvent('task-progress', {
+        jobId,
+        taskType: 'download',
+        progress: normalizedProgress,
+        message: task,
+        timestamp: this.getTimestamp()
+      });
+    }
   }
   
   emitDownloadCompleted(outputFile: string, url: string, jobId?: string, isImage: boolean = false): void {

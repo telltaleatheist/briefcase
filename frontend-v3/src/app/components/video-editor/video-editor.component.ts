@@ -39,30 +39,33 @@ export enum EditorTool {
 
 // Category colors for different analysis types
 const CATEGORY_COLORS: Record<string, string> = {
-  'violence': '#dc3545',
-  'conspiracy': '#6f42c1',
-  'misinformation': '#fd7e14',
-  'hate speech': '#e83e8c',
-  'harmful content': '#ffc107',
-  'medical misinformation': '#20c997',
+  'routine': '#3b82f6',           // Blue
+  'shocking': '#f59e0b',          // Amber
+  'political-violence': '#b91c1c', // Dark Red
+  'hate': '#dc2626',              // Red
+  'violence': '#ef4444',          // Red
+  'extremism': '#f97316',         // Orange
+  'misinformation': '#eab308',    // Yellow
+  'conspiracy': '#a855f7',        // Purple
+  'christian-nationalism': '#ec4899', // Pink
+  'false-prophecy': '#8b5cf6',    // Violet
+  // Legacy categories
+  'hate speech': '#dc2626',
+  'harmful content': '#f97316',
   'political': '#0d6efd',
   'educational': '#198754',
   'entertainment': '#6610f2',
   'news': '#0dcaf0',
-  'routine': '#6f42c1',
-  'false-prophecy': '#ffc107',
-  'false prophecy': '#ffc107',
-  'prophecy': '#fd7e14',
+  'false prophecy': '#8b5cf6',
+  'prophecy': '#8b5cf6',
   'spiritual': '#20c997',
   'testimony': '#0dcaf0',
   'teaching': '#198754',
   'worship': '#6610f2',
-  'prayer': '#e83e8c',
-  'christian nationalism': '#dc3545',
-  'nationalism': '#e83e8c',
-  'extremism': '#dc3545',
-  'hate/extremism': '#8b0000',
-  'political violence': '#990000',
+  'prayer': '#ec4899',
+  'christian nationalism': '#ec4899',
+  'nationalism': '#ec4899',
+  'political violence': '#b91c1c',
   'rhetoric': '#fd7e14',
   'propaganda': '#ffc107',
   'fear-mongering': '#e83e8c',
@@ -511,6 +514,10 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
         this.transcript.set(data.transcript);
       } else if (data && Array.isArray(data)) {
         this.transcript.set(data);
+      } else if (data && data.srt_format) {
+        // Parse SRT format into segments
+        const segments = this.parseSrtToSegments(data.srt_format);
+        this.transcript.set(segments);
       } else {
         this.transcript.set([]);
       }
@@ -518,6 +525,48 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       console.log('Failed to load transcript:', error);
       this.transcript.set([]);
     }
+  }
+
+  private parseSrtToSegments(srtContent: string): TranscriptionSegment[] {
+    const segments: TranscriptionSegment[] = [];
+    const blocks = srtContent.trim().split(/\n\n+/);
+
+    for (const block of blocks) {
+      const lines = block.split('\n');
+      if (lines.length < 3) continue;
+
+      // Parse timestamp line (e.g., "00:00:00,000 --> 00:00:05,000")
+      const timestampLine = lines[1];
+      const timestampMatch = timestampLine.match(
+        /(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/
+      );
+
+      if (!timestampMatch) continue;
+
+      const startTime =
+        parseInt(timestampMatch[1]) * 3600 +
+        parseInt(timestampMatch[2]) * 60 +
+        parseInt(timestampMatch[3]) +
+        parseInt(timestampMatch[4]) / 1000;
+
+      const endTime =
+        parseInt(timestampMatch[5]) * 3600 +
+        parseInt(timestampMatch[6]) * 60 +
+        parseInt(timestampMatch[7]) +
+        parseInt(timestampMatch[8]) / 1000;
+
+      // Text is everything after the timestamp line
+      const text = lines.slice(2).join(' ').trim();
+
+      segments.push({
+        id: `segment-${segments.length}`,
+        startTime,
+        endTime,
+        text
+      });
+    }
+
+    return segments;
   }
 
   private async loadAnalysisForVideo(videoId: string) {

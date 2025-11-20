@@ -2,8 +2,53 @@
 @use '../../../styles/mixins' as *;
 
 .video-info-container {
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
   background: var(--bg-primary);
+  padding-bottom: 60px;
+}
+
+// Loading and error states
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 16px;
+  color: var(--text-secondary);
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--primary-orange);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  .error-icon {
+    font-size: 48px;
+  }
+
+  .back-button {
+    margin-top: 16px;
+    padding: 8px 16px;
+    background: var(--primary-orange);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--dark-orange);
+    }
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 // Video Header
@@ -12,45 +57,43 @@
   border-bottom: 1px solid var(--border-color);
   padding: $spacing-xl;
 
-  .video-player-placeholder {
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    margin-bottom: 16px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: var(--primary-orange);
+    }
+
+    span {
+      font-size: 16px;
+    }
+  }
+
+  .video-player-container {
     width: 100%;
     max-width: 800px;
     margin: 0 auto $spacing-lg;
-    aspect-ratio: 16/9;
     background: #000;
     border-radius: $radius-lg;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    position: relative;
     overflow: hidden;
 
-    .player-icon {
-      font-size: 4rem;
-      opacity: 0.5;
-      color: white;
-    }
-
-    .player-text {
-      font-size: $font-size-lg;
-      color: rgba(255, 255, 255, 0.7);
-      margin-top: $spacing-md;
-    }
-
-    .player-overlay {
-      position: absolute;
-      bottom: $spacing-md;
-      right: $spacing-md;
-
-      .duration-badge {
-        padding: $spacing-xs $spacing-sm;
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        border-radius: $radius-sm;
-        font-size: $font-size-sm;
-        font-weight: $font-weight-medium;
-      }
+    .video-player {
+      width: 100%;
+      display: block;
+      max-height: 450px;
     }
   }
 
@@ -554,34 +597,131 @@
   margin-top: $spacing-lg;
 
   .metadata-group {
+    background: var(--bg-secondary);
+    border-radius: $radius-md;
+    padding: $spacing-md;
+
+    .group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: $spacing-lg;
+      padding-bottom: $spacing-md;
+      border-bottom: 2px solid var(--border-color);
+
+      .group-title {
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
+      }
+    }
+
     .group-title {
       font-size: $font-size-lg;
       font-weight: $font-weight-semibold;
       color: $primary-orange;
-      margin-bottom: $spacing-md;
-      padding-bottom: $spacing-sm;
+      margin-bottom: $spacing-lg;
+      padding-bottom: $spacing-md;
       border-bottom: 2px solid var(--border-color);
+    }
+
+    .edit-button-small {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      border-radius: $radius-sm;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: $font-size-sm;
+
+      &:hover {
+        background: var(--bg-tertiary);
+      }
     }
 
     .metadata-item {
       display: flex;
       justify-content: space-between;
-      padding: $spacing-sm 0;
+      padding: $spacing-md $spacing-lg;
       border-bottom: 1px solid var(--bg-tertiary);
+      min-height: 48px;
+      align-items: center;
 
       &:last-child {
         border-bottom: none;
       }
 
+      &.edit-mode {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: $spacing-sm;
+
+        .metadata-label {
+          padding-right: 0;
+        }
+      }
+
       .metadata-label {
         font-weight: $font-weight-medium;
         color: var(--text-secondary);
+        padding-right: $spacing-lg;
+        font-size: $font-size-base;
       }
 
       .metadata-value {
         font-weight: $font-weight-medium;
         color: var(--text-primary);
         text-align: right;
+        font-size: $font-size-base;
+      }
+
+      .date-input {
+        width: 100%;
+        padding: $spacing-sm $spacing-md;
+        border: 1px solid var(--border-color);
+        border-radius: $radius-sm;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-size: $font-size-base;
+
+        &:focus {
+          outline: none;
+          border-color: $primary-orange;
+        }
+      }
+    }
+
+    .edit-actions {
+      display: flex;
+      gap: $spacing-sm;
+      padding: $spacing-md $spacing-lg;
+      justify-content: flex-end;
+
+      .save-button,
+      .cancel-button {
+        padding: $spacing-sm $spacing-md;
+        border-radius: $radius-sm;
+        font-size: $font-size-sm;
+        cursor: pointer;
+      }
+
+      .save-button {
+        background: $primary-orange;
+        color: white;
+        border: none;
+
+        &:hover {
+          background: darken($primary-orange, 10%);
+        }
+      }
+
+      .cancel-button {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+
+        &:hover {
+          background: var(--bg-tertiary);
+        }
       }
     }
   }
@@ -618,6 +758,137 @@
         border-color: $primary-orange;
       }
     }
+  }
+}
+
+// Section Cards - Individual cards for each analysis section
+.section-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.section-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--border-color);
+  border-radius: $radius-sm;
+  padding: $spacing-sm $spacing-md;
+  transition: all $transition-fast;
+
+  &:hover {
+    box-shadow: $shadow-sm;
+  }
+
+  // Category-based colors
+  &[data-category="routine"] {
+    border-left-color: #3b82f6; // Blue
+    background: rgba(59, 130, 246, 0.05);
+  }
+
+  &[data-category="shocking"] {
+    border-left-color: #f59e0b; // Amber
+    background: rgba(245, 158, 11, 0.08);
+  }
+
+  &[data-category="political-violence"] {
+    border-left-color: #b91c1c; // Dark Red
+    background: rgba(185, 28, 28, 0.08);
+  }
+
+  &[data-category="hate"] {
+    border-left-color: #dc2626; // Red
+    background: rgba(220, 38, 38, 0.08);
+  }
+
+  &[data-category="violence"] {
+    border-left-color: #ef4444; // Red
+    background: rgba(239, 68, 68, 0.08);
+  }
+
+  &[data-category="extremism"] {
+    border-left-color: #f97316; // Orange
+    background: rgba(249, 115, 22, 0.08);
+  }
+
+  &[data-category="misinformation"] {
+    border-left-color: #eab308; // Yellow
+    background: rgba(234, 179, 8, 0.08);
+  }
+
+  &[data-category="conspiracy"] {
+    border-left-color: #a855f7; // Purple
+    background: rgba(168, 85, 247, 0.08);
+  }
+
+  &[data-category="christian-nationalism"] {
+    border-left-color: #ec4899; // Pink
+    background: rgba(236, 72, 153, 0.08);
+  }
+
+  &[data-category="false-prophecy"] {
+    border-left-color: #8b5cf6; // Violet
+    background: rgba(139, 92, 246, 0.08);
+  }
+
+  .section-card-header {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    margin-bottom: $spacing-sm;
+  }
+
+  .section-timestamp {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-bold;
+    color: $primary-orange;
+    padding: 2px 8px;
+    background: rgba(255, 107, 53, 0.1);
+    border-radius: $radius-sm;
+  }
+
+  .section-category-badge {
+    font-size: $font-size-xs;
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    background: var(--bg-tertiary);
+    border-radius: $radius-full;
+    text-transform: capitalize;
+  }
+
+  .section-delete-btn {
+    margin-left: auto;
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    border-radius: $radius-sm;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all $transition-fast;
+    opacity: 0;
+
+    &:hover {
+      background: rgba(239, 68, 68, 0.1);
+      color: $error;
+    }
+  }
+
+  &:hover .section-delete-btn {
+    opacity: 1;
+  }
+
+  .section-text {
+    margin: 0;
+    color: var(--text-primary);
+    line-height: $line-height-relaxed;
+    font-size: $font-size-base;
   }
 }
 
@@ -725,6 +996,8 @@
           line-height: $line-height-relaxed;
           color: var(--text-primary);
           margin-bottom: $spacing-md;
+          white-space: pre-wrap;
+          word-wrap: break-word;
         }
 
         .analysis-tags {
@@ -1037,7 +1310,8 @@
 
       .search-input {
         flex: 1;
-        padding: $spacing-md;
+        height: 44px;
+        padding: 0 $spacing-md;
         background: var(--bg-card);
         border: 2px solid var(--border-color);
         border-radius: $radius-md;

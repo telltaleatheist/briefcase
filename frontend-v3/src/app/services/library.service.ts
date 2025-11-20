@@ -39,6 +39,7 @@ export interface BackendJobRequest {
   videoId?: string;
   videoPath?: string;
   displayName?: string;
+  libraryId?: string;
   tasks: BackendTask[];
 }
 
@@ -200,9 +201,12 @@ export class LibraryService {
   /**
    * Delete video from library
    * DELETE /api/database/videos/:id
+   * @param mode - 'database-only' (keep file), 'file-only' (keep db entry), 'everything' (delete both)
    */
-  deleteVideo(id: string): Observable<ApiResponse<void>> {
-    return this.http.delete<any>(`${this.API_BASE}/database/videos/${id}`).pipe(
+  deleteVideo(id: string, mode: 'database-only' | 'file-only' | 'everything' = 'everything'): Observable<ApiResponse<void>> {
+    return this.http.delete<any>(`${this.API_BASE}/database/videos/${id}`, {
+      body: { mode }
+    }).pipe(
       map(response => ({
         success: response.success !== false,
         data: undefined
@@ -220,7 +224,9 @@ export class LibraryService {
       suggestedFilename: video.suggested_title || video.filename || 'Untitled',
       duration: this.formatDuration(video.duration || video.duration_seconds || 0),
       size: video.file_size || video.file_size_bytes,
-      downloadDate: video.download_date ? new Date(video.download_date) : undefined,
+      uploadDate: video.upload_date ? this.parseLocalDate(video.upload_date) : undefined,
+      downloadDate: video.download_date ? this.parseLocalDate(video.download_date) : undefined,
+      lastProcessedDate: video.last_processed_date ? this.parseLocalDate(video.last_processed_date) : undefined,
       thumbnailUrl: video.id ? `${this.API_BASE}/database/videos/${video.id}/thumbnail` : undefined,
       // Additional fields for context menu actions
       filePath: video.file_path || video.filepath || video.current_path,
@@ -245,6 +251,20 @@ export class LibraryService {
   }
 
   /**
+   * Parse date string as local time to avoid timezone shift
+   * "2025-11-17" should display as Nov 17, not Nov 16
+   */
+  private parseLocalDate(dateStr: string): Date {
+    // If it's an ISO string with time (e.g., "2025-11-17T12:00:00Z"), parse normally
+    if (dateStr.includes('T')) {
+      return new Date(dateStr);
+    }
+    // For date-only strings (e.g., "2025-11-17"), parse as local time
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  /**
    * Format duration from seconds to hh:mm:ss
    */
   private formatDuration(seconds: number): string {
@@ -261,16 +281,17 @@ export class LibraryService {
 
   /**
    * Group videos by date (folder format) with special "Past 24 hours" section
+   * Videos appear in "Past 24 Hours" based on lastProcessedDate (or downloadDate as fallback)
    */
   private groupVideosByWeek(videos: VideoItem[]): VideoWeek[] {
     const dateMap = new Map<string, VideoItem[]>();
     const now = new Date();
     const past24Hours: VideoItem[] = [];
 
-    // Sort videos by download date (newest first)
+    // Sort videos by most recent activity (lastProcessedDate or downloadDate)
     const sortedVideos = [...videos].sort((a, b) => {
-      const dateA = a.downloadDate ? new Date(a.downloadDate).getTime() : 0;
-      const dateB = b.downloadDate ? new Date(b.downloadDate).getTime() : 0;
+      const dateA = (a.lastProcessedDate || a.downloadDate) ? new Date(a.lastProcessedDate || a.downloadDate!).getTime() : 0;
+      const dateB = (b.lastProcessedDate || b.downloadDate) ? new Date(b.lastProcessedDate || b.downloadDate!).getTime() : 0;
       return dateB - dateA;
     });
 
@@ -284,16 +305,18 @@ export class LibraryService {
         continue;
       }
 
-      const videoDate = new Date(video.downloadDate);
+      // Use lastProcessedDate for "New" section, fall back to downloadDate
+      const activityDate = video.lastProcessedDate || video.downloadDate;
+      const videoDate = new Date(activityDate);
       const hoursDiff = (now.getTime() - videoDate.getTime()) / (1000 * 60 * 60);
 
-      // Check if within past 24 hours
+      // Check if within past 24 hours (based on recent activity)
       if (hoursDiff <= 24) {
         past24Hours.push(video);
       }
 
-      // Always add to date group as well
-      const dateKey = this.getDateKey(videoDate);
+      // Always add to date group based on download date
+      const dateKey = this.getDateKey(new Date(video.downloadDate));
       if (!dateMap.has(dateKey)) {
         dateMap.set(dateKey, []);
       }
@@ -611,10 +634,16 @@ export class LibraryService {
    */
   getCurrentLibrary(): Observable<ApiResponse<Library>> {
     return this.http.get<any>(`${this.API_BASE}/database/libraries/active`).pipe(
-      map(response => ({
-        success: !!response.library,
-        data: response.library
-      }))
+      map(response => {
+        // Update the signal when we get the current library
+        if (response.library) {
+          this.currentLibrary.set(response.library);
+        }
+        return {
+          success: !!response.library,
+          data: response.library
+        };
+      })
     );
   }
 
@@ -624,10 +653,16 @@ export class LibraryService {
    */
   switchLibrary(libraryId: string): Observable<ApiResponse<Library>> {
     return this.http.post<any>(`${this.API_BASE}/database/libraries/${libraryId}/switch`, {}).pipe(
-      map(response => ({
-        success: response.success,
-        data: response.library
-      }))
+      map(response => {
+        // Update the signal when switching libraries
+        if (response.success && response.library) {
+          this.currentLibrary.set(response.library);
+        }
+        return {
+          success: response.success,
+          data: response.library
+        };
+      })
     );
   }
 
@@ -640,10 +675,16 @@ export class LibraryService {
       name: library.name,
       clipsFolderPath: library.path
     }).pipe(
-      map(response => ({
-        success: response.success,
-        data: response.library
-      }))
+      map(response => {
+        // Update the signal when creating a new library (it becomes active)
+        if (response.success && response.library) {
+          this.currentLibrary.set(response.library);
+        }
+        return {
+          success: response.success,
+          data: response.library
+        };
+      })
     );
   }
 
@@ -854,6 +895,32 @@ export class LibraryService {
         success: true,
         data: response.sections || []
       }))
+    );
+  }
+
+  /**
+   * Get video info from URL (title, duration, etc.)
+   * GET /api/downloader/info?url=...
+   */
+  getVideoInfo(url: string): Observable<ApiResponse<{ title: string; duration?: number; thumbnail?: string }>> {
+    return this.http.get<any>(`${this.API_BASE}/downloader/info`, {
+      params: { url }
+    }).pipe(
+      map(response => ({
+        success: !response.error,
+        data: {
+          title: response.title || 'Unknown Video',
+          duration: response.duration,
+          thumbnail: response.thumbnail
+        }
+      })),
+      catchError(error => {
+        console.error('Failed to fetch video info:', error);
+        return of({
+          success: false,
+          data: { title: 'Unknown Video' }
+        });
+      })
     );
   }
 }

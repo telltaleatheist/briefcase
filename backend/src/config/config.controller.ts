@@ -111,4 +111,101 @@ export class ConfigController {
       };
     }
   }
+
+  /**
+   * Get analysis categories
+   */
+  @Get('analysis-categories')
+  async getAnalysisCategories() {
+    try {
+      const categoriesPath = path.join(path.dirname(this.configPath), 'analysis-categories.json');
+
+      if (fs.existsSync(categoriesPath)) {
+        const data = fs.readFileSync(categoriesPath, 'utf8');
+        return JSON.parse(data);
+      }
+
+      return { categories: null }; // Frontend will use defaults
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to get analysis categories: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Save analysis categories
+   */
+  @Post('analysis-categories')
+  async saveAnalysisCategories(@Body() body: { categories: any[] }) {
+    try {
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      const categoriesPath = path.join(configDir, 'analysis-categories.json');
+
+      // Save categories
+      fs.writeFileSync(categoriesPath, JSON.stringify({
+        categories: body.categories,
+        lastUpdated: new Date().toISOString()
+      }, null, 2), 'utf8');
+
+      // Also update the Python prompt file with the new categories
+      await this.updateAnalysisPrompt(body.categories);
+
+      return {
+        success: true,
+        message: 'Analysis categories saved'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to save analysis categories: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Update the analysis prompt Python file with new categories
+   */
+  private async updateAnalysisPrompt(categories: any[]) {
+    try {
+      // Build categories list for the prompt
+      const enabledCategories = categories.filter(c => c.enabled);
+
+      // Create the category descriptions for the prompt
+      const categoryDescriptions = enabledCategories
+        .filter(c => c.name !== 'routine')
+        .map(c => `- **${c.name}** - ${c.description}`)
+        .join('\n');
+
+      // Create the category list for JSON format
+      const categoryList = enabledCategories.map(c => c.name).join(', ');
+
+      // Path to prompt file
+      const promptPath = path.join(__dirname, '..', '..', 'python', 'analysis_prompts.py');
+
+      if (fs.existsSync(promptPath)) {
+        let content = fs.readFileSync(promptPath, 'utf8');
+
+        // Update the category list in the IMPORTANT RULES section
+        const categoryRuleRegex = /- Category must be EXACTLY ONE of: [^\n]+/;
+        const newCategoryRule = `- Category must be EXACTLY ONE of: ${categoryList} (pick the SINGLE most relevant category, do NOT combine multiple)`;
+        content = content.replace(categoryRuleRegex, newCategoryRule);
+
+        // Update the example category list in the JSON format section
+        const jsonCategoryRegex = /"category": "ONE of: [^"]+"/g;
+        const newJsonCategory = `"category": "ONE of: ${categoryList}"`;
+        content = content.replace(jsonCategoryRegex, newJsonCategory);
+
+        fs.writeFileSync(promptPath, content, 'utf8');
+      }
+    } catch (error) {
+      console.error('Failed to update analysis prompt:', error);
+      // Don't throw - saving categories should still succeed
+    }
+  }
 }

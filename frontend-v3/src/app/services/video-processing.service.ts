@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, of } from 'rxjs';
+import { map, catchError } from 'rxjs/operators';
 import { VideoJob, VideoTask, VideoJobSettings, QueueStats, ProcessingWebSocketMessage } from '../models/video-processing.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
 import { LibraryService, BackendJobRequest, BackendTask, BackendTaskType } from './library.service';
@@ -197,6 +198,13 @@ export class VideoProcessingService {
     return this.progressUpdates$.asObservable();
   }
 
+  /**
+   * Translate a backend job ID to the corresponding frontend job ID
+   */
+  getFrontendJobId(backendJobId: string): string | undefined {
+    return this.jobIdMap.get(backendJobId);
+  }
+
   addJob(videoUrl: string, videoName: string, settings: VideoJobSettings, videoId?: string, videoPath?: string): VideoJob {
     const job: VideoJob = {
       id: this.generateId(),
@@ -220,10 +228,15 @@ export class VideoProcessingService {
 
   /**
    * Process all queued jobs by sending them to the backend
+   * Returns an Observable that emits a map of frontend job ID -> backend job ID
    */
-  processQueue(): void {
+  processQueue(): Observable<Map<string, string>> {
     const queuedJobs = this.jobs$.value.filter(j => j.status === 'queued');
-    if (queuedJobs.length === 0) return;
+    if (queuedJobs.length === 0) return of(new Map());
+
+    // Get current library ID
+    const currentLibrary = this.libraryService.currentLibrary();
+    const libraryId = currentLibrary?.id;
 
     // Convert jobs to backend format
     const backendJobs: BackendJobRequest[] = queuedJobs.map(job => {
@@ -233,20 +246,24 @@ export class VideoProcessingService {
         return {
           url: job.videoUrl,
           displayName: job.videoName,
+          libraryId, // Pass library ID for downloads
           tasks
         };
       } else {
         return {
           videoId: job.videoId || job.id, // Use actual video ID from library
           displayName: job.videoName,
+          libraryId,
           tasks
         };
       }
     });
 
-    // Submit to backend
-    this.libraryService.createBulkJobs(backendJobs).subscribe({
-      next: (response) => {
+    // Submit to backend and return the job ID mapping
+    return this.libraryService.createBulkJobs(backendJobs).pipe(
+      map((response) => {
+        const frontendToBackend = new Map<string, string>();
+
         if (response.success) {
           const jobIds = response.data.jobIds;
 
@@ -254,6 +271,7 @@ export class VideoProcessingService {
           queuedJobs.forEach((job, index) => {
             if (index < jobIds.length) {
               this.jobIdMap.set(jobIds[index], job.id);
+              frontendToBackend.set(job.id, jobIds[index]);
             }
           });
 
@@ -261,8 +279,10 @@ export class VideoProcessingService {
         } else {
           console.error('Failed to create jobs');
         }
-      },
-      error: (error) => {
+
+        return frontendToBackend;
+      }),
+      catchError((error) => {
         console.error('Failed to submit jobs:', error);
         // Mark jobs as failed
         const jobs = this.jobs$.value;
@@ -274,8 +294,9 @@ export class VideoProcessingService {
         });
         this.jobs$.next([...jobs]);
         this.updateStats();
-      }
-    });
+        return of(new Map<string, string>());
+      })
+    );
   }
 
   private convertSettingsToBackendTasks(settings: VideoJobSettings, isUrl: boolean): string[] {
@@ -429,6 +450,15 @@ export class VideoProcessingService {
     this.updateStats();
   }
 
+  updateJobNameByUrl(url: string, name: string): void {
+    const jobs = this.jobs$.value;
+    const job = jobs.find(j => j.videoUrl === url);
+    if (job) {
+      job.videoName = name;
+      this.jobs$.next([...jobs]);
+    }
+  }
+
   pauseJob(jobId: string): void {
     this.updateJobStatus(jobId, 'paused');
   }
@@ -465,9 +495,12 @@ export class VideoProcessingService {
   }
 
   updateJobFromTaskTypes(jobId: string, taskTypes: string[], taskConfigs?: Map<string, any>): void {
+    console.log('updateJobFromTaskTypes called:', { jobId, taskTypes });
     const jobs = this.jobs$.value;
     const job = jobs.find(j => j.id === jobId);
+    console.log('Found job:', job ? { id: job.id, status: job.status } : 'NOT FOUND');
     if (job && job.status === 'queued') {
+      console.log('Updating job settings...');
       // Convert task types to settings
       job.settings = {
         ...job.settings,
@@ -491,12 +524,14 @@ export class VideoProcessingService {
         if (aiConfig && aiConfig.aiModel) {
           // Strip provider prefix if present (e.g., "ollama:qwen2.5:32b" -> "qwen2.5:32b")
           let aiModel = aiConfig.aiModel;
+          console.log('Saving AI model - original:', aiConfig.aiModel);
           if (aiModel.includes(':')) {
             const parts = aiModel.split(':');
             if (['ollama', 'claude', 'openai'].includes(parts[0])) {
               aiModel = parts.slice(1).join(':');
             }
           }
+          console.log('Saving AI model - stripped:', aiModel);
           job.settings.aiModel = aiModel;
           job.settings.customInstructions = aiConfig.customInstructions;
         }

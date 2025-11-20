@@ -164,6 +164,7 @@ export interface QueueJob {
   videoPath?: string; // For local file tasks
   videoId?: string; // For library video tasks
   displayName?: string;
+  libraryId?: string; // Target library for import (uses active library if not specified)
   tasks: Task[];
   currentTaskIndex: number;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';

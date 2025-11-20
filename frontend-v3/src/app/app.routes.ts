@@ -17,11 +17,6 @@ export const routes: Routes = [
     title: 'Video Editor | ClipChimp'
   },
   {
-    path: 'queue',
-    loadComponent: () => import('./components/video-processing-queue/video-processing-queue.component').then(m => m.VideoProcessingQueueComponent),
-    title: 'Processing Queue | ClipChimp'
-  },
-  {
     path: 'video/:id',
     loadComponent: () => import('./components/video-info-page/video-info-page.component').then(m => m.VideoInfoPageComponent),
     title: 'Video Info | ClipChimp'

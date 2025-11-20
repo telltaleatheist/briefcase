@@ -162,18 +162,25 @@ export class QueueItemConfigModalComponent implements OnInit {
 
     // Initialize from existing tasks or defaults
     const existing = this.existingTasks();
+    console.log('initializeTasks - existing tasks:', existing);
     if (existing && existing.length > 0) {
       existing.forEach(task => {
+        console.log('Adding task to map:', task.type, 'config:', task.config);
         taskMap.set(task.type, { ...task });
       });
     }
 
     this.tasks.set(taskMap);
+    console.log('Tasks map after init:', Array.from(taskMap.entries()));
   }
 
   getAvailableTasks(): Task[] {
     const source = this.itemSource();
     return AVAILABLE_TASKS.filter(task => {
+      // Exclude download-import - it's automatically added based on source type
+      if (task.type === 'download-import') {
+        return false;
+      }
       if (source === 'url') {
         return task.requiresUrl || task.requiresFile;
       } else {
@@ -254,7 +261,15 @@ export class QueueItemConfigModalComponent implements OnInit {
   }
 
   getTaskConfig(taskType: TaskType): any {
-    return this.tasks().get(taskType)?.config || this.getDefaultConfig(taskType);
+    const task = this.tasks().get(taskType);
+    const config = task?.config;
+    // Only fall back to default if config is undefined/null or empty object
+    if (!config || Object.keys(config).length === 0) {
+      console.log(`getTaskConfig(${taskType}): no config, using default`);
+      return this.getDefaultConfig(taskType);
+    }
+    console.log(`getTaskConfig(${taskType}):`, config);
+    return config;
   }
 
   onSave() {

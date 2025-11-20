@@ -73,6 +73,108 @@
         </div>
       </div>
     </section>
+
+    <!-- Analysis Categories Section -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">🏷️</div>
+        <div class="section-info">
+          <h2>Analysis Categories</h2>
+          <p>Configure the categories that AI uses to classify video content</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        <!-- Categories List -->
+        <div class="categories-list">
+          @for (category of categories(); track category.id) {
+            <div class="category-item" [class.disabled]="!category.enabled">
+              @if (editingCategory()?.id === category.id) {
+                <!-- Edit Mode -->
+                <div class="category-edit-form">
+                  <div class="form-row">
+                    <input
+                      type="text"
+                      class="category-name-input"
+                      [(ngModel)]="editingCategory()!.name"
+                      placeholder="Category name">
+                    <input
+                      type="color"
+                      class="category-color-input"
+                      [(ngModel)]="editingCategory()!.color">
+                  </div>
+                  <textarea
+                    class="category-description-input"
+                    [(ngModel)]="editingCategory()!.description"
+                    placeholder="Description for AI..."
+                    rows="2"></textarea>
+                  <div class="form-actions">
+                    <button class="btn-save" (click)="saveEditCategory()">Save</button>
+                    <button class="btn-cancel" (click)="cancelEditCategory()">Cancel</button>
+                  </div>
+                </div>
+              } @else {
+                <!-- View Mode -->
+                <div class="category-color" [style.backgroundColor]="category.color"></div>
+                <div class="category-details">
+                  <div class="category-name">{{ category.name }}</div>
+                  <div class="category-description">{{ category.description }}</div>
+                </div>
+                <div class="category-actions">
+                  <button
+                    class="btn-toggle"
+                    [class.enabled]="category.enabled"
+                    (click)="toggleCategoryEnabled(category)"
+                    [title]="category.enabled ? 'Disable' : 'Enable'">
+                    {{ category.enabled ? '✓' : '○' }}
+                  </button>
+                  <button class="btn-edit" (click)="startEditCategory(category)" title="Edit">✏️</button>
+                  <button class="btn-delete" (click)="deleteCategory(category.id)" title="Delete">🗑️</button>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- Add Category Form -->
+        @if (isAddingCategory()) {
+          <div class="add-category-form">
+            <div class="form-row">
+              <input
+                type="text"
+                class="category-name-input"
+                [(ngModel)]="newCategory.name"
+                placeholder="Category name (e.g., propaganda)">
+              <input
+                type="color"
+                class="category-color-input"
+                [(ngModel)]="newCategory.color">
+            </div>
+            <textarea
+              class="category-description-input"
+              [(ngModel)]="newCategory.description"
+              placeholder="Description for AI to understand what to look for..."
+              rows="2"></textarea>
+            <div class="form-actions">
+              <button class="btn-save" (click)="addCategory()">Add Category</button>
+              <button class="btn-cancel" (click)="cancelAddCategory()">Cancel</button>
+            </div>
+          </div>
+        }
+
+        <!-- Action Buttons -->
+        <div class="section-actions">
+          <button class="action-btn primary" (click)="startAddCategory()" [disabled]="isAddingCategory()">
+            <span class="btn-icon">➕</span>
+            <span>Add Category</span>
+          </button>
+          <button class="action-btn secondary" (click)="resetToDefaults()">
+            <span class="btn-icon">↺</span>
+            <span>Reset to Defaults</span>
+          </button>
+        </div>
+      </div>
+    </section>
   </div>
 </div>
 

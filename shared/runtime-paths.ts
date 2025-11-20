@@ -123,13 +123,15 @@ export function getRuntimePaths() {
       getBinaryName('ffprobe')
     ),
 
-    // yt-dlp from utilities folder
-    ytdlp: path.join(
-      resourcesPath,
-      'utilities',
-      'bin',
-      getYtDlpBinaryName()
-    ),
+    // yt-dlp from utilities folder (packaged) or system (development)
+    ytdlp: isPackaged()
+      ? path.join(
+          resourcesPath,
+          'utilities',
+          'bin',
+          getYtDlpBinaryName()
+        )
+      : 'yt-dlp', // Use system yt-dlp in development
 
     // Python from bundled runtime
     python: isPackaged()

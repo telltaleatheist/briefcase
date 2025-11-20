@@ -30,8 +30,8 @@
       maxBufferPx="800"
     >
       <ng-container *cdkVirtualFor="let item of virtualItems(); let i = index; trackBy: trackItem">
-        <!-- Week Header -->
-        @if (item.type === 'header') {
+        <!-- Week Header (skip empty labels) -->
+        @if (item.type === 'header' && item.week.weekLabel) {
           <div
             class="week-header"
             (click)="toggleWeek(item.week, $event)"
@@ -83,16 +83,27 @@
               <!-- Suggested Title Row (only show if AI suggested title exists) -->
               @if (item.video.suggestedTitle) {
                 <div class="video-meta">
-                  <span class="meta-icon">✨</span>
-                  <span class="meta-label">AI Title:</span>
-                  <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
-                  <span
-                    class="meta-action"
-                    (click)="openSuggestedTitleModal(item.video); $event.stopPropagation()"
-                  >Edit</span>
-                  @if (item.video.downloadDate) {
-                    <span class="meta-separator">•</span>
-                    <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
+                  @if (isQueueItem(item.video)) {
+                    <!-- Queue item status display -->
+                    <span class="meta-icon">⏳</span>
+                    <span class="meta-filename status-text">{{ item.video.suggestedTitle }}</span>
+                    <span
+                      class="meta-action"
+                      (click)="onConfigureClick(item.video, $event)"
+                    >Configure</span>
+                  } @else {
+                    <!-- AI suggested title display -->
+                    <span class="meta-icon">✨</span>
+                    <span class="meta-label">AI Title:</span>
+                    <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
+                    <span
+                      class="meta-action"
+                      (click)="openSuggestedTitleModal(item.video); $event.stopPropagation()"
+                    >Edit</span>
+                    @if (item.video.downloadDate) {
+                      <span class="meta-separator">•</span>
+                      <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
+                    }
                   }
                 </div>
               }
@@ -112,11 +123,11 @@
                   ✏️
                 </button>
               }
-              @if (showDeleteButton) {
+              @if (showDeleteButton && isQueueItem(item.video)) {
                 <button
                   class="delete-btn"
                   (click)="onDeleteClick(item.video, $event)"
-                  title="Delete"
+                  title="Remove from Queue"
                 >
                   ×
                 </button>
@@ -248,21 +259,30 @@
         </div>
         <p class="delete-modal-description">Choose how to delete the selected items:</p>
         <div class="delete-options">
-          <button class="delete-option" (click)="onDeleteModeSelected('database-only')">
+          <button
+            class="delete-option"
+            [class.selected]="selectedDeleteMode() === 'database-only'"
+            (click)="selectDeleteMode('database-only')">
             <span class="option-icon">📋</span>
             <div class="option-content">
               <span class="option-label">Remove from Library</span>
               <span class="option-description">Delete database entry but keep file on disk</span>
             </div>
           </button>
-          <button class="delete-option" (click)="onDeleteModeSelected('file-only')">
+          <button
+            class="delete-option"
+            [class.selected]="selectedDeleteMode() === 'file-only'"
+            (click)="selectDeleteMode('file-only')">
             <span class="option-icon">📁</span>
             <div class="option-content">
               <span class="option-label">Delete File Only</span>
               <span class="option-description">Delete file from disk but keep database entry</span>
             </div>
           </button>
-          <button class="delete-option delete-option-danger" (click)="onDeleteModeSelected('everything')">
+          <button
+            class="delete-option delete-option-danger"
+            [class.selected]="selectedDeleteMode() === 'everything'"
+            (click)="selectDeleteMode('everything')">
             <span class="option-icon">⚠️</span>
             <div class="option-content">
               <span class="option-label">Delete Everything</span>
@@ -270,7 +290,15 @@
             </div>
           </button>
         </div>
-        <button class="delete-cancel-btn" (click)="closeDeleteModal()">Cancel</button>
+        <div class="delete-modal-actions">
+          <button class="delete-cancel-btn" (click)="closeDeleteModal()">Cancel</button>
+          <button
+            class="delete-submit-btn"
+            [disabled]="!selectedDeleteMode()"
+            (click)="confirmDelete()">
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   }

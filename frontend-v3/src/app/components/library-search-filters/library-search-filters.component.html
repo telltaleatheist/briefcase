@@ -7,7 +7,12 @@
         type="text"
         [(ngModel)]="filters.searchQuery"
         (ngModelChange)="onSearchChange()"
-        placeholder="Search media..."
+        placeholder="Search: multiple words, &quot;exact phrase&quot;, wild*"
+        title="Search tips:
+• Multiple words: all must match (in any field)
+• Wildcards: test* matches testing, tests
+• Exact phrase: &quot;hello world&quot;
+• Searches: filename, transcript, analysis, tags"
         class="search-input"
       />
     </div>
@@ -78,8 +83,10 @@
         >
           <option value="date">Date Added</option>
           <option value="name">Name</option>
-          <option value="size">File Size</option>
           <option value="duration">Duration</option>
+          <option value="suggestions">Has AI Suggestions</option>
+          <option value="no-analysis">Missing Analysis</option>
+          <option value="no-transcript">Missing Transcript</option>
         </select>
       </div>
 

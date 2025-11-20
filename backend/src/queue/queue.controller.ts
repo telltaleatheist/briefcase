@@ -30,6 +30,7 @@ export class QueueController {
       videoId?: string; // For transcribe/analyze tasks on existing library videos
       videoPath?: string; // For local file processing
       displayName?: string;
+      libraryId?: string; // Target library for import
       tasks: Task[];
     },
   ) {
@@ -45,6 +46,7 @@ export class QueueController {
       videoId: body.videoId,
       videoPath: body.videoPath,
       displayName: body.displayName,
+      libraryId: body.libraryId,
       tasks: body.tasks,
     });
 
@@ -69,6 +71,7 @@ export class QueueController {
         videoId?: string;
         videoPath?: string;
         displayName?: string;
+        libraryId?: string;
         tasks: Task[];
       }>;
     },
@@ -85,6 +88,7 @@ export class QueueController {
         videoId: job.videoId,
         videoPath: job.videoPath,
         displayName: job.displayName,
+        libraryId: job.libraryId,
         tasks: job.tasks,
       });
       jobIds.push(jobId);
@@ -208,6 +212,7 @@ export class QueueController {
     body: {
       url: string;
       displayName?: string;
+      libraryId?: string;
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
@@ -239,6 +244,7 @@ export class QueueController {
     const jobId = this.queueManager.addJob({
       url: body.url,
       displayName: body.displayName,
+      libraryId: body.libraryId,
       tasks,
     });
 

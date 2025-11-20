@@ -1067,6 +1067,7 @@ export class DatabaseController {
   /**
    * PATCH /api/database/videos/:id/metadata
    * Update video metadata (upload_date, download_date, added_at, ai_description)
+   * If upload_date changes, also updates the filename to include/update the date prefix
    */
   @Patch('videos/:id/metadata')
   async updateVideoMetadata(
@@ -1078,17 +1079,72 @@ export class DatabaseController {
       aiDescription?: string | null;
     }
   ) {
+    const fs = require('fs').promises;
+    const path = require('path');
+
+    this.logger.log(`updateVideoMetadata called for ${videoId}:`, JSON.stringify(body));
+
     try {
       // Verify video exists
       const video = this.databaseService.getVideoById(videoId);
       if (!video) {
+        this.logger.error(`Video not found: ${videoId}`);
         return {
           success: false,
           error: 'Video not found'
         };
       }
 
-      // Update metadata
+      this.logger.log(`Current video: ${video.filename}, upload_date: ${video.upload_date}`);
+
+      // If upload date is being set/changed, update the filename
+      if (body.uploadDate !== undefined) {
+        const oldFilename = video.filename as string;
+        const oldPath = video.current_path as string;
+
+        // Get new filename with updated date prefix
+        const newFilename = body.uploadDate
+          ? FilenameDateUtil.ensureDatePrefix(oldFilename, body.uploadDate)
+          : oldFilename; // Keep filename as-is if clearing date
+
+        // Rename physical file if filename changed
+        if (newFilename !== oldFilename) {
+          const directory = path.dirname(oldPath);
+          const newPath = path.join(directory, newFilename);
+
+          // Check if new path already exists
+          try {
+            await fs.access(newPath);
+            return {
+              success: false,
+              error: 'A file with this name already exists'
+            };
+          } catch {
+            // File doesn't exist, which is what we want
+          }
+
+          // Rename the physical file
+          try {
+            await fs.rename(oldPath, newPath);
+            this.logger.log(`Renamed file for upload date change: ${oldPath} -> ${newPath}`);
+
+            // Update database with new filename and path
+            this.databaseService.updateVideoFilename(videoId, newFilename);
+            this.databaseService.updateVideoPath(videoId, newPath);
+
+            // Emit WebSocket event
+            this.mediaEventService.emitVideoRenamed(videoId, oldFilename, newFilename, newPath);
+          } catch (error: any) {
+            this.logger.error(`Failed to rename file: ${error.message}`);
+            return {
+              success: false,
+              error: `Failed to rename file: ${error.message}`
+            };
+          }
+        }
+      }
+
+      // Update metadata in database
       this.databaseService.updateVideoMetadata(
         videoId,
         body.uploadDate,
@@ -1424,43 +1480,82 @@ export class DatabaseController {
 
   /**
    * DELETE /api/database/videos/:id
-   * Delete a video from the library (both database record AND physical file)
+   * Delete a video from the library
+   * @param mode - 'database-only' (keep file), 'file-only' (keep db), 'everything' (delete both)
    */
   @Delete('videos/:id')
   async deleteVideo(
     @Param('id') videoId: string,
-    @Query('deleteFiles') deleteFiles?: string
+    @Query('deleteFiles') deleteFiles?: string,
+    @Body() body?: { mode?: 'database-only' | 'file-only' | 'everything' }
   ) {
     try {
-      // Delete from database and get video info (includes file path)
-      const video = this.databaseService.deleteVideo(videoId);
+      const fs = require('fs').promises;
 
-      // Only delete physical file if deleteFiles parameter is 'true'
-      const shouldDeleteFiles = deleteFiles === 'true';
-
-      if (shouldDeleteFiles) {
-        const fs = require('fs').promises;
-        const videoPath = video.current_path;
-
-        if (videoPath) {
-          try {
-            await fs.unlink(videoPath);
-            this.logger.log(`Deleted physical file: ${videoPath}`);
-          } catch (fileError: any) {
-            // File might already be deleted or not exist - log but don't fail
-            this.logger.warn(`Could not delete physical file ${videoPath}: ${fileError.message}`);
-          }
-        }
-
-        this.logger.log(`Deleted video ${videoId} from library (database and file)`);
-      } else {
-        this.logger.log(`Removed video ${videoId} from library (database only, file kept)`);
+      // Determine mode from body or legacy query param
+      let mode = body?.mode || 'everything';
+      if (!body?.mode && deleteFiles === 'true') {
+        mode = 'everything';
+      } else if (!body?.mode && deleteFiles === 'false') {
+        mode = 'database-only';
       }
 
-      return {
-        success: true,
-        message: shouldDeleteFiles ? 'Video deleted successfully' : 'Video removed from library'
-      };
+      // Get video info first for file path
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      const videoPath = video.current_path;
+
+      // Handle each mode
+      switch (mode) {
+        case 'database-only':
+          // Delete from database only, keep file
+          this.databaseService.deleteVideo(videoId);
+          this.logger.log(`Removed video ${videoId} from library (database only, file kept)`);
+          return {
+            success: true,
+            message: 'Video removed from library (file kept on disk)'
+          };
+
+        case 'file-only':
+          // Delete file only, keep database entry
+          if (videoPath) {
+            try {
+              await fs.unlink(videoPath);
+              this.logger.log(`Deleted physical file: ${videoPath}`);
+            } catch (fileError: any) {
+              this.logger.warn(`Could not delete physical file ${videoPath}: ${fileError.message}`);
+            }
+          }
+          this.logger.log(`Deleted file for video ${videoId} (database entry kept)`);
+          return {
+            success: true,
+            message: 'File deleted (database entry kept)'
+          };
+
+        case 'everything':
+        default:
+          // Delete both database and file
+          this.databaseService.deleteVideo(videoId);
+          if (videoPath) {
+            try {
+              await fs.unlink(videoPath);
+              this.logger.log(`Deleted physical file: ${videoPath}`);
+            } catch (fileError: any) {
+              this.logger.warn(`Could not delete physical file ${videoPath}: ${fileError.message}`);
+            }
+          }
+          this.logger.log(`Deleted video ${videoId} from library (database and file)`);
+          return {
+            success: true,
+            message: 'Video deleted successfully'
+          };
+      }
     } catch (error: any) {
       this.logger.error(`Failed to delete video: ${error.message}`);
       return {

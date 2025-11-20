@@ -7,7 +7,7 @@ export interface LibraryFilters {
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
   hasTranscript: boolean | null;
   hasAnalysis: boolean | null;
-  sortBy: 'date' | 'name' | 'size' | 'duration';
+  sortBy: 'date' | 'name' | 'duration' | 'suggestions' | 'no-analysis' | 'no-transcript';
   sortOrder: 'asc' | 'desc';
 }
 

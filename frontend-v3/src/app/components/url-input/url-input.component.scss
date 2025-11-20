@@ -1,0 +1,82 @@
+@use '../../../styles/variables' as *;
+
+.url-input-container {
+  position: relative;
+}
+
+.url-textarea {
+  width: 100%;
+  padding: $spacing-md;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: $font-size-sm;
+  resize: none;
+  transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: $primary-orange;
+    box-shadow: 0 0 0 2px rgba($primary-orange, 0.2);
+  }
+
+  &.processing {
+    opacity: 0.7;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+
+.input-status {
+  position: absolute;
+  right: $spacing-md;
+  bottom: $spacing-sm;
+  font-size: $font-size-xs;
+  pointer-events: none;
+
+  .hint {
+    color: var(--text-tertiary);
+  }
+
+  .loading {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    color: $primary-orange;
+  }
+
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid transparent;
+    border-top-color: $primary-orange;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Responsive
+@media (max-width: $breakpoint-md) {
+  .url-textarea {
+    padding: $spacing-sm;
+  }
+
+  .input-status {
+    right: $spacing-sm;
+    bottom: $spacing-xs;
+  }
+}
