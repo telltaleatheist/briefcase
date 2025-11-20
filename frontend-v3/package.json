@@ -5,7 +5,7 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "ng build",
+    "build": "npx ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint"
@@ -24,6 +24,7 @@
     "@angular/router": "^17.0.0",
     "@ngneat/hotkeys": "^4.1.0",
     "angular-split": "^17.2.0",
+    "clippy": "file:..",
     "rxjs": "^7.8.0",
     "socket.io-client": "^4.8.1",
     "tslib": "^2.6.0",
