@@ -21,6 +21,7 @@ import { NavigationService } from './services/navigation.service';
   styles: [`
     .app-container {
       display: flex;
+      flex-direction: column;
       min-height: 100vh;
       background: var(--bg-primary);
       color: var(--text-primary);
@@ -29,18 +30,12 @@ import { NavigationService } from './services/navigation.service';
 
     .main-content {
       flex: 1;
-      margin-left: 280px;
-      transition: margin-left 0.3s ease;
+      margin-top: 60px;
+      transition: margin-top 0.3s ease;
     }
 
     .main-content.nav-hidden {
-      margin-left: 0;
-    }
-
-    @media (max-width: 768px) {
-      .main-content {
-        margin-left: 0;
-      }
+      margin-top: 0;
     }
   `]
 })
