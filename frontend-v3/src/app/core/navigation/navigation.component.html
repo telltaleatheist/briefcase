@@ -1,86 +1,118 @@
-<!-- Mobile Menu Button -->
-<button
-  class="mobile-menu-btn"
-  (click)="toggleMobileMenu()"
-  [attr.aria-label]="mobileMenuOpen() ? 'Close menu' : 'Open menu'"
-  [attr.aria-expanded]="mobileMenuOpen()"
->
-  <span class="menu-icon" [class.open]="mobileMenuOpen()">
-    <span></span>
-    <span></span>
-    <span></span>
-  </span>
-</button>
+<!-- Top Header Navigation -->
+<header class="header">
+  <div class="header-container">
+    <!-- Left Section: Logo and Library -->
+    <div class="header-left">
+      <!-- Back Button (shown when not on home) -->
+      @if (!isHome()) {
+        <button
+          class="back-btn"
+          (click)="goBack()"
+          title="Back to Media Library"
+        >
+          <span class="btn-icon">←</span>
+        </button>
+      }
 
-<!-- Sidebar Navigation -->
-<nav class="navbar" [class.mobile-open]="mobileMenuOpen()">
-  <div class="navbar-container">
-    <!-- Logo -->
-    <a routerLink="/" class="logo" (click)="closeMobileMenu()">
-      <span class="logo-icon">🎬</span>
-      <span class="logo-text gradient-text">ClipChimp</span>
-    </a>
+      <!-- Logo -->
+      <a routerLink="/" class="logo">
+        <span class="logo-icon">🎬</span>
+        <span class="logo-text gradient-text">ClipChimp</span>
+      </a>
 
-    <!-- Current Library -->
-    <button class="library-selector" (click)="openLibraryManager()">
-      <span class="library-icon">📁</span>
-      <div class="library-info">
-        <span class="library-label">Library</span>
+      <!-- Library Selector -->
+      <button class="library-selector" (click)="openLibraryManager()">
+        <span class="library-icon">📁</span>
         <span class="library-name">
           {{ libraryService.currentLibrary()?.name || 'No Library' }}
         </span>
-      </div>
-      <span class="library-chevron">▼</span>
-    </button>
-
-    <!-- Navigation Links -->
-    <div class="nav-links">
-      @for (link of navLinks; track link.path) {
-        <a
-          [routerLink]="link.path"
-          routerLinkActive="active"
-          [routerLinkActiveOptions]="{exact: link.path === '/'}"
-          class="nav-link"
-          (click)="closeMobileMenu()"
-        >
-          <span class="nav-icon">{{ link.icon }}</span>
-          <span class="nav-label">{{ link.label }}</span>
-        </a>
-      }
+        <span class="library-chevron">▼</span>
+      </button>
     </div>
 
-    <!-- Controls -->
-    <div class="nav-controls">
+    <!-- Right Section: Controls -->
+    <div class="header-right">
+      <!-- Media Library -->
+      <a
+        routerLink="/"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{exact: true}"
+        class="header-btn"
+        title="Media Library"
+      >
+        <span class="btn-icon">📹</span>
+      </a>
+
+      <!-- Settings -->
+      <a
+        routerLink="/settings"
+        routerLinkActive="active"
+        class="header-btn"
+        title="Settings"
+      >
+        <span class="btn-icon">⚙️</span>
+      </a>
+
       <!-- Download Logs -->
       <button
-        class="theme-toggle"
+        class="header-btn"
         (click)="downloadLogs()"
         aria-label="Download logs"
         title="Download console logs"
       >
-        <span class="theme-icon">📋</span>
+        <span class="btn-icon">📋</span>
       </button>
 
       <!-- Theme Toggle -->
       <button
-        class="theme-toggle"
+        class="header-btn"
         (click)="toggleTheme()"
         [attr.aria-label]="'Switch to ' + (themeService.isDarkMode() ? 'light' : 'dark') + ' mode'"
+        title="Toggle theme"
       >
-        <span class="theme-icon">
+        <span class="btn-icon">
           {{ themeService.isDarkMode() ? '☀️' : '🌙' }}
+        </span>
+      </button>
+
+      <!-- Mobile Menu Button -->
+      <button
+        class="mobile-menu-btn"
+        (click)="toggleMobileMenu()"
+        [attr.aria-label]="mobileMenuOpen() ? 'Close menu' : 'Open menu'"
+        [attr.aria-expanded]="mobileMenuOpen()"
+      >
+        <span class="menu-icon" [class.open]="mobileMenuOpen()">
+          <span></span>
+          <span></span>
+          <span></span>
         </span>
       </button>
     </div>
   </div>
-</nav>
+</header>
 
-<!-- Mobile Backdrop -->
+<!-- Mobile Menu Dropdown -->
 @if (mobileMenuOpen()) {
-  <div
-    class="mobile-backdrop"
-    (click)="closeMobileMenu()"
-  ></div>
+  <div class="mobile-menu">
+    <button class="mobile-menu-item" (click)="openLibraryManager(); closeMobileMenu()">
+      <span class="menu-item-icon">📁</span>
+      <span>{{ libraryService.currentLibrary()?.name || 'Select Library' }}</span>
+    </button>
+    <a routerLink="/settings" class="mobile-menu-item" (click)="closeMobileMenu()">
+      <span class="menu-item-icon">⚙️</span>
+      <span>Settings</span>
+    </a>
+    <button class="mobile-menu-item" (click)="downloadLogs(); closeMobileMenu()">
+      <span class="menu-item-icon">📋</span>
+      <span>Download Logs</span>
+    </button>
+    <button class="mobile-menu-item" (click)="toggleTheme(); closeMobileMenu()">
+      <span class="menu-item-icon">{{ themeService.isDarkMode() ? '☀️' : '🌙' }}</span>
+      <span>{{ themeService.isDarkMode() ? 'Light Mode' : 'Dark Mode' }}</span>
+    </button>
+  </div>
+  <div class="mobile-backdrop" (click)="closeMobileMenu()"></div>
 }
 
 <!-- Library Manager Modal -->

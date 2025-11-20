@@ -127,7 +127,7 @@ export class LoggerService {
   downloadLogs() {
     const content = this.exportLogs();
 
-    // Save to backend (which saves to ~/Library/Logs/clippy/)
+    // Save to backend (which saves to ~/Library/Logs/clipchimp/)
     this.http.post<any>(`${this.API_BASE}/config/save-logs`, { content }).subscribe({
       next: (response) => {
         if (response.success) {

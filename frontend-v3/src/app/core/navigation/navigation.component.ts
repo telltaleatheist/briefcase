@@ -1,6 +1,7 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule, NavigationEnd } from '@angular/router';
+import { filter } from 'rxjs/operators';
 import { ThemeService } from '../../services/theme.service';
 import { LibraryService } from '../../services/library.service';
 import { LoggerService } from '../../services/logger.service';
@@ -15,16 +16,33 @@ import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
   styleUrls: ['./navigation.component.scss']
 })
 export class NavigationComponent {
+  private router = inject(Router);
   themeService = inject(ThemeService);
   libraryService = inject(LibraryService);
   private loggerService = inject(LoggerService);
   mobileMenuOpen = signal(false);
   libraryManagerOpen = signal(false);
+  currentUrl = signal('/');
+
+  isHome = computed(() => this.currentUrl() === '/');
 
   navLinks = [
     { path: '/', label: 'Media Library', icon: '📹' },
     { path: '/settings', label: 'Settings', icon: '⚙️' }
   ];
+
+  constructor() {
+    this.currentUrl.set(this.router.url);
+    this.router.events.pipe(
+      filter((event): event is NavigationEnd => event instanceof NavigationEnd)
+    ).subscribe((event) => {
+      this.currentUrl.set(event.urlAfterRedirects);
+    });
+  }
+
+  goBack() {
+    this.router.navigate(['/']);
+  }
 
   toggleMobileMenu() {
     this.mobileMenuOpen.update(value => !value);

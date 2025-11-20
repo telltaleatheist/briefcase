@@ -1,50 +1,72 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
 
-// ==================== SIDEBAR ====================
-.navbar {
+// ==================== HEADER ====================
+.header {
   position: fixed;
   top: 0;
   left: 0;
-  width: 280px;
-  height: 100vh;
+  right: 0;
+  height: 60px;
   z-index: $z-sticky;
   background: var(--bg-card);
-  border-right: 2px solid var(--border-color);
-  box-shadow: $shadow-lg;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: transform $transition-base;
-
-  @media (max-width: 768px) {
-    transform: translateX(-100%);
-
-    &.mobile-open {
-      transform: translateX(0);
-    }
-  }
+  border-bottom: 2px solid var(--border-color);
+  box-shadow: $shadow-md;
 }
 
-.navbar-container {
+.header-container {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   height: 100%;
-  gap: 0;
+  padding: 0 $spacing-lg;
+  max-width: 100%;
+}
+
+// ==================== LEFT SECTION ====================
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+}
+
+// ==================== BACK BUTTON ====================
+.back-btn {
+  @include flex-center;
+  width: 36px;
+  height: 36px;
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all $transition-fast;
+  color: var(--text-primary);
+
+  &:hover {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+    transform: translateX(-2px);
+  }
+
+  .btn-icon {
+    font-size: $font-size-lg;
+    font-weight: $font-weight-bold;
+  }
 }
 
 // ==================== LOGO ====================
 .logo {
-  @include flex-center;
-  gap: $spacing-md;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
   text-decoration: none;
-  padding: $spacing-2xl $spacing-lg;
-  border-bottom: 2px solid var(--border-color);
-  background: var(--bg-secondary);
+  padding: $spacing-sm;
+  border-radius: $radius-md;
   transition: all $transition-fast;
 
   &:hover {
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
 
     .logo-icon {
       transform: scale(1.1) rotate(5deg);
@@ -53,224 +75,143 @@
 }
 
 .logo-icon {
-  font-size: $font-size-4xl;
-  animation: float 3s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
+  font-size: $font-size-2xl;
+  transition: transform $transition-fast;
 }
 
 .logo-text {
-  font-size: $font-size-2xl;
+  font-size: $font-size-xl;
   font-weight: $font-weight-extrabold;
   letter-spacing: -0.5px;
+
+  @media (max-width: 600px) {
+    display: none;
+  }
 }
 
 // ==================== LIBRARY SELECTOR ====================
 .library-selector {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  margin: 12px 16px;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: $radius-md;
   cursor: pointer;
-  transition: all 0.2s ease;
-  width: calc(100% - 32px);
+  transition: all $transition-fast;
+  max-width: 200px;
 
   &:hover {
     background: var(--bg-tertiary);
     border-color: var(--primary-orange);
-    transform: translateX(2px);
   }
 
   .library-icon {
-    font-size: 20px;
+    font-size: $font-size-base;
     flex-shrink: 0;
   }
 
-  .library-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    min-width: 0;
-
-    .library-label {
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .library-name {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      width: 100%;
-      text-align: left;
-    }
+  .library-name {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .library-chevron {
-    font-size: 10px;
+    font-size: 8px;
     color: var(--text-secondary);
     flex-shrink: 0;
   }
+
+  @media (max-width: 600px) {
+    max-width: 120px;
+    padding: $spacing-xs $spacing-sm;
+
+    .library-name {
+      font-size: $font-size-xs;
+    }
+  }
 }
 
-// ==================== NAVIGATION LINKS ====================
-.nav-links {
-  flex: 1;
+// ==================== RIGHT SECTION ====================
+.header-right {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: $spacing-xs;
-  padding: $spacing-lg;
-  overflow-y: auto;
-  @include custom-scrollbar;
 }
 
-.nav-link {
+// ==================== HEADER BUTTONS ====================
+.header-btn {
   @include flex-center;
-  gap: $spacing-md;
-  padding: $spacing-md $spacing-lg;
+  width: 40px;
+  height: 40px;
   border-radius: $radius-md;
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-weight: $font-weight-medium;
-  font-size: $font-size-base;
-  transition: all $transition-fast;
-  position: relative;
-  justify-content: flex-start;
-
-  &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 4px;
-    height: 0;
-    background: var(--primary-orange);
-    border-radius: 0 $radius-sm $radius-sm 0;
-    transition: height $transition-base;
-  }
-
-  &:hover {
-    color: var(--primary-orange);
-    background: var(--bg-secondary);
-    transform: translateX(4px);
-
-    .nav-icon {
-      transform: scale(1.2) rotate(5deg);
-    }
-  }
-
-  &.active {
-    color: var(--primary-orange);
-    background: rgba(255, 107, 53, 0.1);
-    font-weight: $font-weight-bold;
-
-    &::before {
-      height: 70%;
-    }
-
-    .nav-icon {
-      transform: scale(1.1);
-    }
-  }
-}
-
-.nav-icon {
-  font-size: $font-size-2xl;
-  transition: transform $transition-fast;
-  flex-shrink: 0;
-}
-
-.nav-label {
-  flex: 1;
-  text-align: left;
-}
-
-// ==================== CONTROLS ====================
-.nav-controls {
-  @include flex-center;
-  gap: $spacing-sm;
-  padding: $spacing-lg;
-  border-top: 2px solid var(--border-color);
-  background: var(--bg-secondary);
-}
-
-// Theme Toggle
-.theme-toggle {
-  @include flex-center;
-  width: 48px;
-  height: 48px;
-  border-radius: $radius-md;
-  background: var(--bg-tertiary);
-  border: 2px solid var(--border-color);
+  background: transparent;
+  border: none;
   cursor: pointer;
   transition: all $transition-fast;
+  text-decoration: none;
+  color: var(--text-primary);
 
   &:hover {
-    transform: scale(1.1) rotate(15deg);
-    background: var(--primary-orange);
-    border-color: var(--primary-orange);
+    background: var(--bg-secondary);
+    transform: scale(1.1);
 
-    .theme-icon {
-      transform: rotate(-15deg);
+    .btn-icon {
+      transform: rotate(10deg);
     }
   }
 
   &:active {
     transform: scale(0.95);
   }
+
+  &.active {
+    background: rgba(255, 107, 53, 0.15);
+
+    .btn-icon {
+      transform: scale(1.1);
+    }
+  }
+
+  @media (max-width: 600px) {
+    display: none;
+  }
 }
 
-.theme-icon {
-  font-size: $font-size-2xl;
+.btn-icon {
+  font-size: $font-size-xl;
   transition: transform $transition-fast;
 }
 
-// ==================== MOBILE ====================
-// Mobile Menu Button
+// ==================== MOBILE MENU BUTTON ====================
 .mobile-menu-btn {
   @include flex-center;
-  position: fixed;
-  top: $spacing-md;
-  left: $spacing-md;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   cursor: pointer;
-  background: var(--bg-card);
-  border: 2px solid var(--border-color);
+  background: transparent;
+  border: none;
   border-radius: $radius-md;
-  z-index: 1001;
-  box-shadow: $shadow-md;
   display: none;
 
-  @media (max-width: 768px) {
+  &:hover {
+    background: var(--bg-secondary);
+  }
+
+  @media (max-width: 600px) {
     display: flex;
   }
 }
 
 .menu-icon {
   position: relative;
-  width: 24px;
-  height: 18px;
+  width: 20px;
+  height: 14px;
 
   span {
     position: absolute;
@@ -312,27 +253,68 @@
   }
 }
 
-// Mobile Menu (same as sidebar on mobile)
+// ==================== MOBILE MENU ====================
 .mobile-menu {
-  display: none;
+  position: fixed;
+  top: 60px;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border-bottom: 2px solid var(--border-color);
+  box-shadow: $shadow-lg;
+  z-index: $z-modal - 1;
+  padding: $spacing-sm;
+  animation: slideDown 0.2s ease-out;
 }
 
-// Mobile Backdrop
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mobile-menu-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  width: 100%;
+  padding: $spacing-md $spacing-lg;
+  background: transparent;
+  border: none;
+  border-radius: $radius-md;
+  color: var(--text-primary);
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-secondary);
+    color: var(--primary-orange);
+  }
+
+  .menu-item-icon {
+    font-size: $font-size-xl;
+  }
+}
+
+// ==================== MOBILE BACKDROP ====================
 .mobile-backdrop {
   position: fixed;
-  top: 0;
+  top: 60px;
   left: 0;
   width: 100%;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.7);
+  height: calc(100vh - 60px);
+  background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(4px);
-  z-index: $z-modal-backdrop;
-  animation: fadeIn 0.3s ease-out;
-  display: none;
-
-  @media (max-width: 768px) {
-    display: block;
-  }
+  z-index: $z-modal - 2;
+  animation: fadeIn 0.2s ease-out;
 }
 
 @keyframes fadeIn {
@@ -341,12 +323,5 @@
   }
   to {
     opacity: 1;
-  }
-}
-
-// Mobile-specific sidebar visibility
-@media (max-width: 768px) {
-  .navbar.mobile-open {
-    transform: translateX(0);
   }
 }

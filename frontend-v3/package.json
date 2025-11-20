@@ -1,7 +1,7 @@
 {
-  "name": "frontend-v3",
+  "name": "clipchimp",
   "version": "1.0.0",
-  "description": "Beautiful Angular application with Creamsicle design system",
+  "description": "ClipChimp - Professional media library manager with AI analysis",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",

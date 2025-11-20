@@ -263,7 +263,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       if (!item) {
         // Try localStorage mapping
         try {
-          const mapping = localStorage.getItem('clippy-job-id-mapping');
+          const mapping = localStorage.getItem('clipchimp-job-id-mapping');
           if (mapping) {
             const jobIdMap: Record<string, string> = JSON.parse(mapping);
             const mappedFrontendId = jobIdMap[event.jobId];
@@ -397,7 +397,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Load default task settings from localStorage
   private loadDefaultTaskSettings() {
-    const saved = localStorage.getItem('clippy-task-defaults');
+    const saved = localStorage.getItem('clipchimp-task-defaults');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -420,7 +420,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Clear old defaults that included extra tasks - force reset to download-only
     // Remove this after users have updated
     if (this.defaultTaskSettings.length > 1) {
-      localStorage.removeItem('clippy-task-defaults');
+      localStorage.removeItem('clipchimp-task-defaults');
       this.defaultTaskSettings = this.getDefaultTasks();
     }
   }
@@ -434,7 +434,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Save task settings to localStorage
   private saveDefaultTaskSettings(tasks: QueueItemTask[]) {
-    localStorage.setItem('clippy-task-defaults', JSON.stringify({
+    localStorage.setItem('clipchimp-task-defaults', JSON.stringify({
       tasks,
       savedAt: new Date().toISOString()
     }));
@@ -444,13 +444,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Save processing queue to localStorage
   private saveProcessingQueueToStorage(queue: ProcessingQueueItem[]) {
     try {
-      localStorage.setItem('clippy-processing-queue', JSON.stringify(queue));
+      localStorage.setItem('clipchimp-processing-queue', JSON.stringify(queue));
 
       // Also save the processing flags (video IDs that are in queue)
       const processingVideoIds = queue
         .filter(item => item.videoId)
         .map(item => item.videoId!);
-      localStorage.setItem('clippy-processing-flags', JSON.stringify(processingVideoIds));
+      localStorage.setItem('clipchimp-processing-flags', JSON.stringify(processingVideoIds));
 
       // Save the backend-to-frontend job ID mapping for items that have started processing
       const jobIdMapping: Record<string, string> = {};
@@ -459,7 +459,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           jobIdMapping[item.backendJobId] = item.jobId;
         }
       });
-      localStorage.setItem('clippy-job-id-mapping', JSON.stringify(jobIdMapping));
+      localStorage.setItem('clipchimp-job-id-mapping', JSON.stringify(jobIdMapping));
     } catch (e) {
       console.error('Failed to save processing queue:', e);
     }
@@ -473,7 +473,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Get all video IDs currently in processing queue (from localStorage)
   static getProcessingVideoIds(): string[] {
     try {
-      const saved = localStorage.getItem('clippy-processing-flags');
+      const saved = localStorage.getItem('clipchimp-processing-flags');
       if (saved) {
         return JSON.parse(saved);
       }
@@ -486,7 +486,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Load processing queue from localStorage
   private loadProcessingQueueFromStorage() {
     try {
-      const saved = localStorage.getItem('clippy-processing-queue');
+      const saved = localStorage.getItem('clipchimp-processing-queue');
       if (saved) {
         const queue: ProcessingQueueItem[] = JSON.parse(saved);
         if (Array.isArray(queue) && queue.length > 0) {
@@ -507,7 +507,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     } catch (e) {
       console.error('Failed to load processing queue:', e);
-      localStorage.removeItem('clippy-processing-queue');
+      localStorage.removeItem('clipchimp-processing-queue');
     }
   }
 
@@ -587,7 +587,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // If still not found, check localStorage mapping
     if (itemIndex === -1) {
       try {
-        const mapping = localStorage.getItem('clippy-job-id-mapping');
+        const mapping = localStorage.getItem('clipchimp-job-id-mapping');
         if (mapping) {
           const jobIdMap: Record<string, string> = JSON.parse(mapping);
           const frontendJobId = jobIdMap[jobId];
