@@ -69,6 +69,11 @@ export class TimelineWaveformComponent implements OnChanges, AfterViewInit {
     const visibleStart = this.zoomState.offset;
     const visibleDuration = this.duration / this.zoomState.level;
 
+    // Guard against invalid durations
+    if (!isFinite(visibleDuration) || visibleDuration <= 0 || this.waveformData.duration <= 0) {
+      return;
+    }
+
     // Calculate sample range to draw
     const samplesPerSecond = this.waveformData.samples.length / this.waveformData.duration;
     const startSample = Math.floor(visibleStart * samplesPerSecond);

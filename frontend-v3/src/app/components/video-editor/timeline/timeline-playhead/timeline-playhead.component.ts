@@ -21,6 +21,9 @@ export class TimelinePlayheadComponent {
     const visibleStart = this.zoomState.offset;
     const visibleDuration = this.duration / this.zoomState.level;
 
+    // Guard against invalid visibleDuration
+    if (!isFinite(visibleDuration) || visibleDuration <= 0) return 0;
+
     const position = ((this.currentTime - visibleStart) / visibleDuration) * 100;
     return Math.max(0, Math.min(100, position));
   }
@@ -42,6 +45,10 @@ export class TimelinePlayheadComponent {
 
       const visibleStart = this.zoomState.offset;
       const visibleDuration = this.duration / this.zoomState.level;
+
+      // Guard against invalid visibleDuration
+      if (!isFinite(visibleDuration) || visibleDuration <= 0) return;
+
       const newTime = visibleStart + (percentage * visibleDuration);
 
       this.seek.emit(Math.max(0, Math.min(this.duration, newTime)));

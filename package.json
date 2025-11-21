@@ -1,7 +1,7 @@
 {
-  "name": "clippy",
+  "name": "clipchimp",
   "version": "1.0.0",
-  "description": "Video downloader application using NestJS and Angular",
+  "description": "ClipChimp - Professional media library manager with AI analysis",
   "asar": true,
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -94,8 +94,8 @@
     "yt-dlp-wrap-extended": "^2.3.15"
   },
   "build": {
-    "appId": "com.owenmorgan.clippy",
-    "productName": "Clippy",
+    "appId": "com.owenmorgan.clipchimp",
+    "productName": "ClipChimp",
     "asar": true,
     "compression": "normal",
     "directories": {

@@ -14,7 +14,7 @@ export class AppController {
   getHealth(): { status: string; message: string } {
     return {
       status: 'ok',
-      message: 'Clippy backend is running'
+      message: 'ClipChimp backend is running'
     };
   }
 }

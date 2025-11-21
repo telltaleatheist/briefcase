@@ -5,6 +5,7 @@
   height: 100vh;
   overflow-y: auto;
   background: var(--bg-primary);
+  padding-top: 60px; // Account for fixed header
   padding-bottom: 60px;
 }
 
@@ -164,7 +165,7 @@
   gap: $spacing-md;
   overflow-x: auto;
   position: sticky;
-  top: 0;
+  top: 60px; // Account for fixed header
   z-index: 100;
 
   .tab-button {

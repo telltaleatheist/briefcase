@@ -47,6 +47,9 @@ export class WindowService {
     // Set up CSP headers
     this.setupContentSecurityPolicy();
 
+    // Set up keyboard shortcuts for reload
+    this.setupKeyboardShortcuts();
+
     // Load the frontend URL using the actual port
     const frontendUrl = `http://${ServerConfig.config.electronServer.host}:${this.frontendPort}`;
     log.info(`Loading frontend from: ${frontendUrl}`);
@@ -206,6 +209,29 @@ export class WindowService {
     this.isQuitting = quitting;
   }
   
+  /**
+   * Setup keyboard shortcuts for reload
+   */
+  private setupKeyboardShortcuts(): void {
+    if (!this.mainWindow) return;
+
+    this.mainWindow.webContents.on('before-input-event', (event, input) => {
+      // Cmd+R (Mac) or Ctrl+R (Windows/Linux) - Regular reload
+      if ((input.meta || input.control) && input.key.toLowerCase() === 'r' && !input.shift) {
+        event.preventDefault();
+        log.info('Reloading window (Cmd/Ctrl+R)');
+        this.mainWindow?.reload();
+      }
+
+      // Cmd+Shift+R (Mac) or Ctrl+Shift+R (Windows/Linux) - Hard reload (ignore cache)
+      if ((input.meta || input.control) && input.shift && input.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        log.info('Hard reloading window (Cmd/Ctrl+Shift+R)');
+        this.mainWindow?.webContents.reloadIgnoringCache();
+      }
+    });
+  }
+
   /**
    * Setup Content Security Policy
    */

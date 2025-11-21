@@ -24,7 +24,7 @@ interface Settings {
 // Initialize electron-store for user settings
 // Stored in user's app data directory - won't transfer with app
 const store = new Store<Settings>({
-  name: 'clippy-settings',
+  name: 'clipchimp-settings',
   defaults: {
     lastUsedProvider: 'ollama',
     lastUsedModel: 'qwen2.5:7b',
@@ -385,6 +385,40 @@ function setupSettingsHandlers(): void {
     } catch (error) {
       log.error('Failed to save console logs:', error);
       throw error;
+    }
+  });
+
+  // Import files to library
+  ipcMain.handle('import-files', async (event, filePaths: string[]) => {
+    try {
+      log.info(`Importing ${filePaths.length} file(s):`, filePaths);
+
+      // Get backend URL
+      const backendUrl = await backendServiceRef.getBackendUrl();
+      const url = `${backendUrl}/api/database/import`;
+
+      log.info(`Calling backend at: ${url}`);
+
+      // Call backend import API using native fetch
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ filePaths }),
+      });
+
+      const result = await response.json();
+      log.info('Import result:', result);
+
+      return result;
+    } catch (error: any) {
+      log.error('Failed to import files:', error);
+      return {
+        success: false,
+        message: error.message,
+        error: error.toString()
+      };
     }
   });
 }

@@ -38,7 +38,7 @@ export class TrayService {
       }
 
       this.tray = new Tray(icon);
-      this.tray.setToolTip('Clippy - Video Library Manager');
+      this.tray.setToolTip('ClipChimp - Media Library Manager');
 
       // Build and set the context menu
       this.updateTrayMenu();
@@ -76,7 +76,7 @@ export class TrayService {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Open Clippy',
+        label: 'Open ClipChimp',
         click: () => this.showWindow()
       },
       {
@@ -90,7 +90,7 @@ export class TrayService {
       },
       { type: 'separator' },
       {
-        label: 'Quit Clippy',
+        label: 'Quit ClipChimp',
         click: () => this.quitApplication()
       }
     ]);

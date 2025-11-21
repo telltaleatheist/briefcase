@@ -21,6 +21,7 @@ export class TimelineZoomBarComponent {
   get thumbLeft(): number {
     if (this.duration <= 0) return 0;
     const maxOffset = this.duration - (this.duration / this.zoomState.level);
+    if (maxOffset <= 0) return 0;
     return (this.zoomState.offset / maxOffset) * (100 - this.thumbWidth);
   }
 

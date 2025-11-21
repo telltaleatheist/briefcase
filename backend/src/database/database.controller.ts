@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { Response, Request } from 'express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import * as path from 'path';
 import * as fs from 'fs';
 import { createReadStream, statSync } from 'fs';
@@ -2947,6 +2948,249 @@ export class DatabaseController {
         success: false,
         error: error?.message || 'Unknown error',
       };
+    }
+  }
+
+  /**
+   * POST /api/database/import
+   * Import media files to the library by file path
+   * If files are already in clips folder, just scan them
+   * If files are elsewhere, copy them to clips folder then scan
+   */
+  @Post('import')
+  async importFiles(@Body() body: { filePaths: string[] }) {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      if (!body.filePaths || body.filePaths.length === 0) {
+        throw new HttpException('No file paths provided', HttpStatus.BAD_REQUEST);
+      }
+
+      this.logger.log(`Importing ${body.filePaths.length} file(s) to library: ${activeLibrary.name}`);
+
+      const clipsFolder = activeLibrary.clipsFolderPath;
+      if (!fs.existsSync(clipsFolder)) {
+        fs.mkdirSync(clipsFolder, { recursive: true });
+      }
+
+      const results: any[] = [];
+      const filesToScan = new Set<string>();
+
+      for (const filePath of body.filePaths) {
+        try {
+          if (!fs.existsSync(filePath)) {
+            results.push({
+              success: false,
+              filePath,
+              error: 'File not found'
+            });
+            continue;
+          }
+
+          const filename = path.basename(filePath);
+
+          // Normalize paths for comparison
+          const normalizedFilePath = path.resolve(filePath);
+          const normalizedClipsFolder = path.resolve(clipsFolder);
+          const normalizedFileDir = path.dirname(normalizedFilePath);
+
+          // Check if file is already in clips folder
+          const isInClipsFolder = normalizedFileDir === normalizedClipsFolder;
+
+          let finalFilename = filename;
+
+          if (!isInClipsFolder) {
+            // Copy file to clips folder
+            this.logger.log(`Copying ${filename} to clips folder (from ${filePath})`);
+
+            // Generate unique filename if needed
+            let uniqueFilename = filename;
+            let counter = 1;
+            const ext = path.extname(filename);
+            const base = path.basename(filename, ext);
+
+            while (fs.existsSync(path.join(clipsFolder, uniqueFilename))) {
+              uniqueFilename = `${base}_${counter}${ext}`;
+              counter++;
+            }
+
+            finalFilename = uniqueFilename;
+            const finalTargetPath = path.join(clipsFolder, uniqueFilename);
+            fs.copyFileSync(filePath, finalTargetPath);
+            this.logger.log(`Copied to: ${finalTargetPath}`);
+            filesToScan.add(uniqueFilename);
+          } else {
+            this.logger.log(`File already in clips folder: ${filename}`);
+            filesToScan.add(filename);
+          }
+
+          results.push({
+            success: true,
+            filePath,
+            filename: finalFilename,
+            pendingScan: true
+          });
+        } catch (error: any) {
+          this.logger.error(`Failed to import file ${filePath}:`, error);
+          results.push({
+            success: false,
+            filePath,
+            error: error.message
+          });
+        }
+      }
+
+      // Scan clips folder once after all files are copied
+      this.logger.log(`Scanning clips folder for ${filesToScan.size} file(s)...`);
+      await this.fileScannerService.scanClipsFolder(clipsFolder);
+
+      // Update results with video IDs
+      const allVideos = this.databaseService.getAllVideos({ linkedOnly: true });
+      for (const result of results) {
+        if (result.success && result.pendingScan) {
+          const newVideo = allVideos.find((v: any) => v.filename === result.filename);
+          if (newVideo) {
+            result.videoId = newVideo.id;
+            delete result.pendingScan;
+          } else {
+            result.success = false;
+            result.error = 'File copied but not found in database after scan';
+            delete result.pendingScan;
+          }
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+
+      return {
+        success: successCount > 0,
+        message: `Successfully imported ${successCount} of ${body.filePaths.length} file(s)`,
+        results
+      };
+    } catch (error: any) {
+      this.logger.error('Import failed:', error);
+      throw new HttpException(
+        error.message || 'Failed to import files',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * POST /api/database/upload
+   * Upload media files to the library
+   * Accepts multiple files and saves them to the active library's clips folder
+   */
+  @Post('upload')
+  @UseInterceptors(FilesInterceptor('files', 20))
+  async uploadFiles(@UploadedFiles() files: Express.Multer.File[]) {
+    try {
+      const activeLibrary = this.libraryManagerService.getActiveLibrary();
+      if (!activeLibrary) {
+        throw new HttpException('No active library', HttpStatus.BAD_REQUEST);
+      }
+
+      if (!files || files.length === 0) {
+        throw new HttpException('No files uploaded', HttpStatus.BAD_REQUEST);
+      }
+
+      this.logger.log(`Uploading ${files.length} file(s) to library: ${activeLibrary.name}`);
+
+      // Ensure clips folder exists
+      const clipsFolder = activeLibrary.clipsFolderPath;
+      if (!fs.existsSync(clipsFolder)) {
+        fs.mkdirSync(clipsFolder, { recursive: true });
+      }
+
+      const results = [];
+
+      for (const file of files) {
+        try {
+          // Validate file type
+          const allowedMimeTypes = [
+            'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime',
+            'video/x-msvideo', 'video/x-matroska', 'audio/mpeg',
+            'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg'
+          ];
+
+          const isValidType = allowedMimeTypes.includes(file.mimetype) ||
+            file.mimetype.startsWith('video/') ||
+            file.mimetype.startsWith('audio/');
+
+          if (!isValidType) {
+            results.push({
+              success: false,
+              filename: file.originalname,
+              error: `Invalid file type: ${file.mimetype}`
+            });
+            continue;
+          }
+
+          // Generate unique filename
+          let filename = file.originalname;
+          let counter = 1;
+          const ext = path.extname(filename);
+          const base = path.basename(filename, ext);
+
+          while (fs.existsSync(path.join(clipsFolder, filename))) {
+            filename = `${base}_${counter}${ext}`;
+            counter++;
+          }
+
+          // Move file from temp location to clips folder
+          const targetPath = path.join(clipsFolder, filename);
+          fs.renameSync(file.path, targetPath);
+
+          this.logger.log(`Saved file to: ${targetPath}`);
+
+          // Scan and import the file into the database
+          await this.fileScannerService.scanClipsFolder(clipsFolder);
+
+          // Find the newly added video in the database
+          const allVideos = this.databaseService.getAllVideos({ linkedOnly: true });
+          const newVideo = allVideos.find(v => v.filename === filename);
+
+          if (newVideo) {
+            results.push({
+              success: true,
+              filename: filename,
+              videoId: newVideo.id,
+              path: targetPath,
+              size: file.size
+            });
+          } else {
+            results.push({
+              success: false,
+              filename: filename,
+              error: 'File uploaded but not found in database after scan'
+            });
+          }
+        } catch (error: any) {
+          this.logger.error(`Failed to process uploaded file ${file.originalname}:`, error);
+          results.push({
+            success: false,
+            filename: file.originalname,
+            error: error.message
+          });
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+
+      return {
+        success: successCount > 0,
+        message: `Successfully uploaded ${successCount} of ${files.length} file(s)`,
+        results
+      };
+    } catch (error: any) {
+      this.logger.error('Upload failed:', error);
+      throw new HttpException(
+        error.message || 'Failed to upload files',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 }

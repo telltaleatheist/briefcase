@@ -45,6 +45,11 @@ export class TimelineSectionsLayerComponent implements OnChanges {
     const visibleDuration = this.duration / this.zoomState.level;
     const visibleEnd = visibleStart + visibleDuration;
 
+    // Guard against invalid visibleDuration
+    if (visibleDuration <= 0 || !isFinite(visibleDuration)) {
+      return;
+    }
+
     for (const section of this.sections) {
       // If section is completely outside visible range, hide it
       if (section.endTime < visibleStart || section.startTime > visibleEnd) {

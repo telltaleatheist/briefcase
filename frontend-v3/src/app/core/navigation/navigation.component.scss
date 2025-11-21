@@ -150,16 +150,18 @@
   width: 40px;
   height: 40px;
   border-radius: $radius-md;
-  background: transparent;
-  border: none;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
   cursor: pointer;
   transition: all $transition-fast;
   text-decoration: none;
   color: var(--text-primary);
 
   &:hover {
-    background: var(--bg-secondary);
-    transform: scale(1.1);
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+    transform: scale(1.05);
 
     .btn-icon {
       transform: rotate(10deg);
@@ -171,10 +173,28 @@
   }
 
   &.active {
-    background: rgba(255, 107, 53, 0.15);
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+    color: white;
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.2);
 
     .btn-icon {
       transform: scale(1.1);
+    }
+  }
+
+  // Navigation links with text
+  &.nav-link {
+    width: auto;
+    padding: $spacing-sm $spacing-md;
+    gap: $spacing-xs;
+    font-weight: $font-weight-semibold;
+    font-size: $font-size-sm;
+
+    .btn-text {
+      @media (max-width: 800px) {
+        display: none;
+      }
     }
   }
 

@@ -34,6 +34,10 @@ export class TimelineRulerComponent implements OnChanges {
 
     const percentage = clickX / rulerWidth;
     const visibleDuration = this.duration / this.zoomState.level;
+
+    // Guard against invalid visibleDuration
+    if (!isFinite(visibleDuration) || visibleDuration <= 0) return;
+
     const time = this.zoomState.offset + (percentage * visibleDuration);
 
     this.seek.emit(Math.max(0, Math.min(time, this.duration)));
@@ -53,6 +57,11 @@ export class TimelineRulerComponent implements OnChanges {
     const visibleStart = this.zoomState.offset;
     const visibleDuration = this.duration / this.zoomState.level;
     const visibleEnd = visibleStart + visibleDuration;
+
+    // Guard against invalid visibleDuration
+    if (!isFinite(visibleDuration) || visibleDuration <= 0) {
+      return;
+    }
 
     // Determine appropriate interval based on zoom level and duration
     let majorInterval = this.calculateMajorInterval(visibleDuration);

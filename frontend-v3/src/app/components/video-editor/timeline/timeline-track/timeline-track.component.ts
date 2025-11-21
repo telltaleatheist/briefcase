@@ -56,6 +56,9 @@ export class TimelineTrackComponent {
     const visibleStart = this.zoomState.offset;
     const visibleDuration = this.duration / this.zoomState.level;
 
+    // Guard against invalid visibleDuration
+    if (!isFinite(visibleDuration) || visibleDuration <= 0) return 0;
+
     // Calculate position relative to visible area
     const relativeStart = (this.selection.startTime - visibleStart) / visibleDuration;
     return Math.max(0, relativeStart * 100);
@@ -65,6 +68,10 @@ export class TimelineTrackComponent {
     if (!this.selection || this.duration === 0) return 0;
 
     const visibleDuration = this.duration / this.zoomState.level;
+
+    // Guard against invalid visibleDuration
+    if (!isFinite(visibleDuration) || visibleDuration <= 0) return 0;
+
     const selectionDuration = this.selection.endTime - this.selection.startTime;
 
     return (selectionDuration / visibleDuration) * 100;

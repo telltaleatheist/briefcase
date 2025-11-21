@@ -35,6 +35,8 @@ interface ElectronAPI {
   }>;
   selectDirectory: () => Promise<string | null>;
   selectVideoFile: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+  openFiles: (options: any) => Promise<{ canceled: boolean; filePaths: string[] }>;
+  importFiles: (filePaths: string[]) => Promise<any>;
   getFilePathFromFile: (file: File) => string;
   // Settings API
   getSettings: () => Promise<any>;
@@ -108,6 +110,8 @@ contextBridge.exposeInMainWorld('electron', {
   downloadVideo: (options: any) => ipcRenderer.invoke('download-video', options),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
+  openFiles: (options: any) => ipcRenderer.invoke('dialog:openFiles', options),
+  importFiles: (filePaths: string[]) => ipcRenderer.invoke('import-files', filePaths),
   getFilePathFromFile: (file: File) => webUtils.getPathForFile(file),
   // Settings API
   getSettings: () => ipcRenderer.invoke('get-settings'),

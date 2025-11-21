@@ -1,7 +1,7 @@
 {
-  "name": "clippy-backend",
+  "name": "clipchimp-backend",
   "version": "1.0.0",
-  "description": "NestJS backend for Clippy video downloader",
+  "description": "NestJS backend for ClipChimp media library manager",
   "author": "Your Name",
   "private": true,
   "license": "MIT",

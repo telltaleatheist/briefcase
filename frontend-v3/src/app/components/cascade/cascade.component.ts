@@ -77,6 +77,7 @@ export class CascadeComponent {
   @Output() childClicked = new EventEmitter<{ parent: VideoItem; child: VideoChild }>();
   @Output() itemsReordered = new EventEmitter<{ weekLabel: string; videos: VideoItem[] }>();
   @Output() configureItem = new EventEmitter<VideoItem>();
+  @Output() previewRequested = new EventEmitter<VideoItem>();
 
   @ViewChild(CdkVirtualScrollViewport) private viewport?: CdkVirtualScrollViewport;
 
@@ -574,10 +575,15 @@ export class CascadeComponent {
   }
 
   /**
-   * Handle keyboard shortcuts for delete
+   * Handle keyboard shortcuts for navigation, delete, and preview
    */
   @HostListener('document:keydown', ['$event'])
   onKeyDown(event: KeyboardEvent) {
+    // Don't handle if user is typing in an input
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
     // Check for Delete key or Cmd/Ctrl+Backspace
     const isDelete = event.key === 'Delete';
     const isCmdBackspace = event.key === 'Backspace' && (event.metaKey || event.ctrlKey);
@@ -588,7 +594,127 @@ export class CascadeComponent {
         event.preventDefault();
         this.openDeleteModal(selectedVideos);
       }
+      return;
     }
+
+    // Arrow key navigation
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      this.navigateWithArrowKey(event.key === 'ArrowDown' ? 1 : -1, event.shiftKey);
+      return;
+    }
+
+    // Spacebar to toggle preview (open/close)
+    if (event.key === ' ' && !event.ctrlKey && !event.metaKey) {
+      const highlightedId = this.highlightedItemId();
+      if (highlightedId) {
+        event.preventDefault();
+        const video = this.getVideoByItemId(highlightedId);
+        if (video && !this.isQueueItem(video)) {
+          // Emit null to signal toggle (parent handles open/close logic)
+          this.previewRequested.emit(video);
+        }
+      }
+      return;
+    }
+
+    // Enter to open in editor
+    if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey) {
+      const highlightedId = this.highlightedItemId();
+      if (highlightedId) {
+        event.preventDefault();
+        const video = this.getVideoByItemId(highlightedId);
+        if (video && !this.isQueueItem(video)) {
+          this.videoAction.emit({ action: 'openInEditor', videos: [video] });
+        }
+      }
+      return;
+    }
+  }
+
+  /**
+   * Navigate up/down in the list with arrow keys
+   */
+  private navigateWithArrowKey(direction: 1 | -1, extendSelection: boolean): void {
+    const videoItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
+    if (videoItems.length === 0) return;
+
+    const currentId = this.highlightedItemId();
+    let currentIndex = currentId ? videoItems.findIndex(item => item.itemId === currentId) : -1;
+
+    // If nothing is highlighted, start from beginning or end based on direction
+    if (currentIndex === -1) {
+      currentIndex = direction === 1 ? -1 : videoItems.length;
+    }
+
+    const newIndex = Math.max(0, Math.min(videoItems.length - 1, currentIndex + direction));
+    const newItem = videoItems[newIndex];
+
+    if (newItem) {
+      this.highlightedItemId.set(newItem.itemId);
+
+      if (extendSelection) {
+        // Shift+Arrow: extend selection
+        const selected = new Set(this.selectedVideos());
+        selected.add(newItem.itemId);
+        this.selectedVideos.set(selected);
+      } else {
+        // Arrow only: move selection to new item
+        this.selectedVideos.set(new Set([newItem.itemId]));
+      }
+
+      // Scroll to make the item visible
+      this.scrollToItemId(newItem.itemId);
+    }
+  }
+
+  /**
+   * Scroll to make an item visible in the viewport
+   * Only scrolls if the item is outside the visible area
+   */
+  private scrollToItemId(itemId: string): void {
+    const allItems = this.virtualItems();
+    const index = allItems.findIndex(item =>
+      item.type === 'video' && item.itemId === itemId
+    );
+    if (index < 0 || !this.viewport) return;
+
+    const itemHeight = 56; // Approximate row height
+    const headerHeight = 40; // Sticky section header height
+    const itemOffset = index * itemHeight;
+
+    const viewportSize = this.viewport.getViewportSize();
+    const currentScroll = this.viewport.measureScrollOffset('top');
+
+    // Check if item is above visible area (accounting for header)
+    if (itemOffset < currentScroll + headerHeight) {
+      // Scroll up - put item just below the header
+      this.viewport.scrollToOffset(Math.max(0, itemOffset - headerHeight), 'smooth');
+    }
+    // Check if item is below visible area
+    else if (itemOffset + itemHeight > currentScroll + viewportSize) {
+      // Scroll down - put item at the bottom of the viewport
+      this.viewport.scrollToOffset(itemOffset - viewportSize + itemHeight + 10, 'smooth');
+    }
+    // Otherwise item is already visible, no need to scroll
+  }
+
+  /**
+   * Get a video by its itemId
+   */
+  private getVideoByItemId(itemId: string): VideoItem | null {
+    const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
+    const found = allItems.find(item => item.itemId === itemId);
+    return found?.video || null;
+  }
+
+  /**
+   * Get the currently highlighted video
+   */
+  getHighlightedVideo(): VideoItem | null {
+    const highlightedId = this.highlightedItemId();
+    if (!highlightedId) return null;
+    return this.getVideoByItemId(highlightedId);
   }
 
   /**

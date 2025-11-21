@@ -11,6 +11,13 @@
     <div class="header-actions">
       <button
         class="btn btn-primary"
+        (click)="openImportDialog()"
+        title="Import media files from your computer">
+        <span class="btn-icon">📁</span>
+        <span>Import Files</span>
+      </button>
+      <button
+        class="btn btn-primary"
         [disabled]="selectedCount() !== 1"
         (click)="openInEditor()"
         [title]="selectedCount() === 1 ? 'Open in Video Editor' : 'Select exactly one video'">
@@ -69,8 +76,22 @@
     }
   </div>
 
-  <!-- Main Container -->
-  <div class="main-container">
+  <!-- Main Container with Drag & Drop -->
+  <div
+    class="main-container"
+    [class.dragging-over]="isDraggingOver()"
+    (drop)="onDrop($event)"
+    (dragover)="onDragOver($event)"
+    (dragleave)="onDragLeave($event)">
+
+    <!-- Drop overlay -->
+    <div class="drop-overlay" *ngIf="isDraggingOver()">
+      <div class="drop-message">
+        <div class="drop-icon">📁</div>
+        <div class="drop-text">Drop media files to import</div>
+      </div>
+    </div>
+
     <div class="unified-content">
       <!-- Media Library Cascade (includes queue items) -->
       <app-cascade
@@ -80,6 +101,7 @@
         (selectionChanged)="onSelectionChanged($event)"
         (videoAction)="onVideoAction($event)"
         (configureItem)="onConfigureItem($event)"
+        (previewRequested)="onPreviewRequested($event)"
       />
 
       <!-- Empty State -->
@@ -91,7 +113,7 @@
             Try adjusting your search filters
           </span>
           <span *ngIf="!currentFilters?.searchQuery">
-            Paste URLs above or select items to add to the queue
+            Paste URLs above, click Import Files, or drag and drop files here
           </span>
         </p>
       </div>
@@ -128,3 +150,12 @@
     (closed)="onAiWizardClosed()"
   />
 }
+
+<!-- Video Preview Modal -->
+<app-video-preview-modal
+  [show]="previewModalOpen()"
+  [previewItems]="previewItems()"
+  [selectedId]="previewSelectedId()"
+  (closed)="onPreviewModalClosed()"
+  (selectionChanged)="onPreviewSelectionChanged($event)"
+/>

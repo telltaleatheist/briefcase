@@ -1,12 +1,15 @@
 import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, computed, ViewChild, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
 import { CascadeComponent } from '../../components/cascade/cascade.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { UrlInputComponent, UrlEntry } from '../../components/url-input/url-input.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
+import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
 import { QueueItemTask } from '../../models/queue.model';
@@ -48,7 +51,8 @@ export interface ProcessingTask {
     LibraryManagerModalComponent,
     UrlInputComponent,
     QueueItemConfigModalComponent,
-    AiSetupWizardComponent
+    AiSetupWizardComponent,
+    VideoPreviewModalComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
@@ -57,12 +61,19 @@ export interface ProcessingTask {
 export class LibraryPageComponent implements OnInit, OnDestroy {
   private libraryService = inject(LibraryService);
   private router = inject(Router);
+  private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);
   private videoProcessingService = inject(VideoProcessingService);
   private aiSetupService = inject(AiSetupService);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
   @ViewChild(UrlInputComponent) private urlInputComponent?: UrlInputComponent;
+
+  // File input for import button
+  private fileInput?: HTMLInputElement;
+
+  // Drag and drop state
+  isDraggingOver = signal(false);
 
   // AI Setup wizard state
   aiWizardOpen = signal(false);
@@ -202,6 +213,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Selection state
   selectedCount = signal(0);
   selectedVideoIds = signal<Set<string>>(new Set());
+
+  // Video preview modal state
+  previewModalOpen = signal(false);
+  previewItems = signal<PreviewItem[]>([]);
+  previewSelectedId = signal<string | undefined>(undefined);
 
   // Filters
   currentFilters: LibraryFilters | null = null;
@@ -1585,6 +1601,75 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   // ========================================
+  // Video Preview Modal Methods
+  // ========================================
+
+  /**
+   * Toggle preview modal for a video (triggered by spacebar on highlighted item)
+   */
+  onPreviewRequested(video: VideoItem) {
+    // If modal is already open, close it
+    if (this.previewModalOpen()) {
+      this.previewModalOpen.set(false);
+      return;
+    }
+
+    // Build list of all non-queue videos for navigation
+    const allVideos: VideoItem[] = [];
+    this.filteredWeeks().forEach(week => {
+      week.videos.forEach(v => {
+        if (!v.id.startsWith('queue-')) {
+          allVideos.push(v);
+        }
+      });
+    });
+
+    if (allVideos.length === 0) return;
+
+    // Convert to PreviewItem format
+    const previewItems: PreviewItem[] = allVideos.map(v => ({
+      id: v.id,
+      name: v.name,
+      videoId: v.id,
+      mediaType: v.mediaType
+    }));
+
+    this.previewItems.set(previewItems);
+    this.previewSelectedId.set(video.id);
+    this.previewModalOpen.set(true);
+  }
+
+  /**
+   * Handle preview modal closed
+   */
+  onPreviewModalClosed() {
+    this.previewModalOpen.set(false);
+  }
+
+  /**
+   * Handle selection change from preview modal (arrow keys in modal)
+   */
+  onPreviewSelectionChanged(videoId: string) {
+    // Update the cascade selection to match
+    this.previewSelectedId.set(videoId);
+
+    // Find the itemId for this video and update cascade selection
+    const items = this.combinedWeeks();
+    for (const week of items) {
+      const video = week.videos.find(v => v.id === videoId);
+      if (video) {
+        const itemId = `${week.weekLabel}|${video.id}`;
+        this.selectedVideoIds.set(new Set([itemId]));
+        if (this.cascadeComponent) {
+          // Update cascade's highlighted item
+          this.cascadeComponent.highlightedItemId.set(itemId);
+        }
+        break;
+      }
+    }
+  }
+
+  // ========================================
   // Processing Queue UI Methods
   // ========================================
 
@@ -1670,5 +1755,170 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   getTaskLabel(type: TaskType): string {
     const taskInfo = AVAILABLE_TASKS.find(t => t.type === type);
     return taskInfo?.label || type;
+  }
+
+  // ========================================
+  // File Import Methods
+  // ========================================
+
+  /**
+   * Open file picker dialog for importing media files using Electron IPC
+   */
+  async openImportDialog() {
+    try {
+      // Use Electron's file dialog which gives us file paths
+      const result = await (window as any).electron?.openFiles({
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Media Files', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mp3', 'm4a', 'wav'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+
+      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return;
+      }
+
+      console.log('Selected files:', result.filePaths);
+      await this.importFilesByPath(result.filePaths);
+    } catch (error) {
+      console.error('Failed to open file dialog:', error);
+      console.error('Make sure Electron IPC is available');
+    }
+  }
+
+  /**
+   * Handle file drop event
+   */
+  async onDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingOver.set(false);
+
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    const filePaths: string[] = [];
+
+    // Use Electron's webUtils.getPathForFile to get file paths
+    try {
+      for (const file of fileArray) {
+        const path = (window as any).electron?.getFilePathFromFile(file);
+        if (path) {
+          filePaths.push(path);
+          console.log('Got file path:', path);
+        }
+      }
+
+      if (filePaths.length > 0) {
+        console.log('Importing dropped files:', filePaths);
+        await this.importFilesByPath(filePaths);
+      } else {
+        console.error('Could not get file paths from dropped files');
+      }
+    } catch (error) {
+      console.error('Error getting file paths:', error);
+    }
+  }
+
+  /**
+   * Handle drag over event
+   */
+  onDragOver(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingOver.set(true);
+  }
+
+  /**
+   * Handle drag leave event
+   */
+  onDragLeave(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDraggingOver.set(false);
+  }
+
+  /**
+   * Process selected files and add to queue
+   */
+  private async handleFiles(files: File[]) {
+    // Filter for video/audio files
+    const mediaFiles = files.filter(file =>
+      file.type.startsWith('video/') || file.type.startsWith('audio/')
+    );
+
+    if (mediaFiles.length === 0) {
+      alert('No valid video or audio files found. Please select media files.');
+      return;
+    }
+
+    if (mediaFiles.length !== files.length) {
+      alert(`Selected ${mediaFiles.length} media file(s) out of ${files.length} total files.`);
+    }
+
+    console.log('Importing files:', mediaFiles.map(f => f.name));
+
+    // Import files immediately (copy to library and scan)
+    await this.importFilesToLibrary(mediaFiles);
+  }
+
+  /**
+   * Import files by file path using Electron IPC
+   */
+  private async importFilesByPath(filePaths: string[]) {
+    try {
+      console.log('Importing files:', filePaths);
+
+      // Use Electron IPC to import files
+      const response = await (window as any).electron?.importFiles(filePaths);
+
+      console.log('Import response:', response);
+
+      if (response?.success) {
+        // Reload library to show newly imported files
+        this.loadLibrary();
+
+        const successCount = response.results?.filter((r: any) => r.success).length || 0;
+        console.log(`✓ Successfully imported ${successCount} of ${filePaths.length} file(s)`);
+      } else {
+        console.error('Import failed:', response);
+        if (response?.results) {
+          response.results.forEach((r: any) => {
+            if (!r.success) {
+              console.error(`Failed to import ${r.filePath}: ${r.error}`);
+            }
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('Import error:', error);
+    }
+  }
+
+  /**
+   * Import files to library - copy to clips folder and scan into database
+   */
+  private async importFilesToLibrary(files: File[]) {
+    try {
+      // Get file paths from File objects using Electron's webUtils
+      const filePaths: string[] = [];
+
+      for (const file of files) {
+        const path = (window as any).electron?.getFilePathFromFile(file);
+        if (path) {
+          filePaths.push(path);
+        }
+      }
+
+      if (filePaths.length > 0) {
+        await this.importFilesByPath(filePaths);
+      } else {
+        console.error('Could not get file paths from File objects');
+      }
+    } catch (error) {
+      console.error('Import error:', error);
+    }
   }
 }
