@@ -35,12 +35,15 @@ export interface PreviewItem {
                 [src]="mediaSrc()"
                 [attr.data-video-id]="currentItem()?.id"
                 (loadedmetadata)="onVideoLoaded()"
+                (loadeddata)="onVideoLoadedData()"
                 (canplay)="onCanPlay()"
+                (playing)="onPlaying()"
                 (timeupdate)="onTimeUpdate()"
                 (ended)="onVideoEnded()"
                 (error)="onMediaError($event)"
                 (click)="togglePlay()"
-                preload="metadata"
+                preload="auto"
+                autoplay
               >
                 Your browser does not support the video tag.
               </video>
@@ -340,12 +343,19 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       this.currentTime.set(0);
       this.progress.set(0);
       this.duration.set(0);
+      this.isPlaying.set(false);
       this.pendingAutoplay = true;
       this.needsCenter = true;
       // Try to get backend URL from Electron
       this.initBackendUrl();
       // Load the current media after a delay to ensure DOM is ready
-      setTimeout(() => this.loadCurrentMedia(), 150);
+      setTimeout(() => this.loadCurrentMedia(), 100);
+    } else if (!value) {
+      // Modal closing - pause video if playing
+      if (this.videoPlayer?.nativeElement) {
+        this.videoPlayer.nativeElement.pause();
+      }
+      this.isPlaying.set(false);
     }
   }
 
@@ -364,6 +374,7 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       // Only reload if the index actually changed OR if modal just opened
       if (previousIndex !== idx || !this.visible()) {
         this.pendingAutoplay = true;
+        console.log('Selection changed, setting pendingAutoplay=true');
         // Give Angular time to render the new element
         setTimeout(() => this.loadCurrentMedia(), 100);
       }
@@ -461,17 +472,18 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       name: item.name,
       isVideo: this.isVideo(),
       mediaType: item.mediaType,
-      mediaSrc: this.mediaSrc()
+      mediaSrc: this.mediaSrc(),
+      pendingAutoplay: this.pendingAutoplay
     });
 
     // Angular's binding will automatically update the src attribute
     // We just need to ensure the video element reloads when it appears
     if (this.isVideo()) {
-      // Check if video element exists after Angular renders it
+      // Wait for Angular to render the video element
       setTimeout(() => {
         if (this.videoPlayer?.nativeElement) {
           const video = this.videoPlayer.nativeElement;
-          console.log('Video element found, loading...');
+          console.log('Video element found, loading...', { pendingAutoplay: this.pendingAutoplay });
           video.load();
         } else {
           console.warn('Video element not found in DOM after timeout');
@@ -666,6 +678,7 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   onVideoLoaded() {
     if (this.videoPlayer?.nativeElement) {
       this.duration.set(this.videoPlayer.nativeElement.duration);
+      console.log('Video metadata loaded, duration:', this.videoPlayer.nativeElement.duration);
     }
   }
 
@@ -675,13 +688,29 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   /**
+   * Called when video has loaded enough data to render first frame
+   */
+  onVideoLoadedData() {
+    console.log('Video data loaded', { pendingAutoplay: this.pendingAutoplay });
+    this.tryAutoplay();
+  }
+
+  /**
    * Called when video has enough data to start playing
    */
   onCanPlay() {
+    console.log('Video can play', { pendingAutoplay: this.pendingAutoplay });
+    this.tryAutoplay();
+  }
+
+  /**
+   * Attempt to autoplay the video if autoplay is pending
+   */
+  private tryAutoplay() {
     if (this.pendingAutoplay && this.isVideo() && this.videoPlayer?.nativeElement) {
       this.pendingAutoplay = false;
       const video = this.videoPlayer.nativeElement;
-      console.log('Video can play, attempting autoplay...');
+      console.log('Attempting autoplay...');
       video.play().then(() => {
         this.isPlaying.set(true);
         console.log('Autoplay successful');
@@ -690,6 +719,15 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
         // Autoplay might be blocked by browser, that's ok - user can click play
       });
     }
+  }
+
+  /**
+   * Called when video starts playing
+   */
+  onPlaying() {
+    console.log('Video playing event fired');
+    this.isPlaying.set(true);
+    this.pendingAutoplay = false;
   }
 
   onTimeUpdate() {
