@@ -13,10 +13,12 @@ export interface PreviewItem {
   standalone: true,
   imports: [CommonModule],
   template: `
-    @if (visible() && mediaSrc()) {
+    @if (visible() && currentItem()) {
       <div class="floating-window"
            [style.left.px]="position().x"
            [style.top.px]="position().y"
+           [style.width.px]="windowSize().width"
+           [style.height.px]="windowSize().height"
            #floatingWindow>
         <div class="window-header"
              (mousedown)="startDrag($event)"
@@ -26,18 +28,19 @@ export interface PreviewItem {
         </div>
 
         <div class="window-body">
-          <div class="media-container">
+          <div class="media-container" [attr.data-media-id]="currentItem()?.id">
             @if (isVideo()) {
               <video
                 #videoPlayer
                 [src]="mediaSrc()"
+                [attr.data-video-id]="currentItem()?.id"
                 (loadedmetadata)="onVideoLoaded()"
                 (canplay)="onCanPlay()"
                 (timeupdate)="onTimeUpdate()"
                 (ended)="onVideoEnded()"
                 (error)="onMediaError($event)"
                 (click)="togglePlay()"
-                preload="auto"
+                preload="metadata"
               >
                 Your browser does not support the video tag.
               </video>
@@ -45,6 +48,7 @@ export interface PreviewItem {
               <img
                 #imageElement
                 [src]="mediaSrc()"
+                [attr.data-image-id]="currentItem()?.id"
                 [alt]="currentItem()?.name || 'Preview'"
                 (error)="onMediaError($event)"
                 (load)="onImageLoaded()"
@@ -76,6 +80,16 @@ export interface PreviewItem {
             </div>
           }
         </div>
+
+        <!-- Resize handles -->
+        <div class="resize-handle resize-right" (mousedown)="startResize($event, 'right')"></div>
+        <div class="resize-handle resize-bottom" (mousedown)="startResize($event, 'bottom')"></div>
+        <div class="resize-handle resize-bottom-right" (mousedown)="startResize($event, 'bottom-right')"></div>
+        <div class="resize-handle resize-left" (mousedown)="startResize($event, 'left')"></div>
+        <div class="resize-handle resize-top" (mousedown)="startResize($event, 'top')"></div>
+        <div class="resize-handle resize-top-left" (mousedown)="startResize($event, 'top-left')"></div>
+        <div class="resize-handle resize-top-right" (mousedown)="startResize($event, 'top-right')"></div>
+        <div class="resize-handle resize-bottom-left" (mousedown)="startResize($event, 'bottom-left')"></div>
       </div>
     }
   `,
@@ -85,7 +99,6 @@ export interface PreviewItem {
 
     .floating-window {
       position: fixed;
-      width: 480px;
       background: var(--bg-card);
       border-radius: $radius-lg;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
@@ -93,6 +106,8 @@ export interface PreviewItem {
       z-index: $z-modal;
       animation: fadeIn 0.2s ease-out;
       border: 2px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
     }
 
     @keyframes fadeIn {
@@ -139,6 +154,10 @@ export interface PreviewItem {
 
     .window-body {
       padding: $spacing-md;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
 
     .media-container {
@@ -146,7 +165,8 @@ export interface PreviewItem {
       border-radius: $radius-md;
       overflow: hidden;
       margin-bottom: $spacing-sm;
-      aspect-ratio: 16 / 9;
+      flex: 1;
+      min-height: 0;
       @include flex-center;
 
       video, img {
@@ -228,6 +248,76 @@ export interface PreviewItem {
       border-radius: $radius-full;
       transition: width 0.1s ease-out;
     }
+
+    /* Resize handles */
+    .resize-handle {
+      position: absolute;
+      z-index: 10;
+
+      &.resize-right {
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        cursor: ew-resize;
+      }
+
+      &.resize-left {
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        cursor: ew-resize;
+      }
+
+      &.resize-bottom {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 8px;
+        cursor: ns-resize;
+      }
+
+      &.resize-top {
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 8px;
+        cursor: ns-resize;
+      }
+
+      &.resize-bottom-right {
+        right: 0;
+        bottom: 0;
+        width: 16px;
+        height: 16px;
+        cursor: nwse-resize;
+      }
+
+      &.resize-bottom-left {
+        left: 0;
+        bottom: 0;
+        width: 16px;
+        height: 16px;
+        cursor: nesw-resize;
+      }
+
+      &.resize-top-right {
+        right: 0;
+        top: 0;
+        width: 16px;
+        height: 16px;
+        cursor: nesw-resize;
+      }
+
+      &.resize-top-left {
+        left: 0;
+        top: 0;
+        width: 16px;
+        height: 16px;
+        cursor: nwse-resize;
+      }
+    }
   `]
 })
 export class VideoPreviewModalComponent implements AfterViewChecked {
@@ -242,7 +332,10 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   private readonly imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'];
 
   @Input() set show(value: boolean) {
-    if (value && !this.visible()) {
+    const wasVisible = this.visible();
+    this.visible.set(value);
+
+    if (value && !wasVisible) {
       // Opening modal - reset state
       this.currentTime.set(0);
       this.progress.set(0);
@@ -251,8 +344,9 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       this.needsCenter = true;
       // Try to get backend URL from Electron
       this.initBackendUrl();
+      // Load the current media after a delay to ensure DOM is ready
+      setTimeout(() => this.loadCurrentMedia(), 150);
     }
-    this.visible.set(value);
   }
 
   @Input() set previewItems(value: PreviewItem[]) {
@@ -263,11 +357,16 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     if (!value) return;
     const items = this.items();
     const idx = items.findIndex(item => item.id === value);
-    if (idx >= 0 && idx !== this.currentIndex()) {
+    if (idx >= 0) {
+      const previousIndex = this.currentIndex();
       this.currentIndex.set(idx);
-      this.pendingAutoplay = true;
-      // Load new media when selection changes from outside
-      this.loadCurrentMedia();
+
+      // Only reload if the index actually changed OR if modal just opened
+      if (previousIndex !== idx || !this.visible()) {
+        this.pendingAutoplay = true;
+        // Give Angular time to render the new element
+        setTimeout(() => this.loadCurrentMedia(), 100);
+      }
     }
   }
 
@@ -282,11 +381,17 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   duration = signal(0);
   progress = signal(0);
   position = signal({ x: 100, y: 100 });
+  windowSize = signal({ width: 480, height: 360 });
 
   private isDragging = false;
   private dragOffset = { x: 0, y: 0 };
+  private isResizing = false;
+  private resizeHandle: string | null = null;
+  private resizeStart = { x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 };
   private pendingAutoplay = false;
   private needsCenter = false;
+  private readonly minWidth = 320;
+  private readonly minHeight = 240;
 
   currentItem = () => this.items()[this.currentIndex()];
 
@@ -295,16 +400,21 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
    */
   isVideo = (): boolean => {
     const item = this.currentItem();
-    if (!item) return true; // Default to video
+    if (!item) {
+      return true; // Default to video
+    }
 
     // Check mediaType first
     if (item.mediaType) {
-      return item.mediaType.startsWith('video/');
+      // Handle both "video/mp4" and "video" formats
+      const result = item.mediaType.startsWith('video/') || item.mediaType === 'video';
+      return result;
     }
 
     // Fall back to checking file extension
     const name = item.name.toLowerCase();
-    return !this.imageExtensions.some(ext => name.endsWith(ext));
+    const hasImageExt = this.imageExtensions.some(ext => name.endsWith(ext));
+    return !hasImageExt;
   };
 
   mediaSrc = () => {
@@ -338,13 +448,36 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   private loadCurrentMedia() {
-    if (this.isVideo() && this.videoPlayer?.nativeElement) {
-      const video = this.videoPlayer.nativeElement;
-      video.pause();
-      this.isPlaying.set(false);
-      video.load();
+    // Reset playback state
+    this.currentTime.set(0);
+    this.progress.set(0);
+    this.duration.set(0);
+    this.isPlaying.set(false);
+
+    const item = this.currentItem();
+    if (!item) return;
+
+    console.log('Loading media:', {
+      name: item.name,
+      isVideo: this.isVideo(),
+      mediaType: item.mediaType,
+      mediaSrc: this.mediaSrc()
+    });
+
+    // Angular's binding will automatically update the src attribute
+    // We just need to ensure the video element reloads when it appears
+    if (this.isVideo()) {
+      // Check if video element exists after Angular renders it
+      setTimeout(() => {
+        if (this.videoPlayer?.nativeElement) {
+          const video = this.videoPlayer.nativeElement;
+          console.log('Video element found, loading...');
+          video.load();
+        } else {
+          console.warn('Video element not found in DOM after timeout');
+        }
+      }, 50);
     }
-    // Images load automatically when src changes
   }
 
   /**
@@ -447,6 +580,73 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     document.addEventListener('mouseup', onMouseUp);
   }
 
+  startResize(event: MouseEvent, handle: string) {
+    if (event.button !== 0) return; // Only left click
+    event.preventDefault();
+    event.stopPropagation(); // Prevent dragging
+
+    this.isResizing = true;
+    this.resizeHandle = handle;
+
+    const pos = this.position();
+    const size = this.windowSize();
+    this.resizeStart = {
+      x: event.clientX,
+      y: event.clientY,
+      width: size.width,
+      height: size.height,
+      posX: pos.x,
+      posY: pos.y
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isResizing || !this.resizeHandle) return;
+
+      const deltaX = e.clientX - this.resizeStart.x;
+      const deltaY = e.clientY - this.resizeStart.y;
+
+      let newWidth = this.resizeStart.width;
+      let newHeight = this.resizeStart.height;
+      let newX = this.resizeStart.posX;
+      let newY = this.resizeStart.posY;
+
+      // Handle horizontal resize
+      if (this.resizeHandle.includes('right')) {
+        newWidth = Math.max(this.minWidth, this.resizeStart.width + deltaX);
+      } else if (this.resizeHandle.includes('left')) {
+        const proposedWidth = this.resizeStart.width - deltaX;
+        if (proposedWidth >= this.minWidth) {
+          newWidth = proposedWidth;
+          newX = this.resizeStart.posX + deltaX;
+        }
+      }
+
+      // Handle vertical resize
+      if (this.resizeHandle.includes('bottom')) {
+        newHeight = Math.max(this.minHeight, this.resizeStart.height + deltaY);
+      } else if (this.resizeHandle.includes('top')) {
+        const proposedHeight = this.resizeStart.height - deltaY;
+        if (proposedHeight >= this.minHeight) {
+          newHeight = proposedHeight;
+          newY = this.resizeStart.posY + deltaY;
+        }
+      }
+
+      this.windowSize.set({ width: newWidth, height: newHeight });
+      this.position.set({ x: newX, y: newY });
+    };
+
+    const onMouseUp = () => {
+      this.isResizing = false;
+      this.resizeHandle = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
   togglePlay() {
     if (!this.isVideo() || !this.videoPlayer?.nativeElement) return;
 
@@ -481,11 +681,13 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     if (this.pendingAutoplay && this.isVideo() && this.videoPlayer?.nativeElement) {
       this.pendingAutoplay = false;
       const video = this.videoPlayer.nativeElement;
+      console.log('Video can play, attempting autoplay...');
       video.play().then(() => {
         this.isPlaying.set(true);
+        console.log('Autoplay successful');
       }).catch(err => {
-        console.warn('Autoplay failed:', err);
-        // Autoplay might be blocked by browser, that's ok
+        console.warn('Autoplay failed (browser may have blocked it):', err);
+        // Autoplay might be blocked by browser, that's ok - user can click play
       });
     }
   }
@@ -504,10 +706,21 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
 
   onMediaError(event: Event) {
     const target = event.target as HTMLVideoElement | HTMLImageElement;
+    const item = this.currentItem();
+
     if (target instanceof HTMLVideoElement) {
-      console.error('Video error:', target.error?.message || 'Unknown error');
+      console.error('Video load error:', {
+        name: item?.name,
+        src: target.src,
+        error: target.error?.message || 'Unknown error',
+        mediaType: item?.mediaType
+      });
     } else {
-      console.error('Image load error');
+      console.error('Image load error:', {
+        name: item?.name,
+        src: (target as HTMLImageElement).src,
+        mediaType: item?.mediaType
+      });
     }
   }
 

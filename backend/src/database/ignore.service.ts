@@ -61,7 +61,6 @@ export class IgnoreService {
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('#'));
 
-      this.logger.log(`Loaded ${this.ignorePatterns.length} ignore patterns from .clippyignore`);
       return this.ignorePatterns;
     } catch (error: any) {
       this.logger.error(`Failed to load ignore patterns: ${error.message}`);
@@ -99,16 +98,12 @@ export class IgnoreService {
         relativePath = relativePath.replace(/\\/g, '/');
         const normalizedPattern = pattern.replace(/\\/g, '/');
 
-        this.logger.debug(`Checking path pattern: "${normalizedPattern}" against "${relativePath}"`);
-
         if (this.matchPattern(relativePath, normalizedPattern)) {
-          this.logger.log(`Ignoring file (path match): ${relativePath} (pattern: ${normalizedPattern})`);
           return true;
         }
       } else {
         // Pattern has no slash, match against filename only
         if (this.matchPattern(filename, pattern)) {
-          this.logger.log(`Ignoring file (filename match): ${filename} (pattern: ${pattern})`);
           return true;
         }
       }

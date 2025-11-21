@@ -19,6 +19,7 @@ import { WebsocketService, TaskCompleted, TaskProgress } from '../../services/we
 import { VideoProcessingService } from '../../services/video-processing.service';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { VideoJobSettings } from '../../models/video-processing.model';
+import { VideoManagerService, UnimportedVideo, MissingFile, DuplicateEntry } from '../../services/video-manager.service';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -65,6 +66,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private websocketService = inject(WebsocketService);
   private videoProcessingService = inject(VideoProcessingService);
   private aiSetupService = inject(AiSetupService);
+  private videoManagerService = inject(VideoManagerService);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
   @ViewChild(UrlInputComponent) private urlInputComponent?: UrlInputComponent;
@@ -221,6 +223,16 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Filters
   currentFilters: LibraryFilters | null = null;
+
+  // Manager Tab State
+  activeTab = signal<'library' | 'manager'>('library');
+  isScanning = signal(false);
+  scanningOperation = signal<'scanning' | 'importing' | 'relinking'>('scanning');
+  scanResults = signal<{
+    type: 'orphaned-files' | 'orphaned-entries' | 'duplicates';
+    data: UnimportedVideo[] | MissingFile[] | DuplicateEntry[];
+  } | null>(null);
+  managerSelectedIds = signal<Set<string>>(new Set());
 
   // Default task settings (loaded from localStorage)
   private defaultTaskSettings: QueueItemTask[] = [];
@@ -1631,7 +1643,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       id: v.id,
       name: v.name,
       videoId: v.id,
-      mediaType: v.mediaType
+      mediaType: v.mediaType || 'video/mp4' // Default to video if not specified
     }));
 
     this.previewItems.set(previewItems);
@@ -1920,5 +1932,388 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     } catch (error) {
       console.error('Import error:', error);
     }
+  }
+
+  // ========================================
+  // Manager Tab Methods
+  // ========================================
+
+  /**
+   * Check if manager has results to display
+   */
+  hasManagerResults = computed(() => {
+    const weeks = this.managerWeeks();
+    return weeks.length > 0 && weeks[0].videos.length > 0;
+  });
+
+  /**
+   * Computed property that converts scan results to VideoWeek format for cascade
+   */
+  managerWeeks = computed<VideoWeek[]>(() => {
+    const results = this.scanResults();
+    if (!results) return [];
+
+    const videos: VideoItem[] = [];
+
+    if (results.type === 'orphaned-files') {
+      const data = results.data as UnimportedVideo[];
+      videos.push(...data.map(file => ({
+        id: file.fullPath,
+        name: file.filename,
+        filePath: file.fullPath,
+        tags: ['orphaned-file'],
+        isDuplicate: file.isDuplicate,
+        suggestedTitle: file.isDuplicate ? `⚠️ Duplicate of ${file.duplicateOf?.filename}` : undefined
+      })));
+    } else if (results.type === 'orphaned-entries') {
+      const data = results.data as MissingFile[];
+      videos.push(...data.map(entry => ({
+        id: entry.id,
+        name: entry.filename,
+        filePath: entry.current_path,
+        uploadDate: entry.upload_date ? new Date(entry.upload_date) : undefined,
+        downloadDate: entry.download_date ? new Date(entry.download_date) : undefined,
+        tags: ['orphaned-entry']
+      })));
+    } else if (results.type === 'duplicates') {
+      const data = results.data as any[]; // Backend returns flat array of duplicate entries
+      videos.push(...data.map(entry => ({
+        id: entry.id,
+        name: entry.filename,
+        filePath: entry.current_path,
+        uploadDate: entry.upload_date ? new Date(entry.upload_date) : undefined,
+        downloadDate: entry.download_date ? new Date(entry.download_date) : undefined,
+        tags: ['duplicate'],
+        suggestedTitle: `Duplicate (${entry.duplicate_count} total copies of this file)`
+      })));
+    }
+
+    return [{
+      weekLabel: this.getScanTypeLabel(results.type),
+      videos
+    }];
+  });
+
+  /**
+   * Get human-readable label for scan type
+   */
+  private getScanTypeLabel(type: string): string {
+    switch (type) {
+      case 'orphaned-files': return 'Orphaned Files (Not in Database)';
+      case 'orphaned-entries': return 'Orphaned Entries (File Missing)';
+      case 'duplicates': return 'Duplicate Entries';
+      default: return 'Scan Results';
+    }
+  }
+
+  /**
+   * Get summary text for scan results
+   */
+  getScanResultSummary(): string {
+    const results = this.scanResults();
+    if (!results) return '';
+
+    const count = this.managerWeeks()[0]?.videos.length || 0;
+
+    switch (results.type) {
+      case 'orphaned-files':
+        return `Found ${count} file${count !== 1 ? 's' : ''} not in database`;
+      case 'orphaned-entries':
+        return `Found ${count} database entr${count !== 1 ? 'ies' : 'y'} with missing files`;
+      case 'duplicates':
+        return `Found ${count} duplicate entr${count !== 1 ? 'ies' : 'y'}`;
+      default:
+        return `Found ${count} item${count !== 1 ? 's' : ''}`;
+    }
+  }
+
+  /**
+   * Get loading message based on current operation
+   */
+  getLoadingMessage(): string {
+    switch (this.scanningOperation()) {
+      case 'importing':
+        return 'Importing files...';
+      case 'relinking':
+        return 'Relinking entries...';
+      default:
+        return 'Scanning library...';
+    }
+  }
+
+  /**
+   * Switch between Library and Manager tabs
+   */
+  setActiveTab(tab: 'library' | 'manager') {
+    this.activeTab.set(tab);
+  }
+
+  /**
+   * Scan for orphaned files (files on disk not in database)
+   */
+  scanOrphanedFiles() {
+    this.scanningOperation.set('scanning');
+    this.isScanning.set(true);
+    this.videoManagerService.scanOrphanedFiles().subscribe({
+      next: (response: any) => {
+        console.log('Orphaned files response:', response);
+        if (response.success) {
+          const data = response.data || response.videos || [];
+          this.scanResults.set({
+            type: 'orphaned-files',
+            data
+          });
+        } else {
+          console.error('Scan failed - response:', response);
+          alert('Scan failed: ' + (response.error || 'Unknown error'));
+        }
+        this.isScanning.set(false);
+      },
+      error: (error) => {
+        console.error('Scan failed - error:', error);
+        alert('Scan failed: ' + (error.error?.error || error.message));
+        this.isScanning.set(false);
+      }
+    });
+  }
+
+  /**
+   * Scan for orphaned database entries (entries with missing files)
+   */
+  scanOrphanedEntries() {
+    this.scanningOperation.set('scanning');
+    this.isScanning.set(true);
+    this.videoManagerService.scanOrphanedEntries().subscribe({
+      next: (response: any) => {
+        console.log('Orphaned entries response:', response);
+        if (response.success) {
+          const data = response.data || response.videos || [];
+          this.scanResults.set({
+            type: 'orphaned-entries',
+            data
+          });
+        } else {
+          console.error('Scan failed - response:', response);
+          alert('Scan failed: ' + (response.error || 'Unknown error'));
+        }
+        this.isScanning.set(false);
+      },
+      error: (error) => {
+        console.error('Scan failed - error:', error);
+        alert('Scan failed: ' + (error.error?.error || error.message));
+        this.isScanning.set(false);
+      }
+    });
+  }
+
+  /**
+   * Scan for duplicate database entries
+   */
+  scanDuplicates() {
+    this.scanningOperation.set('scanning');
+    this.isScanning.set(true);
+    this.videoManagerService.scanDuplicates().subscribe({
+      next: (response: any) => {
+        console.log('Duplicates response:', response);
+        if (response.success) {
+          const data = response.data || response.duplicateEntries || [];
+          this.scanResults.set({
+            type: 'duplicates',
+            data
+          });
+        } else {
+          console.error('Scan failed - response:', response);
+          alert('Scan failed: ' + (response.error || 'Unknown error'));
+        }
+        this.isScanning.set(false);
+      },
+      error: (error) => {
+        console.error('Scan failed - error:', error);
+        alert('Scan failed: ' + (error.error?.error || error.message));
+        this.isScanning.set(false);
+      }
+    });
+  }
+
+  /**
+   * Handle selection changes in manager tab
+   */
+  onManagerSelectionChanged(event: { count: number; ids: Set<string> }) {
+    this.managerSelectedIds.set(event.ids);
+  }
+
+  /**
+   * Handle actions in manager tab
+   */
+  onManagerAction(event: { action: string; videos: VideoItem[] }) {
+    const { action, videos } = event;
+    const results = this.scanResults();
+    if (!results) return;
+
+    switch (action) {
+      case 'delete':
+        this.deleteManagerItems(videos, results.type);
+        break;
+
+      case 'import':
+        if (results.type === 'orphaned-files') {
+          this.importOrphanedFiles(videos);
+        }
+        break;
+
+      case 'relink':
+        if (results.type === 'orphaned-entries') {
+          this.relinkOrphanedEntries(videos);
+        }
+        break;
+
+      default:
+        console.warn('Unknown manager action:', action);
+    }
+  }
+
+  /**
+   * Delete items from manager view
+   */
+  private deleteManagerItems(videos: VideoItem[], scanType: string) {
+    const confirmMsg = scanType === 'orphaned-files'
+      ? `Delete ${videos.length} file(s) from disk? This cannot be undone.`
+      : `Remove ${videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}? This cannot be undone.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    if (scanType === 'orphaned-files') {
+      const filePaths = videos.map(v => v.filePath).filter(Boolean) as string[];
+      this.videoManagerService.deleteUnimportedFiles(filePaths).subscribe({
+        next: (response) => {
+          if (response.success) {
+            // Remove from display
+            const currentResults = this.scanResults();
+            if (currentResults && currentResults.type === 'orphaned-files') {
+              const data = currentResults.data as UnimportedVideo[];
+              const pathsToRemove = new Set(filePaths);
+              const filtered = data.filter(item => !pathsToRemove.has(item.fullPath));
+              this.scanResults.set({ ...currentResults, data: filtered });
+            }
+            alert(`Deleted ${response.deletedCount || videos.length} file(s)`);
+          } else {
+            alert('Delete failed: ' + (response.error || 'Unknown error'));
+          }
+        },
+        error: (error) => {
+          console.error('Delete failed:', error);
+          alert('Delete failed: ' + (error.error?.error || error.message));
+        }
+      });
+    } else {
+      const videoIds = videos.map(v => v.id);
+      this.videoManagerService.deleteOrphanedEntries(videoIds).subscribe({
+        next: (response) => {
+          if (response.success) {
+            // Remove from display
+            const currentResults = this.scanResults();
+            if (currentResults) {
+              const idsToRemove = new Set(videoIds);
+              if (currentResults.type === 'orphaned-entries') {
+                const data = currentResults.data as MissingFile[];
+                const filtered = data.filter(item => !idsToRemove.has(item.id));
+                this.scanResults.set({ ...currentResults, data: filtered });
+              } else if (currentResults.type === 'duplicates') {
+                // Duplicates are a flat array of entries
+                const data = currentResults.data as any[];
+                const filtered = data.filter(item => !idsToRemove.has(item.id));
+                this.scanResults.set({ ...currentResults, data: filtered });
+              }
+            }
+            alert(`Removed ${response.deletedCount || videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}`);
+          } else {
+            alert('Delete failed: ' + (response.error || 'Unknown error'));
+          }
+        },
+        error: (error) => {
+          console.error('Delete failed:', error);
+          alert('Delete failed: ' + (error.error?.error || error.message));
+        }
+      });
+    }
+  }
+
+  /**
+   * Import orphaned files into database
+   */
+  private importOrphanedFiles(videos: VideoItem[]) {
+    const filePaths = videos.map(v => v.filePath).filter(Boolean) as string[];
+
+    console.log('Importing files:', filePaths);
+
+    // Show importing status
+    this.scanningOperation.set('importing');
+    this.isScanning.set(true);
+
+    this.videoManagerService.importFiles(filePaths).subscribe({
+      next: (response) => {
+        console.log('Import response:', response);
+        this.isScanning.set(false);
+
+        if (response.success) {
+          // Remove imported items from display
+          const currentResults = this.scanResults();
+          if (currentResults && currentResults.type === 'orphaned-files') {
+            const data = currentResults.data as UnimportedVideo[];
+            const pathsToRemove = new Set(filePaths);
+            const filtered = data.filter(item => !pathsToRemove.has(item.fullPath));
+            this.scanResults.set({ ...currentResults, data: filtered });
+          }
+
+          const importedCount = response.imported?.length || response.results?.length || filePaths.length;
+          alert(`Successfully imported ${importedCount} file(s) into database`);
+          this.loadLibrary(); // Refresh library to show new files
+        } else {
+          console.error('Import failed - response:', response);
+          alert('Import failed: ' + (response.error || 'Unknown error'));
+        }
+      },
+      error: (error) => {
+        this.isScanning.set(false);
+        console.error('Import failed - error:', error);
+        alert('Import failed: ' + (error.error?.error || error.message));
+      }
+    });
+  }
+
+  /**
+   * Attempt to relink orphaned database entries
+   */
+  private relinkOrphanedEntries(videos: VideoItem[]) {
+    const videoIds = videos.map(v => v.id);
+
+    this.scanningOperation.set('relinking');
+    this.isScanning.set(true);
+
+    this.videoManagerService.relinkOrphanedEntries(videoIds, { autoScan: true }).subscribe({
+      next: (response) => {
+        this.isScanning.set(false);
+
+        if (response.success) {
+          // Remove relinked items from display
+          const currentResults = this.scanResults();
+          if (currentResults && currentResults.type === 'orphaned-entries') {
+            const data = currentResults.data as MissingFile[];
+            const idsToRemove = new Set(videoIds);
+            const filtered = data.filter(item => !idsToRemove.has(item.id));
+            this.scanResults.set({ ...currentResults, data: filtered });
+          }
+          alert(`Relinked ${response.relinkedCount || 0} of ${videoIds.length} entr${videoIds.length !== 1 ? 'ies' : 'y'}`);
+          this.loadLibrary(); // Refresh library
+        } else {
+          alert('Relink failed: ' + (response.error || 'Unknown error'));
+        }
+      },
+      error: (error) => {
+        this.isScanning.set(false);
+        console.error('Relink failed:', error);
+        alert('Relink failed: ' + (error.error?.error || error.message));
+      }
+    });
   }
 }

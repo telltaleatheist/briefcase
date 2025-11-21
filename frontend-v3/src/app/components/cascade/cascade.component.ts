@@ -235,6 +235,41 @@ export class CascadeComponent {
       return actions;
     }
 
+    // Check for manager tab items based on tags
+    const isOrphanedFile = video?.tags?.includes('orphaned-file');
+    const isOrphanedEntry = video?.tags?.includes('orphaned-entry');
+    const isDuplicate = video?.tags?.includes('duplicate');
+
+    // Orphaned Files (files on disk not in database)
+    if (isOrphanedFile) {
+      actions.push({ label: `Import${countSuffix}`, icon: '📥', action: 'import' });
+      actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
+      if (count <= 1) {
+        actions.push({ label: '', icon: '', action: '', divider: true });
+        actions.push({ label: 'Open File Location', icon: '📁', action: 'openLocation' });
+        actions.push({ label: 'Copy Filename', icon: '📋', action: 'copyFilename' });
+      }
+      return actions;
+    }
+
+    // Orphaned Entries (database entries with missing files)
+    if (isOrphanedEntry) {
+      actions.push({ label: `Relink${countSuffix}`, icon: '🔗', action: 'relink' });
+      actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
+      return actions;
+    }
+
+    // Duplicate Entries
+    if (isDuplicate) {
+      actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
+      if (count <= 1) {
+        actions.push({ label: '', icon: '', action: '', divider: true });
+        actions.push({ label: 'Open File Location', icon: '📁', action: 'openLocation' });
+        actions.push({ label: 'Copy Filename', icon: '📋', action: 'copyFilename' });
+      }
+      return actions;
+    }
+
     // Library item actions
     // Single video actions
     if (count <= 1) {

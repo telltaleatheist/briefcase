@@ -25,6 +25,7 @@ export class NavigationComponent {
   currentUrl = signal('/');
 
   isHome = computed(() => this.currentUrl() === '/');
+  isSettings = computed(() => this.currentUrl().startsWith('/settings'));
 
   navLinks = [
     { path: '/', label: 'Media Library', icon: '📹' },

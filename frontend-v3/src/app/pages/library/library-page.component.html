@@ -53,15 +53,59 @@
     </div>
   </div>
 
-  <!-- Search and Filters -->
-  <div class="filters-section">
+  <!-- Tabs -->
+  <div class="tabs-section">
+    <button
+      class="tab"
+      [class.active]="activeTab() === 'library'"
+      (click)="setActiveTab('library')">
+      📚 Library
+    </button>
+    <button
+      class="tab"
+      [class.active]="activeTab() === 'manager'"
+      (click)="setActiveTab('manager')">
+      🔧 Manager
+    </button>
+  </div>
+
+  <!-- Search and Filters (Library Tab Only) -->
+  <div class="filters-section" *ngIf="activeTab() === 'library'">
     <app-library-search-filters
       (filtersChanged)="onFiltersChanged($event)"
     />
   </div>
 
-  <!-- URL Input Bar -->
-  <div class="url-input-bar">
+  <!-- Manager Toolbar (Manager Tab Only) -->
+  <div class="manager-toolbar" *ngIf="activeTab() === 'manager'">
+    <button
+      class="btn btn-secondary scan-btn"
+      [disabled]="isScanning()"
+      (click)="scanOrphanedFiles()">
+      <span class="btn-icon">📁</span>
+      <span>Scan Orphaned Files</span>
+    </button>
+    <button
+      class="btn btn-secondary scan-btn"
+      [disabled]="isScanning()"
+      (click)="scanOrphanedEntries()">
+      <span class="btn-icon">🗃️</span>
+      <span>Scan Orphaned Entries</span>
+    </button>
+    <button
+      class="btn btn-secondary scan-btn"
+      [disabled]="isScanning()"
+      (click)="scanDuplicates()">
+      <span class="btn-icon">🔍</span>
+      <span>Scan Duplicates</span>
+    </button>
+    <div class="scan-status" *ngIf="scanResults()">
+      <span class="status-text">{{ getScanResultSummary() }}</span>
+    </div>
+  </div>
+
+  <!-- URL Input Bar (Library Tab Only) -->
+  <div class="url-input-bar" *ngIf="activeTab() === 'library'">
     <span class="url-input-label">Add to Queue:</span>
     <app-url-input (urlsAdded)="onUrlsAdded($event)" />
     @if (hasPendingItems) {
@@ -93,8 +137,9 @@
     </div>
 
     <div class="unified-content">
-      <!-- Media Library Cascade (includes queue items) -->
+      <!-- Library Tab: Media Library Cascade (includes queue items) -->
       <app-cascade
+        *ngIf="activeTab() === 'library'"
         [weeks]="combinedWeeks()"
         [progressMapper]="queueProgressMapper"
         [childrenConfig]="processingChildrenConfig"
@@ -104,8 +149,16 @@
         (previewRequested)="onPreviewRequested($event)"
       />
 
-      <!-- Empty State -->
-      <div class="empty-state" *ngIf="filteredWeeks().length === 0 && processingQueue().length === 0">
+      <!-- Manager Tab: Scan Results Cascade -->
+      <app-cascade
+        *ngIf="activeTab() === 'manager'"
+        [weeks]="managerWeeks()"
+        (selectionChanged)="onManagerSelectionChanged($event)"
+        (videoAction)="onManagerAction($event)"
+      />
+
+      <!-- Empty State - Library -->
+      <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0 && processingQueue().length === 0">
         <div class="empty-icon">📹</div>
         <h3 class="empty-title">No media found</h3>
         <p class="empty-description">
@@ -116,6 +169,30 @@
             Paste URLs above, click Import Files, or drag and drop files here
           </span>
         </p>
+      </div>
+
+      <!-- Empty State - Manager -->
+      <div class="empty-state" *ngIf="activeTab() === 'manager' && !scanResults() && !isScanning()">
+        <div class="empty-icon">🔧</div>
+        <h3 class="empty-title">No scan results</h3>
+        <p class="empty-description">
+          Click one of the scan buttons above to analyze your library
+        </p>
+      </div>
+
+      <!-- Empty Results - Manager (after scan completes with no results) -->
+      <div class="empty-state" *ngIf="activeTab() === 'manager' && scanResults() && !hasManagerResults()">
+        <div class="empty-icon">✅</div>
+        <h3 class="empty-title">All clear!</h3>
+        <p class="empty-description">
+          No issues found in this scan
+        </p>
+      </div>
+
+      <!-- Loading State -->
+      <div class="loading-state" *ngIf="isScanning()">
+        <div class="spinner"></div>
+        <p>{{ getLoadingMessage() }}</p>
       </div>
     </div>
   </div>
