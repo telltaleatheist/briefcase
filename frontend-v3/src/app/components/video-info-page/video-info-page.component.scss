@@ -5,7 +5,6 @@
   height: 100vh;
   overflow-y: auto;
   background: var(--bg-primary);
-  padding-top: 60px; // Account for fixed header
   padding-bottom: 60px;
 }
 
@@ -165,7 +164,7 @@
   gap: $spacing-md;
   overflow-x: auto;
   position: sticky;
-  top: 60px; // Account for fixed header
+  top: 0;
   z-index: 100;
 
   .tab-button {
@@ -1709,5 +1708,330 @@
       width: 100%;
       justify-content: space-between;
     }
+  }
+}
+
+// ============================================================================
+// CHILDREN SECTION
+// ============================================================================
+
+.children-container {
+  // Placeholder state (matching video editor analysis panel)
+  .no-children-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    text-align: center;
+
+    .no-children-icon {
+      color: var(--text-secondary);
+      opacity: 0.5;
+      margin-bottom: 16px;
+    }
+
+    .no-children-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 0 0 8px 0;
+    }
+
+    .no-children-description {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin: 0 0 24px 0;
+      max-width: 400px;
+      line-height: 1.5;
+    }
+
+    .add-children-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      background: var(--primary-orange);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+
+      svg {
+        flex-shrink: 0;
+      }
+
+      &:hover {
+        background: var(--dark-orange);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(255, 138, 0, 0.3);
+      }
+
+      &:active {
+        transform: translateY(0);
+      }
+    }
+  }
+
+  .children-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .add-more-children-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    margin-top: 8px;
+    background: var(--bg-tertiary);
+    border: 1px dashed var(--border-color);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    svg {
+      flex-shrink: 0;
+    }
+
+    &:hover {
+      background: var(--bg-secondary);
+      border-color: var(--primary-orange);
+      color: var(--primary-orange);
+    }
+  }
+
+  .child-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: var(--bg-hover);
+      transform: translateX(4px);
+    }
+
+    .child-thumbnail {
+      width: 80px;
+      height: 45px;
+      border-radius: 4px;
+      overflow: hidden;
+      flex-shrink: 0;
+
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+    }
+
+    .child-info {
+      flex: 1;
+      min-width: 0;
+
+      .child-name {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .child-meta {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+    }
+
+    .child-remove-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
+      font-size: 24px;
+      line-height: 1;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      &:hover {
+        background: rgba(239, 68, 68, 0.2);
+        transform: scale(1.1);
+      }
+    }
+  }
+
+  // Embedded video selector
+  .video-selector-embedded {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    .selector-header {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+
+      .search-input {
+        flex: 1;
+        padding: 10px 14px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-size: 14px;
+
+        &:focus {
+          outline: none;
+          border-color: var(--primary-orange);
+        }
+      }
+
+      .cancel-selection-btn {
+        padding: 10px 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover {
+          background: var(--bg-hover);
+          color: var(--text-primary);
+        }
+      }
+    }
+
+    .selector-list-empty {
+      min-height: 400px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background: var(--bg-secondary);
+
+      .empty-state {
+        padding: 32px;
+        text-align: center;
+        color: var(--text-secondary);
+        font-style: italic;
+      }
+    }
+
+    .selector-cascade-wrapper {
+      height: 400px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--bg-secondary);
+
+      app-cascade {
+        display: block;
+        height: 100%;
+        width: 100%;
+
+        // Hide the toolbar - we don't need "Media Library" title
+        ::ng-deep .library-toolbar {
+          display: none;
+        }
+
+        // Make the cascade take full size
+        ::ng-deep .cascade {
+          height: 100%;
+          width: 100%;
+        }
+
+        // Make the content viewport take full height
+        ::ng-deep .library-content {
+          height: 100% !important;
+          width: 100%;
+        }
+
+        // Ensure virtual scroll viewport is sized correctly
+        ::ng-deep cdk-virtual-scroll-viewport {
+          height: 100% !important;
+          width: 100%;
+        }
+      }
+    }
+
+    .selector-footer {
+      display: flex;
+      justify-content: flex-end;
+
+      .submit-selection-btn {
+        padding: 12px 24px;
+        background: var(--primary-orange);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+
+        &:hover:not(:disabled) {
+          background: var(--dark-orange);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(255, 138, 0, 0.3);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+      }
+    }
+  }
+}
+
+.count-badge {
+  display: inline-block;
+  background: var(--primary-orange);
+  color: white;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+  font-weight: 600;
+}
+
+.remove-all-button {
+  padding: 6px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.3);
   }
 }

@@ -1036,6 +1036,60 @@ export class DatabaseService {
       }
     }
 
+    try {
+      // Migration 18: Create video_relationships junction table for many-to-many parent-child relationships
+      db.exec("SELECT * FROM video_relationships LIMIT 1");
+      // If we get here without error, table exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such table: video_relationships')) {
+        this.logger.log('Running migration: Creating video_relationships junction table');
+        try {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS video_relationships (
+              id TEXT PRIMARY KEY,
+              parent_id TEXT NOT NULL,
+              child_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (parent_id) REFERENCES videos(id) ON DELETE CASCADE,
+              FOREIGN KEY (child_id) REFERENCES videos(id) ON DELETE CASCADE,
+              UNIQUE (parent_id, child_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_video_relationships_parent ON video_relationships(parent_id);
+            CREATE INDEX IF NOT EXISTS idx_video_relationships_child ON video_relationships(child_id);
+          `);
+
+          // Migrate existing parent_id data to the junction table
+          const existingRelationships = db.prepare(`
+            SELECT id, parent_id FROM videos WHERE parent_id IS NOT NULL
+          `).all() as any[];
+
+          if (existingRelationships.length > 0) {
+            this.logger.log(`Migrating ${existingRelationships.length} existing parent-child relationships`);
+            const insertStmt = db.prepare(`
+              INSERT INTO video_relationships (id, parent_id, child_id, created_at)
+              VALUES (?, ?, ?, ?)
+            `);
+
+            const { v4: uuidv4 } = require('uuid');
+            for (const rel of existingRelationships) {
+              insertStmt.run(
+                uuidv4(),
+                rel.parent_id,
+                rel.id,
+                new Date().toISOString()
+              );
+            }
+          }
+
+          this.saveDatabase();
+          this.logger.log('Migration complete: video_relationships table created and existing data migrated');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
   }
 
   /**
@@ -1232,7 +1286,7 @@ export class DatabaseService {
       return [];
     }
 
-    this.logger.log(`[FTS Search] Query: "${trimmedQuery}" -> Tokens: ${JSON.stringify(tokens)}`);
+    // this.logger.log(`[FTS Search] Query: "${trimmedQuery}" -> Tokens: ${JSON.stringify(tokens)}`);
 
     try {
       // For each token, find matching videos across all FTS tables
@@ -1329,7 +1383,7 @@ export class DatabaseService {
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
 
-      this.logger.log(`[FTS Search] Found ${sortedResults.length} results for "${trimmedQuery}"`);
+      // this.logger.log(`[FTS Search] Found ${sortedResults.length} results for "${trimmedQuery}"`);
       return sortedResults;
     } catch (error: any) {
       this.logger.error(`[FTS Search] Search failed: ${error?.message || 'Unknown error'}`);
@@ -3218,8 +3272,9 @@ export class DatabaseService {
 
   /**
    * Set a video as a child of another video (parent-child relationship)
+   * Now uses many-to-many junction table
    * @param childId - ID of the child video
-   * @param parentId - ID of the parent video (null to remove parent)
+   * @param parentId - ID of the parent video (null to remove ALL parents)
    */
   setVideoParent(childId: string, parentId: string | null) {
     const db = this.ensureInitialized();
@@ -3230,90 +3285,150 @@ export class DatabaseService {
       throw new Error(`Child video not found: ${childId}`);
     }
 
-    // Validate that the parent exists (if provided)
-    if (parentId) {
-      const parent = this.getVideoById(parentId);
-      if (!parent) {
-        throw new Error(`Parent video not found: ${parentId}`);
-      }
+    // If parentId is null, remove all parent relationships for this child
+    if (parentId === null) {
+      db.prepare(
+        'DELETE FROM video_relationships WHERE child_id = ?'
+      ).run(childId);
 
-      // Prevent child from being its own parent
-      if (childId === parentId) {
-        throw new Error('A video cannot be its own parent');
-      }
+      // Also clear the deprecated parent_id column for backwards compatibility
+      db.prepare(
+        'UPDATE videos SET parent_id = NULL WHERE id = ?'
+      ).run(childId);
 
-      // Prevent a child from becoming a parent (children can't have children)
-      if (parent.parent_id) {
-        throw new Error('Cannot set a child video as a parent. Only root-level videos can be parents.');
-      }
-
-      // Prevent circular references - check if parent is already a child of this video
-      const parentRecord = this.getVideoById(parentId);
-      if (parentRecord && parentRecord.parent_id === childId) {
-        throw new Error('Circular parent-child relationship not allowed');
-      }
+      this.saveDatabase();
+      this.logger.log(`Removed all parents from video ${childId}`);
+      return;
     }
 
-    db.prepare(
-      'UPDATE videos SET parent_id = ? WHERE id = ?'
-    ).run(parentId, childId);
+    // Validate that the parent exists
+    const parent = this.getVideoById(parentId);
+    if (!parent) {
+      throw new Error(`Parent video not found: ${parentId}`);
+    }
+
+    // Prevent child from being its own parent
+    if (childId === parentId) {
+      throw new Error('A video cannot be its own parent');
+    }
+
+    // Check if relationship already exists
+    const existing = db.prepare(
+      'SELECT id FROM video_relationships WHERE parent_id = ? AND child_id = ?'
+    ).get(parentId, childId);
+
+    if (existing) {
+      this.logger.warn(`Child ${childId} is already linked to parent ${parentId}`);
+      return;
+    }
+
+    // Create the relationship
+    const { v4: uuidv4 } = require('uuid');
+    db.prepare(`
+      INSERT INTO video_relationships (id, parent_id, child_id, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(
+      uuidv4(),
+      parentId,
+      childId,
+      new Date().toISOString()
+    );
 
     this.saveDatabase();
-    this.logger.log(`Set parent for video ${childId}: ${parentId || 'none'}`);
+    this.logger.log(`Linked video ${childId} as child of ${parentId}`);
   }
 
   /**
    * Get all children of a parent video
+   * Now uses many-to-many junction table
    * @param parentId - ID of the parent video
    * @returns Array of child videos
    */
   getChildVideos(parentId: string): VideoRecord[] {
     const db = this.ensureInitialized();
     const stmt = db.prepare(`
-      SELECT * FROM videos
-      WHERE parent_id = ?
-      ORDER BY added_at ASC
+      SELECT v.* FROM videos v
+      INNER JOIN video_relationships vr ON v.id = vr.child_id
+      WHERE vr.parent_id = ?
+      ORDER BY vr.created_at ASC
     `);
     const results = stmt.all(parentId) as VideoRecord[];
     return this.resolveVideoPathsArray(results);
   }
 
   /**
-   * Get the parent of a video (if it has one)
+   * Get all parents of a video (now supports multiple parents)
    * @param videoId - ID of the video
-   * @returns Parent video or null
+   * @returns Array of parent videos
+   */
+  getParentVideos(videoId: string): VideoRecord[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT v.* FROM videos v
+      INNER JOIN video_relationships vr ON v.id = vr.parent_id
+      WHERE vr.child_id = ?
+      ORDER BY vr.created_at ASC
+    `);
+    const results = stmt.all(videoId) as VideoRecord[];
+    return this.resolveVideoPathsArray(results);
+  }
+
+  /**
+   * Get the parent of a video (if it has one)
+   * @deprecated Use getParentVideos() instead for multiple parents support
+   * @param videoId - ID of the video
+   * @returns First parent video or null
    */
   getParentVideo(videoId: string): VideoRecord | null {
-    const video = this.getVideoById(videoId);
-
-    if (!video || !video.parent_id) {
-      return null;
-    }
-
-    return this.getVideoById(video.parent_id);
+    const parents = this.getParentVideos(videoId);
+    return parents.length > 0 ? parents[0] : null;
   }
 
   /**
    * Check if a video has any children
+   * Now uses many-to-many junction table
    * @param videoId - ID of the video
    * @returns True if video has children
    */
   hasChildren(videoId: string): boolean {
     const db = this.ensureInitialized();
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM videos WHERE parent_id = ?');
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM video_relationships WHERE parent_id = ?');
     const result = stmt.get(videoId) as any;
     return result.count > 0;
   }
 
   /**
-   * Remove all children from a parent (set their parent_id to null)
+   * Remove all children from a parent
    * @param parentId - ID of the parent video
    */
   removeAllChildren(parentId: string) {
     const db = this.ensureInitialized();
+    db.prepare('DELETE FROM video_relationships WHERE parent_id = ?').run(parentId);
+
+    // Also clear deprecated parent_id column for backwards compatibility
     db.prepare('UPDATE videos SET parent_id = NULL WHERE parent_id = ?').run(parentId);
+
     this.saveDatabase();
     this.logger.log(`Removed all children from parent ${parentId}`);
+  }
+
+  /**
+   * Remove a specific parent-child relationship
+   * @param parentId - ID of the parent video
+   * @param childId - ID of the child video
+   */
+  removeParentChildRelationship(parentId: string, childId: string) {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM video_relationships WHERE parent_id = ? AND child_id = ?').run(parentId, childId);
+
+    // Also clear deprecated parent_id column if this was the only relationship
+    const remainingParents = this.getParentVideos(childId);
+    if (remainingParents.length === 0) {
+      db.prepare('UPDATE videos SET parent_id = NULL WHERE id = ?').run(childId);
+    }
+
+    this.saveDatabase();
+    this.logger.log(`Removed parent-child relationship: ${parentId} -> ${childId}`);
   }
 
   // ============================================================================

@@ -864,7 +864,7 @@ export class CascadeComponent {
   // ========================================
 
   /**
-   * Check if a video has children
+   * Check if a video has children (processing tasks)
    */
   hasChildren(video: VideoItem): boolean {
     if (!this.childrenConfig?.enabled) return false;
@@ -875,6 +875,66 @@ export class CascadeComponent {
     }
 
     return false;
+  }
+
+  /**
+   * Check if a video has child videos (parent-child relationship)
+   */
+  hasVideoChildren(video: VideoItem): boolean {
+    return !!(video.childIds && video.childIds.length > 0);
+  }
+
+  /**
+   * Check if a video is a child (has parents)
+   */
+  isVideoChild(video: VideoItem): boolean {
+    return !!(video.parentIds && video.parentIds.length > 0);
+  }
+
+  /**
+   * Handle video click (select for normal items, prevent for ghost items)
+   */
+  handleVideoClick(itemId: string, video: VideoItem, event: MouseEvent): void {
+    if (video.isGhost) {
+      // Ghost items are not selectable
+      event.stopPropagation();
+      return;
+    }
+    this.selectVideo(itemId, video, event);
+  }
+
+  /**
+   * Handle video double-click (navigate to actual location for ghost items)
+   */
+  handleVideoDoubleClick(video: VideoItem, event: MouseEvent): void {
+    if (video.isGhost) {
+      event.stopPropagation();
+      event.preventDefault();
+      // Scroll to and highlight the actual video
+      this.scrollToVideo(video.id);
+    }
+  }
+
+  /**
+   * Scroll to a video and highlight it
+   */
+  private scrollToVideo(videoId: string): void {
+    // Find the video's actual position in the list
+    const virtualItems = this.virtualItems();
+    const index = virtualItems.findIndex(item =>
+      item.type === 'video' && item.video.id === videoId && !item.video.isGhost
+    );
+
+    if (index !== -1 && this.viewport) {
+      // Scroll to the video
+      this.viewport.scrollToIndex(index, 'smooth');
+
+      // Temporarily highlight it
+      this.highlightedItemId.set(videoId);
+      setTimeout(() => {
+        this.highlightedItemId.set(null);
+      }, 2000);
+    }
   }
 
   /**

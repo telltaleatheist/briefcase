@@ -354,7 +354,8 @@ export class DatabaseController {
     @Query('linkedOnly') linkedOnly?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
-    @Query('hierarchical') hierarchical?: string
+    @Query('hierarchical') hierarchical?: string,
+    @Query('includeRelationships') includeRelationships?: string
   ) {
     // Default to linked only unless explicitly set to false
     const shouldFilterLinked = linkedOnly === 'false' ? false : true;
@@ -368,6 +369,22 @@ export class DatabaseController {
     } else {
       videos = this.databaseService.getAllVideos({
         linkedOnly: shouldFilterLinked,
+      });
+    }
+
+    // Enrich with parent/child relationship data if requested
+    if (includeRelationships === 'true') {
+      videos = videos.map(video => {
+        const children = this.databaseService.getChildVideos(video.id as string);
+        const parents = this.databaseService.getParentVideos(video.id as string);
+
+        return {
+          ...video,
+          child_ids: children.map(c => c.id),
+          parent_ids: parents.map(p => p.id),
+          children: children,
+          parents: parents
+        };
       });
     }
 
@@ -2719,13 +2736,7 @@ export class DatabaseController {
         };
       }
 
-      // Check if parent is already a child (children can't be parents)
-      if (parent.parent_id) {
-        return {
-          success: false,
-          error: 'Cannot link files to a child video. Only root-level videos can be parents.'
-        };
-      }
+      // Note: Children CAN now be parents (many-to-many relationships)
 
       const results = [];
       const errors = [];
@@ -2827,6 +2838,130 @@ export class DatabaseController {
 
     } catch (error) {
       this.logger.error(`Error linking files: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/:parentId/remove-all-children
+   * Remove all children from a parent video
+   */
+  @Post('videos/:parentId/remove-all-children')
+  removeAllChildren(@Param('parentId') parentId: string) {
+    try {
+      this.databaseService.removeAllChildren(parentId);
+      return {
+        success: true,
+        message: 'All children removed from parent'
+      };
+    } catch (error) {
+      this.logger.error(`Error removing all children: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/:parentId/remove-child/:childId
+   * Remove a specific child from a parent
+   */
+  @Post('videos/:parentId/remove-child/:childId')
+  removeChild(
+    @Param('parentId') parentId: string,
+    @Param('childId') childId: string
+  ) {
+    try {
+      this.databaseService.removeParentChildRelationship(parentId, childId);
+      return {
+        success: true,
+        message: 'Child removed from parent'
+      };
+    } catch (error) {
+      this.logger.error(`Error removing child: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * GET /api/database/videos/:videoId/parents
+   * Get all parents of a video
+   */
+  @Get('videos/:videoId/parents')
+  getParentVideos(@Param('videoId') videoId: string) {
+    try {
+      const parents = this.databaseService.getParentVideos(videoId);
+      return {
+        success: true,
+        parents
+      };
+    } catch (error) {
+      this.logger.error(`Error getting parents: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/:parentId/add-children
+   * Add multiple existing videos as children of a parent
+   */
+  @Post('videos/:parentId/add-children')
+  addChildren(
+    @Param('parentId') parentId: string,
+    @Body() body: { childIds: string[] }
+  ) {
+    try {
+      const { childIds } = body;
+
+      if (!childIds || childIds.length === 0) {
+        return {
+          success: false,
+          error: 'Child IDs are required'
+        };
+      }
+
+      // Verify parent exists
+      const parent = this.databaseService.getVideoById(parentId);
+      if (!parent) {
+        return {
+          success: false,
+          error: 'Parent video not found'
+        };
+      }
+
+      const results = [];
+      const errors = [];
+
+      for (const childId of childIds) {
+        try {
+          this.databaseService.setVideoParent(childId, parentId);
+          results.push({ childId, status: 'linked' });
+        } catch (error) {
+          errors.push({
+            childId,
+            error: (error as Error).message
+          });
+        }
+      }
+
+      return {
+        success: errors.length === 0,
+        message: `Linked ${results.length} video(s) as children`,
+        results,
+        errors: errors.length > 0 ? errors : undefined
+      };
+    } catch (error) {
+      this.logger.error(`Error adding children: ${(error as Error).message}`);
       return {
         success: false,
         error: (error as Error).message

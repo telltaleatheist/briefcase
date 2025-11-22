@@ -53,8 +53,11 @@
               [class.highlighted]="isHighlighted(item.itemId)"
               [class.selection-edge-top]="isSelectionEdgeTop(i)"
               [class.selection-edge-bottom]="isSelectionEdgeBottom(i)"
-              [class.has-children]="hasChildren(item.video)"
-              (click)="selectVideo(item.itemId, item.video, $event)"
+              [class.has-children]="hasChildren(item.video) || hasVideoChildren(item.video)"
+              [class.is-ghost]="item.video.isGhost"
+              [class.is-child]="isVideoChild(item.video)"
+              (click)="handleVideoClick(item.itemId, item.video, $event)"
+              (dblclick)="handleVideoDoubleClick(item.video, $event)"
               (contextmenu)="onContextMenu(item.itemId, item.video, $event)"
             >
               <!-- Processing Status Indicator -->
@@ -91,6 +94,10 @@
                       class="meta-action"
                       (click)="onConfigureClick(item.video, $event)"
                     >Configure</span>
+                  } @else if (item.video.suggestedTitle.startsWith('⚠️')) {
+                    <!-- Duplicate warning display (no AI label or edit button) -->
+                    <span class="meta-icon">⚠️</span>
+                    <span class="meta-filename duplicate-warning">{{ item.video.suggestedTitle.substring(2).trim() }}</span>
                   } @else {
                     <!-- AI suggested title display -->
                     <span class="meta-icon">✨</span>

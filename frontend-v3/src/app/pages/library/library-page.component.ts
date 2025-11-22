@@ -1957,14 +1957,21 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     if (results.type === 'orphaned-files') {
       const data = results.data as UnimportedVideo[];
-      videos.push(...data.map(file => ({
-        id: file.fullPath,
-        name: file.filename,
-        filePath: file.fullPath,
-        tags: ['orphaned-file'],
-        isDuplicate: file.isDuplicate,
-        suggestedTitle: file.isDuplicate ? `⚠️ Duplicate of ${file.duplicateOf?.filename}` : undefined
-      })));
+      videos.push(...data.map(file => {
+        const isDuplicateContent = (file as any).isDuplicateContent;
+        const duplicateOf = (file as any).duplicateOf;
+
+        return {
+          id: file.fullPath,
+          name: file.filename,
+          filePath: file.fullPath,
+          tags: isDuplicateContent ? ['orphaned-file', 'duplicate-content'] : ['orphaned-file'],
+          isDuplicate: isDuplicateContent,
+          suggestedTitle: isDuplicateContent
+            ? `⚠️ Duplicate of "${duplicateOf?.filename}" (consider deleting this file)`
+            : undefined
+        };
+      }));
     } else if (results.type === 'orphaned-entries') {
       const data = results.data as MissingFile[];
       videos.push(...data.map(entry => ({
@@ -2150,11 +2157,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const results = this.scanResults();
     if (!results) return;
 
-    switch (action) {
-      case 'delete':
-        this.deleteManagerItems(videos, results.type);
-        break;
+    // Handle delete actions (simple delete or with mode)
+    if (action === 'delete' || action.startsWith('delete:')) {
+      this.deleteManagerItems(videos, results.type);
+      return;
+    }
 
+    switch (action) {
       case 'import':
         if (results.type === 'orphaned-files') {
           this.importOrphanedFiles(videos);
@@ -2252,7 +2261,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     this.videoManagerService.importFiles(filePaths).subscribe({
       next: (response) => {
-        console.log('Import response:', response);
+        console.log('=== Import Response ===');
+        console.log('Full response:', JSON.stringify(response, null, 2));
+        console.log('response.success:', response.success);
+        console.log('response.results:', response.results);
+        console.log('response.message:', response.message);
         this.isScanning.set(false);
 
         if (response.success) {
@@ -2263,20 +2276,30 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             const pathsToRemove = new Set(filePaths);
             const filtered = data.filter(item => !pathsToRemove.has(item.fullPath));
             this.scanResults.set({ ...currentResults, data: filtered });
+            console.log('Removed items from display. Remaining:', filtered.length);
           }
 
-          const importedCount = response.imported?.length || response.results?.length || filePaths.length;
+          const importedCount = response.results?.filter((r: any) => r.success).length || filePaths.length;
           alert(`Successfully imported ${importedCount} file(s) into database`);
           this.loadLibrary(); // Refresh library to show new files
         } else {
           console.error('Import failed - response:', response);
-          alert('Import failed: ' + (response.error || 'Unknown error'));
+          alert('Import failed: ' + (response.error || response.message || 'Unknown error'));
         }
       },
       error: (error) => {
         this.isScanning.set(false);
-        console.error('Import failed - error:', error);
-        alert('Import failed: ' + (error.error?.error || error.message));
+        console.error('Import failed - full error:', error);
+        console.error('Error status:', error.status);
+        console.error('Error URL:', error.url);
+
+        let errorMsg = 'Import failed: ';
+        if (error.status === 404) {
+          errorMsg += 'API endpoint not found (404). Check backend logs.';
+        } else {
+          errorMsg += error.error?.error || error.error?.message || error.message || 'Unknown error';
+        }
+        alert(errorMsg);
       }
     });
   }

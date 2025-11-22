@@ -1,8 +1,9 @@
-import { Component, OnInit, Input, inject } from '@angular/core';
+import { Component, OnInit, Input, inject, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
+import { ScrollingModule } from '@angular/cdk/scrolling';
 import { forkJoin } from 'rxjs';
 import {
   VideoInfo,
@@ -11,12 +12,14 @@ import {
   TranscriptionSegment,
   TranscriptionSearchResult
 } from '../../models/video-info.model';
+import { VideoItem, VideoWeek } from '../../models/video.model';
 import { LibraryService } from '../../services/library.service';
+import { CascadeComponent } from '../cascade/cascade.component';
 
 @Component({
   selector: 'app-video-info-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, HttpClientModule],
+  imports: [CommonModule, FormsModule, HttpClientModule, ScrollingModule, CascadeComponent],
   templateUrl: './video-info-page.component.html',
   styleUrls: ['./video-info-page.component.scss']
 })
@@ -61,11 +64,23 @@ export class VideoInfoPageComponent implements OnInit {
   transcriptionView: 'continuous' | 'segments' = 'continuous';
   playbackPosition = 0; // Current video position in seconds
 
+  // Children Management
+  childVideos: any[] = [];
+  isAddingChildren = false;
+  showVideoSelector = false;
+  availableVideos: VideoItem[] = [];
+  availableVideosWeek: VideoWeek[] = [];
+  selectedVideosForLink: Set<string> = new Set();
+  videoSearchQuery = '';
+
+  @ViewChild('videoSelectorCascade') videoSelectorCascade?: CascadeComponent;
+
   // UI State
   activeTab: 'overview' | 'metadata' | 'ai-analysis' | 'transcription' = 'overview';
   expandedSections = {
     tags: true,
     description: true,
+    children: true,
     metadata: false,
     analyses: true,
     transcription: true
@@ -127,6 +142,9 @@ export class VideoInfoPageComponent implements OnInit {
         if (this.videoInfo.aiAnalyses.length > 0) {
           this.selectedAnalysis = this.videoInfo.aiAnalyses[0];
         }
+
+        // Load children
+        this.loadChildren(videoId);
 
         this.loading = false;
       },
@@ -582,6 +600,166 @@ export class VideoInfoPageComponent implements OnInit {
   }
 
   // Utility Methods
+  // ============================================================================
+  // CHILDREN MANAGEMENT
+  // ============================================================================
+
+  private loadChildren(videoId: string): void {
+    this.http.get<any>(`http://localhost:3000/api/database/videos/${videoId}/children`)
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.children) {
+            this.childVideos = response.children;
+            console.log(`Loaded ${this.childVideos.length} children for video ${videoId}`);
+          } else {
+            console.warn('Failed to load children:', response.error || 'Unknown error');
+            this.childVideos = [];
+          }
+        },
+        error: (err) => {
+          console.error('Failed to load children:', err);
+          this.childVideos = [];
+        }
+      });
+  }
+
+  openVideoSelector(): void {
+    this.showVideoSelector = true;
+
+    const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
+
+    this.libraryService.getVideosByWeek().subscribe({
+      next: (response) => {
+        if (!response.success || !response.data) {
+          console.error('Library load failed:', response);
+          this.showVideoSelector = false;
+          return;
+        }
+
+        const weeks = response.data;
+        const childIds = new Set(this.childVideos.map(c => c.id));
+
+        // Filter videos
+        const filteredWeeks = weeks.map((week: VideoWeek) => ({
+          ...week,
+          videos: week.videos.filter((v: VideoItem) =>
+            v.id !== currentId && !childIds.has(v.id)
+          )
+        }))
+        .filter((week: VideoWeek) => week.videos.length > 0);
+        
+        // Reverse the weeks array to show newest first (2025 at top, 2016 at bottom)
+        // Create a new reversed array to avoid mutation
+        this.availableVideosWeek = [...filteredWeeks].reverse();
+      },
+      error: (err) => {
+        console.error('Failed to load library:', err);
+        this.showVideoSelector = false;
+      }
+    });
+  }
+
+  onVideoSelectorSelectionChanged(event: { count: number; ids: Set<string> }): void {
+    this.selectedVideosForLink = event.ids;
+  }
+
+  get filteredAvailableVideosWeek(): VideoWeek[] {
+    if (!this.videoSearchQuery || this.videoSearchQuery.trim() === '') {
+      return this.availableVideosWeek;
+    }
+
+    const query = this.videoSearchQuery.toLowerCase();
+    return this.availableVideosWeek.map(week => ({
+      ...week,
+      videos: week.videos.filter(v =>
+        v.name?.toLowerCase().includes(query)
+      )
+    })).filter(week => week.videos.length > 0);
+  }
+
+  addSelectedChildren(): void {
+    if (this.selectedVideosForLink.size === 0) return;
+
+    const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
+    
+    // Extract video IDs from itemIds (format: "weekLabel|videoId")
+    // The cascade component uses itemIds in format "weekLabel|videoId" for uniqueness
+    const childIds = Array.from(this.selectedVideosForLink).map(itemId => {
+      // Extract video ID from itemId (everything after the last "|")
+      const parts = itemId.split('|');
+      return parts.length > 1 ? parts[parts.length - 1] : itemId;
+    });
+
+    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/add-children`, {
+      childIds
+    }).subscribe({
+      next: (response) => {
+        if (response.success) {
+          // Reload children
+          this.loadChildren(currentId!);
+          // Close selector
+          this.cancelVideoSelection();
+        } else {
+          console.error('Failed to add children:', response.error);
+          alert('Failed to add children: ' + (response.error || 'Unknown error'));
+        }
+      },
+      error: (err) => {
+        console.error('Failed to add children:', err);
+        alert('Error adding children: ' + (err.error?.error || err.message || 'Unknown error'));
+      }
+    });
+  }
+
+  cancelVideoSelection(): void {
+    this.showVideoSelector = false;
+    this.selectedVideosForLink.clear();
+    this.videoSearchQuery = '';
+  }
+
+  removeChild(childId: string): void {
+    const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
+    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/remove-child/${childId}`, {})
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            // Reload children
+            this.loadChildren(currentId!);
+          }
+        },
+        error: (err) => {
+          console.error('Failed to remove child:', err);
+        }
+      });
+  }
+
+  removeAllChildren(): void {
+    if (!confirm('Are you sure you want to remove all children from this video?')) {
+      return;
+    }
+
+    const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
+    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/remove-all-children`, {})
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.childVideos = [];
+          }
+        },
+        error: (err) => {
+          console.error('Failed to remove all children:', err);
+        }
+      });
+  }
+
+  navigateToVideo(videoId: string): void {
+    this.router.navigate(['/video', videoId]);
+  }
+
+  // ============================================================================
+  // FORMATTING UTILITIES
+  // ============================================================================
+
   formatFileSize(bytes: number): string {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     if (bytes === 0) return '0 B';

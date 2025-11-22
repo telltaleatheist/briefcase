@@ -21,6 +21,12 @@ export interface VideoItem {
   // Media type info
   mediaType?: string;
   fileExtension?: string;
+  // Parent-child relationships
+  parentIds?: string[]; // Array of parent video IDs (many-to-many)
+  childIds?: string[]; // Array of child video IDs (many-to-many)
+  children?: VideoItem[]; // Populated child video objects
+  parents?: VideoItem[]; // Populated parent video objects
+  isGhost?: boolean; // True if this is a ghost item (shown in different week)
 }
 
 export interface VideoWeek {

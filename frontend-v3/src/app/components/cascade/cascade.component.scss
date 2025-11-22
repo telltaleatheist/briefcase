@@ -217,6 +217,45 @@ cdk-virtual-scroll-viewport.library-content {
   &:last-child {
     border-bottom: none;
   }
+
+  // Ghost item styling (half-height, faded, unselectable)
+  &.is-ghost {
+    height: 30px;
+    opacity: 0.5;
+    background: var(--bg-tertiary);
+    cursor: pointer;
+    pointer-events: auto;
+
+    &:hover {
+      background: var(--bg-secondary);
+      opacity: 0.6;
+    }
+
+    // Prevent selection
+    &.selected {
+      background-color: var(--bg-tertiary);
+      box-shadow: none;
+    }
+
+    .video-title {
+      font-size: 12px;
+      font-style: italic;
+    }
+
+    .video-meta {
+      font-size: 10px;
+    }
+  }
+
+  // Child video indentation
+  &.is-child:not(.is-ghost) {
+    padding-left: calc($spacing-lg + 32px);
+    background: var(--bg-secondary);
+
+    &:hover {
+      background: var(--bg-hover);
+    }
+  }
 }
 
 // Selection/Status Indicator
@@ -283,7 +322,9 @@ cdk-virtual-scroll-viewport.library-content {
   color: var(--text-primary);
   line-height: $line-height-tight;
   transition: color $transition-fast;
-  @include truncate;
+  // Allow full title to display - removed truncate
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .video-meta {

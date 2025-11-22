@@ -180,6 +180,135 @@
         </div>
       </div>
 
+      <!-- Children Section -->
+      <div class="section-card">
+        <div class="section-header" (click)="toggleSection('children')">
+          <h2 class="section-title">
+            Children
+            <span class="count-badge" *ngIf="childVideos.length > 0">{{ childVideos.length }}</span>
+          </h2>
+          <div class="section-actions">
+            <button
+              *ngIf="childVideos.length > 0 && expandedSections.children && !showVideoSelector"
+              class="remove-all-button"
+              (click)="removeAllChildren(); $event.stopPropagation()">
+              Remove All
+            </button>
+            <button class="section-toggle">
+              <span [class.rotated]="!expandedSections.children">▶</span>
+            </button>
+          </div>
+        </div>
+        <div class="section-content" *ngIf="expandedSections.children">
+          <div class="children-container">
+            <!-- Placeholder State (No children and not selecting) -->
+            <div class="no-children-state" *ngIf="childVideos.length === 0 && !showVideoSelector">
+              <div class="no-children-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+              </div>
+              <h4 class="no-children-title">No Children Linked</h4>
+              <p class="no-children-description">
+                Link related videos as children to create a hierarchical organization.
+              </p>
+              <button class="add-children-btn" (click)="openVideoSelector(); $event.stopPropagation()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Add Children
+              </button>
+            </div>
+
+            <!-- Children List (when has children and not selecting) -->
+            <div class="children-list" *ngIf="childVideos.length > 0 && !showVideoSelector">
+              <div
+                *ngFor="let child of childVideos"
+                class="child-item"
+                (click)="navigateToVideo(child.id)">
+                <div class="child-thumbnail">
+                  <img
+                    [src]="'http://localhost:3000/api/database/videos/' + child.id + '/thumbnail'"
+                    [alt]="child.filename"
+                    onerror="this.src='assets/default-thumbnail.png'">
+                </div>
+                <div class="child-info">
+                  <div class="child-name">{{ child.filename }}</div>
+                  <div class="child-meta">
+                    <span *ngIf="child.duration_seconds">
+                      {{ formatDuration(child.duration_seconds) }}
+                    </span>
+                    <span *ngIf="child.file_size_bytes">
+                      • {{ formatFileSize(child.file_size_bytes) }}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  class="child-remove-btn"
+                  (click)="removeChild(child.id); $event.stopPropagation()"
+                  title="Remove this child">
+                  ×
+                </button>
+              </div>
+              <button class="add-more-children-btn" (click)="openVideoSelector(); $event.stopPropagation()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Add More Children
+              </button>
+            </div>
+
+            <!-- Video Selector (embedded in section) -->
+            <div class="video-selector-embedded" *ngIf="showVideoSelector">
+              <div class="selector-header">
+                <input
+                  type="text"
+                  class="search-input"
+                  [(ngModel)]="videoSearchQuery"
+                  placeholder="Search videos..."
+                  autofocus>
+                <button class="cancel-selection-btn" (click)="cancelVideoSelection()">Cancel</button>
+              </div>
+
+              <!-- Cascade Component for Video Selection -->
+              @if (availableVideosWeek.length > 0) {
+                <div class="selector-cascade-wrapper">
+                  <app-cascade
+                    #videoSelectorCascade
+                    [weeks]="filteredAvailableVideosWeek"
+                    [showStatusIndicator]="false"
+                    [showDeleteButton]="false"
+                    [showEditButton]="false"
+                    [showDuration]="false"
+                    [draggable]="false"
+                    (selectionChanged)="onVideoSelectorSelectionChanged($event)"
+                    (contextmenu)="$event.preventDefault()">
+                  </app-cascade>
+                </div>
+              } @else {
+                <div class="selector-list-empty">
+                  <p class="empty-state">Loading videos...</p>
+                </div>
+              }
+
+              <div class="selector-footer">
+                <button
+                  class="submit-selection-btn"
+                  [disabled]="selectedVideosForLink.size === 0"
+                  (click)="addSelectedChildren()">
+                  Add {{ selectedVideosForLink.size }} Video{{ selectedVideosForLink.size !== 1 ? 's' : '' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Quick Insights -->
       <div class="section-card">
         <h2 class="section-title">

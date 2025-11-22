@@ -153,6 +153,7 @@
       <app-cascade
         *ngIf="activeTab() === 'manager'"
         [weeks]="managerWeeks()"
+        [deleteMode]="'simple'"
         (selectionChanged)="onManagerSelectionChanged($event)"
         (videoAction)="onManagerAction($event)"
       />

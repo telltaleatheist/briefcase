@@ -154,12 +154,14 @@ export class LibraryService {
    * Get videos organized by week
    */
   getVideosByWeek(): Observable<ApiResponse<VideoWeek[]>> {
-    return this.http.get<any>(`${this.API_BASE}/database/videos`).pipe(
+    return this.http.get<any>(`${this.API_BASE}/database/videos`, {
+      params: { includeRelationships: 'true' }
+    }).pipe(
       map(response => {
         console.log('Raw API response:', response);
         const videos = this.transformVideos(response.videos || []);
         console.log('Transformed videos:', videos.length);
-        const weeks = this.groupVideosByWeek(videos);
+        const weeks = this.groupVideosByWeekWithHierarchy(videos);
         console.log('Grouped into weeks:', weeks.length);
         return {
           success: true,
@@ -239,7 +241,13 @@ export class LibraryService {
       tags: video.tags || [],
       // Media type info
       mediaType: video.media_type,
-      fileExtension: video.file_extension
+      fileExtension: video.file_extension,
+      // Parent-child relationships
+      parentIds: video.parent_ids || [],
+      childIds: video.child_ids || [],
+      children: video.children ? video.children.map((c: any) => this.transformVideo(c)) : [],
+      parents: video.parents ? video.parents.map((p: any) => this.transformVideo(p)) : [],
+      isGhost: video.is_ghost || false
     };
   }
 
@@ -351,6 +359,88 @@ export class LibraryService {
     result.push(...dateGroups);
 
     return result;
+  }
+
+  /**
+   * Group videos by week with hierarchical parent-child relationships and ghost items
+   */
+  private groupVideosByWeekWithHierarchy(videos: VideoItem[]): VideoWeek[] {
+    // First, group videos by week normally
+    const weeks = this.groupVideosByWeek(videos);
+
+    // Create a map of video ID to video for quick lookup
+    const videoMap = new Map<string, VideoItem>();
+    videos.forEach(v => videoMap.set(v.id, v));
+
+    // Process each week to add hierarchical structure
+    weeks.forEach(week => {
+      const processedVideos: VideoItem[] = [];
+      const handledIds = new Set<string>();
+
+      week.videos.forEach(video => {
+        // Skip if already handled as a child
+        if (handledIds.has(video.id)) return;
+
+        // Only show parent videos (videos with no parents)
+        // or root-level videos (no parent relationships)
+        const isChild = video.parentIds && video.parentIds.length > 0;
+
+        if (!isChild) {
+          // Add the parent/root video
+          processedVideos.push(video);
+          handledIds.add(video.id);
+
+          // Add its children if they're in the same week
+          if (video.childIds && video.childIds.length > 0) {
+            video.childIds.forEach(childId => {
+              const child = videoMap.get(childId);
+              if (child && week.videos.some(v => v.id === childId)) {
+                // Child is in the same week - add it normally (will be indented by cascade)
+                processedVideos.push(child);
+                handledIds.add(childId);
+              } else if (child) {
+                // Child is in a different week - add as ghost item
+                const ghostChild: VideoItem = {
+                  ...child,
+                  isGhost: true
+                };
+                processedVideos.push(ghostChild);
+                // Don't add to handledIds - it can still appear in its own week
+              }
+            });
+          }
+        }
+      });
+
+      // Check for children whose parents are in other weeks
+      week.videos.forEach(video => {
+        if (handledIds.has(video.id)) return;
+
+        // This is a child whose parent is in a different week
+        if (video.parentIds && video.parentIds.length > 0) {
+          // Add ghost parent(s)
+          video.parentIds.forEach(parentId => {
+            const parent = videoMap.get(parentId);
+            if (parent && !week.videos.some(v => v.id === parentId)) {
+              // Parent is in a different week - add as ghost
+              const ghostParent: VideoItem = {
+                ...parent,
+                isGhost: true
+              };
+              processedVideos.push(ghostParent);
+            }
+          });
+
+          // Add the actual child (indented under ghost parent)
+          processedVideos.push(video);
+          handledIds.add(video.id);
+        }
+      });
+
+      week.videos = processedVideos;
+    });
+
+    return weeks;
   }
 
   /**
