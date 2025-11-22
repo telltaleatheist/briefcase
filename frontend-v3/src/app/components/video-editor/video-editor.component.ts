@@ -214,35 +214,107 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     if (event.metaKey || event.ctrlKey) {
       event.preventDefault();
       event.stopPropagation();
-      if (event.deltaY < 0) {
-        this.zoomIn();
-      } else if (event.deltaY > 0) {
-        this.zoomOut();
+
+      // Calculate mouse position relative to timeline
+      const timeline = (event.target as HTMLElement).closest('.timeline-area');
+      if (timeline) {
+        const rect = timeline.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mousePercent = mouseX / rect.width;
+
+        if (event.deltaY < 0) {
+          this.zoomIn(mousePercent);
+        } else if (event.deltaY > 0) {
+          this.zoomOut(mousePercent);
+        }
+      } else {
+        // Not over timeline, zoom on playhead
+        if (event.deltaY < 0) {
+          this.zoomIn();
+        } else if (event.deltaY > 0) {
+          this.zoomOut();
+        }
       }
     }
   };
 
-  zoomIn() {
+  zoomIn(targetPercent?: number) {
     const currentZoom = this.editorState().zoomState;
-    const newLevel = Math.min(currentZoom.level * 1.25, 20); // Max zoom 20x
+    const currentTime = this.editorState().currentTime;
+    const duration = this.editorState().duration;
+
+    // Calculate max zoom: should be able to fit 5 seconds on screen
+    // This scales with video duration
+    const maxZoom = duration / 5; // e.g., 60s video = 12x max, 104s video = 20.8x max
+    const newLevel = Math.min(currentZoom.level * 1.25, maxZoom);
+
+    // Calculate the time we want to keep centered
+    let centerTime: number;
+    if (targetPercent !== undefined) {
+      // Mouse position in timeline
+      const currentVisibleDuration = duration / currentZoom.level;
+      centerTime = currentZoom.offset + (targetPercent * currentVisibleDuration);
+    } else {
+      // Use playhead position
+      centerTime = currentTime;
+    }
+
+    // Calculate new offset to keep centerTime at the same position
+    const newVisibleDuration = duration / newLevel;
+    let newOffset: number;
+    if (targetPercent !== undefined) {
+      newOffset = centerTime - (targetPercent * newVisibleDuration);
+    } else {
+      // Center on playhead (middle of screen)
+      newOffset = centerTime - (newVisibleDuration / 2);
+    }
+
+    // Clamp offset to valid range
+    const maxOffset = Math.max(0, duration - newVisibleDuration);
+    newOffset = Math.max(0, Math.min(newOffset, maxOffset));
+
     this.onZoomChange({
       level: newLevel,
-      offset: currentZoom.offset
+      offset: newOffset
     });
   }
 
-  zoomOut() {
+  zoomOut(targetPercent?: number) {
     const currentZoom = this.editorState().zoomState;
-    const newLevel = Math.max(currentZoom.level / 1.25, 1); // Min zoom 1x
-
-    // Adjust offset if needed to keep view within bounds
+    const currentTime = this.editorState().currentTime;
     const duration = this.editorState().duration;
-    const visibleDuration = duration / newLevel;
-    const maxOffset = Math.max(0, duration - visibleDuration);
+
+    // Min zoom is always 1x (full video visible)
+    const newLevel = Math.max(currentZoom.level / 1.25, 1);
+
+    // Calculate the time we want to keep centered
+    let centerTime: number;
+    if (targetPercent !== undefined) {
+      // Mouse position in timeline
+      const currentVisibleDuration = duration / currentZoom.level;
+      centerTime = currentZoom.offset + (targetPercent * currentVisibleDuration);
+    } else {
+      // Use playhead position
+      centerTime = currentTime;
+    }
+
+    // Calculate new offset to keep centerTime at the same position
+    const newVisibleDuration = duration / newLevel;
+    let newOffset: number;
+    if (targetPercent !== undefined) {
+      newOffset = centerTime - (targetPercent * newVisibleDuration);
+    } else {
+      // Center on playhead (middle of screen)
+      newOffset = centerTime - (newVisibleDuration / 2);
+    }
+
+    // Clamp offset to valid range
+    const maxOffset = Math.max(0, duration - newVisibleDuration);
+    newOffset = Math.max(0, Math.min(newOffset, maxOffset));
 
     this.onZoomChange({
       level: newLevel,
-      offset: Math.min(currentZoom.offset, maxOffset)
+      offset: newOffset
     });
   }
 
@@ -387,31 +459,40 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   private wasPlaying = false;
 
   constructor() {
-    // Initialize category filters from sections
+    // Initialize category filters from sections with error handling
     effect(() => {
-      const sections = this.sections();
-      this.updateCategoryFilters(sections);
+      try {
+        const sections = this.sections();
+        this.updateCategoryFilters(sections);
+      } catch (error) {
+        console.error('Error updating category filters:', error);
+      }
     }, { allowSignalWrites: true });
 
     // Set up playback effect - only react to isPlaying changes
     effect(() => {
-      const isPlaying = this.editorState().isPlaying;
-      if (isPlaying !== this.wasPlaying) {
-        this.wasPlaying = isPlaying;
-        if (isPlaying) {
-          this.startPlayback();
-          // Hide timeline in fullscreen when playing
-          if (this.isFullscreen()) {
-            this.hideTimelineAfterDelay();
-          }
-        } else {
-          this.stopPlayback();
-          // Show timeline in fullscreen when paused
-          if (this.isFullscreen()) {
-            this.showTimelineInFullscreen.set(true);
-            this.clearFullscreenTimeout();
+      try {
+        const isPlaying = this.editorState().isPlaying;
+        if (isPlaying !== this.wasPlaying) {
+          this.wasPlaying = isPlaying;
+          if (isPlaying) {
+            this.startPlayback();
+            // Hide timeline in fullscreen when playing
+            if (this.isFullscreen()) {
+              this.hideTimelineAfterDelay();
+            }
+          } else {
+            this.stopPlayback();
+            // Show timeline in fullscreen when paused
+            if (this.isFullscreen()) {
+              this.showTimelineInFullscreen.set(true);
+              this.clearFullscreenTimeout();
+            }
           }
         }
+      } catch (error) {
+        console.error('Error in playback effect:', error);
+        this.stopPlayback();
       }
     }, { allowSignalWrites: true });
   }
@@ -463,9 +544,17 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       this.isLoading.set(true);
       this.errorMessage.set(null);
 
+      // Load video details with timeout protection
+      const timeoutId = setTimeout(() => {
+        console.error('Video loading timed out');
+        this.errorMessage.set('Video loading timed out. Please try again.');
+        this.isLoading.set(false);
+      }, 30000); // 30 second timeout
+
       // Load video details
       this.libraryService.getVideo(videoId).subscribe({
         next: (response) => {
+          clearTimeout(timeoutId);
           if (response.success && response.data) {
             const video = response.data;
             this.metadata.update(m => ({
@@ -474,12 +563,17 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
               fileSize: video.size || 0
             }));
 
-            // Load transcript separately
-            this.loadTranscriptForVideo(videoId);
+            // Load transcript separately (non-blocking)
+            this.loadTranscriptForVideo(videoId).catch(err => {
+              console.warn('Transcript loading failed, continuing without it:', err);
+            });
 
             // If video has analysis, try to load it
             if (video.hasAnalysis) {
-              this.loadAnalysisForVideo(videoId);
+              this.loadAnalysisForVideo(videoId).catch(err => {
+                console.warn('Analysis loading failed, continuing without it:', err);
+                this.hasAnalysis.set(false);
+              });
             } else {
               // No analysis - show generate button
               this.hasAnalysis.set(false);
@@ -489,14 +583,16 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
           } else {
             this.hasAnalysis.set(false);
           }
+          this.isLoading.set(false);
         },
         error: (error) => {
+          clearTimeout(timeoutId);
           console.error('Failed to load video details:', error);
           this.hasAnalysis.set(false);
+          this.isLoading.set(false);
         }
       });
 
-      this.isLoading.set(false);
     } catch (error) {
       console.error('Failed to load video data:', error);
       this.errorMessage.set('Failed to load video data. Please try again.');
@@ -799,7 +895,19 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   private startPlayback() {
     this.stopPlayback();
+    // Add safety check to prevent runaway intervals
+    let intervalCount = 0;
     this.playbackInterval = setInterval(() => {
+      intervalCount++;
+
+      // Safety: stop after 1 hour of continuous playback
+      if (intervalCount > 36000) {
+        console.warn('Playback interval safety limit reached, stopping');
+        this.stopPlayback();
+        this.togglePlayPause();
+        return;
+      }
+
       const state = this.editorState();
       let newTime = state.currentTime + (0.1 * state.playbackRate);
 
@@ -1581,30 +1689,23 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       duration
     }));
 
-    // Generate real waveform from video using Web Audio API
+    // Phase 1: Show demo waveform immediately for instant feedback
+    this.waveformData.set({
+      samples: this.generateDemoWaveform(duration),
+      sampleRate: 44100,
+      duration
+    });
+
+    // Phase 2: Generate quick low-res waveform from client-side (real audio data)
     const url = this.videoUrl();
     if (url) {
-      // Set temporary demo waveform while loading
-      this.waveformData.set({
-        samples: this.generateDemoWaveform(duration),
-        sampleRate: 44100,
-        duration
-      });
+      this.generateQuickClientWaveform(url, duration);
+    }
 
-      // Generate real waveform asynchronously
-      const samples = await this.generateWaveformFromVideo(url);
-      this.waveformData.set({
-        samples,
-        sampleRate: 44100,
-        duration
-      });
-    } else {
-      // Fallback to demo waveform
-      this.waveformData.set({
-        samples: this.generateDemoWaveform(duration),
-        sampleRate: 44100,
-        duration
-      });
+    // Phase 3: Load high-quality waveform from server in background
+    const videoId = this.videoId();
+    if (videoId) {
+      this.loadWaveformFromServer(videoId, duration);
     }
   }
 
@@ -1649,46 +1750,146 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     return `${size.toFixed(2)} ${units[unitIndex]}`;
   }
 
-  // Generate waveform from video using Web Audio API
-  private async generateWaveformFromVideo(videoUrl: string): Promise<number[]> {
+  // Phase 2: Generate quick low-resolution waveform from client-side
+  // Only samples every N seconds to avoid memory issues
+  private async generateQuickClientWaveform(videoUrl: string, duration: number): Promise<void> {
     try {
-      // Fetch the video file using HttpClient with arraybuffer response
-      const arrayBuffer = await firstValueFrom(
-        this.http.get(videoUrl, { responseType: 'arraybuffer' })
-      );
-
-      // Decode audio using Web Audio API
-      const audioContext = new AudioContext();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-      // Get raw audio data from first channel
-      const rawData = audioBuffer.getChannelData(0);
-      const samples = 1000; // Number of samples for waveform
-      const blockSize = Math.floor(rawData.length / samples);
-      const filteredData: number[] = [];
-
-      // Downsample by averaging blocks
-      for (let i = 0; i < samples; i++) {
-        const blockStart = blockSize * i;
-        let sum = 0;
-        for (let j = 0; j < blockSize; j++) {
-          sum += Math.abs(rawData[blockStart + j]);
-        }
-        filteredData.push(sum / blockSize);
+      // Skip client-side generation for very large files (>3 hours)
+      if (duration > 10800) { // > 3 hours
+        console.log('Skipping client-side waveform for long video, waiting for server...');
+        return;
       }
 
-      // Normalize the data
-      const max = Math.max(...filteredData);
-      const normalizedData = max > 0 ? filteredData.map(n => n / max) : filteredData;
+      console.log('Generating quick client-side waveform...');
 
-      // Close audio context to free resources
-      await audioContext.close();
+      // Fetch only the first 3MB of the video to generate initial waveform
+      const response = await fetch(videoUrl, {
+        headers: {
+          'Range': `bytes=0-${3 * 1024 * 1024}` // First 3MB
+        }
+      });
 
-      return normalizedData;
+      if (!response.ok || response.status === 416) {
+        console.log('Range requests not supported, skipping client-side waveform');
+        return;
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      try {
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const rawData = audioBuffer.getChannelData(0);
+
+        // Generate initial waveform - much higher resolution than before
+        // Aim for ~10 samples per second for good initial detail
+        const targetSamples = Math.min(Math.floor(duration * 10), 5000); // Up to 5000 samples
+        const blockSize = Math.floor(rawData.length / targetSamples);
+
+        const samples: number[] = [];
+        for (let i = 0; i < targetSamples; i++) {
+          const blockStart = blockSize * i;
+          let sum = 0;
+          const actualBlockSize = Math.min(blockSize, rawData.length - blockStart);
+
+          for (let j = 0; j < actualBlockSize; j++) {
+            sum += Math.abs(rawData[blockStart + j]);
+          }
+          samples.push(sum / actualBlockSize);
+        }
+
+        // Normalize
+        const max = Math.max(...samples, 0.01);
+        const normalizedSamples = samples.map(s => s / max);
+
+        console.log(`✓ Generated ${normalizedSamples.length} client-side samples from partial audio`);
+
+        // Update waveform with real (but low-res) data
+        this.waveformData.set({
+          samples: normalizedSamples,
+          sampleRate: 44100,
+          duration
+        });
+
+        await audioContext.close();
+      } catch (decodeError) {
+        // Expected for formats that don't support partial decoding
+        console.log('Partial decode not supported for this format, waiting for server waveform...');
+        await audioContext.close();
+      }
     } catch (error) {
-      console.error('Error generating waveform:', error);
-      // Return demo waveform as fallback
-      return this.generateDemoWaveform(this.editorState().duration);
+      // Silently fail - server waveform will handle it
+      console.log('Client-side waveform skipped, using server waveform');
+    }
+  }
+
+  // Phase 3: Load high-quality waveform from server with progressive updates
+  private async loadWaveformFromServer(videoId: string, duration: number): Promise<void> {
+    try {
+      console.log(`🎵 Starting progressive waveform generation...`);
+
+      // Start generation with progressive mode - request samples based on duration
+      // Target: 2000 samples per 60 seconds for maximum granularity
+      const samplesPerMinute = 2000;
+      const targetSamples = Math.ceil((duration / 60) * samplesPerMinute);
+      console.log(`Requesting ${targetSamples} samples (${samplesPerMinute} per minute for ${duration.toFixed(1)}s video)`);
+
+      const generationPromise = firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/waveform?samples=${targetSamples}&progressive=true`)
+      );
+
+      // Poll for progress updates every 1 second
+      const pollInterval = setInterval(async () => {
+        try {
+          const progressResponse = await firstValueFrom(
+            this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/waveform/progress`)
+          );
+
+          if (progressResponse.success && progressResponse.data) {
+            const { progress, status, partial } = progressResponse.data;
+            console.log(`📊 Waveform progress: ${progress}% - ${status}`);
+
+            // Update with partial waveform if available
+            if (partial && partial.samples && partial.samples.length > 0) {
+              console.log(`✓ Updating with ${partial.samples.length} samples (${progress}%)`);
+              // Create a completely new object to trigger change detection
+              this.waveformData.set({
+                samples: [...partial.samples], // Create new array
+                sampleRate: partial.sampleRate || 44100,
+                duration: partial.duration || duration
+              });
+            }
+
+            // Stop polling when complete
+            if (progress >= 100) {
+              clearInterval(pollInterval);
+            }
+          }
+        } catch (err) {
+          // Progress endpoint might not be ready yet, continue polling
+        }
+      }, 1000);
+
+      // Wait for final result
+      const response = await generationPromise;
+      clearInterval(pollInterval);
+
+      console.log('Server waveform response:', response);
+
+      if (response.success && response.data && response.data.samples && response.data.samples.length > 0) {
+        console.log(`✅ Final waveform: ${response.data.samples.length} samples`);
+
+        // Replace with final high-quality waveform
+        this.waveformData.set({
+          samples: response.data.samples,
+          sampleRate: response.data.sampleRate || 44100,
+          duration: response.data.duration || duration
+        });
+      } else {
+        console.warn('Server waveform not available, keeping current version');
+      }
+    } catch (error) {
+      console.warn('Server waveform loading failed, keeping current version:', error);
     }
   }
 

@@ -180,18 +180,18 @@
         </div>
       </div>
 
-      <!-- Children Section -->
+      <!-- Relationships Section -->
       <div class="section-card">
         <div class="section-header" (click)="toggleSection('children')">
           <h2 class="section-title">
-            Children
-            <span class="count-badge" *ngIf="childVideos.length > 0">{{ childVideos.length }}</span>
+            Relationships
+            <span class="count-badge" *ngIf="getTotalRelationshipsCount() > 0">{{ getTotalRelationshipsCount() }}</span>
           </h2>
           <div class="section-actions">
             <button
-              *ngIf="childVideos.length > 0 && expandedSections.children && !showVideoSelector"
+              *ngIf="getTotalRelationshipsCount() > 0 && expandedSections.children && !showVideoSelector"
               class="remove-all-button"
-              (click)="removeAllChildren(); $event.stopPropagation()">
+              (click)="removeAllRelationships(); $event.stopPropagation()">
               Remove All
             </button>
             <button class="section-toggle">
@@ -201,8 +201,8 @@
         </div>
         <div class="section-content" *ngIf="expandedSections.children">
           <div class="children-container">
-            <!-- Placeholder State (No children and not selecting) -->
-            <div class="no-children-state" *ngIf="childVideos.length === 0 && !showVideoSelector">
+            <!-- Placeholder State (No relationships and not selecting) -->
+            <div class="no-children-state" *ngIf="getTotalRelationshipsCount() === 0 && !showVideoSelector">
               <div class="no-children-icon">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -211,9 +211,9 @@
                   <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                 </svg>
               </div>
-              <h4 class="no-children-title">No Children Linked</h4>
+              <h4 class="no-children-title">No Relationships</h4>
               <p class="no-children-description">
-                Link related videos as children to create a hierarchical organization.
+                Link related videos as parents or children to create a hierarchical organization.
               </p>
               <button class="add-children-btn" (click)="openVideoSelector(); $event.stopPropagation()">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -224,36 +224,76 @@
               </button>
             </div>
 
-            <!-- Children List (when has children and not selecting) -->
-            <div class="children-list" *ngIf="childVideos.length > 0 && !showVideoSelector">
-              <div
-                *ngFor="let child of childVideos"
-                class="child-item"
-                (click)="navigateToVideo(child.id)">
-                <div class="child-thumbnail">
-                  <img
-                    [src]="'http://localhost:3000/api/database/videos/' + child.id + '/thumbnail'"
-                    [alt]="child.filename"
-                    onerror="this.src='assets/default-thumbnail.png'">
-                </div>
-                <div class="child-info">
-                  <div class="child-name">{{ child.filename }}</div>
-                  <div class="child-meta">
-                    <span *ngIf="child.duration_seconds">
-                      {{ formatDuration(child.duration_seconds) }}
-                    </span>
-                    <span *ngIf="child.file_size_bytes">
-                      • {{ formatFileSize(child.file_size_bytes) }}
-                    </span>
+            <!-- Relationships List (when has relationships and not selecting) -->
+            <div class="children-list" *ngIf="getTotalRelationshipsCount() > 0 && !showVideoSelector">
+              <!-- Parent Videos -->
+              <div *ngIf="parentVideos.length > 0" class="relationship-group">
+                <h3 class="relationship-group-title">Parents ({{ parentVideos.length }})</h3>
+                <div
+                  *ngFor="let parent of parentVideos"
+                  class="child-item parent-item"
+                  (click)="navigateToVideo(parent.id)">
+                  <div class="relationship-icon">↑</div>
+                  <div class="child-thumbnail">
+                    <img
+                      [src]="'http://localhost:3000/api/database/videos/' + parent.id + '/thumbnail'"
+                      [alt]="parent.filename"
+                      onerror="this.src='assets/default-thumbnail.png'">
                   </div>
+                  <div class="child-info">
+                    <div class="child-name">{{ parent.filename }}</div>
+                    <div class="child-meta">
+                      <span *ngIf="parent.duration_seconds">
+                        {{ formatDuration(parent.duration_seconds) }}
+                      </span>
+                      <span *ngIf="parent.file_size_bytes">
+                        • {{ formatFileSize(parent.file_size_bytes) }}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    class="child-remove-btn"
+                    (click)="removeParent(parent.id); $event.stopPropagation()"
+                    title="Remove this parent">
+                    ×
+                  </button>
                 </div>
-                <button
-                  class="child-remove-btn"
-                  (click)="removeChild(child.id); $event.stopPropagation()"
-                  title="Remove this child">
-                  ×
-                </button>
               </div>
+
+              <!-- Child Videos -->
+              <div *ngIf="childVideos.length > 0" class="relationship-group">
+                <h3 class="relationship-group-title">Children ({{ childVideos.length }})</h3>
+                <div
+                  *ngFor="let child of childVideos"
+                  class="child-item child-item-actual"
+                  (click)="navigateToVideo(child.id)">
+                  <div class="relationship-icon">↓</div>
+                  <div class="child-thumbnail">
+                    <img
+                      [src]="'http://localhost:3000/api/database/videos/' + child.id + '/thumbnail'"
+                      [alt]="child.filename"
+                      onerror="this.src='assets/default-thumbnail.png'">
+                  </div>
+                  <div class="child-info">
+                    <div class="child-name">{{ child.filename }}</div>
+                    <div class="child-meta">
+                      <span *ngIf="child.duration_seconds">
+                        {{ formatDuration(child.duration_seconds) }}
+                      </span>
+                      <span *ngIf="child.file_size_bytes">
+                        • {{ formatFileSize(child.file_size_bytes) }}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    class="child-remove-btn"
+                    (click)="removeChild(child.id); $event.stopPropagation()"
+                    title="Remove this child">
+                    ×
+                  </button>
+                </div>
+              </div>
+
               <button class="add-more-children-btn" (click)="openVideoSelector(); $event.stopPropagation()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="12" y1="5" x2="12" y2="19"/>
@@ -281,13 +321,7 @@
                   <app-cascade
                     #videoSelectorCascade
                     [weeks]="filteredAvailableVideosWeek"
-                    [showStatusIndicator]="false"
-                    [showDeleteButton]="false"
-                    [showEditButton]="false"
-                    [showDuration]="false"
-                    [draggable]="false"
-                    (selectionChanged)="onVideoSelectorSelectionChanged($event)"
-                    (contextmenu)="$event.preventDefault()">
+                    (selectionChanged)="onVideoSelectorSelectionChanged($event)">
                   </app-cascade>
                 </div>
               } @else {

@@ -99,6 +99,13 @@
       <span class="btn-icon">🔍</span>
       <span>Scan Duplicates</span>
     </button>
+    <button
+      class="btn btn-secondary scan-btn"
+      (click)="openIgnoreFileModal()"
+      title="Edit ignore patterns">
+      <span class="btn-icon">🚫</span>
+      <span>Ignore Patterns</span>
+    </button>
     <div class="scan-status" *ngIf="scanResults()">
       <span class="status-text">{{ getScanResultSummary() }}</span>
     </div>
@@ -236,4 +243,10 @@
   [selectedId]="previewSelectedId()"
   (closed)="onPreviewModalClosed()"
   (selectionChanged)="onPreviewSelectionChanged($event)"
+/>
+
+<!-- Ignore File Modal -->
+<app-ignore-file-modal
+  [show]="ignoreFileModalOpen()"
+  (closed)="onIgnoreFileModalClosed()"
 />

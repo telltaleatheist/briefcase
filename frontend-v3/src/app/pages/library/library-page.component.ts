@@ -10,6 +10,7 @@ import { UrlInputComponent, UrlEntry } from '../../components/url-input/url-inpu
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
+import { IgnoreFileModalComponent } from '../../components/ignore-file-modal/ignore-file-modal.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
 import { QueueItemTask } from '../../models/queue.model';
@@ -20,6 +21,7 @@ import { VideoProcessingService } from '../../services/video-processing.service'
 import { AiSetupService } from '../../services/ai-setup.service';
 import { VideoJobSettings } from '../../models/video-processing.model';
 import { VideoManagerService, UnimportedVideo, MissingFile, DuplicateEntry } from '../../services/video-manager.service';
+import { NotificationService } from '../../services/notification.service';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -53,7 +55,8 @@ export interface ProcessingTask {
     UrlInputComponent,
     QueueItemConfigModalComponent,
     AiSetupWizardComponent,
-    VideoPreviewModalComponent
+    VideoPreviewModalComponent,
+    IgnoreFileModalComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
@@ -67,6 +70,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private videoProcessingService = inject(VideoProcessingService);
   private aiSetupService = inject(AiSetupService);
   private videoManagerService = inject(VideoManagerService);
+  private notificationService = inject(NotificationService);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
   @ViewChild(UrlInputComponent) private urlInputComponent?: UrlInputComponent;
@@ -221,6 +225,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   previewItems = signal<PreviewItem[]>([]);
   previewSelectedId = signal<string | undefined>(undefined);
 
+  // Ignore file modal state
+  ignoreFileModalOpen = signal(false);
+
   // Filters
   currentFilters: LibraryFilters | null = null;
 
@@ -263,8 +270,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Subscribe to websocket events
     this.websocketService.connect();
 
-    // Check for first-time setup
-    await this.checkFirstTimeSetup();
+    // Check for first-time setup with error handling
+    try {
+      await this.checkFirstTimeSetup();
+    } catch (error) {
+      console.error('Error during first-time setup check:', error);
+      // If setup check fails, still try to load library directly
+      this.loadCurrentLibrary();
+    }
 
     // Task completion - refresh library and update queue
     this.websocketService.onTaskCompleted((event: TaskCompleted) => {
@@ -331,6 +344,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
         this.updateQueueTaskStatus(frontendJobId, event.type, 'running', event.progress);
       }
+    });
+
+    // Video renamed - update video list
+    this.websocketService.onVideoRenamed((event) => {
+      console.log('Video renamed event received:', event);
+      this.updateVideoName(event.videoId, event.newFilename);
     });
 
     // Check for navigation state to trigger analysis
@@ -597,6 +616,29 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       case 'failed': return '✗';
       case 'pending': return '⏳';
       default: return '○';
+    }
+  }
+
+  // Update video name in the library when renamed via WebSocket
+  private updateVideoName(videoId: string, newFilename: string) {
+    const weeks = this.videoWeeks();
+    let updated = false;
+
+    // Find and update the video in the weeks array
+    const updatedWeeks = weeks.map(week => {
+      const videos = week.videos.map(video => {
+        if (video.id === videoId) {
+          updated = true;
+          return { ...video, name: newFilename };
+        }
+        return video;
+      });
+      return { ...week, videos };
+    });
+
+    if (updated) {
+      this.videoWeeks.set(updatedWeeks);
+      console.log(`Updated video ${videoId} name to: ${newFilename}`);
     }
   }
 
@@ -1004,8 +1046,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Failed to load current library:', error);
-        // Open library manager if no library is set
-        this.openLibraryManager();
+
+        // Check if it's a connection refused error
+        if (error.status === 0) {
+          console.error('Backend server appears to be unavailable. Please check if it\'s running.');
+          this.notificationService.error(
+            'Connection Error',
+            'Cannot connect to backend server. Please ensure the server is running on port 3000.'
+          );
+        } else {
+          // Open library manager if no library is set
+          this.openLibraryManager();
+        }
       }
     });
   }
@@ -1043,7 +1095,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Failed to switch library:', error);
-        alert('Failed to switch library. Please try again.');
+        this.notificationService.error('Library Switch Failed', 'Failed to switch library. Please try again.');
       }
     });
   }
@@ -1060,7 +1112,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Failed to create library:', error);
-        alert('Failed to create library. Please try again.');
+        this.notificationService.error('Library Creation Failed', 'Failed to create library. Please try again.');
       }
     });
   }
@@ -1078,7 +1130,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Failed to import library:', error);
         const message = error.error?.error || 'Failed to import library. Make sure the folder contains a .library.db file.';
-        alert(message);
+        this.notificationService.error('Import Failed', message);
       }
     });
   }
@@ -1328,13 +1380,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       case 'viewDetails':
         // TODO: Open video details/metadata editor modal
         console.log('View details for:', videosToProcess[0]?.name);
-        alert(`View details: ${videosToProcess[0]?.name}\n\nThis feature will show video metadata, transcript, and analysis.`);
+        this.notificationService.info('Coming Soon', 'This feature will show video metadata, transcript, and analysis.');
         break;
 
       case 'addToTab':
         // TODO: Open tab selector dialog
         console.log('Add to tab:', videosToProcess.map(v => v.name));
-        alert(`Add ${videosToProcess.length} video(s) to tab\n\nThis feature will open a dialog to select or create a tab.`);
+        this.notificationService.info('Coming Soon', 'This feature will open a dialog to select or create a tab.');
         break;
 
       case 'analyze':
@@ -1344,7 +1396,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       case 'moveToLibrary':
         // TODO: Open library selector dialog
         console.log('Move to library:', videosToProcess.map(v => v.name));
-        alert(`Move ${videosToProcess.length} video(s) to another library\n\nThis feature will open a dialog to select a target library.`);
+        this.notificationService.info('Coming Soon', 'This feature will open a dialog to select a target library.');
         break;
 
       case 'delete':
@@ -1372,12 +1424,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const selectedItemIds = this.selectedVideoIds();
 
       if (selectedItemIds.size === 0) {
-        alert('Please select a video first');
+        this.notificationService.warning('No Selection', 'Please select a video first');
         return;
       }
 
       if (selectedItemIds.size !== 1) {
-        alert('Please select exactly one video to open in editor');
+        this.notificationService.warning('Multiple Selection', 'Please select exactly one video to open in editor');
         return;
       }
 
@@ -1412,7 +1464,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     if (!video) {
       console.error('Could not find video. Selected IDs:', Array.from(this.selectedVideoIds()));
-      alert('Could not find selected video');
+      this.notificationService.error('Video Not Found', 'Could not find selected video');
       return;
     }
 
@@ -1434,12 +1486,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const selectedItemIds = this.selectedVideoIds();
 
     if (selectedItemIds.size === 0) {
-      alert('Please select a video first');
+      this.notificationService.warning('No Selection', 'Please select a video first');
       return;
     }
 
     if (selectedItemIds.size !== 1) {
-      alert('Please select exactly one video to view details');
+      this.notificationService.warning('Multiple Selection', 'Please select exactly one video to view details');
       return;
     }
 
@@ -1512,7 +1564,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Failed to delete video:', video.name, error);
-          alert(`Failed to delete: ${video.name}`);
+          this.notificationService.error('Delete Failed', `Failed to delete: ${video.name}`);
         }
       });
     });
@@ -1520,7 +1572,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   onAddSelectedToQueue() {
     if (this.selectedCount() === 0) {
-      alert('Please select at least one video');
+      this.notificationService.warning('No Selection', 'Please select at least one video');
       return;
     }
 
@@ -1862,12 +1914,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     );
 
     if (mediaFiles.length === 0) {
-      alert('No valid video or audio files found. Please select media files.');
+      this.notificationService.warning('No Media Files', 'No valid video or audio files found. Please select media files.');
       return;
     }
 
     if (mediaFiles.length !== files.length) {
-      alert(`Selected ${mediaFiles.length} media file(s) out of ${files.length} total files.`);
+      this.notificationService.info('Files Filtered', `Selected ${mediaFiles.length} media file(s) out of ${files.length} total files.`);
     }
 
     console.log('Importing files:', mediaFiles.map(f => f.name));
@@ -2072,13 +2124,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           });
         } else {
           console.error('Scan failed - response:', response);
-          alert('Scan failed: ' + (response.error || 'Unknown error'));
+          this.notificationService.error('Scan Failed', response.error || 'Unknown error');
         }
         this.isScanning.set(false);
       },
       error: (error) => {
         console.error('Scan failed - error:', error);
-        alert('Scan failed: ' + (error.error?.error || error.message));
+        this.notificationService.error('Scan Failed', error.error?.error || error.message);
         this.isScanning.set(false);
       }
     });
@@ -2101,13 +2153,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           });
         } else {
           console.error('Scan failed - response:', response);
-          alert('Scan failed: ' + (response.error || 'Unknown error'));
+          this.notificationService.error('Scan Failed', response.error || 'Unknown error');
         }
         this.isScanning.set(false);
       },
       error: (error) => {
         console.error('Scan failed - error:', error);
-        alert('Scan failed: ' + (error.error?.error || error.message));
+        this.notificationService.error('Scan Failed', error.error?.error || error.message);
         this.isScanning.set(false);
       }
     });
@@ -2130,13 +2182,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           });
         } else {
           console.error('Scan failed - response:', response);
-          alert('Scan failed: ' + (response.error || 'Unknown error'));
+          this.notificationService.error('Scan Failed', response.error || 'Unknown error');
         }
         this.isScanning.set(false);
       },
       error: (error) => {
         console.error('Scan failed - error:', error);
-        alert('Scan failed: ' + (error.error?.error || error.message));
+        this.notificationService.error('Scan Failed', error.error?.error || error.message);
         this.isScanning.set(false);
       }
     });
@@ -2176,6 +2228,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
         break;
 
+      case 'relinkWithFolder':
+        if (results.type === 'orphaned-entries') {
+          this.relinkOrphanedEntriesWithFolder(videos);
+        }
+        break;
+
       default:
         console.warn('Unknown manager action:', action);
     }
@@ -2185,11 +2243,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Delete items from manager view
    */
   private deleteManagerItems(videos: VideoItem[], scanType: string) {
-    const confirmMsg = scanType === 'orphaned-files'
-      ? `Delete ${videos.length} file(s) from disk? This cannot be undone.`
-      : `Remove ${videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}? This cannot be undone.`;
-
-    if (!confirm(confirmMsg)) return;
+    // Note: Confirmation is handled by the cascade component's delete modal
+    // No need for additional confirm() dialog here
 
     if (scanType === 'orphaned-files') {
       const filePaths = videos.map(v => v.filePath).filter(Boolean) as string[];
@@ -2204,14 +2259,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
               const filtered = data.filter(item => !pathsToRemove.has(item.fullPath));
               this.scanResults.set({ ...currentResults, data: filtered });
             }
-            alert(`Deleted ${response.deletedCount || videos.length} file(s)`);
+            this.notificationService.success('Deleted', `Deleted ${response.deletedCount || videos.length} file(s)`);
           } else {
-            alert('Delete failed: ' + (response.error || 'Unknown error'));
+            this.notificationService.error('Delete Failed', response.error || 'Unknown error');
           }
         },
         error: (error) => {
           console.error('Delete failed:', error);
-          alert('Delete failed: ' + (error.error?.error || error.message));
+          this.notificationService.error('Delete Failed', error.error?.error || error.message);
         }
       });
     } else {
@@ -2234,14 +2289,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
                 this.scanResults.set({ ...currentResults, data: filtered });
               }
             }
-            alert(`Removed ${response.deletedCount || videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}`);
+            this.notificationService.success('Removed', `Removed ${response.deletedCount || videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}`);
           } else {
-            alert('Delete failed: ' + (response.error || 'Unknown error'));
+            this.notificationService.error('Delete Failed', response.error || 'Unknown error');
           }
         },
         error: (error) => {
           console.error('Delete failed:', error);
-          alert('Delete failed: ' + (error.error?.error || error.message));
+          this.notificationService.error('Delete Failed', error.error?.error || error.message);
         }
       });
     }
@@ -2280,11 +2335,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           }
 
           const importedCount = response.results?.filter((r: any) => r.success).length || filePaths.length;
-          alert(`Successfully imported ${importedCount} file(s) into database`);
+          this.notificationService.success('Import Complete', `Successfully imported ${importedCount} file(s) into database`);
           this.loadLibrary(); // Refresh library to show new files
         } else {
           console.error('Import failed - response:', response);
-          alert('Import failed: ' + (response.error || response.message || 'Unknown error'));
+          this.notificationService.error('Import Failed', response.error || response.message || 'Unknown error');
         }
       },
       error: (error) => {
@@ -2293,19 +2348,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         console.error('Error status:', error.status);
         console.error('Error URL:', error.url);
 
-        let errorMsg = 'Import failed: ';
+        let errorMsg;
         if (error.status === 404) {
-          errorMsg += 'API endpoint not found (404). Check backend logs.';
+          errorMsg = 'API endpoint not found (404). Check backend logs.';
         } else {
-          errorMsg += error.error?.error || error.error?.message || error.message || 'Unknown error';
+          errorMsg = error.error?.error || error.error?.message || error.message || 'Unknown error';
         }
-        alert(errorMsg);
+        this.notificationService.error('Import Failed', errorMsg);
       }
     });
   }
 
   /**
-   * Attempt to relink orphaned database entries
+   * Attempt to relink orphaned database entries (auto-scan in library folders)
    */
   private relinkOrphanedEntries(videos: VideoItem[]) {
     const videoIds = videos.map(v => v.id);
@@ -2326,17 +2381,85 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             const filtered = data.filter(item => !idsToRemove.has(item.id));
             this.scanResults.set({ ...currentResults, data: filtered });
           }
-          alert(`Relinked ${response.relinkedCount || 0} of ${videoIds.length} entr${videoIds.length !== 1 ? 'ies' : 'y'}`);
+          this.notificationService.success('Relink Complete', `Relinked ${response.relinkedCount || 0} of ${videoIds.length} entr${videoIds.length !== 1 ? 'ies' : 'y'}`);
           this.loadLibrary(); // Refresh library
         } else {
-          alert('Relink failed: ' + (response.error || 'Unknown error'));
+          this.notificationService.error('Relink Failed', response.error || 'Unknown error');
         }
       },
       error: (error) => {
         this.isScanning.set(false);
         console.error('Relink failed:', error);
-        alert('Relink failed: ' + (error.error?.error || error.message));
+        this.notificationService.error('Relink Failed', error.error?.error || error.message);
       }
     });
+  }
+
+  /**
+   * Attempt to relink orphaned database entries by browsing for a folder
+   */
+  private async relinkOrphanedEntriesWithFolder(videos: VideoItem[]) {
+    const videoIds = videos.map(v => v.id);
+
+    try {
+      // Use Electron's folder dialog
+      const result = await (window as any).electron?.openFolder({
+        properties: ['openDirectory'],
+        title: 'Select folder to search for missing files'
+      });
+
+      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return; // User cancelled
+      }
+
+      const searchFolder = result.filePaths[0];
+      console.log('Searching for files in:', searchFolder);
+
+      this.scanningOperation.set('relinking');
+      this.isScanning.set(true);
+
+      this.videoManagerService.relinkOrphanedEntries(videoIds, { searchFolder }).subscribe({
+        next: (response) => {
+          this.isScanning.set(false);
+
+          if (response.success) {
+            // Remove relinked items from display
+            const currentResults = this.scanResults();
+            if (currentResults && currentResults.type === 'orphaned-entries') {
+              const data = currentResults.data as MissingFile[];
+              const idsToRemove = new Set(videoIds);
+              const filtered = data.filter(item => !idsToRemove.has(item.id));
+              this.scanResults.set({ ...currentResults, data: filtered });
+            }
+            this.notificationService.success('Relink Complete', `Relinked ${response.relinkedCount || 0} of ${videoIds.length} entr${videoIds.length !== 1 ? 'ies' : 'y'}`);
+            this.loadLibrary(); // Refresh library
+          } else {
+            this.notificationService.error('Relink Failed', response.error || 'Unknown error');
+          }
+        },
+        error: (error) => {
+          this.isScanning.set(false);
+          console.error('Relink failed:', error);
+          this.notificationService.error('Relink Failed', error.error?.error || error.message);
+        }
+      });
+    } catch (error) {
+      console.error('Failed to open folder dialog:', error);
+      this.notificationService.error('Dialog Error', 'Failed to open folder picker. Make sure Electron IPC is available.');
+    }
+  }
+
+  /**
+   * Open the ignore file modal
+   */
+  openIgnoreFileModal() {
+    this.ignoreFileModalOpen.set(true);
+  }
+
+  /**
+   * Handle ignore file modal closed
+   */
+  onIgnoreFileModalClosed() {
+    this.ignoreFileModalOpen.set(false);
   }
 }

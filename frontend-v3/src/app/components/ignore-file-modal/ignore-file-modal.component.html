@@ -1,0 +1,80 @@
+@if (show) {
+  <div class="modal-backdrop" (click)="handleBackdropClick($event)">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <!-- Header -->
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">🚫</span>
+          <h2>Ignore Patterns</h2>
+        </div>
+        <button class="close-btn" (click)="close()" title="Close">×</button>
+      </div>
+
+      <!-- File Path -->
+      @if (filePath()) {
+        <div class="file-path">
+          <span class="path-label">File:</span>
+          <span class="path-value">{{ filePath() }}</span>
+        </div>
+      }
+
+      <!-- Description -->
+      <div class="modal-description">
+        <p>Add patterns to ignore files when scanning (supports wildcards like .gitignore)</p>
+        <p class="description-note">Examples: <code>*.tmp</code>, <code>._*</code>, <code>*-thumb.jpg</code></p>
+      </div>
+
+      <!-- Content -->
+      <div class="modal-content">
+        @if (isLoading()) {
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading ignore file...</p>
+          </div>
+        } @else {
+          <textarea
+            class="ignore-textarea"
+            [(ngModel)]="fileContent"
+            placeholder="# Add ignore patterns here&#10;# One pattern per line&#10;# Comments start with #"
+            spellcheck="false"
+          ></textarea>
+        }
+      </div>
+
+      <!-- Actions -->
+      <div class="modal-actions">
+        <button
+          class="rescan-btn"
+          (click)="rescanDatabase()"
+          [disabled]="isScanning() || isLoading()"
+          title="Scan database and remove entries matching ignore patterns"
+        >
+          @if (isScanning()) {
+            <span class="btn-spinner"></span>
+            <span>Scanning...</span>
+          } @else {
+            <span>🔍</span>
+            <span>Rescan Database</span>
+          }
+        </button>
+        <div class="actions-right">
+          <button class="cancel-btn" (click)="close()" [disabled]="isSaving() || isScanning()">
+            Cancel
+          </button>
+          <button
+            class="save-btn"
+            (click)="saveChanges()"
+            [disabled]="isSaving() || isLoading() || isScanning()"
+          >
+            @if (isSaving()) {
+              <span class="btn-spinner"></span>
+              <span>Saving...</span>
+            } @else {
+              <span>Save Changes</span>
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}

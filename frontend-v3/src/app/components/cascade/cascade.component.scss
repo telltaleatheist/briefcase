@@ -154,8 +154,8 @@ cdk-virtual-scroll-viewport.library-content {
 
 // Video Item - Fixed height for virtual scroll
 .video-item {
-  display: grid;
-  grid-template-columns: 8px 32px 1fr auto;
+  display: flex;
+  align-items: center;
   gap: $spacing-md;
   padding: 0 $spacing-lg;
   height: 60px;
@@ -163,7 +163,6 @@ cdk-virtual-scroll-viewport.library-content {
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
   transition: all $transition-fast;
-  align-items: center;
   position: relative;
   user-select: none;
   box-sizing: border-box;
@@ -218,33 +217,48 @@ cdk-virtual-scroll-viewport.library-content {
     border-bottom: none;
   }
 
-  // Ghost item styling (half-height, faded, unselectable)
+  // Ghost item styling (compact, grayed out with lighter background)
   &.is-ghost {
-    height: 30px;
-    opacity: 0.5;
-    background: var(--bg-tertiary);
+    height: auto;
+    min-height: 40px;
+    opacity: 0.6;
+    background: var(--bg-hover);
     cursor: pointer;
     pointer-events: auto;
+    margin: 0;
+    margin-top: 2px; // Gap between ghost items
 
     &:hover {
       background: var(--bg-secondary);
-      opacity: 0.6;
+      opacity: 0.75;
     }
 
     // Prevent selection
     &.selected {
-      background-color: var(--bg-tertiary);
+      background-color: var(--bg-hover);
       box-shadow: none;
+    }
+
+    // Match gap between relationship indicator and title to gap between ghost items
+    .video-content {
+      gap: 2px;
     }
 
     .video-title {
       font-size: 12px;
       font-style: italic;
+      color: var(--text-secondary);
     }
 
     .video-meta {
       font-size: 10px;
     }
+  }
+
+  // Child ghost indentation (deeper)
+  &.is-ghost.is-child {
+    margin-left: 32px;
+    padding-left: 16px;
   }
 
   // Child video indentation
@@ -265,7 +279,7 @@ cdk-virtual-scroll-viewport.library-content {
   border-radius: $radius-full;
   background: var(--border-color);
   transition: all $transition-fast;
-  justify-self: center;
+  flex-shrink: 0;
 }
 
 // Processing status colors - separate for specificity
@@ -303,6 +317,7 @@ cdk-virtual-scroll-viewport.library-content {
 
 // Video Icon
 .video-icon {
+  width: 32px;
   font-size: $font-size-xl;
   @include flex-center;
   flex-shrink: 0;
@@ -373,6 +388,26 @@ cdk-virtual-scroll-viewport.library-content {
 
 .meta-downloaded {
   color: var(--text-tertiary);
+}
+
+// Ghost relationship indicator
+.ghost-relationship {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: 10px;
+  color: var(--text-tertiary);
+
+  .ghost-icon {
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .ghost-label {
+    text-transform: uppercase;
+    font-weight: $font-weight-semibold;
+    letter-spacing: 0.02em;
+  }
 }
 
 // Actions
@@ -633,6 +668,7 @@ cdk-virtual-scroll-viewport.library-content {
   user-select: none;
   transition: all $transition-fast;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  position: relative;
 
   &:last-child {
     border-bottom: none;
@@ -745,6 +781,66 @@ cdk-virtual-scroll-viewport.library-content {
     opacity: 0.5;
     .child-label {
       text-decoration: line-through;
+    }
+  }
+
+  // Relationship-specific styling
+  &.cascade-relationship {
+    padding-right: $spacing-sm;
+
+    .relationship-type {
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: $font-weight-semibold;
+      letter-spacing: 0.02em;
+      margin-right: $spacing-xs;
+    }
+
+    &.is-parent {
+      .child-icon {
+        color: #3b82f6; // Blue for parent
+      }
+      .relationship-type {
+        color: #3b82f6;
+      }
+    }
+
+    &.is-child {
+      .child-icon {
+        color: #8b5cf6; // Purple for child
+      }
+      .relationship-type {
+        color: #8b5cf6;
+      }
+    }
+
+    .relationship-remove {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: transparent;
+      border: none;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      transition: all $transition-fast;
+      @include flex-center;
+      opacity: 0;
+
+      &:hover {
+        background: var(--error);
+        color: white;
+        transform: scale(1.1);
+      }
+
+      &:active {
+        transform: scale(0.95);
+      }
+    }
+
+    &:hover .relationship-remove {
+      opacity: 0.7;
     }
   }
 }
@@ -1124,6 +1220,33 @@ cdk-virtual-scroll-viewport.library-content {
 
     &.child-active {
       background: rgba(255, 102, 0, 0.15);
+    }
+
+    // Relationship styling in dark mode
+    &.cascade-relationship {
+      &.is-parent {
+        .child-icon {
+          color: #60a5fa; // Lighter blue for dark mode
+        }
+        .relationship-type {
+          color: #60a5fa;
+        }
+      }
+
+      &.is-child {
+        .child-icon {
+          color: #a78bfa; // Lighter purple for dark mode
+        }
+        .relationship-type {
+          color: #a78bfa;
+        }
+      }
+
+      .relationship-remove {
+        &:hover {
+          background: var(--error);
+        }
+      }
     }
   }
 

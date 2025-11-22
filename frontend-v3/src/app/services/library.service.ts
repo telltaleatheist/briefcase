@@ -223,7 +223,7 @@ export class LibraryService {
     return {
       id: video.id,
       name: video.filename || video.name || 'Untitled',
-      suggestedFilename: video.suggested_title || video.filename || 'Untitled',
+      suggestedFilename: video.suggested_title || undefined,
       duration: this.formatDuration(video.duration || video.duration_seconds || 0),
       size: video.file_size || video.file_size_bytes,
       uploadDate: video.upload_date ? this.parseLocalDate(video.upload_date) : undefined,
@@ -392,6 +392,8 @@ export class LibraryService {
 
           // Add its children if they're in the same week
           if (video.childIds && video.childIds.length > 0) {
+            const ghostChildren: VideoItem[] = [];
+
             video.childIds.forEach(childId => {
               const child = videoMap.get(childId);
               if (child && week.videos.some(v => v.id === childId)) {
@@ -399,41 +401,89 @@ export class LibraryService {
                 processedVideos.push(child);
                 handledIds.add(childId);
               } else if (child) {
-                // Child is in a different week - add as ghost item
-                const ghostChild: VideoItem = {
-                  ...child,
-                  isGhost: true
-                };
-                processedVideos.push(ghostChild);
-                // Don't add to handledIds - it can still appear in its own week
+                // Child is in a different week - collect as ghost item
+                ghostChildren.push(child);
               }
+            });
+
+            // Add ghost children with relationship indicator only on the first one
+            ghostChildren.forEach((child, index) => {
+              const isFirstGhost = index === 0;
+              const ghostCount = ghostChildren.length;
+
+              const ghostChild: VideoItem = {
+                ...child,
+                isGhost: true,
+                // Only add relationship metadata to first ghost child
+                ...(isFirstGhost && {
+                  ghostType: 'child' as const,
+                  ghostRelatedName: ghostCount === 1 ? video.name : `${video.name} (${ghostCount} children)`
+                })
+              };
+              processedVideos.push(ghostChild);
+              // Don't add to handledIds - it can still appear in its own week
             });
           }
         }
       });
 
       // Check for children whose parents are in other weeks
+      // Group children by their parent IDs to avoid duplicate ghost parents
+      const childrenByParent = new Map<string, VideoItem[]>();
+
       week.videos.forEach(video => {
         if (handledIds.has(video.id)) return;
 
         // This is a child whose parent is in a different week
         if (video.parentIds && video.parentIds.length > 0) {
-          // Add ghost parent(s)
           video.parentIds.forEach(parentId => {
-            const parent = videoMap.get(parentId);
-            if (parent && !week.videos.some(v => v.id === parentId)) {
-              // Parent is in a different week - add as ghost
-              const ghostParent: VideoItem = {
-                ...parent,
-                isGhost: true
-              };
-              processedVideos.push(ghostParent);
+            // Only consider parents that aren't in this week
+            if (!week.videos.some(v => v.id === parentId)) {
+              if (!childrenByParent.has(parentId)) {
+                childrenByParent.set(parentId, []);
+              }
+              childrenByParent.get(parentId)!.push(video);
             }
           });
+        }
+      });
 
-          // Add the actual child (indented under ghost parent)
-          processedVideos.push(video);
-          handledIds.add(video.id);
+      // Add ghost parents with their children
+      // We need to track which child videos we've already added indicators for
+      const childrenWithIndicators = new Set<string>();
+
+      childrenByParent.forEach((children, parentId) => {
+        const parent = videoMap.get(parentId);
+        if (parent) {
+          // Check if any of these children already have an indicator
+          const firstChildWithoutIndicator = children.find(c => !childrenWithIndicators.has(c.id));
+          const shouldShowIndicator = firstChildWithoutIndicator !== undefined;
+
+          // Count how many children this parent has
+          const childCount = children.length;
+
+          // Add ghost parent once with info about all children
+          const ghostParent: VideoItem = {
+            ...parent,
+            isGhost: true,
+            // Only add indicator if this is the first ghost parent for these children
+            ...(shouldShowIndicator && {
+              ghostType: 'parent' as const,
+              ghostRelatedName: childCount === 1 ? children[0].name : `${childCount} videos`
+            })
+          };
+          processedVideos.push(ghostParent);
+
+          // Add all children of this parent (only once)
+          children.forEach(child => {
+            if (!handledIds.has(child.id)) {
+              processedVideos.push(child);
+              handledIds.add(child.id);
+              if (shouldShowIndicator) {
+                childrenWithIndicators.add(child.id);
+              }
+            }
+          });
         }
       });
 
@@ -663,6 +713,17 @@ export class LibraryService {
   }
 
   /**
+   * Rename video file (renames both database record AND physical file)
+   * PATCH /api/database/videos/:id/filename
+   */
+  renameVideoFile(id: string, filename: string): Observable<ApiResponse<any>> {
+    return this.http.patch<ApiResponse<any>>(
+      `${this.API_BASE}/database/videos/${id}/filename`,
+      { filename }
+    );
+  }
+
+  /**
    * Accept suggested title - renames file and clears suggested title
    * POST /api/database/videos/:id/accept-suggested-title
    */
@@ -670,6 +731,60 @@ export class LibraryService {
     return this.http.post<ApiResponse<any>>(
       `${this.API_BASE}/database/videos/${id}/accept-suggested-title`,
       { customFilename }
+    );
+  }
+
+  /**
+   * Remove parent-child relationship between two videos
+   * POST /api/database/videos/:parentId/remove-child/:childId
+   */
+  removeParentChildRelationship(parentId: string, childId: string): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(
+      `${this.API_BASE}/database/videos/${parentId}/remove-child/${childId}`,
+      {}
+    );
+  }
+
+  /**
+   * Get the .clippyignore file content
+   * GET /api/database/ignore
+   */
+  getIgnoreFile(): Observable<ApiResponse<{ content: string; filePath: string; patterns: string[] }>> {
+    return this.http.get<ApiResponse<{ content: string; filePath: string; patterns: string[] }>>(
+      `${this.API_BASE}/database/ignore`
+    );
+  }
+
+  /**
+   * Update the .clippyignore file content
+   * POST /api/database/ignore
+   */
+  updateIgnoreFile(content: string): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(
+      `${this.API_BASE}/database/ignore`,
+      { content }
+    );
+  }
+
+  /**
+   * Add a pattern to the .clippyignore file
+   * POST /api/database/ignore/add
+   */
+  addIgnorePattern(pattern: string): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(
+      `${this.API_BASE}/database/ignore/add`,
+      { pattern }
+    );
+  }
+
+  /**
+   * Scan database for ignored entries and remove them
+   * POST /api/database/scan-ignored
+   */
+  scanAndRemoveIgnored(): Observable<ApiResponse<{ removed: string[]; message: string }>> {
+    return this.http.post<ApiResponse<{ removed: string[]; message: string }>>(
+      `${this.API_BASE}/database/scan-ignored`,
+      {}
     );
   }
 

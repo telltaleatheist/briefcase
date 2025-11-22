@@ -10,6 +10,7 @@ import { ContextMenuPosition } from '../../models/file.model';
 import { FilenameModalComponent } from '../filename-modal/filename-modal.component';
 import { ElectronService } from '../../services/electron.service';
 import { LibraryService } from '../../services/library.service';
+import { NotificationService } from '../../services/notification.service';
 
 interface ExpandableVideoWeek extends VideoWeek {
   expanded: boolean;
@@ -43,6 +44,7 @@ export type VirtualListItem =
 export class CascadeComponent {
   private electronService = inject(ElectronService);
   private libraryService = inject(LibraryService);
+  private notificationService = inject(NotificationService);
   private router = inject(Router);
 
   @Input() set weeks(value: VideoWeek[]) {
@@ -255,6 +257,8 @@ export class CascadeComponent {
     // Orphaned Entries (database entries with missing files)
     if (isOrphanedEntry) {
       actions.push({ label: `Relink${countSuffix}`, icon: '🔗', action: 'relink' });
+      actions.push({ label: `Browse for Folder...${countSuffix}`, icon: '📁', action: 'relinkWithFolder' });
+      actions.push({ label: '', icon: '', action: '', divider: true });
       actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
       return actions;
     }
@@ -447,6 +451,11 @@ export class CascadeComponent {
         // Remove queue items from processing queue
         this.videoAction.emit({ action: 'removeFromQueue', videos });
         break;
+
+      default:
+        // For any unhandled actions (like 'relink', 'relinkWithFolder', 'import'), emit to parent
+        this.videoAction.emit({ action, videos });
+        break;
     }
   }
 
@@ -523,10 +532,26 @@ export class CascadeComponent {
   onFilenameSaved(newFilename: string) {
     const video = this.editingVideo();
     if (video) {
-      video.suggestedFilename = newFilename;
-      console.log('Updated filename:', video.id, newFilename);
-      // Here you would typically make an API call to save the new filename
-      this.videoWeeks.set([...this.videoWeeks()]);
+      // Call API to rename the file
+      this.libraryService.renameVideoFile(video.id, newFilename).subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            console.log('File renamed successfully:', video.id, newFilename);
+            // Update local state - change name and clear AI suggestion
+            video.name = response.newFilename || newFilename;
+            video.suggestedFilename = undefined;
+            // Update display
+            this.videoWeeks.set([...this.videoWeeks()]);
+          } else {
+            console.error('Failed to rename file:', response.error);
+            this.notificationService.error('Rename Failed', response.error || 'Failed to rename file');
+          }
+        },
+        error: (error: any) => {
+          console.error('Error renaming file:', error);
+          this.notificationService.error('Rename Failed', error.error?.error || error.message);
+        }
+      });
     }
   }
 
@@ -555,12 +580,12 @@ export class CascadeComponent {
             this.videoWeeks.set([...this.videoWeeks()]);
           } else {
             console.error('Failed to accept suggested title:', response.error);
-            alert(response.error || 'Failed to rename file');
+            this.notificationService.error('Rename Failed', response.error || 'Failed to rename file');
           }
         },
         error: (error: any) => {
           console.error('Error accepting suggested title:', error);
-          alert('Failed to rename file: ' + (error.error?.error || error.message));
+          this.notificationService.error('Rename Failed', error.error?.error || error.message);
         }
       });
     }
@@ -875,6 +900,119 @@ export class CascadeComponent {
     }
 
     return false;
+  }
+
+  /**
+   * Check if a video has any relationships (task children, video children, or parents)
+   */
+  hasRelationships(video: VideoItem): boolean {
+    // Check for task-based children
+    if (this.hasChildren(video)) return true;
+
+    // Check for video relationships (parents or children)
+    return this.hasVideoChildren(video) || this.isVideoChild(video);
+  }
+
+  /**
+   * Get video relationships (both parents and children)
+   */
+  getVideoRelationships(video: VideoItem): Array<{id: string; type: 'parent' | 'child'; video: VideoItem}> {
+    const relationships: Array<{id: string; type: 'parent' | 'child'; video: VideoItem}> = [];
+
+    // Debug logging
+    console.log('Getting relationships for video:', video.name, {
+      parentIds: video.parentIds,
+      childIds: video.childIds,
+      parents: video.parents,
+      children: video.children
+    });
+
+    // Add parents
+    if (video.parents && video.parents.length > 0) {
+      video.parents.forEach(parent => {
+        relationships.push({
+          id: `parent-${parent.id}`,
+          type: 'parent',
+          video: parent
+        });
+      });
+    }
+
+    // Add children
+    if (video.children && video.children.length > 0) {
+      video.children.forEach(child => {
+        relationships.push({
+          id: `child-${child.id}`,
+          type: 'child',
+          video: child
+        });
+      });
+    }
+
+    console.log('Total relationships found:', relationships.length);
+
+    return relationships;
+  }
+
+  /**
+   * Handle click on a relationship item (navigate to related video)
+   */
+  handleRelationshipClick(relationship: {id: string; type: 'parent' | 'child'; video: VideoItem}, event: Event): void {
+    event.stopPropagation();
+    // Navigate to the related video's info page
+    this.router.navigate(['/video', relationship.video.id]);
+  }
+
+  /**
+   * Remove a relationship between videos
+   */
+  removeRelationship(currentVideo: VideoItem, relationship: {id: string; type: 'parent' | 'child'; video: VideoItem}, event: Event): void {
+    event.stopPropagation();
+
+    const relatedVideoId = relationship.video.id;
+    const confirmMessage = relationship.type === 'parent'
+      ? `Remove parent relationship with "${relationship.video.name}"?`
+      : `Remove child relationship with "${relationship.video.name}"?`;
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Determine parent and child based on relationship type
+    const parentId = relationship.type === 'parent' ? relatedVideoId : currentVideo.id;
+    const childId = relationship.type === 'parent' ? currentVideo.id : relatedVideoId;
+
+    // Call library service to remove the relationship
+    this.libraryService.removeParentChildRelationship(parentId, childId).subscribe({
+      next: (response: any) => {
+        if (response.success) {
+          console.log('Relationship removed successfully');
+
+          // Update local state - remove from parents or children arrays
+          if (relationship.type === 'parent' && currentVideo.parents) {
+            currentVideo.parents = currentVideo.parents.filter(p => p.id !== relatedVideoId);
+            if (currentVideo.parentIds) {
+              currentVideo.parentIds = currentVideo.parentIds.filter(id => id !== relatedVideoId);
+            }
+          } else if (relationship.type === 'child' && currentVideo.children) {
+            currentVideo.children = currentVideo.children.filter(c => c.id !== relatedVideoId);
+            if (currentVideo.childIds) {
+              currentVideo.childIds = currentVideo.childIds.filter(id => id !== relatedVideoId);
+            }
+          }
+
+          // Trigger change detection
+          this.videoWeeks.set([...this.videoWeeks()]);
+        } else {
+          console.error('Failed to remove relationship:', response.error);
+          this.notificationService.error('Remove Failed', response.error || 'Failed to remove relationship');
+        }
+      },
+      error: (error: any) => {
+        console.error('Error removing relationship:', error);
+        this.notificationService.error('Remove Failed', error.error?.error || error.message);
+      }
+    });
   }
 
   /**

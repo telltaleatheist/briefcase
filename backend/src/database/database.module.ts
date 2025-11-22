@@ -12,6 +12,8 @@ import { RelinkingService } from './relinking.service';
 import { RelinkingController } from './relinking.controller';
 import { TabsController } from './tabs.controller';
 import { IgnoreService } from './ignore.service';
+import { ThumbnailService } from './thumbnail.service';
+import { WaveformService } from './waveform.service';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { MediaModule } from '../media/media.module';
@@ -50,6 +52,8 @@ import { MediaModule } from '../media/media.module';
     SharedDatabaseService,
     RelinkingService,
     IgnoreService,
+    ThumbnailService,
+    WaveformService,
   ],
   exports: [
     DatabaseService,
@@ -60,6 +64,8 @@ import { MediaModule } from '../media/media.module';
     DatabaseConflictService,
     SharedDatabaseService,
     IgnoreService,
+    ThumbnailService,
+    WaveformService,
   ],
 })
 export class DatabaseModule {}

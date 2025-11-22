@@ -12,6 +12,8 @@ import { LibraryManagerService } from './library-manager.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
 import { IgnoreService } from './ignore.service';
+import { ThumbnailService } from './thumbnail.service';
+import { WaveformService } from './waveform.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
 
 /**
@@ -37,6 +39,8 @@ export class DatabaseController {
     private readonly ffmpegService: FfmpegService,
     private readonly mediaEventService: MediaEventService,
     private readonly ignoreService: IgnoreService,
+    private readonly thumbnailService: ThumbnailService,
+    private readonly waveformService: WaveformService,
   ) {}
 
   /**
@@ -295,12 +299,12 @@ export class DatabaseController {
     };
   }
 
-  @Post('import')
+  @Post('import-batch')
   async importVideos(@Body() body: {
     videoPaths: string[];
     duplicateHandling?: { [key: string]: 'skip' | 'replace' | 'keep-both' };
   }) {
-    this.logger.log(`Importing ${body.videoPaths?.length || 0} videos`);
+    this.logger.log(`Importing ${body.videoPaths?.length || 0} videos (batch mode)`);
 
     if (!body.videoPaths || !Array.isArray(body.videoPaths)) {
       return {
@@ -945,12 +949,18 @@ export class DatabaseController {
 
   /**
    * GET /api/database/videos/:id/waveform
-   * Generate and return waveform data for a video
+   * Generate and return waveform data for a video using server-side processing
+   * This is much more efficient than loading the entire video in the browser
+   *
+   * Query params:
+   * - samples: number of samples to generate (default 1000)
+   * - progressive: if true, uses progressive generation with updates every few seconds
    */
   @Get('videos/:id/waveform')
   async getVideoWaveform(
     @Param('id') videoId: string,
-    @Query('samples') samples?: string
+    @Query('samples') samples?: string,
+    @Query('progressive') progressive?: string
   ) {
     try {
       const video = this.databaseService.getVideoById(videoId);
@@ -965,17 +975,23 @@ export class DatabaseController {
         throw new HttpException('Video file not found on disk', HttpStatus.NOT_FOUND);
       }
 
-      const samplesCount = samples ? parseInt(samples, 10) : 500;
-      const waveformData = await this.ffmpegService.generateWaveform(videoPath, samplesCount);
+      const samplesCount = samples ? parseInt(samples, 10) : 1000;
+      const useProgressive = progressive === 'true';
+
+      this.logger.log(`Generating waveform for video ${videoId}: ${video.filename} with ${samplesCount} samples (progressive: ${useProgressive})`);
+
+      // Use the new WaveformService for efficient server-side generation with caching
+      const waveformData = await this.waveformService.generateWaveform(
+        videoPath,
+        videoId,
+        { samples: samplesCount, useCache: true, progressive: useProgressive }
+      );
+
+      this.logger.log(`Waveform generated successfully: ${waveformData.samples.length} samples, duration: ${waveformData.duration}s`);
 
       return {
         success: true,
-        data: {
-          samples: waveformData.samples,
-          duration: waveformData.duration,
-          sampleRate: 8000,
-          videoId
-        }
+        data: waveformData
       };
     } catch (error) {
       if (error instanceof HttpException) {
@@ -987,6 +1003,27 @@ export class DatabaseController {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  /**
+   * GET /api/database/videos/:id/waveform/progress
+   * Get the current progress of waveform generation
+   */
+  @Get('videos/:id/waveform/progress')
+  async getWaveformProgress(@Param('id') videoId: string) {
+    const progress = this.waveformService.getProgress(videoId);
+
+    if (!progress) {
+      return {
+        success: false,
+        message: 'No waveform generation in progress'
+      };
+    }
+
+    return {
+      success: true,
+      data: progress
+    };
   }
 
   /**
@@ -1130,15 +1167,20 @@ export class DatabaseController {
           const directory = path.dirname(oldPath);
           const newPath = path.join(directory, newFilename);
 
-          // Check if new path already exists
-          try {
-            await fs.access(newPath);
-            return {
-              success: false,
-              error: 'A file with this name already exists'
-            };
-          } catch {
-            // File doesn't exist, which is what we want
+          // Check if new path already exists (but exclude the current file)
+          // On case-insensitive filesystems, oldPath and newPath might point to the same file
+          const isSameFile = oldPath.toLowerCase() === newPath.toLowerCase();
+
+          if (!isSameFile) {
+            try {
+              await fs.access(newPath);
+              return {
+                success: false,
+                error: 'A file with this name already exists'
+              };
+            } catch {
+              // File doesn't exist, which is what we want
+            }
           }
 
           // Rename the physical file
@@ -1223,14 +1265,29 @@ export class DatabaseController {
       const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
       const uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
 
+      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}"`);
+
       // Ensure new filename has the date prefix (preserves existing or adds upload date)
       const newFilename = FilenameDateUtil.updateTitle(oldFilename, body.filename.trim(), uploadDate);
 
+      this.logger.log(`updateVideoFilename: computed newFilename="${newFilename}"`);
+
       // Skip if filename hasn't changed
       if (video.filename === newFilename) {
+        this.logger.log(`updateVideoFilename: Filenames are identical, skipping rename`);
         return {
           success: true,
           message: 'Filename unchanged'
+        };
+      }
+
+      // Check if another video in the database already has this filename
+      const existingVideo = this.databaseService.findVideoByFilename(newFilename);
+      if (existingVideo && existingVideo.id !== videoId) {
+        this.logger.warn(`updateVideoFilename: Found existing video with filename "${newFilename}": ${existingVideo.id}`);
+        return {
+          success: false,
+          error: 'A file with this name already exists in the library'
         };
       }
 
@@ -1238,15 +1295,20 @@ export class DatabaseController {
       const directory = path.dirname(oldPath);
       const newPath = path.join(directory, newFilename);
 
-      // Check if new path already exists
-      try {
-        await fs.access(newPath);
-        return {
-          success: false,
-          error: 'A file with this name already exists in the library'
-        };
-      } catch {
-        // File doesn't exist, which is what we want
+      // Check if new path already exists (but exclude the current file)
+      // On case-insensitive filesystems, oldPath and newPath might point to the same file
+      const isSameFile = oldPath.toLowerCase() === newPath.toLowerCase();
+
+      if (!isSameFile) {
+        try {
+          await fs.access(newPath);
+          return {
+            success: false,
+            error: 'A file with this name already exists in the library'
+          };
+        } catch {
+          // File doesn't exist, which is what we want
+        }
       }
 
       // Rename the physical file
@@ -1265,7 +1327,11 @@ export class DatabaseController {
       this.databaseService.updateVideoFilename(videoId, newFilename);
       this.databaseService.updateVideoPath(videoId, newPath);
 
+      // Clear the suggested_title since the user manually renamed the file
+      this.databaseService.updateVideoSuggestedTitle(videoId, null);
+
       this.logger.log(`Updated filename for video ${videoId}: ${newFilename}`);
+      this.logger.log(`Cleared suggested_title for video ${videoId}`);
 
       // Emit WebSocket event to notify frontend of the rename
       this.mediaEventService.emitVideoRenamed(
@@ -1278,6 +1344,7 @@ export class DatabaseController {
       return {
         success: true,
         message: 'Video filename updated successfully',
+        newFilename: newFilename,
         newPath: newPath
       };
     } catch (error: any) {
@@ -1387,15 +1454,20 @@ export class DatabaseController {
       const directory = path.dirname(oldPath);
       const newPath = path.join(directory, newFilename);
 
-      // Check if new path already exists
-      try {
-        await fs.access(newPath);
-        return {
-          success: false,
-          error: 'A file with this name already exists in the library'
-        };
-      } catch {
-        // File doesn't exist, which is what we want
+      // Check if new path already exists (but exclude the current file)
+      // On case-insensitive filesystems, oldPath and newPath might point to the same file
+      const isSameFile = oldPath.toLowerCase() === newPath.toLowerCase();
+
+      if (!isSameFile) {
+        try {
+          await fs.access(newPath);
+          return {
+            success: false,
+            error: 'A file with this name already exists in the library'
+          };
+        } catch {
+          // File doesn't exist, which is what we want
+        }
       }
 
       // Rename the physical file
@@ -1802,6 +1874,24 @@ export class DatabaseController {
       message: result.deletedCount > 0
         ? `Pruned ${result.deletedCount} orphaned video${result.deletedCount > 1 ? 's' : ''} from database`
         : 'No orphaned videos to prune'
+    };
+  }
+
+  /**
+   * POST /api/database/cleanup-thumbnails
+   * Clean up orphaned thumbnails (thumbnails without corresponding videos)
+   */
+  @Post('cleanup-thumbnails')
+  cleanupOrphanedThumbnails() {
+    this.logger.log('Cleaning up orphaned thumbnails');
+    const result = this.databaseService.cleanupOrphanedThumbnails();
+    return {
+      success: true,
+      deletedCount: result.deletedCount,
+      orphanedThumbnails: result.orphanedThumbnails,
+      message: result.deletedCount > 0
+        ? `Cleaned up ${result.deletedCount} orphaned thumbnail${result.deletedCount > 1 ? 's' : ''}`
+        : 'No orphaned thumbnails found'
     };
   }
 
@@ -2502,6 +2592,7 @@ export class DatabaseController {
   /**
    * GET /api/database/videos/:id/thumbnail
    * Get or generate thumbnail for a library video
+   * Thumbnails are stored in centralized .thumbnails directory
    */
   @Get('videos/:id/thumbnail')
   async getVideoThumbnail(
@@ -2525,15 +2616,13 @@ export class DatabaseController {
         throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
       }
 
-      // Check if thumbnail already exists
-      const videoDir = path.dirname(videoPath);
-      const videoBase = path.parse(videoPath).name;
-      const thumbnailPath = path.join(videoDir, `${videoBase}_thumbnail.jpg`);
+      // Get thumbnail path from ThumbnailService
+      const thumbnailPath = this.thumbnailService.getThumbnailPath(id);
 
       // If thumbnail doesn't exist, generate it
-      if (!fs.existsSync(thumbnailPath)) {
+      if (!this.thumbnailService.thumbnailExists(id)) {
         this.logger.log(`Generating thumbnail for video ${id}: ${video.filename}`);
-        const generatedPath = await this.ffmpegService.createThumbnail(videoPath);
+        const generatedPath = await this.ffmpegService.createThumbnail(videoPath, undefined, id);
 
         if (!generatedPath || !fs.existsSync(generatedPath)) {
           throw new HttpException(
@@ -3178,23 +3267,83 @@ export class DatabaseController {
         }
       }
 
-      // Scan clips folder once after all files are copied
-      this.logger.log(`Scanning clips folder for ${filesToScan.size} file(s)...`);
-      await this.fileScannerService.scanClipsFolder(clipsFolder);
+      // Import specific files directly without scanning entire folder
+      this.logger.log(`Importing ${filesToScan.size} specific file(s)...`);
 
-      // Update results with video IDs
-      const allVideos = this.databaseService.getAllVideos({ linkedOnly: true });
       for (const result of results) {
-        if (result.success && result.pendingScan) {
-          const newVideo = allVideos.find((v: any) => v.filename === result.filename);
-          if (newVideo) {
-            result.videoId = newVideo.id;
+        if (!result.success || !result.pendingScan) continue;
+
+        try {
+          const filePath = path.join(clipsFolder, result.filename);
+
+          // Check if already in database by filename
+          const existingByFilename = this.databaseService.getAllVideos({ linkedOnly: false })
+            .find((v: any) => v.filename === result.filename);
+
+          if (existingByFilename) {
+            // File exists in database - update its path and mark as linked
+            this.logger.log(`File "${result.filename}" already in database as ${existingByFilename.id} - relinking`);
+            this.databaseService.updateVideoPath(existingByFilename.id, filePath);
+            result.videoId = existingByFilename.id;
+            result.wasRelinked = true;
             delete result.pendingScan;
-          } else {
-            result.success = false;
-            result.error = 'File copied but not found in database after scan';
-            delete result.pendingScan;
+            continue;
           }
+
+          // Compute hash for the specific file
+          const stats = fs.statSync(filePath);
+          const fileHash = await this.databaseService.hashFile(filePath);
+
+          // Check if this hash already exists in database
+          const existingByHash = this.databaseService.getAllVideos({ linkedOnly: false })
+            .find((v: any) => v.file_hash === fileHash);
+
+          if (existingByHash) {
+            // Same content exists - update path and mark as linked
+            this.logger.log(`File "${result.filename}" matches existing video ${existingByHash.id} by hash - relinking`);
+            this.databaseService.updateVideoPath(existingByHash.id, filePath);
+            result.videoId = existingByHash.id;
+            result.wasRelinked = true;
+            delete result.pendingScan;
+            continue;
+          }
+
+          // New file - add to database
+          const videoId = require('uuid').v4();
+          const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+
+          // Extract upload date from filename or parent folder
+          let uploadDate: string | undefined;
+          const dateInfo = FilenameDateUtil.extractDateInfo(result.filename);
+          if (dateInfo.hasDate) {
+            uploadDate = FilenameDateUtil.toISODate(dateInfo.date) || undefined;
+          } else {
+            // Fallback: Extract date folder from path
+            const relativePath = filePath.replace(clipsFolder, '');
+            const pathParts = relativePath.split(path.sep).filter(Boolean);
+            uploadDate = pathParts.length > 1 ? pathParts[0] : undefined;
+          }
+
+          this.databaseService.insertVideo({
+            id: videoId,
+            filename: result.filename,
+            fileHash: fileHash,
+            currentPath: result.filename, // Store as relative path
+            uploadDate: uploadDate,
+            downloadDate: fileCreationDate.toISOString(),
+            fileSizeBytes: stats.size,
+          });
+
+          this.logger.log(`Added new video: ${result.filename} (${videoId})`);
+          result.videoId = videoId;
+          result.wasRelinked = false;
+          delete result.pendingScan;
+
+        } catch (error: any) {
+          this.logger.error(`Failed to import ${result.filename}:`, error);
+          result.success = false;
+          result.error = error.message;
+          delete result.pendingScan;
         }
       }
 

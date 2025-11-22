@@ -1809,6 +1809,23 @@
     }
   }
 
+  .relationship-group {
+    margin-bottom: 24px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    .relationship-group-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  }
+
   .child-item {
     display: flex;
     align-items: center;
@@ -1818,10 +1835,31 @@
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s ease;
+    margin-bottom: 8px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
 
     &:hover {
       background: var(--bg-hover);
       transform: translateX(4px);
+    }
+
+    .relationship-icon {
+      font-size: 20px;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+      width: 24px;
+      text-align: center;
+    }
+
+    &.parent-item .relationship-icon {
+      color: #3b82f6;
+    }
+
+    &.child-item-actual .relationship-icon {
+      color: #22c55e;
     }
 
     .child-thumbnail {
@@ -1947,34 +1985,12 @@
       border-radius: 6px;
       overflow: hidden;
       background: var(--bg-secondary);
+      display: flex;
+      flex-direction: column;
 
       app-cascade {
-        display: block;
-        height: 100%;
-        width: 100%;
-
-        // Hide the toolbar - we don't need "Media Library" title
-        ::ng-deep .library-toolbar {
-          display: none;
-        }
-
-        // Make the cascade take full size
-        ::ng-deep .cascade {
-          height: 100%;
-          width: 100%;
-        }
-
-        // Make the content viewport take full height
-        ::ng-deep .library-content {
-          height: 100% !important;
-          width: 100%;
-        }
-
-        // Ensure virtual scroll viewport is sized correctly
-        ::ng-deep cdk-virtual-scroll-viewport {
-          height: 100% !important;
-          width: 100%;
-        }
+        flex: 1;
+        min-height: 0;
       }
     }
 

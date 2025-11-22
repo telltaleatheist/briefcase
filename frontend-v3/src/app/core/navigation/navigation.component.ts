@@ -5,13 +5,15 @@ import { filter } from 'rxjs/operators';
 import { ThemeService } from '../../services/theme.service';
 import { LibraryService } from '../../services/library.service';
 import { LoggerService } from '../../services/logger.service';
+import { NotificationService } from '../../services/notification.service';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
+import { NotificationBellComponent } from '../../components/notification-bell/notification-bell.component';
 import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
 
 @Component({
   selector: 'app-navigation',
   standalone: true,
-  imports: [CommonModule, RouterModule, LibraryManagerModalComponent],
+  imports: [CommonModule, RouterModule, LibraryManagerModalComponent, NotificationBellComponent],
   templateUrl: './navigation.component.html',
   styleUrls: ['./navigation.component.scss']
 })
@@ -20,6 +22,7 @@ export class NavigationComponent {
   themeService = inject(ThemeService);
   libraryService = inject(LibraryService);
   private loggerService = inject(LoggerService);
+  private notificationService = inject(NotificationService);
   mobileMenuOpen = signal(false);
   libraryManagerOpen = signal(false);
   currentUrl = signal('/');
@@ -72,7 +75,7 @@ export class NavigationComponent {
       },
       error: (error) => {
         console.error('Failed to switch library:', error);
-        alert('Failed to switch library. Please try again.');
+        this.notificationService.error('Library Switch Failed', 'Failed to switch library. Please try again.');
       }
     });
   }
@@ -87,7 +90,7 @@ export class NavigationComponent {
       },
       error: (error) => {
         console.error('Failed to create library:', error);
-        alert('Failed to create library. Please try again.');
+        this.notificationService.error('Library Creation Failed', 'Failed to create library. Please try again.');
       }
     });
   }
@@ -99,12 +102,12 @@ export class NavigationComponent {
         next: (response) => {
           if (response.success) {
             this.libraryService.currentLibrary.set(response.data);
-            alert('Library relinked successfully!');
+            this.notificationService.success('Library Relinked', 'Library relinked successfully!');
           }
         },
         error: (error) => {
           console.error('Failed to relink library:', error);
-          alert('Failed to relink library. Please try again.');
+          this.notificationService.error('Relink Failed', 'Failed to relink library. Please try again.');
         }
       });
     }
@@ -125,7 +128,7 @@ export class NavigationComponent {
       },
       error: (error) => {
         console.error('Failed to update library:', error);
-        alert('Failed to update library. Please try again.');
+        this.notificationService.error('Update Failed', 'Failed to update library. Please try again.');
       }
     });
   }
@@ -141,7 +144,7 @@ export class NavigationComponent {
         },
         error: (error) => {
           console.error('Failed to delete library:', error);
-          alert('Failed to delete library. Please try again.');
+          this.notificationService.error('Delete Failed', 'Failed to delete library. Please try again.');
         }
       });
     }

@@ -38,6 +38,14 @@ export interface SystemStatus {
   queue: { total: number; waiting: number; completed: number; failed: number };
 }
 
+export interface VideoRenamed {
+  videoId: string;
+  oldFilename: string;
+  newFilename: string;
+  newPath: string;
+  timestamp: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -54,6 +62,7 @@ export class WebsocketService implements OnDestroy {
   private taskProgressCallbacks: ((event: TaskProgress) => void)[] = [];
   private taskCompletedCallbacks: ((event: TaskCompleted) => void)[] = [];
   private taskFailedCallbacks: ((event: TaskFailed) => void)[] = [];
+  private videoRenamedCallbacks: ((event: VideoRenamed) => void)[] = [];
 
   connect(): void {
     if (this.socket?.connected) {
@@ -131,6 +140,12 @@ export class WebsocketService implements OnDestroy {
       this.systemStatus.set(status);
     });
 
+    // Video events
+    this.socket.on('video-renamed', (event: VideoRenamed) => {
+      console.log('WS video-renamed received:', event);
+      this.videoRenamedCallbacks.forEach(cb => cb(event));
+    });
+
     // Legacy events for backward compatibility
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
@@ -178,6 +193,13 @@ export class WebsocketService implements OnDestroy {
     this.taskFailedCallbacks.push(callback);
     return () => {
       this.taskFailedCallbacks = this.taskFailedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onVideoRenamed(callback: (event: VideoRenamed) => void): () => void {
+    this.videoRenamedCallbacks.push(callback);
+    return () => {
+      this.videoRenamedCallbacks = this.videoRenamedCallbacks.filter(cb => cb !== callback);
     };
   }
 

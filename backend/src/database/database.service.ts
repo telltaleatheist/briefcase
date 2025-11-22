@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { ThumbnailService } from './thumbnail.service';
 
 // Type definitions for database records
 export interface VideoRecord {
@@ -197,7 +198,7 @@ export class DatabaseService {
   private dbPath: string | null = null;
   private readonly appDataPath: string;
 
-  constructor() {
+  constructor(private readonly thumbnailService: ThumbnailService) {
     // Base directory: ~/Library/Application Support/clippy
     this.appDataPath = path.join(
       os.homedir(),
@@ -206,7 +207,7 @@ export class DatabaseService {
       'clippy',
     );
 
-    // Ensure directory exists
+    // Ensure directories exist
     if (!fs.existsSync(this.appDataPath)) {
       fs.mkdirSync(this.appDataPath, { recursive: true });
     }
@@ -242,6 +243,9 @@ export class DatabaseService {
 
     this.initializeSchema();
     this.logger.log('Database initialized successfully');
+
+    // Set the library path for thumbnail service
+    this.thumbnailService.setLibraryPath(this.dbPath);
 
     // After initialization is complete, check if FTS5 needs population
     this.checkAndPopulateFTS5();
@@ -1974,10 +1978,8 @@ export class DatabaseService {
     const stmt = db.prepare(`
       SELECT
         v.*,
-        a.summary as suggested_title,
         CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
       FROM videos v
-      LEFT JOIN analyses a ON a.video_id = v.id
       WHERE v.id = ?
     `);
     const result = stmt.get(id) as VideoRecordWithFlags | undefined;
@@ -1996,6 +1998,7 @@ export class DatabaseService {
   /**
    * Delete a video from the database
    * This will cascade delete all related records (transcripts, analyses, tags, sections)
+   * Also deletes the associated thumbnail file
    * Returns the video record before deletion so caller can delete physical file
    */
   deleteVideo(id: string): VideoRecord {
@@ -2009,6 +2012,9 @@ export class DatabaseService {
 
     this.logger.log(`Deleting video ${id} and all related data`);
 
+    // Delete associated thumbnail
+    this.thumbnailService.deleteThumbnail(id);
+
     db.prepare('DELETE FROM videos WHERE id = ?').run(id);
 
     this.saveDatabase();
@@ -2019,6 +2025,7 @@ export class DatabaseService {
   /**
    * Prune/cleanup orphaned videos (videos marked as unlinked)
    * Deletes all database records for videos where is_linked = 0
+   * Also deletes associated thumbnails
    * Returns count of deleted videos
    */
   pruneOrphanedVideos(): PruneResult {
@@ -2035,6 +2042,10 @@ export class DatabaseService {
 
     this.logger.log(`Pruning ${unlinkedVideos.length} orphaned videos from database`);
 
+    // Delete thumbnails for all unlinked videos
+    const videoIds = unlinkedVideos.map(v => v.id);
+    this.thumbnailService.deleteThumbnails(videoIds);
+
     // Delete all unlinked videos (CASCADE will handle related records)
     db.prepare('DELETE FROM videos WHERE is_linked = 0').run();
 
@@ -2047,19 +2058,44 @@ export class DatabaseService {
   }
 
   /**
+   * Clean up orphaned thumbnails
+   * Finds and deletes thumbnails that don't have corresponding video records
+   * Returns count of deleted orphaned thumbnails
+   */
+  cleanupOrphanedThumbnails(): { deletedCount: number; orphanedThumbnails: string[] } {
+    const db = this.ensureInitialized();
+
+    // Get all valid video IDs from database
+    const videos = db.prepare('SELECT id FROM videos').all() as Array<{ id: string }>;
+    const validVideoIds = new Set(videos.map(v => v.id));
+
+    // Use ThumbnailService to find orphaned thumbnails
+    const orphanedPaths = this.thumbnailService.findOrphanedThumbnails(validVideoIds);
+
+    // Clean up orphaned thumbnails
+    const deletedCount = this.thumbnailService.cleanupOrphanedThumbnails(validVideoIds);
+
+    // Extract just the filenames from the paths
+    const orphaned = orphanedPaths.map(p => path.basename(p));
+
+    return {
+      deletedCount,
+      orphanedThumbnails: orphaned
+    };
+  }
+
+  /**
    * Get all videos (excluding children - they are fetched separately via getChildVideos)
    */
   getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number; includeChildren?: boolean }): VideoRecordWithFlags[] {
     const db = this.ensureInitialized();
-    // Use LEFT JOIN for analyses to get suggested_title (summary field)
     // has_transcript and has_analysis are now actual columns (maintained by triggers/updates)
+    // suggested_title comes from the videos table itself, not from analyses
     let query = `
       SELECT
         v.*,
-        a.summary as suggested_title,
         CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
       FROM videos v
-      LEFT JOIN analyses a ON a.video_id = v.id
     `;
     const params: any[] = [];
 

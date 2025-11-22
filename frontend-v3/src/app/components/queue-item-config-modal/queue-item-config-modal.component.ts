@@ -265,10 +265,8 @@ export class QueueItemConfigModalComponent implements OnInit {
     const config = task?.config;
     // Only fall back to default if config is undefined/null or empty object
     if (!config || Object.keys(config).length === 0) {
-      console.log(`getTaskConfig(${taskType}): no config, using default`);
       return this.getDefaultConfig(taskType);
     }
-    console.log(`getTaskConfig(${taskType}):`, config);
     return config;
   }
 

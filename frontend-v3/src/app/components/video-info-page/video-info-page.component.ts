@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, inject, ViewChild } from '@angular/core';
+import { Component, OnInit, Input, inject, ViewChild, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
@@ -28,6 +28,7 @@ export class VideoInfoPageComponent implements OnInit {
   private router = inject(Router);
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
+  private cdr = inject(ChangeDetectorRef);
 
   @Input() videoId?: string;
 
@@ -66,6 +67,7 @@ export class VideoInfoPageComponent implements OnInit {
 
   // Children Management
   childVideos: any[] = [];
+  parentVideos: any[] = [];
   isAddingChildren = false;
   showVideoSelector = false;
   availableVideos: VideoItem[] = [];
@@ -605,12 +607,15 @@ export class VideoInfoPageComponent implements OnInit {
   // ============================================================================
 
   private loadChildren(videoId: string): void {
+    // Load children
     this.http.get<any>(`http://localhost:3000/api/database/videos/${videoId}/children`)
       .subscribe({
         next: (response) => {
           if (response.success && response.children) {
             this.childVideos = response.children;
             console.log(`Loaded ${this.childVideos.length} children for video ${videoId}`);
+            // Force change detection to update the view immediately
+            this.cdr.detectChanges();
           } else {
             console.warn('Failed to load children:', response.error || 'Unknown error');
             this.childVideos = [];
@@ -619,6 +624,26 @@ export class VideoInfoPageComponent implements OnInit {
         error: (err) => {
           console.error('Failed to load children:', err);
           this.childVideos = [];
+        }
+      });
+
+    // Load parents
+    this.http.get<any>(`http://localhost:3000/api/database/videos/${videoId}/parents`)
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.parents) {
+            this.parentVideos = response.parents;
+            console.log(`Loaded ${this.parentVideos.length} parents for video ${videoId}`);
+            // Force change detection to update the view immediately
+            this.cdr.detectChanges();
+          } else {
+            console.warn('Failed to load parents:', response.error || 'Unknown error');
+            this.parentVideos = [];
+          }
+        },
+        error: (err) => {
+          console.error('Failed to load parents:', err);
+          this.parentVideos = [];
         }
       });
   }
@@ -647,10 +672,9 @@ export class VideoInfoPageComponent implements OnInit {
           )
         }))
         .filter((week: VideoWeek) => week.videos.length > 0);
-        
-        // Reverse the weeks array to show newest first (2025 at top, 2016 at bottom)
-        // Create a new reversed array to avoid mutation
-        this.availableVideosWeek = [...filteredWeeks].reverse();
+
+        // Keep weeks in original order (newest first: 2025 at top, 2016 at bottom)
+        this.availableVideosWeek = filteredWeeks;
       },
       error: (err) => {
         console.error('Failed to load library:', err);
@@ -681,7 +705,7 @@ export class VideoInfoPageComponent implements OnInit {
     if (this.selectedVideosForLink.size === 0) return;
 
     const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
-    
+
     // Extract video IDs from itemIds (format: "weekLabel|videoId")
     // The cascade component uses itemIds in format "weekLabel|videoId" for uniqueness
     const childIds = Array.from(this.selectedVideosForLink).map(itemId => {
@@ -695,9 +719,10 @@ export class VideoInfoPageComponent implements OnInit {
     }).subscribe({
       next: (response) => {
         if (response.success) {
-          // Reload children
+          // Reload children to get complete data with thumbnails
           this.loadChildren(currentId!);
-          // Close selector
+
+          // Close selector and clear selection
           this.cancelVideoSelection();
         } else {
           console.error('Failed to add children:', response.error);
@@ -750,6 +775,63 @@ export class VideoInfoPageComponent implements OnInit {
           console.error('Failed to remove all children:', err);
         }
       });
+  }
+
+  removeParent(parentId: string): void {
+    const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
+    if (!currentId) return;
+
+    // Use the library service method to remove the parent-child relationship
+    this.libraryService.removeParentChildRelationship(parentId, currentId).subscribe({
+      next: (response) => {
+        if (response.success) {
+          // Reload parents to reflect the change
+          this.loadChildren(currentId);
+        }
+      },
+      error: (err) => {
+        console.error('Failed to remove parent:', err);
+      }
+    });
+  }
+
+  removeAllRelationships(): void {
+    if (!confirm('Are you sure you want to remove all parent and child relationships from this video?')) {
+      return;
+    }
+
+    const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
+
+    // Remove all children
+    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/remove-all-children`, {})
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.childVideos = [];
+          }
+        },
+        error: (err) => {
+          console.error('Failed to remove all children:', err);
+        }
+      });
+
+    // Remove all parents (remove this video as a child from all its parents)
+    for (const parent of this.parentVideos) {
+      this.libraryService.removeParentChildRelationship(parent.id, currentId!).subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.parentVideos = [];
+          }
+        },
+        error: (err) => {
+          console.error('Failed to remove parent:', err);
+        }
+      });
+    }
+  }
+
+  getTotalRelationshipsCount(): number {
+    return this.childVideos.length + this.parentVideos.length;
   }
 
   navigateToVideo(videoId: string): void {

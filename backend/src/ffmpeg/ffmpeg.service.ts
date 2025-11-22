@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
 import { SharedConfigService } from '../config/shared-config.service';
+import { ThumbnailService } from '../database/thumbnail.service';
 
 @Injectable()
 export class FfmpegService {
@@ -16,7 +17,8 @@ export class FfmpegService {
   constructor(
     private readonly eventService: MediaEventService,
     private readonly configService: SharedConfigService,
-    private readonly eventEmitter: EventEmitter2
+    private readonly eventEmitter: EventEmitter2,
+    private readonly thumbnailService: ThumbnailService
   ) {
     try {
       // Prioritize environment variables FIRST (set by Electron), then config service paths
@@ -692,7 +694,14 @@ export class FfmpegService {
     }
   }
   
-  async createThumbnail(videoPath: string, outputPath?: string): Promise<string | null> {
+  /**
+   * Create thumbnail for a video
+   * @param videoPath - Path to the video file
+   * @param outputPath - Optional output path (if not provided, generates based on video path)
+   * @param videoId - Optional video database ID (for storing in centralized thumbnails directory)
+   * @returns Path to created thumbnail or null on failure
+   */
+  async createThumbnail(videoPath: string, outputPath?: string, videoId?: string): Promise<string | null> {
     if (!fs.existsSync(videoPath)) {
       this.logger.error(`Video file doesn't exist: ${videoPath}`);
       return null;
@@ -701,9 +710,15 @@ export class FfmpegService {
     try {
       // Generate output path if not provided
       if (!outputPath) {
-        const fileDir = path.dirname(videoPath);
-        const fileBase = path.parse(videoPath).name;
-        outputPath = path.join(fileDir, `${fileBase}_thumbnail.jpg`);
+        if (videoId) {
+          // Use ThumbnailService to get the correct path for this library
+          outputPath = this.thumbnailService.getThumbnailPath(videoId);
+        } else {
+          // Fall back to old behavior for backwards compatibility
+          const fileDir = path.dirname(videoPath);
+          const fileBase = path.parse(videoPath).name;
+          outputPath = path.join(fileDir, `${fileBase}_thumbnail.jpg`);
+        }
       }
 
       // First, get video duration to calculate 10% mark

@@ -60,31 +60,47 @@
               (dblclick)="handleVideoDoubleClick(item.video, $event)"
               (contextmenu)="onContextMenu(item.itemId, item.video, $event)"
             >
-              <!-- Processing Status Indicator -->
-              @if (showStatusIndicator) {
+              <!-- Processing Status Indicator (not for ghosts) -->
+              @if (showStatusIndicator && !item.video.isGhost) {
                 <div class="selection-indicator" [ngClass]="getProcessingStatus(item.video)"></div>
               }
 
-              <!-- Expand/Collapse Button (if children enabled) -->
-              @if (childrenConfig?.expandable && hasChildren(item.video)) {
+              <!-- Expand/Collapse Button (if children enabled, not for ghosts) -->
+              @if (childrenConfig?.expandable && hasChildren(item.video) && !item.video.isGhost) {
                 <button
                   class="expand-toggle"
                   (click)="toggleExpanded(item.video.id, $event)"
                   [attr.aria-expanded]="isExpanded(item.video.id)">
                   <span class="expand-icon" [class.expanded]="isExpanded(item.video.id)">▶</span>
                 </button>
-              } @else {
-                <!-- Video Icon -->
+              } @else if (!item.video.isGhost) {
+                <!-- Video Icon (not for ghosts) -->
                 <div class="video-icon">📹</div>
               }
 
             <!-- Video Content -->
             <div class="video-content">
+              <!-- Ghost relationship indicator for children (ABOVE title) -->
+              @if (item.video.isGhost && item.video.ghostType === 'child') {
+                <div class="ghost-relationship ghost-relationship-top">
+                  <span class="ghost-icon">↑</span>
+                  <span class="ghost-label">CHILD OF: {{ item.video.ghostRelatedName }}</span>
+                </div>
+              }
+
               <!-- Title -->
               <div class="video-title">{{ item.video.name }}</div>
 
-              <!-- Suggested Title Row (only show if AI suggested title exists) -->
-              @if (item.video.suggestedTitle) {
+              <!-- Ghost relationship indicator for parents (BELOW title) -->
+              @if (item.video.isGhost && item.video.ghostType === 'parent') {
+                <div class="ghost-relationship ghost-relationship-bottom">
+                  <span class="ghost-icon">↓</span>
+                  <span class="ghost-label">PARENT OF: {{ item.video.ghostRelatedName }}</span>
+                </div>
+              }
+
+              <!-- Suggested Title Row (not for ghosts) -->
+              @if (item.video.suggestedTitle && !item.video.isGhost) {
                 <div class="video-meta">
                   @if (isQueueItem(item.video)) {
                     <!-- Queue item status display -->
@@ -116,12 +132,12 @@
               }
             </div>
 
-            <!-- Duration & Actions -->
+            <!-- Duration & Actions (not for ghosts) -->
             <div class="video-actions">
-              @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00') {
+              @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00' && !item.video.isGhost) {
                 <span class="video-duration">{{ item.video.duration }}</span>
               }
-              @if (showEditButton) {
+              @if (showEditButton && !item.video.isGhost) {
                 <button
                   class="edit-btn"
                   (click)="onEditClick(item.video, $event)"
@@ -130,7 +146,7 @@
                   ✏️
                 </button>
               }
-              @if (showDeleteButton && isQueueItem(item.video)) {
+              @if (showDeleteButton && isQueueItem(item.video) && !item.video.isGhost) {
                 <button
                   class="delete-btn"
                   (click)="onDeleteClick(item.video, $event)"
@@ -173,9 +189,10 @@
             }
           </div>
 
-            <!-- Cascade Children -->
-            @if (isExpanded(item.video.id) && hasChildren(item.video)) {
+            <!-- Relationships Section -->
+            @if (isExpanded(item.video.id) && hasRelationships(item.video)) {
               <div class="cascade-children" [@expandCollapse]>
+                <!-- Show task-based children first -->
                 @for (child of getChildren(item.video); track child.id) {
                   <div
                     class="cascade-child"
@@ -215,6 +232,32 @@
                     @if (childrenConfig?.showStatus !== false) {
                       <span class="child-status-icon">{{ getChildStatusIcon(child.status) }}</span>
                     }
+                  </div>
+                }
+
+                <!-- Show video relationships (parents and children) -->
+                @for (relationship of getVideoRelationships(item.video); track relationship.id) {
+                  <div
+                    class="cascade-child cascade-relationship"
+                    [class.is-parent]="relationship.type === 'parent'"
+                    [class.is-child]="relationship.type === 'child'"
+                    (click)="handleRelationshipClick(relationship, $event)">
+
+                    <!-- Relationship Icon -->
+                    <span class="child-icon">{{ relationship.type === 'parent' ? '↑' : '↓' }}</span>
+
+                    <!-- Relationship Label -->
+                    <span class="child-label">
+                      <span class="relationship-type">{{ relationship.type === 'parent' ? 'Parent:' : 'Child:' }}</span>
+                      {{ relationship.video.name }}
+                    </span>
+
+                    <!-- Remove button -->
+                    <button
+                      class="relationship-remove"
+                      (click)="removeRelationship(item.video, relationship, $event)"
+                      title="Remove relationship"
+                    >×</button>
                   </div>
                 }
               </div>

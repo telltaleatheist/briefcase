@@ -123,14 +123,14 @@ export class NotificationService {
     return null;
   }
 
-  success(title: string, message: string, showToast: boolean = true): void {
+  success(title: string, message: string, showToast: boolean = false): void {
     const notification = this.addNotification('success', title, message);
     if (showToast) {
       this.toastSubject.next(notification);
     }
   }
 
-  error(title: string, message: string, showToast: boolean = true): void {
+  error(title: string, message: string, showToast: boolean = false): void {
     // Parse error to make it more human-readable
     const parsed = ErrorParser.formatWithTechnical(message);
     const notification = this.addNotification('error', parsed.title, parsed.message);
@@ -139,14 +139,14 @@ export class NotificationService {
     }
   }
 
-  info(title: string, message: string, showToast: boolean = true): void {
+  info(title: string, message: string, showToast: boolean = false): void {
     const notification = this.addNotification('info', title, message);
     if (showToast) {
       this.toastSubject.next(notification);
     }
   }
 
-  warning(title: string, message: string, showToast: boolean = true): void {
+  warning(title: string, message: string, showToast: boolean = false): void {
     const notification = this.addNotification('warning', title, message);
     if (showToast) {
       this.toastSubject.next(notification);
@@ -215,7 +215,7 @@ export class NotificationService {
   }
 
   // Trackable notification that can be updated later
-  trackable(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = true, action?: NotificationAction): string {
+  trackable(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = false, action?: NotificationAction): string {
     console.log('trackable() called:', {trackingKey, type, title, message, showToast, action});
 
     // Check if notification with this tracking key already exists
@@ -240,7 +240,7 @@ export class NotificationService {
   }
 
   // Update a tracked notification (convenience method)
-  updateTracked(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = true): void {
+  updateTracked(trackingKey: string, type: NotificationType, title: string, message: string, showToast: boolean = false): void {
     this.trackable(trackingKey, type, title, message, showToast);
   }
 }

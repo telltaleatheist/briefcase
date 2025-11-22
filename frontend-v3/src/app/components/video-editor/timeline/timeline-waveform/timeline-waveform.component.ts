@@ -25,7 +25,11 @@ export class TimelineWaveformComponent implements OnChanges, AfterViewInit {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['waveformData'] || changes['zoomState'] || changes['color']) {
+    if (changes['waveformData']) {
+      const current = changes['waveformData'].currentValue;
+      console.log(`[Waveform Component] Data changed:`, current?.samples?.length, 'samples');
+      this.drawWaveform();
+    } else if (changes['zoomState'] || changes['color']) {
       this.drawWaveform();
     }
   }
@@ -90,14 +94,25 @@ export class TimelineWaveformComponent implements OnChanges, AfterViewInit {
     ctx.fillStyle = this.color;
     ctx.globalAlpha = 0.6;
 
-    const barWidth = width / visibleSamples.length;
+    // Calculate time per sample and pixels per second
+    const timePerSample = this.waveformData.duration / this.waveformData.samples.length;
+    const pixelsPerSecond = width / visibleDuration;
 
     visibleSamples.forEach((sample, i) => {
-      const barHeight = sample * height * 0.8;
-      const x = i * barWidth;
-      const y = centerY - barHeight / 2;
+      // Calculate the actual time this sample represents
+      const sampleIndex = startSample + i;
+      const sampleTime = sampleIndex * timePerSample;
 
-      ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
+      // Calculate x position based on time offset from visible start
+      const timeOffset = sampleTime - visibleStart;
+      const x = timeOffset * pixelsPerSecond;
+
+      // Draw the bar
+      const barHeight = sample * height * 0.8;
+      const y = centerY - barHeight / 2;
+      const barWidth = Math.max(1, timePerSample * pixelsPerSecond);
+
+      ctx.fillRect(x, y, barWidth, barHeight);
     });
   }
 

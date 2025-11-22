@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { PathMappingService } from './path-mapping.service';
 import { DatabaseConflictService } from './database-conflict.service';
+import { ThumbnailService } from './thumbnail.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as lockfile from 'proper-lockfile';
@@ -31,8 +32,9 @@ export class SharedDatabaseService extends DatabaseService {
   constructor(
     private pathMapper: PathMappingService,
     private conflictService: DatabaseConflictService,
+    thumbnailService: ThumbnailService,
   ) {
-    super();
+    super(thumbnailService);
   }
 
   /**

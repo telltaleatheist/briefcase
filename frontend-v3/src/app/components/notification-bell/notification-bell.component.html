@@ -1,0 +1,88 @@
+<div class="notification-bell-container">
+  <!-- Bell Button -->
+  <button
+    class="bell-btn"
+    (click)="togglePanel()"
+    [class.has-unread]="unreadCount() > 0"
+    [attr.aria-label]="unreadCount() > 0 ? unreadCount() + ' unread notifications' : 'Notifications'"
+    title="Notifications"
+  >
+    <span class="bell-icon">🔔</span>
+    @if (unreadCount() > 0) {
+      <span class="unread-badge">{{ unreadCount() > 99 ? '99+' : unreadCount() }}</span>
+    }
+  </button>
+
+  <!-- Notification Panel -->
+  @if (panelOpen()) {
+    <div class="notification-panel">
+      <!-- Panel Header -->
+      <div class="panel-header">
+        <h3 class="panel-title">Notifications</h3>
+        <div class="panel-actions">
+          @if (notifications().length > 0) {
+            @if (unreadCount() > 0) {
+              <button class="text-btn" (click)="markAllAsRead()" title="Mark all as read">
+                Mark all read
+              </button>
+            }
+            <button class="text-btn danger" (click)="clearAll()" title="Clear all notifications">
+              Clear all
+            </button>
+          }
+        </div>
+      </div>
+
+      <!-- Notification List -->
+      <div class="notification-list">
+        @if (notifications().length === 0) {
+          <div class="empty-state">
+            <span class="empty-icon">🔕</span>
+            <p class="empty-text">No notifications</p>
+          </div>
+        } @else {
+          @for (notification of notifications(); track notification.id) {
+            <div
+              class="notification-item"
+              [class.unread]="!notification.read"
+              [class.clickable]="hasAction(notification)"
+              (click)="onNotificationClick(notification)"
+            >
+              <!-- Left: Icon and Content -->
+              <div class="notification-content">
+                <div class="notification-icon" [attr.data-type]="notification.type">
+                  {{ getNotificationIcon(notification.type) }}
+                </div>
+                <div class="notification-text">
+                  <div class="notification-title">{{ notification.title }}</div>
+                  <div class="notification-message">{{ notification.message }}</div>
+                  <div class="notification-timestamp">{{ formatTimestamp(notification.timestamp) }}</div>
+                </div>
+              </div>
+
+              <!-- Right: Actions -->
+              <div class="notification-actions">
+                @if (!notification.read) {
+                  <button
+                    class="icon-btn"
+                    (click)="markAsRead(notification, $event)"
+                    title="Mark as read"
+                  >
+                    <span class="action-icon">✓</span>
+                  </button>
+                }
+                <button
+                  class="icon-btn danger"
+                  (click)="deleteNotification(notification, $event)"
+                  title="Delete"
+                >
+                  <span class="action-icon">×</span>
+                </button>
+              </div>
+            </div>
+          }
+        }
+      </div>
+    </div>
+  }
+</div>

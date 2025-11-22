@@ -96,8 +96,9 @@ export class TimelineZoomBarComponent {
       const newOffset = Math.max(0, Math.min(rightEdge - 0.1, startOffset + deltaTime));
       // New visible duration is from new offset to fixed right edge
       const newVisibleDuration = rightEdge - newOffset;
-      // Calculate new zoom level
-      const newLevel = Math.max(1, Math.min(10, this.duration / newVisibleDuration));
+      // Calculate new zoom level - max zoom allows 5 seconds visible
+      const maxZoom = this.duration / 5;
+      const newLevel = Math.max(1, Math.min(maxZoom, this.duration / newVisibleDuration));
 
       this.zoomChange.emit({
         level: newLevel,
@@ -135,8 +136,9 @@ export class TimelineZoomBarComponent {
       const newRightEdge = Math.max(startOffset + 0.1, Math.min(this.duration, startRightEdge + deltaTime));
       // New visible duration
       const newVisibleDuration = newRightEdge - startOffset;
-      // Calculate new zoom level
-      const newLevel = Math.max(1, Math.min(10, this.duration / newVisibleDuration));
+      // Calculate new zoom level - max zoom allows 5 seconds visible
+      const maxZoom = this.duration / 5;
+      const newLevel = Math.max(1, Math.min(maxZoom, this.duration / newVisibleDuration));
 
       this.zoomChange.emit({
         level: newLevel,
@@ -154,7 +156,9 @@ export class TimelineZoomBarComponent {
   }
 
   zoomIn(): void {
-    const newLevel = Math.min(10, this.zoomState.level * 1.2);
+    // Calculate max zoom: should be able to fit 5 seconds on screen
+    const maxZoom = this.duration / 5;
+    const newLevel = Math.min(maxZoom, this.zoomState.level * 1.2);
     const visibleDuration = this.duration / newLevel;
     const maxOffset = this.duration - visibleDuration;
 

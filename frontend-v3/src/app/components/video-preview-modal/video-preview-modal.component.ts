@@ -28,12 +28,12 @@ export interface PreviewItem {
         </div>
 
         <div class="window-body">
-          <div class="media-container" [attr.data-media-id]="currentItem()?.id">
+          <div class="media-container" [attr.data-media-id]="currentItem().id">
             @if (isVideo()) {
               <video
                 #videoPlayer
                 [src]="mediaSrc()"
-                [attr.data-video-id]="currentItem()?.id"
+                [attr.data-video-id]="currentItem().id"
                 (loadedmetadata)="onVideoLoaded()"
                 (loadeddata)="onVideoLoadedData()"
                 (canplay)="onCanPlay()"
@@ -51,8 +51,8 @@ export interface PreviewItem {
               <img
                 #imageElement
                 [src]="mediaSrc()"
-                [attr.data-image-id]="currentItem()?.id"
-                [alt]="currentItem()?.name || 'Preview'"
+                [attr.data-image-id]="currentItem().id"
+                [alt]="currentItem().name || 'Preview'"
                 (error)="onMediaError($event)"
                 (load)="onImageLoaded()"
               />
@@ -60,7 +60,7 @@ export interface PreviewItem {
           </div>
 
           <div class="media-info">
-            <div class="filename">{{ currentItem()?.name || 'No file selected' }}</div>
+            <div class="filename">{{ currentItem().name || 'No file selected' }}</div>
             @if (isVideo()) {
               <div class="time-display">
                 {{ formatTime(currentTime()) }} / {{ formatTime(duration()) }}

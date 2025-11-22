@@ -27,6 +27,8 @@ export interface VideoItem {
   children?: VideoItem[]; // Populated child video objects
   parents?: VideoItem[]; // Populated parent video objects
   isGhost?: boolean; // True if this is a ghost item (shown in different week)
+  ghostType?: 'parent' | 'child'; // Type of ghost relationship
+  ghostRelatedName?: string; // Name of the related video (parent or child)
 }
 
 export interface VideoWeek {
