@@ -13,6 +13,8 @@ import {
 } from '../../models/task.model';
 import { QueueItemTask } from '../../models/queue.model';
 import { AiSetupService, AIAvailability } from '../../services/ai-setup.service';
+import { LibraryService } from '../../services/library.service';
+import { firstValueFrom } from 'rxjs';
 
 interface AIModelOption {
   value: string;
@@ -29,6 +31,7 @@ interface AIModelOption {
 })
 export class QueueItemConfigModalComponent implements OnInit {
   private aiSetupService = inject(AiSetupService);
+  private libraryService = inject(LibraryService);
 
   // Inputs
   isOpen = input<boolean>(false);
@@ -50,11 +53,16 @@ export class QueueItemConfigModalComponent implements OnInit {
   aiModels = signal<AIModelOption[]>([]);
   loadingModels = signal(false);
   defaultAIModel = 'ollama:qwen2.5:7b';
+  savedAsDefault = signal(false);
 
   constructor() {
-    // Re-initialize tasks when modal opens
+    // Re-initialize tasks when modal opens or when models finish loading
     effect(() => {
-      if (this.isOpen()) {
+      const isOpen = this.isOpen();
+      const loading = this.loadingModels();
+
+      // Only initialize when modal is open AND models are loaded
+      if (isOpen && !loading) {
         this.initializeTasks();
       }
     }, { allowSignalWrites: true });
@@ -108,7 +116,23 @@ export class QueueItemConfigModalComponent implements OnInit {
 
       this.aiModels.set(models);
 
-      // Set default model priority: largest local > claude > openai
+      // Try to load saved default from backend first
+      try {
+        const savedDefault = await firstValueFrom(this.libraryService.getDefaultAI());
+        if (savedDefault.success && savedDefault.defaultAI) {
+          const fullModelValue = `${savedDefault.defaultAI.provider}:${savedDefault.defaultAI.model}`;
+          // Check if the saved model is still available
+          if (models.some(m => m.value === fullModelValue)) {
+            this.defaultAIModel = fullModelValue;
+            console.log(`Using saved default AI model: ${fullModelValue}`);
+            return; // Exit early, we have our default
+          }
+        }
+      } catch (error) {
+        console.warn('Could not load saved default AI:', error);
+      }
+
+      // Fallback: Set default model priority: largest local > claude > openai
       if (models.length > 0) {
         // Try to get largest Ollama model first (prefer models with larger numbers)
         const ollamaModels = models.filter(m => m.provider === 'ollama');
@@ -157,6 +181,32 @@ export class QueueItemConfigModalComponent implements OnInit {
     return this.aiModels().some(m => m.provider === provider);
   }
 
+  async saveAsDefault(modelValue: string) {
+    try {
+      // Split the model value (e.g., "ollama:qwen2.5:7b" -> provider: "ollama", model: "qwen2.5:7b")
+      const [provider, ...modelParts] = modelValue.split(':');
+      const model = modelParts.join(':');
+
+      const result = await firstValueFrom(
+        this.libraryService.saveDefaultAI(provider, model)
+      );
+
+      if (result.success) {
+        console.log(`Saved ${modelValue} as default AI model`);
+        // Update the local default so new tasks use this model
+        this.defaultAIModel = modelValue;
+        // Show success feedback
+        this.savedAsDefault.set(true);
+        // Reset after 1 second
+        setTimeout(() => {
+          this.savedAsDefault.set(false);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Failed to save default AI:', error);
+    }
+  }
+
   initializeTasks() {
     const taskMap = new Map<TaskType, QueueItemTask>();
 
@@ -166,7 +216,20 @@ export class QueueItemConfigModalComponent implements OnInit {
     if (existing && existing.length > 0) {
       existing.forEach(task => {
         console.log('Adding task to map:', task.type, 'config:', task.config);
-        taskMap.set(task.type, { ...task });
+        const taskCopy = { ...task };
+
+        // Ensure ai-analyze task has the default AI model if not specified
+        if (task.type === 'ai-analyze') {
+          if (!task.config || !task.config['aiModel']) {
+            taskCopy.config = {
+              ...task.config,
+              aiModel: this.defaultAIModel
+            };
+            console.log('Set default AI model for ai-analyze task:', this.defaultAIModel);
+          }
+        }
+
+        taskMap.set(task.type, taskCopy);
       });
     }
 

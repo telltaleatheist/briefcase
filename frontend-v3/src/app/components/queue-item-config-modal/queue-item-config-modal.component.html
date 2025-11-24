@@ -102,6 +102,20 @@
                     </option>
                   </optgroup>
                 </select>
+                <button
+                  type="button"
+                  class="btn-save-default"
+                  [class.saved]="savedAsDefault()"
+                  (click)="saveAsDefault(getTaskConfig(task.type).aiModel)"
+                  [disabled]="loadingModels() || !getTaskConfig(task.type).aiModel || savedAsDefault()"
+                  [title]="savedAsDefault() ? 'Saved!' : 'Save this model as your default for future analysis'"
+                >
+                  @if (savedAsDefault()) {
+                    ✓ Saved!
+                  } @else {
+                    💾 Save as Default
+                  }
+                </button>
               </div>
               <div class="form-group">
                 <label>Custom Instructions (optional)</label>

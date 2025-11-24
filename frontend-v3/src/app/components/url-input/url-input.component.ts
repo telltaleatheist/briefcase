@@ -6,6 +6,8 @@ import { LibraryService } from '../../services/library.service';
 export interface UrlEntry {
   url: string;
   title: string;
+  duration?: string;
+  thumbnail?: string;
   loading: boolean;
 }
 
@@ -68,15 +70,17 @@ export class UrlInputComponent {
       this.urlInput.nativeElement.value = '';
     }
 
-    // Fetch actual titles in background and emit updates
+    // Fetch actual metadata in background and emit updates
     urls.forEach(async (url, index) => {
       try {
         const info = await this.fetchVideoInfo(url);
-        if (info.title && info.title !== entries[index].title) {
-          // Emit update with fetched title
+        // Emit update with fetched metadata (title, duration, thumbnail)
+        if (info.title && (info.title !== entries[index].title || info.duration || info.thumbnail)) {
           this.urlsAdded.emit([{
             url,
             title: info.title,
+            duration: info.duration,
+            thumbnail: info.thumbnail,
             loading: false
           }]);
         }
@@ -86,12 +90,16 @@ export class UrlInputComponent {
     });
   }
 
-  private async fetchVideoInfo(url: string): Promise<{ title: string }> {
+  private async fetchVideoInfo(url: string): Promise<{ title: string; duration?: string; thumbnail?: string }> {
     return new Promise((resolve, reject) => {
       this.libraryService.getVideoInfo(url).subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            resolve({ title: response.data.title });
+            resolve({
+              title: response.data.title,
+              duration: response.data.duration ? this.formatDuration(response.data.duration) : undefined,
+              thumbnail: response.data.thumbnail
+            });
           } else {
             reject(new Error('Failed to fetch video info'));
           }
@@ -99,6 +107,19 @@ export class UrlInputComponent {
         error: (error) => reject(error)
       });
     });
+  }
+
+  // Format duration from seconds to HH:MM:SS or MM:SS
+  private formatDuration(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    } else {
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
   }
 
   private isValidUrl(string: string): boolean {

@@ -147,28 +147,40 @@ export class FilenameDateUtil {
   }
 
   /**
-   * Update the title portion while preserving the date
-   * Ensures date stays at the front, no duplication
-   * IMPORTANT: Only adds a date if one already exists or uploadDate is provided.
+   * Update the title portion while handling date preservation
+   * Priority order:
+   * 1. Date in new title (if user explicitly provides one)
+   * 2. Provided uploadDate parameter
+   * 3. Date from old filename
+   * 4. No date
+   *
+   * IMPORTANT: If user provides a date in newTitle, that takes precedence.
+   * This allows users to change the upload date during rename.
    * Does NOT fall back to current date.
    */
   static updateTitle(filename: string, newTitle: string, uploadDate?: string): string {
     const ext = this.getExtension(filename);
-    const dateInfo = this.extractDateInfo(filename);
-
-    // Remove any date from the new title to avoid duplication
+    const oldDateInfo = this.extractDateInfo(filename);
     const newTitleInfo = this.extractDateInfo(newTitle);
     const cleanNewTitle = this.sanitizeTitle(newTitleInfo.title);
 
-    // Use existing date if available, otherwise use provided date
-    if (dateInfo.hasDate) {
-      return `${dateInfo.date} ${cleanNewTitle}${ext}`;
-    } else if (uploadDate) {
-      return `${uploadDate} ${cleanNewTitle}${ext}`;
-    } else {
-      // No date available - return title without date
-      return `${cleanNewTitle}${ext}`;
+    // Priority 1: If new title has a date, use that (user is explicitly setting a new date)
+    if (newTitleInfo.hasDate) {
+      return `${newTitleInfo.date} ${cleanNewTitle}${ext}`;
     }
+
+    // Priority 2: Use provided uploadDate parameter
+    if (uploadDate) {
+      return `${uploadDate} ${cleanNewTitle}${ext}`;
+    }
+
+    // Priority 3: Use date from old filename
+    if (oldDateInfo.hasDate) {
+      return `${oldDateInfo.date} ${cleanNewTitle}${ext}`;
+    }
+
+    // No date available - return title without date
+    return `${cleanNewTitle}${ext}`;
   }
 
   /**

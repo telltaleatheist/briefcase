@@ -146,23 +146,42 @@ export class TabsController {
 
   /**
    * POST /api/tabs/:id/videos
-   * Add a video to a tab
-   * Body: { videoId: string }
+   * Add one or more videos to a tab
+   * Body: { videoId: string | string[] }
    */
   @Post(':id/videos')
-  addVideoToTab(@Param('id') tabId: string, @Body() body: { videoId: string }) {
+  addVideoToTab(@Param('id') tabId: string, @Body() body: { videoId: string | string[] }) {
     try {
       if (!body.videoId) {
         throw new HttpException('Video ID is required', HttpStatus.BAD_REQUEST);
       }
-      const itemId = this.databaseService.addVideoToTab(tabId, body.videoId);
-      return { success: true, itemId };
+
+      const videoIds = Array.isArray(body.videoId) ? body.videoId : [body.videoId];
+      const results: { videoId: string; success: boolean; itemId?: string; error?: string }[] = [];
+
+      for (const videoId of videoIds) {
+        try {
+          const itemId = this.databaseService.addVideoToTab(tabId, videoId);
+          results.push({ videoId, success: true, itemId });
+        } catch (error: any) {
+          if (error?.message?.includes('already in this tab')) {
+            results.push({ videoId, success: false, error: 'Already in tab' });
+          } else {
+            results.push({ videoId, success: false, error: error.message || 'Unknown error' });
+          }
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      return {
+        success: successCount > 0,
+        results,
+        addedCount: successCount,
+        totalCount: videoIds.length
+      };
     } catch (error: any) {
       if (error instanceof HttpException) {
         throw error;
-      }
-      if (error?.message?.includes('already in this tab')) {
-        throw new HttpException(error.message, HttpStatus.CONFLICT);
       }
       this.logger.error(`Failed to add video to tab: ${error?.message}`);
       throw new HttpException(

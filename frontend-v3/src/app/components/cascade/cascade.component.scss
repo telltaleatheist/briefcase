@@ -56,7 +56,8 @@
 .library-content {
   flex: 1;
   min-height: 0;
-  position: relative;
+  display: flex;
+  flex-direction: column;
 
   // Empty state
   &.empty {
@@ -66,14 +67,16 @@
   }
 }
 
-// CDK Virtual Scroll - use absolute positioning for reliable height
+// CDK Virtual Scroll - use flexbox instead of absolute positioning
 cdk-virtual-scroll-viewport.library-content {
   @include custom-scrollbar;
-  position: absolute !important;
-  top: 53px; // Below toolbar
-  left: 0;
-  right: 0;
-  bottom: 0;
+  flex: 1;
+  min-height: 0;
+
+  // Add bottom padding so last item is fully visible
+  .cdk-virtual-scroll-content-wrapper {
+    padding-bottom: 24px;
+  }
 }
 
 // Week Header (Accordion) - Fixed height for virtual scroll
@@ -217,48 +220,59 @@ cdk-virtual-scroll-viewport.library-content {
     border-bottom: none;
   }
 
-  // Ghost item styling (compact, grayed out with lighter background)
+  // Ghost item styling (match processing queue item appearance)
   &.is-ghost {
     height: auto;
-    min-height: 40px;
-    opacity: 0.6;
-    background: var(--bg-hover);
+    min-height: 44px;
+    opacity: 0.75;
+    background: var(--bg-card);
     cursor: pointer;
     pointer-events: auto;
-    margin: 0;
-    margin-top: 2px; // Gap between ghost items
+    margin: 4px 12px;
+    padding: 8px 12px !important;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
 
     &:hover {
       background: var(--bg-secondary);
-      opacity: 0.75;
+      opacity: 0.85;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+      border-color: rgba(255, 107, 53, 0.3);
     }
 
     // Prevent selection
     &.selected {
-      background-color: var(--bg-hover);
-      box-shadow: none;
+      background-color: var(--bg-card);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
 
     // Match gap between relationship indicator and title to gap between ghost items
     .video-content {
-      gap: 2px;
+      gap: 4px;
     }
 
     .video-title {
       font-size: 12px;
       font-style: italic;
+      font-weight: 500;
       color: var(--text-secondary);
     }
 
     .video-meta {
       font-size: 10px;
     }
+
+    // Remove the status indicator for ghost items
+    .selection-indicator {
+      display: none;
+    }
   }
 
   // Child ghost indentation (deeper)
   &.is-ghost.is-child {
-    margin-left: 32px;
-    padding-left: 16px;
+    margin-left: 44px;
   }
 
   // Child video indentation
@@ -394,19 +408,26 @@ cdk-virtual-scroll-viewport.library-content {
 .ghost-relationship {
   display: flex;
   align-items: center;
-  gap: $spacing-xs;
+  gap: 6px;
+  padding: 3px 8px;
+  background: rgba(255, 107, 53, 0.08);
+  border-radius: 4px;
   font-size: 10px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 107, 53, 0.15);
+  width: fit-content;
 
   .ghost-icon {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: bold;
+    color: var(--primary-orange);
   }
 
   .ghost-label {
     text-transform: uppercase;
     font-weight: $font-weight-semibold;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.03em;
+    font-size: 9px;
   }
 }
 

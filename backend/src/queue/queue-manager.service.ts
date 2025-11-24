@@ -465,6 +465,7 @@ export class QueueManagerService implements OnModuleDestroy {
       this.eventService.emit('task.failed', {
         taskId,
         jobId: job.id,
+        videoId: job.videoId,
         type: task.type,
         error: {
           code: 'TASK_FAILED',
@@ -473,6 +474,13 @@ export class QueueManagerService implements OnModuleDestroy {
         canRetry: false,
         timestamp: new Date().toISOString(),
       });
+
+      // Remove failed job from queue after a delay (like completed jobs)
+      // This ensures the UI can show the failure state before removal
+      setTimeout(() => {
+        this.jobQueue.delete(job.id);
+        this.logger.log(`Removed failed job \${job.id} from queue`);
+      }, 5000);
     } finally {
       // Remove from pool
       if (pool === 'main') {

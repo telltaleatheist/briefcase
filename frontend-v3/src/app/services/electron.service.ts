@@ -6,6 +6,7 @@ interface ElectronAPI {
   openDirectoryPicker: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   showOpenDialog: (options: any) => Promise<{ canceled: boolean; filePaths: string[] }>;
   openFile: (filePath: string) => Promise<string>;
+  openMultipleFiles: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
   getBackendUrl: () => Promise<string>;
@@ -83,6 +84,23 @@ export class ElectronService {
       await window.electron!.openFile(filePath);
     } catch (error) {
       console.error('Error opening file:', error);
+    }
+  }
+
+  /**
+   * Open multiple files in their default application (as tabs if supported)
+   * On macOS, files will open as tabs in QuickTime if user has tab preference enabled
+   */
+  async openMultipleFiles(filePaths: string[]): Promise<void> {
+    if (!this.isElectron) {
+      console.warn('openMultipleFiles: Not running in Electron');
+      return;
+    }
+
+    try {
+      await window.electron!.openMultipleFiles(filePaths);
+    } catch (error) {
+      console.error('Error opening files:', error);
     }
   }
 

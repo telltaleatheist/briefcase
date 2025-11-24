@@ -97,20 +97,6 @@ async function downloadYtDlp() {
       fs.mkdirSync(BIN_DIR, { recursive: true });
     }
 
-    // Backup existing binaries
-    console.log('📦 Backing up existing binaries...');
-    const backupSuffix = `.backup.${Date.now()}`;
-    for (const platform of ['macos', 'linux', 'windows']) {
-      const filename = platform === 'windows' ? 'yt-dlp.exe' : `yt-dlp_${platform}`;
-      const filePath = path.join(BIN_DIR, filename);
-
-      if (fs.existsSync(filePath)) {
-        const backupPath = filePath + backupSuffix;
-        fs.copyFileSync(filePath, backupPath);
-        console.log(`   Backed up: ${filename} -> ${filename}${backupSuffix}`);
-      }
-    }
-
     // Download for each platform
     console.log('\n📥 Downloading yt-dlp binaries...\n');
 
@@ -176,8 +162,7 @@ async function downloadYtDlp() {
     console.log('\n╔═══════════════════════════════════════════════════════════╗');
     console.log('║              yt-dlp Download Complete! ✅                 ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
-    console.log('📁 Binaries saved to: utilities/bin/');
-    console.log('   (Compiled binaries backed up with .backup suffix)\n');
+    console.log('📁 Binaries saved to: utilities/bin/\n');
 
   } catch (error) {
     console.error('\n╔═══════════════════════════════════════════════════════════╗');

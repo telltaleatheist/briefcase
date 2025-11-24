@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, HostListener, ViewChild, ElementRef, AfterViewChecked, OnChanges, SimpleChanges, ChangeDetectorRef, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, HostListener, ViewChild, ElementRef, AfterViewChecked, OnChanges, SimpleChanges, ChangeDetectorRef, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model';
 
@@ -15,19 +15,51 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
         [style.top.px]="adjustedPosition.y"
         (click)="$event.stopPropagation()"
       >
-        @for (action of actions; track action.action) {
+        @for (action of actions; track action.action || action.label) {
           @if (action.divider) {
             <div class="context-menu-divider"></div>
           } @else {
             <button
               class="context-menu-item"
               [class.disabled]="action.disabled"
+              [class.has-submenu]="action.submenu && action.submenu.length > 0"
               [disabled]="action.disabled"
               (click)="onActionClick(action)"
+              (mouseenter)="onItemHover(action, $event)"
             >
               <span class="menu-icon">{{ action.icon }}</span>
               <span class="menu-label">{{ action.label }}</span>
+              @if (action.submenu && action.submenu.length > 0) {
+                <span class="menu-arrow">▶</span>
+              }
             </button>
+
+            <!-- Submenu -->
+            @if (action.submenu && action.submenu.length > 0 && hoveredAction() === action) {
+              <div
+                #submenuElement
+                class="context-submenu"
+                [style.left.px]="submenuPosition().x"
+                [style.top.px]="submenuPosition().y"
+                (click)="$event.stopPropagation()"
+              >
+                @for (subAction of action.submenu; track subAction.action || subAction.label) {
+                  @if (subAction.divider) {
+                    <div class="context-menu-divider"></div>
+                  } @else {
+                    <button
+                      class="context-menu-item"
+                      [class.disabled]="subAction.disabled"
+                      [disabled]="subAction.disabled"
+                      (click)="onActionClick(subAction)"
+                    >
+                      <span class="menu-icon">{{ subAction.icon }}</span>
+                      <span class="menu-label">{{ subAction.label }}</span>
+                    </button>
+                  }
+                }
+              </div>
+            }
           }
         }
       </div>
@@ -99,6 +131,29 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
       flex: 1;
     }
 
+    .menu-arrow {
+      margin-left: auto;
+      font-size: $font-size-xs;
+      color: var(--text-tertiary);
+      transition: transform $transition-fast;
+    }
+
+    .context-menu-item.has-submenu:hover .menu-arrow {
+      transform: translateX(2px);
+    }
+
+    .context-submenu {
+      position: fixed;
+      z-index: #{$z-popover + 1};
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: $radius-md;
+      box-shadow: $shadow-xl;
+      min-width: 200px;
+      padding: $spacing-xs;
+      animation: contextMenuAppear 0.15s ease-out;
+    }
+
     .context-menu-divider {
       height: 1px;
       background: var(--border-color);
@@ -116,8 +171,11 @@ export class ContextMenuComponent implements AfterViewChecked, OnChanges {
   @Output() closed = new EventEmitter<void>();
 
   @ViewChild('menuElement') menuElement?: ElementRef<HTMLDivElement>;
+  @ViewChild('submenuElement') submenuElement?: ElementRef<HTMLDivElement>;
 
   adjustedPosition: ContextMenuPosition = { x: 0, y: 0 };
+  submenuPosition = signal<ContextMenuPosition>({ x: 0, y: 0 });
+  hoveredAction = signal<ContextMenuAction | null>(null);
   private needsPositionRecalc = false;
 
   ngOnChanges(changes: SimpleChanges) {
@@ -183,8 +241,34 @@ export class ContextMenuComponent implements AfterViewChecked, OnChanges {
   }
 
 
+  onItemHover(action: ContextMenuAction, event: MouseEvent) {
+    if (action.submenu && action.submenu.length > 0 && !action.disabled) {
+      this.hoveredAction.set(action);
+
+      // Calculate submenu position
+      const menuItem = event.currentTarget as HTMLElement;
+      const rect = menuItem.getBoundingClientRect();
+      const menuRect = this.menuElement?.nativeElement.getBoundingClientRect();
+
+      if (menuRect) {
+        // Position submenu to the right of the menu item
+        const x = menuRect.right + 5;
+        const y = rect.top;
+
+        this.submenuPosition.set({ x, y });
+      }
+    } else {
+      this.hoveredAction.set(null);
+    }
+  }
+
   onActionClick(action: ContextMenuAction) {
-    if (!action.disabled) {
+    // Don't trigger action if it has a submenu (submenu items will trigger instead)
+    if (action.submenu && action.submenu.length > 0) {
+      return;
+    }
+
+    if (!action.disabled && action.action) {
       this.actionSelected.emit(action.action);
       this.close();
     }
@@ -192,6 +276,7 @@ export class ContextMenuComponent implements AfterViewChecked, OnChanges {
 
   close() {
     this.visible = false;
+    this.hoveredAction.set(null);
     this.closed.emit();
   }
 }

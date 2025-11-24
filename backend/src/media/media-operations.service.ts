@@ -616,6 +616,12 @@ export class MediaOperationsService {
         this.logger.log(`[${jobId || 'standalone'}] Saved AI description`);
       }
 
+      // Save suggested title
+      if (analysisResult.suggested_title) {
+        this.databaseService.updateVideoSuggestedTitle(videoId, analysisResult.suggested_title);
+        this.logger.log(`[${jobId || 'standalone'}] Saved suggested title: ${analysisResult.suggested_title}`);
+      }
+
       // Save analysis sections
       if (analysisResult.sections && Array.isArray(analysisResult.sections)) {
         for (const section of analysisResult.sections) {

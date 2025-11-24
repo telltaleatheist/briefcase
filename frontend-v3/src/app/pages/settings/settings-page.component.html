@@ -74,6 +74,59 @@
       </div>
     </section>
 
+    <!-- Default AI Model Section -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">🎯</div>
+        <div class="section-info">
+          <h2>Default AI Model</h2>
+          <p>Choose which AI model to use by default for video analysis</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        @if (loadingDefaultAI()) {
+          <div class="loading-state">Loading...</div>
+        } @else {
+          <div class="default-ai-selector">
+            <label class="input-label">Selected Model</label>
+            <select
+              class="model-select"
+              [value]="defaultAIModel() || ''"
+              (change)="saveDefaultAI($any($event.target).value)"
+              [disabled]="savingDefaultAI() || availableModels().length === 0"
+            >
+              <option value="" disabled>{{ availableModels().length === 0 ? 'No models available' : 'Select a model...' }}</option>
+              @for (model of availableModels(); track model.value) {
+                <option [value]="model.value">{{ model.label }}</option>
+              }
+            </select>
+
+            @if (savingDefaultAI()) {
+              <div class="save-indicator success">
+                <span class="indicator-icon">✓</span>
+                <span class="indicator-text">Saved!</span>
+              </div>
+            }
+
+            @if (defaultAIModel()) {
+              <div class="current-default-info">
+                <span class="info-icon">ℹ️</span>
+                <span>This model will be automatically selected when analyzing videos</span>
+              </div>
+            }
+          </div>
+
+          @if (availableModels().length === 0) {
+            <div class="warning-message">
+              <span class="warning-icon">⚠️</span>
+              <span>No AI models available. Set up an AI provider above first.</span>
+            </div>
+          }
+        }
+      </div>
+    </section>
+
     <!-- Analysis Categories Section -->
     <section class="settings-section">
       <div class="section-header">

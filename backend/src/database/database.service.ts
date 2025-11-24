@@ -1949,6 +1949,26 @@ export class DatabaseService {
   }
 
   /**
+   * Update video's upload date
+   */
+  updateVideoUploadDate(id: string, uploadDate: string | null) {
+    const db = this.ensureInitialized();
+
+    try {
+      db.prepare(
+        `UPDATE videos
+         SET upload_date = ?
+         WHERE id = ?`
+      ).run(uploadDate, id);
+
+      this.saveDatabase();
+    } catch (error) {
+      this.logger.error(`Failed to update upload date for video ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Update video's last processed date (set when any task completes on this video)
    */
   updateLastProcessedDate(id: string, date?: string) {

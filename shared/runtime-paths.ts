@@ -133,6 +133,16 @@ export function getRuntimePaths() {
         )
       : 'yt-dlp', // Use system yt-dlp in development
 
+    // Whisper from utilities folder (packaged) or system (development)
+    whisper: isPackaged()
+      ? path.join(
+          resourcesPath,
+          'utilities',
+          'bin',
+          process.platform === 'win32' ? 'whisper.exe' : 'whisper'
+        )
+      : 'whisper', // Use system whisper in development
+
     // Python from bundled runtime
     python: isPackaged()
       ? path.join(

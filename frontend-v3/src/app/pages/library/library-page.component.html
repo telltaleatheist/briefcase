@@ -63,6 +63,12 @@
     </button>
     <button
       class="tab"
+      [class.active]="activeTab() === 'tabs'"
+      (click)="setActiveTab('tabs')">
+      📑 Tabs
+    </button>
+    <button
+      class="tab"
       [class.active]="activeTab() === 'manager'"
       (click)="setActiveTab('manager')">
       🔧 Manager
@@ -77,38 +83,8 @@
   </div>
 
   <!-- Manager Toolbar (Manager Tab Only) -->
-  <div class="manager-toolbar" *ngIf="activeTab() === 'manager'">
-    <button
-      class="btn btn-secondary scan-btn"
-      [disabled]="isScanning()"
-      (click)="scanOrphanedFiles()">
-      <span class="btn-icon">📁</span>
-      <span>Scan Orphaned Files</span>
-    </button>
-    <button
-      class="btn btn-secondary scan-btn"
-      [disabled]="isScanning()"
-      (click)="scanOrphanedEntries()">
-      <span class="btn-icon">🗃️</span>
-      <span>Scan Orphaned Entries</span>
-    </button>
-    <button
-      class="btn btn-secondary scan-btn"
-      [disabled]="isScanning()"
-      (click)="scanDuplicates()">
-      <span class="btn-icon">🔍</span>
-      <span>Scan Duplicates</span>
-    </button>
-    <button
-      class="btn btn-secondary scan-btn"
-      (click)="openIgnoreFileModal()"
-      title="Edit ignore patterns">
-      <span class="btn-icon">🚫</span>
-      <span>Ignore Patterns</span>
-    </button>
-    <div class="scan-status" *ngIf="scanResults()">
-      <span class="status-text">{{ getScanResultSummary() }}</span>
-    </div>
+  <div class="manager-tab-container" *ngIf="activeTab() === 'manager'">
+    <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
   </div>
 
   <!-- URL Input Bar (Library Tab Only) -->
@@ -156,13 +132,12 @@
         (previewRequested)="onPreviewRequested($event)"
       />
 
-      <!-- Manager Tab: Scan Results Cascade -->
-      <app-cascade
-        *ngIf="activeTab() === 'manager'"
-        [weeks]="managerWeeks()"
-        [deleteMode]="'simple'"
-        (selectionChanged)="onManagerSelectionChanged($event)"
-        (videoAction)="onManagerAction($event)"
+      <!-- Tabs Tab: User-created tabs with videos -->
+      <app-tabs-tab
+        *ngIf="activeTab() === 'tabs'"
+        [onSelectionChanged]="onSelectionChanged.bind(this)"
+        [onVideoAction]="onVideoAction.bind(this)"
+        [onPreviewRequested]="onPreviewRequested.bind(this)"
       />
 
       <!-- Empty State - Library -->
@@ -177,30 +152,6 @@
             Paste URLs above, click Import Files, or drag and drop files here
           </span>
         </p>
-      </div>
-
-      <!-- Empty State - Manager -->
-      <div class="empty-state" *ngIf="activeTab() === 'manager' && !scanResults() && !isScanning()">
-        <div class="empty-icon">🔧</div>
-        <h3 class="empty-title">No scan results</h3>
-        <p class="empty-description">
-          Click one of the scan buttons above to analyze your library
-        </p>
-      </div>
-
-      <!-- Empty Results - Manager (after scan completes with no results) -->
-      <div class="empty-state" *ngIf="activeTab() === 'manager' && scanResults() && !hasManagerResults()">
-        <div class="empty-icon">✅</div>
-        <h3 class="empty-title">All clear!</h3>
-        <p class="empty-description">
-          No issues found in this scan
-        </p>
-      </div>
-
-      <!-- Loading State -->
-      <div class="loading-state" *ngIf="isScanning()">
-        <div class="spinner"></div>
-        <p>{{ getLoadingMessage() }}</p>
       </div>
     </div>
   </div>
@@ -245,8 +196,9 @@
   (selectionChanged)="onPreviewSelectionChanged($event)"
 />
 
-<!-- Ignore File Modal -->
-<app-ignore-file-modal
-  [show]="ignoreFileModalOpen()"
-  (closed)="onIgnoreFileModalClosed()"
+<!-- New Tab Dialog -->
+<app-new-tab-dialog
+  [show]="newTabDialogOpen()"
+  (created)="onNewTabCreated($event)"
+  (closed)="onNewTabDialogClosed()"
 />

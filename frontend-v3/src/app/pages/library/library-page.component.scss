@@ -44,6 +44,22 @@
   }
 }
 
+// Manager Tab Container
+.manager-tab-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+
+  app-manager-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+}
+
 // Manager Toolbar
 .manager-toolbar {
   display: flex;
@@ -200,6 +216,15 @@
 
   // Cascade component fills remaining space
   app-cascade {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 0; // Force flex to calculate height
+    overflow: hidden;
+  }
+
+  // Tabs tab component fills remaining space
+  app-tabs-tab {
     display: flex;
     flex: 1 1 0;
     min-height: 0;

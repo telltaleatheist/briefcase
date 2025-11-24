@@ -245,13 +245,44 @@ export class DownloaderService implements OnModuleInit {
           if (info && info.imageUrl) {
             // It's an image post, handle differently
             const result = await this.downloadRedditImage(info.imageUrl, info.title, downloadFolder, jobId);
-            
+
             // Add a flag to indicate this is an image
             return { ...result, isImage: true };
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
           this.logger.warn(`Failed to get Reddit info, trying regular download: ${errorMessage}`);
+        }
+      }
+
+      // Check if this is a direct Twitter image URL (pbs.twimg.com)
+      if (options.url.includes('pbs.twimg.com') || options.url.includes('twimg.com/media/')) {
+        this.logger.log('Detected direct Twitter image URL');
+        // Extract a title from the URL or use a default
+        const mediaId = options.url.match(/\/media\/([^?]+)/)?.[1] || 'twitter-image';
+        const title = options.displayName || `Twitter Image ${mediaId}`;
+
+        const result = await this.downloadTwitterImage(options.url, title, downloadFolder, jobId);
+        return { ...result, isImage: true };
+      }
+
+      // Check if this is a Twitter/X tweet with /photo/ - handle differently
+      if ((options.url.includes('twitter.com') || options.url.includes('x.com')) && options.url.includes('/photo/')) {
+        try {
+          const info = await this.getTwitterImageInfo(options.url);
+          if (info && info.imageUrl) {
+            // It's an image post, download the image directly
+            const result = await this.downloadTwitterImage(info.imageUrl, info.title, downloadFolder, jobId);
+
+            // Add a flag to indicate this is an image
+            return { ...result, isImage: true };
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
+          this.logger.warn(`Failed to get Twitter image info: ${errorMessage}`);
+          this.logger.warn(`Twitter image posts require the tweet URL, not the direct image URL`);
+          this.logger.warn(`Example: https://x.com/user/status/123... instead of https://pbs.twimg.com/...`);
+          // Continue with regular download attempt (will likely fail)
         }
       }
       
@@ -263,8 +294,12 @@ export class DownloaderService implements OnModuleInit {
       if (options.displayName) {
         // Use the pre-fetched and sanitized displayName from frontend metadata
         // This avoids the slow metadata re-fetch by yt-dlp and prevents "NA" titles
-        outputTemplate = path.join(downloadFolder, `${options.displayName}.%(ext)s`);
-        this.logger.log(`Using pre-fetched displayName for output: ${options.displayName}`);
+        // Prepend upload date if available
+        const displayNameWithDate = uploadDate
+          ? `${uploadDate} ${options.displayName}`
+          : options.displayName;
+        outputTemplate = path.join(downloadFolder, `${displayNameWithDate}.%(ext)s`);
+        this.logger.log(`Using pre-fetched displayName for output: ${displayNameWithDate}`);
       } else {
         // Fallback to yt-dlp's dynamic title extraction
         // Use current date as fallback if upload_date is not available
@@ -845,6 +880,188 @@ export class DownloaderService implements OnModuleInit {
         request.end();
       } catch (error) {
         this.logger.error('Error downloading Reddit image:', error);
+        const errorMsg = error instanceof Error ? (error as Error).message : 'Unknown error';
+        this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
+        reject({
+          success: false,
+          error: errorMsg
+        });
+      }
+    });
+  }
+
+  /**
+   * Get information about a Twitter/X post with an image
+   */
+  private async getTwitterImageInfo(url: string): Promise<{ imageUrl?: string, title: string }> {
+    try {
+      this.logger.log(`Fetching info for Twitter image URL: ${url}`);
+
+      // Use yt-dlp to get tweet metadata
+      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
+      ytDlpManager
+        .input(url)
+        .addOption('--dump-json')
+        .addOption('--simulate')
+        .addOption('--no-playlist');
+
+      try {
+        const output = await ytDlpManager.run();
+
+        if (output && output.trim()) {
+          const info = JSON.parse(output.trim());
+
+          if (info && info.title) {
+            const title = info.title;
+            this.logger.log(`Successfully fetched Twitter post title: ${title}`);
+
+            // Extract image URL from the tweet
+            // Twitter media is in the 'url' field when it's an image
+            if (info.url && (info.url.includes('pbs.twimg.com') || info.url.includes('twimg.com'))) {
+              const imageUrl = info.url;
+              this.logger.log(`Found image URL in tweet: ${imageUrl}`);
+              return { imageUrl, title };
+            }
+
+            // Check for thumbnails which might be the image
+            if (info.thumbnail) {
+              this.logger.log(`Found thumbnail URL: ${info.thumbnail}`);
+              return { imageUrl: info.thumbnail, title };
+            }
+          }
+        }
+      } catch (error) {
+        // If yt-dlp fails with "Media #X is not a video", extract info from error
+        const errorMessage = error instanceof Error ? (error as Error).message : String(error);
+        this.logger.warn(`yt-dlp execution failed: ${errorMessage}`);
+
+        // Try to use getVideoInfo to get just the title
+        try {
+          const videoInfo = await this.getVideoInfo(url);
+          if (videoInfo && videoInfo.title) {
+            // We have the title, but need to construct the image URL from the tweet
+            // Remove /photo/1 from URL to get base tweet URL
+            const baseTweetUrl = url.replace(/\/photo\/\d+$/, '');
+
+            this.logger.log(`Extracted title from tweet: ${videoInfo.title}`);
+            this.logger.log(`Note: Unable to extract image URL directly, would need to fetch from Twitter API`);
+
+            // For now, return title only - the download will fail but at least we tried
+            return { title: videoInfo.title };
+          }
+        } catch (infoError) {
+          this.logger.warn(`Could not get video info: ${infoError instanceof Error ? infoError.message : 'Unknown error'}`);
+        }
+
+        throw new Error(`Could not extract image URL or title from Twitter post. Error: ${errorMessage}`);
+      }
+
+      // Fallback
+      throw new Error('Could not extract Twitter image information');
+
+    } catch (error) {
+      this.logger.error(`Error in getTwitterImageInfo: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Download an image from Twitter/X directly
+   */
+  private async downloadTwitterImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string): Promise<DownloadResult> {
+    return new Promise((resolve, reject) => {
+      try {
+        // Create a safe filename from the title
+        const safeTitle = title.replace(/[^a-z0-9\s]/gi, '_').replace(/\s+/g, ' ').trim();
+
+        // Prepare a filename with current date like the video naming convention
+        const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+        // Twitter images are usually jpg, but check URL for extension
+        let ext = path.extname(imageUrl).toLowerCase();
+        // Remove query params from extension if present
+        if (ext.includes('?')) {
+          ext = ext.split('?')[0];
+        }
+        // Fallback to .jpg if no extension found
+        if (!ext || ext === '') {
+          ext = '.jpg';
+        }
+
+        const filename = `${date} ${safeTitle}${ext}`;
+        const outputPath = path.join(downloadFolder, filename);
+
+        this.logger.log(`Downloading Twitter image: ${imageUrl} to ${outputPath}`);
+        this.eventService.emitDownloadProgress(0, 'Downloading Image', jobId);
+
+        // Create the output directory if it doesn't exist
+        if (!fs.existsSync(downloadFolder)) {
+          fs.mkdirSync(downloadFolder, { recursive: true });
+        }
+
+        // Use https or http module to download the image
+        const httpModule = imageUrl.startsWith('https') ? require('https') : require('http');
+        const file = fs.createWriteStream(outputPath);
+
+        const request = httpModule.get(imageUrl, (response: any) => {
+          // Handle redirects
+          if (response.statusCode === 301 || response.statusCode === 302) {
+            const redirectUrl = response.headers.location;
+            this.logger.log(`Following redirect to: ${redirectUrl}`);
+            file.close();
+
+            // Try again with the new URL
+            this.downloadTwitterImage(redirectUrl, title, downloadFolder, jobId)
+              .then(resolve)
+              .catch(reject);
+            return;
+          }
+
+          // Check if we got a successful response
+          if (response.statusCode !== 200) {
+            file.close();
+            fs.unlinkSync(outputPath); // Clean up the empty file
+
+            const errorMsg = `HTTP error: ${response.statusCode} ${response.statusMessage}`;
+            this.logger.error(errorMsg);
+            this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
+            reject({ success: false, error: errorMsg });
+            return;
+          }
+
+          response.pipe(file);
+
+          // Handle progress (approximate since we don't know total size)
+          let receivedBytes = 0;
+          response.on('data', (chunk: any) => {
+            receivedBytes += chunk.length;
+            this.eventService.emitDownloadProgress(50, 'Downloading Image', jobId);
+          });
+
+          file.on('finish', () => {
+            file.close();
+            this.logger.log(`Image download completed: ${outputPath}`);
+            this.eventService.emitDownloadProgress(100, 'Completed', jobId);
+
+            // Add to history
+            this.addToHistory(outputPath, imageUrl);
+            this.eventService.emitDownloadCompleted(outputPath, imageUrl, jobId, true);
+
+            resolve({ success: true, outputFile: outputPath, isImage: true });
+          });
+        });
+
+        request.on('error', (err: any) => {
+          file.close();
+          fs.unlink(outputPath, () => {}); // Delete the file async
+          this.logger.error(`Image download failed: ${err.message}`);
+          this.eventService.emitDownloadFailed(imageUrl, err.message, jobId);
+          reject({ success: false, error: err.message });
+        });
+
+        request.end();
+      } catch (error) {
+        this.logger.error('Error downloading Twitter image:', error);
         const errorMsg = error instanceof Error ? (error as Error).message : 'Unknown error';
         this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
         reject({

@@ -23,7 +23,8 @@ export class LoggerService {
 
   constructor() {
     this.interceptConsole();
-    this.setupAutoSave();
+    // Auto-save disabled - logs only save when user clicks the save button
+    // this.setupAutoSave();
     this.setupBeforeUnload();
   }
 
@@ -140,5 +141,12 @@ export class LoggerService {
         console.error('Failed to save logs:', error);
       }
     });
+  }
+
+  ngOnDestroy() {
+    // Clean up auto-save interval if it exists
+    if (this.autoSaveInterval) {
+      clearInterval(this.autoSaveInterval);
+    }
   }
 }

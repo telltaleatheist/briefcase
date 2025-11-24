@@ -1,0 +1,43 @@
+<!-- Tabs Content -->
+<div class="tabs-content">
+  <!-- Header with New Tab Button -->
+  <div class="tabs-header">
+    <div class="header-info">
+      <h2 class="tabs-title">Video Tabs</h2>
+      <p class="tabs-subtitle" *ngIf="allTabs().length > 0">
+        {{ allTabs().length }} {{ allTabs().length === 1 ? 'tab' : 'tabs' }}
+      </p>
+    </div>
+    <button class="btn-new-tab" (click)="openNewTabDialog([])">
+      <span class="btn-icon">➕</span>
+      <span>New Tab</span>
+    </button>
+  </div>
+
+  <!-- Tabs Cascade -->
+  <app-cascade
+    *ngIf="tabWeeks().length > 0"
+    [weeks]="tabWeeks()"
+    [tabsMode]="true"
+    (selectionChanged)="handleSelectionChanged($event)"
+    (videoAction)="handleVideoAction($event)"
+    (headerAction)="handleHeaderAction($event)"
+    (previewRequested)="handlePreviewRequested($event)"
+  />
+
+  <!-- Empty State -->
+  <div class="empty-state" *ngIf="tabWeeks().length === 0">
+    <div class="empty-icon">📑</div>
+    <h3 class="empty-title">No tabs yet</h3>
+    <p class="empty-description">
+      Create tabs to organize your videos. Click "New Tab" above or right-click any video and select "Add to Tab" to get started.
+    </p>
+  </div>
+</div>
+
+<!-- New Tab Dialog -->
+<app-new-tab-dialog
+  [show]="newTabDialogOpen()"
+  (created)="onTabCreated($event)"
+  (closed)="newTabDialogOpen.set(false)"
+/>

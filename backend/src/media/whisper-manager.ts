@@ -27,32 +27,26 @@ export class WhisperManager extends EventEmitter {
 
   constructor(private readonly sharedConfigService: SharedConfigService) {
     super();
-    this.whisperPath = this.getWhisperPath();
+    this.whisperPath = this.sharedConfigService.getWhisperPath();
+    this.logger.log(`Using whisper binary at: ${this.whisperPath}`);
     this.detectWhisperVersion();
   }
 
-  private getWhisperPath(): string {
-    // Try environment variable first
-    if (process.env.WHISPER_PATH && fs.existsSync(process.env.WHISPER_PATH)) {
-      return process.env.WHISPER_PATH;
-    }
+  /**
+   * Get environment with ffmpeg in PATH
+   * The Whisper Python library needs ffmpeg to be available in PATH
+   */
+  private getEnvironmentWithFfmpeg(): NodeJS.ProcessEnv {
+    const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+    const ffmpegDir = path.dirname(ffmpegPath);
 
-    // Try standard installation paths
-    const possiblePaths = [
-      '/usr/local/bin/whisper',
-      '/usr/bin/whisper',
-      'C:\\Program Files\\whisper\\whisper.exe',
-      'whisper' // System PATH
-    ];
+    // Add ffmpeg directory to PATH
+    const env = { ...process.env };
+    const pathSeparator = process.platform === 'win32' ? ';' : ':';
+    env.PATH = `${ffmpegDir}${pathSeparator}${env.PATH || ''}`;
 
-    for (const path of possiblePaths) {
-      if (fs.existsSync(path)) {
-        return path;
-      }
-    }
-
-    // Default to system PATH
-    return 'whisper';
+    this.logger.log(`Added ffmpeg directory to PATH: ${ffmpegDir}`);
+    return env;
   }
 
   // Detect whisper command line format by running help
@@ -66,7 +60,7 @@ export class WhisperManager extends EventEmitter {
     }
 
     try {
-      exec(`${this.whisperPath} --help`, (error, stdout, stderr) => {
+      exec(`"${this.whisperPath}" --help`, (error, stdout, stderr) => {
         if (error) {
           this.logger.warn(`Error checking whisper version: ${(error as Error).message}`);
           return;
@@ -170,7 +164,9 @@ export class WhisperManager extends EventEmitter {
     this.logger.log(`Starting Whisper transcription: ${this.whisperPath} ${args.join(' ')}`);
 
     return new Promise<string>((resolve, reject) => {
-      this.currentProcess = spawn(this.whisperPath, args);
+      // Get environment with ffmpeg in PATH so Whisper can find it
+      const env = this.getEnvironmentWithFfmpeg();
+      this.currentProcess = spawn(this.whisperPath, args, { env });
 
       let stdoutBuffer = '';
       let stderrBuffer = '';
@@ -178,17 +174,24 @@ export class WhisperManager extends EventEmitter {
       this.currentProcess.stdout?.on('data', (data) => {
         const chunk = data.toString();
         stdoutBuffer += chunk;
+        this.logger.log(`[WHISPER STDOUT] ${chunk.trim()}`);
         this.parseProgress(chunk);
       });
 
       this.currentProcess.stderr?.on('data', (data) => {
         const chunk = data.toString();
         stderrBuffer += chunk;
+        this.logger.log(`[WHISPER STDERR] ${chunk.trim()}`);
         this.parseProgress(chunk);
       });
 
       this.currentProcess.on('close', (code) => {
         this.isRunning = false;
+        clearInterval(progressInterval);
+
+        this.logger.log(`Whisper process exited with code ${code}`);
+        this.logger.log(`Full stdout: ${stdoutBuffer.substring(0, 500)}`);
+        this.logger.log(`Full stderr: ${stderrBuffer.substring(0, 500)}`);
 
         if (this.aborted) {
           reject(new Error('Transcription was cancelled'));
@@ -202,32 +205,52 @@ export class WhisperManager extends EventEmitter {
             resolve(srtFile);
           } else {
             // Try to find any SRT file in the output directory
-            const files = fs.readdirSync(outputDir);
-            const srtFiles = files.filter(file => 
-              file.startsWith(basename) && file.endsWith('.srt')
-            );
-            
-            if (srtFiles.length > 0) {
-              const foundSrtFile = path.join(outputDir, srtFiles[0]);
-              this.logger.log(`Found SRT file with different name: ${foundSrtFile}`);
-              resolve(foundSrtFile);
-            } else {
-              // If still not found, check for .txt file and convert it
-              const txtFiles = files.filter(file => 
-                file.startsWith(basename) && file.endsWith('.txt')
-              );
-              
-              if (txtFiles.length > 0) {
-                const txtFile = path.join(outputDir, txtFiles[0]);
-                const convertedSrtFile = this.convertTxtToSrt(txtFile, srtFile);
-                if (convertedSrtFile) {
-                  resolve(convertedSrtFile);
-                } else {
-                  reject(new Error('Transcription completed but SRT file could not be created'));
-                }
-              } else {
-                reject(new Error('Transcription completed but no output file found'));
+            try {
+              this.logger.log(`Expected SRT file not found: ${srtFile}`);
+              this.logger.log(`Searching in output directory: ${outputDir}`);
+
+              // Verify output directory exists
+              if (!fs.existsSync(outputDir)) {
+                reject(new Error(`Output directory does not exist: ${outputDir}`));
+                return;
               }
+
+              const files = fs.readdirSync(outputDir);
+              this.logger.log(`Found ${files.length} files in output directory`);
+
+              const srtFiles = files.filter(file =>
+                file.startsWith(basename) && file.endsWith('.srt')
+              );
+
+              if (srtFiles.length > 0) {
+                const foundSrtFile = path.join(outputDir, srtFiles[0]);
+                this.logger.log(`Found SRT file with different name: ${foundSrtFile}`);
+                resolve(foundSrtFile);
+              } else {
+                // If still not found, check for .txt file and convert it
+                const txtFiles = files.filter(file =>
+                  file.startsWith(basename) && file.endsWith('.txt')
+                );
+
+                if (txtFiles.length > 0) {
+                  const txtFile = path.join(outputDir, txtFiles[0]);
+                  this.logger.log(`Found TXT file, converting to SRT: ${txtFile}`);
+                  const convertedSrtFile = this.convertTxtToSrt(txtFile, srtFile);
+                  if (convertedSrtFile) {
+                    resolve(convertedSrtFile);
+                  } else {
+                    reject(new Error('Transcription completed but SRT file could not be created'));
+                  }
+                } else {
+                  // Log all files found for debugging
+                  this.logger.error(`No matching output files found. All files in directory: ${files.join(', ')}`);
+                  this.logger.error(`Looking for files starting with: ${basename}`);
+                  reject(new Error(`Transcription completed but no output file found. Expected: ${srtFile}, Basename: ${basename}`));
+                }
+              }
+            } catch (error) {
+              this.logger.error(`Error reading output directory: ${(error as Error).message}`);
+              reject(new Error(`Failed to read output directory ${outputDir}: ${(error as Error).message}`));
             }
           }
         } else {
@@ -241,9 +264,10 @@ export class WhisperManager extends EventEmitter {
             ];
             
             this.emit('progress', { percent: 10, task: 'Retrying with simpler command...' });
-            
+
             // Execute whisper with simplified arguments
-            const simpleProcess = spawn(this.whisperPath, simpleArgs, { cwd: outputDir });
+            const env = this.getEnvironmentWithFfmpeg();
+            const simpleProcess = spawn(this.whisperPath, simpleArgs, { cwd: outputDir, env });
             
             let simpleStdoutBuffer = '';
             let simpleStderrBuffer = '';
@@ -300,6 +324,10 @@ export class WhisperManager extends EventEmitter {
 
       this.currentProcess.on('error', (err) => {
         this.isRunning = false;
+        clearInterval(progressInterval);
+        this.logger.error(`Failed to spawn whisper process: ${err.message}`);
+        this.logger.error(`Whisper path: ${this.whisperPath}`);
+        this.logger.error(`Whisper exists: ${fs.existsSync(this.whisperPath)}`);
         reject(new Error(`Failed to start Whisper: ${err.message}`));
       });
     });
@@ -351,7 +379,8 @@ export class WhisperManager extends EventEmitter {
    */
   private async getAudioDuration(audioFile: string): Promise<number> {
     return new Promise((resolve) => {
-      exec(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioFile}"`, (error, stdout) => {
+      const ffprobePath = this.sharedConfigService.getFfprobePath();
+      exec(`"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioFile}"`, (error, stdout) => {
         if (error) {
           this.logger.warn(`Could not get audio duration: ${error.message}`);
           resolve(180); // Default to 3 minutes if we can't detect
@@ -389,6 +418,12 @@ export class WhisperManager extends EventEmitter {
     // Log output for debugging
     if (output.trim().length > 0) {
       this.logger.debug(`Whisper: ${output.trim()}`);
+    }
+
+    // Skip model download progress bars (they contain | and iB/s)
+    // Example: "5%|█▉| 3.84M/72.1M [00:00<00:01, 40.3MiB/s]"
+    if (output.includes('|') && output.includes('iB/s')) {
+      return;
     }
 
     // Check for explicit percentage in output

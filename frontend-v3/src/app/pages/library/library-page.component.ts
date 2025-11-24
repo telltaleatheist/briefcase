@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, computed, ViewChild, effect } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, ChangeDetectorRef, computed, ViewChild, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
@@ -10,18 +10,21 @@ import { UrlInputComponent, UrlEntry } from '../../components/url-input/url-inpu
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
-import { IgnoreFileModalComponent } from '../../components/ignore-file-modal/ignore-file-modal.component';
+import { ManagerTabComponent } from '../../components/manager-tab/manager-tab.component';
+import { TabsTabComponent } from '../../components/tabs-tab/tabs-tab.component';
+import { NewTabDialogComponent } from '../../components/new-tab-dialog/new-tab-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
 import { QueueItemTask } from '../../models/queue.model';
 import { TaskType, AVAILABLE_TASKS } from '../../models/task.model';
 import { LibraryService } from '../../services/library.service';
-import { WebsocketService, TaskCompleted, TaskProgress } from '../../services/websocket.service';
+import { WebsocketService, TaskCompleted, TaskProgress, TaskFailed, AnalysisCompleted } from '../../services/websocket.service';
 import { VideoProcessingService } from '../../services/video-processing.service';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { VideoJobSettings } from '../../models/video-processing.model';
-import { VideoManagerService, UnimportedVideo, MissingFile, DuplicateEntry } from '../../services/video-manager.service';
 import { NotificationService } from '../../services/notification.service';
+import { TabsService } from '../../services/tabs.service';
+import { FileImportService } from '../../services/file-import.service';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -56,7 +59,9 @@ export interface ProcessingTask {
     QueueItemConfigModalComponent,
     AiSetupWizardComponent,
     VideoPreviewModalComponent,
-    IgnoreFileModalComponent
+    ManagerTabComponent,
+    TabsTabComponent,
+    NewTabDialogComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
@@ -69,14 +74,20 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private websocketService = inject(WebsocketService);
   private videoProcessingService = inject(VideoProcessingService);
   private aiSetupService = inject(AiSetupService);
-  private videoManagerService = inject(VideoManagerService);
   private notificationService = inject(NotificationService);
+  private tabsService = inject(TabsService);
+  private fileImportService = inject(FileImportService);
+  private cdr = inject(ChangeDetectorRef);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
   @ViewChild(UrlInputComponent) private urlInputComponent?: UrlInputComponent;
+  @ViewChild(TabsTabComponent) private tabsTabComponent?: TabsTabComponent;
 
   // File input for import button
   private fileInput?: HTMLInputElement;
+
+  // Track videos with pending renames to avoid race conditions
+  private pendingRenames = new Set<string>();
 
   // Drag and drop state
   isDraggingOver = signal(false);
@@ -225,21 +236,15 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   previewItems = signal<PreviewItem[]>([]);
   previewSelectedId = signal<string | undefined>(undefined);
 
-  // Ignore file modal state
-  ignoreFileModalOpen = signal(false);
+  // New tab dialog state
+  newTabDialogOpen = signal(false);
+  newTabPendingVideos = signal<string[]>([]);
 
   // Filters
   currentFilters: LibraryFilters | null = null;
 
-  // Manager Tab State
-  activeTab = signal<'library' | 'manager'>('library');
-  isScanning = signal(false);
-  scanningOperation = signal<'scanning' | 'importing' | 'relinking'>('scanning');
-  scanResults = signal<{
-    type: 'orphaned-files' | 'orphaned-entries' | 'duplicates';
-    data: UnimportedVideo[] | MissingFile[] | DuplicateEntry[];
-  } | null>(null);
-  managerSelectedIds = signal<Set<string>>(new Set());
+  // Tab State
+  activeTab = signal<'library' | 'tabs' | 'manager'>('library');
 
   // Default task settings (loaded from localStorage)
   private defaultTaskSettings: QueueItemTask[] = [];
@@ -289,9 +294,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // Update queue item task status first
       this.updateQueueTaskStatus(frontendJobId, event.type, 'completed', 100);
 
+      // Store videoId in queue item if available (download/import tasks)
+      if (event.videoId) {
+        this.storeVideoIdInQueueItem(frontendJobId, event.jobId, event.videoId);
+      }
+
       // Refresh library when a task completes
+      // Skip if there's a pending rename for this video to avoid race conditions
       if (event.type === 'analyze' || event.type === 'transcribe' || event.type === 'import' || event.type === 'download') {
-        this.loadCurrentLibrary();
+        if (event.videoId && this.pendingRenames.has(event.videoId)) {
+          console.log('Skipping library refresh - pending rename for videoId:', event.videoId);
+        } else {
+          this.loadCurrentLibrary();
+        }
       }
 
       // Check if all tasks are complete and remove from queue
@@ -346,10 +361,55 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
+    // Task failed - show notification and mark as failed
+    this.websocketService.onTaskFailed((event: TaskFailed) => {
+      console.log('Task failed:', event);
+
+      // Translate backend job ID to frontend job ID
+      const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
+
+      // Update queue item task status to failed
+      if (event.type) {
+        this.updateQueueTaskStatus(frontendJobId, event.type, 'failed', 0);
+      }
+
+      // Show notification to user
+      const errorMessage = event.error?.message || 'Unknown error';
+      this.notificationService.error(
+        `Task failed: ${event.type}`,
+        errorMessage,
+        true  // showToast
+      );
+
+      // Find and mark the entire queue item as failed if all tasks are done
+      const queue = this.processingQueue();
+      const item = queue.find(q => q.jobId === frontendJobId || q.backendJobId === event.jobId);
+
+      if (item) {
+        const allTasksDone = item.tasks.every(t =>
+          t.status === 'completed' || t.status === 'failed'
+        );
+
+        if (allTasksDone) {
+          // Remove failed item after a delay
+          setTimeout(() => {
+            this.removeFromQueue(item.id);
+          }, 3000);
+        }
+      }
+    });
+
     // Video renamed - update video list
     this.websocketService.onVideoRenamed((event) => {
       console.log('Video renamed event received:', event);
       this.updateVideoName(event.videoId, event.newFilename);
+    });
+
+    // Analysis completed - update video with suggested title
+    this.websocketService.onAnalysisCompleted((event) => {
+      console.log('Analysis completed event received:', event);
+      this.updateVideoSuggestedTitle(event.videoId, event.suggestedTitle, event.aiDescription);
+      this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
     });
 
     // Check for navigation state to trigger analysis
@@ -642,6 +702,54 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  // Update video suggested title in the library when analysis completes via WebSocket
+  private updateVideoSuggestedTitle(videoId: string, suggestedTitle: string, aiDescription: string) {
+    const weeks = this.videoWeeks();
+    let updated = false;
+
+    // Find and update the video in the weeks array
+    const updatedWeeks = weeks.map(week => {
+      const videos = week.videos.map(video => {
+        if (video.id === videoId) {
+          updated = true;
+          return {
+            ...video,
+            suggestedFilename: suggestedTitle,
+            aiDescription: aiDescription,
+            hasAnalysis: true
+          };
+        }
+        return video;
+      });
+      return { ...week, videos };
+    });
+
+    if (updated) {
+      this.videoWeeks.set(updatedWeeks);
+      console.log(`Updated video ${videoId} with suggested title: ${suggestedTitle}`);
+
+      // Also update filtered weeks if they exist
+      const filtered = this.filteredWeeks();
+      if (filtered.length > 0) {
+        const updatedFiltered = filtered.map(week => {
+          const videos = week.videos.map(video => {
+            if (video.id === videoId) {
+              return {
+                ...video,
+                suggestedFilename: suggestedTitle,
+                aiDescription: aiDescription,
+                hasAnalysis: true
+              };
+            }
+            return video;
+          });
+          return { ...week, videos };
+        });
+        this.filteredWeeks.set(updatedFiltered);
+      }
+    }
+  }
+
   // Update queue task status from websocket events
   private updateQueueTaskStatus(jobId: string, taskType: string, status: 'pending' | 'running' | 'completed' | 'failed', progress: number) {
     const queue = this.processingQueue();
@@ -731,6 +839,72 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     return mapping[type] || 'download-import';
   }
 
+  // Store videoId in queue item when download/import completes
+  private storeVideoIdInQueueItem(frontendJobId: string, backendJobId: string, videoId: string): void {
+    const queue = this.processingQueue();
+
+    // Find item by frontend job ID
+    let itemIndex = queue.findIndex(q => q.jobId === frontendJobId);
+
+    // If not found, try backend job ID
+    if (itemIndex === -1) {
+      itemIndex = queue.findIndex(q => q.backendJobId === backendJobId);
+    }
+
+    // If still not found, try localStorage mapping
+    if (itemIndex === -1) {
+      try {
+        const mapping = localStorage.getItem('clipchimp-job-id-mapping');
+        if (mapping) {
+          const jobIdMap: Record<string, string> = JSON.parse(mapping);
+          const mappedFrontendId = jobIdMap[backendJobId];
+          if (mappedFrontendId) {
+            itemIndex = queue.findIndex(q => q.jobId === mappedFrontendId);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load job ID mapping:', e);
+      }
+    }
+
+    if (itemIndex !== -1) {
+      const newQueue = [...queue];
+      newQueue[itemIndex] = { ...newQueue[itemIndex], videoId };
+      this.processingQueue.set(newQueue);
+      console.log('Stored videoId in queue item:', videoId, 'for job:', frontendJobId);
+    }
+  }
+
+  // Rename video file after download completes and title is fetched
+  private renameDownloadedVideo(videoId: string, newTitle: string): void {
+    // Extract filename from title (remove extension if present, add .mp4)
+    const cleanTitle = newTitle.replace(/\.(mp4|mov|avi|mkv|webm)$/i, '');
+    const filename = `${cleanTitle}.mp4`;
+
+    // Track this rename to prevent race conditions with library refresh
+    this.pendingRenames.add(videoId);
+    console.log('Starting rename for videoId:', videoId, 'to:', filename);
+
+    this.libraryService.renameVideoFile(videoId, filename).subscribe({
+      next: (response) => {
+        if (response.success) {
+          console.log('Video renamed successfully:', filename);
+          // Remove from pending renames
+          this.pendingRenames.delete(videoId);
+          // Refresh library to show updated filename
+          this.loadCurrentLibrary();
+        } else {
+          console.error('Failed to rename video:', response.error);
+          this.pendingRenames.delete(videoId);
+        }
+      },
+      error: (error) => {
+        console.error('Error renaming video:', error);
+        this.pendingRenames.delete(videoId);
+      }
+    });
+  }
+
   // Handle URLs added from input
   onUrlsAdded(entries: UrlEntry[]) {
     // Create a new array to avoid mutating the original
@@ -755,10 +929,23 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           tasks
         });
       } else {
-        // Title update - find and update existing item
+        // Metadata update - find and update existing item
         const itemIndex = queue.findIndex(q => q.url === entry.url);
         if (itemIndex !== -1) {
-          queue[itemIndex] = { ...queue[itemIndex], title: entry.title };
+          const item = queue[itemIndex];
+          // Update all metadata fields
+          queue[itemIndex] = {
+            ...item,
+            title: entry.title,
+            duration: entry.duration || item.duration,
+            thumbnail: entry.thumbnail || item.thumbnail
+          };
+
+          // If download already completed (videoId exists), rename the file
+          if (item.videoId && entry.title !== item.title) {
+            console.log('Title updated after download - renaming file:', item.videoId, 'to:', entry.title);
+            this.renameDownloadedVideo(item.videoId, entry.title);
+          }
         }
       }
     }
@@ -842,7 +1029,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       fixAspectRatio: false,
       normalizeAudio: false,
       transcribe: false,
-      whisperModel: 'base',
+      whisperModel: 'tiny',
       aiAnalysis: false,
       outputFormat: 'mp4',
       outputQuality: 'high'
@@ -1335,6 +1522,16 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onSelectionChanged(event: { count: number; ids: Set<string> }) {
     this.selectedCount.set(event.count);
     this.selectedVideoIds.set(event.ids);
+
+    // If preview modal is open and a single item is selected, update the preview
+    if (this.previewModalOpen() && event.count === 1) {
+      const itemId = Array.from(event.ids)[0];
+      // Extract video ID from itemId format: "weekLabel|videoId"
+      const videoId = itemId.split('|')[1];
+      if (videoId) {
+        this.previewSelectedId.set(videoId);
+      }
+    }
   }
 
   onVideoAction(event: { action: string; videos: VideoItem[] }) {
@@ -1383,10 +1580,23 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.notificationService.info('Coming Soon', 'This feature will show video metadata, transcript, and analysis.');
         break;
 
+      case 'addToNewTab':
+        // Open new tab dialog directly in library page
+        this.openNewTabDialog(videosToProcess.map(v => v.id));
+        break;
+
       case 'addToTab':
-        // TODO: Open tab selector dialog
-        console.log('Add to tab:', videosToProcess.map(v => v.name));
-        this.notificationService.info('Coming Soon', 'This feature will open a dialog to select or create a tab.');
+        // This shouldn't be called directly anymore (submenu items handle it)
+        console.warn('addToTab called without tab ID');
+        break;
+
+      case 'removeFromTab':
+        // Remove from tab - only works when viewing tabs tab
+        if (this.tabsTabComponent) {
+          this.tabsTabComponent.removeVideosFromCurrentTab(videosToProcess.map(v => v.id));
+        } else {
+          console.warn('Cannot remove from tab - not on tabs view');
+        }
         break;
 
       case 'analyze':
@@ -1412,7 +1622,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         if (action.startsWith('delete:')) {
           const mode = action.replace('delete:', '') as 'database-only' | 'file-only' | 'everything';
           this.deleteVideos(videosToProcess, mode);
-        } else {
+        }
+        // Check for addToTab:tabId pattern
+        else if (action.startsWith('addToTab:')) {
+          const tabId = action.replace('addToTab:', '');
+          // Add videos to existing tab directly
+          this.addVideosToTab(tabId, videosToProcess.map(v => v.id));
+        }
+        else {
           console.warn('Unknown video action:', action);
         }
     }
@@ -1507,8 +1724,44 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private analyzeVideos(videos: VideoItem[]) {
     if (videos.length === 0) return;
 
+    // Filter out non-video files (images, PDFs, etc.)
+    // Transcribe and AI analysis only work on video/audio files
+    const videoOnlyItems = videos.filter(video => {
+      const mediaType = video.mediaType?.toLowerCase() || '';
+      const ext = video.fileExtension?.toLowerCase() || '';
+      const fileName = video.name?.toLowerCase() || '';
+
+      // List of non-video extensions to exclude
+      const nonVideoExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.pdf', '.doc', '.docx', '.txt', '.md'];
+
+      // Check if it's a non-video file
+      const isNonVideo = mediaType.startsWith('image/') ||
+                         mediaType === 'application/pdf' ||
+                         nonVideoExtensions.some(e => ext === e || fileName.endsWith(e));
+
+      return !isNonVideo;
+    });
+
+    // Show notification if some items were filtered out
+    if (videoOnlyItems.length < videos.length) {
+      const filtered = videos.length - videoOnlyItems.length;
+      this.notificationService.warning(
+        'Non-video Files Excluded',
+        `${filtered} image${filtered !== 1 ? 's' : ''} or document${filtered !== 1 ? 's' : ''} cannot be transcribed or analyzed. Only video files were added.`
+      );
+    }
+
+    // If all items were filtered out, don't proceed
+    if (videoOnlyItems.length === 0) {
+      this.notificationService.error(
+        'No Videos Selected',
+        'Transcription and analysis only work on video files. Please select at least one video.'
+      );
+      return;
+    }
+
     // Store videos pending configuration (not added to queue yet)
-    this.pendingConfigVideos.set(videos);
+    this.pendingConfigVideos.set(videoOnlyItems);
 
     // Clear selection
     if (this.cascadeComponent) {
@@ -1521,7 +1774,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         type: 'transcribe',
         status: 'pending',
         progress: 0,
-        config: { model: 'base' }
+        config: { model: 'tiny' }
       },
       {
         type: 'ai-analyze',
@@ -1829,25 +2082,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Open file picker dialog for importing media files using Electron IPC
    */
   async openImportDialog() {
-    try {
-      // Use Electron's file dialog which gives us file paths
-      const result = await (window as any).electron?.openFiles({
-        properties: ['openFile', 'multiSelections'],
-        filters: [
-          { name: 'Media Files', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mp3', 'm4a', 'wav'] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
-      });
-
-      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return;
-      }
-
-      console.log('Selected files:', result.filePaths);
-      await this.importFilesByPath(result.filePaths);
-    } catch (error) {
-      console.error('Failed to open file dialog:', error);
-      console.error('Make sure Electron IPC is available');
+    const filePaths = await this.fileImportService.openFileDialog();
+    if (filePaths && filePaths.length > 0) {
+      await this.fileImportService.importFilesByPath(filePaths, () => this.loadLibrary());
     }
   }
 
@@ -1863,26 +2100,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files);
-    const filePaths: string[] = [];
+    const filePaths = await this.fileImportService.getFilePathsFromFiles(fileArray);
 
-    // Use Electron's webUtils.getPathForFile to get file paths
-    try {
-      for (const file of fileArray) {
-        const path = (window as any).electron?.getFilePathFromFile(file);
-        if (path) {
-          filePaths.push(path);
-          console.log('Got file path:', path);
-        }
-      }
-
-      if (filePaths.length > 0) {
-        console.log('Importing dropped files:', filePaths);
-        await this.importFilesByPath(filePaths);
-      } else {
-        console.error('Could not get file paths from dropped files');
-      }
-    } catch (error) {
-      console.error('Error getting file paths:', error);
+    if (filePaths.length > 0) {
+      console.log('Importing dropped files:', filePaths);
+      await this.fileImportService.importFilesByPath(filePaths, () => this.loadLibrary());
+    } else {
+      console.error('Could not get file paths from dropped files');
     }
   }
 
@@ -1905,561 +2129,103 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Process selected files and add to queue
+   * Switch between Library, Tabs, and Manager tabs
    */
-  private async handleFiles(files: File[]) {
-    // Filter for video/audio files
-    const mediaFiles = files.filter(file =>
-      file.type.startsWith('video/') || file.type.startsWith('audio/')
-    );
-
-    if (mediaFiles.length === 0) {
-      this.notificationService.warning('No Media Files', 'No valid video or audio files found. Please select media files.');
-      return;
-    }
-
-    if (mediaFiles.length !== files.length) {
-      this.notificationService.info('Files Filtered', `Selected ${mediaFiles.length} media file(s) out of ${files.length} total files.`);
-    }
-
-    console.log('Importing files:', mediaFiles.map(f => f.name));
-
-    // Import files immediately (copy to library and scan)
-    await this.importFilesToLibrary(mediaFiles);
-  }
-
-  /**
-   * Import files by file path using Electron IPC
-   */
-  private async importFilesByPath(filePaths: string[]) {
-    try {
-      console.log('Importing files:', filePaths);
-
-      // Use Electron IPC to import files
-      const response = await (window as any).electron?.importFiles(filePaths);
-
-      console.log('Import response:', response);
-
-      if (response?.success) {
-        // Reload library to show newly imported files
-        this.loadLibrary();
-
-        const successCount = response.results?.filter((r: any) => r.success).length || 0;
-        console.log(`✓ Successfully imported ${successCount} of ${filePaths.length} file(s)`);
-      } else {
-        console.error('Import failed:', response);
-        if (response?.results) {
-          response.results.forEach((r: any) => {
-            if (!r.success) {
-              console.error(`Failed to import ${r.filePath}: ${r.error}`);
-            }
-          });
-        }
-      }
-    } catch (error: any) {
-      console.error('Import error:', error);
-    }
-  }
-
-  /**
-   * Import files to library - copy to clips folder and scan into database
-   */
-  private async importFilesToLibrary(files: File[]) {
-    try {
-      // Get file paths from File objects using Electron's webUtils
-      const filePaths: string[] = [];
-
-      for (const file of files) {
-        const path = (window as any).electron?.getFilePathFromFile(file);
-        if (path) {
-          filePaths.push(path);
-        }
-      }
-
-      if (filePaths.length > 0) {
-        await this.importFilesByPath(filePaths);
-      } else {
-        console.error('Could not get file paths from File objects');
-      }
-    } catch (error) {
-      console.error('Import error:', error);
-    }
-  }
-
-  // ========================================
-  // Manager Tab Methods
-  // ========================================
-
-  /**
-   * Check if manager has results to display
-   */
-  hasManagerResults = computed(() => {
-    const weeks = this.managerWeeks();
-    return weeks.length > 0 && weeks[0].videos.length > 0;
-  });
-
-  /**
-   * Computed property that converts scan results to VideoWeek format for cascade
-   */
-  managerWeeks = computed<VideoWeek[]>(() => {
-    const results = this.scanResults();
-    if (!results) return [];
-
-    const videos: VideoItem[] = [];
-
-    if (results.type === 'orphaned-files') {
-      const data = results.data as UnimportedVideo[];
-      videos.push(...data.map(file => {
-        const isDuplicateContent = (file as any).isDuplicateContent;
-        const duplicateOf = (file as any).duplicateOf;
-
-        return {
-          id: file.fullPath,
-          name: file.filename,
-          filePath: file.fullPath,
-          tags: isDuplicateContent ? ['orphaned-file', 'duplicate-content'] : ['orphaned-file'],
-          isDuplicate: isDuplicateContent,
-          suggestedTitle: isDuplicateContent
-            ? `⚠️ Duplicate of "${duplicateOf?.filename}" (consider deleting this file)`
-            : undefined
-        };
-      }));
-    } else if (results.type === 'orphaned-entries') {
-      const data = results.data as MissingFile[];
-      videos.push(...data.map(entry => ({
-        id: entry.id,
-        name: entry.filename,
-        filePath: entry.current_path,
-        uploadDate: entry.upload_date ? new Date(entry.upload_date) : undefined,
-        downloadDate: entry.download_date ? new Date(entry.download_date) : undefined,
-        tags: ['orphaned-entry']
-      })));
-    } else if (results.type === 'duplicates') {
-      const data = results.data as any[]; // Backend returns flat array of duplicate entries
-      videos.push(...data.map(entry => ({
-        id: entry.id,
-        name: entry.filename,
-        filePath: entry.current_path,
-        uploadDate: entry.upload_date ? new Date(entry.upload_date) : undefined,
-        downloadDate: entry.download_date ? new Date(entry.download_date) : undefined,
-        tags: ['duplicate'],
-        suggestedTitle: `Duplicate (${entry.duplicate_count} total copies of this file)`
-      })));
-    }
-
-    return [{
-      weekLabel: this.getScanTypeLabel(results.type),
-      videos
-    }];
-  });
-
-  /**
-   * Get human-readable label for scan type
-   */
-  private getScanTypeLabel(type: string): string {
-    switch (type) {
-      case 'orphaned-files': return 'Orphaned Files (Not in Database)';
-      case 'orphaned-entries': return 'Orphaned Entries (File Missing)';
-      case 'duplicates': return 'Duplicate Entries';
-      default: return 'Scan Results';
-    }
-  }
-
-  /**
-   * Get summary text for scan results
-   */
-  getScanResultSummary(): string {
-    const results = this.scanResults();
-    if (!results) return '';
-
-    const count = this.managerWeeks()[0]?.videos.length || 0;
-
-    switch (results.type) {
-      case 'orphaned-files':
-        return `Found ${count} file${count !== 1 ? 's' : ''} not in database`;
-      case 'orphaned-entries':
-        return `Found ${count} database entr${count !== 1 ? 'ies' : 'y'} with missing files`;
-      case 'duplicates':
-        return `Found ${count} duplicate entr${count !== 1 ? 'ies' : 'y'}`;
-      default:
-        return `Found ${count} item${count !== 1 ? 's' : ''}`;
-    }
-  }
-
-  /**
-   * Get loading message based on current operation
-   */
-  getLoadingMessage(): string {
-    switch (this.scanningOperation()) {
-      case 'importing':
-        return 'Importing files...';
-      case 'relinking':
-        return 'Relinking entries...';
-      default:
-        return 'Scanning library...';
-    }
-  }
-
-  /**
-   * Switch between Library and Manager tabs
-   */
-  setActiveTab(tab: 'library' | 'manager') {
+  setActiveTab(tab: 'library' | 'tabs' | 'manager') {
     this.activeTab.set(tab);
   }
 
+  // ========================================
+  // New Tab Dialog Methods
+  // ========================================
+
   /**
-   * Scan for orphaned files (files on disk not in database)
+   * Open new tab dialog with pending videos
    */
-  scanOrphanedFiles() {
-    this.scanningOperation.set('scanning');
-    this.isScanning.set(true);
-    this.videoManagerService.scanOrphanedFiles().subscribe({
-      next: (response: any) => {
-        console.log('Orphaned files response:', response);
-        if (response.success) {
-          const data = response.data || response.videos || [];
-          this.scanResults.set({
-            type: 'orphaned-files',
-            data
-          });
-        } else {
-          console.error('Scan failed - response:', response);
-          this.notificationService.error('Scan Failed', response.error || 'Unknown error');
-        }
-        this.isScanning.set(false);
-      },
-      error: (error) => {
-        console.error('Scan failed - error:', error);
-        this.notificationService.error('Scan Failed', error.error?.error || error.message);
-        this.isScanning.set(false);
-      }
-    });
+  openNewTabDialog(videoIds: string[]) {
+    this.newTabPendingVideos.set(videoIds);
+    this.newTabDialogOpen.set(true);
   }
 
   /**
-   * Scan for orphaned database entries (entries with missing files)
+   * Handle creating a new tab and adding pending videos to it
    */
-  scanOrphanedEntries() {
-    this.scanningOperation.set('scanning');
-    this.isScanning.set(true);
-    this.videoManagerService.scanOrphanedEntries().subscribe({
-      next: (response: any) => {
-        console.log('Orphaned entries response:', response);
-        if (response.success) {
-          const data = response.data || response.videos || [];
-          this.scanResults.set({
-            type: 'orphaned-entries',
-            data
-          });
-        } else {
-          console.error('Scan failed - response:', response);
-          this.notificationService.error('Scan Failed', response.error || 'Unknown error');
-        }
-        this.isScanning.set(false);
-      },
-      error: (error) => {
-        console.error('Scan failed - error:', error);
-        this.notificationService.error('Scan Failed', error.error?.error || error.message);
-        this.isScanning.set(false);
-      }
-    });
-  }
-
-  /**
-   * Scan for duplicate database entries
-   */
-  scanDuplicates() {
-    this.scanningOperation.set('scanning');
-    this.isScanning.set(true);
-    this.videoManagerService.scanDuplicates().subscribe({
-      next: (response: any) => {
-        console.log('Duplicates response:', response);
-        if (response.success) {
-          const data = response.data || response.duplicateEntries || [];
-          this.scanResults.set({
-            type: 'duplicates',
-            data
-          });
-        } else {
-          console.error('Scan failed - response:', response);
-          this.notificationService.error('Scan Failed', response.error || 'Unknown error');
-        }
-        this.isScanning.set(false);
-      },
-      error: (error) => {
-        console.error('Scan failed - error:', error);
-        this.notificationService.error('Scan Failed', error.error?.error || error.message);
-        this.isScanning.set(false);
-      }
-    });
-  }
-
-  /**
-   * Handle selection changes in manager tab
-   */
-  onManagerSelectionChanged(event: { count: number; ids: Set<string> }) {
-    this.managerSelectedIds.set(event.ids);
-  }
-
-  /**
-   * Handle actions in manager tab
-   */
-  onManagerAction(event: { action: string; videos: VideoItem[] }) {
-    const { action, videos } = event;
-    const results = this.scanResults();
-    if (!results) return;
-
-    // Handle delete actions (simple delete or with mode)
-    if (action === 'delete' || action.startsWith('delete:')) {
-      this.deleteManagerItems(videos, results.type);
-      return;
-    }
-
-    switch (action) {
-      case 'import':
-        if (results.type === 'orphaned-files') {
-          this.importOrphanedFiles(videos);
-        }
-        break;
-
-      case 'relink':
-        if (results.type === 'orphaned-entries') {
-          this.relinkOrphanedEntries(videos);
-        }
-        break;
-
-      case 'relinkWithFolder':
-        if (results.type === 'orphaned-entries') {
-          this.relinkOrphanedEntriesWithFolder(videos);
-        }
-        break;
-
-      default:
-        console.warn('Unknown manager action:', action);
-    }
-  }
-
-  /**
-   * Delete items from manager view
-   */
-  private deleteManagerItems(videos: VideoItem[], scanType: string) {
-    // Note: Confirmation is handled by the cascade component's delete modal
-    // No need for additional confirm() dialog here
-
-    if (scanType === 'orphaned-files') {
-      const filePaths = videos.map(v => v.filePath).filter(Boolean) as string[];
-      this.videoManagerService.deleteUnimportedFiles(filePaths).subscribe({
-        next: (response) => {
-          if (response.success) {
-            // Remove from display
-            const currentResults = this.scanResults();
-            if (currentResults && currentResults.type === 'orphaned-files') {
-              const data = currentResults.data as UnimportedVideo[];
-              const pathsToRemove = new Set(filePaths);
-              const filtered = data.filter(item => !pathsToRemove.has(item.fullPath));
-              this.scanResults.set({ ...currentResults, data: filtered });
-            }
-            this.notificationService.success('Deleted', `Deleted ${response.deletedCount || videos.length} file(s)`);
-          } else {
-            this.notificationService.error('Delete Failed', response.error || 'Unknown error');
-          }
-        },
-        error: (error) => {
-          console.error('Delete failed:', error);
-          this.notificationService.error('Delete Failed', error.error?.error || error.message);
-        }
-      });
-    } else {
-      const videoIds = videos.map(v => v.id);
-      this.videoManagerService.deleteOrphanedEntries(videoIds).subscribe({
-        next: (response) => {
-          if (response.success) {
-            // Remove from display
-            const currentResults = this.scanResults();
-            if (currentResults) {
-              const idsToRemove = new Set(videoIds);
-              if (currentResults.type === 'orphaned-entries') {
-                const data = currentResults.data as MissingFile[];
-                const filtered = data.filter(item => !idsToRemove.has(item.id));
-                this.scanResults.set({ ...currentResults, data: filtered });
-              } else if (currentResults.type === 'duplicates') {
-                // Duplicates are a flat array of entries
-                const data = currentResults.data as any[];
-                const filtered = data.filter(item => !idsToRemove.has(item.id));
-                this.scanResults.set({ ...currentResults, data: filtered });
-              }
-            }
-            this.notificationService.success('Removed', `Removed ${response.deletedCount || videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}`);
-          } else {
-            this.notificationService.error('Delete Failed', response.error || 'Unknown error');
-          }
-        },
-        error: (error) => {
-          console.error('Delete failed:', error);
-          this.notificationService.error('Delete Failed', error.error?.error || error.message);
-        }
-      });
-    }
-  }
-
-  /**
-   * Import orphaned files into database
-   */
-  private importOrphanedFiles(videos: VideoItem[]) {
-    const filePaths = videos.map(v => v.filePath).filter(Boolean) as string[];
-
-    console.log('Importing files:', filePaths);
-
-    // Show importing status
-    this.scanningOperation.set('importing');
-    this.isScanning.set(true);
-
-    this.videoManagerService.importFiles(filePaths).subscribe({
-      next: (response) => {
-        console.log('=== Import Response ===');
-        console.log('Full response:', JSON.stringify(response, null, 2));
-        console.log('response.success:', response.success);
-        console.log('response.results:', response.results);
-        console.log('response.message:', response.message);
-        this.isScanning.set(false);
-
-        if (response.success) {
-          // Remove imported items from display
-          const currentResults = this.scanResults();
-          if (currentResults && currentResults.type === 'orphaned-files') {
-            const data = currentResults.data as UnimportedVideo[];
-            const pathsToRemove = new Set(filePaths);
-            const filtered = data.filter(item => !pathsToRemove.has(item.fullPath));
-            this.scanResults.set({ ...currentResults, data: filtered });
-            console.log('Removed items from display. Remaining:', filtered.length);
-          }
-
-          const importedCount = response.results?.filter((r: any) => r.success).length || filePaths.length;
-          this.notificationService.success('Import Complete', `Successfully imported ${importedCount} file(s) into database`);
-          this.loadLibrary(); // Refresh library to show new files
-        } else {
-          console.error('Import failed - response:', response);
-          this.notificationService.error('Import Failed', response.error || response.message || 'Unknown error');
-        }
-      },
-      error: (error) => {
-        this.isScanning.set(false);
-        console.error('Import failed - full error:', error);
-        console.error('Error status:', error.status);
-        console.error('Error URL:', error.url);
-
-        let errorMsg;
-        if (error.status === 404) {
-          errorMsg = 'API endpoint not found (404). Check backend logs.';
-        } else {
-          errorMsg = error.error?.error || error.error?.message || error.message || 'Unknown error';
-        }
-        this.notificationService.error('Import Failed', errorMsg);
-      }
-    });
-  }
-
-  /**
-   * Attempt to relink orphaned database entries (auto-scan in library folders)
-   */
-  private relinkOrphanedEntries(videos: VideoItem[]) {
-    const videoIds = videos.map(v => v.id);
-
-    this.scanningOperation.set('relinking');
-    this.isScanning.set(true);
-
-    this.videoManagerService.relinkOrphanedEntries(videoIds, { autoScan: true }).subscribe({
-      next: (response) => {
-        this.isScanning.set(false);
-
-        if (response.success) {
-          // Remove relinked items from display
-          const currentResults = this.scanResults();
-          if (currentResults && currentResults.type === 'orphaned-entries') {
-            const data = currentResults.data as MissingFile[];
-            const idsToRemove = new Set(videoIds);
-            const filtered = data.filter(item => !idsToRemove.has(item.id));
-            this.scanResults.set({ ...currentResults, data: filtered });
-          }
-          this.notificationService.success('Relink Complete', `Relinked ${response.relinkedCount || 0} of ${videoIds.length} entr${videoIds.length !== 1 ? 'ies' : 'y'}`);
-          this.loadLibrary(); // Refresh library
-        } else {
-          this.notificationService.error('Relink Failed', response.error || 'Unknown error');
-        }
-      },
-      error: (error) => {
-        this.isScanning.set(false);
-        console.error('Relink failed:', error);
-        this.notificationService.error('Relink Failed', error.error?.error || error.message);
-      }
-    });
-  }
-
-  /**
-   * Attempt to relink orphaned database entries by browsing for a folder
-   */
-  private async relinkOrphanedEntriesWithFolder(videos: VideoItem[]) {
-    const videoIds = videos.map(v => v.id);
-
+  async onNewTabCreated(tabName: string) {
     try {
-      // Use Electron's folder dialog
-      const result = await (window as any).electron?.openFolder({
-        properties: ['openDirectory'],
-        title: 'Select folder to search for missing files'
-      });
+      const videoIds = this.newTabPendingVideos();
 
-      if (!result || result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return; // User cancelled
+      // Create the tab
+      const result = await firstValueFrom(this.tabsService.createTab(tabName));
+
+      // If there are videos to add, add them to the tab
+      if (videoIds.length > 0) {
+        await firstValueFrom(this.tabsService.addVideosToTab(result.id, videoIds));
+
+        // Show success notification with video count
+        const videoCount = videoIds.length;
+        const videoText = videoCount === 1 ? '1 video' : `${videoCount} videos`;
+        this.notificationService.success(
+          'Tab Created',
+          `Created "${tabName}" with ${videoText}`
+        );
+      } else {
+        // Show success notification for empty tab
+        this.notificationService.success(
+          'Tab Created',
+          `Created empty tab "${tabName}"`
+        );
       }
 
-      const searchFolder = result.filePaths[0];
-      console.log('Searching for files in:', searchFolder);
-
-      this.scanningOperation.set('relinking');
-      this.isScanning.set(true);
-
-      this.videoManagerService.relinkOrphanedEntries(videoIds, { searchFolder }).subscribe({
-        next: (response) => {
-          this.isScanning.set(false);
-
-          if (response.success) {
-            // Remove relinked items from display
-            const currentResults = this.scanResults();
-            if (currentResults && currentResults.type === 'orphaned-entries') {
-              const data = currentResults.data as MissingFile[];
-              const idsToRemove = new Set(videoIds);
-              const filtered = data.filter(item => !idsToRemove.has(item.id));
-              this.scanResults.set({ ...currentResults, data: filtered });
-            }
-            this.notificationService.success('Relink Complete', `Relinked ${response.relinkedCount || 0} of ${videoIds.length} entr${videoIds.length !== 1 ? 'ies' : 'y'}`);
-            this.loadLibrary(); // Refresh library
-          } else {
-            this.notificationService.error('Relink Failed', response.error || 'Unknown error');
-          }
-        },
-        error: (error) => {
-          this.isScanning.set(false);
-          console.error('Relink failed:', error);
-          this.notificationService.error('Relink Failed', error.error?.error || error.message);
-        }
-      });
-    } catch (error) {
-      console.error('Failed to open folder dialog:', error);
-      this.notificationService.error('Dialog Error', 'Failed to open folder picker. Make sure Electron IPC is available.');
+      // Clear pending videos
+      this.newTabPendingVideos.set([]);
+    } catch (error: any) {
+      console.error('Failed to create tab:', error);
+      this.notificationService.error(
+        'Failed to Create Tab',
+        error?.message || 'An error occurred while creating the tab'
+      );
     }
   }
 
   /**
-   * Open the ignore file modal
+   * Close new tab dialog
    */
-  openIgnoreFileModal() {
-    this.ignoreFileModalOpen.set(true);
+  onNewTabDialogClosed() {
+    this.newTabDialogOpen.set(false);
+    this.newTabPendingVideos.set([]);
   }
 
   /**
-   * Handle ignore file modal closed
+   * Add videos to an existing tab
    */
-  onIgnoreFileModalClosed() {
-    this.ignoreFileModalOpen.set(false);
+  async addVideosToTab(tabId: string, videoIds: string[]) {
+    try {
+      const result = await firstValueFrom(this.tabsService.addVideosToTab(tabId, videoIds));
+
+      // Get tab info to show in notification
+      const tab = await firstValueFrom(this.tabsService.getTabById(tabId));
+
+      // Show success notification
+      const addedCount = result.addedCount || 0;
+      const totalCount = result.totalCount || videoIds.length;
+      const alreadyInTab = totalCount - addedCount;
+
+      let message = '';
+      if (addedCount > 0 && alreadyInTab > 0) {
+        message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}". ${alreadyInTab} already in tab.`;
+      } else if (addedCount > 0) {
+        message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}"`;
+      } else {
+        message = `All videos already in "${tab.name}"`;
+      }
+
+      this.notificationService.success('Videos Added to Tab', message);
+    } catch (error: any) {
+      console.error('Failed to add videos to tab:', error);
+      this.notificationService.error(
+        'Failed to Add to Tab',
+        error?.message || 'An error occurred while adding videos to the tab'
+      );
+    }
   }
 }

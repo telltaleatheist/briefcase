@@ -43,6 +43,8 @@ export interface VideoContextMenuAction {
   action: string;
   divider?: boolean;
   disabled?: boolean;
+  submenu?: VideoContextMenuAction[]; // For nested submenu items
+  hasArrow?: boolean; // Show arrow indicator for submenu
 }
 
 /**

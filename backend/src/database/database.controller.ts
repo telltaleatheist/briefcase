@@ -1261,9 +1261,13 @@ export class DatabaseController {
       const oldPath = video.current_path as string;
       const oldFilename = video.filename as string;
 
-      // Extract upload date from old filename (if it exists)
-      const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
-      const uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
+      // Use upload_date from database as source of truth
+      // Fallback to extracting from old filename if not in database
+      let uploadDate = video.upload_date as string | undefined;
+      if (!uploadDate) {
+        const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
+        uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
+      }
 
       this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}"`);
 
@@ -1271,6 +1275,14 @@ export class DatabaseController {
       const newFilename = FilenameDateUtil.updateTitle(oldFilename, body.filename.trim(), uploadDate);
 
       this.logger.log(`updateVideoFilename: computed newFilename="${newFilename}"`);
+
+      // Extract the final date from the new filename to update the database
+      const finalDateInfo = FilenameDateUtil.extractDateInfo(newFilename);
+      const finalUploadDate = finalDateInfo.hasDate
+        ? FilenameDateUtil.toISODate(finalDateInfo.date)
+        : null;
+
+      this.logger.log(`updateVideoFilename: finalUploadDate="${finalUploadDate}"`);
 
       // Skip if filename hasn't changed
       if (video.filename === newFilename) {
@@ -1323,15 +1335,12 @@ export class DatabaseController {
         };
       }
 
-      // Update database with new filename and path
+      // Update database with new filename, path, and upload date
       this.databaseService.updateVideoFilename(videoId, newFilename);
       this.databaseService.updateVideoPath(videoId, newPath);
+      this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
 
-      // Clear the suggested_title since the user manually renamed the file
-      this.databaseService.updateVideoSuggestedTitle(videoId, null);
-
-      this.logger.log(`Updated filename for video ${videoId}: ${newFilename}`);
-      this.logger.log(`Cleared suggested_title for video ${videoId}`);
+      this.logger.log(`Updated filename for video ${videoId}: ${newFilename}, upload_date: ${finalUploadDate}`);
 
       // Emit WebSocket event to notify frontend of the rename
       this.mediaEventService.emitVideoRenamed(
@@ -2529,6 +2538,42 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/libraries/:id/default-ai-model
+   * Get default AI model for a library (or active library if no ID provided)
+   */
+  @Get('libraries/default-ai-model')
+  getLibraryDefaultAiModel(@Query('libraryId') libraryId?: string) {
+    const aiModel = this.libraryManagerService.getDefaultAiModel(libraryId);
+    return {
+      success: true,
+      aiModel,
+    };
+  }
+
+  /**
+   * POST /api/database/libraries/:id/default-ai-model
+   * Set default AI model for a library (or active library if no ID provided)
+   */
+  @Post('libraries/default-ai-model')
+  setLibraryDefaultAiModel(@Body() body: { aiModel: string; libraryId?: string }) {
+    if (!body.aiModel || typeof body.aiModel !== 'string') {
+      return {
+        success: false,
+        error: 'AI model is required',
+      };
+    }
+
+    const success = this.libraryManagerService.setDefaultAiModel(
+      body.aiModel,
+      body.libraryId,
+    );
+    return {
+      success,
+      message: success ? 'Default AI model saved' : 'Library not found',
+    };
+  }
+
+  /**
    * POST /api/database/transfer-videos
    * Transfer (move or copy) videos from current library to another library
    */
@@ -3227,8 +3272,38 @@ export class DatabaseController {
           let finalFilename = filename;
 
           if (!isInClipsFolder) {
-            // Copy file to clips folder
-            this.logger.log(`Copying ${filename} to clips folder (from ${filePath})`);
+            // Calculate week folder based on file creation date
+            const stats = fs.statSync(filePath);
+            const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+
+            // Calculate Sunday of the current week for the file's creation date
+            const dayOfWeek = fileCreationDate.getDay();
+            const sundayDate = new Date(fileCreationDate);
+
+            if (dayOfWeek === 0) {
+              // Already Sunday
+            } else if (dayOfWeek <= 3) {
+              // Monday-Wednesday: go back to previous Sunday
+              sundayDate.setDate(fileCreationDate.getDate() - dayOfWeek);
+            } else {
+              // Thursday-Saturday: go forward to next Sunday
+              sundayDate.setDate(fileCreationDate.getDate() + (7 - dayOfWeek));
+            }
+
+            const year = sundayDate.getFullYear();
+            const month = String(sundayDate.getMonth() + 1).padStart(2, '0');
+            const day = String(sundayDate.getDate()).padStart(2, '0');
+            const weekFolder = `${year}-${month}-${day}`;
+
+            // Create week folder if it doesn't exist
+            const weekFolderPath = path.join(clipsFolder, weekFolder);
+            if (!fs.existsSync(weekFolderPath)) {
+              fs.mkdirSync(weekFolderPath, { recursive: true });
+              this.logger.log(`Created week folder: ${weekFolderPath}`);
+            }
+
+            // Copy file to week folder
+            this.logger.log(`Copying ${filename} to week folder ${weekFolder} (from ${filePath})`);
 
             // Generate unique filename if needed
             let uniqueFilename = filename;
@@ -3236,16 +3311,20 @@ export class DatabaseController {
             const ext = path.extname(filename);
             const base = path.basename(filename, ext);
 
-            while (fs.existsSync(path.join(clipsFolder, uniqueFilename))) {
+            while (fs.existsSync(path.join(weekFolderPath, uniqueFilename))) {
               uniqueFilename = `${base}_${counter}${ext}`;
               counter++;
             }
 
-            finalFilename = uniqueFilename;
-            const finalTargetPath = path.join(clipsFolder, uniqueFilename);
+            finalFilename = path.join(weekFolder, uniqueFilename);  // Include week folder in path
+            const finalTargetPath = path.join(weekFolderPath, uniqueFilename);
             fs.copyFileSync(filePath, finalTargetPath);
+
+            // Preserve original file timestamps
+            fs.utimesSync(finalTargetPath, stats.atime, stats.mtime);
+
             this.logger.log(`Copied to: ${finalTargetPath}`);
-            filesToScan.add(uniqueFilename);
+            filesToScan.add(finalFilename);  // Use relative path with week folder
           } else {
             this.logger.log(`File already in clips folder: ${filename}`);
             filesToScan.add(filename);

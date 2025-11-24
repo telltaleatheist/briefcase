@@ -35,6 +35,7 @@
           <div
             class="week-header"
             (click)="toggleWeek(item.week, $event)"
+            (contextmenu)="onHeaderContextMenu(item.week, $event)"
           >
             <button class="week-toggle" (click)="toggleWeek(item.week, $event)">
               <span class="toggle-icon" [class.expanded]="item.week.expanded">▶</span>
@@ -280,7 +281,7 @@
   <!-- Filename Edit Modal -->
   <app-filename-modal
     [show]="filenameModalVisible()"
-    [filename]="editingVideo()?.suggestedFilename || ''"
+    [filename]="editingFilename()"
     [original]="editingVideo()?.name || ''"
     (saved)="onFilenameSaved($event)"
     (closed)="onFilenameModalClosed()"

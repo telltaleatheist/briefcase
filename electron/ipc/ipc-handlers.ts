@@ -150,6 +150,43 @@ function setupFileSystemHandlers(): void {
       return { success: false, error: (error as Error).message };
     }
   });
+
+  // Open multiple files in their default application (as tabs if supported)
+  ipcMain.handle('open-files', async (_, filePaths: string[]) => {
+    try {
+      if (filePaths.length === 0) {
+        return { success: false, error: 'No files provided' };
+      }
+
+      if (process.platform === 'darwin') {
+        // On macOS, use 'open' command with all files at once
+        // This will open them as tabs in QuickTime if user has tab preference enabled
+        const { exec } = require('child_process');
+        const escapedPaths = filePaths.map(p => `"${p}"`).join(' ');
+        const command = `open ${escapedPaths}`;
+
+        return new Promise((resolve, reject) => {
+          exec(command, (error: any) => {
+            if (error) {
+              log.error('Error opening files:', error);
+              reject(error);
+            } else {
+              log.info(`Opened ${filePaths.length} file(s) in default application`);
+              resolve({ success: true });
+            }
+          });
+        });
+      } else {
+        // On non-macOS platforms, open each file with default app
+        const promises = filePaths.map(fp => shell.openPath(fp));
+        await Promise.all(promises);
+        return { success: true };
+      }
+    } catch (error) {
+      log.error('Error opening files:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
   
   // Directory picker dialog
   ipcMain.handle('open-directory-picker', async (event) => {

@@ -735,6 +735,17 @@ export class LibraryService {
   }
 
   /**
+   * Clear/reject the AI-suggested title from the database
+   * POST /api/database/videos/:id/reject-suggested-title
+   */
+  clearSuggestedTitle(id: string): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(
+      `${this.API_BASE}/database/videos/${id}/reject-suggested-title`,
+      {}
+    );
+  }
+
+  /**
    * Remove parent-child relationship between two videos
    * POST /api/database/videos/:parentId/remove-child/:childId
    */
@@ -1126,6 +1137,27 @@ export class LibraryService {
           data: { title: 'Unknown Video' }
         });
       })
+    );
+  }
+
+  /**
+   * Get default AI settings
+   * GET /api/config/default-ai
+   */
+  getDefaultAI(): Observable<{ success: boolean; defaultAI: { provider: string; model: string } | null }> {
+    return this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
+      `${this.API_BASE}/config/default-ai`
+    );
+  }
+
+  /**
+   * Save default AI settings
+   * POST /api/config/default-ai
+   */
+  saveDefaultAI(provider: string, model: string): Observable<{ success: boolean; message: string; defaultAI: { provider: string; model: string } }> {
+    return this.http.post<{ success: boolean; message: string; defaultAI: { provider: string; model: string } }>(
+      `${this.API_BASE}/config/default-ai`,
+      { provider, model }
     );
   }
 }

@@ -1,10 +1,10 @@
-import { Component, EventEmitter, Input, Output, signal, effect } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal, effect, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonComponent } from '../button/button.component';
 
 @Component({
-  selector: 'app-filename-modal',
+  selector: 'app-new-tab-dialog',
   standalone: true,
   imports: [CommonModule, FormsModule, ButtonComponent],
   template: `
@@ -12,38 +12,28 @@ import { ButtonComponent } from '../button/button.component';
       <div class="modal-overlay" (click)="onOverlayClick($event)">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h3 class="modal-title">{{ modalTitle() }}</h3>
+            <h3 class="modal-title">Create New Tab</h3>
             <button class="modal-close" (click)="close()">×</button>
           </div>
 
           <div class="modal-body">
             <div class="form-group">
-              <label class="form-label">Original Name</label>
-              <div class="original-name">{{ originalName() }}</div>
-            </div>
-
-            <div class="upload-date-notice">
-              <span class="notice-icon">📅</span>
-              <span class="notice-text">Upload date and file extension will be automatically preserved</span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">{{ fieldLabel() }}</label>
-              <textarea
-                class="form-textarea"
-                [(ngModel)]="editedFilename"
+              <label class="form-label">Tab Name</label>
+              <input
+                #nameInput
+                type="text"
+                class="form-input"
+                [(ngModel)]="tabName"
                 [maxlength]="maxLength"
-                [placeholder]="'Enter new title (date and extension will be added automatically)'"
                 (keydown.escape)="close()"
-                (keydown.meta.enter)="save()"
-                (keydown.control.enter)="save()"
-                rows="6"
-                #filenameInput
-              ></textarea>
+                (keydown.enter)="create()"
+                placeholder="Enter tab name..."
+                autocomplete="off"
+              />
               <div class="form-meta">
-                <span class="form-hint">Cmd+Enter to save, Esc to cancel</span>
-                <span class="char-count" [class.near-limit]="editedFilename.length > maxLength - 20">
-                  {{ editedFilename.length }}/{{ maxLength }}
+                <span class="form-hint">Press Enter to create, Esc to cancel</span>
+                <span class="char-count" [class.near-limit]="tabName.length > maxLength - 10">
+                  {{ tabName.length }}/{{ maxLength }}
                 </span>
               </div>
             </div>
@@ -53,8 +43,12 @@ import { ButtonComponent } from '../button/button.component';
             <app-button variant="secondary" (click)="close()">
               Cancel
             </app-button>
-            <app-button variant="gradient" icon="💾" (click)="save()">
-              Save
+            <app-button
+              variant="gradient"
+              icon="📑"
+              (click)="create()"
+              [disabled]="!tabName.trim()">
+              Create Tab
             </app-button>
           </div>
         </div>
@@ -82,9 +76,8 @@ import { ButtonComponent } from '../button/button.component';
       background: var(--bg-card);
       border-radius: $radius-xl;
       box-shadow: $shadow-2xl;
-      max-width: 600px;
+      max-width: 500px;
       width: 90%;
-      max-height: 90vh;
       overflow: hidden;
       animation: scaleIn 0.3s ease-out;
     }
@@ -142,40 +135,7 @@ import { ButtonComponent } from '../button/button.component';
       margin-bottom: $spacing-sm;
     }
 
-    .original-name {
-      padding: $spacing-md;
-      background: var(--bg-secondary);
-      border-radius: $radius-md;
-      font-size: $font-size-sm;
-      color: var(--text-secondary);
-      font-family: 'Monaco', monospace;
-      word-break: break-all;
-    }
-
-    .upload-date-notice {
-      display: flex;
-      align-items: center;
-      gap: $spacing-sm;
-      padding: $spacing-sm $spacing-md;
-      background: rgba(255, 107, 53, 0.1);
-      border-left: 3px solid var(--primary-orange);
-      border-radius: $radius-md;
-      margin: $spacing-md 0;
-    }
-
-    .notice-icon {
-      font-size: $font-size-base;
-      flex-shrink: 0;
-    }
-
-    .notice-text {
-      font-size: $font-size-xs;
-      color: var(--text-secondary);
-      font-style: italic;
-      line-height: 1.4;
-    }
-
-    .form-textarea {
+    .form-input {
       width: 100%;
       padding: $spacing-md;
       background: var(--bg-input);
@@ -183,16 +143,16 @@ import { ButtonComponent } from '../button/button.component';
       border-radius: $radius-md;
       font-size: $font-size-base;
       color: var(--text-primary);
-      font-family: 'Monaco', monospace;
       transition: all $transition-fast;
-      resize: vertical;
-      min-height: 120px;
-      line-height: 1.5;
 
       &:focus {
         outline: none;
         border-color: var(--primary-orange);
         box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+      }
+
+      &::placeholder {
+        color: var(--text-tertiary);
       }
     }
 
@@ -228,50 +188,57 @@ import { ButtonComponent } from '../button/button.component';
       border-top: 1px solid var(--border-color);
       background: var(--bg-secondary);
     }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes scaleIn {
+      from {
+        opacity: 0;
+        transform: scale(0.95);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
   `]
 })
-export class FilenameModalComponent {
+export class NewTabDialogComponent {
   @Input() set show(value: boolean) {
     this.visible.set(value);
   }
-  @Input() set filename(value: string) {
-    this.suggestedFilename.set(value);
-    this.editedFilename = value;
-  }
-  @Input() set original(value: string) {
-    this.originalName.set(value);
-  }
-  @Input() set title(value: string) {
-    this.modalTitle.set(value);
-  }
-  @Input() set label(value: string) {
-    this.fieldLabel.set(value);
-  }
 
-  @Output() saved = new EventEmitter<string>();
+  @Output() created = new EventEmitter<string>();
   @Output() closed = new EventEmitter<void>();
 
-  visible = signal(false);
-  suggestedFilename = signal('');
-  originalName = signal('');
-  modalTitle = signal('Edit Filename');
-  fieldLabel = signal('Suggested Filename');
-  editedFilename = '';
+  @ViewChild('nameInput') nameInput?: ElementRef<HTMLInputElement>;
 
-  // Max filename length (255 is typical for most filesystems)
-  maxLength = 255;
+  visible = signal(false);
+  tabName = '';
+
+  // Max tab name length
+  maxLength = 100;
 
   constructor() {
     effect(() => {
+      // Auto-focus input when modal opens
       if (this.visible()) {
-        this.editedFilename = this.suggestedFilename();
+        setTimeout(() => {
+          this.nameInput?.nativeElement.focus();
+        }, 100);
+      } else {
+        // Reset form when closing
+        this.tabName = '';
       }
     });
   }
 
-  save() {
-    if (this.editedFilename.trim()) {
-      this.saved.emit(this.editedFilename.trim());
+  create() {
+    if (this.tabName.trim()) {
+      this.created.emit(this.tabName.trim());
       this.close();
     }
   }

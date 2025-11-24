@@ -20,6 +20,7 @@ export interface TaskStarted {
 export interface TaskCompleted {
   taskId: string;
   jobId: string;
+  videoId?: string;
   type: string;
   duration: number;
   result?: any;
@@ -46,6 +47,13 @@ export interface VideoRenamed {
   timestamp: string;
 }
 
+export interface AnalysisCompleted {
+  videoId: string;
+  suggestedTitle: string;
+  aiDescription: string;
+  timestamp: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -63,6 +71,7 @@ export class WebsocketService implements OnDestroy {
   private taskCompletedCallbacks: ((event: TaskCompleted) => void)[] = [];
   private taskFailedCallbacks: ((event: TaskFailed) => void)[] = [];
   private videoRenamedCallbacks: ((event: VideoRenamed) => void)[] = [];
+  private analysisCompletedCallbacks: ((event: AnalysisCompleted) => void)[] = [];
 
   connect(): void {
     if (this.socket?.connected) {
@@ -146,6 +155,12 @@ export class WebsocketService implements OnDestroy {
       this.videoRenamedCallbacks.forEach(cb => cb(event));
     });
 
+    // Analysis events
+    this.socket.on('analysis-completed', (event: AnalysisCompleted) => {
+      console.log('WS analysis-completed received:', event);
+      this.analysisCompletedCallbacks.forEach(cb => cb(event));
+    });
+
     // Legacy events for backward compatibility
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
@@ -200,6 +215,13 @@ export class WebsocketService implements OnDestroy {
     this.videoRenamedCallbacks.push(callback);
     return () => {
       this.videoRenamedCallbacks = this.videoRenamedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onAnalysisCompleted(callback: (event: AnalysisCompleted) => void): () => void {
+    this.analysisCompletedCallbacks.push(callback);
+    return () => {
+      this.analysisCompletedCallbacks = this.analysisCompletedCallbacks.filter(cb => cb !== callback);
     };
   }
 

@@ -25,6 +25,9 @@
     "paths": {
       "ngx-video-timeline-editor": [
         "projects/ngx-video-timeline-editor/src/public-api.ts"
+      ],
+      "@shared/*": [
+        "../shared/*"
       ]
     }
   },

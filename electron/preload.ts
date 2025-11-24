@@ -24,6 +24,7 @@ interface ElectronAPI {
     getBinaryPath: (binaryName: string) => string;
   };
   openFile: (filePath: string) => Promise<string>;
+  openMultipleFiles: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
   copyFilesToClipboard: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   openInQuickTime: (filePath: string) => Promise<{ success: boolean; error?: string }>;
@@ -103,6 +104,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   // Add all your other IPC handlers here
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
+  openMultipleFiles: (filePaths: string[]) => ipcRenderer.invoke('open-files', filePaths),
   showInFolder: (filePath: string) => ipcRenderer.invoke('show-in-folder', filePath),
   copyFilesToClipboard: (filePaths: string[]) => ipcRenderer.invoke('copy-files-to-clipboard', filePaths),
   openInQuickTime: (filePath: string) => ipcRenderer.invoke('open-in-quicktime', filePath),

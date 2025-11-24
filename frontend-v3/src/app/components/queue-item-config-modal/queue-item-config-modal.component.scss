@@ -284,3 +284,46 @@
     opacity: 0.9;
   }
 }
+
+.btn-save-default {
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--primary-orange);
+  }
+
+  &:disabled:not(.saved) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.saved {
+    background: #22c55e;
+    color: white;
+    border-color: #16a34a;
+    cursor: default;
+    animation: savedPulse 0.3s ease-out;
+  }
+}
+
+@keyframes savedPulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}

@@ -5,6 +5,9 @@
 **/dist/
 **/dist-electron/
 dist-python/
+backup/
+backend-prod-temp/
+.build-cache/
 
 # Electron packaged app artifacts
 *.dmg
@@ -36,6 +39,7 @@ yarn-error.log
 # macOS files
 .DS_Store
 ._*
+*.tsbuildinfo
 
 scripts/refresh-tree.sh
 scripts/refresh-full-tree.sh
@@ -66,12 +70,15 @@ electron/._.DS_Store
 utilities/bin/yt-dlp_macos
 utilities/bin/yt-dlp.exe
 utilities/bin/yt-dlp_linux
+utilities/bin/whisper
+utilities/bin/whisper.exe
 BULK_ANALYSIS_VISION.md
 BULK_ANALYSIS_START_PROMPT.md
 docs/*
 utilities/bin/yt-dlp_macos.backup*
 utilities/bin/yt-dlp_linux.backup.*
 utilities/bin/yt-dlp.exe.backup.*
+utilities/bin/whisper.backup*
 backend/python/*.md
 backend/python/__pycache__/*
 REFACTORING_COMPLETE_SUMMARY.md

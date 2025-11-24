@@ -45,6 +45,10 @@ export class SharedConfigService {
     return getRuntimePaths().ytdlp;
   }
 
+  getWhisperPath(): string {
+    return getRuntimePaths().whisper;
+  }
+
   // Legacy method - no longer needed but kept for compatibility
   getOutputDir(): string | undefined {
     return undefined;
@@ -55,7 +59,8 @@ export class SharedConfigService {
     return {
       ffmpegPath: this.getFfmpegPath(),
       ffprobePath: this.getFfprobePath(),
-      ytDlpPath: this.getYtDlpPath()
+      ytDlpPath: this.getYtDlpPath(),
+      whisperPath: this.getWhisperPath()
     };
   }
 

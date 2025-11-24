@@ -53,7 +53,7 @@ export class FileScannerService {
   private readonly IMPORT_BATCH_SIZE = 5; // Process 5 files at a time
   private readonly HASH_SAMPLE_SIZE = 1024 * 1024; // 1MB sample for quick hash
   private readonly STREAM_CHUNK_SIZE = 64 * 1024; // 64KB chunks for streaming
-  private readonly MAX_DURATION_EXTRACT_SIZE = 500 * 1024 * 1024; // Only extract duration for files < 500MB
+  // Duration extraction uses ffprobe which only reads metadata, not file contents - fast for any size
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -621,19 +621,35 @@ export class FileScannerService {
         const downloadDate = fileCreationDate.toISOString();
 
         if (fullPath.startsWith(clipsRoot)) {
-          // File is already in the clips folder - don't copy, just use it
-          destinationPath = fullPath;
-          this.logger.log(`Video already in clips folder: ${fullPath}`);
+          // File is already in the clips folder - check if it's in a week subfolder
+          const relativePath = path.relative(clipsRoot, fullPath);
+          const pathParts = relativePath.split(path.sep);
 
-          // If we didn't get upload date from filename, try to extract from path
-          if (!uploadDate) {
-            const relativePath = path.relative(clipsRoot, fullPath);
-            const pathParts = relativePath.split(path.sep);
-            if (pathParts.length > 1) {
-              // File is in a subfolder - use that as the upload date
+          if (pathParts.length > 1) {
+            // File is already in a subfolder (week folder) - keep it there
+            destinationPath = fullPath;
+            this.logger.log(`Video already in week folder: ${fullPath}`);
+
+            if (!uploadDate) {
               uploadDate = pathParts[0];
               this.logger.log(`Extracted upload date from path: ${uploadDate}`);
             }
+          } else {
+            // File is directly in clips root - move to week folder
+            this.logger.log(`Video in clips root, moving to week folder: ${fullPath}`);
+            const weekFolder = this.getWeekStartDate(fileCreationDate);
+            const weekFolderPath = path.join(clipsRoot, weekFolder);
+
+            if (!fs.existsSync(weekFolderPath)) {
+              fs.mkdirSync(weekFolderPath, { recursive: true });
+              this.logger.log(`Created weekly folder: ${weekFolderPath}`);
+            }
+
+            destinationPath = path.join(weekFolderPath, filename);
+
+            // Move the file to the week folder
+            fs.renameSync(fullPath, destinationPath);
+            this.logger.log(`Moved to: ${destinationPath}`);
           }
         } else {
           // File is outside clips folder - copy to weekly folder based on download date
@@ -665,12 +681,12 @@ export class FileScannerService {
         // Create new video entry
         const videoId = uuidv4();
 
-        // Extract duration for video/audio files (skip for very large files to save memory)
+        // Extract duration for video/audio files using ffprobe (fast metadata read)
         let durationSeconds: number | undefined = undefined;
         const fileExt = path.extname(filename).toLowerCase();
         const isVideoOrAudio = [...this.VIDEO_EXTENSIONS, ...this.AUDIO_EXTENSIONS].includes(fileExt);
 
-        if (isVideoOrAudio && stats.size < this.MAX_DURATION_EXTRACT_SIZE) {
+        if (isVideoOrAudio) {
           try {
             const metadata = await this.ffmpegService.getVideoMetadata(destinationPath);
             durationSeconds = metadata.duration;
@@ -679,8 +695,6 @@ export class FileScannerService {
             this.logger.warn(`Could not extract duration for ${filename}: ${error.message}`);
             // Continue with undefined duration - not critical for import
           }
-        } else if (isVideoOrAudio && stats.size >= this.MAX_DURATION_EXTRACT_SIZE) {
-          this.logger.log(`Skipping duration extraction for large file (${(stats.size / 1024 / 1024).toFixed(1)}MB): ${filename}`);
         }
 
         // Insert into database (convert to relative path for cross-platform compatibility)

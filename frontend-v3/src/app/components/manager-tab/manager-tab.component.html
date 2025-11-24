@@ -1,0 +1,78 @@
+<div class="manager-container">
+  <!-- Manager Toolbar -->
+  <div class="manager-toolbar">
+    <button
+      class="btn btn-secondary scan-btn"
+      [disabled]="isScanning()"
+      (click)="scanOrphanedFiles()">
+      <span class="btn-icon">📁</span>
+      <span>Scan Orphaned Files</span>
+    </button>
+    <button
+      class="btn btn-secondary scan-btn"
+      [disabled]="isScanning()"
+      (click)="scanOrphanedEntries()">
+      <span class="btn-icon">🗃️</span>
+      <span>Scan Orphaned Entries</span>
+    </button>
+    <button
+      class="btn btn-secondary scan-btn"
+      [disabled]="isScanning()"
+      (click)="scanDuplicates()">
+      <span class="btn-icon">🔍</span>
+      <span>Scan Duplicates</span>
+    </button>
+    <button
+      class="btn btn-secondary scan-btn"
+      (click)="openIgnoreFileModal()"
+      title="Edit ignore patterns">
+      <span class="btn-icon">🚫</span>
+      <span>Ignore Patterns</span>
+    </button>
+    <div class="scan-status" *ngIf="scanResults()">
+      <span class="status-text">{{ getScanResultSummary() }}</span>
+    </div>
+  </div>
+
+  <!-- Manager Content -->
+  <div class="manager-content">
+  <!-- Scan Results Cascade -->
+  <app-cascade
+    *ngIf="!isScanning() && hasManagerResults()"
+    [weeks]="managerWeeks()"
+    [deleteMode]="'simple'"
+    (selectionChanged)="onSelectionChanged($event)"
+    (videoAction)="onAction($event)"
+  />
+
+  <!-- Empty State - No scan results -->
+  <div class="empty-state" *ngIf="!scanResults() && !isScanning()">
+    <div class="empty-icon">🔧</div>
+    <h3 class="empty-title">No scan results</h3>
+    <p class="empty-description">
+      Click one of the scan buttons above to analyze your library
+    </p>
+  </div>
+
+  <!-- Empty Results - After scan completes with no results -->
+  <div class="empty-state" *ngIf="scanResults() && !hasManagerResults() && !isScanning()">
+    <div class="empty-icon">✅</div>
+    <h3 class="empty-title">All clear!</h3>
+    <p class="empty-description">
+      No issues found in this scan
+    </p>
+  </div>
+
+    <!-- Loading State -->
+    <div class="loading-state" *ngIf="isScanning()">
+      <div class="spinner"></div>
+      <p>{{ getLoadingMessage() }}</p>
+    </div>
+  </div>
+</div>
+
+<!-- Ignore File Modal -->
+<app-ignore-file-modal
+  [show]="ignoreFileModalOpen()"
+  (closed)="onIgnoreFileModalClosed()"
+/>

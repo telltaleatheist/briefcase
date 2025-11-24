@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { AiSetupService } from '../../services/ai-setup.service';
+import { LibraryService } from '../../services/library.service';
+import { firstValueFrom } from 'rxjs';
 
 interface AnalysisCategory {
   id: string;
@@ -24,6 +26,7 @@ interface AnalysisCategory {
 export class SettingsPageComponent implements OnInit {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
+  private libraryService = inject(LibraryService);
 
   // AI Setup Wizard state
   wizardOpen = signal(false);
@@ -31,6 +34,12 @@ export class SettingsPageComponent implements OnInit {
   // AI status
   aiConfigured = signal(false);
   activeProviders = signal<string[]>([]);
+
+  // Default AI Model
+  defaultAIModel = signal<string | null>(null);
+  availableModels = signal<Array<{ value: string; label: string; provider: string }>>([]);
+  loadingDefaultAI = signal(false);
+  savingDefaultAI = signal(false);
 
   // Analysis Categories
   categories = signal<AnalysisCategory[]>([]);
@@ -62,6 +71,8 @@ export class SettingsPageComponent implements OnInit {
   async ngOnInit() {
     await this.refreshAiStatus();
     await this.loadCategories();
+    await this.loadDefaultAI();
+    await this.loadAvailableModels();
   }
 
   private async loadCategories() {
@@ -186,5 +197,94 @@ export class SettingsPageComponent implements OnInit {
     if (!confirm('Reset all categories to defaults? This will remove any custom categories.')) return;
     this.categories.set([...this.defaultCategories]);
     await this.saveCategories();
+  }
+
+  // Default AI Model Management
+  private async loadDefaultAI() {
+    this.loadingDefaultAI.set(true);
+    try {
+      const result = await firstValueFrom(this.libraryService.getDefaultAI());
+      if (result.success && result.defaultAI) {
+        const fullModelValue = `${result.defaultAI.provider}:${result.defaultAI.model}`;
+        this.defaultAIModel.set(fullModelValue);
+      } else {
+        this.defaultAIModel.set(null);
+      }
+    } catch (error) {
+      console.error('Failed to load default AI:', error);
+      this.defaultAIModel.set(null);
+    } finally {
+      this.loadingDefaultAI.set(false);
+    }
+  }
+
+  private async loadAvailableModels() {
+    try {
+      const availability = await this.aiSetupService.checkAIAvailability();
+      const models: Array<{ value: string; label: string; provider: string }> = [];
+
+      // Add Ollama models
+      if (availability.hasOllama && availability.ollamaModels.length > 0) {
+        availability.ollamaModels.forEach(model => {
+          models.push({
+            value: `ollama:${model}`,
+            label: `${model} (Ollama)`,
+            provider: 'ollama'
+          });
+        });
+      }
+
+      // Add Claude models
+      if (availability.hasClaudeKey) {
+        const claudeModels = [
+          { value: 'claude:claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
+          { value: 'claude:claude-3-opus-20240229', label: 'Claude 3 Opus' },
+          { value: 'claude:claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
+        ];
+        claudeModels.forEach(m => {
+          models.push({ ...m, provider: 'claude' });
+        });
+      }
+
+      // Add OpenAI models
+      if (availability.hasOpenAIKey) {
+        const openaiModels = [
+          { value: 'openai:gpt-4o', label: 'GPT-4o' },
+          { value: 'openai:gpt-4o-mini', label: 'GPT-4o Mini' },
+          { value: 'openai:gpt-4-turbo', label: 'GPT-4 Turbo' }
+        ];
+        openaiModels.forEach(m => {
+          models.push({ ...m, provider: 'openai' });
+        });
+      }
+
+      this.availableModels.set(models);
+    } catch (error) {
+      console.error('Failed to load available models:', error);
+    }
+  }
+
+  async saveDefaultAI(modelValue: string) {
+    this.savingDefaultAI.set(true);
+    try {
+      const [provider, ...modelParts] = modelValue.split(':');
+      const model = modelParts.join(':');
+
+      const result = await firstValueFrom(
+        this.libraryService.saveDefaultAI(provider, model)
+      );
+
+      if (result.success) {
+        console.log(`Saved ${modelValue} as default AI model`);
+        this.defaultAIModel.set(modelValue);
+        // Show success feedback briefly
+        setTimeout(() => {
+          this.savingDefaultAI.set(false);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Failed to save default AI:', error);
+      this.savingDefaultAI.set(false);
+    }
   }
 }

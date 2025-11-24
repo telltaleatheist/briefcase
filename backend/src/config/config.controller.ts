@@ -169,6 +169,76 @@ export class ConfigController {
   }
 
   /**
+   * Save default AI settings
+   */
+  @Post('default-ai')
+  async saveDefaultAI(@Body() body: { provider: string; model: string }) {
+    try {
+      // Ensure config directory exists
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      // Read existing config or create new one
+      let config: any = {};
+      if (fs.existsSync(this.configPath)) {
+        const configData = fs.readFileSync(this.configPath, 'utf8');
+        config = JSON.parse(configData);
+      }
+
+      // Update default AI settings
+      config.defaultAI = {
+        provider: body.provider,
+        model: body.model
+      };
+      config.lastUpdated = new Date().toISOString();
+
+      // Save config
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
+
+      return {
+        success: true,
+        message: 'Default AI settings saved',
+        defaultAI: config.defaultAI
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to save default AI settings: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Get default AI settings
+   */
+  @Get('default-ai')
+  async getDefaultAI() {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        const configData = fs.readFileSync(this.configPath, 'utf8');
+        const config = JSON.parse(configData);
+
+        return {
+          success: true,
+          defaultAI: config.defaultAI || null
+        };
+      }
+
+      return {
+        success: true,
+        defaultAI: null
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to get default AI settings: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
    * Update the analysis prompt Python file with new categories
    */
   private async updateAnalysisPrompt(categories: any[]) {

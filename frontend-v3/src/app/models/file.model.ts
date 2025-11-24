@@ -18,6 +18,8 @@ export interface ContextMenuAction {
   action: string;
   divider?: boolean;
   disabled?: boolean;
+  submenu?: ContextMenuAction[]; // For nested submenu items
+  hasArrow?: boolean; // Show arrow indicator for submenu
 }
 
 export interface ContextMenuPosition {

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, effect, inject, HostListener, ViewChild } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, ChangeDetectorRef, effect, inject, HostListener, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ScrollingModule, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
@@ -11,6 +11,8 @@ import { FilenameModalComponent } from '../filename-modal/filename-modal.compone
 import { ElectronService } from '../../services/electron.service';
 import { LibraryService } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
+import { TabsService } from '../../services/tabs.service';
+import { extractTitleFromFilename } from '@shared/filename-utils';
 
 interface ExpandableVideoWeek extends VideoWeek {
   expanded: boolean;
@@ -46,6 +48,8 @@ export class CascadeComponent {
   private libraryService = inject(LibraryService);
   private notificationService = inject(NotificationService);
   private router = inject(Router);
+  private tabsService = inject(TabsService);
+  private cdr = inject(ChangeDetectorRef);
 
   @Input() set weeks(value: VideoWeek[]) {
     // Convert to expandable weeks (all expanded by default)
@@ -54,6 +58,9 @@ export class CascadeComponent {
       expanded: true
     }));
     this.videoWeeks.set(expandableWeeks);
+
+    // Manually trigger change detection for OnPush strategy
+    this.cdr.markForCheck();
   }
 
   // Progress configuration
@@ -74,12 +81,16 @@ export class CascadeComponent {
   // Delete behavior: 'options' shows 3-option modal, 'simple' emits directly
   @Input() deleteMode: 'options' | 'simple' = 'options';
 
+  // Tabs mode: show "Remove from Tab" instead of delete for tabs view
+  @Input() tabsMode = false;
+
   @Output() selectionChanged = new EventEmitter<{ count: number; ids: Set<string> }>();
   @Output() videoAction = new EventEmitter<{ action: string; videos: VideoItem[] }>();
   @Output() childClicked = new EventEmitter<{ parent: VideoItem; child: VideoChild }>();
   @Output() itemsReordered = new EventEmitter<{ weekLabel: string; videos: VideoItem[] }>();
   @Output() configureItem = new EventEmitter<VideoItem>();
   @Output() previewRequested = new EventEmitter<VideoItem>();
+  @Output() headerAction = new EventEmitter<{ action: string; weekLabel: string }>();
 
   @ViewChild(CdkVirtualScrollViewport) private viewport?: CdkVirtualScrollViewport;
 
@@ -118,10 +129,12 @@ export class CascadeComponent {
   contextMenuVisible = signal(false);
   contextMenuPosition = signal<ContextMenuPosition>({ x: 0, y: 0 });
   contextMenuVideo = signal<VideoItem | null>(null);
+  contextMenuHeader = signal<VideoWeek | null>(null);
 
   // Filename modal
   filenameModalVisible = signal(false);
   editingVideo = signal<VideoItem | null>(null);
+  editingFilename = signal<string>(''); // Extracted title for editing (without date/extension)
 
   // Suggested title modal
   suggestedTitleModalVisible = signal(false);
@@ -190,7 +203,9 @@ export class CascadeComponent {
   // Flattened list for virtual scrolling
   virtualItems = computed<VirtualListItem[]>(() => {
     const items: VirtualListItem[] = [];
-    for (const week of this.videoWeeks()) {
+    const weeks = this.videoWeeks();
+
+    for (const week of weeks) {
       // Add week header
       items.push({ type: 'header', week });
       // Add videos if week is expanded
@@ -208,6 +223,9 @@ export class CascadeComponent {
   private initialized = false;
 
   constructor() {
+    // Load tabs for context menu
+    this.tabsService.loadTabs().subscribe();
+
     // Emit selection changes (skip initial)
     effect(() => {
       const ids = this.selectedVideos();
@@ -221,6 +239,15 @@ export class CascadeComponent {
 
   // Context menu actions - computed based on selection
   contextMenuActions = computed<VideoContextMenuAction[]>(() => {
+    // Check if this is a header context menu
+    const header = this.contextMenuHeader();
+    if (header) {
+      // Header-specific actions
+      return [
+        { label: 'Delete Tab', icon: '🗑️', action: 'deleteTab' }
+      ];
+    }
+
     const count = this.selectedCount();
     const video = this.contextMenuVideo();
     const hasSuggestedTitle = video?.suggestedTitle && video.suggestedTitle !== video.name;
@@ -275,6 +302,9 @@ export class CascadeComponent {
     }
 
     // Library item actions
+    // "Open" action - available for both single and multi-select
+    actions.push({ label: `Open${countSuffix}`, icon: '▶️', action: 'open' });
+
     // Single video actions
     if (count <= 1) {
       actions.push({ label: 'Open in Editor', icon: '🎬', action: 'openInEditor' });
@@ -294,7 +324,30 @@ export class CascadeComponent {
     }
 
     // Multi-select capable actions
-    actions.push({ label: `Add to Tab${countSuffix}`, icon: '📑', action: 'addToTab' });
+    // Build submenu for "Add to Tab" with recent tabs
+    const recentTabs = this.tabsService.recentTabs();
+    const tabSubmenu: VideoContextMenuAction[] = [
+      { label: 'New Tab...', icon: '➕', action: 'addToNewTab' }
+    ];
+
+    if (recentTabs.length > 0) {
+      tabSubmenu.push({ label: '', icon: '', action: '', divider: true });
+      recentTabs.forEach(tab => {
+        tabSubmenu.push({
+          label: tab.name,
+          icon: '📑',
+          action: `addToTab:${tab.id}`
+        });
+      });
+    }
+
+    actions.push({
+      label: `Add to Tab${countSuffix}`,
+      icon: '📑',
+      action: 'addToTab',
+      submenu: tabSubmenu,
+      hasArrow: true
+    });
 
     // Another divider
     actions.push({ label: '', icon: '', action: '', divider: true });
@@ -303,9 +356,15 @@ export class CascadeComponent {
     actions.push({ label: `Run Analysis${countSuffix}`, icon: '🧠', action: 'analyze' });
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
 
-    // Final divider and delete
+    // Final divider and delete/remove
     actions.push({ label: '', icon: '', action: '', divider: true });
-    actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
+
+    // Show "Remove from Tab" in tabs mode, otherwise "Delete"
+    if (this.tabsMode) {
+      actions.push({ label: `Remove from Tab${countSuffix}`, icon: '✖️', action: 'removeFromTab' });
+    } else {
+      actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
+    }
 
     return actions;
   });
@@ -382,11 +441,30 @@ export class CascadeComponent {
     }
 
     this.contextMenuVideo.set(video);
+    this.contextMenuHeader.set(null); // Clear header context
+    this.contextMenuPosition.set({ x: event.clientX, y: event.clientY });
+    this.contextMenuVisible.set(true);
+  }
+
+  onHeaderContextMenu(week: VideoWeek, event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.contextMenuHeader.set(week);
+    this.contextMenuVideo.set(null); // Clear video context
     this.contextMenuPosition.set({ x: event.clientX, y: event.clientY });
     this.contextMenuVisible.set(true);
   }
 
   onContextMenuAction(action: string) {
+    // Check if this is a header action
+    const header = this.contextMenuHeader();
+    if (header) {
+      this.headerAction.emit({ action, weekLabel: header.weekLabel });
+      this.closeContextMenu();
+      return;
+    }
+
     const video = this.contextMenuVideo();
     if (!video) return;
 
@@ -395,6 +473,23 @@ export class CascadeComponent {
     const videos = selectedVideos.length > 0 ? selectedVideos : [video];
 
     switch (action) {
+      case 'open':
+        // Open all selected files in their default application
+        // If multiple files, use batch method to open as tabs (if supported)
+        const filePaths = videos
+          .filter(v => v.filePath)
+          .map(v => v.filePath!);
+
+        if (filePaths.length === 0) {
+          console.warn('No file paths available for selected videos');
+        } else if (filePaths.length === 1) {
+          this.electronService.openFile(filePaths[0]);
+        } else {
+          // Open multiple files at once (will open as tabs in QuickTime on macOS)
+          this.electronService.openMultipleFiles(filePaths);
+        }
+        break;
+
       case 'rename':
         this.openFilenameModal(video);
         break;
@@ -526,6 +621,14 @@ export class CascadeComponent {
 
   openFilenameModal(video: VideoItem) {
     this.editingVideo.set(video);
+
+    // Extract just the title portion (without date prefix and extension) for editing
+    // This allows the user to edit only the title while date and extension are preserved
+    const titleOnly = extractTitleFromFilename(video.name);
+
+    // Use suggested filename if available, otherwise use extracted title
+    this.editingFilename.set(video.suggestedFilename || titleOnly);
+
     this.filenameModalVisible.set(true);
   }
 
@@ -540,6 +643,14 @@ export class CascadeComponent {
             // Update local state - change name and clear AI suggestion
             video.name = response.newFilename || newFilename;
             video.suggestedFilename = undefined;
+            video.suggestedTitle = undefined;
+
+            // Clear suggested title from database
+            this.libraryService.clearSuggestedTitle(video.id).subscribe({
+              next: () => console.log('Suggested title cleared from database'),
+              error: (err) => console.warn('Failed to clear suggested title:', err)
+            });
+
             // Update display
             this.videoWeeks.set([...this.videoWeeks()]);
           } else {
@@ -558,6 +669,7 @@ export class CascadeComponent {
   onFilenameModalClosed() {
     this.filenameModalVisible.set(false);
     this.editingVideo.set(null);
+    this.editingFilename.set('');
   }
 
   openSuggestedTitleModal(video: VideoItem) {
@@ -702,12 +814,21 @@ export class CascadeComponent {
     const currentId = this.highlightedItemId();
     let currentIndex = currentId ? videoItems.findIndex(item => item.itemId === currentId) : -1;
 
-    // If nothing is highlighted, start from beginning or end based on direction
+    // If current item doesn't exist in filtered list, find closest item or start fresh
     if (currentIndex === -1) {
+      // Nothing highlighted or highlighted item not in current list
+      // Start from beginning if going down, or end if going up
       currentIndex = direction === 1 ? -1 : videoItems.length;
     }
 
+    // Calculate new index
     const newIndex = Math.max(0, Math.min(videoItems.length - 1, currentIndex + direction));
+
+    // Don't navigate if we're already at the boundary
+    if (newIndex === currentIndex) {
+      return;
+    }
+
     const newItem = videoItems[newIndex];
 
     if (newItem) {
@@ -734,29 +855,14 @@ export class CascadeComponent {
    */
   private scrollToItemId(itemId: string): void {
     const allItems = this.virtualItems();
-    const index = allItems.findIndex(item =>
+    const targetIndex = allItems.findIndex(item =>
       item.type === 'video' && item.itemId === itemId
     );
-    if (index < 0 || !this.viewport) return;
+    if (targetIndex < 0 || !this.viewport) return;
 
-    const itemHeight = 56; // Approximate row height
-    const headerHeight = 40; // Sticky section header height
-    const itemOffset = index * itemHeight;
-
-    const viewportSize = this.viewport.getViewportSize();
-    const currentScroll = this.viewport.measureScrollOffset('top');
-
-    // Check if item is above visible area (accounting for header)
-    if (itemOffset < currentScroll + headerHeight) {
-      // Scroll up - put item just below the header
-      this.viewport.scrollToOffset(Math.max(0, itemOffset - headerHeight), 'smooth');
-    }
-    // Check if item is below visible area
-    else if (itemOffset + itemHeight > currentScroll + viewportSize) {
-      // Scroll down - put item at the bottom of the viewport
-      this.viewport.scrollToOffset(itemOffset - viewportSize + itemHeight + 10, 'smooth');
-    }
-    // Otherwise item is already visible, no need to scroll
+    // Use 'auto' instead of 'smooth' to avoid animation issues that can cause
+    // indices to be wrong when rapidly pressing arrow keys
+    this.viewport.scrollToIndex(targetIndex, 'auto');
   }
 
   /**
@@ -1064,14 +1170,18 @@ export class CascadeComponent {
     );
 
     if (index !== -1 && this.viewport) {
+      const item = virtualItems[index];
+
       // Scroll to the video
       this.viewport.scrollToIndex(index, 'smooth');
 
-      // Temporarily highlight it
-      this.highlightedItemId.set(videoId);
-      setTimeout(() => {
-        this.highlightedItemId.set(null);
-      }, 2000);
+      // Temporarily highlight it using the correct itemId format
+      if (item.type === 'video') {
+        this.highlightedItemId.set(item.itemId);
+        setTimeout(() => {
+          this.highlightedItemId.set(null);
+        }, 2000);
+      }
     }
   }
 

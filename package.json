@@ -13,7 +13,7 @@
     "clean:win": "rimraf dist-electron",
     "clean:mac": "rimraf dist-electron/mac dist-electron/mac-arm64 dist-electron/*.dmg dist-electron/*.dmg.blockmap dist-electron/latest-mac.yml mac-arm64 mac-arm64* *.dmg *.dmg.blockmap",
     "clean:linux": "rimraf dist-electron/linux-unpacked dist-electron/*.AppImage dist-electron/*.AppImage.blockmap dist-electron/*.deb dist-electron/latest-linux.yml",
-    "clean:all": "npm run clean && rimraf frontend/dist backend/dist",
+    "clean:all": "npm run clean:mac && npm run clean:win && npm run clean:linux && rimraf dist-electron dist-python backup",
     "build:all": "npm run build:shared && npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
     "build:backend": "tsc -p backend/tsconfig.json && cd backend && npm run build",
     "build:frontend": "cd frontend-v3 && npm run build",
@@ -21,10 +21,13 @@
     "build:preload": "tsc -p electron/tsconfig.preload.json",
     "build:shared": "tsc -p shared",
     "download:ytdlp": "node scripts/download-ytdlp.js",
+    "download:whisper": "node scripts/download-whisper.js",
+    "download:binaries": "node scripts/download-all-binaries.js",
     "package:python:mac-arm64": "node scripts/package-python-mac.js arm64",
     "package:python:mac-x64": "node scripts/package-python-mac.js x64",
     "package:python:win-x64": "node scripts/package-python-windows.js x64",
     "package:python:win-arm64": "node scripts/package-python-windows.js arm64",
+    "package:backend:prod": "node scripts/package-backend-prod.js",
     "clean:python:mac-arm64": "rimraf dist-python/python-arm64",
     "clean:python:mac-x64": "rimraf dist-python/python-x64",
     "clean:python:win-x64": "rimraf dist-python/python-x64",
@@ -36,16 +39,17 @@
     "electron:dev:bundled": "npm run build:all && cross-env NODE_ENV=development USE_BUNDLED_PYTHON=true electron .",
     "electron:test-packaged": "npm run build:all && cross-env NODE_ENV=production electron .",
     "electron": "npm run build:all && electron .",
-    "package:mac-arm64": "npm run clean:mac && npm run download:ytdlp && npm run build:all && npm run package:python:mac-arm64 && electron-builder --mac --arm64 --publish never",
+    "package:mac-arm64": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:python:mac-arm64 && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
     "install:ffmpeg:x64": "node scripts/install-ffmpeg-x64.js",
-    "package:mac-x64": "npm run clean:mac && npm run download:ytdlp && npm run install:ffmpeg:x64 && npm run build:all && npm run package:python:mac-x64 && node -e \"const pkg = require('./package.json'); const config = JSON.parse(JSON.stringify(pkg.build)); config.mac.extraResources[0].from = 'dist-python/python-x64'; require('fs').writeFileSync('./.package-temp.json', JSON.stringify(config));\" && electron-builder --mac --x64 --config .package-temp.json --publish never && rm -f .package-temp.json",
-    "package:win-x64": "npm run clean:win && npm run download:ytdlp && npm run build:all && npm run package:python:win-x64 && electron-builder --win --x64 --publish never",
-    "package:win-arm64": "npm run clean:win && npm run download:ytdlp && npm run build:all && npm run package:python:win-arm64 && node -e \"const pkg = require('./package.json'); const config = JSON.parse(JSON.stringify(pkg.build)); config.win.extraResources[0].from = 'dist-python/python-arm64'; require('fs').writeFileSync('./.package-temp.json', JSON.stringify(config));\" && electron-builder --win --arm64 --config .package-temp.json --publish never && rm -f .package-temp.json",
-    "package:linux": "npm run clean:linux && npm run download:ytdlp && npm run build:all && electron-builder --linux --publish never",
+    "package:mac-x64": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:python:mac-x64 && npm run package:backend:prod && node -e \"const pkg = require('./package.json'); const config = JSON.parse(JSON.stringify(pkg.build)); config.mac.extraResources[0].from = 'dist-python/python-x64'; require('fs').writeFileSync('./.package-temp.json', JSON.stringify(config));\" && electron-builder --mac --x64 --config .package-temp.json --publish never && rm -f .package-temp.json",
+    "package:win-x64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:python:win-x64 && npm run package:backend:prod && electron-builder --win --x64 --publish never",
+    "package:win-arm64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:python:win-arm64 && npm run package:backend:prod && node -e \"const pkg = require('./package.json'); const config = JSON.parse(JSON.stringify(pkg.build)); config.win.extraResources[0].from = 'dist-python/python-arm64'; require('fs').writeFileSync('./.package-temp.json', JSON.stringify(config));\" && electron-builder --win --arm64 --config .package-temp.json --publish never && rm -f .package-temp.json",
+    "package:linux": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
     "clean:package:mac-arm64": "npm run clean:python:mac-arm64 && npm run package:mac-arm64",
     "clean:package:mac-x64": "npm run clean:python:mac-x64 && npm run package:mac-x64",
     "clean:package:win-x64": "npm run clean:python:win-x64 && npm run package:win-x64",
-    "clean:package:win-arm64": "npm run clean:python:win-arm64 && npm run package:win-arm64"
+    "clean:package:win-arm64": "npm run clean:python:win-arm64 && npm run package:win-arm64",
+    "clean:cache": "find . -name '.DS_Store' -delete && find . -name '*.tsbuildinfo' -not -path '*/node_modules/*' -delete"
   },
   "keywords": [
     "video",
@@ -63,6 +67,7 @@
     "npm": ">=10.0.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
     "@electron/typescript-definitions": "^9.1.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/electron": "^1.6.12",
@@ -134,21 +139,11 @@
         "from": "utilities",
         "to": "utilities",
         "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "node_modules/@ffmpeg-installer",
-        "to": "node_modules/@ffmpeg-installer",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "node_modules/@ffprobe-installer",
-        "to": "node_modules/@ffprobe-installer",
-        "filter": [
-          "**/*"
+          "bin/yt-dlp_macos",
+          "bin/yt-dlp.exe",
+          "bin/yt-dlp_linux",
+          "bin/whisper",
+          "bin/whisper.exe"
         ]
       }
     ],
@@ -202,6 +197,14 @@
           "filter": [
             "**/*"
           ]
+        },
+        {
+          "from": "node_modules/@ffmpeg-installer/darwin-arm64",
+          "to": "node_modules/@ffmpeg-installer/darwin-arm64"
+        },
+        {
+          "from": "node_modules/@ffprobe-installer/darwin-arm64",
+          "to": "node_modules/@ffprobe-installer/darwin-arm64"
         }
       ],
       "extendInfo": {
@@ -241,6 +244,14 @@
           "filter": [
             "**/*"
           ]
+        },
+        {
+          "from": "node_modules/@ffmpeg-installer/win32-x64",
+          "to": "node_modules/@ffmpeg-installer/win32-x64"
+        },
+        {
+          "from": "node_modules/@ffprobe-installer/win32-x64",
+          "to": "node_modules/@ffprobe-installer/win32-x64"
         }
       ]
     },
@@ -266,7 +277,17 @@
         "AppImage",
         "deb"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "extraResources": [
+        {
+          "from": "node_modules/@ffmpeg-installer/linux-x64",
+          "to": "node_modules/@ffmpeg-installer/linux-x64"
+        },
+        {
+          "from": "node_modules/@ffprobe-installer/linux-x64",
+          "to": "node_modules/@ffprobe-installer/linux-x64"
+        }
+      ]
     },
     "publish": {
       "provider": "github",

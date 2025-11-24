@@ -76,11 +76,7 @@
                 <div class="form-group">
                   <label>Whisper Model</label>
                   <select [(ngModel)]="settings.whisperModel">
-                    <option value="tiny">Tiny (Fastest, Less Accurate)</option>
-                    <option value="base">Base</option>
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large (Slowest, Most Accurate)</option>
+                    <option value="tiny">Tiny (Bundled)</option>
                   </select>
                 </div>
               </div>
@@ -102,7 +98,7 @@
               <div class="config-form">
                 <div class="form-group">
                   <label>AI Model</label>
-                  <select [(ngModel)]="settings.aiModel" [disabled]="loadingModels">
+                  <select [(ngModel)]="settings.aiModel" (change)="onAiModelChange()" [disabled]="loadingModels">
                     <option *ngIf="loadingModels" value="">Loading models...</option>
                     <option *ngIf="!loadingModels && aiModels.length === 0" value="">No models available</option>
 

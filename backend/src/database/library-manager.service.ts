@@ -15,6 +15,7 @@ export interface ClipLibrary {
   clipsFolderPath: string;
   createdAt: string;
   lastAccessedAt: string;
+  defaultAiModel?: string; // Format: "provider:model" (e.g., "claude:claude-3-5-sonnet-latest")
 }
 
 interface LibraryManagerConfig {
@@ -407,6 +408,41 @@ export class LibraryManagerService implements OnModuleInit {
     this.saveConfig();
 
     this.logger.log(`Updated clips folder for library ${libraryId} to: ${newPath}`);
+    return true;
+  }
+
+  /**
+   * Get default AI model for a library
+   */
+  getDefaultAiModel(libraryId?: string): string | null {
+    const library = libraryId
+      ? this.config.libraries.find((lib) => lib.id === libraryId)
+      : this.getActiveLibrary();
+
+    if (!library) {
+      return null;
+    }
+
+    return library.defaultAiModel || null;
+  }
+
+  /**
+   * Set default AI model for a library
+   */
+  setDefaultAiModel(aiModel: string, libraryId?: string): boolean {
+    const library = libraryId
+      ? this.config.libraries.find((lib) => lib.id === libraryId)
+      : this.getActiveLibrary();
+
+    if (!library) {
+      this.logger.warn(`Library not found: ${libraryId || 'active'}`);
+      return false;
+    }
+
+    library.defaultAiModel = aiModel;
+    this.saveConfig();
+
+    this.logger.log(`Set default AI model for library ${library.id} to: ${aiModel}`);
     return true;
   }
 
