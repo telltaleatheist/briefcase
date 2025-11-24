@@ -29,11 +29,13 @@ interface LibraryManagerConfig {
  * Each library has:
  * - Unique ID
  * - Name (user-friendly)
- * - SQLite database file
- * - Clips folder (where imported videos are copied)
+ * - SQLite database file (.library.db in the clips folder)
+ * - Clips folder (where imported videos are stored)
  *
- * Libraries are stored in: ~/Library/Application Support/ClipChimp/libraries/
- * Configuration stored in: ~/Library/Application Support/ClipChimp/libraries-config.json
+ * Configuration stored in platform-specific app data directory:
+ * - Mac: ~/Library/Application Support/ClipChimp/libraries-config.json
+ * - Windows: %APPDATA%/ClipChimp/libraries-config.json
+ * - Linux: ~/.config/ClipChimp/libraries-config.json
  */
 @Injectable()
 export class LibraryManagerService implements OnModuleInit {
@@ -47,15 +49,13 @@ export class LibraryManagerService implements OnModuleInit {
     private readonly databaseService: DatabaseService,
     private readonly migrationService: LibraryMigrationService,
   ) {
-    // Base directory: ~/Library/Application Support/ClipChimp
-    this.appDataPath = path.join(
-      os.homedir(),
-      'Library',
-      'Application Support',
-      'ClipChimp',
-    );
+    // Base directory - cross-platform app data location
+    // Mac: ~/Library/Application Support/ClipChimp
+    // Windows: %APPDATA%/ClipChimp
+    // Linux: ~/.config/ClipChimp
+    this.appDataPath = this.getAppDataPath();
 
-    // Libraries directory: ~/Library/Application Support/ClipChimp/libraries
+    // Libraries directory (metadata only - actual libraries are in user-selected folders)
     this.librariesBasePath = path.join(this.appDataPath, 'libraries');
 
     // Config file
@@ -72,6 +72,30 @@ export class LibraryManagerService implements OnModuleInit {
     // Load or initialize config
     this.config = this.loadConfig();
     this.logger.log(`Loaded library configuration: ${this.config.libraries.length} libraries`);
+  }
+
+  /**
+   * Get cross-platform app data directory
+   * Mac: ~/Library/Application Support/ClipChimp
+   * Windows: %APPDATA%/ClipChimp
+   * Linux: ~/.config/ClipChimp
+   */
+  private getAppDataPath(): string {
+    const platform = process.platform;
+    const appName = 'ClipChimp';
+
+    if (platform === 'darwin') {
+      // macOS
+      return path.join(os.homedir(), 'Library', 'Application Support', appName);
+    } else if (platform === 'win32') {
+      // Windows - use APPDATA environment variable
+      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      return path.join(appData, appName);
+    } else {
+      // Linux and others - use XDG_CONFIG_HOME or fallback to ~/.config
+      const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+      return path.join(configHome, appName);
+    }
   }
 
   /**

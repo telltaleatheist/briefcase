@@ -48,7 +48,7 @@ export class SharedDatabaseService extends DatabaseService {
     }
 
     // Get master database path from path mapping
-    this.masterDbPath = this.pathMapper.toAbsolutePath('libraries/master.db');
+    this.masterDbPath = this.pathMapper.toAbsolutePath('.clipchimp.db');
     this.isSharedMode = true;
 
     this.sharedLogger.log(`Initializing shared database at: ${this.masterDbPath}`);

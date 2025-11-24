@@ -199,13 +199,11 @@ export class DatabaseService {
   private readonly appDataPath: string;
 
   constructor(private readonly thumbnailService: ThumbnailService) {
-    // Base directory: ~/Library/Application Support/clipchimp
-    this.appDataPath = path.join(
-      os.homedir(),
-      'Library',
-      'Application Support',
-      'clipchimp',
-    );
+    // Base directory - cross-platform app data location
+    // Mac: ~/Library/Application Support/ClipChimp
+    // Windows: %APPDATA%/ClipChimp
+    // Linux: ~/.config/ClipChimp
+    this.appDataPath = this.getAppDataPath();
 
     // Ensure directories exist
     if (!fs.existsSync(this.appDataPath)) {
@@ -216,12 +214,36 @@ export class DatabaseService {
   }
 
   /**
+   * Get cross-platform app data directory
+   * Mac: ~/Library/Application Support/ClipChimp
+   * Windows: %APPDATA%/ClipChimp
+   * Linux: ~/.config/ClipChimp
+   */
+  private getAppDataPath(): string {
+    const platform = process.platform;
+    const appName = 'ClipChimp';
+
+    if (platform === 'darwin') {
+      // macOS
+      return path.join(os.homedir(), 'Library', 'Application Support', appName);
+    } else if (platform === 'win32') {
+      // Windows - use APPDATA environment variable
+      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      return path.join(appData, appName);
+    } else {
+      // Linux and others - use XDG_CONFIG_HOME or fallback to ~/.config
+      const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+      return path.join(configHome, appName);
+    }
+  }
+
+  /**
    * Initialize database connection with a specific database file
    * @param dbPath - Path to the database file (optional, uses default if not provided)
    */
   initializeDatabase(dbPath?: string) {
-    // Use provided path or default to clipchimp.db
-    this.dbPath = dbPath || path.join(this.appDataPath, 'clipchimp.db');
+    // Use provided path or default to .clipchimp.db in app data directory
+    this.dbPath = dbPath || path.join(this.appDataPath, '.clipchimp.db');
 
     this.logger.log(`Initializing database at: ${this.dbPath}`);
 
