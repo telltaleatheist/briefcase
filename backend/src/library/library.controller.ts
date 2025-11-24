@@ -1,4 +1,4 @@
-// clippy/backend/src/library/library.controller.ts
+// ClipChimp/backend/src/library/library.controller.ts
 import {
   Controller,
   Get,
@@ -1020,19 +1020,19 @@ export class LibraryController {
       // Determine output path
       let outputDir: string;
       let baseDir: string;
-      let clippyDir: string;
+      let clipChimpDir: string;
 
       if (body.customDirectory) {
         // If custom directory is provided, use it directly without adding /clips subfolder
         baseDir = body.customDirectory.replace(/[\\/]+$/, ''); // Remove trailing slashes
-        clippyDir = baseDir;
+        clipChimpDir = baseDir;
         outputDir = baseDir;
       } else {
         // Use library clips directory
         const libraryPaths = this.libraryService.getLibraryPaths();
         outputDir = libraryPaths.clipsDir;
         baseDir = libraryPaths.libraryDir;
-        clippyDir = libraryPaths.libraryDir;
+        clipChimpDir = libraryPaths.libraryDir;
       }
 
       const outputPath = path.join(outputDir, clipFilename);
@@ -1043,7 +1043,7 @@ export class LibraryController {
         outputDir,
         filename: clipFilename,
         baseDir,
-        clippyDir,
+        clipChimpDir,
       };
     } catch (error: any) {
       if (error instanceof HttpException) {
@@ -1254,7 +1254,7 @@ export class LibraryController {
       // Create a temporary file for the clip
       const tempDir = os.tmpdir();
       const originalExt = path.extname(body.videoPath);
-      const tempFilename = `clippy_temp_${Date.now()}${originalExt}`;
+      const tempFilename = `clipchimp_temp_${Date.now()}${originalExt}`;
       const tempPath = path.join(tempDir, tempFilename);
 
       // Extract the clip to temp file

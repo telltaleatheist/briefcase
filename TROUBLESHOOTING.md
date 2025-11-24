@@ -8,7 +8,7 @@
 ```
 Error: Cannot find module '../dist-electron/shared/binary-paths'
 Require stack:
-- /Applications/Clippy.app/Contents/Resources/app.asar/dist-electron/electron/utilities/executables.js
+- /Applications/ClipChimp.app/Contents/Resources/app.asar/dist-electron/electron/utilities/executables.js
 ```
 
 **Cause:**
@@ -70,11 +70,11 @@ Binaries are not in the expected locations after packaging.
 **Debug:**
 ```bash
 # Check packaged app structure
-ls -la "Clippy.app/Contents/Resources/utilities/bin/"
-ls -la "Clippy.app/Contents/Resources/node_modules/@ffmpeg-installer/"
+ls -la "ClipChimp.app/Contents/Resources/utilities/bin/"
+ls -la "ClipChimp.app/Contents/Resources/node_modules/@ffmpeg-installer/"
 
 # Check logs for path resolution
-tail -f ~/Library/Logs/Clippy/main.log
+tail -f ~/Library/Logs/ClipChimp/main.log
 ```
 
 ---
@@ -95,14 +95,14 @@ Cache directory has been fixed to use writable user data location:
 
 ```typescript
 // ✅ CORRECT (now fixed)
-const userDataPath = getUserDataPath(); // ~/Library/Application Support/clippy
+const userDataPath = getUserDataPath(); // ~/Library/Application Support/clipchimp
 const cacheDir = path.join(userDataPath, 'cache');
 process.env.XDG_CACHE_HOME = cacheDir;
 ```
 
 Whisper models will now download to:
 ```
-~/Library/Application Support/clippy/cache/
+~/Library/Application Support/clipchimp/cache/
 ```
 
 ---
@@ -136,7 +136,7 @@ const dbPath = path.join(
 - ASAR archive ❌
 
 **Should be in:**
-- `~/Library/Application Support/clippy/` ✓
+- `~/Library/Application Support/clipchimp/` ✓
 
 ---
 
@@ -186,11 +186,11 @@ Check `environment.util.ts` getFrontEndPath():
 ```typescript
 const possiblePaths = [
   // Packaged paths (inside app bundle)
-  path.join(process.resourcesPath, 'frontend', 'dist', 'clippy-frontend', 'browser'),
-  path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clippy-frontend', 'browser'),
+  path.join(process.resourcesPath, 'frontend', 'dist', 'clipchimp-frontend', 'browser'),
+  path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clipchimp-frontend', 'browser'),
 
   // Development paths
-  path.join(process.cwd(), 'frontend', 'dist', 'clippy-frontend', 'browser'),
+  path.join(process.cwd(), 'frontend', 'dist', 'clipchimp-frontend', 'browser'),
 ];
 ```
 
@@ -213,7 +213,7 @@ Environment variables are not persisted or binary paths not detected.
 
 ```bash
 # Check config file
-cat ~/Library/Application\ Support/clippy/app-config.json
+cat ~/Library/Application\ Support/clipchimp/app-config.json
 
 # Should contain:
 {
@@ -251,10 +251,10 @@ npm run clean:mac
 npm run package:mac-arm64
 
 # Run packaged app
-open "dist-electron/mac-arm64/Clippy.app"
+open "dist-electron/mac-arm64/ClipChimp.app"
 
 # Check logs
-tail -f ~/Library/Logs/Clippy/main.log
+tail -f ~/Library/Logs/ClipChimp/main.log
 ```
 
 ### Verification Steps
@@ -266,7 +266,7 @@ tail -f ~/Library/Logs/Clippy/main.log
 2. **Database Works:**
    - Create a new library
    - Import a video
-   - Verify database file created in `~/Library/Application Support/clippy/libraries/`
+   - Verify database file created in `~/Library/Application Support/clipchimp/libraries/`
 
 3. **Downloads Work:**
    - Paste a video URL
@@ -275,7 +275,7 @@ tail -f ~/Library/Logs/Clippy/main.log
 
 4. **Transcription Works:**
    - Run transcription on a video
-   - Whisper models download to `~/Library/Application Support/clippy/cache/`
+   - Whisper models download to `~/Library/Application Support/clipchimp/cache/`
    - Transcript appears in database
 
 5. **Config Persists:**
@@ -295,19 +295,19 @@ export ELECTRON_ENABLE_LOGGING=1
 npm run electron:dev
 
 # Or in packaged app
-ELECTRON_ENABLE_LOGGING=1 /Applications/Clippy.app/Contents/MacOS/Clippy
+ELECTRON_ENABLE_LOGGING=1 /Applications/ClipChimp.app/Contents/MacOS/ClipChimp
 ```
 
 Check logs:
 ```bash
 # macOS
-tail -f ~/Library/Logs/Clippy/main.log
+tail -f ~/Library/Logs/ClipChimp/main.log
 
 # Windows
-type %USERPROFILE%\AppData\Roaming\Clippy\logs\main.log
+type %USERPROFILE%\AppData\Roaming\ClipChimp\logs\main.log
 
 # Linux
-tail -f ~/.config/Clippy/logs/main.log
+tail -f ~/.config/ClipChimp/logs/main.log
 ```
 
 ---

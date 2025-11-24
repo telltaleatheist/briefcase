@@ -10,8 +10,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-// Path to clippy database
-const appDataPath = path.join(os.homedir(), 'Library', 'Application Support', 'clippy');
+// Path to ClipChimp database
+const appDataPath = path.join(os.homedir(), 'Library', 'Application Support', 'ClipChimp');
 const librariesPath = path.join(appDataPath, 'libraries');
 
 // Find all library databases

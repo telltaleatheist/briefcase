@@ -20,23 +20,35 @@ const CACHE_DIR = path.join(__dirname, '..', '.build-cache', 'whisper');
  * Find whisper executable on the system
  */
 function findWhisperExecutable() {
+  const isWindows = process.platform === 'win32';
+
+  // Try using 'where' on Windows or 'which' on Unix
   try {
-    const whisperPath = execSync('which whisper', { encoding: 'utf-8' }).trim();
+    const cmd = isWindows ? 'where whisper' : 'which whisper';
+    const whisperPath = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n')[0];
     if (whisperPath && fs.existsSync(whisperPath)) {
       return whisperPath;
     }
   } catch (error) {
-    // which command failed, try other methods
+    // Command failed, try other methods
   }
 
   // Try common Python script locations
-  const commonPaths = [
-    '/usr/local/bin/whisper',
-    '/usr/bin/whisper',
-    path.join(process.env.HOME || '', '.local', 'bin', 'whisper'),
+  const commonPaths = isWindows ? [
+    // Windows paths
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'Scripts', 'whisper.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'Scripts', 'whisper.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python310', 'Scripts', 'whisper.exe'),
     'C:\\Python312\\Scripts\\whisper.exe',
     'C:\\Python311\\Scripts\\whisper.exe',
     'C:\\Python310\\Scripts\\whisper.exe',
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'Scripts', 'whisper.exe'),
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'Scripts', 'whisper.exe'),
+  ] : [
+    // Unix paths
+    '/usr/local/bin/whisper',
+    '/usr/bin/whisper',
+    path.join(process.env.HOME || '', '.local', 'bin', 'whisper'),
   ];
 
   for (const testPath of commonPaths) {
@@ -73,7 +85,8 @@ async function downloadWhisper() {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     }
 
-    const binaryName = 'whisper';
+    const isWindows = process.platform === 'win32';
+    const binaryName = isWindows ? 'whisper.exe' : 'whisper';
     const cachePath = path.join(CACHE_DIR, binaryName);
     const destPath = path.join(BIN_DIR, binaryName);
 
@@ -83,12 +96,14 @@ async function downloadWhisper() {
       console.log('✅ Whisper binary found in cache!\n');
       console.log('📋 Restoring from cache...\n');
       copyFile(cachePath, destPath);
-      fs.chmodSync(destPath, 0o755);
+      if (!isWindows) {
+        fs.chmodSync(destPath, 0o755);
+      }
 
       console.log('\n╔═══════════════════════════════════════════════════════════╗');
       console.log('║          Whisper Binary Restored! ✅                      ║');
       console.log('╚═══════════════════════════════════════════════════════════╝\n');
-      console.log('📁 Binary restored to: utilities/bin/whisper\n');
+      console.log(`📁 Binary restored to: utilities/bin/${binaryName}\n`);
       return;
     }
 
@@ -112,11 +127,15 @@ async function downloadWhisper() {
 
     // Copy to cache
     copyFile(whisperPath, cachePath);
-    fs.chmodSync(cachePath, 0o755);
+    if (!isWindows) {
+      fs.chmodSync(cachePath, 0o755);
+    }
 
     // Copy to bin
     copyFile(whisperPath, destPath);
-    fs.chmodSync(destPath, 0o755);
+    if (!isWindows) {
+      fs.chmodSync(destPath, 0o755);
+    }
 
     const stats = fs.statSync(destPath);
     const size = `${(stats.size / 1024).toFixed(2)} KB`;
@@ -124,7 +143,7 @@ async function downloadWhisper() {
     console.log('\n╔═══════════════════════════════════════════════════════════╗');
     console.log('║          Whisper Setup Complete! ✅                       ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
-    console.log(`📁 Binary saved to: utilities/bin/whisper (${size})`);
+    console.log(`📁 Binary saved to: utilities/bin/${binaryName} (${size})`);
     console.log('💾 Cached in: .build-cache/whisper/\n');
     console.log('ℹ️  This binary will be reused for all future builds!\n');
 

@@ -1,4 +1,4 @@
-// clippy/backend/src/downloader/downloader.controller.ts
+// ClipChimp/backend/src/downloader/downloader.controller.ts
 import { Controller, Get, Param, Delete, Res, Query } from '@nestjs/common';
 import { Response } from 'express';
 import { DownloaderService } from './downloader.service';

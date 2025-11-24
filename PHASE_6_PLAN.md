@@ -60,7 +60,7 @@ Phase 6 focuses on making it easy to discover and navigate through thousands of 
 **Features:**
 1. **Thumbnail Generation**
    - FFmpeg extract frame at 10% into video
-   - Cache thumbnails in `~/Library/Application Support/clippy/thumbnails/`
+   - Cache thumbnails in `~/Library/Application Support/ClipChimp/thumbnails/`
    - Background job queue (don't block UI)
    - Lazy generation on first view
 

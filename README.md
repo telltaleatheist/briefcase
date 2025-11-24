@@ -1,10 +1,10 @@
-# Clippy Development Guide
+# ClipChimp Development Guide
 
-This guide provides comprehensive documentation for developers working on the Clippy video downloader application. It covers the architecture, component structure, and implementation details necessary for development and troubleshooting.
+This guide provides comprehensive documentation for developers working on the ClipChimp video downloader application. It covers the architecture, component structure, and implementation details necessary for development and troubleshooting.
 
 ## Architecture Overview
 
-Clippy is built using a modern web application architecture with Electron as the container:
+ClipChimp is built using a modern web application architecture with Electron as the container:
 
 ### Backend (NestJS)
 
@@ -141,7 +141,7 @@ async processMedia(
 
 ### Video Player and Clip Creation System
 
-Clippy includes a comprehensive video player and clip creation system that allows users to:
+ClipChimp includes a comprehensive video player and clip creation system that allows users to:
 - Play any video file (analyzed or custom)
 - Create clips from specific time ranges
 - View AI analysis sections and transcripts
@@ -719,7 +719,7 @@ try {
 
 #### Python Configuration
 
-Clippy supports multiple Python configuration modes:
+ClipChimp supports multiple Python configuration modes:
 
 **1. Development Mode (Recommended for Development):**
 ```bash
@@ -766,8 +766,8 @@ npm run package:mac-arm64  # or other platform
 
 ```bash
 # Clone Repository
-git clone https://github.com/your-username/clippy.git
-cd clippy
+git clone https://github.com/your-username/clipchimp.git
+cd clipchimp
 ```
 
 ### Install Dependencies
@@ -909,7 +909,7 @@ This documentation should provide a comprehensive understanding of the project a
 - Check logs first:
   - Backend logs for API and process issues
   - Frontend console for UI and event issues
-  - Log location for Mac: `~/Library/Logs/clippy/main.log`
+  - Log location for Mac: `~/Library/Logs/clipchimp/main.log`
 
 **Key log patterns:**
 - "Emitting event" logs for WebSocket communication

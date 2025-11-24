@@ -11,8 +11,8 @@ import { v4 as uuidv4 } from 'uuid';
  *
  * This is a one-time migration that imports:
  * - Existing analyzed videos from library.json
- * - Transcripts from ~/Library/Application Support/clippy/transcripts/
- * - Analyses from ~/Library/Application Support/clippy/analyses/
+ * - Transcripts from ~/Library/Application Support/clipchimp/transcripts/
+ * - Analyses from ~/Library/Application Support/clipchimp/analyses/
  * - Parsed metadata (sections, categories)
  */
 @Injectable()
@@ -27,7 +27,7 @@ export class MigrationService {
       os.homedir(),
       'Library',
       'Application Support',
-      'clippy',
+      'clipchimp',
     );
 
     this.libraryPath = path.join(appDataPath, 'library.json');

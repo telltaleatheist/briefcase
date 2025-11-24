@@ -82,7 +82,7 @@ After running `npm run electron:dev`, you should see:
 ## Directory Structure
 
 ```
-clippy/
+ClipChimp/
 ├── backend/               # NestJS backend (port 3000)
 ├── frontend-v2/          # Old frontend (deprecated)
 ├── frontend-v3/          # NEW frontend (ClipChimp)

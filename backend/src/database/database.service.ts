@@ -199,12 +199,12 @@ export class DatabaseService {
   private readonly appDataPath: string;
 
   constructor(private readonly thumbnailService: ThumbnailService) {
-    // Base directory: ~/Library/Application Support/clippy
+    // Base directory: ~/Library/Application Support/clipchimp
     this.appDataPath = path.join(
       os.homedir(),
       'Library',
       'Application Support',
-      'clippy',
+      'clipchimp',
     );
 
     // Ensure directories exist
@@ -220,8 +220,8 @@ export class DatabaseService {
    * @param dbPath - Path to the database file (optional, uses default if not provided)
    */
   initializeDatabase(dbPath?: string) {
-    // Use provided path or default to clippy.db
-    this.dbPath = dbPath || path.join(this.appDataPath, 'clippy.db');
+    // Use provided path or default to clipchimp.db
+    this.dbPath = dbPath || path.join(this.appDataPath, 'clipchimp.db');
 
     this.logger.log(`Initializing database at: ${this.dbPath}`);
 

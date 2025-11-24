@@ -1,4 +1,4 @@
-// clippy/electron/config/app-config.ts
+// ClipChimp/electron/config/app-config.ts
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';

@@ -32,8 +32,8 @@ interface LibraryManagerConfig {
  * - SQLite database file
  * - Clips folder (where imported videos are copied)
  *
- * Libraries are stored in: ~/Library/Application Support/clippy/libraries/
- * Configuration stored in: ~/Library/Application Support/clippy/libraries-config.json
+ * Libraries are stored in: ~/Library/Application Support/ClipChimp/libraries/
+ * Configuration stored in: ~/Library/Application Support/ClipChimp/libraries-config.json
  */
 @Injectable()
 export class LibraryManagerService implements OnModuleInit {
@@ -47,15 +47,15 @@ export class LibraryManagerService implements OnModuleInit {
     private readonly databaseService: DatabaseService,
     private readonly migrationService: LibraryMigrationService,
   ) {
-    // Base directory: ~/Library/Application Support/clippy
+    // Base directory: ~/Library/Application Support/ClipChimp
     this.appDataPath = path.join(
       os.homedir(),
       'Library',
       'Application Support',
-      'clippy',
+      'ClipChimp',
     );
 
-    // Libraries directory: ~/Library/Application Support/clippy/libraries
+    // Libraries directory: ~/Library/Application Support/ClipChimp/libraries
     this.librariesBasePath = path.join(this.appDataPath, 'libraries');
 
     // Config file

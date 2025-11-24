@@ -1,4 +1,4 @@
-// clippy/backend/src/library/parsers/analysis-parser.ts
+// ClipChimp/backend/src/library/parsers/analysis-parser.ts
 import * as fs from 'fs/promises';
 import {
   ParsedAnalysisMetadata,

@@ -1,4 +1,4 @@
-// clippy/backend/src/ffmpeg/ffmpeg.service.ts
+// ClipChimp/backend/src/ffmpeg/ffmpeg.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as ffmpeg from 'fluent-ffmpeg';

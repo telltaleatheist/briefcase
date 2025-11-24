@@ -1,4 +1,4 @@
-// clippy/backend/src/downloader/yt-dlp-manager.ts
+// ClipChimp/backend/src/downloader/yt-dlp-manager.ts
 import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable } from '@nestjs/common';

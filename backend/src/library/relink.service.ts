@@ -1,4 +1,4 @@
-// clippy/backend/src/library/relink.service.ts
+// ClipChimp/backend/src/library/relink.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';

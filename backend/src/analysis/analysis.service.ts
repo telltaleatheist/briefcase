@@ -1275,7 +1275,7 @@ export class AnalysisService implements OnModuleInit {
 
     // Fallback to default location
     const homeDir = require('os').homedir();
-    return path.join(homeDir, 'Downloads', 'clippy');
+    return path.join(homeDir, 'Downloads', 'ClipChimp');
   }
 
   /**

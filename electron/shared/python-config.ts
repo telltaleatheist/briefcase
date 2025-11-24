@@ -1,5 +1,5 @@
 /**
- * Centralized Python configuration for Clippy
+ * Centralized Python configuration for ClipChimp
  *
  * This module ensures that all parts of the application use the SAME Python
  * interpreter, preventing version mismatch issues between setup, checks, and runtime.

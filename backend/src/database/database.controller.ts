@@ -3179,7 +3179,7 @@ export class DatabaseController {
 
   /**
    * GET /api/database/ignore
-   * Get the .clippyignore file content
+   * Get the .clipchimpignore file content
    */
   @Get('ignore')
   getIgnoreFile() {
@@ -3203,7 +3203,7 @@ export class DatabaseController {
 
   /**
    * POST /api/database/ignore
-   * Update the .clippyignore file content
+   * Update the .clipchimpignore file content
    */
   @Post('ignore')
   updateIgnoreFile(@Body() body: { content: string }) {
@@ -3224,7 +3224,7 @@ export class DatabaseController {
 
   /**
    * POST /api/database/ignore/add
-   * Add a pattern to the .clippyignore file
+   * Add a pattern to the .clipchimpignore file
    */
   @Post('ignore/add')
   addIgnorePattern(@Body() body: { pattern: string }) {

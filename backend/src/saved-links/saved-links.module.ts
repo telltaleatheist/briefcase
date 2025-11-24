@@ -1,4 +1,4 @@
-// clippy/backend/src/saved-links/saved-links.module.ts
+// ClipChimp/backend/src/saved-links/saved-links.module.ts
 import { Module } from '@nestjs/common';
 import { SavedLinksService } from './saved-links.service';
 import { SavedLinksController } from './saved-links.controller';

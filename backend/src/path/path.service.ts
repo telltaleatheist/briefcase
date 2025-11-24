@@ -1,4 +1,4 @@
-// clippy/backend/src/path/path.service.ts
+// ClipChimp/backend/src/path/path.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import * as os from 'os';
 import * as path from 'path';

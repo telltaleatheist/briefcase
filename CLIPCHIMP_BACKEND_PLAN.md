@@ -16,7 +16,7 @@
 ## Executive Summary
 
 ### Project Overview
-ClipChimp is a refactored version of Clippy with a new Angular frontend and streamlined NestJS backend. The system uses an **outcome-based architecture** where the database tracks "what has been done to videos" rather than "what work is in progress."
+ClipChimp is a refactored version of ClipChimp with a new Angular frontend and streamlined NestJS backend. The system uses an **outcome-based architecture** where the database tracks "what has been done to videos" rather than "what work is in progress."
 
 ### Key Design Principles
 - **Outcome-Based Storage**: Database tracks video states (has_transcript, has_analysis, etc.), not processing tasks
@@ -809,13 +809,13 @@ new ClipChimpExtension();
   - ✅ `onModuleDestroy()` - updated for new structure
 
 **Files Modified:**
-- `/Volumes/Callisto/Projects/clippy/backend/src/database/database.service.ts` (lines 9-31, 373-396, 980-1016)
-- `/Volumes/Callisto/Projects/clippy/backend/src/queue/queue-manager.service.ts` (lines 14-165)
-- `/Volumes/Callisto/Projects/clippy/backend/src/common/interfaces/task.interface.ts` (lines 160-188)
+- `/Volumes/Callisto/Projects/ClipChimp/backend/src/database/database.service.ts` (lines 9-31, 373-396, 980-1016)
+- `/Volumes/Callisto/Projects/ClipChimp/backend/src/queue/queue-manager.service.ts` (lines 14-165)
+- `/Volumes/Callisto/Projects/ClipChimp/backend/src/common/interfaces/task.interface.ts` (lines 160-188)
 
 ### 🔄 IN PROGRESS
 
-**Current location:** `/Volumes/Callisto/Projects/clippy/backend/src/queue/queue-manager.service.ts` line ~170
+**Current location:** `/Volumes/Callisto/Projects/ClipChimp/backend/src/queue/queue-manager.service.ts` line ~170
 
 Need to replace/rewrite these methods starting at line 167:
 

@@ -1,4 +1,4 @@
-// clippy/backend/src/saved-links/saved-links.service.ts
+// ClipChimp/backend/src/saved-links/saved-links.service.ts
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { QueueManagerService } from '../queue/queue-manager.service';

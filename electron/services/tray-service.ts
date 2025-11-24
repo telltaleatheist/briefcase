@@ -1,4 +1,4 @@
-// clippy/electron/services/tray-service.ts
+// ClipChimp/electron/services/tray-service.ts
 import { app, Tray, Menu, nativeImage, shell } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';

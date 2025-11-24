@@ -2,7 +2,7 @@
 MISSING METADATA & DATABASE INFORMATION HANDLING ANALYSIS - EXECUTIVE SUMMARY
 ================================================================================
 
-PROJECT: Clippy - Video Analysis & Library Management System
+PROJECT: ClipChimp - Video Analysis & Library Management System
 ANALYSIS DATE: 2024
 ANALYST: Code Quality & Resilience Review
 
@@ -208,10 +208,10 @@ For complete fix details, see: MISSING_METADATA_FIXES.md
 For full analysis, see: MISSING_METADATA_ANALYSIS.md
 
 Key file locations:
-- /Volumes/Callisto/Projects/clippy/frontend/src/app/components/video-player/video-player.component.ts
-- /Volumes/Callisto/Projects/clippy/frontend/src/app/components/library/library.component.ts
-- /Volumes/Callisto/Projects/clippy/backend/src/database/database.service.ts
-- /Volumes/Callisto/Projects/clippy/backend/python/video_analysis_service.py
+- /Volumes/Callisto/Projects/ClipChimp/frontend/src/app/components/video-player/video-player.component.ts
+- /Volumes/Callisto/Projects/ClipChimp/frontend/src/app/components/library/library.component.ts
+- /Volumes/Callisto/Projects/ClipChimp/backend/src/database/database.service.ts
+- /Volumes/Callisto/Projects/ClipChimp/backend/python/video_analysis_service.py
 
 ================================================================================
 RESILIENCE SCORES BY COMPONENT
@@ -230,7 +230,7 @@ OVERALL SYSTEM RESILIENCE ............... 6.5/10 (MODERATE RISK)
 CONCLUSION
 ================================================================================
 
-The Clippy system demonstrates good resilience in most areas, particularly in
+The ClipChimp system demonstrates good resilience in most areas, particularly in
 the database and backend services which handle missing data gracefully.
 
 However, the VIDEO PLAYER COMPONENT has CRITICAL VULNERABILITIES with unsafe

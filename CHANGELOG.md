@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Clippy project will be documented in this file.
+All notable changes to the ClipChimp project will be documented in this file.
 
 ---
 
@@ -40,7 +40,7 @@ All notable changes to the Clippy project will be documented in this file.
 - **Solution**: Added automatic schema migration to add missing columns
 - **Implementation**: `runSchemaMigrations()` method checks and adds `added_at` column if missing
 - **File**: [database.service.ts:219-245](backend/src/database/database.service.ts#L219-L245)
-- **Note**: Users can also delete `~/Library/Application Support/clippy/clippy.db` to recreate with fresh schema
+- **Note**: Users can also delete `~/Library/Application Support/ClipChimp/ClipChimp.db` to recreate with fresh schema
 
 #### Build System
 - **Issue**: Backend build incomplete - missing app.controller.js and other files

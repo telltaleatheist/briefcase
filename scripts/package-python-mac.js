@@ -269,7 +269,7 @@ System: macOS
 Whisper model: base (bundled in cache/)
 Dependencies: numpy 1.26.4, torch 2.1.2, openai-whisper
 
-This is a bundled Python environment for Clippy.
+This is a bundled Python environment for ClipChimp.
 Do not modify or move files manually.
 `;
     fs.writeFileSync(markerPath, packageInfo);

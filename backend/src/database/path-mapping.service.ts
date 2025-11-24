@@ -39,7 +39,7 @@ export class PathMappingService {
 
   constructor() {
     // Store config in user's home directory (survives app updates)
-    this.configPath = path.join(os.homedir(), '.clippy-path-mapping.json');
+    this.configPath = path.join(os.homedir(), '.clipchimp-path-mapping.json');
   }
 
   /**

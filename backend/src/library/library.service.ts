@@ -1,4 +1,4 @@
-// clippy/backend/src/library/library.service.ts
+// ClipChimp/backend/src/library/library.service.ts
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
@@ -35,7 +35,7 @@ export class LibraryService {
       os.homedir(),
       'Library',
       'Application Support',
-      'clippy'
+      'ClipChimp'
     );
     this.libraryPath = path.join(this.libraryDir, 'library.json');
     this.analysesDir = path.join(this.libraryDir, 'analyses');
@@ -372,7 +372,7 @@ export class LibraryService {
 
       // Get the configured output directory
       const configOutputDir = this.configService.getOutputDir();
-      const outputDir = configOutputDir || path.join(os.homedir(), 'Downloads', 'clippy');
+      const outputDir = configOutputDir || path.join(os.homedir(), 'Downloads', 'ClipChimp');
 
       this.logger.log(`Looking for original files in: ${outputDir}`);
 

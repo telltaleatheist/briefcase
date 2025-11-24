@@ -31,7 +31,7 @@ When processing a queue of analysis jobs:
 
 ### Test 1: Basic Keep-Alive (Same Model)
 
-1. Open Clippy application
+1. Open ClipChimp application
 2. Go to Video Analysis page
 3. Add 3-4 videos to the processing queue using the same AI model (e.g., qwen2.5:7b)
 4. Start processing

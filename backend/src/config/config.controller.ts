@@ -13,7 +13,7 @@ export class ConfigController {
                       path.join(process.env.HOME || '', 'Library', 'Application Support') :
                       path.join(process.env.HOME || '', '.config'));
 
-    this.configPath = path.join(userDataPath, 'clippy', 'app-config.json');
+    this.configPath = path.join(userDataPath, 'ClipChimp', 'app-config.json');
   }
 
   /**
@@ -84,7 +84,7 @@ export class ConfigController {
   async saveLogs(@Body() body: { content: string }) {
     try {
       // Get logs directory
-      const logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'clippy');
+      const logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'ClipChimp');
 
       // Ensure logs directory exists
       if (!fs.existsSync(logsDir)) {

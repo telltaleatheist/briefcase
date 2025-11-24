@@ -3,7 +3,7 @@
 ## Database Schema & Models
 
 ### Database Service (Core Data Layer)
-- **Path**: `/Volumes/Callisto/Projects/clippy/backend/src/database/database.service.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/backend/src/database/database.service.ts`
 - **Key Methods**:
   - `initializeSchema()` - Creates all database tables (lines 118-217)
   - `insertAnalysis(data)` - Store analysis (lines 524-556)
@@ -14,24 +14,24 @@
   - `insertTag(tag)` - Store tags (lines 646-671)
   - `getTags(videoId)` - Get video tags (lines 676-688)
 
-**Database Location**: `~/Library/Application Support/clippy/clippy.db` (SQLite via sql.js)
+**Database Location**: `~/Library/Application Support/clipchimp/clipchimp.db` (SQLite via sql.js)
 
 ---
 
 ## Backend Services
 
 ### Analysis Service (Single Video Analysis)
-- **Path**: `/Volumes/Callisto/Projects/clippy/backend/src/analysis/analysis.service.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/backend/src/analysis/analysis.service.ts`
 - **Key Methods**:
   - `startAnalysis(request)` - Start job (lines 78-102)
   - `processAnalysis(jobId, request)` - Main pipeline (lines 139-413)
   - `extractAudio(videoPath, jobId)` - Extract WAV file (lines 449-479)
   - `storeAnalysisResults()` - NOT used for single analysis (saves to filesystem only)
 
-**Output Location**: `~/Downloads/clippy/analysis/`
+**Output Location**: `~/Downloads/clipchimp/analysis/`
 
 ### Batch Analysis Service (Multiple Videos + Database)
-- **Path**: `/Volumes/Callisto/Projects/clippy/backend/src/database/batch-analysis.service.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/backend/src/database/batch-analysis.service.ts`
 - **Key Methods**:
   - `startBatchAnalysis(options)` - Queue job (lines 89-183)
   - `processBatch(videos, config)` - Main batch loop (lines 188-289)
@@ -48,7 +48,7 @@
 ## API Controllers
 
 ### Analysis Controller (Single Analysis Endpoints)
-- **Path**: `/Volumes/Callisto/Projects/clippy/backend/src/analysis/analysis.controller.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/backend/src/analysis/analysis.controller.ts`
 - **Key Endpoints**:
   - `POST /api/analysis/start` (lines 55-90)
   - **`POST /api/analysis/check-existing-report`** (lines 203-256) - DUPLICATE CHECK
@@ -62,7 +62,7 @@
 - Returns exists flag + stats
 
 ### Database Controller (Batch Analysis Endpoints)
-- **Path**: `/Volumes/Callisto/Projects/clippy/backend/src/database/database.controller.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/backend/src/database/database.controller.ts`
 - **Key Endpoints**:
   - `GET /api/database/videos/:id/analysis` (lines 185-195)
   - `GET /api/database/videos/:id/has-analysis` (lines 161-167)
@@ -74,7 +74,7 @@
 ## Frontend Services
 
 ### Database Library Service (API Client for Batch)
-- **Path**: `/Volumes/Callisto/Projects/clippy/frontend/src/app/services/database-library.service.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/frontend/src/app/services/database-library.service.ts`
 - **Key Methods**:
   - `startBatchAnalysis(options)` - Call batch start endpoint (lines 291-307)
   - `getBatchProgress()` - Poll progress (lines 312-317)
@@ -86,7 +86,7 @@
 ## Frontend Components
 
 ### Video Analysis Component (Single Video UI)
-- **Path**: `/Volumes/Callisto/Projects/clippy/frontend/src/app/components/video-analysis/video-analysis.component.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/frontend/src/app/components/video-analysis/video-analysis.component.ts`
 - **Key Methods**:
   - `onSubmit()` - Start analysis (lines 161+)
     - Lines 170-190: Call check-existing-report
@@ -100,7 +100,7 @@
 - Options: Cancel, Overwrite, New with timestamp
 
 ### Library Component (Batch Analysis UI)
-- **Path**: `/Volumes/Callisto/Projects/clippy/frontend/src/app/components/library/library.component.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/frontend/src/app/components/library/library.component.ts`
 - **Key Methods**:
   - `analyzeSelected()` - Trigger batch analysis (lines 676+)
     - Shows mode selection dialog
@@ -109,7 +109,7 @@
   - `startProgressPolling()` - Monitor batch progress (lines ~760)
 
 ### Analyze Selected Dialog Component
-- **Path**: `/Volumes/Callisto/Projects/clippy/frontend/src/app/components/library/analyze-selected-dialog.component.ts`
+- **Path**: `/Volumes/Callisto/Projects/clipchimp/frontend/src/app/components/library/analyze-selected-dialog.component.ts`
 - **Options**:
   - 'transcribe-only' - Whisper only
   - 'transcribe-analyze' - Full pipeline
@@ -128,7 +128,7 @@ VideoAnalysisComponent.onSubmit()
   → Show dialog if exists
   → /api/analysis/start (if confirmed)
   → AnalysisService.startAnalysis()
-  → Save to ~/Downloads/clippy/
+  → Save to ~/Downloads/clipchimp/
 ```
 
 ### Batch Video Flow (duplicate check)
@@ -153,7 +153,7 @@ LibraryComponent.analyzeSelected()
 ## Critical Code Sections for Duplicate Analysis
 
 ### Batch: Delete Existing Analysis
-**File**: `/Volumes/Callisto/Projects/clippy/backend/src/database/batch-analysis.service.ts`
+**File**: `/Volumes/Callisto/Projects/clipchimp/backend/src/database/batch-analysis.service.ts`
 **Lines**: 437-444
 
 ```typescript
@@ -168,7 +168,7 @@ if (existingAnalysis) {
 ```
 
 ### Single: Check Report Exists
-**File**: `/Volumes/Callisto/Projects/clippy/backend/src/analysis/analysis.controller.ts`
+**File**: `/Volumes/Callisto/Projects/clipchimp/backend/src/analysis/analysis.controller.ts`
 **Lines**: 224-228
 
 ```typescript
@@ -180,7 +180,7 @@ const exists = fs.existsSync(expectedReportPath);
 ```
 
 ### Transcript Deduplication
-**File**: `/Volumes/Callisto/Projects/clippy/backend/src/database/batch-analysis.service.ts`
+**File**: `/Volumes/Callisto/Projects/clipchimp/backend/src/database/batch-analysis.service.ts`
 **Lines**: 304-329
 
 ```typescript
@@ -246,10 +246,10 @@ DELETE FROM analyses WHERE video_id = ?
 ## Environment & Configuration
 
 ### Database Location
-`~/Library/Application Support/clippy/clippy.db`
+`~/Library/Application Support/clipchimp/clipchimp.db`
 
 ### File System Output (Single Analysis)
-`~/Downloads/clippy/analysis/`
+`~/Downloads/clipchimp/analysis/`
 
 ### Config Keys
 - `aiModel`: e.g., 'qwen2.5:7b'

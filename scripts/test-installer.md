@@ -2,7 +2,7 @@
 
 ## The Issue
 
-"Windows is looking for clippy.exe" error when running the installer suggests the NSIS installer script can't find the app files.
+"Windows is looking for clipchimp.exe" error when running the installer suggests the NSIS installer script can't find the app files.
 
 ## Quick Diagnosis (On Windows)
 
@@ -15,36 +15,36 @@ Open Command Prompt and run:
 dir "%TEMP%\nsis*" /s
 ```
 
-This shows what the installer extracted. Look for `Clippy.exe`.
+This shows what the installer extracted. Look for `ClipChimp.exe`.
 
 ### 2. Check installation directory
 
 If installation started:
 ```cmd
-dir "%LOCALAPPDATA%\Programs\Clippy"
+dir "%LOCALAPPDATA%\Programs\ClipChimp"
 ```
 
 Or:
 ```cmd
-dir "%ProgramFiles%\Clippy"
+dir "%ProgramFiles%\ClipChimp"
 ```
 
 ### 3. Check Windows Event Viewer
 
 1. Windows Key + X → Event Viewer
 2. Windows Logs → Application
-3. Look for errors from "Clippy" or "NSIS"
+3. Look for errors from "ClipChimp" or "NSIS"
 
 ### 4. Run installer with logging
 
 ```cmd
-"Clippy Setup 1.0.0.exe" /S /D=C:\Test\Clippy
+"ClipChimp Setup 1.0.0.exe" /S /D=C:\Test\ClipChimp
 ```
 
 Then check:
 ```cmd
-dir C:\Test\Clippy
-type C:\Test\Clippy\install.log
+dir C:\Test\ClipChimp
+type C:\Test\ClipChimp\install.log
 ```
 
 ## Common Causes
@@ -72,7 +72,7 @@ type C:\Test\Clippy\install.log
 3. Protection history
 4. Look for recent quarantines
 5. Restore if found
-6. Add exclusion for Clippy Setup exe
+6. Add exclusion for ClipChimp Setup exe
 
 ### Cause 3: Insufficient permissions
 
@@ -91,12 +91,12 @@ type C:\Test\Clippy\install.log
 - Installation directory has very long name
 
 **Solution:**
-- Install to shorter path: `C:\Clippy` instead of `C:\Program Files\My Company\Applications\Clippy`
+- Install to shorter path: `C:\ClipChimp` instead of `C:\Program Files\My Company\Applications\ClipChimp`
 
 ### Cause 5: NSIS can't find app.asar
 
 **Symptoms:**
-- Installer runs but says "can't find clippy.exe"
+- Installer runs but says "can't find clipchimp.exe"
 - This is the most likely cause for your issue
 
 **Root Cause:**
@@ -105,7 +105,7 @@ The `main` entry in package.json doesn't match what electron-builder expects for
 **What's probably happening:**
 1. electron-builder packages files into `app.asar`
 2. NSIS tries to extract `app.asar`
-3. The extracted structure doesn't have `Clippy.exe` in expected location
+3. The extracted structure doesn't have `ClipChimp.exe` in expected location
 4. Installer fails
 
 ## The Real Fix (Without Rebuilding Yet)

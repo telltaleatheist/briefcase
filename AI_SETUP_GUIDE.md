@@ -2,7 +2,7 @@
 
 ## Overview
 
-Clippy now features a comprehensive, user-friendly AI setup system that makes it clear that **AI features are completely optional**. Users can fully use the video library, player, and download features without any AI configuration.
+ClipChimp now features a comprehensive, user-friendly AI setup system that makes it clear that **AI features are completely optional**. Users can fully use the video library, player, and download features without any AI configuration.
 
 ## New Components
 
@@ -90,7 +90,7 @@ A welcoming onboarding dialog shown on first launch:
   - "Set Up AI Features (Optional)"
 
 **Key Message:**
-> "You can use Clippy's library, player, and download features without any AI setup. AI features (transcription and analysis) require additional setup but are **not required** to use the core functionality."
+> "You can use ClipChimp's library, player, and download features without any AI setup. AI features (transcription and analysis) require additional setup but are **not required** to use the core functionality."
 
 ### 5. Video Analysis Dialog Integration
 
@@ -113,8 +113,8 @@ The video analysis dialog now includes:
 ## User Flow
 
 ### First-Time User
-1. Opens Clippy for the first time
-2. Sees "Welcome to Clippy" dialog
+1. Opens ClipChimp for the first time
+2. Sees "Welcome to ClipChimp" dialog
 3. Reads that AI is optional
 4. Chooses to either:
    - Get started immediately (skip AI)
@@ -203,7 +203,7 @@ Default recommendations for Ollama:
 3. `qwen2.5:14b` - 9GB (high quality)
 
 ### API Key Storage
-- Stored in backend at `~/Library/Application Support/clippy/api-keys.json`
+- Stored in backend at `~/Library/Application Support/clipchimp/api-keys.json`
 - Masked when displayed in UI
 - Secure HTTP-only communication
 - Separate storage from Electron settings
@@ -268,4 +268,4 @@ All components support:
 
 ## Conclusion
 
-The new AI setup system makes Clippy approachable for all users, whether they're tech-savvy or complete beginners. By making AI optional and providing clear, step-by-step guidance, users can choose their preferred experience without feeling overwhelmed or forced into complex setup processes.
+The new AI setup system makes ClipChimp approachable for all users, whether they're tech-savvy or complete beginners. By making AI optional and providing clear, step-by-step guidance, users can choose their preferred experience without feeling overwhelmed or forced into complex setup processes.

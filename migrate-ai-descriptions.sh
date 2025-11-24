@@ -3,7 +3,7 @@
 # Migration script to populate ai_description field for existing videos
 # Extracts the VIDEO OVERVIEW section from existing analyses
 
-APP_DATA_PATH="$HOME/Library/Application Support/clippy"
+APP_DATA_PATH="$HOME/Library/Application Support/ClipChimp"
 LIBRARIES_PATH="$APP_DATA_PATH/libraries"
 
 echo "Migration: Populating ai_description from existing analyses"

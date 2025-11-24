@@ -43,7 +43,7 @@ function quickHashFile(filePath, fileSize) {
 }
 
 // Find the active library database
-const configPath = path.join(os.homedir(), 'Library', 'Application Support', 'clippy', 'config.json');
+const configPath = path.join(os.homedir(), 'Library', 'Application Support', 'ClipChimp', 'config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 const activeLib = config.libraries.find(lib => lib.id === config.activeLibraryId);
 

@@ -1,4 +1,4 @@
-// clippy/backend/src/saved-links/web.controller.ts
+// ClipChimp/backend/src/saved-links/web.controller.ts
 import { Controller, Get, Res, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import * as path from 'path';

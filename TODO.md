@@ -1,4 +1,4 @@
-# Clippy - TODO & Future Enhancements
+# ClipChimp - TODO & Future Enhancements
 
 **Last Updated:** November 6, 2025
 **Current Status:** Phase 5 Complete ✅

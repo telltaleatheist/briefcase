@@ -21,11 +21,11 @@ export class IgnoreService {
       return null;
     }
 
-    return path.join(activeLibrary.clipsFolderPath, '.clippyignore');
+    return path.join(activeLibrary.clipsFolderPath, '.clipchimpignore');
   }
 
   /**
-   * Load ignore patterns from .clippyignore file
+   * Load ignore patterns from .clipchimpignore file
    */
   loadIgnorePatterns(): string[] {
     this.ignoreFilePath = this.getIgnoreFilePath();
@@ -38,7 +38,7 @@ export class IgnoreService {
       if (!fs.existsSync(this.ignoreFilePath)) {
         // Create default ignore file with common patterns
         const defaultPatterns = [
-          '# Clippy Ignore File',
+          '# ClipChimp Ignore File',
           '# Add patterns to ignore files (supports wildcards like .gitignore)',
           '',
           '# macOS metadata files',
@@ -69,7 +69,7 @@ export class IgnoreService {
         ].join('\n');
 
         fs.writeFileSync(this.ignoreFilePath, defaultPatterns, 'utf-8');
-        this.logger.log(`Created default .clippyignore file at: ${this.ignoreFilePath}`);
+        this.logger.log(`Created default .clipchimpignore file at: ${this.ignoreFilePath}`);
       }
 
       const content = fs.readFileSync(this.ignoreFilePath, 'utf-8');
@@ -176,7 +176,7 @@ export class IgnoreService {
   }
 
   /**
-   * Get the raw content of .clippyignore file
+   * Get the raw content of .clipchimpignore file
    */
   getIgnoreFileContent(): string | null {
     this.ignoreFilePath = this.getIgnoreFilePath();
@@ -197,7 +197,7 @@ export class IgnoreService {
   }
 
   /**
-   * Update the .clippyignore file content
+   * Update the .clipchimpignore file content
    */
   updateIgnoreFileContent(content: string): boolean {
     this.ignoreFilePath = this.getIgnoreFilePath();
@@ -209,7 +209,7 @@ export class IgnoreService {
 
     try {
       fs.writeFileSync(this.ignoreFilePath, content, 'utf-8');
-      this.logger.log('Updated .clippyignore file');
+      this.logger.log('Updated .clipchimpignore file');
 
       // Reload patterns
       this.loadIgnorePatterns();
@@ -247,7 +247,7 @@ export class IgnoreService {
       const newContent = content.trim() + '\n' + pattern + '\n';
 
       fs.writeFileSync(this.ignoreFilePath, newContent, 'utf-8');
-      this.logger.log(`Added pattern to .clippyignore: ${pattern}`);
+      this.logger.log(`Added pattern to .clipchimpignore: ${pattern}`);
 
       // Reload patterns
       this.loadIgnorePatterns();

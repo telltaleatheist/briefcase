@@ -4,7 +4,7 @@
  * Python Configuration Verification Script
  *
  * Run this script to verify that Python is properly configured across
- * both the Electron and Backend parts of Clippy.
+ * both the Electron and Backend parts of ClipChimp.
  *
  * Usage: node scripts/verify-python-setup.js
  */
@@ -14,7 +14,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 console.log('╔════════════════════════════════════════════════════════════╗');
-console.log('║   Clippy Python Configuration Verification                ║');
+console.log('║   ClipChimp Python Configuration Verification             ║');
 console.log('╚════════════════════════════════════════════════════════════╝\n');
 
 let allPassed = true;

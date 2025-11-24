@@ -7,7 +7,7 @@ import * as Database from 'better-sqlite3';
  * LibraryMigrationService - Handles migration of libraries from old structure to new
  *
  * Migrates:
- * 1. Database location: from ~/Library/Application Support/clippy/libraries/lib_[id]/library.db
+ * 1. Database location: from ~/Library/Application Support/clipchimp/libraries/lib_[id]/library.db
  *    to [clipsFolderPath]/.library.db
  * 2. Video paths: from absolute paths to relative paths
  */

@@ -1,10 +1,10 @@
-# Binary Packaging Guide for Clippy
+# Binary Packaging Guide for ClipChimp
 
-This guide explains how Clippy packages and manages binary dependencies (ffmpeg, ffprobe, yt-dlp, and Python) for distribution.
+This guide explains how ClipChimp packages and manages binary dependencies (ffmpeg, ffprobe, yt-dlp, and Python) for distribution.
 
 ## Overview
 
-Clippy requires several binary dependencies to function:
+ClipChimp requires several binary dependencies to function:
 - **FFmpeg**: Video/audio processing
 - **FFprobe**: Media file analysis
 - **yt-dlp**: Video downloading from various platforms

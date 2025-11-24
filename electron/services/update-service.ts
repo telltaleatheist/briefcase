@@ -1,4 +1,4 @@
-// clippy/electron/services/update-service.ts
+// ClipChimp/electron/services/update-service.ts
 import * as log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
 import { AppConfig } from '../config/app-config';

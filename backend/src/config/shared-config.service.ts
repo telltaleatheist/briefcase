@@ -71,11 +71,11 @@ export class SharedConfigService {
     const homeDir = os.homedir();
 
     if (process.platform === 'darwin') {
-      return path.join(homeDir, 'Library', 'Application Support', 'clippy');
+      return path.join(homeDir, 'Library', 'Application Support', 'ClipChimp');
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'clippy');
+      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'ClipChimp');
     } else {
-      return path.join(homeDir, '.config', 'clippy');
+      return path.join(homeDir, '.config', 'ClipChimp');
     }
   }
 

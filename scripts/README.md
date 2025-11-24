@@ -1,6 +1,6 @@
 # Build Scripts
 
-This directory contains scripts for packaging and building Clippy.
+This directory contains scripts for packaging and building ClipChimp.
 
 ## yt-dlp Binary Management
 

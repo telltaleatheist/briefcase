@@ -757,7 +757,7 @@ export class LibraryService {
   }
 
   /**
-   * Get the .clippyignore file content
+   * Get the .clipchimpignore file content
    * GET /api/database/ignore
    */
   getIgnoreFile(): Observable<ApiResponse<{ content: string; filePath: string; patterns: string[] }>> {
@@ -767,7 +767,7 @@ export class LibraryService {
   }
 
   /**
-   * Update the .clippyignore file content
+   * Update the .clipchimpignore file content
    * POST /api/database/ignore
    */
   updateIgnoreFile(content: string): Observable<ApiResponse<any>> {
@@ -778,7 +778,7 @@ export class LibraryService {
   }
 
   /**
-   * Add a pattern to the .clippyignore file
+   * Add a pattern to the .clipchimpignore file
    * POST /api/database/ignore/add
    */
   addIgnorePattern(pattern: string): Observable<ApiResponse<any>> {

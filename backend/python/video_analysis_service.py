@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Video Analysis Service for Clippy
+Video Analysis Service for ClipChimp
 Handles transcription and AI analysis using Whisper and Ollama
 """
 

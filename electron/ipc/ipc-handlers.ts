@@ -1,4 +1,4 @@
-// clippy/electron/ipc/ipc-handlers.ts
+// ClipChimp/electron/ipc/ipc-handlers.ts
 // SIMPLIFIED: Removed ConfigManager and PathValidator - using bundled binaries
 import { ipcMain, dialog, shell, app } from 'electron';
 import * as log from 'electron-log';

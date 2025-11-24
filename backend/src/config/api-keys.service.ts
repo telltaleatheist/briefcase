@@ -20,7 +20,7 @@ export class ApiKeysService {
   constructor() {
     // Store in user's app data directory (won't transfer with app)
     const userDataPath = this.getUserDataPath();
-    this.configPath = path.join(userDataPath, 'clippy', 'api-keys.json');
+    this.configPath = path.join(userDataPath, 'clipchimp', 'api-keys.json');
 
     this.ensureConfigDirectoryExists();
     this.loadConfig();

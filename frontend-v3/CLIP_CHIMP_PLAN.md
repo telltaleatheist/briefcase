@@ -1,7 +1,7 @@
 # CLIP CHIMP - Complete Development Plan 🐵
 
 ## Overview
-Clip Chimp is a complete rewrite of the Clippy frontend using modern Angular patterns and the Creamsicle design system. This is a clean-slate approach with no legacy code dependencies.
+Clip Chimp is a complete rewrite of the ClipChimp frontend using modern Angular patterns and the Creamsicle design system. This is a clean-slate approach with no legacy code dependencies.
 
 ## Core Philosophy
 - **Clean Architecture**: No Material Angular, no legacy dependencies

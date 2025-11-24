@@ -1,4 +1,4 @@
-; Custom NSIS installer script for Clippy
+; Custom NSIS installer script for ClipChimp
 ; Provides detailed progress information during installation
 
 !macro customHeader
@@ -9,7 +9,7 @@
 
 !macro customInstall
   ; Show initial message
-  DetailPrint "Starting Clippy installation..."
+  DetailPrint "Starting ClipChimp installation..."
   DetailPrint ""
   DetailPrint "This may take 3-5 minutes due to large components:"
   DetailPrint "  • Python 3.11.9 runtime (~20 MB)"
@@ -31,7 +31,7 @@
 
 !macro customUnInstall
   ; Enhanced uninstaller
-  DetailPrint "Uninstalling Clippy..."
+  DetailPrint "Uninstalling ClipChimp..."
   DetailPrint ""
 
   ; Remove application directory
@@ -67,12 +67,12 @@
   ; Force the app to close if running
   !include "FileFunc.nsh"
 
-  ; Try to close Clippy gracefully
-  DetailPrint "Checking if Clippy is running..."
-  nsExec::ExecToStack 'taskkill /IM "Clippy.exe" /F'
+  ; Try to close ClipChimp gracefully
+  DetailPrint "Checking if ClipChimp is running..."
+  nsExec::ExecToStack 'taskkill /IM "ClipChimp.exe" /F'
   Pop $0
   ${If} $0 == 0
-    DetailPrint "Closed running Clippy instance"
+    DetailPrint "Closed running ClipChimp instance"
     Sleep 2000
   ${EndIf}
 !macroend

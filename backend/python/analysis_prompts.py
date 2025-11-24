@@ -1,5 +1,5 @@
 """
-AI Analysis Prompts for Clippy Video Analysis
+AI Analysis Prompts for ClipChimp Video Analysis
 
 This file contains all prompts used by the AI analysis system.
 Edit these prompts to customize how videos are analyzed.

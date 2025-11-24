@@ -1,5 +1,5 @@
 /**
- * SIMPLIFIED Python configuration for Clippy
+ * SIMPLIFIED Python configuration for ClipChimp
  * No more complex detection - just use bundled Python and set cache to writable location
  */
 
@@ -18,11 +18,11 @@ function getUserDataPath(): string {
     // Fallback when Electron is not available (testing, etc.)
     const home = os.homedir();
     if (process.platform === 'darwin') {
-      return path.join(home, 'Library', 'Application Support', 'clippy');
+      return path.join(home, 'Library', 'Application Support', 'ClipChimp');
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'clippy');
+      return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'ClipChimp');
     } else {
-      return path.join(home, '.config', 'clippy');
+      return path.join(home, '.config', 'ClipChimp');
     }
   }
 }

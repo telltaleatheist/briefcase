@@ -1,4 +1,4 @@
-// clippy/electron/main.ts
+// ClipChimp/electron/main.ts
 // SIMPLIFIED: No more executable checking - binaries are bundled!
 import { app } from 'electron';
 import * as log from 'electron-log';

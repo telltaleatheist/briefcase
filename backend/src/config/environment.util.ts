@@ -23,7 +23,7 @@ export class EnvironmentUtil {
   static getDownloadsPath(): string {
     const baseDir = this.isDevelopment() 
       ? path.join(process.cwd()) // Current working directory in development
-      : path.join(process.env.HOME || process.env.USERPROFILE || '.', 'Documents', 'clippy');
+      : path.join(process.env.HOME || process.env.USERPROFILE || '.', 'Documents', 'clipchimp');
     
     const downloadsPath = path.join(baseDir, 'downloads');
     
@@ -37,7 +37,7 @@ export class EnvironmentUtil {
     } catch (error) {
       log.error(`Failed to create downloads directory: ${error instanceof Error ? (error as Error).message : String(error)}`);
       // Fallback to a temporary directory
-      const tmpDir = path.join(require('os').tmpdir(), 'clippy-downloads');
+      const tmpDir = path.join(require('os').tmpdir(), 'clipchimp-downloads');
       try {
         if (!fs.existsSync(tmpDir)) {
           fs.mkdirSync(tmpDir, { recursive: true });

@@ -1,4 +1,4 @@
-// clippy/backend/src/downloader/downloader.service.ts
+// ClipChimp/backend/src/downloader/downloader.service.ts
 import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -30,7 +30,7 @@ export class DownloaderService implements OnModuleInit {
                         path.join(os.homedir(), 'Library', 'Application Support') :
                         path.join(os.homedir(), '.config'));
 
-    this.historyFilePath = path.join(userDataPath, 'clippy', 'history.json');
+    this.historyFilePath = path.join(userDataPath, 'ClipChimp', 'history.json');
     this.ensureDirectoriesExist();
     this.loadDownloadHistory();
   }

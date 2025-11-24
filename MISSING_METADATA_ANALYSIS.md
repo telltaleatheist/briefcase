@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This report analyzes how the Clippy system handles missing metadata, null/undefined values, and missing database information. The system shows **mixed resilience**: some areas gracefully degrade, while others have **critical vulnerabilities** where missing data could cause crashes or system seizure.
+This report analyzes how the ClipChimp system handles missing metadata, null/undefined values, and missing database information. The system shows **mixed resilience**: some areas gracefully degrade, while others have **critical vulnerabilities** where missing data could cause crashes or system seizure.
 
 ---
 
@@ -10,7 +10,7 @@ This report analyzes how the Clippy system handles missing metadata, null/undefi
 
 ### Database Service (Backend)
 
-**File:** `/Volumes/Callisto/Projects/clippy/backend/src/database/database.service.ts`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/backend/src/database/database.service.ts`
 
 #### Optional Fields (Nullable)
 ```sql
@@ -43,7 +43,7 @@ source TEXT                      -- Can be NULL
 
 #### Frontend Type Definitions
 
-**File:** `/Volumes/Callisto/Projects/clippy/frontend/src/app/services/database-library.service.ts`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/frontend/src/app/services/database-library.service.ts`
 
 Properly defines nullable fields:
 ```typescript
@@ -75,7 +75,7 @@ export interface DatabaseAnalysisSection {
 
 ### Library Component
 
-**File:** `/Volumes/Callisto/Projects/clippy/frontend/src/app/components/library/library.component.ts`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/frontend/src/app/components/library/library.component.ts`
 
 #### Good Practices
 ```typescript
@@ -136,7 +136,7 @@ async openVideoPlayer(video: DatabaseVideo) {
 
 ### Database Library Service
 
-**File:** `/Volumes/Callisto/Projects/clippy/frontend/src/app/services/database-library.service.ts`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/frontend/src/app/services/database-library.service.ts`
 
 #### Good Practices
 ```typescript
@@ -186,7 +186,7 @@ async getAnalysisSections(videoId: string): Promise<DatabaseAnalysisSection[]> {
 
 ## 3. VIDEO PLAYER COMPONENT - CRITICAL ISSUES
 
-**File:** `/Volumes/Callisto/Projects/clippy/frontend/src/app/components/video-player/video-player.component.ts`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/frontend/src/app/components/video-player/video-player.component.ts`
 
 ### CRITICAL ISSUE #1: Unsafe metadata access (Lines 587-609)
 
@@ -300,7 +300,7 @@ seekToTime(seconds: number, sectionIndex?: number) {
 
 ## 4. ANALYSIS SERVICE - ERROR HANDLING
 
-**File:** `/Volumes/Callisto/Projects/clippy/backend/src/analysis/analysis.service.ts`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/backend/src/analysis/analysis.service.ts`
 
 ### Good Practices
 
@@ -335,7 +335,7 @@ if (videoId && hasAnalysis) {
 
 ## 5. PYTHON ANALYSIS SERVICE - ERROR HANDLING
 
-**File:** `/Volumes/Callisto/Projects/clippy/backend/python/video_analysis_service.py`
+**File:** `/Volumes/Callisto/Projects/ClipChimp/backend/python/video_analysis_service.py`
 
 ### CRITICAL ISSUE #1: Missing transcript handling (Lines 268-308)
 

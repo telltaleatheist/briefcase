@@ -33,7 +33,7 @@ export class AnalysisController {
       return configOutputDir;
     }
     // Fallback to default
-    return path.join(os.homedir(), 'Downloads', 'clippy');
+    return path.join(os.homedir(), 'Downloads', 'ClipChimp');
   }
 
   /**

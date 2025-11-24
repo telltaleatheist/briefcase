@@ -1,4 +1,4 @@
-// clippy/backend/src/app.service.ts
+// ClipChimp/backend/src/app.service.ts
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
