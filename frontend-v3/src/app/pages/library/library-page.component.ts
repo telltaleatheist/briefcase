@@ -399,10 +399,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Video renamed - update video list
+    // Video renamed - update video list (including upload date)
     this.websocketService.onVideoRenamed((event) => {
       console.log('Video renamed event received:', event);
-      this.updateVideoName(event.videoId, event.newFilename);
+      this.updateVideoName(event.videoId, event.newFilename, event.uploadDate);
+      this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
     });
 
     // Analysis completed - update video with suggested title
@@ -679,8 +680,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  // Update video name in the library when renamed via WebSocket
-  private updateVideoName(videoId: string, newFilename: string) {
+  // Update video name and upload date in the library when renamed via WebSocket
+  private updateVideoName(videoId: string, newFilename: string, uploadDate?: string | null) {
     const weeks = this.videoWeeks();
     let updated = false;
 
@@ -689,7 +690,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const videos = week.videos.map(video => {
         if (video.id === videoId) {
           updated = true;
-          return { ...video, name: newFilename };
+          const updates: any = {
+            ...video,
+            name: newFilename,
+            // Clear AI suggestions since user renamed the file
+            suggestedFilename: undefined,
+            suggestedTitle: undefined
+          };
+          // Update uploadDate if provided
+          if (uploadDate !== undefined) {
+            updates.uploadDate = uploadDate ? new Date(uploadDate) : undefined;
+          }
+          return updates;
         }
         return video;
       });
@@ -698,7 +710,32 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     if (updated) {
       this.videoWeeks.set(updatedWeeks);
-      console.log(`Updated video ${videoId} name to: ${newFilename}`);
+      console.log(`Updated video ${videoId} name to: ${newFilename}, uploadDate: ${uploadDate}, cleared AI suggestions`);
+
+      // Also update filtered weeks if they exist
+      const filtered = this.filteredWeeks();
+      if (filtered.length > 0) {
+        const updatedFiltered = filtered.map(week => {
+          const videos = week.videos.map(video => {
+            if (video.id === videoId) {
+              const updates: any = {
+                ...video,
+                name: newFilename,
+                // Clear AI suggestions since user renamed the file
+                suggestedFilename: undefined,
+                suggestedTitle: undefined
+              };
+              if (uploadDate !== undefined) {
+                updates.uploadDate = uploadDate ? new Date(uploadDate) : undefined;
+              }
+              return updates;
+            }
+            return video;
+          });
+          return { ...week, videos };
+        });
+        this.filteredWeeks.set(updatedFiltered);
+      }
     }
   }
 

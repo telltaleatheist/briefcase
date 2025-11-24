@@ -72,13 +72,35 @@ export interface PreviewItem {
 
           @if (isVideo()) {
             <div class="controls">
-              <button class="control-btn play-btn" (click)="togglePlay()">
-                {{ isPlaying() ? '⏸' : '▶' }}
-              </button>
-              <div class="progress-container" (click)="seek($event)">
-                <div class="progress-bar">
-                  <div class="progress-fill" [style.width.%]="progress()"></div>
+              <div class="controls-row">
+                <button class="control-btn skip-btn" (click)="skipTime(-10)" title="Skip backward 10s (J)">
+                  ⏪
+                </button>
+                <button class="control-btn play-btn" (click)="togglePlay()" title="Play/Pause (Space or K)">
+                  {{ isPlaying() ? '⏸' : '▶' }}
+                </button>
+                <button class="control-btn skip-btn" (click)="skipTime(10)" title="Skip forward 10s (L)">
+                  ⏩
+                </button>
+                <div class="progress-container" (click)="seek($event)" title="Click to seek">
+                  <div class="progress-bar">
+                    <div class="progress-fill" [style.width.%]="progress()"></div>
+                  </div>
                 </div>
+                <select
+                  class="playback-speed"
+                  [value]="playbackRate()"
+                  (change)="setPlaybackRate(+$any($event.target).value)"
+                  title="Playback speed"
+                >
+                  <option value="0.25">0.25x</option>
+                  <option value="0.5">0.5x</option>
+                  <option value="0.75">0.75x</option>
+                  <option value="1">1x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2x</option>
+                </select>
               </div>
             </div>
           }
@@ -205,6 +227,12 @@ export interface PreviewItem {
 
     .controls {
       display: flex;
+      flex-direction: column;
+      gap: $spacing-xs;
+    }
+
+    .controls-row {
+      display: flex;
       align-items: center;
       gap: $spacing-sm;
     }
@@ -230,6 +258,22 @@ export interface PreviewItem {
       &:active {
         transform: scale(0.95);
       }
+
+      &.skip-btn {
+        width: 36px;
+        height: 36px;
+        font-size: $font-size-base;
+        background: var(--primary-orange);
+
+        &:hover {
+          background: var(--primary-orange-dark);
+          transform: scale(1.05);
+        }
+
+        &:active {
+          transform: scale(0.95);
+        }
+      }
     }
 
     .progress-container {
@@ -239,17 +283,47 @@ export interface PreviewItem {
     }
 
     .progress-bar {
-      height: 4px;
-      background: var(--bg-tertiary);
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
       border-radius: $radius-full;
       overflow: hidden;
+      transition: height $transition-fast;
+      position: relative;
+
+      &:hover {
+        height: 10px;
+      }
     }
 
     .progress-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
       height: 100%;
       background: linear-gradient(90deg, var(--primary-orange), var(--primary-pink));
       border-radius: $radius-full;
       transition: width 0.1s ease-out;
+      min-width: 2px;
+    }
+
+    .playback-speed {
+      padding: $spacing-xs $spacing-sm;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: $radius-md;
+      color: var(--text-primary);
+      font-size: $font-size-xs;
+      cursor: pointer;
+      outline: none;
+      transition: all $transition-fast;
+
+      &:hover {
+        background: var(--bg-secondary);
+      }
+
+      &:focus {
+        border-color: var(--primary-orange);
+      }
     }
 
     /* Resize handles */
@@ -393,6 +467,9 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   progress = signal(0);
   position = signal({ x: 100, y: 100 });
   windowSize = signal({ width: 480, height: 360 });
+  volume = signal(1.0); // 0.0 to 1.0
+  isMuted = signal(false);
+  playbackRate = signal(1.0); // Playback speed
 
   private isDragging = false;
   private dragOffset = { x: 0, y: 0 };
@@ -552,6 +629,66 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
         event.preventDefault();
         this.next();
         break;
+      case 'ArrowLeft':
+        // Seek backward 5 seconds
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.skipTime(-5);
+        }
+        break;
+      case 'ArrowRight':
+        // Seek forward 5 seconds
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.skipTime(5);
+        }
+        break;
+      case 'j':
+      case 'J':
+        // Seek backward 10 seconds
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.skipTime(-10);
+        }
+        break;
+      case 'l':
+      case 'L':
+        // Seek forward 10 seconds
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.skipTime(10);
+        }
+        break;
+      case 'k':
+      case 'K':
+        // Toggle play/pause (alternative to space)
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.togglePlay();
+        }
+        break;
+      case 'm':
+      case 'M':
+        // Toggle mute
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.toggleMute();
+        }
+        break;
+      case ',':
+        // Frame by frame backward
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.frameStep(-1);
+        }
+        break;
+      case '.':
+        // Frame by frame forward
+        event.preventDefault();
+        if (this.isVideo()) {
+          this.frameStep(1);
+        }
+        break;
     }
   }
 
@@ -675,10 +812,59 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     }
   }
 
+  skipTime(seconds: number) {
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+  }
+
+  toggleMute() {
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.muted = !video.muted;
+    this.isMuted.set(video.muted);
+  }
+
+  frameStep(direction: number) {
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.pause();
+    this.isPlaying.set(false);
+    // Assuming 30fps, 1 frame = 1/30 second
+    video.currentTime += (direction / 30);
+  }
+
+  setVolume(value: number) {
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    const clampedValue = Math.max(0, Math.min(1, value));
+    video.volume = clampedValue;
+    this.volume.set(clampedValue);
+    // If setting volume above 0, unmute
+    if (clampedValue > 0 && video.muted) {
+      video.muted = false;
+      this.isMuted.set(false);
+    }
+  }
+
+  setPlaybackRate(rate: number) {
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.playbackRate = rate;
+    this.playbackRate.set(rate);
+  }
+
   onVideoLoaded() {
     if (this.videoPlayer?.nativeElement) {
-      this.duration.set(this.videoPlayer.nativeElement.duration);
-      console.log('Video metadata loaded, duration:', this.videoPlayer.nativeElement.duration);
+      const video = this.videoPlayer.nativeElement;
+      this.duration.set(video.duration);
+
+      // Initialize video properties from signals
+      video.volume = this.volume();
+      video.muted = this.isMuted();
+      video.playbackRate = this.playbackRate();
+
+      console.log('Video metadata loaded, duration:', video.duration);
     }
   }
 
@@ -734,7 +920,15 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     if (this.videoPlayer?.nativeElement) {
       const video = this.videoPlayer.nativeElement;
       this.currentTime.set(video.currentTime);
-      this.progress.set((video.currentTime / video.duration) * 100 || 0);
+
+      // Calculate progress, handling edge cases
+      const duration = video.duration;
+      if (duration && !isNaN(duration) && duration > 0) {
+        const progressValue = (video.currentTime / duration) * 100;
+        this.progress.set(progressValue);
+      } else {
+        this.progress.set(0);
+      }
     }
   }
 

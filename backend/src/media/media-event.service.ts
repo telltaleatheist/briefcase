@@ -245,12 +245,13 @@ export class MediaEventService {
   /**
    * Video renamed event (notify frontend when a video's filename changes)
    */
-  emitVideoRenamed(videoId: string, oldFilename: string, newFilename: string, newPath: string): void {
+  emitVideoRenamed(videoId: string, oldFilename: string, newFilename: string, newPath: string, uploadDate?: string | null): void {
     this.emitEvent('video-renamed', {
       videoId,
       oldFilename,
       newFilename,
       newPath,
+      uploadDate,
       timestamp: this.getTimestamp()
     });
   }
@@ -296,12 +297,13 @@ export class MediaEventService {
   /**
    * Suggestion accepted event (notify frontend when a video name suggestion is accepted)
    */
-  emitSuggestionAccepted(videoId: string, oldFilename: string, newFilename: string): void {
+  emitSuggestionAccepted(videoId: string, oldFilename: string, newFilename: string, uploadDate?: string | null): void {
     this.logger.log(`Emitting suggestion-accepted event for ${videoId}: ${oldFilename} -> ${newFilename}`);
     this.emitEvent('suggestion-accepted', {
       videoId,
       oldFilename,
       newFilename,
+      uploadDate,
       timestamp: this.getTimestamp()
     });
   }

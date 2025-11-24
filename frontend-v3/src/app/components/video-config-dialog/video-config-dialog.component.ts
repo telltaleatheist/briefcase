@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, OnInit, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -18,7 +18,7 @@ interface AIModelOption {
   templateUrl: './video-config-dialog.component.html',
   styleUrls: ['./video-config-dialog.component.scss']
 })
-export class VideoConfigDialogComponent implements OnInit {
+export class VideoConfigDialogComponent implements OnInit, OnChanges {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private readonly API_BASE = 'http://localhost:3000/api';
@@ -45,6 +45,14 @@ export class VideoConfigDialogComponent implements OnInit {
 
   ngOnInit() {
     this.loadAIModels();
+  }
+
+  ngOnChanges(changes: SimpleChanges) {
+    // Reload models every time the modal opens to get the latest library default
+    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
+      console.log('Modal opened, reloading AI models and library default...');
+      this.loadAIModels();
+    }
   }
 
   private async loadAIModels() {
@@ -98,17 +106,40 @@ export class VideoConfigDialogComponent implements OnInit {
           `${this.API_BASE}/database/libraries/default-ai-model`
         ).toPromise();
         defaultModel = response?.aiModel || null;
+        console.log('Fetched library default AI model:', defaultModel);
       } catch (error) {
         console.error('Failed to fetch library default AI model:', error);
       }
 
+      // If no library-specific default, try global config default
+      if (!defaultModel) {
+        console.log('No library-specific default found, checking global config...');
+        try {
+          const configResponse = await this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
+            `${this.API_BASE}/config/default-ai`
+          ).toPromise();
+          if (configResponse?.defaultAI) {
+            defaultModel = `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
+            console.log('Using global config default AI model:', defaultModel);
+          }
+        } catch (error) {
+          console.error('Failed to fetch global default AI model:', error);
+        }
+      }
+
+      console.log('Available models:', models.map(m => m.value));
+      console.log('Final default model to use:', defaultModel);
+
       // Set default model
       if (models.length > 0) {
-        // If library has a default and it's available, use it
+        // If we have a default (library or global) and it's available, use it
         if (defaultModel && models.some(m => m.value === defaultModel)) {
           this.settings.aiModel = defaultModel;
-          console.log('Using library default AI model:', defaultModel);
+          console.log('✓ Successfully set AI model to library/global default:', defaultModel);
         } else {
+          if (defaultModel) {
+            console.warn('⚠ Default model not available in current models list:', defaultModel);
+          }
           // Otherwise, use fallback priority: largest local > claude > openai
           const ollamaModels = models.filter(m => m.provider === 'ollama');
           if (ollamaModels.length > 0) {
@@ -155,7 +186,8 @@ export class VideoConfigDialogComponent implements OnInit {
   }
 
   /**
-   * Save the selected AI model as the library's default
+   * Save the selected AI model as both library-specific and global default
+   * This ensures consistency across all dialogs and modals
    */
   async onAiModelChange() {
     if (!this.settings.aiModel) {
@@ -163,11 +195,21 @@ export class VideoConfigDialogComponent implements OnInit {
     }
 
     try {
+      // Save to library-specific storage
       await this.http.post(
         `${this.API_BASE}/database/libraries/default-ai-model`,
         { aiModel: this.settings.aiModel }
       ).toPromise();
       console.log('Saved default AI model for library:', this.settings.aiModel);
+
+      // Also save to global config storage for consistency
+      const [provider, ...modelParts] = this.settings.aiModel.split(':');
+      const model = modelParts.join(':');
+      await this.http.post(
+        `${this.API_BASE}/config/default-ai`,
+        { provider, model }
+      ).toPromise();
+      console.log('Saved default AI model to global config:', this.settings.aiModel);
     } catch (error) {
       console.error('Failed to save default AI model:', error);
     }

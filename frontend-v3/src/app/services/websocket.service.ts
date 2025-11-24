@@ -44,6 +44,7 @@ export interface VideoRenamed {
   oldFilename: string;
   newFilename: string;
   newPath: string;
+  uploadDate?: string | null;
   timestamp: string;
 }
 

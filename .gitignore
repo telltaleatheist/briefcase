@@ -93,3 +93,5 @@ backend/src/database/database.service.ts.bak5
 frontend-v3/.angular/cache/*
 .aider*
 Modelfile
+# Backend dependencies (managed separately)
+!backend/node_modules/.gitkeep

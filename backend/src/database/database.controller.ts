@@ -1261,17 +1261,25 @@ export class DatabaseController {
       const oldPath = video.current_path as string;
       const oldFilename = video.filename as string;
 
-      // Use upload_date from database as source of truth
-      // Fallback to extracting from old filename if not in database
-      let uploadDate = video.upload_date as string | undefined;
+      // FILENAME IS SOURCE OF TRUTH: Extract date from old filename first
+      // Only fall back to database if filename has no date
+      const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
+      let uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
       if (!uploadDate) {
-        const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
-        uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
+        // Filename has no date, check database
+        uploadDate = video.upload_date as string | undefined;
       }
 
-      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}"`);
+      // Check if user provided a NEW date in their input
+      const newTitleInfo = FilenameDateUtil.extractDateInfo(body.filename.trim());
+      if (newTitleInfo.hasDate && newTitleInfo.date !== uploadDate) {
+        this.logger.log(`User provided NEW date: "${newTitleInfo.date}" (replacing old date: "${uploadDate}")`);
+      }
+
+      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}" (source: ${oldDateInfo.hasDate ? 'filename' : 'database'})`);
 
       // Ensure new filename has the date prefix (preserves existing or adds upload date)
+      // If user provided a new date in their input, that takes priority
       const newFilename = FilenameDateUtil.updateTitle(oldFilename, body.filename.trim(), uploadDate);
 
       this.logger.log(`updateVideoFilename: computed newFilename="${newFilename}"`);
@@ -1281,6 +1289,11 @@ export class DatabaseController {
       const finalUploadDate = finalDateInfo.hasDate
         ? FilenameDateUtil.toISODate(finalDateInfo.date)
         : null;
+
+      // Check if database needs to be corrected to match filename
+      if (finalUploadDate && video.upload_date !== finalUploadDate) {
+        this.logger.log(`Correcting database upload_date: "${video.upload_date}" -> "${finalUploadDate}" (filename is source of truth)`);
+      }
 
       this.logger.log(`updateVideoFilename: finalUploadDate="${finalUploadDate}"`);
 
@@ -1340,14 +1353,18 @@ export class DatabaseController {
       this.databaseService.updateVideoPath(videoId, newPath);
       this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
 
-      this.logger.log(`Updated filename for video ${videoId}: ${newFilename}, upload_date: ${finalUploadDate}`);
+      // Clear AI suggested title since user manually renamed the file
+      this.databaseService.updateVideoSuggestedTitle(videoId, null);
 
-      // Emit WebSocket event to notify frontend of the rename
+      this.logger.log(`Updated filename for video ${videoId}: ${newFilename}, upload_date: ${finalUploadDate}, cleared AI suggestion`);
+
+      // Emit WebSocket event to notify frontend of the rename (including upload date)
       this.mediaEventService.emitVideoRenamed(
         videoId,
         video.filename as string,
         newFilename,
-        newPath
+        newPath,
+        finalUploadDate
       );
 
       return {
@@ -1440,24 +1457,49 @@ export class DatabaseController {
         };
       }
 
+      const oldFilename = video.filename as string;
+
+      // FILENAME IS SOURCE OF TRUTH: Extract date from old filename first
+      // Only fall back to database if filename has no date
+      const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
+      let uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
+      if (!uploadDate) {
+        // Filename has no date, check database
+        uploadDate = video.upload_date as string | undefined;
+      }
+
       // Use custom filename if provided, otherwise format from suggested title
       let newFilename: string;
       if (body?.customFilename) {
-        // Use the custom filename provided by the user
-        newFilename = body.customFilename;
-        this.logger.log(`Using custom filename: ${newFilename}`);
-      } else {
-        // Format the new filename: YYYY-MM-DD [suggested-title].ext
-        const uploadDate = video.upload_date || '';
-        const extension = video.file_extension || '.mp4';
-        const suggestedTitle = String(video.suggested_title || '').trim();
-
-        if (uploadDate) {
-          newFilename = `${uploadDate} ${suggestedTitle}${extension}`;
-        } else {
-          newFilename = `${suggestedTitle}${extension}`;
+        // Check if user provided a NEW date in their custom filename
+        const newTitleInfo = FilenameDateUtil.extractDateInfo(body.customFilename);
+        if (newTitleInfo.hasDate && newTitleInfo.date !== uploadDate) {
+          this.logger.log(`User provided NEW date in AI suggestion: "${newTitleInfo.date}" (replacing old date: "${uploadDate}")`);
         }
+
+        // Process custom filename to ensure date and extension are present
+        // If user provided a new date in their input, that takes priority
+        this.logger.log(`Processing custom filename: ${body.customFilename}`);
+        newFilename = FilenameDateUtil.updateTitle(oldFilename, body.customFilename, uploadDate);
+        this.logger.log(`Processed to: ${newFilename}`);
+      } else {
+        // Format the new filename from suggested title
+        const suggestedTitle = String(video.suggested_title || '').trim();
+        newFilename = FilenameDateUtil.updateTitle(oldFilename, suggestedTitle, uploadDate);
       }
+
+      // Extract the final date from the new filename to update the database
+      const finalDateInfo = FilenameDateUtil.extractDateInfo(newFilename);
+      const finalUploadDate = finalDateInfo.hasDate
+        ? FilenameDateUtil.toISODate(finalDateInfo.date)
+        : null;
+
+      // Check if database needs to be corrected to match filename
+      if (finalUploadDate && video.upload_date !== finalUploadDate) {
+        this.logger.log(`Correcting database upload_date: "${video.upload_date}" -> "${finalUploadDate}" (filename is source of truth)`);
+      }
+
+      this.logger.log(`acceptSuggestedTitle: oldFilename="${oldFilename}", newFilename="${newFilename}", finalUploadDate="${finalUploadDate}"`);
 
       const oldPath = video.current_path as string;
       const directory = path.dirname(oldPath);
@@ -1491,28 +1533,31 @@ export class DatabaseController {
         };
       }
 
-      // Update database with new filename and path
+      // Update database with new filename, path, and upload date
       this.databaseService.updateVideoFilename(videoId, newFilename);
       this.databaseService.updateVideoPath(videoId, newPath);
+      this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
 
       // Clear the suggested_title since it's been accepted
       this.databaseService.updateVideoSuggestedTitle(videoId, null);
 
-      this.logger.log(`Accepted suggested title for video ${videoId}: ${newFilename}`);
+      this.logger.log(`Accepted suggested title for video ${videoId}: ${newFilename}, upload_date: ${finalUploadDate}`);
 
-      // Emit WebSocket events to notify frontend
+      // Emit WebSocket events to notify frontend (including upload date)
       this.mediaEventService.emitVideoRenamed(
         videoId,
         video.filename as string,
         newFilename,
-        newPath
+        newPath,
+        finalUploadDate
       );
 
-      // Emit suggestion-specific event for reactive UI updates
+      // Emit suggestion-specific event for reactive UI updates (including upload date)
       this.mediaEventService.emitSuggestionAccepted(
         videoId,
         video.filename as string,
-        newFilename
+        newFilename,
+        finalUploadDate
       );
 
       return {
