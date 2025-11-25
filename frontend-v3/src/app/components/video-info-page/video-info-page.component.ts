@@ -904,4 +904,9 @@ export class VideoInfoPageComponent implements OnInit {
   toggleSection(section: keyof typeof this.expandedSections): void {
     this.expandedSections[section] = !this.expandedSections[section];
   }
+
+  onThumbnailError(event: Event): void {
+    const img = event.target as HTMLImageElement;
+    img.src = 'assets/default-thumbnail.png';
+  }
 }

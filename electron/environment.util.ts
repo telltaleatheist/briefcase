@@ -8,11 +8,11 @@ import log from 'electron-log';
 export const DEFAULT_SERVER_CONFIG = {
   nestBackend: {
     port: 3000,
-    host: 'localhost'
+    host: '0.0.0.0'  // Bind to all interfaces for remote access
   },
   electronServer: {
     port: 3001,
-    host: 'localhost'
+    host: '0.0.0.0'  // Bind to all interfaces for remote access
   }
 };
 

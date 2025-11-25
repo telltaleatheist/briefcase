@@ -245,24 +245,28 @@ export class WindowService {
     this.mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
       let cspPolicy: string;
 
+      // Both development and production need localhost access since the packaged app
+      // runs frontend and backend on localhost with different ports
+      const localhostSrc = "http://localhost:* ws://localhost:*";
+
       if (!security.csp.enableStrictCSP) {
         // Development: Relaxed CSP for hot-reload and debugging
         cspPolicy = "default-src 'self'; " +
           `script-src 'self'${security.csp.allowUnsafeInline ? " 'unsafe-inline'" : ""}${security.csp.allowUnsafeEval ? " 'unsafe-eval'" : ""}; ` +
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
           "font-src 'self' https://fonts.gstatic.com; " +
-          "img-src 'self' http://localhost:* data: blob:; " +
-          "connect-src 'self' http://localhost:* ws://localhost:*; " +
-          "media-src 'self' http://localhost:* blob:;";
+          `img-src 'self' ${localhostSrc} data: blob:; ` +
+          `connect-src 'self' ${localhostSrc}; ` +
+          `media-src 'self' ${localhostSrc} blob:;`;
       } else {
-        // Production: Strict CSP for security
+        // Production: Strict CSP but still allow localhost since app runs locally
         cspPolicy = "default-src 'self'; " +
           "script-src 'self'; " +  // No unsafe-inline or unsafe-eval in production
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +  // Keep unsafe-inline for Angular styles
           "font-src 'self' https://fonts.gstatic.com; " +
-          "img-src 'self' data: blob:; " +  // No localhost in production
-          "connect-src 'self'; " +  // Strict connection policy
-          "media-src 'self' blob:;";
+          `img-src 'self' ${localhostSrc} data: blob:; ` +
+          `connect-src 'self' ${localhostSrc}; ` +  // Allow localhost for backend API/WebSocket
+          `media-src 'self' ${localhostSrc} blob:;`;
       }
 
       callback({

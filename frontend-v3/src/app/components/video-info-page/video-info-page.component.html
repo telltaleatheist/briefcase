@@ -238,7 +238,7 @@
                     <img
                       [src]="'http://localhost:3000/api/database/videos/' + parent.id + '/thumbnail'"
                       [alt]="parent.filename"
-                      onerror="this.src='assets/default-thumbnail.png'">
+                      (error)="onThumbnailError($event)">
                   </div>
                   <div class="child-info">
                     <div class="child-name">{{ parent.filename }}</div>
@@ -272,7 +272,7 @@
                     <img
                       [src]="'http://localhost:3000/api/database/videos/' + child.id + '/thumbnail'"
                       [alt]="child.filename"
-                      onerror="this.src='assets/default-thumbnail.png'">
+                      (error)="onThumbnailError($event)">
                   </div>
                   <div class="child-info">
                     <div class="child-name">{{ child.filename }}</div>
