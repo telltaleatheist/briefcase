@@ -61,12 +61,13 @@ export class IgnoreFileModalComponent implements OnInit {
     this.isSaving.set(true);
     this.libraryService.updateIgnoreFile(this.fileContent()).subscribe({
       next: (response) => {
+        this.isSaving.set(false);
         if (response.success) {
           this.notificationService.success('Saved', 'Ignore file updated successfully');
+          this.close();
         } else {
           this.notificationService.error('Save Failed', response.error || 'Failed to save ignore file');
         }
-        this.isSaving.set(false);
       },
       error: (error) => {
         console.error('Failed to save ignore file:', error);

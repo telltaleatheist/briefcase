@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import * as log from 'electron-log';
+import { log } from '../common/logger';
 
 // Import the binary installers
 import YTDlpWrap from 'yt-dlp-wrap-extended';

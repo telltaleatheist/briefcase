@@ -3,9 +3,9 @@ import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
-import { Server } from 'http';
 import * as log from 'electron-log';
 import { spawn, ChildProcess } from 'child_process';
+import * as lockfile from 'proper-lockfile';
 import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 import { PortUtil } from '../utilities/port-util';
@@ -25,11 +25,10 @@ try {
  */
 export class BackendService {
   private backendProcess: ChildProcess | null = null;
-  private server: Server | null = null;
   private backendStarted: boolean = false;
   private lockFilePath: string;
+  private lockRelease: (() => Promise<void>) | null = null;
   private actualBackendPort: number = 3000;
-  private actualFrontendPort: number = 8080;
 
   constructor() {
     this.lockFilePath = path.join(app.getPath('userData'), 'backend.lock');
@@ -80,82 +79,87 @@ export class BackendService {
     // Kill any stale backend processes from previous runs
     await this.killStaleBackends();
 
-    // Check if lock file exists and is recent (less than 10 seconds old)
-    if (fs.existsSync(this.lockFilePath)) {
-      const stats = fs.statSync(this.lockFilePath);
-      const fileAge = Date.now() - stats.mtimeMs;
+    // Try to acquire lock using proper-lockfile
+    try {
+      // Check if lock file exists and try to break stale locks
+      if (fs.existsSync(this.lockFilePath)) {
+        try {
+          const isLocked = await lockfile.check(this.lockFilePath);
+          if (isLocked) {
+            log.warn('Lock file is held, attempting to clean up stale processes...');
+            // Try to free the port instead of failing
+            const backendPortFreed = await PortUtil.attemptToFreePort(ServerConfig.config.nestBackend.port);
+            const frontendPortFreed = await PortUtil.attemptToFreePort(ServerConfig.config.electronServer.port);
 
-      if (fileAge < 10000) {  // 10 seconds
-        log.info('Recent lock file found. Attempting to clean up stale processes...');
-        // Try to free the port instead of failing
-        const backendPortFreed = await PortUtil.attemptToFreePort(ServerConfig.config.nestBackend.port);
-        const frontendPortFreed = await PortUtil.attemptToFreePort(ServerConfig.config.electronServer.port);
-
-        if (backendPortFreed && frontendPortFreed) {
-          log.info('Successfully freed ports, continuing with startup');
-          fs.unlinkSync(this.lockFilePath);
-        } else {
-          log.warn('Could not free ports, will try alternative ports');
+            if (backendPortFreed && frontendPortFreed) {
+              log.info('Successfully freed ports, breaking stale lock');
+              // Release the stale lock
+              await lockfile.unlock(this.lockFilePath).catch(() => {
+                // If unlock fails, remove the lock file manually
+                try {
+                  fs.unlinkSync(this.lockFilePath);
+                } catch (err) {
+                  log.warn('Could not remove lock file:', err);
+                }
+              });
+            }
+          }
+        } catch (err) {
+          log.warn('Error checking lock file:', err);
         }
-      } else {
-        fs.unlinkSync(this.lockFilePath);
       }
+    } catch (err) {
+      log.warn('Error during lock acquisition setup:', err);
     }
 
-    // Find available ports
+    // Find available port for backend
     const backendPort = await PortUtil.findAvailablePort(ServerConfig.config.nestBackend.port, 10);
-    const frontendPort = await PortUtil.findAvailablePort(ServerConfig.config.electronServer.port, 10);
 
-    if (!backendPort || !frontendPort) {
-      log.error('Could not find available ports for backend and frontend servers');
+    if (!backendPort) {
+      log.error('Could not find available port for backend server');
       return false;
     }
 
     this.actualBackendPort = backendPort;
-    this.actualFrontendPort = frontendPort;
 
     if (backendPort !== ServerConfig.config.nestBackend.port) {
       log.info(`Using alternative backend port: ${backendPort} (default ${ServerConfig.config.nestBackend.port} was in use)`);
     }
 
-    if (frontendPort !== ServerConfig.config.electronServer.port) {
-      log.info(`Using alternative frontend port: ${frontendPort} (default ${ServerConfig.config.electronServer.port} was in use)`);
-    }
-
-    // Create lock file
+    // Acquire lock file atomically
     try {
-      fs.writeFileSync(this.lockFilePath, new Date().toString());
+      // Ensure the lock file exists before locking
+      if (!fs.existsSync(this.lockFilePath)) {
+        fs.writeFileSync(this.lockFilePath, '');
+      }
+
+      this.lockRelease = await lockfile.lock(this.lockFilePath, {
+        retries: {
+          retries: 3,
+          minTimeout: 100,
+          maxTimeout: 1000
+        },
+        stale: 10000, // Consider lock stale after 10 seconds
+        update: 2000  // Update lock every 2 seconds
+      });
+      log.info('Successfully acquired backend lock');
     } catch (err) {
-      log.warn(`Could not create lock file: ${err}`);
+      log.error(`Could not acquire lock file: ${err}`);
+      return false;
     }
 
     try {
       await this.startNodeBackend();
-      await this.startHttpServer();
 
-      // Wait for backend to be ready with retries
-      const maxRetries = 30; // 30 retries
-      const retryDelay = 1000; // 1 second between retries
-      let isRunning = false;
+      // Wait for backend ready signal with exponential backoff
+      const isRunning = await this.waitForBackendReady();
 
-      for (let i = 0; i < maxRetries; i++) {
-        log.info(`Checking backend health (attempt ${i + 1}/${maxRetries})...`);
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-
-        isRunning = await this.checkBackendRunning();
-
-        if (isRunning) {
-          log.info(`✓ Backend successfully started on port ${this.actualBackendPort} (took ${i + 1} seconds)`);
-          log.info(`✓ Frontend server successfully started on port ${this.actualFrontendPort}`);
-          this.backendStarted = true;
-          break;
-        } else {
-          log.warn(`Backend not ready yet (attempt ${i + 1}/${maxRetries})`);
-        }
-      }
-
-      if (!isRunning) {
-        log.error(`Backend failed to start after ${maxRetries} attempts - cleaning up processes`);
+      if (isRunning) {
+        log.info(`✓ Backend successfully started on port ${this.actualBackendPort}`);
+        log.info(`✓ Frontend is served directly from backend`);
+        this.backendStarted = true;
+      } else {
+        log.error('Backend failed to start - cleaning up processes');
         this.cleanup();
       }
 
@@ -169,6 +173,42 @@ export class BackendService {
   }
 
   /**
+   * Wait for backend to be ready using HTTP health checks with exponential backoff
+   * This is the standard approach for Electron apps with HTTP backends
+   */
+  private async waitForBackendReady(): Promise<boolean> {
+    const maxAttempts = 20; // Max 20 attempts (~10 seconds total)
+    let delay = 50; // Start with 50ms (faster initial check)
+    const maxDelay = 1000; // Cap at 1 second per attempt
+
+    log.info('Waiting for backend to be ready...');
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // Check immediately on first attempt, then wait
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 1.5, maxDelay); // Exponential backoff
+      }
+
+      // HTTP health check - standard approach
+      const isReady = await this.checkBackendRunning();
+
+      if (isReady) {
+        log.info(`✓ Backend ready after ${attempt + 1} attempt(s)`);
+        return true;
+      }
+
+      // Log progress every 5 attempts
+      if (attempt > 0 && attempt % 5 === 0) {
+        log.info(`Still waiting for backend (attempt ${attempt + 1}/${maxAttempts})...`);
+      }
+    }
+
+    log.error('Backend failed to respond after maximum attempts');
+    return false;
+  }
+
+  /**
    * Check if backend is running on the actual port being used
    */
   private async checkBackendRunning(): Promise<boolean> {
@@ -178,19 +218,18 @@ export class BackendService {
         port: this.actualBackendPort,
         path: '/api',
         method: 'GET',
-        timeout: 5000 // Increased from 2000ms to 5000ms to allow backend time to initialize
+        timeout: 5000
       }, (res) => {
-        log.info(`Backend check response status: ${res.statusCode}`);
+        // Silently check status - don't log every attempt
         resolve(res.statusCode === 200);
       });
 
-      req.on('error', (err) => {
-        log.error(`Backend check error: ${err.message}`);
+      req.on('error', () => {
+        // Expected during startup - silently fail
         resolve(false);
       });
 
       req.on('timeout', () => {
-        log.error('Backend check timeout');
         req.destroy();
         resolve(false);
       });
@@ -204,13 +243,6 @@ export class BackendService {
    */
   getBackendPort(): number {
     return this.actualBackendPort;
-  }
-
-  /**
-   * Get the actual frontend port being used
-   */
-  getFrontendPort(): number {
-    return this.actualFrontendPort;
   }
 
   /**
@@ -320,147 +352,6 @@ export class BackendService {
       return false;
     }
   }
-  
-  /**
-   * Start the HTTP server for serving frontend
-   */
-  private async startHttpServer(): Promise<void> {
-    // Get frontend path
-    const frontendPath = AppConfig.frontendPath;
-    const serverConfig = ServerConfig.config;
-    
-    this.server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
-      const url = req.url || '/';
-      
-      if (url.startsWith('/api/') || url.includes('/socket.io/')) {
-        
-        const proxyOptions = {
-          hostname: serverConfig.nestBackend.host,
-          port: this.actualBackendPort,
-          path: url,
-          method: req.method,
-          headers: {
-            ...req.headers,
-            'Host': `${serverConfig.nestBackend.host}:${this.actualBackendPort}`
-          }
-        };
-
-        const proxyReq = http.request(proxyOptions, (proxyRes) => {
-          // Set CORS headers
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-          res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-          proxyRes.pipe(res);
-        });
-      
-        req.pipe(proxyReq);
-      
-        proxyReq.on('error', (err) => {
-          log.error(`[HTTP Server] Proxy error for ${url}: ${err.message}`);
-          
-          // Error page for API requests
-          res.writeHead(503, { 'Content-Type': 'text/html' });
-          res.end(`
-            <html>
-              <head>
-                <title>Service Unavailable</title>
-                <style>
-                  body {
-                    font-family: Arial, sans-serif;
-                    text-align: center;
-                    padding: 50px;
-                    background-color: #f5f5f5;
-                  }
-                  .error-container {
-                    background-color: white;
-                    border-radius: 8px;
-                    padding: 30px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    max-width: 500px;
-                    margin: 0 auto;
-                  }
-                  h1 { color: #e74c3c; }
-                  p { color: #333; line-height: 1.5; }
-                  button {
-                    background-color: #3498db;
-                    color: white;
-                    border: none;
-                    padding: 10px 20px;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    margin-top: 20px;
-                    font-size: 14px;
-                  }
-                  button:hover { background-color: #2980b9; }
-                </style>
-              </head>
-              <body>
-                <div class="error-container">
-                  <h1>Connection Error</h1>
-                  <p>Unable to connect to the backend service. This is typically because the backend server isn't running.</p>
-                  <p>Please make sure the backend server is started before using the application.</p>
-                  <button onclick="window.location.reload()">Retry Connection</button>
-                </div>
-              </body>
-            </html>
-          `);
-        });
-        
-        return;
-      }
-
-      // Serve static frontend files
-      let filePath = path.join(frontendPath, url === '/' ? 'index.html' : url);
-
-      if (fs.existsSync(filePath)) {
-        if (fs.statSync(filePath).isDirectory()) {
-          filePath = path.join(filePath, 'index.html');
-        }
-        
-        if (fs.existsSync(filePath)) {
-                
-          const content = fs.readFileSync(filePath);
-          const ext = path.extname(filePath).toLowerCase();
-          
-          // Set content type based on file extension
-          let contentType = 'text/html';
-          if (ext === '.js') contentType = 'application/javascript';
-          if (ext === '.css') contentType = 'text/css';
-          if (ext === '.ico') contentType = 'image/x-icon';
-          if (ext === '.png') contentType = 'image/png';
-          if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
-          if (ext === '.svg') contentType = 'image/svg+xml';
-          
-          res.writeHead(200, { 'Content-Type': contentType });
-          res.end(content);
-          return;
-        }
-      }
-      
-      // Fallback to serving index.html for client-side routing
-      
-      const indexPath = path.join(frontendPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        const content = fs.readFileSync(indexPath);
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(content);
-      } else {
-        res.writeHead(404);
-        res.end('Not Found');
-      }
-    });
-
-    // Handle server errors
-    this.server.on('error', (err) => {
-      log.error(`HTTP server error: ${err.message}`);
-    });
-
-    // Start HTTP server
-    this.server.listen(this.actualFrontendPort, serverConfig.electronServer.host, () => {
-      log.info(`HTTP server listening on ${serverConfig.electronServer.host}:${this.actualFrontendPort}`);
-    });
-  }
 
   /**
    * Set up event handlers for the backend process
@@ -540,16 +431,6 @@ export class BackendService {
       }
     }
 
-    // Stop HTTP server
-    if (this.server) {
-      try {
-        this.server.close();
-        this.server = null;
-      } catch (err) {
-        log.warn(`Error closing HTTP server: ${err}`);
-      }
-    }
-
     // Kill backend process
     if (this.backendProcess && !this.backendProcess.killed) {
       try {
@@ -600,5 +481,13 @@ export class BackendService {
     }
 
     this.backendProcess = null;
+
+    // Release lock file
+    if (this.lockRelease) {
+      this.lockRelease()
+        .then(() => log.info('Released backend lock'))
+        .catch((err) => log.warn('Error releasing lock:', err));
+      this.lockRelease = null;
+    }
   }
 }

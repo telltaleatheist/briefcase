@@ -3,7 +3,6 @@ import { Controller, Get, Param, Delete, Res, Query } from '@nestjs/common';
 import { Response } from 'express';
 import { DownloaderService } from './downloader.service';
 import * as fs from 'fs';
-import * as log from 'electron-log';
 
 @Controller('downloader')
 export class DownloaderController {

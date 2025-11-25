@@ -6,8 +6,7 @@ import { EventEmitter } from 'events';
 import { spawn, ChildProcess } from 'child_process';
 import { SharedConfigService } from '../config/shared-config.service';
 import * as readline from 'readline';
-import * as logger from 'electron-log';
-import { log } from 'electron-log';
+import { log } from '../common/logger';
 import { getPythonConfig } from '../shared/python-config';
 
 export interface YtDlpProgress {
@@ -40,7 +39,6 @@ export class YtDlpManager extends EventEmitter {
   private isRunning = false;
   private ytDlpPath: string;
   private aborted = false;
-  logger: any;
 
   constructor(
     private readonly sharedConfigService: SharedConfigService
@@ -65,7 +63,7 @@ export class YtDlpManager extends EventEmitter {
     // Only check fs.existsSync for absolute paths
     // For PATH-based commands (like 'yt-dlp'), skip the check
     if (path.isAbsolute(ytDlpPath) && !fs.existsSync(ytDlpPath)) {
-      logger.error(`yt-dlp not found at: ${ytDlpPath}`);
+      log.error(`yt-dlp not found at: ${ytDlpPath}`);
       throw new Error(`yt-dlp executable not found at path: ${ytDlpPath}`);
     }
 
@@ -144,15 +142,15 @@ export class YtDlpManager extends EventEmitter {
    */
   private async verifyFileExists(filePath: string, maxRetries = 10, interval = 500): Promise<boolean> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      this.logger.debug(`Verifying file exists (attempt ${attempt}/${maxRetries}): ${filePath}`);
+      log.debug(`Verifying file exists (attempt ${attempt}/${maxRetries}): ${filePath}`);
       try {
         // Use fs.promises.access instead of fs.access for Promise-based API
         await fs.promises.access(filePath);
-        this.logger.log(`Verified output file exists: ${filePath}`);
+        log.log(`Verified output file exists: ${filePath}`);
         return true;
       } catch (error) {
         if (attempt === maxRetries) {
-          this.logger.warn(`File not found after ${maxRetries} attempts: ${filePath}`);
+          log.warn(`File not found after ${maxRetries} attempts: ${filePath}`);
           return false;
         }
         await new Promise(resolve => setTimeout(resolve, interval));
@@ -192,7 +190,7 @@ export class YtDlpManager extends EventEmitter {
     // Add URL as the last argument
     finalArgs.push(this.inputUrl);
   
-    logger.info(`Executing yt-dlp with args: ${finalArgs.join(' ')}`);
+    log.info(`Executing yt-dlp with args: ${finalArgs.join(' ')}`);
     
     // Store output and error data
     let stdoutBuffer = '';
@@ -217,13 +215,13 @@ export class YtDlpManager extends EventEmitter {
         const pythonConfig = getPythonConfig();
         command = pythonConfig.fullPath || 'python3';
         args = [this.ytDlpPath, ...finalArgs];
-        logger.info(`Using Python to run bundled yt-dlp: ${command} ${this.ytDlpPath}`);
+        log.info(`Using Python to run bundled yt-dlp: ${command} ${this.ytDlpPath}`);
       } else {
         // System yt-dlp: execute directly (it's a standalone executable)
         // Execute: yt-dlp [args...]
         command = this.ytDlpPath;
         args = finalArgs;
-        logger.info(`Running system yt-dlp directly: ${this.ytDlpPath}`);
+        log.info(`Running system yt-dlp directly: ${this.ytDlpPath}`);
       }
 
       this.currentProcess = spawn(command, args);
@@ -231,14 +229,14 @@ export class YtDlpManager extends EventEmitter {
       // Set up stdout and stderr handlers
       this.currentProcess.stdout?.on('data', (data) => {
         const chunk = data.toString();
-        logger.info(`[STDOUT] Received ${chunk.length} bytes`);
+        log.info(`[STDOUT] Received ${chunk.length} bytes`);
         stdoutBuffer += chunk;
 
         // Also check stdout for progress (--progress-template output goes to stdout)
         const lines = chunk.split('\n');
         for (const line of lines) {
           if (line.trim()) {
-            logger.debug(`[STDOUT LINE]: ${line}`);
+            log.debug(`[STDOUT LINE]: ${line}`);
             this.parseProgressUpdate(line);
           }
         }
@@ -267,7 +265,7 @@ export class YtDlpManager extends EventEmitter {
 
           // Log stderr lines for debugging
           if (line.includes('[download]') || line.includes('%')) {
-            logger.info(`[STDERR LINE]: ${line}`);
+            log.info(`[STDERR LINE]: ${line}`);
           }
 
           // Process the line for progress information
@@ -296,9 +294,9 @@ export class YtDlpManager extends EventEmitter {
       this.currentProcess.on('close', (code) => {
         this.isRunning = false;
 
-        logger.info(`[PROCESS EXIT] Code: ${code}, Stdout length: ${stdoutBuffer.length}, Stderr length: ${stderrBuffer.length}`);
+        log.info(`[PROCESS EXIT] Code: ${code}, Stdout length: ${stdoutBuffer.length}, Stderr length: ${stderrBuffer.length}`);
         if (stderrBuffer.length > 0) {
-          logger.info(`[STDERR CONTENT]: ${stderrBuffer.substring(0, 500)}`);
+          log.info(`[STDERR CONTENT]: ${stderrBuffer.substring(0, 500)}`);
         }
 
         if (this.aborted) {
@@ -360,7 +358,7 @@ export class YtDlpManager extends EventEmitter {
         etaSeconds = parseFloat(eta);
       }
 
-      logger.info(`[PROGRESS TEMPLATE] ${percent}% - ${downloaded}/${total} bytes at ${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`);
+      log.info(`[PROGRESS TEMPLATE] ${percent}% - ${downloaded}/${total} bytes at ${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`);
 
       this.emit('progress', {
         percent: parseFloat(percent),
@@ -497,7 +495,7 @@ export class YtDlpManager extends EventEmitter {
         }
         
         lastError = errorObj;
-        logger.info(`yt-dlp execution failed (attempt ${attempt}/${maxRetries}): ${errorObj.message}`);
+        log.info(`yt-dlp execution failed (attempt ${attempt}/${maxRetries}): ${errorObj.message}`);
         
         if (attempt < maxRetries) {
           // Emit retry event

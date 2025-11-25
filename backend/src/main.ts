@@ -4,7 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ExpressAdapter, NestExpressApplication } from '@nestjs/platform-express';
 import { environment } from './config/environment';
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import * as log from 'electron-log';
+import { log } from './common/logger';
 import { ServerOptions } from 'socket.io';
 import * as express from 'express';  // Explicitly import express
 
@@ -39,9 +39,9 @@ async function bootstrap() {
       AppModule,
       new ExpressAdapter(expressApp),
       {
-        // Reduce log verbosity - only show errors, warnings, and important logs
-        // This removes verbose RouterExplorer route mapping logs
-        logger: ['error', 'warn', 'log'],
+        // Minimal logging - only show errors and warnings
+        // This removes verbose RouterExplorer and RoutesResolver logs
+        logger: ['error', 'warn'],
         abortOnError: false
       }
     );

@@ -53,6 +53,33 @@ log.transports.file.level = 'debug';
 // Clean up old log files (keep logs from last 7 days)
 LogUtil.cleanupOldLogs(7);
 
+// Handle process signals for graceful shutdown
+process.on('SIGTERM', () => {
+  log.info('Received SIGTERM signal, initiating graceful shutdown...');
+  if (backendService) {
+    backendService.shutdown();
+  }
+  app.quit();
+});
+
+process.on('SIGINT', () => {
+  log.info('Received SIGINT signal, initiating graceful shutdown...');
+  if (backendService) {
+    backendService.shutdown();
+  }
+  app.quit();
+});
+
+// Handle uncaught exceptions to prevent zombie processes
+process.on('uncaughtException', (error) => {
+  log.error('Uncaught exception:', error);
+  if (backendService) {
+    backendService.shutdown();
+  }
+  app.quit();
+  process.exit(1);
+});
+
 // Single instance lock - must be called before app.whenReady()
 // Wrap in try-catch to handle cases where app object isn't ready
 let gotTheLock = false;
@@ -108,8 +135,8 @@ app.whenReady().then(async () => {
 
     // Create window based on backend status
     if (backendStarted) {
-      // Set the actual frontend port before creating the window
-      windowService.setFrontendPort(backendService.getFrontendPort());
+      // Set the backend port for the window to connect to
+      windowService.setFrontendPort(backendService.getBackendPort());
       windowService.createMainWindow();
 
       // Create tray icon
@@ -125,7 +152,7 @@ app.whenReady().then(async () => {
     app.on('activate', () => {
       if (windowService.getAllWindows().length === 0) {
         if (backendService.isRunning()) {
-          windowService.setFrontendPort(backendService.getFrontendPort());
+          windowService.setFrontendPort(backendService.getBackendPort());
           windowService.createMainWindow();
         } else {
           windowService.showBackendErrorWindow();

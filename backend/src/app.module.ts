@@ -12,12 +12,14 @@ import { LibraryModule } from './library/library.module';
 import { DatabaseModule } from './database/database.module';
 import { SavedLinksModule } from './saved-links/saved-links.module';
 import { ConfigModule } from '@nestjs/config';
+import { ServeStaticModule } from '@nestjs/serve-static';
 import { SharedConfigModule } from './config/shared-config.module';
 import { ApiKeysModule } from './config/config.module';
 import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
 import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { join } from 'path';
 
 @Global()
 @Module({
@@ -29,6 +31,13 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     EventEmitterModule.forRoot({
       global: true,
     }),
+    // Serve static frontend files if FRONTEND_PATH is provided
+    ...(process.env.FRONTEND_PATH
+      ? [ServeStaticModule.forRoot({
+          rootPath: process.env.FRONTEND_PATH,
+          exclude: ['/api*', '/socket.io*'],
+        })]
+      : []),
     CommonModule,
     SharedConfigModule,
     ApiKeysModule,
