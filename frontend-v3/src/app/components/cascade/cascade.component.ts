@@ -221,10 +221,18 @@ export class CascadeComponent {
   });
 
   private initialized = false;
+  private lastLibraryId: string | null = null;
 
   constructor() {
-    // Load tabs for context menu
-    this.tabsService.loadTabs().subscribe();
+    // Load tabs for context menu only when library is available
+    // Also reload tabs when library changes
+    effect(() => {
+      const library = this.libraryService.currentLibrary();
+      if (library && library.id !== this.lastLibraryId) {
+        this.lastLibraryId = library.id;
+        this.tabsService.loadTabs().subscribe();
+      }
+    });
 
     // Emit selection changes (skip initial)
     effect(() => {
