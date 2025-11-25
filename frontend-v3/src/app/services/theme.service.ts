@@ -34,7 +34,8 @@ export class ThemeService {
   }
 
   toggleTheme(): void {
-    const newTheme: Theme = this.currentTheme() === 'light' ? 'dark' : 'light';
+    const currentTheme = this.currentTheme();
+    const newTheme: Theme = currentTheme === 'light' ? 'dark' : 'light';
     this.setTheme(newTheme);
     this.saveTheme(newTheme);
   }

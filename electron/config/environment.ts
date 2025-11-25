@@ -39,7 +39,7 @@ const developmentConfig: ElectronEnvironmentConfig = {
     csp: {
       enableStrictCSP: false,
       allowUnsafeInline: true,
-      allowUnsafeEval: true,
+      allowUnsafeEval: false,  // Disable unsafe-eval - Angular AOT doesn't need it
     },
     devTools: true,
   },
