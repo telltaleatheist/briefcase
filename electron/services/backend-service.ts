@@ -160,14 +160,14 @@ export class BackendService {
         this.backendStarted = true;
       } else {
         log.error('Backend failed to start - cleaning up processes');
-        this.cleanup();
+        await this.cleanup();
       }
 
       return isRunning;
 
     } catch (error) {
       log.error('Error starting backend servers:', error);
-      this.cleanup();
+      await this.cleanup();
       return false;
     }
   }
@@ -177,8 +177,8 @@ export class BackendService {
    * This is the standard approach for Electron apps with HTTP backends
    */
   private async waitForBackendReady(): Promise<boolean> {
-    const maxAttempts = 20; // Max 20 attempts (~10 seconds total)
-    let delay = 50; // Start with 50ms (faster initial check)
+    const maxAttempts = 40; // Max 40 attempts (~25 seconds total)
+    let delay = 100; // Start with 100ms
     const maxDelay = 1000; // Cap at 1 second per attempt
 
     log.info('Waiting for backend to be ready...');
@@ -331,6 +331,8 @@ export class BackendService {
         FFMPEG_PATH: ffmpegPath,
         FFPROBE_PATH: ffprobePath,
         YT_DLP_PATH: runtimePaths.ytdlp || process.env.YT_DLP_PATH,
+        WHISPER_PATH: runtimePaths.whisper || process.env.WHISPER_PATH,
+        PYTHON_PATH: runtimePaths.python || process.env.PYTHON_PATH,
       };
       
       // Set the working directory to the backend directory for proper module resolution
@@ -419,11 +421,28 @@ export class BackendService {
   /**
    * Clean up backend resources (processes, servers, lock files)
    */
-  private cleanup(): void {
+  private async cleanup(): Promise<void> {
     log.info('Cleaning up backend resources...');
 
-    // Remove lock file
-    if (fs.existsSync(this.lockFilePath)) {
+    // Release lock file properly using proper-lockfile
+    if (this.lockRelease) {
+      try {
+        await this.lockRelease();
+        log.info('Released backend lock during cleanup');
+      } catch (err) {
+        log.warn('Error releasing lock during cleanup:', err);
+        // Fallback: try to delete the lock file manually
+        if (fs.existsSync(this.lockFilePath)) {
+          try {
+            fs.unlinkSync(this.lockFilePath);
+          } catch (unlinkErr) {
+            log.warn(`Error removing lock file: ${unlinkErr}`);
+          }
+        }
+      }
+      this.lockRelease = null;
+    } else if (fs.existsSync(this.lockFilePath)) {
+      // No release function available, try manual delete
       try {
         fs.unlinkSync(this.lockFilePath);
       } catch (err) {
@@ -437,13 +456,23 @@ export class BackendService {
         // Try graceful shutdown first
         this.backendProcess.kill('SIGTERM');
 
-        // Force kill after 2 seconds if still alive
-        setTimeout(() => {
-          if (this.backendProcess && !this.backendProcess.killed) {
-            log.warn('Backend process did not exit gracefully, forcing kill...');
-            this.backendProcess.kill('SIGKILL');
+        // Wait for graceful shutdown (up to 2 seconds)
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => {
+            if (this.backendProcess && !this.backendProcess.killed) {
+              log.warn('Backend process did not exit gracefully, forcing kill...');
+              this.backendProcess.kill('SIGKILL');
+            }
+            resolve();
+          }, 2000);
+
+          if (this.backendProcess) {
+            this.backendProcess.once('exit', () => {
+              clearTimeout(timeout);
+              resolve();
+            });
           }
-        }, 2000);
+        });
       } catch (err) {
         log.warn(`Error killing backend process: ${err}`);
       }
@@ -455,39 +484,33 @@ export class BackendService {
   /**
    * Shutdown the backend server
    */
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     log.info('Shutting down backend service...');
-    this.cleanup();
 
-    // Additional force kill for the specific PID if we have it
-    if (this.backendProcess && this.backendProcess.pid) {
-      const pid = this.backendProcess.pid;
+    // Save PID before cleanup clears it
+    const pid = this.backendProcess?.pid;
 
+    await this.cleanup();
+
+    // Additional force kill for the specific PID if cleanup didn't fully terminate it
+    if (pid) {
       // On Windows, kill the process group
       if (process.platform === 'win32') {
         try {
           process.kill(-pid, 'SIGKILL');
         } catch (err) {
-          log.warn(`Error killing process group: ${err}`);
+          // Process may already be dead, which is fine
         }
       } else {
         // On Unix-like systems, try to force kill the specific PID
         try {
           process.kill(pid, 'SIGKILL');
         } catch (err) {
-          log.warn(`Error force killing backend process ${pid}: ${err}`);
+          // Process may already be dead, which is fine
         }
       }
     }
 
     this.backendProcess = null;
-
-    // Release lock file
-    if (this.lockRelease) {
-      this.lockRelease()
-        .then(() => log.info('Released backend lock'))
-        .catch((err) => log.warn('Error releasing lock:', err));
-      this.lockRelease = null;
-    }
   }
 }

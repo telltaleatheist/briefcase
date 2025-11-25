@@ -95,3 +95,4 @@ frontend-v3/.angular/cache/*
 Modelfile
 # Backend dependencies (managed separately)
 !backend/node_modules/.gitkeep
+clipchimp-console*

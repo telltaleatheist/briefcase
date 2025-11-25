@@ -12,7 +12,9 @@ const getRuntimePaths = () => {
     return {
       ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
       ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
-      ytdlp: process.env.YT_DLP_PATH || 'yt-dlp'
+      ytdlp: process.env.YT_DLP_PATH || 'yt-dlp',
+      whisper: process.env.WHISPER_PATH || 'whisper',
+      python: process.env.PYTHON_PATH || 'python'
     };
   }
 };

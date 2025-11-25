@@ -97,6 +97,29 @@ function getYtDlpBinaryName(): string {
 }
 
 /**
+ * Try to find a command in PATH (for development mode)
+ * Returns the full path if found, otherwise returns the command name
+ */
+function findInPath(command: string): string {
+  const { execSync } = require('child_process');
+  try {
+    if (process.platform === 'win32') {
+      const result = execSync(`where ${command}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      const lines = result.trim().split('\n');
+      if (lines.length > 0 && lines[0]) {
+        return lines[0].trim();
+      }
+    } else {
+      const result = execSync(`which ${command}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      return result.trim();
+    }
+  } catch {
+    // Command not found in PATH
+  }
+  return command;
+}
+
+/**
  * Get all binary paths
  * Simple and direct - no detection, no validation, no fallbacks
  */
@@ -131,7 +154,7 @@ export function getRuntimePaths() {
           'bin',
           getYtDlpBinaryName()
         )
-      : 'yt-dlp', // Use system yt-dlp in development
+      : findInPath('yt-dlp'), // Find system yt-dlp in development
 
     // Whisper from utilities folder (packaged) or system (development)
     whisper: isPackaged()
@@ -141,7 +164,7 @@ export function getRuntimePaths() {
           'bin',
           process.platform === 'win32' ? 'whisper.exe' : 'whisper'
         )
-      : 'whisper', // Use system whisper in development
+      : findInPath('whisper'), // Find system whisper in development
 
     // Python from bundled runtime
     python: isPackaged()
@@ -151,7 +174,7 @@ export function getRuntimePaths() {
           'bin',
           process.platform === 'win32' ? 'python.exe' : 'python3'
         )
-      : 'python3', // Use system Python in development
+      : findInPath(process.platform === 'win32' ? 'python' : 'python3'), // Find system Python in development
 
     // Backend entry point
     backend: path.join(resourcesPath, 'backend', 'dist', 'main.js'),

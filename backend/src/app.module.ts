@@ -35,7 +35,7 @@ import { join } from 'path';
     ...(process.env.FRONTEND_PATH
       ? [ServeStaticModule.forRoot({
           rootPath: process.env.FRONTEND_PATH,
-          exclude: ['/api*', '/socket.io*'],
+          exclude: ['/api{/*path}', '/socket.io{/*path}'],
         })]
       : []),
     CommonModule,

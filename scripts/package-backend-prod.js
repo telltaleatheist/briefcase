@@ -69,8 +69,35 @@ try {
 
   // 6. Get size comparison
   const getDirectorySize = (dirPath) => {
-    const result = execSync(`du -sh "${dirPath}"`, { encoding: 'utf-8' });
-    return result.split('\t')[0].trim();
+    // Cross-platform directory size calculation
+    const getAllFiles = (dir) => {
+      let totalSize = 0;
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        const filePath = path.join(dir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isDirectory()) {
+            totalSize += getAllFiles(filePath);
+          } else {
+            totalSize += stat.size;
+          }
+        } catch (e) {
+          // Skip files we can't access
+        }
+      }
+      return totalSize;
+    };
+
+    const bytes = getAllFiles(dirPath);
+    if (bytes >= 1024 * 1024 * 1024) {
+      return (bytes / (1024 * 1024 * 1024)).toFixed(1) + 'G';
+    } else if (bytes >= 1024 * 1024) {
+      return (bytes / (1024 * 1024)).toFixed(1) + 'M';
+    } else if (bytes >= 1024) {
+      return (bytes / 1024).toFixed(1) + 'K';
+    }
+    return bytes + 'B';
   };
 
   const originalSize = getDirectorySize(path.join(backendDir, 'node_modules'));

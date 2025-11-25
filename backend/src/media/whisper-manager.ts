@@ -268,20 +268,27 @@ export class WhisperManager extends EventEmitter {
             // Execute whisper with simplified arguments
             const env = this.getEnvironmentWithFfmpeg();
             const simpleProcess = spawn(this.whisperPath, simpleArgs, { cwd: outputDir, env });
-            
+
             let simpleStdoutBuffer = '';
             let simpleStderrBuffer = '';
-            
+
+            // Handle spawn errors (e.g., ENOENT when whisper not found)
+            simpleProcess.on('error', (err) => {
+              this.isRunning = false;
+              this.logger.error(`Failed to spawn whisper retry process: ${err.message}`);
+              reject(new Error(`Failed to start Whisper retry: ${err.message}`));
+            });
+
             simpleProcess.stdout.on('data', (data) => {
               simpleStdoutBuffer += data.toString();
               this.parseProgress(data.toString());
             });
-            
+
             simpleProcess.stderr.on('data', (data) => {
               simpleStderrBuffer += data.toString();
               this.parseProgress(data.toString());
             });
-            
+
             simpleProcess.on('close', (simpleCode) => {
               if (simpleCode === 0) {
                 // Look for any SRT or TXT file created

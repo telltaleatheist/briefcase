@@ -34,7 +34,9 @@ export class PythonBridgeService {
     // IMPORTANT: Check if we're truly packaged or just running in development
     // In development, resourcesPath will point to node_modules/electron/dist/...
     const resourcesPath = (process as any).resourcesPath || '';
-    const isDevElectron = resourcesPath.includes('node_modules/electron');
+    // Check for both forward and backward slashes (Windows vs Unix paths)
+    const isDevElectron = resourcesPath.includes('node_modules/electron') ||
+                          resourcesPath.includes('node_modules\\electron');
     const isPackaged = !isDevElectron && (
       process.env.NODE_ENV === 'production' ||
       process.env.RESOURCES_PATH !== undefined
@@ -84,7 +86,9 @@ export class PythonBridgeService {
       // This prevents accidentally using system Python from PATH
       // IMPORTANT: Check if we're truly packaged or just running in development
       const resourcesPath = (process as any).resourcesPath || '';
-      const isDevElectron = resourcesPath.includes('node_modules/electron');
+      // Check for both forward and backward slashes (Windows vs Unix paths)
+      const isDevElectron = resourcesPath.includes('node_modules/electron') ||
+                            resourcesPath.includes('node_modules\\electron');
       const isPackaged = !isDevElectron && (
         process.env.NODE_ENV === 'production' ||
         process.env.RESOURCES_PATH !== undefined

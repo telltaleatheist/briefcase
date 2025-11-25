@@ -1,4 +1,6 @@
 // ClipChimp/electron/config/environment.ts
+import { app } from 'electron';
+
 /**
  * Environment-specific configuration for Electron
  */
@@ -76,11 +78,21 @@ const productionConfig: ElectronEnvironmentConfig = {
 };
 
 /**
- * Get the current environment configuration based on NODE_ENV
+ * Get the current environment configuration based on NODE_ENV or app.isPackaged
+ * Uses app.isPackaged as the primary indicator since NODE_ENV isn't always set
  */
 export function getEnvironmentConfig(): ElectronEnvironmentConfig {
-  const env = process.env.NODE_ENV || 'production';
-  return env === 'development' ? developmentConfig : productionConfig;
+  // Check NODE_ENV first, then fall back to app.isPackaged
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === 'development') {
+    return developmentConfig;
+  }
+  if (nodeEnv === 'production') {
+    return productionConfig;
+  }
+  // NODE_ENV not set - use app.isPackaged as fallback
+  // app.isPackaged is true when running from an asar or installed app
+  return app.isPackaged ? productionConfig : developmentConfig;
 }
 
 export const environmentConfig = getEnvironmentConfig();
