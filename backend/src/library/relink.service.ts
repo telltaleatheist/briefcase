@@ -5,13 +5,25 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import { LibraryService } from './library.service';
 import { RelinkResult } from './interfaces/library.interface';
+import { LibraryManagerService } from '../database/library-manager.service';
 
 @Injectable()
 export class RelinkService {
   private readonly logger = new Logger(RelinkService.name);
-  private readonly clipsBasePath = '/Volumes/Callisto/clips';
 
-  constructor(private libraryService: LibraryService) {}
+  constructor(
+    private libraryService: LibraryService,
+    private libraryManagerService: LibraryManagerService,
+  ) {}
+
+  /**
+   * Get the clips base path from the active library
+   * Returns null if no library is active
+   */
+  private getClipsBasePath(): string | null {
+    const activeLibrary = this.libraryManagerService.getActiveLibrary();
+    return activeLibrary?.clipsFolderPath || null;
+  }
 
   /**
    * Calculate week folder (Sunday-based) for a given date
@@ -31,6 +43,11 @@ export class RelinkService {
    */
   async autoRelinkVideo(analysisId: string): Promise<RelinkResult> {
     try {
+      const clipsBasePath = this.getClipsBasePath();
+      if (!clipsBasePath) {
+        return { success: false, reason: 'No active library' };
+      }
+
       const analysis = await this.libraryService.getAnalysis(analysisId);
 
       if (!analysis) {
@@ -39,7 +56,7 @@ export class RelinkService {
 
       // Calculate expected week folder
       const weekFolder = this.calculateWeekFolder(new Date(analysis.createdAt));
-      const weekPath = path.join(this.clipsBasePath, weekFolder);
+      const weekPath = path.join(clipsBasePath, weekFolder);
 
       // Check if week folder exists
       if (!fsSync.existsSync(weekPath)) {
@@ -147,9 +164,10 @@ export class RelinkService {
       }
 
       // Calculate week folder from path if in clips collection
+      const clipsBasePath = this.getClipsBasePath();
       let weekFolder = analysis.video.clipsWeekFolder;
-      if (newVideoPath.startsWith(this.clipsBasePath)) {
-        const relativePath = path.relative(this.clipsBasePath, newVideoPath);
+      if (clipsBasePath && newVideoPath.startsWith(clipsBasePath)) {
+        const relativePath = path.relative(clipsBasePath, newVideoPath);
         const parts = relativePath.split(path.sep);
         if (parts.length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(parts[0])) {
           weekFolder = parts[0];
@@ -312,14 +330,15 @@ export class RelinkService {
    */
   async searchClipsCollection(filename: string): Promise<string[]> {
     const results: string[] = [];
+    const clipsBasePath = this.getClipsBasePath();
 
     try {
-      if (!fsSync.existsSync(this.clipsBasePath)) {
+      if (!clipsBasePath || !fsSync.existsSync(clipsBasePath)) {
         return results;
       }
 
       // Get all week folders
-      const weekFolders = await fs.readdir(this.clipsBasePath);
+      const weekFolders = await fs.readdir(clipsBasePath);
 
       for (const folder of weekFolders) {
         // Skip if not a date folder
@@ -327,7 +346,7 @@ export class RelinkService {
           continue;
         }
 
-        const folderPath = path.join(this.clipsBasePath, folder);
+        const folderPath = path.join(clipsBasePath, folder);
         const stats = await fs.stat(folderPath);
 
         if (!stats.isDirectory()) {
