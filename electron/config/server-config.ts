@@ -21,18 +21,22 @@ export class ServerConfig {
 
   /**
    * Get the backend URL
+   * Note: Uses localhost if host is 0.0.0.0 since that's for binding, not connecting
    */
   static get backendUrl(): string {
     const { host, port } = this.config.nestBackend;
-    return `http://${host}:${port}`;
+    const connectHost = host === '0.0.0.0' ? 'localhost' : host;
+    return `http://${connectHost}:${port}`;
   }
 
   /**
    * Get the frontend URL
+   * Note: Uses localhost if host is 0.0.0.0 since that's for binding, not connecting
    */
   static get frontendUrl(): string {
     const { host, port } = this.config.electronServer;
-    return `http://${host}:${port}`;
+    const connectHost = host === '0.0.0.0' ? 'localhost' : host;
+    return `http://${connectHost}:${port}`;
   }
 
   /**
@@ -40,11 +44,13 @@ export class ServerConfig {
    */
   static async isBackendRunning(): Promise<boolean> {
     const { host, port } = this.config.nestBackend;
-    
+    // Use localhost if host is 0.0.0.0 since that's for binding, not connecting
+    const connectHost = host === '0.0.0.0' ? 'localhost' : host;
+
     return new Promise((resolve) => {
       const http = require('http');
       const req = http.request({
-        hostname: host,
+        hostname: connectHost,
         port: port,
         path: '/api',
         method: 'GET',

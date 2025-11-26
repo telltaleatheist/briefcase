@@ -51,7 +51,9 @@ export class WindowService {
     this.setupKeyboardShortcuts();
 
     // Load the frontend URL using the actual port
-    const frontendUrl = `http://${ServerConfig.config.electronServer.host}:${this.frontendPort}`;
+    // Use localhost for the URL even if server binds to 0.0.0.0 (all interfaces)
+    const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
+    const frontendUrl = `http://${host}:${this.frontendPort}`;
     log.info(`Loading frontend from: ${frontendUrl}`);
     this.mainWindow.loadURL(frontendUrl);
 
