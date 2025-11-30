@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
-    "@ffmpeg-installer/darwin-arm64": "^4.1.5",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@nestjs/common": "^11.0.13",
