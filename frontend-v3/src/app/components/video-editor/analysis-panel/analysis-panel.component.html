@@ -71,40 +71,29 @@
       </div>
     }
 
-    <!-- Sections List -->
+    <!-- Sections List (chronological) -->
     <div class="sections-list">
-      @for (category of categories; track category) {
-        @if (isCategoryEnabled(category)) {
-          <div class="category-group">
-            <div class="category-header" [style.--category-color]="getCategoryColor(category)">
-              <span class="category-dot"></span>
-              <span class="category-name">{{ category }}</span>
+      @for (section of filteredSections; track section.id) {
+        <div
+          class="section-item"
+          [class.selected]="selectedSection?.id === section.id"
+          [style.--section-color]="section.color"
+          [title]="section.description">
+          <button class="section-content" (click)="onSectionClick(section)">
+            <div class="section-time">
+              {{ formatTimeRange(section.startTime, section.endTime) }}
+              <span class="section-category-badge" [style.backgroundColor]="section.color">{{ section.category }}</span>
             </div>
-
-            <div class="category-sections">
-              @for (section of getSectionsForCategory(category); track section.id) {
-                <div
-                  class="section-item"
-                  [class.selected]="selectedSection?.id === section.id"
-                  [style.--section-color]="section.color">
-                  <button class="section-content" (click)="onSectionClick(section)">
-                    <div class="section-time">
-                      {{ formatTimeRange(section.startTime, section.endTime) }}
-                    </div>
-                    <div class="section-description">
-                      {{ section.description }}
-                    </div>
-                  </button>
-                  <button class="section-delete" (click)="onSectionDelete(section)" title="Delete marker">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
-                  </button>
-                </div>
-              }
+            <div class="section-description">
+              {{ section.description }}
             </div>
-          </div>
-        }
+          </button>
+          <button class="section-delete" (click)="onSectionDelete(section)" title="Delete marker">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       }
 
       @if (sections.length === 0) {

@@ -96,5 +96,9 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "optionalDependencies": {
+    "@ffprobe-installer/darwin-arm64": "^5.0.1",
+    "@ffprobe-installer/win32-x64": "^5.1.0"
   }
 }

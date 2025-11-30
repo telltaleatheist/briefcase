@@ -66,7 +66,14 @@ export class AnalysisPanelComponent {
     }
   }
 
-  // Group sections by category
+  // Get sections sorted chronologically and filtered by enabled categories
+  get filteredSections(): TimelineSection[] {
+    return this.sections
+      .filter(section => this.isCategoryEnabled(section.category))
+      .sort((a, b) => a.startTime - b.startTime);
+  }
+
+  // Group sections by category (kept for category filter chips)
   get sectionsByCategory(): Map<string, TimelineSection[]> {
     const grouped = new Map<string, TimelineSection[]>();
 
