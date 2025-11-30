@@ -17,6 +17,6 @@ pdfplumber==0.11.0  # PDF text extraction
 ebooklib==0.18  # EPUB text extraction
 beautifulsoup4==4.12.3  # HTML parsing for EPUB
 
-# Step 5: Optional - AI provider SDKs (for cloud AI services)
-# openai  # For GPT models (uncomment if using OpenAI API)
-# anthropic  # For Claude API (uncomment if using Anthropic API)
+# Step 5: AI provider SDKs (for cloud AI services)
+openai>=1.0.0  # For GPT models
+anthropic>=0.18.0  # For Claude API
