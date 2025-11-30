@@ -72,35 +72,37 @@ export interface PreviewItem {
 
           @if (isVideo()) {
             <div class="controls">
+              <div class="progress-container" (click)="seek($event)" title="Click to seek">
+                <div class="progress-bar">
+                  <div class="progress-fill" [style.width.%]="progress()"></div>
+                  <div class="progress-handle" [style.left.%]="progress()"></div>
+                </div>
+              </div>
               <div class="controls-row">
-                <button class="control-btn skip-btn" (click)="skipTime(-10)" title="Skip backward 10s (J)">
-                  ⏪
+                <button class="control-btn" (click)="skipTime(-10)" title="Skip backward 10s (J)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12.5 8L7.5 12l5 4V8z"/>
+                    <path d="M18.5 8L13.5 12l5 4V8z"/>
+                  </svg>
                 </button>
                 <button class="control-btn play-btn" (click)="togglePlay()" title="Play/Pause (Space or K)">
-                  {{ isPlaying() ? '⏸' : '▶' }}
+                  @if (isPlaying()) {
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="5" width="4" height="14" rx="1"/>
+                      <rect x="14" y="5" width="4" height="14" rx="1"/>
+                    </svg>
+                  } @else {
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5.5v13l10-6.5L8 5.5z"/>
+                    </svg>
+                  }
                 </button>
-                <button class="control-btn skip-btn" (click)="skipTime(10)" title="Skip forward 10s (L)">
-                  ⏩
+                <button class="control-btn" (click)="skipTime(10)" title="Skip forward 10s (L)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11.5 8l5 4-5 4V8z"/>
+                    <path d="M5.5 8l5 4-5 4V8z"/>
+                  </svg>
                 </button>
-                <div class="progress-container" (click)="seek($event)" title="Click to seek">
-                  <div class="progress-bar">
-                    <div class="progress-fill" [style.width.%]="progress()"></div>
-                  </div>
-                </div>
-                <select
-                  class="playback-speed"
-                  [value]="playbackRate()"
-                  (change)="setPlaybackRate(+$any($event.target).value)"
-                  title="Playback speed"
-                >
-                  <option value="0.25">0.25x</option>
-                  <option value="0.5">0.5x</option>
-                  <option value="0.75">0.75x</option>
-                  <option value="1">1x</option>
-                  <option value="1.25">1.25x</option>
-                  <option value="1.5">1.5x</option>
-                  <option value="2">2x</option>
-                </select>
               </div>
             </div>
           }
@@ -228,71 +230,78 @@ export interface PreviewItem {
     .controls {
       display: flex;
       flex-direction: column;
-      gap: $spacing-xs;
+      gap: $spacing-sm;
     }
 
     .controls-row {
       display: flex;
       align-items: center;
-      gap: $spacing-sm;
+      justify-content: center;
+      gap: $spacing-md;
     }
 
     .control-btn {
-      width: 36px;
-      height: 36px;
+      width: 32px;
+      height: 32px;
       border-radius: $radius-full;
-      background: var(--primary-orange);
+      background: transparent;
       border: none;
-      font-size: $font-size-base;
-      color: white;
+      color: var(--text-secondary);
       cursor: pointer;
       transition: all $transition-fast;
       @include flex-center;
       flex-shrink: 0;
+      padding: 0;
+
+      svg {
+        width: 18px;
+        height: 18px;
+      }
 
       &:hover {
-        background: var(--primary-orange-dark);
-        transform: scale(1.05);
+        color: $primary-orange;
+        transform: scale(1.1);
       }
 
       &:active {
         transform: scale(0.95);
       }
 
-      &.skip-btn {
-        width: 36px;
-        height: 36px;
-        font-size: $font-size-base;
-        background: var(--primary-orange);
+      &.play-btn {
+        width: 40px;
+        height: 40px;
+        background: $gradient-sunset;
+        color: white;
+        box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
 
-        &:hover {
-          background: var(--primary-orange-dark);
-          transform: scale(1.05);
+        svg {
+          width: 20px;
+          height: 20px;
         }
 
-        &:active {
-          transform: scale(0.95);
+        &:hover {
+          transform: scale(1.1);
+          box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
         }
       }
     }
 
     .progress-container {
-      flex: 1;
+      width: 100%;
       cursor: pointer;
-      padding: $spacing-xs 0;
+      padding: $spacing-sm 0;
+
+      &:hover .progress-handle {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+      }
     }
 
     .progress-bar {
-      height: 8px;
-      background: rgba(255, 255, 255, 0.1);
+      height: 4px;
+      background: var(--bg-tertiary);
       border-radius: $radius-full;
-      overflow: hidden;
-      transition: height $transition-fast;
       position: relative;
-
-      &:hover {
-        height: 10px;
-      }
     }
 
     .progress-fill {
@@ -300,30 +309,23 @@ export interface PreviewItem {
       top: 0;
       left: 0;
       height: 100%;
-      background: linear-gradient(90deg, var(--primary-orange), var(--primary-pink));
+      background: $gradient-sunset;
       border-radius: $radius-full;
-      transition: width 0.1s ease-out;
-      min-width: 2px;
+      pointer-events: none;
     }
 
-    .playback-speed {
-      padding: $spacing-xs $spacing-sm;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: $radius-md;
-      color: var(--text-primary);
-      font-size: $font-size-xs;
-      cursor: pointer;
-      outline: none;
+    .progress-handle {
+      position: absolute;
+      top: 50%;
+      width: 12px;
+      height: 12px;
+      background: $primary-orange;
+      border-radius: $radius-full;
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
       transition: all $transition-fast;
-
-      &:hover {
-        background: var(--bg-secondary);
-      }
-
-      &:focus {
-        border-color: var(--primary-orange);
-      }
+      pointer-events: none;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
     }
 
     /* Resize handles */
@@ -402,7 +404,7 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   @ViewChild('imageElement') imageElement!: ElementRef<HTMLImageElement>;
   @ViewChild('floatingWindow') floatingWindow!: ElementRef<HTMLDivElement>;
 
-  // Backend URL - fallback to localhost:3000 which is the default
+  // Backend URL - fallback to localhost:3000 which is the backend default
   private backendUrl = 'http://localhost:3000';
 
   // Image extensions for detection
@@ -420,10 +422,11 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       this.isPlaying.set(false);
       this.pendingAutoplay = true;
       this.needsCenter = true;
-      // Try to get backend URL from Electron
-      this.initBackendUrl();
-      // Load the current media after a delay to ensure DOM is ready
-      setTimeout(() => this.loadCurrentMedia(), 100);
+      // Initialize backend URL first, then load media
+      this.initBackendUrl().then(() => {
+        // Load the current media after a delay to ensure DOM is ready
+        setTimeout(() => this.loadCurrentMedia(), 100);
+      });
     } else if (!value) {
       // Modal closing - pause video if playing
       if (this.videoPlayer?.nativeElement) {
@@ -612,21 +615,25 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     switch (event.key) {
       case 'Escape':
         event.preventDefault();
+        event.stopImmediatePropagation(); // Prevent other components from handling
         this.close();
         break;
       case ' ':
         // Space to toggle play (only for videos)
         event.preventDefault();
+        event.stopImmediatePropagation(); // Prevent cascade from handling (spacebar opens preview there)
         if (this.isVideo()) {
           this.togglePlay();
         }
         break;
       case 'ArrowUp':
         event.preventDefault();
+        event.stopImmediatePropagation(); // Prevent cascade from also handling
         this.previous();
         break;
       case 'ArrowDown':
         event.preventDefault();
+        event.stopImmediatePropagation(); // Prevent cascade from also handling
         this.next();
         break;
       case 'ArrowLeft':

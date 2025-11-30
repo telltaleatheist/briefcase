@@ -335,13 +335,11 @@ export class FileScannerService {
               if (dateInfo.hasDate) {
                 // Convert to ISO date for database (T1=01, T2=10, T3=20)
                 uploadDate = FilenameDateUtil.toISODate(dateInfo.date) || undefined;
-              } else {
-                // Fallback: Extract date folder from path
-                // e.g., /Volumes/Callisto/clips/2021-08-08/video.mov -> "2021-08-08"
-                const relativePath = fullPath.replace(clipsRoot, '');
-                const pathParts = relativePath.split(path.sep).filter(Boolean);
-                uploadDate = pathParts.length > 1 ? pathParts[0] : undefined;
               }
+              // NOTE: We do NOT use the folder date as upload_date fallback.
+              // The folder date represents when the file was downloaded/organized (closest Sunday),
+              // NOT when the content was originally uploaded to the internet.
+              // If filename has no date, uploadDate should remain undefined.
 
               results.push({
                 filename: entry.name,
@@ -630,10 +628,10 @@ export class FileScannerService {
             destinationPath = fullPath;
             this.logger.log(`Video already in week folder: ${fullPath}`);
 
-            if (!uploadDate) {
-              uploadDate = pathParts[0];
-              this.logger.log(`Extracted upload date from path: ${uploadDate}`);
-            }
+            // NOTE: We do NOT use the folder date as upload_date fallback.
+            // The folder date represents when the file was downloaded/organized (closest Sunday),
+            // NOT when the content was originally uploaded to the internet.
+            // If filename has no date, uploadDate should remain null.
           } else {
             // File is directly in clips root - move to week folder
             this.logger.log(`Video in clips root, moving to week folder: ${fullPath}`);

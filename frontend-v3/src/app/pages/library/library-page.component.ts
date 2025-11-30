@@ -2004,22 +2004,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Handle selection change from preview modal (arrow keys in modal)
    */
   onPreviewSelectionChanged(videoId: string) {
-    // Update the cascade selection to match
+    // Update the preview modal's selected ID
     this.previewSelectedId.set(videoId);
 
-    // Find the itemId for this video and update cascade selection
-    const items = this.combinedWeeks();
-    for (const week of items) {
-      const video = week.videos.find(v => v.id === videoId);
-      if (video) {
-        const itemId = `${week.weekLabel}|${video.id}`;
-        this.selectedVideoIds.set(new Set([itemId]));
-        if (this.cascadeComponent) {
-          // Update cascade's highlighted item
-          this.cascadeComponent.highlightedItemId.set(itemId);
-        }
-        break;
-      }
+    // Update cascade's selection and scroll to the item
+    if (this.cascadeComponent) {
+      this.cascadeComponent.highlightAndScrollToVideoId(videoId);
     }
   }
 

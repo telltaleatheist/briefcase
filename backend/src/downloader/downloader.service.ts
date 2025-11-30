@@ -212,8 +212,9 @@ export class DownloaderService implements OnModuleInit {
       let uploadDate: string | undefined;
       try {
         const videoInfo = await this.getVideoInfo(options.url);
-        if (videoInfo && videoInfo.upload_date) {
-          uploadDate = FilenameDateUtil.formatUploadDate(videoInfo.upload_date);
+        if (videoInfo && videoInfo.uploadDate) {
+          // uploadDate from getVideoInfo() is already formatted as YYYY-MM-DD
+          uploadDate = videoInfo.uploadDate;
           this.logger.log(`Extracted upload date for filename: ${uploadDate}`);
         }
       } catch (error) {
@@ -1266,7 +1267,8 @@ export class DownloaderService implements OnModuleInit {
         }
         
         // Format the upload date if available
-        let formattedDate = '';
+        // Use undefined (not empty string) when no date, so falsy checks work correctly
+        let formattedDate: string | undefined = undefined;
         if (videoInfo.upload_date) {
           // Convert YYYYMMDD to YYYY-MM-DD
           const dateStr = videoInfo.upload_date;

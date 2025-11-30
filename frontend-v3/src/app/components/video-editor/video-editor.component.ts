@@ -568,17 +568,16 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
               console.warn('Transcript loading failed, continuing without it:', err);
             });
 
-            // If video has analysis, try to load it
-            if (video.hasAnalysis) {
-              this.loadAnalysisForVideo(videoId).catch(err => {
-                console.warn('Analysis loading failed, continuing without it:', err);
-                this.hasAnalysis.set(false);
-              });
-            } else {
-              // No analysis - show generate button
+            // Always load sections (includes both AI sections and custom markers)
+            // loadAnalysisForVideo now handles both cases properly
+            this.loadAnalysisForVideo(videoId).catch(err => {
+              console.warn('Section/analysis loading failed, continuing without it:', err);
               this.hasAnalysis.set(false);
-              this.sections.set([]);
-              this.analysisData.set(undefined);
+            });
+
+            // Set initial hasAnalysis state based on video metadata
+            if (!video.hasAnalysis) {
+              this.hasAnalysis.set(false);
             }
           } else {
             this.hasAnalysis.set(false);
@@ -667,24 +666,47 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   private async loadAnalysisForVideo(videoId: string) {
     try {
-      // Fetch analysis from correct endpoint
-      const analysisData = await firstValueFrom(
-        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/analysis`)
+      // Always fetch sections (both AI and custom markers)
+      const sectionsData = await firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/sections`)
       );
+      const sections = sectionsData?.sections || [];
+
+      // Try to fetch analysis data (may not exist)
+      let analysisData: any = null;
+      try {
+        analysisData = await firstValueFrom(
+          this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/analysis`)
+        );
+      } catch {
+        // Analysis doesn't exist, that's fine
+      }
 
       if (analysisData && !analysisData.error) {
-        // Also fetch sections
-        const sectionsData = await firstValueFrom(
-          this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/sections`)
-        );
-
-        this.processAnalysisFromDatabase(analysisData, sectionsData?.sections || []);
+        this.processAnalysisFromDatabase(analysisData, sections);
       } else {
-        console.log('No analysis found for video');
+        // No analysis, but still process sections (custom markers)
+        this.processSectionsOnly(sections);
       }
     } catch (error: any) {
-      console.log('Failed to load analysis:', error);
+      console.log('Failed to load sections:', error);
     }
+  }
+
+  /**
+   * Process sections without analysis data (for custom markers only)
+   */
+  private processSectionsOnly(sections: any[]) {
+    const timelineSections: TimelineSection[] = sections.map((section: any, index: number) => ({
+      id: section.id || `section-${index}`,
+      startTime: section.start_seconds || 0,
+      endTime: section.end_seconds || section.start_seconds + 10,
+      category: section.category || 'marker',
+      description: section.description || section.title || '',
+      color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
+    }));
+
+    this.sections.set(timelineSections);
   }
 
   private processAnalysisFromDatabase(analysis: any, sections: any[]) {

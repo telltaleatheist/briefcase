@@ -6,7 +6,7 @@
       [class.active]="activeTab() === 'analysis'"
       (click)="setActiveTab('analysis')">
       Analysis
-      @if (hasAnalysis && sections.length > 0) {
+      @if (sections.length > 0) {
         <span class="tab-count">{{ sections.length }}</span>
       }
     </button>
@@ -23,8 +23,8 @@
 
   <!-- Analysis Tab Content -->
   @if (activeTab() === 'analysis') {
-    @if (!hasAnalysis) {
-    <!-- No Analysis State -->
+    @if (!hasAnalysis && sections.length === 0) {
+    <!-- No Analysis State - only show if no analysis AND no custom markers -->
     <div class="no-analysis-state">
       <div class="no-analysis-icon">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -33,7 +33,7 @@
       </div>
       <h4 class="no-analysis-title">No Analysis Yet</h4>
       <p class="no-analysis-description">
-        Generate an AI analysis to identify content sections, categories, and notable quotes.
+        Generate an AI analysis to identify content sections, categories, and notable quotes. You can also add custom markers manually.
       </p>
       <button class="generate-analysis-btn" (click)="onGenerateAnalysis()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

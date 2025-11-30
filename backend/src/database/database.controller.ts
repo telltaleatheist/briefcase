@@ -3441,12 +3441,11 @@ export class DatabaseController {
           const dateInfo = FilenameDateUtil.extractDateInfo(result.filename);
           if (dateInfo.hasDate) {
             uploadDate = FilenameDateUtil.toISODate(dateInfo.date) || undefined;
-          } else {
-            // Fallback: Extract date folder from path
-            const relativePath = filePath.replace(clipsFolder, '');
-            const pathParts = relativePath.split(path.sep).filter(Boolean);
-            uploadDate = pathParts.length > 1 ? pathParts[0] : undefined;
           }
+          // NOTE: We do NOT use the folder date as upload_date fallback.
+          // The folder date represents when the file was downloaded/organized (closest Sunday),
+          // NOT when the content was originally uploaded to the internet.
+          // If filename has no date, uploadDate should remain undefined.
 
           this.databaseService.insertVideo({
             id: videoId,

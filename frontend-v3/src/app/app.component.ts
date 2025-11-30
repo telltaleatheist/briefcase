@@ -22,7 +22,8 @@ import { NavigationService } from './services/navigation.service';
     .app-container {
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
       background: var(--bg-primary);
       color: var(--text-primary);
       transition: background-color 0.3s ease, color 0.3s ease;
@@ -31,11 +32,14 @@ import { NavigationService } from './services/navigation.service';
     .main-content {
       flex: 1;
       margin-top: 60px;
-      transition: margin-top 0.3s ease;
+      height: calc(100vh - 60px);
+      overflow: hidden;
+      transition: margin-top 0.3s ease, height 0.3s ease;
     }
 
     .main-content.nav-hidden {
       margin-top: 0;
+      height: 100vh;
     }
   `]
 })

@@ -247,9 +247,12 @@ export class BackendService {
 
   /**
    * Get the full backend URL with the actual port
+   * Note: Uses localhost if host is 0.0.0.0 since that's for binding, not connecting
    */
   getBackendUrl(): string {
-    return `http://${ServerConfig.config.nestBackend.host}:${this.actualBackendPort}`;
+    const host = ServerConfig.config.nestBackend.host;
+    const connectHost = host === '0.0.0.0' ? 'localhost' : host;
+    return `http://${connectHost}:${this.actualBackendPort}`;
   }
   
   /**

@@ -56,20 +56,45 @@ export class QueueItemConfigModalComponent implements OnInit {
   savedAsDefault = signal(false);
 
   constructor() {
-    // Re-initialize tasks when modal opens or when models finish loading
+    // When modal opens, reload default AI and then initialize tasks
     effect(() => {
       const isOpen = this.isOpen();
       const loading = this.loadingModels();
 
       // Only initialize when modal is open AND models are loaded
       if (isOpen && !loading) {
-        this.initializeTasks();
+        // Reload default AI first, then initialize tasks
+        this.reloadDefaultAIModelAndInit();
       }
     }, { allowSignalWrites: true });
   }
 
   ngOnInit() {
     this.loadAIModels();
+  }
+
+  /**
+   * Reload the default AI model from the backend, then initialize tasks
+   * This ensures tasks use the latest saved default
+   */
+  private async reloadDefaultAIModelAndInit() {
+    try {
+      const savedDefault = await firstValueFrom(this.libraryService.getDefaultAI());
+      if (savedDefault.success && savedDefault.defaultAI) {
+        const fullModelValue = `${savedDefault.defaultAI.provider}:${savedDefault.defaultAI.model}`;
+        // Check if the saved model is still available in our loaded models
+        const models = this.aiModels();
+        if (models.length === 0 || models.some(m => m.value === fullModelValue)) {
+          this.defaultAIModel = fullModelValue;
+          console.log(`Loaded saved default AI model: ${fullModelValue}`);
+        }
+      }
+    } catch (error) {
+      console.warn('Could not load default AI:', error);
+    }
+
+    // Now initialize tasks with the updated default
+    this.initializeTasks();
   }
 
   private async loadAIModels() {

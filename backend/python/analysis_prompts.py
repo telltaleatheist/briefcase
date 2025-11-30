@@ -179,47 +179,47 @@ TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 #   - topic_tags: comma-separated list of topics discussed (str)
 # =============================================================================
 
-SUGGESTED_TITLE_PROMPT = """Generate a concise, descriptive filename for this video.
+SUGGESTED_TITLE_PROMPT = """You are renaming a video file. Generate a new filename based on the content.
 
-**Current Title:** {current_title}
+**Current Filename:** {current_title}
 
-**Video Description:** {description}
+**What the video is about:** {description}
 
-**People Mentioned:** {people_tags}
+**People in the video:** {people_tags}
 
-**Topics Discussed:** {topic_tags}
+**Topics covered:** {topic_tags}
 
-**CRITICAL REQUIREMENTS:**
-1. Use **lowercase only** with **spaces** between words (NOT hyphens, NOT underscores)
-2. **Maximum 100 characters** - keep it concise but descriptive
-3. Include the most important person's name if applicable
-4. Describe the main topic or claim in one clear phrase
-5. Use commas (,) ONLY to separate short lists of 2-3 items maximum
-6. Use dashes with spaces ( - ) for ONE additional detail if needed
-7. **NEVER include:**
-   - Dates (like 2025-11-06 or any date format)
-   - File extensions (.mp4, .mov, etc.)
-   - Special characters (periods, quotes, slashes, colons)
-   - Capital letters
-8. **Return ONLY the title** - no explanations, no quotes, no extra text
+**INSTRUCTIONS:**
+Write a short, descriptive filename. Imagine you're naming the file so you can find it later by searching keywords.
 
-**Good Examples (concise and clear):**
-- "greg locke prophesies conservative movement split over jew hate"
-- "joel webbon criticizes modern women as wicked and stupid"
-- "tucker carlson interviews nick fuentes about antisemitism"
-- "nick fuentes releases antisemitic video praising historical figures"
-- "joshua haymes defends michael cassidy destroying satanic statue"
+**RULES:**
+1. **KEEP important words** from the original filename (channel names, people, main topic)
+2. **Write a real phrase** that makes grammatical sense - NOT random keywords
+3. **Lowercase only**, spaces between words, max 100 characters
+4. **Describe the VIDEO CONTENT**, not what you (the AI) are doing - never say "analysis of" or "summary of"
+5. **NO dates**, NO file extensions (.mp4), NO special characters
 
-**Bad Examples (what NOT to do):**
-- "2025-11-06 religious-communities-response-to-baby-food-assistance.mp4" (has date and extension!)
-- "greg-locke-election-fraud" (uses hyphens instead of spaces)
-- "Video about politics" (too generic, has capital)
-- "Greg Locke's speech." (has capitals and period)
-- "really long title that goes on and on describing every single detail of the video including all the people and all the topics, etc" (too long!)
+**GOOD EXAMPLES:**
 
-**REMEMBER: Short, lowercase, spaces only, NO dates, NO extensions!**
+"God vs. Atheism- Which is More Rational- - PragerU.mp4"
+→ "prageru debates whether god or atheism is more rational"
 
-Suggested title:"""
+"Tucker Carlson Tonight - Interview with Elon Musk"
+→ "tucker carlson interviews elon musk"
+
+"Living Under Lockdown in NYC - Documentary"
+→ "documentary about living under lockdown in new york city"
+
+"JRE #2001 - Naval Ravikant"
+→ "joe rogan and naval ravikant discuss wealth and happiness"
+
+**BAD EXAMPLES (NEVER do this):**
+- "video analysis of living under lockdown" ← NO! "video analysis" describes YOUR task, not the video content
+- "summary of tucker carlson interview" ← NO! "summary of" describes YOUR task, not the video
+- "god atheism rational debate philosophy" ← NO! This is keyword soup, not a phrase
+- "Video about politics" ← NO! Too generic
+
+**Write ONLY the new filename, nothing else:**"""
 
 
 # =============================================================================

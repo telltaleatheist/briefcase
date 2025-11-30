@@ -1,5 +1,6 @@
 .library-page {
-  height: 100vh;
+  height: 100%;
+  box-sizing: border-box;
   background: var(--bg-primary);
   display: flex;
   flex-direction: column;

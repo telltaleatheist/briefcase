@@ -858,8 +858,7 @@ export class CascadeComponent {
   }
 
   /**
-   * Scroll to make an item visible in the viewport
-   * Only scrolls if the item is outside the visible area
+   * Scroll to make an item visible in the viewport, centered vertically when possible
    */
   private scrollToItemId(itemId: string): void {
     const allItems = this.virtualItems();
@@ -868,9 +867,51 @@ export class CascadeComponent {
     );
     if (targetIndex < 0 || !this.viewport) return;
 
-    // Use 'auto' instead of 'smooth' to avoid animation issues that can cause
-    // indices to be wrong when rapidly pressing arrow keys
-    this.viewport.scrollToIndex(targetIndex, 'auto');
+    const itemSize = 56; // itemSize from template
+    const viewportHeight = this.viewport.getViewportSize();
+    const currentScroll = this.viewport.measureScrollOffset('top');
+
+    // Calculate where the item currently is
+    const itemTop = targetIndex * itemSize;
+    const itemBottom = itemTop + itemSize;
+
+    // Check if item is already visible (with some margin)
+    const visibleTop = currentScroll;
+    const visibleBottom = currentScroll + viewportHeight;
+    const margin = itemSize; // One item margin
+
+    const isFullyVisible = itemTop >= visibleTop + margin && itemBottom <= visibleBottom - margin;
+
+    if (isFullyVisible) {
+      // Item is already visible with margin, no need to scroll
+      return;
+    }
+
+    // Calculate ideal scroll position to center the item
+    const targetOffset = itemTop - (viewportHeight / 2) + (itemSize / 2);
+
+    // Clamp to valid range (can't scroll negative or past content)
+    const totalContentHeight = allItems.length * itemSize;
+    const maxScroll = Math.max(0, totalContentHeight - viewportHeight);
+    const scrollOffset = Math.max(0, Math.min(targetOffset, maxScroll));
+
+    this.viewport.scrollToOffset(scrollOffset, 'auto');
+  }
+
+  /**
+   * Public method to highlight and scroll to a video by its database ID
+   * Used by parent component when preview modal changes selection
+   */
+  highlightAndScrollToVideoId(videoId: string): void {
+    // Find the itemId for this video (could be in multiple weeks)
+    const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
+    const found = allItems.find(item => item.video.id === videoId);
+
+    if (found) {
+      this.highlightedItemId.set(found.itemId);
+      this.selectedVideos.set(new Set([found.itemId]));
+      this.scrollToItemId(found.itemId);
+    }
   }
 
   /**
