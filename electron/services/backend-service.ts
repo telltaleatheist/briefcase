@@ -13,9 +13,16 @@ import { PortUtil } from '../utilities/port-util';
 // Import runtime paths for binary locations
 let getRuntimePaths: any;
 try {
-  getRuntimePaths = require('../../dist-electron/shared/runtime-paths').getRuntimePaths;
+  // In packaged app, runtime-paths is in resources/dist-electron/shared/
+  // In development, it's built to dist-electron/shared/
+  if (app.isPackaged) {
+    const runtimePathsFile = path.join(process.resourcesPath!, 'dist-electron', 'shared', 'runtime-paths.js');
+    getRuntimePaths = require(runtimePathsFile).getRuntimePaths;
+  } else {
+    getRuntimePaths = require('../../dist-electron/shared/runtime-paths').getRuntimePaths;
+  }
 } catch (error) {
-  log.warn('runtime-paths not available, will use environment variables');
+  log.warn('runtime-paths not available, will use environment variables:', error);
   getRuntimePaths = () => ({ ffmpeg: '', ffprobe: '', ytdlp: '', python: '' });
 }
 

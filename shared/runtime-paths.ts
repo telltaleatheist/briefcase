@@ -167,12 +167,13 @@ export function getRuntimePaths() {
       : findInPath('whisper'), // Find system whisper in development
 
     // Python from bundled runtime
+    // Windows: python/python.exe (embedded package has no bin folder)
+    // macOS/Linux: python/bin/python3 (standard layout)
     python: isPackaged()
       ? path.join(
           resourcesPath,
           'python',
-          'bin',
-          process.platform === 'win32' ? 'python.exe' : 'python3'
+          ...(process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3'])
         )
       : findInPath(process.platform === 'win32' ? 'python' : 'python3'), // Find system Python in development
 

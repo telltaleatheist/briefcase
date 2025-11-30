@@ -143,16 +143,21 @@ export class PythonBridgeService {
         }
       }
 
+      // Get the directory containing the Python scripts (for PYTHONPATH)
+      const pythonScriptDir = path.dirname(this.pythonScriptPath);
+
       // Spawn Python process with EXPLICIT path (no shell, no PATH lookup)
       const pythonProcess: ChildProcess = spawn(pythonPath, [
         this.pythonScriptPath,
       ], {
         shell: false,  // CRITICAL: Never use shell (prevents PATH lookup)
+        cwd: pythonScriptDir,  // Set working directory so Python can find sibling modules
         env: {
           ...process.env,
           // Clear Python-related environment variables to avoid conflicts
           PYTHONHOME: undefined,
-          PYTHONPATH: undefined,
+          // Set PYTHONPATH to the script directory so it can find sibling modules like analysis_prompts.py
+          PYTHONPATH: pythonScriptDir,
           // Add FFmpeg to PATH so Whisper can find it
           PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}${path.delimiter}${process.env.PATH}` : process.env.PATH,
         }

@@ -12,6 +12,7 @@ import { JobStateManagerModule } from '../common/job-state-manager.module';
 import { DatabaseModule } from '../database/database.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { AnalysisModule } from '../analysis/analysis.module';
+import { ApiKeysModule } from '../config/config.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AnalysisModule } from '../analysis/analysis.module';
     forwardRef(() => DatabaseModule),
     forwardRef(() => DownloaderModule),
     forwardRef(() => AnalysisModule),
+    ApiKeysModule,
   ],
   controllers: [MediaController],
   providers: [

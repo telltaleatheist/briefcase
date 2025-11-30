@@ -202,26 +202,29 @@ export class YtDlpManager extends EventEmitter {
         return;
       }
       
-      // Spawn the yt-dlp process with bundled Python
+      // Spawn the yt-dlp process
       this.isRunning = true;
 
-      // Determine how to execute yt-dlp based on whether it's an absolute path or a PATH command
+      // Determine how to execute yt-dlp based on platform and path type
       let command: string;
       let args: string[];
 
-      if (path.isAbsolute(this.ytDlpPath)) {
-        // Bundled yt-dlp: execute with bundled Python
+      // On Windows, yt-dlp.exe is a standalone executable - run directly
+      // On macOS/Linux, the bundled yt-dlp is a Python script - run with Python
+      const isWindowsExe = process.platform === 'win32' && this.ytDlpPath.endsWith('.exe');
+
+      if (isWindowsExe || !path.isAbsolute(this.ytDlpPath)) {
+        // Windows .exe or system PATH command: execute directly
+        command = this.ytDlpPath;
+        args = finalArgs;
+        log.info(`Running yt-dlp directly: ${this.ytDlpPath}`);
+      } else {
+        // macOS/Linux bundled yt-dlp: execute with bundled Python
         // Execute: python3 /path/to/yt-dlp [args...]
         const pythonConfig = getPythonConfig();
         command = pythonConfig.fullPath || 'python3';
         args = [this.ytDlpPath, ...finalArgs];
         log.info(`Using Python to run bundled yt-dlp: ${command} ${this.ytDlpPath}`);
-      } else {
-        // System yt-dlp: execute directly (it's a standalone executable)
-        // Execute: yt-dlp [args...]
-        command = this.ytDlpPath;
-        args = finalArgs;
-        log.info(`Running system yt-dlp directly: ${this.ytDlpPath}`);
       }
 
       this.currentProcess = spawn(command, args);

@@ -1,20 +1,40 @@
 // backend/src/config/shared-config.service.ts
 // SIMPLIFIED: No more user configuration, just use bundled binaries
 import { Injectable, Logger } from '@nestjs/common';
+import * as path from 'path';
 
 // Import simple runtime path resolver
+// Priority: Environment variables (passed from Electron) > runtime-paths module > fallback
 const getRuntimePaths = () => {
-  try {
-    return require('../../../dist-electron/shared/runtime-paths').getRuntimePaths();
-  } catch (error) {
-    // Fallback for when runtime-paths isn't built yet (during development setup)
-    console.warn('runtime-paths not available, using fallback');
+  // First check environment variables - these are set by Electron when spawning the backend
+  if (process.env.FFMPEG_PATH || process.env.YT_DLP_PATH) {
     return {
       ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
       ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
       ytdlp: process.env.YT_DLP_PATH || 'yt-dlp',
       whisper: process.env.WHISPER_PATH || 'whisper',
       python: process.env.PYTHON_PATH || 'python'
+    };
+  }
+
+  // Try to load runtime-paths module
+  try {
+    // In packaged app, use RESOURCES_PATH env var
+    if (process.env.RESOURCES_PATH) {
+      const runtimePathsFile = path.join(process.env.RESOURCES_PATH, 'dist-electron', 'shared', 'runtime-paths.js');
+      return require(runtimePathsFile).getRuntimePaths();
+    }
+    // In development, use relative path
+    return require('../../../dist-electron/shared/runtime-paths').getRuntimePaths();
+  } catch (error) {
+    // Fallback for when runtime-paths isn't built yet (during development setup)
+    console.warn('runtime-paths not available, using fallback');
+    return {
+      ffmpeg: 'ffmpeg',
+      ffprobe: 'ffprobe',
+      ytdlp: 'yt-dlp',
+      whisper: 'whisper',
+      python: 'python'
     };
   }
 };

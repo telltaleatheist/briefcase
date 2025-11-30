@@ -139,8 +139,9 @@ export class AiSetupService {
   private checkAPIKeys(): Observable<{ hasClaudeKey: boolean; hasOpenAIKey: boolean }> {
     return this.http.get<any>(`${this.API_BASE}/config/api-keys`).pipe(
       map(response => ({
-        hasClaudeKey: !!response.claudeApiKey && response.claudeApiKey !== '' && response.claudeApiKey !== '***',
-        hasOpenAIKey: !!response.openaiApiKey && response.openaiApiKey !== '' && response.openaiApiKey !== '***'
+        // Backend returns '***' when key is set (masked for security), so '***' means key EXISTS
+        hasClaudeKey: !!response.claudeApiKey && response.claudeApiKey !== '',
+        hasOpenAIKey: !!response.openaiApiKey && response.openaiApiKey !== ''
       })),
       catchError(error => {
         console.error('Error checking API keys:', error);

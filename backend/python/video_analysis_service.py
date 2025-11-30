@@ -11,6 +11,14 @@ import time
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+# CRITICAL: Add script directory to sys.path BEFORE importing sibling modules
+# This is needed because Windows embedded Python ignores PYTHONPATH
+# The ._pth file in embedded Python overrides all path settings
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
 import requests
 
 # Import AI prompts from configuration file

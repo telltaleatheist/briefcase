@@ -8,6 +8,7 @@ import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
 import { PythonBridgeService } from '../analysis/python-bridge.service';
+import { ApiKeysService } from '../config/api-keys.service';
 import {
   GetInfoResult,
   DownloadResult,
@@ -33,6 +34,7 @@ export class MediaOperationsService {
     private readonly whisperService: WhisperService,
     private readonly pythonBridgeService: PythonBridgeService,
     private readonly eventService: MediaEventService,
+    private readonly apiKeysService: ApiKeysService,
   ) {}
 
   /**
@@ -533,12 +535,41 @@ export class MediaOperationsService {
       const tmpDir = os.tmpdir();
       const analysisOutputPath = path.join(tmpDir, `${jobId || 'analysis'}_analysis.txt`);
 
-      // Strip provider prefix from model name if present (e.g., "ollama:qwen2.5:7b" -> "qwen2.5:7b")
+      // Extract provider from model name prefix if not explicitly set
+      // Model format: "provider:model" (e.g., "openai:gpt-4o", "ollama:qwen2.5:7b", "claude:claude-3-5-sonnet-latest")
       let cleanModelName = options.aiModel;
-      const provider = options.aiProvider || 'ollama';
-      if (cleanModelName.startsWith(`${provider}:`)) {
-        cleanModelName = cleanModelName.substring(provider.length + 1);
-        this.logger.log(`[${jobId || 'standalone'}] Stripped provider prefix from model name: ${options.aiModel} -> ${cleanModelName}`);
+      let provider = options.aiProvider || 'ollama';
+
+      // Check if model name has a provider prefix
+      const knownProviders = ['ollama', 'openai', 'claude'];
+      const colonIndex = cleanModelName.indexOf(':');
+      if (colonIndex > 0) {
+        const possibleProvider = cleanModelName.substring(0, colonIndex);
+        if (knownProviders.includes(possibleProvider)) {
+          // Extract provider from model name if not explicitly set or if it matches
+          if (!options.aiProvider || possibleProvider === options.aiProvider) {
+            provider = possibleProvider as 'ollama' | 'openai' | 'claude';
+            cleanModelName = cleanModelName.substring(colonIndex + 1);
+            this.logger.log(`[${jobId || 'standalone'}] Extracted provider '${provider}' from model name: ${options.aiModel} -> ${cleanModelName}`);
+          }
+        }
+      }
+
+      // Get API key from options or from stored config
+      let apiKey = options.apiKey;
+      if (!apiKey && provider !== 'ollama') {
+        // Get API key from the API keys service
+        if (provider === 'openai') {
+          apiKey = this.apiKeysService.getOpenAiApiKey();
+          this.logger.log(`[${jobId || 'standalone'}] Using stored OpenAI API key`);
+        } else if (provider === 'claude') {
+          apiKey = this.apiKeysService.getClaudeApiKey();
+          this.logger.log(`[${jobId || 'standalone'}] Using stored Claude API key`);
+        }
+
+        if (!apiKey) {
+          throw new Error(`No API key found for ${provider}. Please configure your ${provider === 'openai' ? 'OpenAI' : 'Claude'} API key in settings.`);
+        }
       }
 
       const analysisResult = await this.pythonBridgeService.analyze(
@@ -552,7 +583,7 @@ export class MediaOperationsService {
         },
         options.customInstructions,
         provider,
-        options.apiKey,
+        apiKey,
         String(video.title || 'Video Analysis'),
       );
 
