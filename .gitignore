@@ -21,9 +21,15 @@ backend-prod-temp/
 .env.local
 .env.*.local
 
-# Binaries (but keep utilities/bin for bundled executables)
+# Binaries
 bin/*
-!utilities/bin/*
+
+# Large binary files and models (downloaded at runtime)
+utilities/bin/whisper-cpp
+utilities/bin/whisper-cpp.exe
+utilities/models/*.bin
+saved-links/*.mov
+saved-links/*.mp4
 
 # Dependency lock files (optional, if not using lock files in version control)
 package-lock.json
