@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -21,6 +21,7 @@ interface AIModelOption {
 export class VideoConfigDialogComponent implements OnInit, OnChanges {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
+  private cdr = inject(ChangeDetectorRef);
   private readonly API_BASE = 'http://localhost:3000/api';
 
   @Input() isOpen = false;
@@ -62,7 +63,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
 
-      // Add Ollama models
+      // Add Ollama models (fetched dynamically by aiSetupService)
       if (availability.hasOllama && availability.ollamaModels.length > 0) {
         availability.ollamaModels.forEach(model => {
           models.push({
@@ -73,95 +74,101 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
         });
       }
 
-      // Add Claude models if API key exists
+      // Fetch Claude models dynamically from API
       if (availability.hasClaudeKey) {
-        const claudeModels = [
-          { value: 'claude:claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-          { value: 'claude:claude-3-opus-20240229', label: 'Claude 3 Opus' },
-          { value: 'claude:claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
-        ];
-        claudeModels.forEach(m => {
-          models.push({ ...m, provider: 'claude' });
-        });
+        try {
+          const claudeResponse = await this.http.get<{ success: boolean; models: any[] }>(
+            `${this.API_BASE}/config/claude-models`
+          ).toPromise();
+          if (claudeResponse?.success && claudeResponse.models.length > 0) {
+            claudeResponse.models.forEach(m => {
+              models.push({ value: m.value, label: m.label, provider: 'claude' });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch Claude models:', error);
+        }
       }
 
-      // Add OpenAI models if API key exists
+      // Fetch OpenAI models dynamically from API
       if (availability.hasOpenAIKey) {
-        const openaiModels = [
-          { value: 'openai:gpt-4o', label: 'GPT-4o' },
-          { value: 'openai:gpt-4o-mini', label: 'GPT-4o Mini' },
-          { value: 'openai:gpt-4-turbo', label: 'GPT-4 Turbo' }
-        ];
-        openaiModels.forEach(m => {
-          models.push({ ...m, provider: 'openai' });
-        });
+        try {
+          const openaiResponse = await this.http.get<{ success: boolean; models: any[] }>(
+            `${this.API_BASE}/config/openai-models`
+          ).toPromise();
+          if (openaiResponse?.success && openaiResponse.models.length > 0) {
+            openaiResponse.models.forEach(m => {
+              models.push({ value: m.value, label: m.label, provider: 'openai' });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch OpenAI models:', error);
+        }
       }
 
       this.aiModels = models;
 
       // Try to get library's default AI model first
       let defaultModel: string | null = null;
+      console.log('=== LOADING DEFAULT AI MODEL ===');
+
       try {
+        console.log('Step 1: Fetching library default from:', `${this.API_BASE}/database/libraries/default-ai-model`);
         const response = await this.http.get<{ success: boolean; aiModel: string | null }>(
           `${this.API_BASE}/database/libraries/default-ai-model`
         ).toPromise();
+        console.log('Step 1 Response:', JSON.stringify(response));
         defaultModel = response?.aiModel || null;
-        console.log('Fetched library default AI model:', defaultModel);
+        console.log('Step 1 Result - Library default AI model:', defaultModel);
       } catch (error) {
-        console.error('Failed to fetch library default AI model:', error);
+        console.error('Step 1 FAILED - Error fetching library default:', error);
       }
 
       // If no library-specific default, try global config default
       if (!defaultModel) {
-        console.log('No library-specific default found, checking global config...');
+        console.log('Step 2: No library default, checking global config at:', `${this.API_BASE}/config/default-ai`);
         try {
           const configResponse = await this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
             `${this.API_BASE}/config/default-ai`
           ).toPromise();
+          console.log('Step 2 Response:', JSON.stringify(configResponse));
           if (configResponse?.defaultAI) {
             defaultModel = `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
-            console.log('Using global config default AI model:', defaultModel);
+            console.log('Step 2 Result - Using global config default AI model:', defaultModel);
+          } else {
+            console.log('Step 2 Result - No global default AI configured');
           }
         } catch (error) {
-          console.error('Failed to fetch global default AI model:', error);
+          console.error('Step 2 FAILED - Error fetching global default:', error);
         }
       }
 
-      console.log('Available models:', models.map(m => m.value));
-      console.log('Final default model to use:', defaultModel);
+      console.log('Step 3: Available models in dropdown:', models.map(m => m.value));
+      console.log('Step 3: Final default model to apply:', defaultModel);
 
-      // Set default model
+      // Set default model - NO FALLBACK, user must select or have a saved default
       if (models.length > 0) {
-        // If we have a default (library or global) and it's available, use it
-        if (defaultModel && models.some(m => m.value === defaultModel)) {
-          this.settings.aiModel = defaultModel;
-          console.log('✓ Successfully set AI model to library/global default:', defaultModel);
+        const modelExists = defaultModel && models.some(m => m.value === defaultModel);
+        console.log('Step 4: Does default model exist in list?', modelExists);
+
+        if (modelExists) {
+          this.settings.aiModel = defaultModel!;
+          console.log('✓ Step 4: Successfully set settings.aiModel to:', this.settings.aiModel);
+          // Force change detection
+          this.cdr.detectChanges();
+          console.log('✓ Step 4: Change detection triggered, current value:', this.settings.aiModel);
         } else {
+          // NO FALLBACK - leave empty, user must select
+          this.settings.aiModel = '';
           if (defaultModel) {
-            console.warn('⚠ Default model not available in current models list:', defaultModel);
-          }
-          // Otherwise, use fallback priority: largest local > claude > openai
-          const ollamaModels = models.filter(m => m.provider === 'ollama');
-          if (ollamaModels.length > 0) {
-            const sorted = [...ollamaModels].sort((a, b) => {
-              const sizeA = this.extractModelSize(a.label);
-              const sizeB = this.extractModelSize(b.label);
-              return sizeB - sizeA;
-            });
-            this.settings.aiModel = sorted[0].value;
+            console.warn('⚠ Step 4: Saved default model NOT FOUND in current models list:', defaultModel);
+            console.warn('⚠ Step 4: User must select a model. Available values are:', models.map(m => m.value));
           } else {
-            const claudeModels = models.filter(m => m.provider === 'claude');
-            if (claudeModels.length > 0) {
-              this.settings.aiModel = claudeModels[0].value;
-            } else {
-              const openaiModels = models.filter(m => m.provider === 'openai');
-              if (openaiModels.length > 0) {
-                this.settings.aiModel = openaiModels[0].value;
-              }
-            }
+            console.log('Step 4: No saved default, user must select a model');
           }
         }
       }
+      console.log('=== FINAL settings.aiModel:', this.settings.aiModel, '===');
     } catch (error) {
       console.error('Failed to load AI models:', error);
     } finally {
@@ -247,13 +254,14 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
 
   private resetForm(): void {
     this.urlText = '';
+    // Reset settings but keep the saved default AI model - it will be loaded fresh when dialog reopens
     this.settings = {
       fixAspectRatio: false,
       normalizeAudio: false,
       transcribe: false,
       whisperModel: 'tiny',
       aiAnalysis: false,
-      aiModel: this.aiModels.length > 0 ? this.aiModels[0].value : '',
+      aiModel: '', // Will be set from saved default when dialog reopens
       customInstructions: '',
       outputFormat: 'mp4',
       outputQuality: 'high'

@@ -3,7 +3,7 @@
  *
  * This script orchestrates downloading all binaries needed for the app:
  * - yt-dlp (video downloader)
- * - whisper (transcription)
+ * - whisper.cpp (transcription) - standalone binary, no Python needed!
  * - ffmpeg (video processing) - via npm installer packages
  * - ffprobe (video analysis) - via npm installer packages
  *
@@ -11,24 +11,24 @@
  */
 
 const { downloadYtDlp } = require('./download-ytdlp');
-const { downloadWhisper } = require('./download-whisper');
+const { downloadWhisperCpp } = require('./download-whisper-cpp');
 const fs = require('fs');
 const path = require('path');
 
 const CACHE_DIR = path.join(__dirname, '..', '.build-cache');
 const BIN_DIR = path.join(__dirname, '..', 'utilities', 'bin');
+const MODELS_DIR = path.join(__dirname, '..', 'utilities', 'models');
 
 async function downloadAllBinaries() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║      ClipChimp Binary Download Manager                   ║');
+  console.log('║      ClipChimp Binary Download Manager                    ║');
   console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
   // Ensure directories exist
-  if (!fs.existsSync(CACHE_DIR)) {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(BIN_DIR)) {
-    fs.mkdirSync(BIN_DIR, { recursive: true });
+  for (const dir of [CACHE_DIR, BIN_DIR, MODELS_DIR]) {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
   }
 
   try {
@@ -36,9 +36,9 @@ async function downloadAllBinaries() {
     console.log('📥 [1/4] yt-dlp\n');
     await downloadYtDlp();
 
-    // Download whisper
-    console.log('\n📥 [2/4] Whisper\n');
-    await downloadWhisper();
+    // Download whisper.cpp (standalone binary + model)
+    console.log('\n📥 [2/4] whisper.cpp (standalone - no Python needed!)\n');
+    await downloadWhisperCpp();
 
     // FFmpeg and FFprobe are handled by npm packages
     console.log('\n✅ [3/4] FFmpeg - Using @ffmpeg-installer npm package');
@@ -51,10 +51,11 @@ async function downloadAllBinaries() {
     console.log('║         All Binaries Ready! ✅                            ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
     console.log('Summary:');
-    console.log('  ✅ yt-dlp:  utilities/bin/');
-    console.log('  ✅ whisper: utilities/bin/');
-    console.log('  ✅ ffmpeg:  node_modules/@ffmpeg-installer/');
-    console.log('  ✅ ffprobe: node_modules/@ffprobe-installer/');
+    console.log('  ✅ yt-dlp:      utilities/bin/');
+    console.log('  ✅ whisper.cpp: utilities/bin/');
+    console.log('  ✅ whisper model: utilities/models/ggml-tiny.bin');
+    console.log('  ✅ ffmpeg:      node_modules/@ffmpeg-installer/');
+    console.log('  ✅ ffprobe:     node_modules/@ffprobe-installer/');
     console.log('\n💾 Cached in: .build-cache/\n');
 
   } catch (error) {

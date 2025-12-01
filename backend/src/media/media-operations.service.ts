@@ -111,11 +111,15 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'download', 100, 'Download complete');
 
+      // Extract title from the actual output filename - no fallbacks
+      const path = require('path');
+      const filename = path.basename(result.outputFile, path.extname(result.outputFile));
+
       return {
         success: true,
         data: {
           videoPath: result.outputFile,
-          title: options.displayName || 'Downloaded Video',
+          title: filename,
         },
       };
     } catch (error) {
@@ -572,6 +576,9 @@ export class MediaOperationsService {
         }
       }
 
+      // Use filename (always present) - strip extension for display
+      const videoTitle = video.filename.replace(/\.[^/.]+$/, '');
+
       const analysisResult = await this.pythonBridgeService.analyze(
         options.ollamaEndpoint || 'http://localhost:11434',
         cleanModelName,
@@ -584,7 +591,7 @@ export class MediaOperationsService {
         options.customInstructions,
         provider,
         apiKey,
-        String(video.title || 'Video Analysis'),
+        videoTitle,
       );
 
       // Log what we received from Python

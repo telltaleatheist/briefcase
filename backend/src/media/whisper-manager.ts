@@ -1,5 +1,6 @@
 // backend/src/media/whisper-manager.ts
-// Uses bundled Python with openai-whisper for maximum compatibility
+// Uses whisper.cpp on ALL platforms - standalone C++ implementation
+// No Python, no VC++ runtime, no dependencies!
 
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter } from 'events';
@@ -19,159 +20,244 @@ export class WhisperManager extends EventEmitter {
   private currentProcess: ChildProcess | null = null;
   private isRunning = false;
   private aborted = false;
-  private pythonPath: string;
-  private progressCounter = 0;
-  private startTime: number = 0;
-  private audioDuration: number = 0;
   private lastReportedPercent = 0;
+
+  private whisperPath: string;
+  private modelPath: string;
 
   constructor(private readonly sharedConfigService: SharedConfigService) {
     super();
-    // Use bundled Python instead of whisper binary
-    this.pythonPath = this.sharedConfigService.getPythonPath();
-    this.logger.log(`Using Python at: ${this.pythonPath}`);
+
+    this.logger.log('='.repeat(60));
+    this.logger.log('WHISPER MANAGER INITIALIZATION');
+    this.logger.log('='.repeat(60));
+    this.logger.log(`Platform: ${process.platform}`);
+    this.logger.log(`Architecture: ${process.arch}`);
+    this.logger.log(`Node version: ${process.version}`);
+    this.logger.log(`Process CWD: ${process.cwd()}`);
+    this.logger.log(`Resources path: ${(process as any).resourcesPath || 'NOT SET (development mode)'}`);
+    this.logger.log(`__dirname: ${__dirname}`);
+
+    this.whisperPath = this.getWhisperCppPath();
+    this.modelPath = this.getModelPath();
+
+    this.logger.log('-'.repeat(60));
+    this.logger.log('RESOLVED PATHS:');
+    this.logger.log(`  Whisper binary: ${this.whisperPath}`);
+    this.logger.log(`  Whisper binary exists: ${fs.existsSync(this.whisperPath)}`);
+    this.logger.log(`  Model file: ${this.modelPath}`);
+    this.logger.log(`  Model file exists: ${fs.existsSync(this.modelPath)}`);
+
+    if (fs.existsSync(this.whisperPath)) {
+      const stats = fs.statSync(this.whisperPath);
+      this.logger.log(`  Whisper binary size: ${(stats.size / 1024).toFixed(2)} KB`);
+      this.logger.log(`  Whisper binary permissions: ${stats.mode.toString(8)}`);
+    }
+
+    if (fs.existsSync(this.modelPath)) {
+      const stats = fs.statSync(this.modelPath);
+      this.logger.log(`  Model file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+    }
+
+    this.logger.log('='.repeat(60));
   }
 
   /**
-   * Get environment with ffmpeg in PATH and proper Python setup
+   * Get the path to the whisper.cpp executable
+   */
+  private getWhisperCppPath(): string {
+    const isWindows = process.platform === 'win32';
+    const binaryName = isWindows ? 'whisper-cpp.exe' : 'whisper-cpp';
+
+    this.logger.log('-'.repeat(60));
+    this.logger.log('RESOLVING WHISPER BINARY PATH');
+    this.logger.log(`  Looking for: ${binaryName}`);
+
+    // Check environment variable first (set by Electron)
+    if (process.env.WHISPER_CPP_PATH) {
+      this.logger.log(`  ENV WHISPER_CPP_PATH: ${process.env.WHISPER_CPP_PATH}`);
+      if (fs.existsSync(process.env.WHISPER_CPP_PATH)) {
+        this.logger.log(`  ✓ Found via WHISPER_CPP_PATH env var`);
+        return process.env.WHISPER_CPP_PATH;
+      } else {
+        this.logger.warn(`  ✗ WHISPER_CPP_PATH set but file not found`);
+      }
+    } else {
+      this.logger.log(`  ENV WHISPER_CPP_PATH: not set`);
+    }
+
+    // Check in utilities/bin relative to various locations
+    const possiblePaths = [
+      // Packaged app paths
+      path.join((process as any).resourcesPath || '', 'utilities', 'bin', binaryName),
+      // Development paths
+      path.join(__dirname, '..', '..', '..', '..', 'utilities', 'bin', binaryName),
+      path.join(process.cwd(), 'utilities', 'bin', binaryName),
+    ];
+
+    this.logger.log('  Checking paths:');
+    for (const p of possiblePaths) {
+      const exists = fs.existsSync(p);
+      this.logger.log(`    ${exists ? '✓' : '✗'} ${p}`);
+      if (exists) {
+        this.logger.log(`  ✓ Using: ${p}`);
+        return p;
+      }
+    }
+
+    this.logger.warn(`  ✗ Whisper binary not found in any location!`);
+    return possiblePaths[0];
+  }
+
+  /**
+   * Get the path to the Whisper model file
+   */
+  private getModelPath(): string {
+    const modelName = 'ggml-tiny.bin';
+
+    this.logger.log('-'.repeat(60));
+    this.logger.log('RESOLVING WHISPER MODEL PATH');
+    this.logger.log(`  Looking for: ${modelName}`);
+
+    // Check environment variable first
+    if (process.env.WHISPER_MODEL_PATH) {
+      this.logger.log(`  ENV WHISPER_MODEL_PATH: ${process.env.WHISPER_MODEL_PATH}`);
+      if (fs.existsSync(process.env.WHISPER_MODEL_PATH)) {
+        this.logger.log(`  ✓ Found via WHISPER_MODEL_PATH env var`);
+        return process.env.WHISPER_MODEL_PATH;
+      } else {
+        this.logger.warn(`  ✗ WHISPER_MODEL_PATH set but file not found`);
+      }
+    } else {
+      this.logger.log(`  ENV WHISPER_MODEL_PATH: not set`);
+    }
+
+    // Check in utilities/models
+    const possiblePaths = [
+      // Packaged app paths
+      path.join((process as any).resourcesPath || '', 'utilities', 'models', modelName),
+      // Development paths
+      path.join(__dirname, '..', '..', '..', '..', 'utilities', 'models', modelName),
+      path.join(process.cwd(), 'utilities', 'models', modelName),
+    ];
+
+    this.logger.log('  Checking paths:');
+    for (const p of possiblePaths) {
+      const exists = fs.existsSync(p);
+      this.logger.log(`    ${exists ? '✓' : '✗'} ${p}`);
+      if (exists) {
+        this.logger.log(`  ✓ Using: ${p}`);
+        return p;
+      }
+    }
+
+    this.logger.warn(`  ✗ Model file not found in any location!`);
+    return possiblePaths[0];
+  }
+
+  /**
+   * Get environment with ffmpeg in PATH
    */
   private getEnvironment(): NodeJS.ProcessEnv {
     const ffmpegPath = this.sharedConfigService.getFfmpegPath();
     const ffmpegDir = path.dirname(ffmpegPath);
-    const pythonDir = path.dirname(this.pythonPath);
+    const whisperDir = path.dirname(this.whisperPath);
 
     const env = { ...process.env };
     const pathSeparator = process.platform === 'win32' ? ';' : ':';
 
-    // Add ffmpeg and python directories to PATH
-    env.PATH = `${ffmpegDir}${pathSeparator}${pythonDir}${pathSeparator}${env.PATH || ''}`;
+    env.PATH = `${ffmpegDir}${pathSeparator}${whisperDir}${pathSeparator}${env.PATH || ''}`;
 
-    // Set cache directory for whisper models
-    const cacheDir = this.getCacheDir();
-    env.XDG_CACHE_HOME = cacheDir;
+    this.logger.log('-'.repeat(60));
+    this.logger.log('ENVIRONMENT SETUP');
+    this.logger.log(`  FFmpeg path: ${ffmpegPath}`);
+    this.logger.log(`  FFmpeg dir added to PATH: ${ffmpegDir}`);
+    this.logger.log(`  Whisper dir added to PATH: ${whisperDir}`);
 
-    // On Windows, also set these for whisper model caching
-    if (process.platform === 'win32') {
-      env.USERPROFILE = env.USERPROFILE || process.env.USERPROFILE;
-    }
-
-    this.logger.log(`Environment PATH includes: ${ffmpegDir}, ${pythonDir}`);
-    this.logger.log(`Whisper cache directory: ${cacheDir}`);
     return env;
   }
 
-  /**
-   * Get cache directory for whisper models
-   */
-  private getCacheDir(): string {
-    // Try to use the bundled cache first (for packaged app)
-    const pythonDir = path.dirname(this.pythonPath);
-    const bundledCache = path.join(pythonDir, '..', 'cache');
-
-    if (fs.existsSync(bundledCache)) {
-      return bundledCache;
-    }
-
-    // Fall back to user's app data
-    const os = require('os');
-    const homeDir = os.homedir();
-
-    if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'ClipChimp', 'cache');
-    } else if (process.platform === 'darwin') {
-      return path.join(homeDir, 'Library', 'Caches', 'ClipChimp');
-    } else {
-      return path.join(homeDir, '.cache', 'ClipChimp');
-    }
-  }
-
   async transcribe(audioFile: string, outputDir: string): Promise<string> {
-    this.progressCounter = 0;
     this.lastReportedPercent = 0;
-    this.startTime = Date.now();
 
-    this.logger.log('Starting Whisper transcription via Python');
+    this.logger.log('='.repeat(60));
+    this.logger.log('STARTING TRANSCRIPTION');
+    this.logger.log('='.repeat(60));
+    this.logger.log(`Timestamp: ${new Date().toISOString()}`);
     this.logger.log(`Audio file: ${audioFile}`);
+    this.logger.log(`Audio file exists: ${fs.existsSync(audioFile)}`);
+    if (fs.existsSync(audioFile)) {
+      const stats = fs.statSync(audioFile);
+      this.logger.log(`Audio file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+    }
     this.logger.log(`Output directory: ${outputDir}`);
-    this.logger.log(`Python path: ${this.pythonPath}`);
+    this.logger.log(`Output directory exists: ${fs.existsSync(outputDir)}`);
+    this.logger.log(`Whisper binary: ${this.whisperPath}`);
+    this.logger.log(`Whisper binary exists: ${fs.existsSync(this.whisperPath)}`);
+    this.logger.log(`Model file: ${this.modelPath}`);
+    this.logger.log(`Model file exists: ${fs.existsSync(this.modelPath)}`);
 
     if (!audioFile || !fs.existsSync(audioFile)) {
-      throw new Error(`Audio file not found: ${audioFile}`);
+      const error = `Audio file not found: ${audioFile}`;
+      this.logger.error(error);
+      throw new Error(error);
     }
 
-    // Check if Python exists
-    if (!fs.existsSync(this.pythonPath)) {
-      throw new Error(`Python not found at: ${this.pythonPath}. Please reinstall the application.`);
+    if (!fs.existsSync(this.whisperPath)) {
+      const error = `whisper.cpp not found at: ${this.whisperPath}. Please reinstall the application or run: npm run download:binaries`;
+      this.logger.error(error);
+      throw new Error(error);
     }
 
-    // Get audio duration for progress estimation
-    this.audioDuration = await this.getAudioDuration(audioFile);
-    this.logger.log(`Audio duration: ${this.audioDuration}s`);
+    if (!fs.existsSync(this.modelPath)) {
+      const error = `Whisper model not found at: ${this.modelPath}. Please reinstall the application or run: npm run download:binaries`;
+      this.logger.error(error);
+      throw new Error(error);
+    }
 
     this.aborted = false;
     this.isRunning = true;
 
-    // Start periodic progress updates based on time
-    const progressInterval = setInterval(() => {
-      if (!this.isRunning) {
-        clearInterval(progressInterval);
-        return;
-      }
-      this.updateTimeBasedProgress();
-    }, 1000);
-
-    // Create output filename for SRT
     const basename = path.basename(audioFile, path.extname(audioFile));
-    const srtFile = path.join(outputDir, `${basename}.srt`);
+    const outputBase = path.join(outputDir, basename);
+    const srtFile = `${outputBase}.srt`;
 
-    // Python script to run whisper
-    const whisperScript = `
-import sys
-import os
+    this.logger.log('-'.repeat(60));
+    this.logger.log('OUTPUT FILES');
+    this.logger.log(`  Base name: ${basename}`);
+    this.logger.log(`  Output base: ${outputBase}`);
+    this.logger.log(`  Expected SRT: ${srtFile}`);
 
-# Set cache directory before importing whisper
-cache_dir = os.environ.get('XDG_CACHE_HOME', '')
-if cache_dir:
-    os.makedirs(os.path.join(cache_dir, 'whisper'), exist_ok=True)
+    // whisper.cpp command line arguments
+    const args = [
+      '-m', this.modelPath,
+      '-f', audioFile,
+      '-osrt',
+      '-of', outputBase,
+      '-pp',  // Print progress
+    ];
 
-import whisper
-
-print("[WHISPER] Loading model...", flush=True)
-model = whisper.load_model("tiny")
-print("[WHISPER] Model loaded", flush=True)
-
-print("[WHISPER] Transcribing...", flush=True)
-result = model.transcribe(r"${audioFile.replace(/\\/g, '\\\\')}", verbose=True)
-print("[WHISPER] Transcription complete", flush=True)
-
-# Generate SRT output
-def format_timestamp(seconds):
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    msecs = int((seconds - int(seconds)) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{msecs:03d}"
-
-output_path = r"${srtFile.replace(/\\/g, '\\\\')}"
-with open(output_path, 'w', encoding='utf-8') as f:
-    for i, segment in enumerate(result['segments'], 1):
-        start = format_timestamp(segment['start'])
-        end = format_timestamp(segment['end'])
-        text = segment['text'].strip()
-        f.write(f"{i}\\n{start} --> {end}\\n{text}\\n\\n")
-
-print(f"[WHISPER] SRT saved to: {output_path}", flush=True)
-print("[WHISPER] SUCCESS", flush=True)
-`;
+    this.logger.log('-'.repeat(60));
+    this.logger.log('COMMAND');
+    this.logger.log(`  Executable: ${this.whisperPath}`);
+    this.logger.log(`  Arguments: ${args.join(' ')}`);
+    this.logger.log(`  Full command: "${this.whisperPath}" ${args.map(a => `"${a}"`).join(' ')}`);
 
     return new Promise<string>((resolve, reject) => {
       const env = this.getEnvironment();
 
-      // Run Python with the whisper script
-      this.currentProcess = spawn(this.pythonPath, ['-c', whisperScript], {
+      this.logger.log('-'.repeat(60));
+      this.logger.log('SPAWNING PROCESS');
+      this.logger.log(`  CWD: ${outputDir}`);
+
+      const startTime = Date.now();
+
+      this.currentProcess = spawn(this.whisperPath, args, {
         env,
         cwd: outputDir
       });
+
+      this.logger.log(`  PID: ${this.currentProcess.pid}`);
 
       let stdoutBuffer = '';
       let stderrBuffer = '';
@@ -179,61 +265,77 @@ print("[WHISPER] SUCCESS", flush=True)
       this.currentProcess.stdout?.on('data', (data) => {
         const chunk = data.toString();
         stdoutBuffer += chunk;
-        this.logger.log(`[PYTHON STDOUT] ${chunk.trim()}`);
+        this.logger.log(`[STDOUT] ${chunk.trim()}`);
         this.parseProgress(chunk);
       });
 
       this.currentProcess.stderr?.on('data', (data) => {
         const chunk = data.toString();
         stderrBuffer += chunk;
-        // Whisper outputs progress to stderr
-        this.logger.log(`[PYTHON STDERR] ${chunk.trim()}`);
+        this.logger.log(`[STDERR] ${chunk.trim()}`);
         this.parseProgress(chunk);
       });
 
       this.currentProcess.on('close', (code) => {
         this.isRunning = false;
-        clearInterval(progressInterval);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
 
-        this.logger.log(`Python process exited with code ${code}`);
+        this.logger.log('-'.repeat(60));
+        this.logger.log('PROCESS COMPLETED');
+        this.logger.log(`  Exit code: ${code}`);
+        this.logger.log(`  Elapsed time: ${elapsed}s`);
+        this.logger.log(`  Was aborted: ${this.aborted}`);
 
         if (this.aborted) {
+          this.logger.warn('Transcription was cancelled by user');
           reject(new Error('Transcription was cancelled'));
           return;
         }
 
-        if (code === 0 && stdoutBuffer.includes('[WHISPER] SUCCESS')) {
+        // Check for output files
+        this.logger.log('-'.repeat(60));
+        this.logger.log('CHECKING OUTPUT FILES');
+        this.logger.log(`  Expected SRT exists: ${fs.existsSync(srtFile)}`);
+
+        if (fs.existsSync(outputDir)) {
+          const files = fs.readdirSync(outputDir);
+          const srtFiles = files.filter(f => f.endsWith('.srt'));
+          this.logger.log(`  SRT files in output dir: ${srtFiles.join(', ') || 'none'}`);
+        }
+
+        if (code === 0) {
           if (fs.existsSync(srtFile)) {
+            const stats = fs.statSync(srtFile);
+            this.logger.log(`  ✓ SRT file created: ${srtFile} (${stats.size} bytes)`);
             this.emit('progress', { percent: 100, task: 'Transcription completed' });
             resolve(srtFile);
           } else {
             // Try to find any SRT file created
             const files = fs.readdirSync(outputDir);
-            const srtFiles = files.filter(f => f.endsWith('.srt'));
+            const srtFiles = files.filter(f => f.endsWith('.srt') && f.startsWith(basename));
             if (srtFiles.length > 0) {
               const foundSrt = path.join(outputDir, srtFiles[0]);
+              const stats = fs.statSync(foundSrt);
+              this.logger.log(`  ✓ SRT file found: ${foundSrt} (${stats.size} bytes)`);
               this.emit('progress', { percent: 100, task: 'Transcription completed' });
               resolve(foundSrt);
             } else {
+              this.logger.error('Transcription completed but no SRT file was created');
+              this.logger.error(`STDOUT: ${stdoutBuffer}`);
+              this.logger.error(`STDERR: ${stderrBuffer}`);
               reject(new Error('Transcription completed but no SRT file was created'));
             }
           }
         } else {
-          // Check for common errors
-          const fullOutput = stdoutBuffer + stderrBuffer;
+          this.logger.error(`Transcription failed with exit code ${code}`);
+          this.logger.error(`STDOUT: ${stdoutBuffer}`);
+          this.logger.error(`STDERR: ${stderrBuffer}`);
 
-          if (fullOutput.includes('No module named')) {
-            const moduleMatch = fullOutput.match(/No module named '(\w+)'/);
-            const moduleName = moduleMatch ? moduleMatch[1] : 'unknown';
-            reject(new Error(`Python module '${moduleName}' not found. Please reinstall the application.`));
-          } else if (fullOutput.includes('CUDA') || fullOutput.includes('cuda')) {
-            // CUDA errors are usually warnings, check if we still got output
-            if (fs.existsSync(srtFile)) {
-              this.emit('progress', { percent: 100, task: 'Transcription completed' });
-              resolve(srtFile);
-              return;
-            }
-            reject(new Error('Transcription failed. GPU acceleration not available, but CPU should work.'));
+          const fullOutput = stdoutBuffer + stderrBuffer;
+          if (fullOutput.includes('failed to open') || fullOutput.includes('error opening')) {
+            reject(new Error(`Could not open audio file. Ensure the file format is supported.`));
+          } else if (fullOutput.includes('model') && fullOutput.includes('failed')) {
+            reject(new Error(`Could not load Whisper model. Please reinstall the application.`));
           } else {
             reject(new Error(`Transcription failed (exit code ${code}): ${stderrBuffer.substring(0, 500)}`));
           }
@@ -242,89 +344,61 @@ print("[WHISPER] SUCCESS", flush=True)
 
       this.currentProcess.on('error', (err) => {
         this.isRunning = false;
-        clearInterval(progressInterval);
-        this.logger.error(`Failed to spawn Python process: ${err.message}`);
-        this.logger.error(`Python path: ${this.pythonPath}`);
-        this.logger.error(`Python exists: ${fs.existsSync(this.pythonPath)}`);
-        reject(new Error(`Failed to start Python: ${err.message}. Please reinstall the application.`));
+        this.logger.error('-'.repeat(60));
+        this.logger.error('PROCESS ERROR');
+        this.logger.error(`  Error: ${err.message}`);
+        this.logger.error(`  Whisper path: ${this.whisperPath}`);
+        this.logger.error(`  Whisper exists: ${fs.existsSync(this.whisperPath)}`);
+        reject(new Error(`Failed to start whisper.cpp: ${err.message}. Please reinstall the application.`));
       });
+
+      this.emit('progress', { percent: 5, task: 'Starting transcription' });
+      this.logger.log('Process spawned, waiting for output...');
     });
   }
 
   /**
-   * Get audio duration using ffprobe
+   * Parse progress from whisper.cpp output
    */
-  private async getAudioDuration(audioFile: string): Promise<number> {
-    return new Promise((resolve) => {
-      const { exec } = require('child_process');
-      const ffprobePath = this.sharedConfigService.getFfprobePath();
-      exec(`"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioFile}"`, (error: any, stdout: string) => {
-        if (error) {
-          this.logger.warn(`Could not get audio duration: ${error.message}`);
-          resolve(180); // Default to 3 minutes
-          return;
-        }
-        const duration = parseFloat(stdout.trim());
-        resolve(isNaN(duration) ? 180 : duration);
-      });
-    });
-  }
-
-  /**
-   * Update progress based on elapsed time
-   */
-  private updateTimeBasedProgress(): void {
-    if (this.audioDuration === 0) return;
-
-    const elapsedSeconds = (Date.now() - this.startTime) / 1000;
-    // Python whisper is slower than whisper.cpp, estimate ~5x realtime on CPU
-    const estimatedProgress = Math.min(95, (elapsedSeconds * 5 / this.audioDuration) * 100);
-
-    if (Math.floor(estimatedProgress / 5) > Math.floor(this.lastReportedPercent / 5)) {
-      this.lastReportedPercent = estimatedProgress;
-      this.emit('progress', {
-        percent: Math.round(estimatedProgress),
-        task: this.getCurrentTask(estimatedProgress)
-      });
-    }
-  }
-
   private parseProgress(output: string): void {
-    // Check for whisper milestone messages
-    if (output.includes('[WHISPER] Loading model')) {
-      this.emit('progress', { percent: 5, task: 'Loading Whisper model' });
-      this.lastReportedPercent = 5;
-    } else if (output.includes('[WHISPER] Model loaded')) {
-      this.emit('progress', { percent: 15, task: 'Model loaded' });
-      this.lastReportedPercent = 15;
-    } else if (output.includes('[WHISPER] Transcribing')) {
-      this.emit('progress', { percent: 20, task: 'Starting transcription' });
-      this.lastReportedPercent = 20;
-    } else if (output.includes('[WHISPER] Transcription complete')) {
-      this.emit('progress', { percent: 90, task: 'Saving transcript' });
-      this.lastReportedPercent = 90;
-    } else if (output.includes('[WHISPER] SUCCESS')) {
-      this.emit('progress', { percent: 100, task: 'Transcription completed' });
-      this.lastReportedPercent = 100;
-    }
-
-    // Check for percentage in whisper verbose output
-    const percentMatch = output.match(/(\d+)%/);
-    if (percentMatch) {
-      const percent = Math.min(95, parseInt(percentMatch[1], 10));
+    // whisper.cpp with -pp outputs: "progress = XX%"
+    const progressMatch = output.match(/progress\s*=\s*(\d+)%/i);
+    if (progressMatch) {
+      const percent = Math.min(95, parseInt(progressMatch[1], 10));
       if (percent > this.lastReportedPercent) {
         this.lastReportedPercent = percent;
-        this.emit('progress', {
-          percent,
-          task: this.getCurrentTask(percent)
-        });
+        this.emit('progress', { percent, task: this.getCurrentTask(percent) });
+      }
+      return;
+    }
+
+    // Simple percentage pattern
+    const simpleMatch = output.match(/(\d+)%/);
+    if (simpleMatch) {
+      const percent = Math.min(95, parseInt(simpleMatch[1], 10));
+      if (percent > this.lastReportedPercent + 5) {
+        this.lastReportedPercent = percent;
+        this.emit('progress', { percent, task: this.getCurrentTask(percent) });
+      }
+    }
+
+    // Loading messages
+    if (output.includes('loading model') || output.includes('whisper_init')) {
+      if (this.lastReportedPercent < 10) {
+        this.emit('progress', { percent: 10, task: 'Loading Whisper model' });
+        this.lastReportedPercent = 10;
+      }
+    } else if (output.includes('processing') || output.includes('run_whisper')) {
+      if (this.lastReportedPercent < 20) {
+        this.emit('progress', { percent: 20, task: 'Processing audio' });
+        this.lastReportedPercent = 20;
       }
     }
   }
 
   private getCurrentTask(percent: number): string {
-    if (percent < 10) return 'Loading Whisper model';
-    if (percent < 20) return 'Preparing transcription';
+    if (percent < 10) return 'Initializing';
+    if (percent < 20) return 'Loading model';
     if (percent < 30) return 'Detecting language';
     if (percent < 50) return 'Processing audio';
     if (percent < 70) return 'Generating transcript';
@@ -334,21 +408,26 @@ print("[WHISPER] SUCCESS", flush=True)
 
   cancel(): void {
     if (this.currentProcess && this.isRunning) {
-      this.logger.log('Cancelling Whisper transcription');
+      this.logger.log('='.repeat(60));
+      this.logger.log('CANCELLING TRANSCRIPTION');
+      this.logger.log(`  PID: ${this.currentProcess.pid}`);
       this.aborted = true;
 
       if (process.platform === 'win32') {
         const { execSync } = require('child_process');
         try {
-          execSync(`taskkill /pid ${this.currentProcess.pid} /T /F`);
+          execSync(`taskkill /pid ${this.currentProcess.pid} /T /F`, { stdio: 'ignore' });
+          this.logger.log('  Killed via taskkill');
         } catch (err) {
-          // Silent fail
+          this.logger.warn('  taskkill failed (process may have already exited)');
         }
       } else {
         this.currentProcess.kill('SIGTERM');
+        this.logger.log('  Sent SIGTERM');
       }
 
       this.isRunning = false;
+      this.logger.log('='.repeat(60));
     }
   }
 }

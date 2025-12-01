@@ -191,7 +191,7 @@ export class DownloaderService implements OnModuleInit {
       // Check if video already exists in database
       const existingVideo = this.databaseService.findVideoByUrl(options.url);
       if (existingVideo) {
-        const reason = `Video already exists in library: "${existingVideo.filename || existingVideo.title || 'Untitled'}"`;
+        const reason = `Video already exists in library: "${existingVideo.filename}"`;
         this.logger.log(`Skipping download - ${reason}`);
         this.eventService.emitDownloadSkipped(options.url, reason, existingVideo.id, jobId);
 

@@ -45,11 +45,15 @@ function getPythonPath(): string {
       return paths.python;
     }
   } catch {
-    // Module not available - fall through to system Python
+    // Module not available - this is expected in some development scenarios
   }
 
-  // Fallback to system Python in development
-  return process.platform === 'win32' ? 'python' : 'python3';
+  // NO FALLBACK TO SYSTEM PYTHON - throw error if bundled Python not found
+  throw new Error(
+    'Bundled Python not found. PYTHON_PATH environment variable must be set. ' +
+    'This usually means the app was not started correctly. ' +
+    'In development, use: npm run electron:dev'
+  );
 }
 
 /**

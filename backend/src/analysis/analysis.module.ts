@@ -15,6 +15,7 @@ import { LibraryModule } from '../library/library.module';
 import { DatabaseModule } from '../database/database.module';
 import { MediaModule } from '../media/media.module';
 import { QueueModule } from '../queue/queue.module';
+import { ApiKeysModule } from '../config/config.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { QueueModule } from '../queue/queue.module';
     forwardRef(() => DatabaseModule),
     forwardRef(() => MediaModule),
     forwardRef(() => QueueModule),
+    ApiKeysModule,
   ],
   controllers: [
     AnalysisController,

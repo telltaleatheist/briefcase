@@ -27,6 +27,7 @@ export class SettingsPageComponent implements OnInit {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private libraryService = inject(LibraryService);
+  private readonly API_BASE = 'http://localhost:3000/api';
 
   // AI Setup Wizard state
   wizardOpen = signal(false);
@@ -223,7 +224,7 @@ export class SettingsPageComponent implements OnInit {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: Array<{ value: string; label: string; provider: string }> = [];
 
-      // Add Ollama models
+      // Add Ollama models (fetched dynamically by aiSetupService)
       if (availability.hasOllama && availability.ollamaModels.length > 0) {
         availability.ollamaModels.forEach(model => {
           models.push({
@@ -234,28 +235,36 @@ export class SettingsPageComponent implements OnInit {
         });
       }
 
-      // Add Claude models
+      // Fetch Claude models dynamically from API
       if (availability.hasClaudeKey) {
-        const claudeModels = [
-          { value: 'claude:claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-          { value: 'claude:claude-3-opus-20240229', label: 'Claude 3 Opus' },
-          { value: 'claude:claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
-        ];
-        claudeModels.forEach(m => {
-          models.push({ ...m, provider: 'claude' });
-        });
+        try {
+          const claudeResponse = await firstValueFrom(
+            this.http.get<{ success: boolean; models: any[] }>(`${this.API_BASE}/config/claude-models`)
+          );
+          if (claudeResponse.success && claudeResponse.models.length > 0) {
+            claudeResponse.models.forEach(m => {
+              models.push({ value: m.value, label: m.label, provider: 'claude' });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch Claude models:', error);
+        }
       }
 
-      // Add OpenAI models
+      // Fetch OpenAI models dynamically from API
       if (availability.hasOpenAIKey) {
-        const openaiModels = [
-          { value: 'openai:gpt-4o', label: 'GPT-4o' },
-          { value: 'openai:gpt-4o-mini', label: 'GPT-4o Mini' },
-          { value: 'openai:gpt-4-turbo', label: 'GPT-4 Turbo' }
-        ];
-        openaiModels.forEach(m => {
-          models.push({ ...m, provider: 'openai' });
-        });
+        try {
+          const openaiResponse = await firstValueFrom(
+            this.http.get<{ success: boolean; models: any[] }>(`${this.API_BASE}/config/openai-models`)
+          );
+          if (openaiResponse.success && openaiResponse.models.length > 0) {
+            openaiResponse.models.forEach(m => {
+              models.push({ value: m.value, label: m.label, provider: 'openai' });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch OpenAI models:', error);
+        }
       }
 
       this.availableModels.set(models);

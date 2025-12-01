@@ -4,16 +4,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
 
 // Import simple runtime path resolver
-// Priority: Environment variables (passed from Electron) > runtime-paths module > fallback
+// Priority: Environment variables (passed from Electron) > runtime-paths module
+// NO FALLBACK TO SYSTEM BINARIES - app must be started correctly
 const getRuntimePaths = () => {
   // First check environment variables - these are set by Electron when spawning the backend
-  if (process.env.FFMPEG_PATH || process.env.YT_DLP_PATH) {
+  if (process.env.FFMPEG_PATH && process.env.YT_DLP_PATH) {
+    // All required env vars must be set - no partial fallbacks
+    if (!process.env.FFMPEG_PATH || !process.env.FFPROBE_PATH || !process.env.YT_DLP_PATH || !process.env.PYTHON_PATH) {
+      throw new Error(
+        'Incomplete binary paths. Required env vars: FFMPEG_PATH, FFPROBE_PATH, YT_DLP_PATH, PYTHON_PATH. ' +
+        'App must be started via Electron which sets these paths.'
+      );
+    }
     return {
-      ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
-      ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
-      ytdlp: process.env.YT_DLP_PATH || 'yt-dlp',
-      whisper: process.env.WHISPER_PATH || 'whisper',
-      python: process.env.PYTHON_PATH || 'python'
+      ffmpeg: process.env.FFMPEG_PATH,
+      ffprobe: process.env.FFPROBE_PATH,
+      ytdlp: process.env.YT_DLP_PATH,
+      whisper: process.env.WHISPER_PATH || '', // Optional - whisper-cpp may not be installed
+      whisperCpp: process.env.WHISPER_CPP_PATH || '',
+      whisperModel: process.env.WHISPER_MODEL_PATH || '',
+      python: process.env.PYTHON_PATH
     };
   }
 
@@ -27,15 +37,13 @@ const getRuntimePaths = () => {
     // In development, use relative path
     return require('../../../dist-electron/shared/runtime-paths').getRuntimePaths();
   } catch (error) {
-    // Fallback for when runtime-paths isn't built yet (during development setup)
-    console.warn('runtime-paths not available, using fallback');
-    return {
-      ffmpeg: 'ffmpeg',
-      ffprobe: 'ffprobe',
-      ytdlp: 'yt-dlp',
-      whisper: 'whisper',
-      python: 'python'
-    };
+    // NO FALLBACK - throw error instead of using system binaries
+    throw new Error(
+      'runtime-paths module not available and no environment variables set. ' +
+      'This usually means the app was not started correctly. ' +
+      'In development, use: npm run electron:dev (NOT npm run start:dev). ' +
+      'The backend must be spawned by Electron to receive proper binary paths.'
+    );
   }
 };
 

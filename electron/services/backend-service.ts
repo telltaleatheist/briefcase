@@ -352,7 +352,9 @@ export class BackendService {
         FFMPEG_PATH: ffmpegPath,
         FFPROBE_PATH: ffprobePath,
         YT_DLP_PATH: runtimePaths.ytdlp || process.env.YT_DLP_PATH,
-        WHISPER_PATH: runtimePaths.whisper || process.env.WHISPER_PATH,
+        // whisper.cpp paths (standalone binary - no Python needed!)
+        WHISPER_CPP_PATH: runtimePaths.whisperCpp || process.env.WHISPER_CPP_PATH,
+        WHISPER_MODEL_PATH: runtimePaths.whisperModel || process.env.WHISPER_MODEL_PATH,
         PYTHON_PATH: runtimePaths.python || process.env.PYTHON_PATH,
       };
       

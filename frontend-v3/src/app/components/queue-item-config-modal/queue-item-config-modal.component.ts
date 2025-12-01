@@ -1,6 +1,7 @@
 import { Component, signal, input, output, inject, OnInit, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import {
   AVAILABLE_TASKS,
   Task,
@@ -32,6 +33,8 @@ interface AIModelOption {
 export class QueueItemConfigModalComponent implements OnInit {
   private aiSetupService = inject(AiSetupService);
   private libraryService = inject(LibraryService);
+  private http = inject(HttpClient);
+  private readonly API_BASE = 'http://localhost:3000/api';
 
   // Inputs
   isOpen = input<boolean>(false);
@@ -52,7 +55,7 @@ export class QueueItemConfigModalComponent implements OnInit {
   // AI Models
   aiModels = signal<AIModelOption[]>([]);
   loadingModels = signal(false);
-  defaultAIModel = 'ollama:qwen2.5:7b';
+  defaultAIModel = ''; // No fallback - user must have saved a default or select one
   savedAsDefault = signal(false);
 
   constructor() {
@@ -104,7 +107,7 @@ export class QueueItemConfigModalComponent implements OnInit {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
 
-      // Add Ollama models
+      // Add Ollama models (fetched dynamically by aiSetupService)
       if (availability.hasOllama && availability.ollamaModels.length > 0) {
         availability.ollamaModels.forEach(model => {
           models.push({
@@ -115,73 +118,70 @@ export class QueueItemConfigModalComponent implements OnInit {
         });
       }
 
-      // Add Claude models if API key exists
+      // Fetch Claude models dynamically from API
       if (availability.hasClaudeKey) {
-        const claudeModels = [
-          { value: 'claude:claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-          { value: 'claude:claude-3-opus-20240229', label: 'Claude 3 Opus' },
-          { value: 'claude:claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
-        ];
-        claudeModels.forEach(m => {
-          models.push({ ...m, provider: 'claude' });
-        });
+        try {
+          const claudeResponse = await firstValueFrom(
+            this.http.get<{ success: boolean; models: any[] }>(`${this.API_BASE}/config/claude-models`)
+          );
+          if (claudeResponse.success && claudeResponse.models.length > 0) {
+            claudeResponse.models.forEach(m => {
+              models.push({ value: m.value, label: m.label, provider: 'claude' });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch Claude models:', error);
+        }
       }
 
-      // Add OpenAI models if API key exists
+      // Fetch OpenAI models dynamically from API
       if (availability.hasOpenAIKey) {
-        const openaiModels = [
-          { value: 'openai:gpt-4o', label: 'GPT-4o' },
-          { value: 'openai:gpt-4o-mini', label: 'GPT-4o Mini' },
-          { value: 'openai:gpt-4-turbo', label: 'GPT-4 Turbo' }
-        ];
-        openaiModels.forEach(m => {
-          models.push({ ...m, provider: 'openai' });
-        });
+        try {
+          const openaiResponse = await firstValueFrom(
+            this.http.get<{ success: boolean; models: any[] }>(`${this.API_BASE}/config/openai-models`)
+          );
+          if (openaiResponse.success && openaiResponse.models.length > 0) {
+            openaiResponse.models.forEach(m => {
+              models.push({ value: m.value, label: m.label, provider: 'openai' });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch OpenAI models:', error);
+        }
       }
 
       this.aiModels.set(models);
+      console.log('=== QUEUE MODAL: Loading AI models ===');
+      console.log('Available models:', models.map(m => m.value));
 
-      // Try to load saved default from backend first
+      // Load saved default from backend - NO FALLBACK
       try {
         const savedDefault = await firstValueFrom(this.libraryService.getDefaultAI());
+        console.log('Saved default response:', JSON.stringify(savedDefault));
         if (savedDefault.success && savedDefault.defaultAI) {
           const fullModelValue = `${savedDefault.defaultAI.provider}:${savedDefault.defaultAI.model}`;
+          console.log('Constructed default model value:', fullModelValue);
           // Check if the saved model is still available
-          if (models.some(m => m.value === fullModelValue)) {
+          const modelExists = models.some(m => m.value === fullModelValue);
+          console.log('Model exists in list?', modelExists);
+          if (modelExists) {
             this.defaultAIModel = fullModelValue;
-            console.log(`Using saved default AI model: ${fullModelValue}`);
-            return; // Exit early, we have our default
+            console.log(`✓ Using saved default AI model: ${fullModelValue}`);
+          } else {
+            // Saved default not available - leave blank, user must select
+            this.defaultAIModel = '';
+            console.warn(`⚠ Saved default model not available: ${fullModelValue}`);
           }
+        } else {
+          // No saved default - leave blank, user must select
+          this.defaultAIModel = '';
+          console.log('No saved default AI, user must select one');
         }
       } catch (error) {
         console.warn('Could not load saved default AI:', error);
+        this.defaultAIModel = '';
       }
-
-      // Fallback: Set default model priority: largest local > claude > openai
-      if (models.length > 0) {
-        // Try to get largest Ollama model first (prefer models with larger numbers)
-        const ollamaModels = models.filter(m => m.provider === 'ollama');
-        if (ollamaModels.length > 0) {
-          // Sort by model size hints in name (e.g., 70b > 7b > 3b)
-          const sorted = [...ollamaModels].sort((a, b) => {
-            const sizeA = this.extractModelSize(a.label);
-            const sizeB = this.extractModelSize(b.label);
-            return sizeB - sizeA;
-          });
-          this.defaultAIModel = sorted[0].value;
-        } else {
-          // Fall back to Claude, then OpenAI
-          const claudeModels = models.filter(m => m.provider === 'claude');
-          if (claudeModels.length > 0) {
-            this.defaultAIModel = claudeModels[0].value;
-          } else {
-            const openaiModels = models.filter(m => m.provider === 'openai');
-            if (openaiModels.length > 0) {
-              this.defaultAIModel = openaiModels[0].value;
-            }
-          }
-        }
-      }
+      console.log('=== FINAL defaultAIModel:', this.defaultAIModel, '===');
     } catch (error) {
       console.error('Failed to load AI models:', error);
     } finally {

@@ -151,13 +151,20 @@ export function getRuntimePaths() {
       getYtDlpBinaryName()
     ),
 
-    // Whisper - no longer used directly (we use Python whisper now)
-    // Kept for backward compatibility but points to utilities folder
-    whisper: path.join(
+    // whisper.cpp - standalone binary, no Python needed!
+    whisperCpp: path.join(
       resourcesPath,
       'utilities',
       'bin',
-      process.platform === 'win32' ? 'whisper.exe' : 'whisper'
+      process.platform === 'win32' ? 'whisper-cpp.exe' : 'whisper-cpp'
+    ),
+
+    // Whisper model file
+    whisperModel: path.join(
+      resourcesPath,
+      'utilities',
+      'models',
+      'ggml-tiny.bin'
     ),
 
     // Python from bundled runtime - ALWAYS bundled

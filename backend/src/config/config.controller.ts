@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Get } from '@nestjs/common';
+import { Controller, Post, Body, Get, Inject, forwardRef } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
+import { ApiKeysService } from './api-keys.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -7,7 +8,10 @@ import * as path from 'path';
 export class ConfigController {
   private configPath: string;
 
-  constructor(private readonly configService: SharedConfigService) {
+  constructor(
+    private readonly configService: SharedConfigService,
+    private readonly apiKeysService: ApiKeysService,
+  ) {
     const userDataPath = process.env.APPDATA ||
                       (process.platform === 'darwin' ?
                       path.join(process.env.HOME || '', 'Library', 'Application Support') :
@@ -277,5 +281,141 @@ export class ConfigController {
       console.error('Failed to update analysis prompt:', error);
       // Don't throw - saving categories should still succeed
     }
+  }
+
+  /**
+   * Fetch available models from OpenAI API
+   * Returns top 3 GPT-4 class models sorted by creation date (newest first)
+   */
+  @Get('openai-models')
+  async getOpenAIModels() {
+    try {
+      const apiKey = this.apiKeysService.getOpenAiApiKey();
+      if (!apiKey) {
+        return { success: false, models: [], message: 'No OpenAI API key configured' };
+      }
+
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+      });
+
+      if (!response.ok) {
+        return { success: false, models: [], message: `OpenAI API error: ${response.status}` };
+      }
+
+      const data = await response.json();
+
+      // Only include specific known chat models - whitelist approach
+      const allowedModels = [
+        'gpt-4o',
+        'gpt-4o-mini',
+        'gpt-4-turbo',
+        'gpt-4-turbo-preview',
+        'gpt-4',
+        'o1',
+        'o1-mini',
+        'o1-preview',
+      ];
+
+      const gptModels = data.data
+        .filter((m: any) => allowedModels.includes(m.id))
+        .sort((a: any, b: any) => b.created - a.created)
+        .map((m: any) => ({
+          value: `openai:${m.id}`,
+          label: this.formatOpenAIModelName(m.id),
+          id: m.id,
+          created: m.created,
+        }));
+
+      return { success: true, models: gptModels };
+    } catch (error: any) {
+      return { success: false, models: [], message: error.message };
+    }
+  }
+
+  /**
+   * Fetch available models from Anthropic/Claude API
+   * Returns models sorted by release date (newest first)
+   */
+  @Get('claude-models')
+  async getClaudeModels() {
+    try {
+      const apiKey = this.apiKeysService.getClaudeApiKey();
+      if (!apiKey) {
+        return { success: false, models: [], message: 'No Claude API key configured' };
+      }
+
+      const response = await fetch('https://api.anthropic.com/v1/models', {
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+      });
+
+      if (!response.ok) {
+        return { success: false, models: [], message: `Anthropic API error: ${response.status}` };
+      }
+
+      const data = await response.json();
+
+      // Only include text-based Claude chat models (exclude audio, vision-only, etc.)
+      const claudeModels = data.data
+        .filter((m: any) => {
+          const id = m.id.toLowerCase();
+          // Must be a Claude model
+          if (!id.includes('claude')) return false;
+          // Exclude audio models
+          if (id.includes('audio')) return false;
+          // Exclude vision-only models (but claude-3-5-sonnet with vision is ok for text too)
+          if (id.includes('vision') && !id.includes('sonnet') && !id.includes('opus')) return false;
+          return true;
+        })
+        .slice(0, 5) // Get top 5
+        .map((m: any) => ({
+          value: `claude:${m.id}`,
+          label: this.formatClaudeModelName(m.id, m.display_name),
+          id: m.id,
+          created: m.created_at,
+        }));
+
+      return { success: true, models: claudeModels };
+    } catch (error: any) {
+      return { success: false, models: [], message: error.message };
+    }
+  }
+
+  /**
+   * Format OpenAI model ID to human-readable name
+   */
+  private formatOpenAIModelName(modelId: string): string {
+    const nameMap: Record<string, string> = {
+      'gpt-4o': 'GPT-4o',
+      'gpt-4o-mini': 'GPT-4o Mini',
+      'gpt-4-turbo': 'GPT-4 Turbo',
+      'gpt-4-turbo-preview': 'GPT-4 Turbo Preview',
+      'gpt-4': 'GPT-4',
+      'o1': 'O1',
+      'o1-mini': 'O1 Mini',
+      'o1-preview': 'O1 Preview',
+    };
+    return nameMap[modelId] || modelId.toUpperCase().replace(/-/g, ' ');
+  }
+
+  /**
+   * Format Claude model ID to human-readable name
+   */
+  private formatClaudeModelName(modelId: string, displayName?: string): string {
+    if (displayName) return displayName;
+
+    // Convert model ID like "claude-sonnet-4-20250514" to "Claude Sonnet 4"
+    return modelId
+      .replace('claude-', 'Claude ')
+      .replace(/-\d{8}$/, '') // Remove date suffix
+      .replace(/-latest$/, '')
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
   }
 }

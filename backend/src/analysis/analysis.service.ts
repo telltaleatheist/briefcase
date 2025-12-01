@@ -16,6 +16,7 @@ import { DatabaseService } from '../database/database.service';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaProcessingService } from '../media/media-processing.service';
 import { QueueManagerService } from '../queue/queue-manager.service';
+import { ApiKeysService } from '../config/api-keys.service';
 import { Task } from '../common/interfaces/task.interface';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -104,6 +105,7 @@ export class AnalysisService implements OnModuleInit {
     private mediaProcessingService: MediaProcessingService,
     @Inject(forwardRef(() => QueueManagerService))
     private queueManager: QueueManagerService,
+    private apiKeysService: ApiKeysService,
   ) {}
 
   /**
@@ -141,17 +143,17 @@ export class AnalysisService implements OnModuleInit {
   async startAnalysis(request: AnalysisRequest, customJobId?: string): Promise<string> {
     const jobId = customJobId || uuidv4();
 
-    // Determine title from input
-    let title = 'Video Analysis';
+    // Determine title from input - use customReportName or extract from file path
+    let title: string;
     if (request.customReportName) {
-      // Use custom name if provided (e.g., from batch downloader)
       title = request.customReportName;
-    } else if (request.inputType === 'file' && request.input) {
-      // Extract filename from path
-      const path = require('path');
-      title = path.basename(request.input, path.extname(request.input));
-    } else if (request.inputType === 'url') {
-      title = 'Downloaded Video';
+    } else if (request.inputType === 'file') {
+      const pathModule = require('path');
+      title = pathModule.basename(request.input, pathModule.extname(request.input));
+    } else {
+      // For URL inputs, extract something useful from the URL
+      const url = new URL(request.input);
+      title = url.pathname.split('/').pop() || url.hostname;
     }
 
     // Determine mode
@@ -623,7 +625,7 @@ export class AnalysisService implements OnModuleInit {
     if (request.videoId && !request.videoTitle) {
       const video = this.databaseService.getVideoById(request.videoId);
       if (video) {
-        request.videoTitle = video.filename || video.suggested_title || 'Untitled Video';
+        request.videoTitle = video.filename;
         this.logger.log(`Loaded video title from database: ${request.videoTitle}`);
       }
     }
@@ -711,6 +713,27 @@ export class AnalysisService implements OnModuleInit {
     // Parse SRT to get segments
     const segments = this.parseSrtToSegments(request.transcriptSrt);
 
+    // Determine provider and get API key if needed
+    const provider = request.aiProvider || 'ollama';
+    let apiKey = request.apiKey;
+
+    // Fetch API key from stored config if not provided and not using Ollama
+    if (!apiKey && provider !== 'ollama') {
+      if (provider === 'openai') {
+        apiKey = this.apiKeysService.getOpenAiApiKey();
+        this.logger.log(`[${jobId}] Using stored OpenAI API key`);
+      } else if (provider === 'claude') {
+        apiKey = this.apiKeysService.getClaudeApiKey();
+        this.logger.log(`[${jobId}] Using stored Claude API key`);
+      }
+
+      if (!apiKey) {
+        throw new Error(`No API key found for ${provider}. Please configure your ${provider === 'openai' ? 'OpenAI' : 'Claude'} API key in settings.`);
+      }
+    }
+
+    this.logger.log(`[${jobId}] Starting analysis with provider=${provider}, model=${modelName}`);
+
     // modelName already stripped earlier in this method
     const analysisResult = await this.pythonBridge.analyze(
       request.ollamaEndpoint,
@@ -736,9 +759,9 @@ export class AnalysisService implements OnModuleInit {
         }
       },
       request.customInstructions,
-      request.aiProvider,
-      request.apiKey,
-      request.videoTitle || 'Untitled Video',
+      provider,
+      apiKey,
+      request.videoTitle,
     );
 
     // Read and save analysis

@@ -70,12 +70,13 @@
               <div class="form-group">
                 <label>AI Model</label>
                 <select
-                  [value]="getTaskConfig(task.type).aiModel"
-                  (change)="updateTaskConfig(task.type, { aiModel: $any($event.target).value })"
+                  [ngModel]="getTaskConfig(task.type).aiModel"
+                  (ngModelChange)="updateTaskConfig(task.type, { aiModel: $event })"
                   [disabled]="loadingModels()"
                 >
                   <option *ngIf="loadingModels()" value="">Loading models...</option>
                   <option *ngIf="!loadingModels() && aiModels().length === 0" value="">No models available</option>
+                  <option *ngIf="!loadingModels() && aiModels().length > 0 && !getTaskConfig(task.type).aiModel" value="" disabled>-- Select a model --</option>
 
                   <!-- Ollama Models -->
                   <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama (Local)">
