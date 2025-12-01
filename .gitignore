@@ -102,3 +102,4 @@ Modelfile
 # Backend dependencies (managed separately)
 !backend/node_modules/.gitkeep
 clipchimp-console*
+utilities/bin/*.dll

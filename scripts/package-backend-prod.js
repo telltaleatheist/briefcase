@@ -60,7 +60,7 @@ try {
 
   // Get Electron version from root package.json
   const rootPackageJson = require(path.join(__dirname, '..', 'package.json'));
-  const electronVersion = rootPackageJson.devDependencies.electron.replace(/^[\^~]/, '');
+  const electronVersion = (rootPackageJson.dependencies?.electron || rootPackageJson.devDependencies?.electron || '33.4.11').replace(/^[\^~]/, '');
 
   execSync(`npx @electron/rebuild --version ${electronVersion}`, {
     cwd: tempDir,

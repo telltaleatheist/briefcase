@@ -156,7 +156,7 @@ export function getRuntimePaths() {
       resourcesPath,
       'utilities',
       'bin',
-      process.platform === 'win32' ? 'whisper-cpp.exe' : 'whisper-cpp'
+      process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
     ),
 
     // Whisper model file

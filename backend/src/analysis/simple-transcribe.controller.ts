@@ -111,8 +111,11 @@ export class SimpleTranscribeController {
       // Read the SRT file content
       const srtContent = await fs.readFile(srtPath, 'utf-8');
 
+      // Normalize line endings: convert \r\n (Windows) to \n (Unix)
+      const normalizedSrt = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
       // Convert SRT to plain text (remove timestamps)
-      const plainText = srtContent
+      const plainText = normalizedSrt
         .split('\n\n')
         .map(block => {
           const lines = block.split('\n');
@@ -127,7 +130,7 @@ export class SimpleTranscribeController {
       this.databaseService.insertTranscript({
         videoId: videoId,
         plainText: plainText,
-        srtFormat: srtContent,
+        srtFormat: normalizedSrt,
         whisperModel: whisperModel,
         language: 'en',
       });

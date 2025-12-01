@@ -67,7 +67,7 @@ export class WhisperManager extends EventEmitter {
    */
   private getWhisperCppPath(): string {
     const isWindows = process.platform === 'win32';
-    const binaryName = isWindows ? 'whisper-cpp.exe' : 'whisper-cpp';
+    const binaryName = isWindows ? 'whisper-cli.exe' : 'whisper-cli';
 
     this.logger.log('-'.repeat(60));
     this.logger.log('RESOLVING WHISPER BINARY PATH');

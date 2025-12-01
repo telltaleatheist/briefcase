@@ -36,11 +36,11 @@ const WINDOWS_BINARY_URL = `https://github.com/ggml-org/whisper.cpp/releases/dow
 // Source code URL for building on macOS/Linux
 const SOURCE_URL = `https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v${WHISPER_CPP_VERSION}.tar.gz`;
 
-// Target binary names
+// Target binary names (whisper.cpp renamed from main/whisper to whisper-cli in v1.8.0+)
 const TARGET_NAMES = {
-  win32: 'whisper-cpp.exe',
-  darwin: 'whisper-cpp',
-  linux: 'whisper-cpp'
+  win32: 'whisper-cli.exe',
+  darwin: 'whisper-cli',
+  linux: 'whisper-cli'
 };
 
 /**
@@ -187,22 +187,42 @@ async function downloadWindowsBinary() {
   fs.mkdirSync(cacheExtractDir, { recursive: true });
   await extractZip(cacheZipPath, cacheExtractDir);
 
-  // Find whisper.exe (the main CLI binary)
-  const extractedBinary = findFile(cacheExtractDir, 'whisper.exe');
-  if (!extractedBinary) {
-    // Try main.exe as fallback
-    const mainBinary = findFile(cacheExtractDir, 'main.exe');
-    if (mainBinary) {
-      fs.copyFileSync(mainBinary, cacheBinaryPath);
-    } else {
-      throw new Error(`Could not find whisper.exe or main.exe in extracted archive`);
+  // Find whisper-cli.exe (the main CLI binary, renamed in v1.8.0+)
+  // Try multiple possible names in order of preference
+  const possibleNames = ['whisper-cli.exe', 'whisper.exe', 'main.exe'];
+  let foundBinary = null;
+
+  for (const name of possibleNames) {
+    foundBinary = findFile(cacheExtractDir, name);
+    if (foundBinary) {
+      console.log(`   Found binary: ${name}`);
+      break;
     }
-  } else {
-    fs.copyFileSync(extractedBinary, cacheBinaryPath);
   }
 
+  if (!foundBinary) {
+    throw new Error(`Could not find whisper binary in extracted archive. Tried: ${possibleNames.join(', ')}`);
+  }
+
+  fs.copyFileSync(foundBinary, cacheBinaryPath);
   fs.copyFileSync(cacheBinaryPath, destPath);
   console.log(`✅ Windows binary installed: ${targetName}`);
+
+  // Copy required DLLs (whisper-cli.exe needs these to run)
+  const requiredDlls = ['ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll', 'whisper.dll'];
+  const binaryDir = path.dirname(foundBinary);
+
+  for (const dll of requiredDlls) {
+    const dllPath = path.join(binaryDir, dll);
+    if (fs.existsSync(dllPath)) {
+      const destDllPath = path.join(BIN_DIR, dll);
+      fs.copyFileSync(dllPath, destDllPath);
+      console.log(`   ✓ Copied ${dll}`);
+    } else {
+      console.warn(`   ⚠ DLL not found: ${dll}`);
+    }
+  }
+
   return destPath;
 }
 
@@ -293,6 +313,7 @@ async function buildFromSource(platform) {
   }
 
   // Find the built binary (it's in build/bin/ now)
+  // whisper.cpp renamed from main to whisper-cli in v1.8.0+
   const possibleBinaryPaths = [
     path.join(sourceDir, 'build', 'bin', 'whisper-cli'),
     path.join(sourceDir, 'build', 'bin', 'main'),

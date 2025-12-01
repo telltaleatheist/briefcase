@@ -1371,7 +1371,9 @@ export class AnalysisService implements OnModuleInit {
       return segments;
     }
 
-    const blocks = srtContent.split('\n\n').filter(b => b.trim());
+    // Normalize line endings: convert \r\n (Windows) to \n (Unix)
+    const normalizedContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const blocks = normalizedContent.split('\n\n').filter(b => b.trim());
 
     for (const block of blocks) {
       const lines = block.split('\n');

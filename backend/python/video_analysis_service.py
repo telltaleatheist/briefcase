@@ -1433,6 +1433,12 @@ def main():
             print(f"[DEBUG] Endpoint/Key type: {'API Key' if provider in ['openai', 'claude'] else 'Ollama Endpoint'}", file=sys.stderr)
             print(f"[DEBUG] Endpoint/Key value: {endpoint_or_key if provider == 'ollama' else '***' if endpoint_or_key else 'NOT PROVIDED'}", file=sys.stderr)
 
+            # Debug: Show segment structure
+            print(f"[DEBUG] Received {len(segments)} segments", file=sys.stderr)
+            if segments and len(segments) > 0:
+                print(f"[DEBUG] First segment: {segments[0]}", file=sys.stderr)
+                print(f"[DEBUG] Last segment: {segments[-1]}", file=sys.stderr)
+
             result = analyze_with_ai(provider, endpoint_or_key, model, transcript_text, segments, output_file, custom_instructions, video_title)
             send_result(result)
 

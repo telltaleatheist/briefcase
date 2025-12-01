@@ -154,8 +154,12 @@
           "bin/yt-dlp_macos",
           "bin/yt-dlp.exe",
           "bin/yt-dlp_linux",
-          "bin/whisper-cpp",
-          "bin/whisper-cpp.exe",
+          "bin/whisper-cli",
+          "bin/whisper-cli.exe",
+          "bin/ggml.dll",
+          "bin/ggml-base.dll",
+          "bin/ggml-cpu.dll",
+          "bin/whisper.dll",
           "models/ggml-tiny.bin"
         ]
       }
