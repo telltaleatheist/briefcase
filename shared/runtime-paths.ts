@@ -1,9 +1,8 @@
 /**
- * Simple runtime path resolution for bundled binaries
- * No user configuration, no auto-detection, no complexity
- * Just returns the paths to bundled binaries
+ * Runtime path resolution for bundled binaries
+ * ALWAYS uses packaged binaries - NEVER falls back to system
  *
- * IMPORTANT: Works in both Electron main process AND backend Node.js process
+ * Works in both Electron main process AND backend Node.js process
  */
 
 import * as path from 'path';
@@ -25,13 +24,12 @@ function isPackaged(): boolean {
     return app.isPackaged;
   }
 
-  // Otherwise, check environment or process.resourcesPath
+  // Check environment variable set by production build
   if (process.env.NODE_ENV === 'production') {
     return true;
   }
 
   // If process.resourcesPath exists, check if it's actually packaged
-  // In development, Electron sets resourcesPath to the Electron binary's resources
   if ((process as any).resourcesPath) {
     const resPath = (process as any).resourcesPath;
     // If the path contains 'node_modules/electron', we're in development
@@ -46,10 +44,11 @@ function isPackaged(): boolean {
 
 /**
  * Get the base resources directory
+ * In dev mode, this is the project root
+ * In packaged mode, this is the resources folder
  */
 function getResourcesPath(): string {
   // In packaged app, use process.resourcesPath
-  // Must check isPackaged() because Electron sets resourcesPath even in development
   if ((process as any).resourcesPath && isPackaged()) {
     return (process as any).resourcesPath;
   }
@@ -59,7 +58,12 @@ function getResourcesPath(): string {
     return path.dirname(app.getAppPath());
   }
 
-  // Development: project root
+  // Development: project root (where package.json is)
+  // Check for CLIPCHIMP_PROJECT_ROOT env var first (set by dev scripts)
+  if (process.env.CLIPCHIMP_PROJECT_ROOT) {
+    return process.env.CLIPCHIMP_PROJECT_ROOT;
+  }
+
   return process.cwd();
 }
 
@@ -97,35 +101,28 @@ function getYtDlpBinaryName(): string {
 }
 
 /**
- * Try to find a command in PATH (for development mode)
- * Returns the full path if found, otherwise returns the command name
+ * Get the Python directory path
+ * In dev: dist-python/python-x64 (or python-arm64)
+ * In prod: resources/python
  */
-function findInPath(command: string): string {
-  const { execSync } = require('child_process');
-  try {
-    if (process.platform === 'win32') {
-      const result = execSync(`where ${command}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-      const lines = result.trim().split('\n');
-      if (lines.length > 0 && lines[0]) {
-        return lines[0].trim();
-      }
-    } else {
-      const result = execSync(`which ${command}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-      return result.trim();
-    }
-  } catch {
-    // Command not found in PATH
+function getPythonDir(resourcesPath: string): string {
+  if (isPackaged()) {
+    return path.join(resourcesPath, 'python');
   }
-  return command;
+
+  // In development, use the dist-python folder created by package-python-windows.js
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  return path.join(resourcesPath, 'dist-python', `python-${arch}`);
 }
 
 /**
  * Get all binary paths
- * Simple and direct - no detection, no validation, no fallbacks
+ * ALWAYS uses packaged/bundled binaries - NEVER falls back to system
  */
 export function getRuntimePaths() {
   const resourcesPath = getResourcesPath();
   const platformFolder = getPlatformFolder();
+  const pythonDir = getPythonDir(resourcesPath);
 
   return {
     // FFmpeg from npm installer package
@@ -146,36 +143,29 @@ export function getRuntimePaths() {
       getBinaryName('ffprobe')
     ),
 
-    // yt-dlp from utilities folder (packaged) or system (development)
-    ytdlp: isPackaged()
-      ? path.join(
-          resourcesPath,
-          'utilities',
-          'bin',
-          getYtDlpBinaryName()
-        )
-      : findInPath('yt-dlp'), // Find system yt-dlp in development
+    // yt-dlp from utilities folder - ALWAYS bundled
+    ytdlp: path.join(
+      resourcesPath,
+      'utilities',
+      'bin',
+      getYtDlpBinaryName()
+    ),
 
-    // Whisper from utilities folder (packaged) or system (development)
-    whisper: isPackaged()
-      ? path.join(
-          resourcesPath,
-          'utilities',
-          'bin',
-          process.platform === 'win32' ? 'whisper.exe' : 'whisper'
-        )
-      : findInPath('whisper'), // Find system whisper in development
+    // Whisper - no longer used directly (we use Python whisper now)
+    // Kept for backward compatibility but points to utilities folder
+    whisper: path.join(
+      resourcesPath,
+      'utilities',
+      'bin',
+      process.platform === 'win32' ? 'whisper.exe' : 'whisper'
+    ),
 
-    // Python from bundled runtime
-    // Windows: python/python.exe (embedded package has no bin folder)
-    // macOS/Linux: python/bin/python3 (standard layout)
-    python: isPackaged()
-      ? path.join(
-          resourcesPath,
-          'python',
-          ...(process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3'])
-        )
-      : findInPath(process.platform === 'win32' ? 'python' : 'python3'), // Find system Python in development
+    // Python from bundled runtime - ALWAYS bundled
+    // Windows: python.exe in root of python dir (embedded package)
+    // macOS/Linux: bin/python3 (standard layout)
+    python: process.platform === 'win32'
+      ? path.join(pythonDir, 'python.exe')
+      : path.join(pythonDir, 'bin', 'python3'),
 
     // Backend entry point
     backend: path.join(resourcesPath, 'backend', 'dist', 'main.js'),

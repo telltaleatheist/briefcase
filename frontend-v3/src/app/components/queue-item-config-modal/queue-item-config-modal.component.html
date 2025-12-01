@@ -41,11 +41,7 @@
                   [value]="getTaskConfig(task.type).model"
                   (change)="updateTaskConfig(task.type, { model: $any($event.target).value })"
                 >
-                  <option value="tiny">Tiny (Fastest, Less Accurate)</option>
-                  <option value="base">Base</option>
-                  <option value="small">Small</option>
-                  <option value="medium">Medium</option>
-                  <option value="large">Large (Slowest, Most Accurate)</option>
+                  <option value="tiny">Tiny (Bundled)</option>
                 </select>
               </div>
               <div class="form-group">

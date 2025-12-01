@@ -71,6 +71,10 @@ export class SharedConfigService {
     return getRuntimePaths().whisper;
   }
 
+  getPythonPath(): string {
+    return getRuntimePaths().python;
+  }
+
   // Legacy method - no longer needed but kept for compatibility
   getOutputDir(): string | undefined {
     return undefined;

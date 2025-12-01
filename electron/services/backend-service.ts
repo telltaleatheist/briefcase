@@ -10,20 +10,31 @@ import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 import { PortUtil } from '../utilities/port-util';
 
-// Import runtime paths for binary locations
-let getRuntimePaths: any;
-try {
-  // In packaged app, runtime-paths is in resources/dist-electron/shared/
-  // In development, it's built to dist-electron/shared/
-  if (app.isPackaged) {
-    const runtimePathsFile = path.join(process.resourcesPath!, 'dist-electron', 'shared', 'runtime-paths.js');
-    getRuntimePaths = require(runtimePathsFile).getRuntimePaths;
-  } else {
-    getRuntimePaths = require('../../dist-electron/shared/runtime-paths').getRuntimePaths;
+// Import runtime paths for binary locations - lazy loaded to avoid issues with app not being ready
+let _runtimePathsCache: any = null;
+function getRuntimePaths(): any {
+  if (_runtimePathsCache) {
+    return _runtimePathsCache;
   }
-} catch (error) {
-  log.warn('runtime-paths not available, will use environment variables:', error);
-  getRuntimePaths = () => ({ ffmpeg: '', ffprobe: '', ytdlp: '', python: '' });
+
+  try {
+    // In packaged app, runtime-paths is in resources/dist-electron/shared/
+    // In development, it's built to dist-electron/shared/
+    // This file compiles to dist-electron/electron/services/backend-service.js
+    // From there: ../../shared/runtime-paths goes to dist-electron/shared/runtime-paths
+    // (one level up to electron/, another level up to dist-electron/, then into shared/)
+    if (app && app.isPackaged) {
+      const runtimePathsFile = path.join(process.resourcesPath!, 'dist-electron', 'shared', 'runtime-paths.js');
+      _runtimePathsCache = require(runtimePathsFile).getRuntimePaths();
+    } else {
+      _runtimePathsCache = require('../../shared/runtime-paths').getRuntimePaths();
+    }
+  } catch (error) {
+    log.warn('runtime-paths not available, will use environment variables:', error);
+    _runtimePathsCache = { ffmpeg: '', ffprobe: '', ytdlp: '', python: '' };
+  }
+
+  return _runtimePathsCache;
 }
 
 /**

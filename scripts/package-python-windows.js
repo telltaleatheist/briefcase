@@ -156,9 +156,9 @@ function checkExistingEnvironment() {
     return { valid: false, reason: 'site-packages directory not found' };
   }
 
-  // Check for key packages
+  // Check for key packages (including AI provider SDKs)
   try {
-    const requiredPackages = ['whisper', 'torch', 'numpy'];
+    const requiredPackages = ['whisper', 'torch', 'numpy', 'openai', 'anthropic'];
     for (const pkg of requiredPackages) {
       const pkgExists = fs.readdirSync(sitePackagesDir).some(f => f.toLowerCase().includes(pkg.toLowerCase()));
       if (!pkgExists) {
@@ -288,8 +288,8 @@ async function packagePython() {
 
     console.log('✅ Python dependencies installed successfully');
 
-    // Download Whisper base model to bundle with installer
-    console.log('\n🎤 Downloading Whisper base model...');
+    // Download Whisper tiny model to bundle with installer
+    console.log('\n🎤 Downloading Whisper tiny model...');
     console.log('   This will be bundled to avoid first-run download');
 
     try {
@@ -298,7 +298,7 @@ async function packagePython() {
         fs.mkdirSync(cacheDir, { recursive: true });
       }
 
-      execSync(`"${pythonExe}" -c "import whisper; model = whisper.load_model('base'); print(f'Model loaded: {model}')"`, {
+      execSync(`"${pythonExe}" -c "import whisper; model = whisper.load_model('tiny'); print(f'Model loaded: {model}')"`, {
         stdio: 'inherit',
         cwd: PYTHON_DIR,
         env: {
@@ -308,7 +308,7 @@ async function packagePython() {
           XDG_CACHE_HOME: path.join(PYTHON_DIR, 'cache')
         }
       });
-      console.log('✅ Whisper base model downloaded and cached');
+      console.log('✅ Whisper tiny model downloaded and cached');
     } catch (error) {
       console.warn('⚠️  Warning: Failed to download Whisper model. It will download on first use.');
       console.warn(`   Error: ${error.message}`);
@@ -320,8 +320,8 @@ async function packagePython() {
 Architecture: ${TARGET_ARCH}
 Packaged on: ${new Date().toISOString()}
 System: Windows
-Whisper model: base (bundled in cache/)
-Dependencies: numpy 1.26.4, torch 2.1.2, openai-whisper
+Whisper model: tiny (bundled in cache/)
+Dependencies: numpy 1.26.4, torch 2.1.2, openai-whisper, openai, anthropic
 
 This is a bundled Python environment for ClipChimp.
 Do not modify or move files manually.

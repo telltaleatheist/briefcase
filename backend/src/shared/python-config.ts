@@ -28,16 +28,28 @@ function getUserDataPath(): string {
 }
 
 /**
- * Get Python from runtime paths
+ * Get Python path - prioritizes environment variable set by Electron
  */
 function getPythonPath(): string {
+  // First check environment variable - this is set by Electron when spawning the backend
+  // and by the dev-test-bundled.js script
+  if (process.env.PYTHON_PATH && process.env.PYTHON_PATH !== 'python') {
+    return process.env.PYTHON_PATH;
+  }
+
+  // Try to load runtime-paths module (for packaged app or when available)
   try {
     const getRuntimePaths = require('../../../dist-electron/shared/runtime-paths').getRuntimePaths;
-    return getRuntimePaths().python;
+    const paths = getRuntimePaths();
+    if (paths.python && paths.python !== 'python') {
+      return paths.python;
+    }
   } catch {
-    // Fallback to system Python in development
-    return process.platform === 'win32' ? 'python' : 'python3';
+    // Module not available - fall through to system Python
   }
+
+  // Fallback to system Python in development
+  return process.platform === 'win32' ? 'python' : 'python3';
 }
 
 /**
