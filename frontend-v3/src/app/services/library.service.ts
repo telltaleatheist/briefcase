@@ -905,33 +905,17 @@ export class LibraryService {
   }
 
   /**
-   * Relink an existing library to a new path
-   * PATCH /api/database/libraries/:id
-   */
-  relinkLibrary(libraryId: string, newPath: string): Observable<ApiResponse<Library>> {
-    return this.http.patch<any>(
-      `${this.API_BASE}/database/libraries/${libraryId}`,
-      { clipsFolderPath: newPath }
-    ).pipe(
-      map(response => ({
-        success: response.success,
-        data: response.library
-      }))
-    );
-  }
-
-  /**
-   * Import/discover a library from a path containing .library.db
+   * Open an existing library from a path containing .library.db
    * POST /api/database/libraries/open
    */
-  importLibrary(path: string): Observable<ApiResponse<Library>> {
+  openLibrary(path: string): Observable<ApiResponse<Library>> {
     return this.http.post<any>(
       `${this.API_BASE}/database/libraries/open`,
       { clipsFolderPath: path }
     ).pipe(
       map(response => {
         if (!response.success) {
-          throw new Error(response.error || 'Failed to import library');
+          throw new Error(response.error || 'Failed to open library');
         }
         return {
           success: true,
@@ -939,6 +923,13 @@ export class LibraryService {
         };
       })
     );
+  }
+
+  /**
+   * @deprecated Use openLibrary instead
+   */
+  importLibrary(path: string): Observable<ApiResponse<Library>> {
+    return this.openLibrary(path);
   }
 
   /**

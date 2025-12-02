@@ -73,6 +73,20 @@
         </select>
       </div>
 
+      <!-- Has Name Suggestions -->
+      <div class="filter-group">
+        <label>Name Suggestions</label>
+        <select
+          [(ngModel)]="filters.hasSuggestions"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option [ngValue]="null">Any</option>
+          <option [ngValue]="true">Has Suggestions</option>
+          <option [ngValue]="false">No Suggestions</option>
+        </select>
+      </div>
+
       <!-- Sort By -->
       <div class="filter-group">
         <label>Sort By</label>

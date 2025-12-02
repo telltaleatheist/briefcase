@@ -14,8 +14,8 @@ export interface NewLibrary {
   path: string;
 }
 
-export interface RelinkLibrary {
+export interface OpenLibrary {
   path: string;
 }
 
-export type LibraryManagerMode = 'select' | 'create' | 'relink';
+export type LibraryManagerMode = 'select' | 'create' | 'open';

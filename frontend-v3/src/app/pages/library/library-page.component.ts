@@ -14,7 +14,7 @@ import { ManagerTabComponent } from '../../components/manager-tab/manager-tab.co
 import { TabsTabComponent } from '../../components/tabs-tab/tabs-tab.component';
 import { NewTabDialogComponent } from '../../components/new-tab-dialog/new-tab-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
-import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
+import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
 import { QueueItemTask } from '../../models/queue.model';
 import { TaskType, AVAILABLE_TASKS } from '../../models/task.model';
 import { LibraryService } from '../../services/library.service';
@@ -1341,20 +1341,20 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  onLibraryRelinked(relink: RelinkLibrary) {
-    this.libraryService.importLibrary(relink.path).subscribe({
+  onLibraryOpened(openLib: OpenLibrary) {
+    this.libraryService.openLibrary(openLib.path).subscribe({
       next: (response) => {
         if (response.success) {
           this.currentLibrary.set(response.data);
           this.closeLibraryManager();
-          this.loadLibrary(); // Load videos for imported library
+          this.loadLibrary(); // Load videos for opened library
           this.loadLibraries(); // Refresh libraries list
         }
       },
       error: (error) => {
-        console.error('Failed to import library:', error);
-        const message = error.error?.error || 'Failed to import library. Make sure the folder contains a .library.db file.';
-        this.notificationService.error('Import Failed', message);
+        console.error('Failed to open library:', error);
+        const message = error.error?.error || 'Failed to open library. Make sure the folder contains a .library.db file.';
+        this.notificationService.error('Open Failed', message);
       }
     });
   }
@@ -1428,11 +1428,45 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     }
 
-    // No search query - apply sorting to all videos
-    const weeks = this.videoWeeks().map(week => ({
+    // No search query - apply filters and sorting to all videos
+    let weeks = this.videoWeeks().map(week => ({
       weekLabel: week.weekLabel,
       videos: [...week.videos]
     }));
+
+    // Apply hasSuggestions filter
+    if (this.currentFilters.hasSuggestions !== null) {
+      const wantsSuggestions = this.currentFilters.hasSuggestions;
+      weeks = weeks.map(week => ({
+        weekLabel: week.weekLabel,
+        videos: week.videos.filter(video =>
+          wantsSuggestions ? !!video.suggestedTitle : !video.suggestedTitle
+        )
+      })).filter(week => week.videos.length > 0);
+    }
+
+    // Apply hasTranscript filter
+    if (this.currentFilters.hasTranscript !== null) {
+      const wantsTranscript = this.currentFilters.hasTranscript;
+      weeks = weeks.map(week => ({
+        weekLabel: week.weekLabel,
+        videos: week.videos.filter(video =>
+          wantsTranscript ? video.hasTranscript : !video.hasTranscript
+        )
+      })).filter(week => week.videos.length > 0);
+    }
+
+    // Apply hasAnalysis filter
+    if (this.currentFilters.hasAnalysis !== null) {
+      const wantsAnalysis = this.currentFilters.hasAnalysis;
+      weeks = weeks.map(week => ({
+        weekLabel: week.weekLabel,
+        videos: week.videos.filter(video =>
+          wantsAnalysis ? video.hasAnalysis : !video.hasAnalysis
+        )
+      })).filter(week => week.videos.length > 0);
+    }
+
     this.sortFilteredWeeks(weeks);
     this.filteredWeeks.set(weeks);
   }

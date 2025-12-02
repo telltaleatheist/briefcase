@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { CascadeComponent } from '../../components/cascade/cascade.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { VideoWeek } from '../../models/video.model';
-import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
+import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
 import { CardComponent } from '../../components/card/card.component';
 
 @Component({
@@ -201,10 +201,10 @@ export class FilesComponent {
     alert(`Created new library: ${newLibrary.name}\nPath: ${newLibrary.path}`);
   }
 
-  // Handle library relink
-  onLibraryRelinked(relinkData: RelinkLibrary) {
-    console.log('Relinked library:', relinkData);
+  // Handle library open
+  onLibraryOpened(openData: OpenLibrary) {
+    console.log('Opened library:', openData);
     // Here you would scan the folder and load the existing library
-    alert(`Relinking to library at:\n${relinkData.path}`);
+    alert(`Opening library at:\n${openData.path}`);
   }
 }

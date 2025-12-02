@@ -8,7 +8,7 @@ import { LoggerService } from '../../services/logger.service';
 import { NotificationService } from '../../services/notification.service';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { NotificationBellComponent } from '../../components/notification-bell/notification-bell.component';
-import { Library, NewLibrary, RelinkLibrary } from '../../models/library.model';
+import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
 
 @Component({
   selector: 'app-navigation',
@@ -95,22 +95,23 @@ export class NavigationComponent {
     });
   }
 
-  onLibraryRelinked(relink: RelinkLibrary) {
-    const currentLib = this.libraryService.currentLibrary();
-    if (currentLib) {
-      this.libraryService.relinkLibrary(currentLib.id, relink.path).subscribe({
-        next: (response) => {
-          if (response.success) {
-            this.libraryService.currentLibrary.set(response.data);
-            this.notificationService.success('Library Relinked', 'Library relinked successfully!');
-          }
-        },
-        error: (error) => {
-          console.error('Failed to relink library:', error);
-          this.notificationService.error('Relink Failed', 'Failed to relink library. Please try again.');
+  onLibraryOpened(openLib: OpenLibrary) {
+    // Open an existing library from a folder containing .library.db
+    this.libraryService.openLibrary(openLib.path).subscribe({
+      next: (response) => {
+        if (response.success) {
+          // Refresh the libraries list to show the new library
+          this.libraryService.refreshLibraries();
+          // Switch to the imported library
+          this.libraryService.currentLibrary.set(response.data);
+          this.notificationService.success('Library Opened', `Library "${response.data.name}" opened successfully!`);
         }
-      });
-    }
+      },
+      error: (error) => {
+        console.error('Failed to open library:', error);
+        this.notificationService.error('Open Failed', error.message || 'Failed to open library. Make sure the folder contains a .library.db file.');
+      }
+    });
   }
 
   onLibraryUpdated(update: { id: string; name: string; path: string }) {

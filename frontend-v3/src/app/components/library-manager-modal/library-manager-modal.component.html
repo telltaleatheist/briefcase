@@ -30,11 +30,11 @@
         </button>
         <button
           class="tab-btn"
-          [class.active]="mode() === 'relink'"
-          (click)="switchMode('relink')"
+          [class.active]="mode() === 'open'"
+          (click)="switchMode('open')"
         >
-          <span class="tab-icon">🔗</span>
-          <span class="tab-label">Relink</span>
+          <span class="tab-icon">📂</span>
+          <span class="tab-label">Open</span>
         </button>
       </div>
 
@@ -189,47 +189,46 @@
           </div>
         }
 
-        <!-- Relink Library Mode -->
-        @if (mode() === 'relink') {
-          <div class="relink-mode">
+        <!-- Open Library Mode -->
+        @if (mode() === 'open') {
+          <div class="open-mode">
             <div class="form-section">
-              <h3 class="section-title">Reconnect to Existing Library</h3>
+              <h3 class="section-title">Open Existing Library</h3>
               <p class="section-description">
-                Browse to the folder containing an existing library to reconnect it.
-                This is useful if you've moved a library or need to access one from a different location.
+                Browse to a folder containing an existing library database (.library.db) to add it to your library list.
               </p>
 
               <!-- Library Location -->
               <div class="form-group">
-                <label class="form-label" for="relink-path">
+                <label class="form-label" for="open-path">
                   <span class="label-icon">📂</span>
                   Library Folder Path
                 </label>
                 <div class="path-input-group">
                   <input
-                    id="relink-path"
+                    id="open-path"
                     type="text"
                     class="form-input path-input"
                     placeholder="e.g., /Users/username/Videos/MyLibrary"
-                    [value]="relinkPath()"
-                    (input)="relinkPath.set($any($event.target).value)"
+                    [value]="openLibraryPath()"
+                    (input)="openLibraryPath.set($any($event.target).value)"
                     autofocus
                   />
-                  <button class="browse-btn" (click)="browseRelinkPath()">
+                  <button class="browse-btn" (click)="browseOpenLibraryPath()">
                     <span class="browse-icon">🔍</span>
                     Browse
                   </button>
                 </div>
-                <p class="input-hint">Select the folder that contains your existing library files</p>
+                <p class="input-hint">Select the folder that contains your existing library</p>
               </div>
 
               <!-- Info Box -->
               <div class="info-box">
                 <div class="info-icon">💡</div>
                 <div class="info-content">
-                  <h4 class="info-title">What happens when relinking?</h4>
+                  <h4 class="info-title">What happens when opening a library?</h4>
                   <ul class="info-list">
-                    <li>The app will scan the folder for existing library data</li>
+                    <li>The app will load the library database from the folder</li>
                     <li>Your videos and organization will be preserved</li>
                     <li>The library will appear in your libraries list</li>
                   </ul>
@@ -237,14 +236,14 @@
               </div>
 
               <!-- Preview -->
-              @if (relinkPath()) {
+              @if (openLibraryPath()) {
                 <div class="preview-section">
                   <h4 class="preview-title">Selected Path</h4>
-                  <div class="preview-card relink-preview">
-                    <div class="preview-icon">🔗</div>
+                  <div class="preview-card open-preview">
+                    <div class="preview-icon">📂</div>
                     <div class="preview-info">
-                      <div class="preview-label">Relinking to:</div>
-                      <div class="preview-path">{{ relinkPath() }}</div>
+                      <div class="preview-label">Opening from:</div>
+                      <div class="preview-path">{{ openLibraryPath() }}</div>
                     </div>
                   </div>
                 </div>
@@ -271,8 +270,8 @@
             <span class="btn-icon">➕</span>
             <span>Create Library</span>
           } @else {
-            <span class="btn-icon">🔗</span>
-            <span>Relink Library</span>
+            <span class="btn-icon">📂</span>
+            <span>Open Library</span>
           }
         </button>
       </div>

@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, signal, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Library, NewLibrary, RelinkLibrary, LibraryManagerMode } from '../../models/library.model';
+import { Library, NewLibrary, OpenLibrary, LibraryManagerMode } from '../../models/library.model';
 import { VideoWeek, VideoItem, DeleteMode } from '../../models/video.model';
 import { ElectronService } from '../../services/electron.service';
 import { CascadeComponent } from '../cascade/cascade.component';
@@ -21,7 +21,7 @@ export class LibraryManagerModalComponent {
   @Output() closed = new EventEmitter<void>();
   @Output() librarySelected = new EventEmitter<Library>();
   @Output() libraryCreated = new EventEmitter<NewLibrary>();
-  @Output() libraryRelinked = new EventEmitter<RelinkLibrary>();
+  @Output() libraryOpened = new EventEmitter<OpenLibrary>();
   @Output() librariesDeleted = new EventEmitter<string[]>();
   @Output() libraryUpdated = new EventEmitter<{ id: string; name: string; path: string }>();
 
@@ -46,8 +46,8 @@ export class LibraryManagerModalComponent {
   newLibraryName = signal('');
   newLibraryPath = signal('');
 
-  // Relink library path
-  relinkPath = signal('');
+  // Open library path
+  openLibraryPath = signal('');
 
   // Transform libraries into Cascade format
   libraryWeeks = computed<VideoWeek[]>(() => {
@@ -182,7 +182,7 @@ export class LibraryManagerModalComponent {
     this.selectedLibrary.set(null);
     this.newLibraryName.set('');
     this.newLibraryPath.set('');
-    this.relinkPath.set('');
+    this.openLibraryPath.set('');
   }
 
   // Select an existing library
@@ -198,11 +198,11 @@ export class LibraryManagerModalComponent {
     }
   }
 
-  // Browse for existing library folder (relink mode)
-  async browseRelinkPath() {
+  // Browse for existing library folder (open mode)
+  async browseOpenLibraryPath() {
     const selectedPath = await this.electronService.selectDirectory();
     if (selectedPath) {
-      this.relinkPath.set(selectedPath);
+      this.openLibraryPath.set(selectedPath);
     }
   }
 
@@ -222,11 +222,11 @@ export class LibraryManagerModalComponent {
         this.libraryCreated.emit({ name, path });
         this.close();
       }
-    } else if (this.mode() === 'relink') {
-      const path = this.relinkPath().trim();
+    } else if (this.mode() === 'open') {
+      const path = this.openLibraryPath().trim();
 
       if (path) {
-        this.libraryRelinked.emit({ path });
+        this.libraryOpened.emit({ path });
         this.close();
       }
     }
@@ -245,7 +245,7 @@ export class LibraryManagerModalComponent {
     this.selectedLibraryIds.set(new Set());
     this.newLibraryName.set('');
     this.newLibraryPath.set('');
-    this.relinkPath.set('');
+    this.openLibraryPath.set('');
     this.showDeleteConfirm.set(false);
     this.editingLibrary.set(null);
     this.editName.set('');
@@ -258,8 +258,8 @@ export class LibraryManagerModalComponent {
       return this.selectedLibrary() !== null;
     } else if (this.mode() === 'create') {
       return this.newLibraryName().trim() !== '' && this.newLibraryPath().trim() !== '';
-    } else if (this.mode() === 'relink') {
-      return this.relinkPath().trim() !== '';
+    } else if (this.mode() === 'open') {
+      return this.openLibraryPath().trim() !== '';
     }
     return false;
   }

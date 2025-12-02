@@ -2537,21 +2537,39 @@ export class DatabaseController {
 
   /**
    * PATCH /api/database/libraries/:id
-   * Rename a library
+   * Update a library (name and/or clipsFolderPath)
    */
   @Patch('libraries/:id')
-  renameLibrary(@Param('id') id: string, @Body() body: { name: string }) {
-    if (!body.name || typeof body.name !== 'string') {
+  updateLibrary(@Param('id') id: string, @Body() body: { name?: string; clipsFolderPath?: string }) {
+    if (!body.name && !body.clipsFolderPath) {
       return {
         success: false,
-        error: 'Library name is required',
+        error: 'At least one of name or clipsFolderPath is required',
       };
     }
 
-    const success = this.libraryManagerService.renameLibrary(id, body.name);
+    let success = true;
+    const updates: string[] = [];
+
+    // Update name if provided
+    if (body.name && typeof body.name === 'string') {
+      success = this.libraryManagerService.renameLibrary(id, body.name) && success;
+      if (success) updates.push('name');
+    }
+
+    // Update clipsFolderPath if provided
+    if (body.clipsFolderPath && typeof body.clipsFolderPath === 'string') {
+      success = this.libraryManagerService.updateLibraryClipsFolder(id, body.clipsFolderPath) && success;
+      if (success) updates.push('clipsFolderPath');
+    }
+
+    // Return the updated library
+    const library = this.libraryManagerService.getAllLibraries().find((lib) => lib.id === id);
+
     return {
       success,
-      message: success ? 'Library renamed' : 'Library not found',
+      message: success ? `Library updated (${updates.join(', ')})` : 'Library not found',
+      library,
     };
   }
 

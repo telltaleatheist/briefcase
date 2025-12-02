@@ -7,6 +7,7 @@ export interface LibraryFilters {
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
   hasTranscript: boolean | null;
   hasAnalysis: boolean | null;
+  hasSuggestions: boolean | null;
   sortBy: 'date' | 'name' | 'duration' | 'suggestions' | 'no-analysis' | 'no-transcript';
   sortOrder: 'asc' | 'desc';
 }
@@ -28,6 +29,7 @@ export class LibrarySearchFiltersComponent {
     dateRange: 'all',
     hasTranscript: null,
     hasAnalysis: null,
+    hasSuggestions: null,
     sortBy: 'date',
     sortOrder: 'desc'
   };
@@ -50,6 +52,7 @@ export class LibrarySearchFiltersComponent {
       dateRange: 'all',
       hasTranscript: null,
       hasAnalysis: null,
+      hasSuggestions: null,
       sortBy: 'date',
       sortOrder: 'desc'
     };
