@@ -1371,9 +1371,19 @@ export class AnalysisService implements OnModuleInit {
       return segments;
     }
 
+    // Debug: Log raw SRT content info
+    this.logger.log(`[parseSrtToSegments] Raw SRT length: ${srtContent.length}`);
+    this.logger.log(`[parseSrtToSegments] First 200 chars: ${JSON.stringify(srtContent.substring(0, 200))}`);
+    this.logger.log(`[parseSrtToSegments] Contains \\r\\n: ${srtContent.includes('\r\n')}, Contains \\r: ${srtContent.includes('\r')}, Contains \\n: ${srtContent.includes('\n')}`);
+
     // Normalize line endings: convert \r\n (Windows) to \n (Unix)
     const normalizedContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const blocks = normalizedContent.split('\n\n').filter(b => b.trim());
+
+    this.logger.log(`[parseSrtToSegments] After normalization, found ${blocks.length} blocks`);
+    if (blocks.length > 0) {
+      this.logger.log(`[parseSrtToSegments] First block: ${JSON.stringify(blocks[0].substring(0, 150))}`);
+    }
 
     for (const block of blocks) {
       const lines = block.split('\n');
@@ -1405,6 +1415,14 @@ export class AnalysisService implements OnModuleInit {
           end,
           text: textLines.join(' ')
         });
+      }
+    }
+
+    this.logger.log(`[parseSrtToSegments] Parsed ${segments.length} segments`);
+    if (segments.length > 0) {
+      this.logger.log(`[parseSrtToSegments] First segment: start=${segments[0].start}, end=${segments[0].end}, text="${segments[0].text.substring(0, 50)}..."`);
+      if (segments.length > 1) {
+        this.logger.log(`[parseSrtToSegments] Second segment: start=${segments[1].start}, end=${segments[1].end}`);
       }
     }
 

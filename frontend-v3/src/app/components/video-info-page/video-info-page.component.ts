@@ -305,7 +305,9 @@ export class VideoInfoPageComponent implements OnInit {
    */
   private parseSrtToSegments(srtContent: string): TranscriptionSegment[] {
     const segments: TranscriptionSegment[] = [];
-    const blocks = srtContent.trim().split(/\n\n+/);
+    // Normalize line endings: convert \r\n (Windows) to \n (Unix)
+    const normalizedContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const blocks = normalizedContent.trim().split(/\n\n+/);
 
     for (const block of blocks) {
       const lines = block.split('\n');
