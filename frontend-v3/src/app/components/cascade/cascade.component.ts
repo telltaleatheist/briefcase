@@ -988,7 +988,7 @@ export class CascadeComponent {
     const mediaType = video.mediaType?.toLowerCase() || '';
     const ext = video.fileExtension?.toLowerCase() || '';
 
-    const nonVideoExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.pdf', '.doc', '.docx', '.txt', '.md'];
+    const nonVideoExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.pdf', '.doc', '.docx', '.txt', '.md', '.mhtml', '.html', '.htm'];
     const isNonVideo = mediaType.startsWith('image/') ||
                        mediaType === 'application/pdf' ||
                        nonVideoExtensions.some(e => ext === e || video.name?.toLowerCase().endsWith(e));
