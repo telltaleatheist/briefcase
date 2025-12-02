@@ -25,8 +25,9 @@ backend-prod-temp/
 bin/*
 
 # Large binary files and models (downloaded at runtime)
-utilities/bin/whisper-cpp
-utilities/bin/whisper-cpp.exe
+utilities/bin/whisper-cli
+utilities/bin/whisper-cli.exe
+utilities/bin/*.dylib
 utilities/models/*.bin
 saved-links/*.mov
 saved-links/*.mp4
@@ -103,3 +104,5 @@ Modelfile
 !backend/node_modules/.gitkeep
 clipchimp-console*
 utilities/bin/*.dll
+utilities/bin/*.dylib
+utilities/bin/whisper-cli
