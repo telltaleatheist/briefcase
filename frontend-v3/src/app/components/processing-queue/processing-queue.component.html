@@ -6,6 +6,16 @@
       <span class="queue-count">({{ items.length }} {{ items.length === 1 ? 'item' : 'items' }})</span>
     </div>
     <div class="queue-actions">
+      <button
+        class="btn btn-primary btn-start-header"
+        *ngIf="canProcess()"
+        (click)="processQueue.emit(); $event.stopPropagation()"
+        title="Start processing all pending items"
+      >
+        <span class="btn-icon">▶</span>
+        <span>Start Processing</span>
+        <span class="task-count">({{ items.length }})</span>
+      </button>
       <span class="expand-icon" [attr.aria-label]="expanded ? 'Collapse queue' : 'Expand queue'">
         {{ expanded ? '▼' : '▲' }}
       </span>
@@ -140,22 +150,11 @@
 
     <!-- Queue Footer -->
     <div class="queue-footer" *ngIf="items.length > 0">
-      <div class="footer-left">
-        <button class="btn btn-secondary" (click)="clearQueue.emit()">
-          Clear Queue
-        </button>
-        <button class="btn btn-secondary" (click)="openBulkConfigModal()">
-          ⚙️ Apply to All
-        </button>
-      </div>
-      <button
-        class="btn btn-primary"
-        (click)="processQueue.emit()"
-        [disabled]="!canProcess()"
-      >
-        <span>Start Processing</span>
-        <span class="task-count" *ngIf="items.length > 0">
-          ({{ items.length }} {{ items.length === 1 ? 'job' : 'jobs' }})</span>
+      <button class="btn btn-secondary" (click)="clearQueue.emit()">
+        Clear Queue
+      </button>
+      <button class="btn btn-secondary" (click)="openBulkConfigModal()">
+        ⚙️ Apply to All
       </button>
     </div>
   </div>

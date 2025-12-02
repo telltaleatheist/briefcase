@@ -93,7 +93,25 @@
 .queue-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+}
+
+// Start Processing button in header
+.btn-start-header {
+  padding: 8px 16px;
+  font-size: 13px;
+
+  .btn-icon {
+    width: auto;
+    height: auto;
+    background: transparent;
+    font-size: 12px;
+  }
+
+  .task-count {
+    font-size: 11px;
+    opacity: 0.9;
+  }
 }
 
 .btn-icon {
@@ -553,17 +571,11 @@
 .queue-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 8px;
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border-color);
-
-  .footer-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
 }
 
 .btn {

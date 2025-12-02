@@ -50,6 +50,17 @@
         <span>Add to Queue</span>
         <span class="badge">{{ selectedCount() }}</span>
       </button>
+      <!-- Start Processing button -->
+      @if (hasPendingItems) {
+        <button
+          class="btn btn-primary start-processing-btn"
+          (click)="startProcessing()"
+          title="Start processing all pending items">
+          <span class="btn-icon">▶</span>
+          <span>Start Processing</span>
+          <span class="badge">{{ queueStats.pending }}</span>
+        </button>
+      }
     </div>
   </div>
 
@@ -91,16 +102,6 @@
   <div class="url-input-bar" *ngIf="activeTab() === 'library'">
     <span class="url-input-label">Add to Queue:</span>
     <app-url-input (urlsAdded)="onUrlsAdded($event)" />
-    @if (hasPendingItems) {
-      <button
-        class="start-queue-btn"
-        (click)="startProcessing()"
-        title="Start processing all pending items">
-        <span class="btn-icon">▶</span>
-        <span>Start Processing</span>
-        <span class="badge">{{ queueStats.pending }}</span>
-      </button>
-    }
   </div>
 
   <!-- Main Container with Drag & Drop -->

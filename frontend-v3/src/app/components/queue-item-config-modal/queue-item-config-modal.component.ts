@@ -324,7 +324,7 @@ export class QueueItemConfigModalComponent implements OnInit {
       case 'download-import':
         return { quality: 'best', format: 'mp4' } as DownloadImportConfig;
       case 'transcribe':
-        return { model: 'tiny', translate: false } as TranscribeConfig;
+        return { model: 'base', translate: false } as TranscribeConfig;
       case 'ai-analyze':
         return {
           aiModel: this.defaultAIModel

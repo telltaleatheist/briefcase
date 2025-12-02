@@ -127,8 +127,12 @@ export class WhisperManager extends EventEmitter {
     const possiblePaths = [
       // Packaged app paths
       path.join((process as any).resourcesPath || '', 'utilities', 'models'),
-      // Development paths
-      path.join(__dirname, '..', '..', '..', '..', 'utilities', 'models'),
+      // Development paths - backend runs from backend/ subdir
+      // __dirname is backend/dist/media, need to go up 3 to get to backend/, then up 1 more for project root
+      path.join(__dirname, '..', '..', '..', 'utilities', 'models'),
+      // process.cwd() in dev is backend/, need to go up 1 for project root
+      path.join(process.cwd(), '..', 'utilities', 'models'),
+      // Also check if cwd is project root (when run directly)
       path.join(process.cwd(), 'utilities', 'models'),
     ];
 

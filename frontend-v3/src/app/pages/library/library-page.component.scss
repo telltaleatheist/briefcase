@@ -413,6 +413,11 @@
   &:active:not(:disabled) {
     transform: translateY(0);
   }
+
+  .badge {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+  }
 }
 
 .btn-secondary {

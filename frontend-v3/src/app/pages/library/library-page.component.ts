@@ -1066,7 +1066,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       fixAspectRatio: false,
       normalizeAudio: false,
       transcribe: false,
-      whisperModel: 'tiny',
+      whisperModel: 'base',
       aiAnalysis: false,
       outputFormat: 'mp4',
       outputQuality: 'high'
@@ -1811,7 +1811,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         type: 'transcribe',
         status: 'pending',
         progress: 0,
-        config: { model: 'tiny' }
+        config: { model: 'base' }
       },
       {
         type: 'ai-analyze',
