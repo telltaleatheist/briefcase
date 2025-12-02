@@ -76,7 +76,9 @@
                 <div class="form-group">
                   <label>Whisper Model</label>
                   <select [(ngModel)]="settings.whisperModel">
-                    <option value="tiny">Tiny (Bundled)</option>
+                    <option value="tiny">Tiny (Fast, ~75MB)</option>
+                    <option value="base">Base (Balanced, ~142MB)</option>
+                    <option value="small">Small (Accurate, ~466MB)</option>
                   </select>
                 </div>
               </div>

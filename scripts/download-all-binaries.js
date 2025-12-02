@@ -51,11 +51,11 @@ async function downloadAllBinaries() {
     console.log('║         All Binaries Ready! ✅                            ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
     console.log('Summary:');
-    console.log('  ✅ yt-dlp:      utilities/bin/');
-    console.log('  ✅ whisper.cpp: utilities/bin/');
-    console.log('  ✅ whisper model: utilities/models/ggml-tiny.bin');
-    console.log('  ✅ ffmpeg:      node_modules/@ffmpeg-installer/');
-    console.log('  ✅ ffprobe:     node_modules/@ffprobe-installer/');
+    console.log('  ✅ yt-dlp:        utilities/bin/');
+    console.log('  ✅ whisper.cpp:   utilities/bin/');
+    console.log('  ✅ whisper models: utilities/models/ (tiny, base, small)');
+    console.log('  ✅ ffmpeg:        node_modules/@ffmpeg-installer/');
+    console.log('  ✅ ffprobe:       node_modules/@ffprobe-installer/');
     console.log('\n💾 Cached in: .build-cache/\n');
 
   } catch (error) {

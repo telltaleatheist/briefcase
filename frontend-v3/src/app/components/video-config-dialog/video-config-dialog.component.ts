@@ -36,7 +36,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     fixAspectRatio: false,
     normalizeAudio: false,
     transcribe: false,
-    whisperModel: 'tiny',
+    whisperModel: 'base',
     aiAnalysis: false,
     aiModel: '',
     customInstructions: '',
@@ -259,7 +259,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
       fixAspectRatio: false,
       normalizeAudio: false,
       transcribe: false,
-      whisperModel: 'tiny',
+      whisperModel: 'base',
       aiAnalysis: false,
       aiModel: '', // Will be set from saved default when dialog reopens
       customInstructions: '',

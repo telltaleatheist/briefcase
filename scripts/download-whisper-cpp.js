@@ -27,9 +27,12 @@ const CACHE_DIR = path.join(__dirname, '..', '.build-cache', 'whisper-cpp');
 // whisper.cpp release version
 const WHISPER_CPP_VERSION = '1.8.2';
 
-// Model to bundle
-const MODEL_NAME = 'ggml-tiny.bin';
-const MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin';
+// Models to bundle (tiny, base, small)
+const MODELS = [
+  { name: 'ggml-tiny.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin', size: '~75MB' },
+  { name: 'ggml-base.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin', size: '~142MB' },
+  { name: 'ggml-small.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin', size: '~466MB' },
+];
 
 // Windows pre-built binary URL
 const WINDOWS_BINARY_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/v${WHISPER_CPP_VERSION}/whisper-bin-x64.zip`;
@@ -465,33 +468,45 @@ async function buildFromSource() {
 }
 
 /**
- * Download the Whisper model
+ * Download all Whisper models
  */
-async function downloadModel() {
-  const cacheModelPath = path.join(CACHE_DIR, MODEL_NAME);
-  const destModelPath = path.join(MODELS_DIR, MODEL_NAME);
+async function downloadModels() {
+  const downloadedModels = [];
 
-  if (fs.existsSync(cacheModelPath)) {
-    console.log(`✅ Whisper model found in cache`);
+  for (const model of MODELS) {
+    const cacheModelPath = path.join(CACHE_DIR, model.name);
+    const destModelPath = path.join(MODELS_DIR, model.name);
+
+    if (fs.existsSync(destModelPath)) {
+      const stats = fs.statSync(destModelPath);
+      if (stats.size > 1000000) { // > 1MB means it's a real model file
+        console.log(`✅ ${model.name} already exists (${(stats.size / 1024 / 1024).toFixed(1)}MB)`);
+        downloadedModels.push(destModelPath);
+        continue;
+      }
+    }
+
+    if (fs.existsSync(cacheModelPath)) {
+      const stats = fs.statSync(cacheModelPath);
+      if (stats.size > 1000000) {
+        console.log(`✅ ${model.name} found in cache`);
+        fs.copyFileSync(cacheModelPath, destModelPath);
+        downloadedModels.push(destModelPath);
+        continue;
+      }
+    }
+
+    console.log(`📥 Downloading ${model.name} (${model.size})...`);
+    console.log(`   URL: ${model.url}`);
+
+    await downloadFile(model.url, cacheModelPath);
     fs.copyFileSync(cacheModelPath, destModelPath);
-    return destModelPath;
+
+    console.log(`✅ Model installed: ${model.name}`);
+    downloadedModels.push(destModelPath);
   }
 
-  if (fs.existsSync(destModelPath)) {
-    console.log(`✅ Whisper model already exists`);
-    fs.copyFileSync(destModelPath, cacheModelPath);
-    return destModelPath;
-  }
-
-  console.log(`📥 Downloading Whisper model (${MODEL_NAME})...`);
-  console.log(`   URL: ${MODEL_URL}`);
-  console.log('   This may take a few minutes (~75MB)...');
-
-  await downloadFile(MODEL_URL, cacheModelPath);
-  fs.copyFileSync(cacheModelPath, destModelPath);
-
-  console.log(`✅ Model installed: ${MODEL_NAME}`);
-  return destModelPath;
+  return downloadedModels;
 }
 
 /**
@@ -526,15 +541,18 @@ async function main() {
       binaryPath = await buildFromSource();
     }
 
-    // Download model
-    console.log('\n📋 Step 2: Download Whisper model\n');
-    const modelPath = await downloadModel();
+    // Download models
+    console.log('\n📋 Step 2: Download Whisper models (tiny, base, small)\n');
+    const modelPaths = await downloadModels();
 
     console.log('\n╔═══════════════════════════════════════════════════════════╗');
     console.log('║         whisper.cpp Setup Complete! ✅                    ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
     console.log(`📁 Binary: ${binaryPath}`);
-    console.log(`📁 Model: ${modelPath}`);
+    console.log(`📁 Models: ${modelPaths.length} models installed`);
+    for (const mp of modelPaths) {
+      console.log(`   - ${path.basename(mp)}`);
+    }
     console.log('\n💾 Files cached in .build-cache/whisper-cpp/ for reuse\n');
 
   } catch (error) {

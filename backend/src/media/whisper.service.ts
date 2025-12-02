@@ -15,10 +15,11 @@ export class WhisperService {
     private readonly sharedConfigService: SharedConfigService
   ) {}
 
-  async transcribeVideo(videoFile: string, jobId?: string): Promise<string | null> {
+  async transcribeVideo(videoFile: string, jobId?: string, model?: string): Promise<string | null> {
     console.log(`[WHISPER SERVICE] Transcription started`);
     console.log(`[WHISPER SERVICE] Video file: ${videoFile}`);
     console.log(`[WHISPER SERVICE] Job ID: ${jobId}`);
+    console.log(`[WHISPER SERVICE] Model: ${model || 'default'}`);
 
     let outputDir: string | undefined;
     let audioFile: string | undefined;
@@ -71,7 +72,7 @@ export class WhisperService {
       this.eventService.emitTranscriptionStarted(videoFile, jobId);
 
       // Start transcription on the extracted audio file
-      const srtFile = await whisperManager.transcribe(audioFile, outputDir);
+      const srtFile = await whisperManager.transcribe(audioFile, outputDir, model);
 
       if (srtFile && fs.existsSync(srtFile)) {
         this.logger.log(`Transcription completed: ${srtFile}`);

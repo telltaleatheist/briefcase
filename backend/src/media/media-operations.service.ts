@@ -450,7 +450,7 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 0, 'Starting transcription...');
 
-      const transcriptFile = await this.whisperService.transcribeVideo(videoPath, jobId);
+      const transcriptFile = await this.whisperService.transcribeVideo(videoPath, jobId, options.model);
 
       if (!transcriptFile) {
         throw new Error('Transcription failed');

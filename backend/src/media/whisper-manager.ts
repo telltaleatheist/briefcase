@@ -23,7 +23,11 @@ export class WhisperManager extends EventEmitter {
   private lastReportedPercent = 0;
 
   private whisperPath: string;
-  private modelPath: string;
+  private modelsDir: string;
+
+  // Available models - these are bundled with the app
+  private static readonly AVAILABLE_MODELS = ['tiny', 'base', 'small'];
+  private static readonly DEFAULT_MODEL = 'base';
 
   constructor(private readonly sharedConfigService: SharedConfigService) {
     super();
@@ -39,14 +43,14 @@ export class WhisperManager extends EventEmitter {
     this.logger.log(`__dirname: ${__dirname}`);
 
     this.whisperPath = this.getWhisperCppPath();
-    this.modelPath = this.getModelPath();
+    this.modelsDir = this.getModelsDir();
 
     this.logger.log('-'.repeat(60));
     this.logger.log('RESOLVED PATHS:');
     this.logger.log(`  Whisper binary: ${this.whisperPath}`);
     this.logger.log(`  Whisper binary exists: ${fs.existsSync(this.whisperPath)}`);
-    this.logger.log(`  Model file: ${this.modelPath}`);
-    this.logger.log(`  Model file exists: ${fs.existsSync(this.modelPath)}`);
+    this.logger.log(`  Models directory: ${this.modelsDir}`);
+    this.logger.log(`  Models directory exists: ${fs.existsSync(this.modelsDir)}`);
 
     if (fs.existsSync(this.whisperPath)) {
       const stats = fs.statSync(this.whisperPath);
@@ -54,9 +58,12 @@ export class WhisperManager extends EventEmitter {
       this.logger.log(`  Whisper binary permissions: ${stats.mode.toString(8)}`);
     }
 
-    if (fs.existsSync(this.modelPath)) {
-      const stats = fs.statSync(this.modelPath);
-      this.logger.log(`  Model file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+    // Log available models
+    this.logger.log('  Available models:');
+    for (const model of WhisperManager.AVAILABLE_MODELS) {
+      const modelPath = path.join(this.modelsDir, `ggml-${model}.bin`);
+      const exists = fs.existsSync(modelPath);
+      this.logger.log(`    - ${model}: ${exists ? '✓' : '✗'}`);
     }
 
     this.logger.log('='.repeat(60));
@@ -110,35 +117,19 @@ export class WhisperManager extends EventEmitter {
   }
 
   /**
-   * Get the path to the Whisper model file
+   * Get the models directory path
    */
-  private getModelPath(): string {
-    const modelName = 'ggml-tiny.bin';
-
+  private getModelsDir(): string {
     this.logger.log('-'.repeat(60));
-    this.logger.log('RESOLVING WHISPER MODEL PATH');
-    this.logger.log(`  Looking for: ${modelName}`);
-
-    // Check environment variable first
-    if (process.env.WHISPER_MODEL_PATH) {
-      this.logger.log(`  ENV WHISPER_MODEL_PATH: ${process.env.WHISPER_MODEL_PATH}`);
-      if (fs.existsSync(process.env.WHISPER_MODEL_PATH)) {
-        this.logger.log(`  ✓ Found via WHISPER_MODEL_PATH env var`);
-        return process.env.WHISPER_MODEL_PATH;
-      } else {
-        this.logger.warn(`  ✗ WHISPER_MODEL_PATH set but file not found`);
-      }
-    } else {
-      this.logger.log(`  ENV WHISPER_MODEL_PATH: not set`);
-    }
+    this.logger.log('RESOLVING WHISPER MODELS DIRECTORY');
 
     // Check in utilities/models
     const possiblePaths = [
       // Packaged app paths
-      path.join((process as any).resourcesPath || '', 'utilities', 'models', modelName),
+      path.join((process as any).resourcesPath || '', 'utilities', 'models'),
       // Development paths
-      path.join(__dirname, '..', '..', '..', '..', 'utilities', 'models', modelName),
-      path.join(process.cwd(), 'utilities', 'models', modelName),
+      path.join(__dirname, '..', '..', '..', '..', 'utilities', 'models'),
+      path.join(process.cwd(), 'utilities', 'models'),
     ];
 
     this.logger.log('  Checking paths:');
@@ -151,8 +142,63 @@ export class WhisperManager extends EventEmitter {
       }
     }
 
-    this.logger.warn(`  ✗ Model file not found in any location!`);
+    this.logger.warn(`  ✗ Models directory not found in any location!`);
     return possiblePaths[0];
+  }
+
+  /**
+   * Get the path to a specific Whisper model file
+   */
+  private getModelPath(modelName: string = WhisperManager.DEFAULT_MODEL): string {
+    // Normalize model name (remove 'ggml-' prefix and '.bin' suffix if present)
+    let normalizedName = modelName.toLowerCase();
+    if (normalizedName.startsWith('ggml-')) {
+      normalizedName = normalizedName.substring(5);
+    }
+    if (normalizedName.endsWith('.bin')) {
+      normalizedName = normalizedName.slice(0, -4);
+    }
+
+    // Validate model name
+    if (!WhisperManager.AVAILABLE_MODELS.includes(normalizedName)) {
+      this.logger.warn(`Invalid model name: ${modelName}, falling back to ${WhisperManager.DEFAULT_MODEL}`);
+      normalizedName = WhisperManager.DEFAULT_MODEL;
+    }
+
+    const modelFile = `ggml-${normalizedName}.bin`;
+    const modelPath = path.join(this.modelsDir, modelFile);
+
+    // Check if model exists, fall back to default if not
+    if (!fs.existsSync(modelPath)) {
+      this.logger.warn(`Model ${modelFile} not found at ${modelPath}`);
+      const defaultPath = path.join(this.modelsDir, `ggml-${WhisperManager.DEFAULT_MODEL}.bin`);
+      if (fs.existsSync(defaultPath)) {
+        this.logger.log(`Falling back to default model: ${WhisperManager.DEFAULT_MODEL}`);
+        return defaultPath;
+      }
+      // Last resort: try tiny
+      const tinyPath = path.join(this.modelsDir, 'ggml-tiny.bin');
+      if (fs.existsSync(tinyPath)) {
+        this.logger.log('Falling back to tiny model');
+        return tinyPath;
+      }
+    }
+
+    return modelPath;
+  }
+
+  /**
+   * Get list of available models (those that exist on disk)
+   */
+  getAvailableModels(): string[] {
+    const available: string[] = [];
+    for (const model of WhisperManager.AVAILABLE_MODELS) {
+      const modelPath = path.join(this.modelsDir, `ggml-${model}.bin`);
+      if (fs.existsSync(modelPath)) {
+        available.push(model);
+      }
+    }
+    return available;
   }
 
   /**
@@ -177,8 +223,12 @@ export class WhisperManager extends EventEmitter {
     return env;
   }
 
-  async transcribe(audioFile: string, outputDir: string): Promise<string> {
+  async transcribe(audioFile: string, outputDir: string, modelName?: string): Promise<string> {
     this.lastReportedPercent = 0;
+
+    // Get the model path for the specified model (or default)
+    const modelPath = this.getModelPath(modelName || WhisperManager.DEFAULT_MODEL);
+    const actualModelName = path.basename(modelPath, '.bin').replace('ggml-', '');
 
     this.logger.log('='.repeat(60));
     this.logger.log('STARTING TRANSCRIPTION');
@@ -194,8 +244,10 @@ export class WhisperManager extends EventEmitter {
     this.logger.log(`Output directory exists: ${fs.existsSync(outputDir)}`);
     this.logger.log(`Whisper binary: ${this.whisperPath}`);
     this.logger.log(`Whisper binary exists: ${fs.existsSync(this.whisperPath)}`);
-    this.logger.log(`Model file: ${this.modelPath}`);
-    this.logger.log(`Model file exists: ${fs.existsSync(this.modelPath)}`);
+    this.logger.log(`Requested model: ${modelName || 'default'}`);
+    this.logger.log(`Using model: ${actualModelName}`);
+    this.logger.log(`Model file: ${modelPath}`);
+    this.logger.log(`Model file exists: ${fs.existsSync(modelPath)}`);
 
     if (!audioFile || !fs.existsSync(audioFile)) {
       const error = `Audio file not found: ${audioFile}`;
@@ -209,8 +261,8 @@ export class WhisperManager extends EventEmitter {
       throw new Error(error);
     }
 
-    if (!fs.existsSync(this.modelPath)) {
-      const error = `Whisper model not found at: ${this.modelPath}. Please reinstall the application or run: npm run download:binaries`;
+    if (!fs.existsSync(modelPath)) {
+      const error = `Whisper model not found at: ${modelPath}. Please reinstall the application or run: npm run download:binaries`;
       this.logger.error(error);
       throw new Error(error);
     }
@@ -230,7 +282,7 @@ export class WhisperManager extends EventEmitter {
 
     // whisper.cpp command line arguments
     const args = [
-      '-m', this.modelPath,
+      '-m', modelPath,
       '-f', audioFile,
       '-osrt',
       '-of', outputBase,
