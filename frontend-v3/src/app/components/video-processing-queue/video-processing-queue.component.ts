@@ -8,13 +8,14 @@ import { AVAILABLE_TASKS, TaskType } from '../../models/task.model';
 import { QueueItemConfigModalComponent } from '../queue-item-config-modal/queue-item-config-modal.component';
 import { VideoConfigDialogComponent } from '../video-config-dialog/video-config-dialog.component';
 import { UrlInputComponent, UrlEntry } from '../url-input/url-input.component';
+import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from '../video-editor/context-menu/context-menu.component';
 import { VideoProcessingService } from '../../services/video-processing.service';
 import { VideoJob, VideoJobSettings } from '../../models/video-processing.model';
 
 @Component({
   selector: 'app-video-processing-queue',
   standalone: true,
-  imports: [CommonModule, FormsModule, QueueItemConfigModalComponent, VideoConfigDialogComponent, UrlInputComponent],
+  imports: [CommonModule, FormsModule, QueueItemConfigModalComponent, VideoConfigDialogComponent, UrlInputComponent, ContextMenuComponent],
   templateUrl: './video-processing-queue.component.html',
   styleUrls: ['./video-processing-queue.component.scss']
 })
@@ -45,6 +46,12 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
 
   // Processing state
   isProcessing = signal(false);
+
+  // Context menu state
+  contextMenuOpen = signal(false);
+  contextMenuPosition = signal<ContextMenuPosition>({ x: 0, y: 0 });
+  contextMenuItemId = signal<string | null>(null);
+  contextMenuActions = signal<ContextMenuAction[]>([]);
 
   // Focus URL input flag (set via navigation state)
   private shouldFocusUrlInput = false;

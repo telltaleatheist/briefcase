@@ -8,8 +8,8 @@ export type Theme = 'light' | 'dark';
 export class ThemeService {
   private readonly THEME_KEY = 'creamsicle-theme';
 
-  currentTheme = signal<Theme>('light');
-  isDarkMode = signal<boolean>(false);
+  currentTheme = signal<Theme>('dark'); // Default to dark mode
+  isDarkMode = signal<boolean>(true);
 
   constructor() {
     // Sync isDarkMode with currentTheme
@@ -20,8 +20,8 @@ export class ThemeService {
 
   initializeTheme(): void {
     const savedTheme = this.getSavedTheme();
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+    // Default to dark mode on first install (no saved preference)
+    const theme = savedTheme || 'dark';
 
     this.setTheme(theme);
 

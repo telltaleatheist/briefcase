@@ -55,6 +55,11 @@ export interface AnalysisCompleted {
   timestamp: string;
 }
 
+export interface SuggestionRejected {
+  videoId: string;
+  timestamp: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -73,6 +78,7 @@ export class WebsocketService implements OnDestroy {
   private taskFailedCallbacks: ((event: TaskFailed) => void)[] = [];
   private videoRenamedCallbacks: ((event: VideoRenamed) => void)[] = [];
   private analysisCompletedCallbacks: ((event: AnalysisCompleted) => void)[] = [];
+  private suggestionRejectedCallbacks: ((event: SuggestionRejected) => void)[] = [];
 
   connect(): void {
     if (this.socket?.connected) {
@@ -162,6 +168,12 @@ export class WebsocketService implements OnDestroy {
       this.analysisCompletedCallbacks.forEach(cb => cb(event));
     });
 
+    // Suggestion events
+    this.socket.on('suggestion-rejected', (event: SuggestionRejected) => {
+      console.log('WS suggestion-rejected received:', event);
+      this.suggestionRejectedCallbacks.forEach(cb => cb(event));
+    });
+
     // Legacy events for backward compatibility
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
@@ -223,6 +235,13 @@ export class WebsocketService implements OnDestroy {
     this.analysisCompletedCallbacks.push(callback);
     return () => {
       this.analysisCompletedCallbacks = this.analysisCompletedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onSuggestionRejected(callback: (event: SuggestionRejected) => void): () => void {
+    this.suggestionRejectedCallbacks.push(callback);
+    return () => {
+      this.suggestionRejectedCallbacks = this.suggestionRejectedCallbacks.filter(cb => cb !== callback);
     };
   }
 

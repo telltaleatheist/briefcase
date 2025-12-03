@@ -4,11 +4,15 @@
     <div class="header-left">
       <h1 class="title">Processing Queue</h1>
       <div class="stats">
+        <span class="stat remaining-count" *ngIf="stats().pending > 0 || stats().running > 0">
+          <span class="count-badge">{{ stats().pending + stats().running }}</span>
+          {{ stats().pending + stats().running === 1 ? 'item' : 'items' }} remaining
+        </span>
         <span class="stat" *ngIf="stats().running > 0">
           <span class="dot running"></span>
           {{ stats().running }} running
         </span>
-        <span class="stat">{{ stats().pending }} pending</span>
+        <span class="stat" *ngIf="stats().pending > 0">{{ stats().pending }} pending</span>
         <span class="stat" *ngIf="stats().completed > 0">{{ stats().completed }} done</span>
       </div>
     </div>
@@ -26,12 +30,6 @@
       </button>
     </div>
   </header>
-
-  <!-- URL Input Section -->
-  <div class="url-input-section">
-    <app-url-input (urlsAdded)="onUrlsAdded($event)" />
-  </div>
-
 
   <!-- Queue List -->
   <div class="queue-list">

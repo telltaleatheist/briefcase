@@ -152,8 +152,9 @@ export class LibraryService {
 
   /**
    * Get videos organized by week
+   * @param processingQueueIds - IDs of videos currently in the processing queue (to exclude from "Past 24 Hours")
    */
-  getVideosByWeek(): Observable<ApiResponse<VideoWeek[]>> {
+  getVideosByWeek(processingQueueIds: string[] = []): Observable<ApiResponse<VideoWeek[]>> {
     return this.http.get<any>(`${this.API_BASE}/database/videos`, {
       params: { includeRelationships: 'true' }
     }).pipe(
@@ -161,7 +162,7 @@ export class LibraryService {
         console.log('Raw API response:', response);
         const videos = this.transformVideos(response.videos || []);
         console.log('Transformed videos:', videos.length);
-        const weeks = this.groupVideosByWeekWithHierarchy(videos);
+        const weeks = this.groupVideosByWeekWithHierarchy(videos, processingQueueIds);
         console.log('Grouped into weeks:', weeks.length);
         return {
           success: true,
@@ -276,22 +277,21 @@ export class LibraryService {
    * Format duration from seconds to hh:mm:ss
    */
   private formatDuration(seconds: number): string {
-    if (!seconds || seconds <= 0) return '00:00';
+    if (!seconds || seconds <= 0) return '00:00:00';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
 
-    if (hrs > 0) {
-      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    // Always show hh:mm:ss format
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   /**
    * Group videos by date (folder format) with special "Past 24 hours" section
    * Videos appear in "Past 24 Hours" based on lastProcessedDate (or downloadDate as fallback)
+   * Excludes videos that are in the processing queue
    */
-  private groupVideosByWeek(videos: VideoItem[]): VideoWeek[] {
+  private groupVideosByWeek(videos: VideoItem[], processingQueueIds: string[] = []): VideoWeek[] {
     const dateMap = new Map<string, VideoItem[]>();
     const now = new Date();
     const past24Hours: VideoItem[] = [];
@@ -319,7 +319,13 @@ export class LibraryService {
       const hoursDiff = (now.getTime() - videoDate.getTime()) / (1000 * 60 * 60);
 
       // Check if within past 24 hours (based on recent activity)
-      if (hoursDiff <= 24) {
+      // Exclude if:
+      // 1. Video is in the processing queue
+      // 2. Video hasn't completed any tasks yet (no lastProcessedDate)
+      const isInProcessingQueue = processingQueueIds.includes(video.id);
+      const hasCompletedTasks = !!video.lastProcessedDate;
+
+      if (hoursDiff <= 24 && !isInProcessingQueue && hasCompletedTasks) {
         past24Hours.push(video);
       }
 
@@ -364,9 +370,9 @@ export class LibraryService {
   /**
    * Group videos by week with hierarchical parent-child relationships and ghost items
    */
-  private groupVideosByWeekWithHierarchy(videos: VideoItem[]): VideoWeek[] {
+  private groupVideosByWeekWithHierarchy(videos: VideoItem[], processingQueueIds: string[] = []): VideoWeek[] {
     // First, group videos by week normally
-    const weeks = this.groupVideosByWeek(videos);
+    const weeks = this.groupVideosByWeek(videos, processingQueueIds);
 
     // Create a map of video ID to video for quick lookup
     const videoMap = new Map<string, VideoItem>();

@@ -1,0 +1,63 @@
+<div class="queue-tab">
+  <!-- Toolbar -->
+  <div class="queue-toolbar">
+    <div class="toolbar-section">
+      <h2 class="section-title">Processing Queue</h2>
+      <p class="section-subtitle">
+        {{ stagingQueue.length }} staging · {{ processingQueue.length }} processing
+      </p>
+    </div>
+    <div class="toolbar-actions">
+      <!-- Staging actions (only show when staging items selected) -->
+      @if (selectedStagingIds().size > 0) {
+        <button class="btn btn-secondary" (click)="onConfigureSelected()">
+          <span class="btn-icon">⚙️</span>
+          <span>Configure</span>
+          <span class="badge">{{ selectedStagingIds().size }}</span>
+        </button>
+        <button class="btn btn-secondary" (click)="onRemoveSelected()">
+          <span class="btn-icon">🗑️</span>
+          <span>Remove</span>
+        </button>
+        <button class="btn btn-primary" (click)="onProcessSelected()">
+          <span class="btn-icon">▶</span>
+          <span>Process Selected</span>
+        </button>
+      }
+      <!-- Process All button (show when no selection and staging items exist) -->
+      @if (selectedStagingIds().size === 0 && stagingQueue.length > 0) {
+        <button class="btn btn-primary" (click)="onProcessAll()">
+          <span class="btn-icon">▶▶</span>
+          <span>Process All</span>
+          <span class="badge">{{ stagingQueue.length }}</span>
+        </button>
+      }
+    </div>
+  </div>
+
+  <!-- Queue Content -->
+  <div class="queue-content">
+    <!-- Single Cascade showing both Staging and Processing -->
+    <app-cascade
+      *ngIf="allQueueWeeks().length > 0"
+      [weeks]="allQueueWeeks()"
+      [progressMapper]="progressMapper"
+      [childrenConfig]="childrenConfig"
+      [aiProcessingVideoId]="aiProcessingVideoId"
+      [showStatusIndicator]="true"
+      [showDeleteButton]="true"
+      [deleteMode]="'simple'"
+      (selectionChanged)="onStagingSelectionChanged($event)"
+      (videoAction)="onVideoAction($event)"
+      (configureItem)="configureItem.emit($event)"
+      (previewRequested)="previewRequested.emit($event)"
+    />
+
+    <!-- Empty State -->
+    <div class="empty-state" *ngIf="allQueueWeeks().length === 0">
+      <div class="empty-icon">📋</div>
+      <h3>No items in queue</h3>
+      <p>Add videos using the Download button or select library videos and click "Add to Queue"</p>
+    </div>
+  </div>
+</div>

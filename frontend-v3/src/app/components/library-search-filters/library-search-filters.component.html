@@ -7,6 +7,7 @@
         type="text"
         [(ngModel)]="filters.searchQuery"
         (ngModelChange)="onSearchChange()"
+        (focus)="onSearchFocus()"
         placeholder="Search: multiple words, &quot;exact phrase&quot;, wild*"
         title="Search tips:
 • Multiple words: all must match (in any field)

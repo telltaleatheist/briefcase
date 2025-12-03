@@ -298,6 +298,7 @@ export class PythonBridgeService {
     aiProvider?: 'ollama' | 'openai' | 'claude',
     apiKey?: string,
     videoTitle?: string,
+    categories?: any[],
   ): Promise<{ sections_count: number; sections: any[]; tags?: { people: string[]; topics: string[] }; description?: string; suggested_title?: string }> {
     const command = {
       command: 'analyze',
@@ -310,6 +311,7 @@ export class PythonBridgeService {
       output_file: outputFile,
       custom_instructions: customInstructions || '',
       video_title: videoTitle || '',
+      categories: categories || null,
     };
 
     return this.executeCommand(command, onProgress);

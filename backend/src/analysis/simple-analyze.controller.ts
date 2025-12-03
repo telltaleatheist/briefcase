@@ -39,6 +39,38 @@ export class SimpleAnalyzeController {
   ) {}
 
   /**
+   * Load analysis categories from config file
+   * Throws error if categories are not configured - NO FALLBACKS
+   */
+  private loadCategories(): any[] {
+    try {
+      const userDataPath = process.env.APPDATA ||
+                        (process.platform === 'darwin' ?
+                        path.join(process.env.HOME || '', 'Library', 'Application Support') :
+                        path.join(process.env.HOME || '', '.config'));
+
+      const categoriesPath = path.join(userDataPath, 'ClipChimp', 'analysis-categories.json');
+
+      const fsSync = require('fs');
+      if (!fsSync.existsSync(categoriesPath)) {
+        throw new Error('Analysis categories not configured. Please configure categories in Settings before running analysis.');
+      }
+
+      const data = fsSync.readFileSync(categoriesPath, 'utf8');
+      const parsed = JSON.parse(data);
+
+      if (!parsed.categories || parsed.categories.length === 0) {
+        throw new Error('No analysis categories found in config. Please configure at least one category in Settings.');
+      }
+
+      return parsed.categories;
+    } catch (error) {
+      this.logger.error(`Failed to load categories: ${(error as Error).message}`);
+      throw error; // Re-throw instead of returning undefined
+    }
+  }
+
+  /**
    * Analyze a video by ID (must have transcript)
    */
   @Post()
@@ -175,6 +207,9 @@ export class SimpleAnalyzeController {
       const sanitizedTitle = this.sanitizeFilename(videoTitle);
       const outputFile = path.join(tmpDir, `${jobId}_${sanitizedTitle}.txt`);
 
+      // Load user's categories from config
+      const categories = this.loadCategories();
+
       // Run AI analysis using PythonBridgeService
       const analysisResult = await this.pythonBridge.analyze(
         ollamaEndpoint,
@@ -196,6 +231,7 @@ export class SimpleAnalyzeController {
         aiProvider,
         aiProvider === 'claude' ? claudeApiKey : aiProvider === 'openai' ? openaiApiKey : undefined,
         videoTitle,
+        categories,
       );
 
       // Read analysis text from output file

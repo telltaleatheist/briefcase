@@ -1,17 +1,4 @@
 <div class="cascade" (click)="clearSelection()">
-  <!-- Toolbar -->
-  <div class="library-toolbar">
-    <div class="toolbar-title">
-      <span class="toolbar-icon">🎬</span>
-      <span class="toolbar-text">Media Library</span>
-    </div>
-    <div class="toolbar-info">
-      @if (selectedCount() > 0) {
-        <span class="selection-count">{{ selectedCount() }} selected</span>
-      }
-    </div>
-  </div>
-
   <!-- Empty State (outside virtual scroll) -->
   @if (virtualItems().length === 0) {
     <div class="library-content empty">
@@ -52,6 +39,7 @@
               class="video-item"
               [class.selected]="isSelected(item.itemId)"
               [class.highlighted]="isHighlighted(item.itemId)"
+              [class.ai-processing]="isProcessingAi(item.video)"
               [class.selection-edge-top]="isSelectionEdgeTop(i)"
               [class.selection-edge-bottom]="isSelectionEdgeBottom(i)"
               [class.has-children]="hasChildren(item.video) || hasVideoChildren(item.video)"
@@ -147,11 +135,12 @@
                   ✏️
                 </button>
               }
-              @if (showDeleteButton && isQueueItem(item.video) && !item.video.isGhost) {
+              @if (showDeleteButton && (isStagingItem(item.video) || isProcessingItem(item.video) || isQueueItem(item.video)) && !item.video.isGhost) {
                 <button
                   class="delete-btn"
+                  [class.cancel-btn]="isProcessingItem(item.video)"
                   (click)="onDeleteClick(item.video, $event)"
-                  title="Remove from Queue"
+                  [title]="isProcessingItem(item.video) ? 'Cancel Processing' : 'Remove from Queue'"
                 >
                   ×
                 </button>
@@ -294,7 +283,9 @@
     [original]="editingSuggestedTitleVideo()?.name || ''"
     [title]="'Edit AI Suggested Title'"
     [label]="'Suggested Title'"
+    [showDiscard]="true"
     (saved)="onSuggestedTitleSaved($event)"
+    (discarded)="onSuggestedTitleDiscarded()"
     (closed)="onSuggestedTitleModalClosed()"
   />
 

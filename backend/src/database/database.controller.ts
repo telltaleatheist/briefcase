@@ -1262,11 +1262,12 @@ export class DatabaseController {
       const oldFilename = video.filename as string;
 
       // FILENAME IS SOURCE OF TRUTH: Extract date from old filename first
-      // Only fall back to database if filename has no date
+      // Only fall back to database upload_date if filename has no date
+      // NOTE: upload_date should ONLY be the actual upload date from yt-dlp metadata, NEVER the download_date
       const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
       let uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
       if (!uploadDate) {
-        // Filename has no date, check database
+        // Filename has no date, check database for upload_date (NOT download_date)
         uploadDate = video.upload_date as string | undefined;
       }
 
@@ -1276,7 +1277,7 @@ export class DatabaseController {
         this.logger.log(`User provided NEW date: "${newTitleInfo.date}" (replacing old date: "${uploadDate}")`);
       }
 
-      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}" (source: ${oldDateInfo.hasDate ? 'filename' : 'database'})`);
+      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}" (source: ${oldDateInfo.hasDate ? 'filename' : 'database upload_date'})`);
 
       // Ensure new filename has the date prefix (preserves existing or adds upload date)
       // If user provided a new date in their input, that takes priority
@@ -1460,11 +1461,12 @@ export class DatabaseController {
       const oldFilename = video.filename as string;
 
       // FILENAME IS SOURCE OF TRUTH: Extract date from old filename first
-      // Only fall back to database if filename has no date
+      // Only fall back to database upload_date if filename has no date
+      // NOTE: upload_date should ONLY be the actual upload date from yt-dlp metadata, NEVER the download_date
       const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
       let uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
       if (!uploadDate) {
-        // Filename has no date, check database
+        // Filename has no date, check database for upload_date (NOT download_date)
         uploadDate = video.upload_date as string | undefined;
       }
 

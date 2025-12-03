@@ -53,6 +53,11 @@ import { ButtonComponent } from '../button/button.component';
             <app-button variant="secondary" (click)="close()">
               Cancel
             </app-button>
+            @if (showDiscardButton()) {
+              <app-button variant="outline" icon="🗑️" (click)="discard()">
+                Discard
+              </app-button>
+            }
             <app-button variant="gradient" icon="💾" (click)="save()">
               Save
             </app-button>
@@ -247,15 +252,20 @@ export class FilenameModalComponent {
   @Input() set label(value: string) {
     this.fieldLabel.set(value);
   }
+  @Input() set showDiscard(value: boolean) {
+    this.showDiscardButton.set(value);
+  }
 
   @Output() saved = new EventEmitter<string>();
   @Output() closed = new EventEmitter<void>();
+  @Output() discarded = new EventEmitter<void>();
 
   visible = signal(false);
   suggestedFilename = signal('');
   originalName = signal('');
   modalTitle = signal('Edit Filename');
   fieldLabel = signal('Suggested Filename');
+  showDiscardButton = signal(false);
   editedFilename = '';
 
   // Max filename length (255 is typical for most filesystems)
@@ -274,6 +284,11 @@ export class FilenameModalComponent {
       this.saved.emit(this.editedFilename.trim());
       this.close();
     }
+  }
+
+  discard() {
+    this.discarded.emit();
+    this.close();
   }
 
   close() {

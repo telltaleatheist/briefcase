@@ -88,6 +88,38 @@ export class AnalysisService implements OnModuleInit {
   private readonly MAX_CONCURRENT_JOBS = 1; // Only 1 job at a time, period
   private isProcessing = false; // Prevent concurrent processNextInQueue calls
 
+  /**
+   * Load analysis categories from config file
+   * Throws error if categories are not configured - NO FALLBACKS
+   */
+  private loadCategories(): any[] {
+    try {
+      const userDataPath = process.env.APPDATA ||
+                        (process.platform === 'darwin' ?
+                        path.join(process.env.HOME || '', 'Library', 'Application Support') :
+                        path.join(process.env.HOME || '', '.config'));
+
+      const categoriesPath = path.join(userDataPath, 'ClipChimp', 'analysis-categories.json');
+
+      const fsSync = require('fs');
+      if (!fsSync.existsSync(categoriesPath)) {
+        throw new Error('Analysis categories not configured. Please configure categories in Settings before running analysis.');
+      }
+
+      const data = fsSync.readFileSync(categoriesPath, 'utf8');
+      const parsed = JSON.parse(data);
+
+      if (!parsed.categories || parsed.categories.length === 0) {
+        throw new Error('No analysis categories found in config. Please configure at least one category in Settings.');
+      }
+
+      return parsed.categories;
+    } catch (error) {
+      this.logger.error(`Failed to load categories: ${(error as Error).message}`);
+      throw error; // Re-throw instead of returning undefined
+    }
+  }
+
   constructor(
     private pythonBridge: PythonBridgeService,
     private ollama: OllamaService,
@@ -734,6 +766,9 @@ export class AnalysisService implements OnModuleInit {
 
     this.logger.log(`[${jobId}] Starting analysis with provider=${provider}, model=${modelName}`);
 
+    // Load user's categories from config
+    const categories = this.loadCategories();
+
     // modelName already stripped earlier in this method
     const analysisResult = await this.pythonBridge.analyze(
       request.ollamaEndpoint,
@@ -762,6 +797,7 @@ export class AnalysisService implements OnModuleInit {
       provider,
       apiKey,
       request.videoTitle,
+      categories,
     );
 
     // Read and save analysis

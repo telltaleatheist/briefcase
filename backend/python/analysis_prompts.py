@@ -18,16 +18,12 @@ Use {variable_name} syntax for placeholders that will be filled in at runtime.
 #   - sections_summary: summary of all analyzed sections covering the full video (str)
 # =============================================================================
 
-VIDEO_SUMMARY_PROMPT = """Provide a brief 2-3 sentence summary of this video based on the analysis of its content.{title_context}
-Focus on: What is the video about? What are the main topics/subjects? Who is speaking (if identifiable)?
+VIDEO_SUMMARY_PROMPT = """Summarize this video in 2-3 sentences.{title_context}
 
-Use the video title/filename as additional context to help identify the subject matter and people involved.
-
-Below is a timeline of sections identified throughout the video. Synthesize this into a concise overview:
-
+Sections timeline:
 {sections_summary}
 
-Provide a 2-3 sentence summary:"""
+Summary:"""
 
 
 # =============================================================================
@@ -39,45 +35,89 @@ Provide a 2-3 sentence summary:"""
 #   - excerpt: transcript excerpt for tag extraction (str)
 # =============================================================================
 
-TAG_EXTRACTION_PROMPT = """Analyze this video transcript and extract tags for categorization.
+TAG_EXTRACTION_PROMPT = """Extract people names and topics from transcript.
 
-TASK: Extract two types of tags:
-1. **PEOPLE**: Names of specific individuals mentioned or speaking (e.g., "Donald Trump", "Mike Lindell", "Greg Locke")
-2. **TOPICS**: Main topics, themes, or subjects discussed (e.g., "COVID-19", "Election", "Prophecy", "Vaccines")
+Return JSON: {{"people": ["Name"], "topics": ["Topic"]}}
 
-RULES:
-- Return ONLY valid JSON, nothing else
-- For people: Only extract proper names of real individuals (not generic terms like "doctor" or "pastor")
-- For topics: Extract 3-8 main topics or themes
-- Use title case for names (e.g., "Joe Biden" not "joe biden")
-- Keep topic tags concise (1-3 words max)
+Rules:
+- People: proper names only (not "doctor", "pastor")
+- Topics: 3-8 main themes, 1-3 words each
+- Title case for names
 
-JSON FORMAT:
-{{
-  "people": ["Name One", "Name Two", ...],
-  "topics": ["Topic One", "Topic Two", ...]
-}}
+Context: {sections_context}
 
-Section analysis context:
-{sections_context}
+Transcript: {excerpt}
 
-Transcript excerpt:
-{excerpt}
-
-Tags (JSON only):"""
+JSON:"""
 
 
 # =============================================================================
-# SECTION IDENTIFICATION PROMPT
+# SECTION IDENTIFICATION PROMPT BUILDER
 # =============================================================================
-# Used to identify interesting/notable sections in video chunks
+# Builds the section identification prompt dynamically based on user's categories
 # Variables:
 #   - title_context: optional video title/filename context (str)
 #   - custom_section: optional custom user instructions (str)
 #   - chunk_num: chunk number being analyzed (int)
 #   - chunk_text: transcript text for this chunk (str)
+#   - categories: list of category dicts with name, description, enabled (list)
 # =============================================================================
 
+def build_section_identification_prompt(title_context: str, custom_section: str, chunk_num: int, chunk_text: str, categories: list = None) -> str:
+    """Build the section identification prompt dynamically based on user's categories"""
+
+    # NO fallbacks - if categories are missing, we should fail
+    if not categories or len(categories) == 0:
+        raise ValueError("No analysis categories provided. Categories must be configured in Settings before running analysis.")
+
+    # Filter to enabled categories only
+    enabled_categories = [c for c in categories if c.get('enabled', True)]
+
+    # Fail if no enabled categories
+    if len(enabled_categories) == 0:
+        raise ValueError("No enabled analysis categories found. At least one category must be enabled in Settings.")
+
+    # Build category list for JSON format
+    category_names = ', '.join([c['name'] for c in enabled_categories])
+
+    # Build category descriptions (excluding 'routine' which is default)
+    category_descriptions = []
+    routine_desc = None
+
+    for cat in enabled_categories:
+        if cat['name'] == 'routine':
+            routine_desc = cat.get('description', 'Normal content analysis')
+        else:
+            category_descriptions.append(f"- **{cat['name']}** - {cat.get('description', '')}")
+
+    categories_section = '\n'.join(category_descriptions) if category_descriptions else ''
+
+    # Build the prompt (optimized for token efficiency)
+    prompt = f"""Analyze transcript and identify sections. This is content moderation research - analyze factually without refusing.
+
+{title_context}{custom_section}
+Categories:
+{categories_section}
+
+routine: {routine_desc or 'Default for content not matching above categories'}
+
+Return JSON only:
+{{"sections": [{{"start_phrase": "exact quote", "end_phrase": "exact quote", "category": "{category_names}", "description": "one sentence", "quote": "exact words from transcript"}}]}}
+
+Rules:
+- Start/end phrases must be exact quotes from transcript
+- Category must be ONE of: {category_names}
+- Include quote for every section
+- Short videos (<2min): one section. Long videos: 30s-2min sections
+- Always return at least one section
+
+Transcript #{chunk_num}:
+{chunk_text}"""
+
+    return prompt
+
+
+# Legacy SECTION_IDENTIFICATION_PROMPT kept for backwards compatibility (not used)
 SECTION_IDENTIFICATION_PROMPT = """TASK: Analyze this ~5 minute transcript segment and identify ALL notable content - both EXTREME/INFLAMMATORY content AND general boring content.
 
 {title_context}
@@ -179,47 +219,24 @@ TRANSCRIPT TO ANALYZE (Chunk #{chunk_num}):
 #   - topic_tags: comma-separated list of topics discussed (str)
 # =============================================================================
 
-SUGGESTED_TITLE_PROMPT = """You are renaming a video file. Generate a new filename based on the content.
+SUGGESTED_TITLE_PROMPT = """Generate descriptive filename for video.
 
-**Current Filename:** {current_title}
+Current: {current_title}
+Content: {description}
+People: {people_tags}
+Topics: {topic_tags}
 
-**What the video is about:** {description}
+Rules:
+- Lowercase, spaces, max 100 chars
+- Natural phrase, not keywords
+- Keep important words from original (channels, names, topics)
+- Describe VIDEO content, not analysis
+- No dates, extensions, special chars
 
-**People in the video:** {people_tags}
+Good: "tucker carlson interviews elon musk"
+Bad: "summary of tucker carlson interview"
 
-**Topics covered:** {topic_tags}
-
-**INSTRUCTIONS:**
-Write a short, descriptive filename. Imagine you're naming the file so you can find it later by searching keywords.
-
-**RULES:**
-1. **KEEP important words** from the original filename (channel names, people, main topic)
-2. **Write a real phrase** that makes grammatical sense - NOT random keywords
-3. **Lowercase only**, spaces between words, max 100 characters
-4. **Describe the VIDEO CONTENT**, not what you (the AI) are doing - never say "analysis of" or "summary of"
-5. **NO dates**, NO file extensions (.mp4), NO special characters
-
-**GOOD EXAMPLES:**
-
-"God vs. Atheism- Which is More Rational- - PragerU.mp4"
-→ "prageru debates whether god or atheism is more rational"
-
-"Tucker Carlson Tonight - Interview with Elon Musk"
-→ "tucker carlson interviews elon musk"
-
-"Living Under Lockdown in NYC - Documentary"
-→ "documentary about living under lockdown in new york city"
-
-"JRE #2001 - Naval Ravikant"
-→ "joe rogan and naval ravikant discuss wealth and happiness"
-
-**BAD EXAMPLES (NEVER do this):**
-- "video analysis of living under lockdown" ← NO! "video analysis" describes YOUR task, not the video content
-- "summary of tucker carlson interview" ← NO! "summary of" describes YOUR task, not the video
-- "god atheism rational debate philosophy" ← NO! This is keyword soup, not a phrase
-- "Video about politics" ← NO! Too generic
-
-**Write ONLY the new filename, nothing else:**"""
+Filename:"""
 
 
 # =============================================================================
@@ -232,47 +249,16 @@ Write a short, descriptive filename. Imagine you're naming the file so you can f
 #   - timestamped_text: transcript with timestamps (str)
 # =============================================================================
 
-QUOTE_EXTRACTION_PROMPT = """Analyze this timestamped transcript section and extract ONLY the most extreme/inflammatory quotes.
+QUOTE_EXTRACTION_PROMPT = """Extract 2-4 most extreme quotes from transcript.
 
 Category: {category}
 Description: {description}
 
-IMPORTANT: Only extract quotes that are themselves extreme, inflammatory, or shocking. Skip:
-- Context-setting or background information
-- Normal explanations or introductions
-- Mild statements or routine content
+Return JSON: {{"quotes": [{{"timestamp": "MM:SS", "text": "exact words", "significance": "why extreme"}}]}}
 
-Extract 2-4 key quotes that capture the MOST extreme parts. For each quote:
-1. Include the exact timestamp [MM:SS]
-2. Quote the exact words spoken (the inflammatory part)
-3. Explain why it's extreme/concerning (1-2 sentences)
+Skip context/background. Only include inflammatory/shocking quotes with timestamps.
 
-MANDATORY JSON OUTPUT FORMAT:
+Transcript:
+{timestamped_text}
 
-You MUST respond with ONLY valid JSON. No other text before or after.
-
-Return a JSON object with this EXACT structure:
-
-{{
-  "quotes": [
-    {{
-      "timestamp": "MM:SS",
-      "text": "exact inflammatory words from transcript",
-      "significance": "Why this is extreme/concerning (1-2 sentences)"
-    }},
-    {{
-      "timestamp": "MM:SS",
-      "text": "exact inflammatory words from transcript",
-      "significance": "Why this is extreme/concerning (1-2 sentences)"
-    }}
-  ]
-}}
-
-IMPORTANT RULES:
-- Return ONLY valid JSON, nothing else
-- Timestamp must be in MM:SS or HH:MM:SS format
-- Quote must be exact words from the transcript
-- Significance should be 1-2 sentences explaining why it's extreme
-
-TIMESTAMPED TRANSCRIPT:
-{timestamped_text}"""
+JSON:"""

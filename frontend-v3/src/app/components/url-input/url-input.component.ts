@@ -109,17 +109,14 @@ export class UrlInputComponent {
     });
   }
 
-  // Format duration from seconds to HH:MM:SS or MM:SS
+  // Format duration from seconds to HH:MM:SS
   private formatDuration(seconds: number): string {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
 
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    } else {
-      return `${minutes}:${secs.toString().padStart(2, '0')}`;
-    }
+    // Always show hh:mm:ss format
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   private isValidUrl(string: string): boolean {

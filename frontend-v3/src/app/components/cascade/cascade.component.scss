@@ -5,18 +5,16 @@
 :host {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: 100%;
   overflow: hidden;
 }
 
 .cascade {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: 100%;
   overflow: hidden;
   position: relative;
 }
@@ -153,6 +151,28 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
+@keyframes ai-glow {
+  0%, 100% {
+    box-shadow: inset 3px 0 0 #4caf50,
+                0 0 0 rgba(76, 175, 80, 0);
+  }
+  50% {
+    box-shadow: inset 3px 0 0 #4caf50,
+                0 0 15px rgba(76, 175, 80, 0.4);
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+  }
+  50% {
+    transform: scale(1.2);
+    box-shadow: 0 0 12px rgba(76, 175, 80, 0.8);
+  }
+}
+
 // Video Item - Fixed height for virtual scroll
 .video-item {
   display: flex;
@@ -173,6 +193,19 @@ cdk-virtual-scroll-viewport.library-content {
 
     .delete-btn {
       opacity: 1;
+    }
+  }
+
+  // AI Processing state - bright glow to indicate active AI task
+  &.ai-processing {
+    background-color: rgba(76, 175, 80, 0.08);
+    border-left: 3px solid #4caf50;
+    animation: ai-glow 2s ease-in-out infinite;
+
+    .selection-indicator {
+      background: #4caf50 !important;
+      box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+      animation: pulse-dot 2s ease-in-out infinite;
     }
   }
 
@@ -480,6 +513,12 @@ cdk-virtual-scroll-viewport.library-content {
 
   &:hover {
     color: var(--error);
+  }
+
+  &.cancel-btn {
+    &:hover {
+      color: var(--primary-orange);
+    }
   }
 }
 

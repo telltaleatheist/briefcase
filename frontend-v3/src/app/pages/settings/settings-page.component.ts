@@ -55,9 +55,8 @@ export class SettingsPageComponent implements OnInit {
     enabled: true
   };
 
-  // Default categories
+  // Default categories (routine is now a built-in category, not user-editable)
   private defaultCategories: AnalysisCategory[] = [
-    { id: 'routine', name: 'routine', description: 'Normal content analysis - use for any content that doesn\'t match specific categories', color: '#3b82f6', enabled: true },
     { id: 'hate', name: 'hate', description: 'Dehumanizing language, slurs, calls for discrimination against groups', color: '#dc2626', enabled: true },
     { id: 'conspiracy', name: 'conspiracy', description: 'Unfounded conspiracy theories presented as fact', color: '#a855f7', enabled: true },
     { id: 'false-prophecy', name: 'false-prophecy', description: 'Specific predictions about future events with dates, apocalyptic prophecies', color: '#8b5cf6', enabled: true },

@@ -655,7 +655,7 @@ export class VideoInfoPageComponent implements OnInit {
 
     const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
 
-    this.libraryService.getVideosByWeek().subscribe({
+    this.libraryService.getVideosByWeek([]).subscribe({
       next: (response) => {
         if (!response.success || !response.data) {
           console.error('Library load failed:', response);

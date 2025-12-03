@@ -303,12 +303,14 @@ export class DownloaderService implements OnModuleInit {
         this.logger.log(`Using pre-fetched displayName for output: ${displayNameWithDate}`);
       } else {
         // Fallback to yt-dlp's dynamic title extraction
-        // Use current date as fallback if upload_date is not available
-        const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-        const dateFormat = `%(upload_date>%Y-%m-%d|${currentDate})s `;
+        // Include upload_date in filename if available from yt-dlp metadata
+        // If upload_date is not available, do NOT use download date - leave filename without date prefix
+        // Format: "YYYY-MM-DD Title.ext" if upload_date exists, or "Title.ext" if not
+        // Using yt-dlp's conditional: %(field&if_true|if_false)s
+        const datePrefix = `%(upload_date&%(upload_date>%Y-%m-%d )s|)s`;
         const maxTitleLength = 200; // Conservative limit to stay under 255 total
-        outputTemplate = path.join(downloadFolder, `${dateFormat}%(title.200)s.%(ext)s`);
-        this.logger.log(`Using yt-dlp title extraction for output template with date fallback`);
+        outputTemplate = path.join(downloadFolder, `${datePrefix}%(title.200)s.%(ext)s`);
+        this.logger.log(`Using yt-dlp title extraction for output template (upload_date only, no fallback to download date)`);
       }
       
       // Create ytDlpManager instance

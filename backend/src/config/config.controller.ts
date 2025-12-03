@@ -157,9 +157,6 @@ export class ConfigController {
         lastUpdated: new Date().toISOString()
       }, null, 2), 'utf8');
 
-      // Also update the Python prompt file with the new categories
-      await this.updateAnalysisPrompt(body.categories);
-
       return {
         success: true,
         message: 'Analysis categories saved'
@@ -242,46 +239,6 @@ export class ConfigController {
     }
   }
 
-  /**
-   * Update the analysis prompt Python file with new categories
-   */
-  private async updateAnalysisPrompt(categories: any[]) {
-    try {
-      // Build categories list for the prompt
-      const enabledCategories = categories.filter(c => c.enabled);
-
-      // Create the category descriptions for the prompt
-      const categoryDescriptions = enabledCategories
-        .filter(c => c.name !== 'routine')
-        .map(c => `- **${c.name}** - ${c.description}`)
-        .join('\n');
-
-      // Create the category list for JSON format
-      const categoryList = enabledCategories.map(c => c.name).join(', ');
-
-      // Path to prompt file
-      const promptPath = path.join(__dirname, '..', '..', 'python', 'analysis_prompts.py');
-
-      if (fs.existsSync(promptPath)) {
-        let content = fs.readFileSync(promptPath, 'utf8');
-
-        // Update the category list in the IMPORTANT RULES section
-        const categoryRuleRegex = /- Category must be EXACTLY ONE of: [^\n]+/;
-        const newCategoryRule = `- Category must be EXACTLY ONE of: ${categoryList} (pick the SINGLE most relevant category, do NOT combine multiple)`;
-        content = content.replace(categoryRuleRegex, newCategoryRule);
-
-        // Update the example category list in the JSON format section
-        const jsonCategoryRegex = /"category": "ONE of: [^"]+"/g;
-        const newJsonCategory = `"category": "ONE of: ${categoryList}"`;
-        content = content.replace(jsonCategoryRegex, newJsonCategory);
-
-        fs.writeFileSync(promptPath, content, 'utf8');
-      }
-    } catch (error) {
-      console.error('Failed to update analysis prompt:', error);
-      // Don't throw - saving categories should still succeed
-    }
-  }
 
   /**
    * Fetch available models from OpenAI API

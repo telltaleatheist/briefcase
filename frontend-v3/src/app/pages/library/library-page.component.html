@@ -2,7 +2,17 @@
   <!-- Page Header -->
   <div class="page-header">
     <div class="header-content">
-      <h1 class="page-title">Media Library</h1>
+      <h1 class="page-title">
+        @if (activeTab() === 'queue') {
+          Processing Queue
+        } @else if (activeTab() === 'tabs') {
+          Tabs
+        } @else if (activeTab() === 'manager') {
+          Library Manager
+        } @else {
+          Media Library
+        }
+      </h1>
       <p class="page-subtitle">
         <span *ngIf="currentLibrary()">{{ currentLibrary()?.name }}</span>
         <span *ngIf="!currentLibrary()">No library selected</span>
@@ -11,10 +21,17 @@
     <div class="header-actions">
       <button
         class="btn btn-primary"
+        (click)="openDownloadDialog()"
+        title="Download videos from URLs">
+        <span class="btn-icon">⬇️</span>
+        <span>Download</span>
+      </button>
+      <button
+        class="btn btn-primary"
         (click)="openImportDialog()"
         title="Import media files from your computer">
         <span class="btn-icon">📁</span>
-        <span>Import Files</span>
+        <span>Import</span>
       </button>
       <button
         class="btn btn-primary"
@@ -32,35 +49,15 @@
         <span class="btn-icon">ℹ️</span>
         <span>View More</span>
       </button>
-      <!-- Configure button for queue items -->
-      <button
-        class="btn btn-secondary"
-        *ngIf="hasQueueItemsSelected"
-        (click)="onConfigureSelected()"
-        title="Configure tasks for selected items">
-        <span class="btn-icon">⚙️</span>
-        <span>Configure</span>
-      </button>
       <!-- Add to queue button for library items -->
       <button
         class="btn btn-secondary"
-        *ngIf="selectedCount() > 0 && !hasQueueItemsSelected"
+        *ngIf="selectedCount() > 0"
         (click)="onAddSelectedToQueue()">
         <span class="btn-icon">➕</span>
         <span>Add to Queue</span>
         <span class="badge">{{ selectedCount() }}</span>
       </button>
-      <!-- Start Processing button -->
-      @if (hasPendingItems) {
-        <button
-          class="btn btn-primary start-processing-btn"
-          (click)="startProcessing()"
-          title="Start processing all pending items">
-          <span class="btn-icon">▶</span>
-          <span>Start Processing</span>
-          <span class="badge">{{ queueStats.pending }}</span>
-        </button>
-      }
     </div>
   </div>
 
@@ -71,6 +68,15 @@
       [class.active]="activeTab() === 'library'"
       (click)="setActiveTab('library')">
       📚 Library
+    </button>
+    <button
+      class="tab"
+      [class.active]="activeTab() === 'queue'"
+      (click)="setActiveTab('queue')">
+      ⚡ Queue
+      @if (queueStats.total > 0) {
+        <span class="tab-badge">{{ queueStats.total }}</span>
+      }
     </button>
     <button
       class="tab"
@@ -98,12 +104,6 @@
     <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
   </div>
 
-  <!-- URL Input Bar (Library Tab Only) -->
-  <div class="url-input-bar" *ngIf="activeTab() === 'library'">
-    <span class="url-input-label">Add to Queue:</span>
-    <app-url-input (urlsAdded)="onUrlsAdded($event)" />
-  </div>
-
   <!-- Main Container with Drag & Drop -->
   <div
     class="main-container"
@@ -121,14 +121,39 @@
     </div>
 
     <div class="unified-content">
-      <!-- Library Tab: Media Library Cascade (includes queue items) -->
-      <app-cascade
-        *ngIf="activeTab() === 'library'"
-        [weeks]="combinedWeeks()"
+      <!-- Library Tab: Media Library Cascade -->
+      @if (activeTab() === 'library') {
+        <div class="library-toolbar">
+          <div class="toolbar-section">
+            <h2 class="section-title">Media Library</h2>
+            <p class="section-subtitle">
+              {{ totalVideoCount() }} videos
+            </p>
+          </div>
+        </div>
+        <app-cascade
+          [weeks]="combinedWeeks()"
+          (selectionChanged)="onSelectionChanged($event)"
+          (videoAction)="onVideoAction($event)"
+          (configureItem)="onConfigureItem($event)"
+          (previewRequested)="onPreviewRequested($event)"
+        />
+      }
+
+      <!-- Queue Tab: Staging and Processing queues -->
+      <app-queue-tab
+        *ngIf="activeTab() === 'queue'"
+        [stagingQueue]="stagingQueue()"
+        [processingQueue]="processingQueue()"
         [progressMapper]="queueProgressMapper"
         [childrenConfig]="processingChildrenConfig"
-        (selectionChanged)="onSelectionChanged($event)"
-        (videoAction)="onVideoAction($event)"
+        [aiProcessingVideoId]="aiProcessingQueueItemId()"
+        (processAll)="onQueueProcessAll()"
+        (processSelected)="onQueueProcessSelected($event)"
+        (configureSelected)="onQueueConfigureSelected($event)"
+        (removeSelected)="onQueueRemoveSelected($event)"
+        (cancelProcessing)="onCancelProcessing($event)"
+        (viewInLibrary)="onViewInLibrary($event)"
         (configureItem)="onConfigureItem($event)"
         (previewRequested)="onPreviewRequested($event)"
       />
@@ -142,7 +167,7 @@
       />
 
       <!-- Empty State - Library -->
-      <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0 && processingQueue().length === 0">
+      <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0">
         <div class="empty-icon">📹</div>
         <h3 class="empty-title">No media found</h3>
         <p class="empty-description">
@@ -202,4 +227,11 @@
   [show]="newTabDialogOpen()"
   (created)="onNewTabCreated($event)"
   (closed)="onNewTabDialogClosed()"
+/>
+
+<!-- Download Dialog -->
+<app-video-config-dialog
+  [isOpen]="downloadDialogOpen()"
+  (closeDialog)="onDownloadDialogClosed()"
+  (submitConfig)="onDownloadSubmit($event)"
 />

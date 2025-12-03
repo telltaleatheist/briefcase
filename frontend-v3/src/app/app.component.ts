@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { NavigationComponent } from './core/navigation/navigation.component';
 import { ThemeService } from './services/theme.service';
 import { NavigationService } from './services/navigation.service';
+import { VideoProcessingService } from './services/video-processing.service';
 
 @Component({
   selector: 'app-root',
@@ -46,6 +47,8 @@ import { NavigationService } from './services/navigation.service';
 export class AppComponent implements OnInit {
   themeService = inject(ThemeService);
   navService = inject(NavigationService);
+  // Inject VideoProcessingService to ensure it initializes eagerly and restores queue
+  private videoProcessingService = inject(VideoProcessingService);
 
   ngOnInit() {
     this.themeService.initializeTheme();

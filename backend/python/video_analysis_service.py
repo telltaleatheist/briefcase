@@ -25,9 +25,9 @@ import requests
 from analysis_prompts import (
     VIDEO_SUMMARY_PROMPT,
     TAG_EXTRACTION_PROMPT,
-    SECTION_IDENTIFICATION_PROMPT,
     QUOTE_EXTRACTION_PROMPT,
-    SUGGESTED_TITLE_PROMPT
+    SUGGESTED_TITLE_PROMPT,
+    build_section_identification_prompt
 )
 
 # Try to import OpenAI client (optional dependency)
@@ -491,7 +491,8 @@ def analyze_with_ai(
     segments: List[Dict],
     output_file: str,
     custom_instructions: str = "",
-    video_title: str = ""
+    video_title: str = "",
+    categories: List[Dict] = None
 ) -> Dict[str, Any]:
     """
     Analyze transcript using AI model (Ollama, OpenAI, or Claude)
@@ -531,7 +532,7 @@ def analyze_with_ai(
             # Identify interesting sections - with error handling to skip failed chunks
             try:
                 interesting_sections = identify_interesting_sections(
-                    provider, endpoint_or_key, model, chunk['text'], i, custom_instructions, video_title
+                    provider, endpoint_or_key, model, chunk['text'], i, custom_instructions, video_title, categories
                 )
             except Exception as e:
                 # Log the failure but continue with remaining chunks
@@ -702,7 +703,7 @@ def chunk_transcript(segments: List[Dict], chunk_minutes: int = 15) -> List[Dict
     return chunks
 
 
-def identify_interesting_sections(provider: str, endpoint_or_key: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "", video_title: str = "") -> List[Dict]:
+def identify_interesting_sections(provider: str, endpoint_or_key: str, model: str, chunk_text: str, chunk_num: int, custom_instructions: str = "", video_title: str = "", categories: List[Dict] = None) -> List[Dict]:
     """Use AI to identify interesting sections in a chunk - with retry logic"""
     MAX_RETRIES = 3
 
@@ -732,11 +733,13 @@ Pay special attention to the custom instructions above when analyzing the conten
 
 """
 
-            prompt = SECTION_IDENTIFICATION_PROMPT.format(
+            # Build prompt dynamically with user's categories
+            prompt = build_section_identification_prompt(
                 title_context=title_context,
                 custom_section=custom_section,
                 chunk_num=chunk_num,
-                chunk_text=chunk_text[:8000]  # Limit to ~8k chars for speed
+                chunk_text=chunk_text[:8000],  # Limit to ~8k chars for speed
+                categories=categories
             )
 
             # Use very large timeout (30 minutes) - we don't care about timeout
@@ -1416,6 +1419,7 @@ def main():
             output_file = command_data['output_file']
             custom_instructions = command_data.get('custom_instructions', '')
             video_title = command_data.get('video_title', '')
+            categories = command_data.get('categories', None)
 
             # Determine endpoint_or_key based on provider
             if provider in ['openai', 'claude']:
@@ -1439,7 +1443,7 @@ def main():
                 print(f"[DEBUG] First segment: {segments[0]}", file=sys.stderr)
                 print(f"[DEBUG] Last segment: {segments[-1]}", file=sys.stderr)
 
-            result = analyze_with_ai(provider, endpoint_or_key, model, transcript_text, segments, output_file, custom_instructions, video_title)
+            result = analyze_with_ai(provider, endpoint_or_key, model, transcript_text, segments, output_file, custom_instructions, video_title, categories)
             send_result(result)
 
         elif command == 'check_model':

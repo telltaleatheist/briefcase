@@ -38,6 +38,11 @@ export class LibrarySearchFiltersComponent {
     this.expanded.set(!this.expanded());
   }
 
+  onSearchFocus() {
+    // Auto-expand filters when search box is focused
+    this.expanded.set(true);
+  }
+
   onSearchChange() {
     this.emitFilters();
   }

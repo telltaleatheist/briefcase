@@ -66,6 +66,9 @@ export class CascadeComponent {
   // Progress configuration
   @Input() progressMapper?: (video: VideoItem) => ItemProgress | null;
 
+  // AI Processing indicator
+  @Input() aiProcessingVideoId?: string | null;
+
   // Children configuration
   @Input() childrenConfig?: ChildrenConfig;
 
@@ -152,6 +155,13 @@ export class CascadeComponent {
    */
   isHighlighted(itemId: string): boolean {
     return this.highlightedItemId() === itemId;
+  }
+
+  /**
+   * Check if video is currently processing an AI task
+   */
+  isProcessingAi(video: VideoItem): boolean {
+    return this.aiProcessingVideoId != null && video.id === this.aiProcessingVideoId;
   }
 
   /**
@@ -260,11 +270,31 @@ export class CascadeComponent {
     const video = this.contextMenuVideo();
     const hasSuggestedTitle = video?.suggestedTitle && video.suggestedTitle !== video.name;
     const isQueue = video ? this.isQueueItem(video) : false;
+    const isStaging = video ? this.isStagingItem(video) : false;
+    const isProcessing = video ? this.isProcessingItem(video) : false;
 
     const actions: VideoContextMenuAction[] = [];
     const countSuffix = count > 1 ? ` (${count})` : '';
 
-    // Queue item specific actions
+    // Processing queue item specific actions
+    if (isProcessing) {
+      if (count === 1) {
+        actions.push({ label: 'View in Library', icon: '📚', action: 'view-in-library' });
+        actions.push({ label: '', icon: '', action: '', divider: true });
+      }
+      actions.push({ label: `Cancel${countSuffix}`, icon: '⛔', action: 'cancel' });
+      return actions;
+    }
+
+    // Staging queue item specific actions
+    if (isStaging) {
+      actions.push({ label: `Configure Tasks${countSuffix}`, icon: '⚙️', action: 'analyze' });
+      actions.push({ label: '', icon: '', action: '', divider: true });
+      actions.push({ label: `Remove from Queue${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
+      return actions;
+    }
+
+    // Legacy queue item specific actions (for backwards compatibility)
     if (isQueue) {
       actions.push({ label: `Configure Tasks${countSuffix}`, icon: '⚙️', action: 'analyze' });
       actions.push({ label: '', icon: '', action: '', divider: true });
@@ -711,6 +741,44 @@ export class CascadeComponent {
     }
   }
 
+  onSuggestedTitleDiscarded() {
+    const video = this.editingSuggestedTitleVideo();
+    if (video) {
+      // Discard suggested title - clears it without renaming
+      this.libraryService.clearSuggestedTitle(video.id).subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            console.log('Suggested title discarded:', video.id);
+
+            // Update local state - clear suggested title by creating new objects
+            const updatedWeeks = this.videoWeeks().map(week => ({
+              ...week,
+              videos: week.videos.map(v =>
+                v.id === video.id
+                  ? { ...v, suggestedTitle: undefined }
+                  : v
+              )
+            }));
+
+            // Update display with new array
+            this.videoWeeks.set(updatedWeeks);
+            this.notificationService.success('Suggestion Discarded', 'AI title suggestion has been removed');
+
+            // Note: The parent component will reload the library when it receives the
+            // 'suggestion-rejected' WebSocket event from the backend
+          } else {
+            console.error('Failed to discard suggested title:', response.error);
+            this.notificationService.error('Discard Failed', response.error || 'Failed to discard suggestion');
+          }
+        },
+        error: (error) => {
+          console.error('Error discarding suggested title:', error);
+          this.notificationService.error('Discard Failed', 'An error occurred while discarding the suggestion');
+        }
+      });
+    }
+  }
+
   onSuggestedTitleModalClosed() {
     this.suggestedTitleModalVisible.set(false);
     this.editingSuggestedTitleVideo.set(null);
@@ -722,8 +790,14 @@ export class CascadeComponent {
   onDeleteClick(video: VideoItem, event: Event) {
     event.stopPropagation();
 
-    // For queue items, emit delete directly (removes from queue, no modal needed)
-    if (this.isQueueItem(video)) {
+    // For processing items, emit cancel action
+    if (this.isProcessingItem(video)) {
+      this.videoAction.emit({ action: 'cancel', videos: [video] });
+      return;
+    }
+
+    // For staging/queue items, emit delete directly (removes from queue, no modal needed)
+    if (this.isStagingItem(video) || this.isQueueItem(video)) {
       this.videoAction.emit({ action: 'delete', videos: [video] });
       return;
     }
@@ -744,6 +818,20 @@ export class CascadeComponent {
    */
   isQueueItem(video: VideoItem): boolean {
     return video.id.startsWith('queue-') || video.tags?.some(t => t.startsWith('queue:')) || false;
+  }
+
+  /**
+   * Check if a video is a staging queue item
+   */
+  isStagingItem(video: VideoItem): boolean {
+    return video.id.startsWith('staging-') || video.tags?.some(t => t.startsWith('staging:')) || false;
+  }
+
+  /**
+   * Check if a video is a processing queue item
+   */
+  isProcessingItem(video: VideoItem): boolean {
+    return video.id.startsWith('processing-') || video.tags?.some(t => t.startsWith('processing:')) || false;
   }
 
   /**
@@ -790,7 +878,8 @@ export class CascadeComponent {
       if (highlightedId) {
         event.preventDefault();
         const video = this.getVideoByItemId(highlightedId);
-        if (video && !this.isQueueItem(video)) {
+        // Don't allow preview for queue, staging, or processing items
+        if (video && !this.isQueueItem(video) && !this.isStagingItem(video) && !this.isProcessingItem(video)) {
           // Emit null to signal toggle (parent handles open/close logic)
           this.previewRequested.emit(video);
         }
@@ -804,7 +893,8 @@ export class CascadeComponent {
       if (highlightedId) {
         event.preventDefault();
         const video = this.getVideoByItemId(highlightedId);
-        if (video && !this.isQueueItem(video)) {
+        // Don't allow opening queue, staging, or processing items in editor
+        if (video && !this.isQueueItem(video) && !this.isStagingItem(video) && !this.isProcessingItem(video)) {
           this.videoAction.emit({ action: 'openInEditor', videos: [video] });
         }
       }

@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable, Subject, of } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
+import { BehaviorSubject, Observable, Subject, of, firstValueFrom } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { VideoJob, VideoTask, VideoJobSettings, QueueStats, ProcessingWebSocketMessage } from '../models/video-processing.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
@@ -9,6 +10,9 @@ import { LibraryService, BackendJobRequest, BackendTask, BackendTaskType } from 
   providedIn: 'root'
 })
 export class VideoProcessingService {
+  private readonly API_BASE = 'http://localhost:3000/api';
+
+  private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);
   private libraryService = inject(LibraryService);
 
@@ -24,6 +28,9 @@ export class VideoProcessingService {
   constructor() {
     // Connect to WebSocket and set up event handlers
     this.setupWebSocket();
+
+    // Restore queue from backend on initialization
+    this.restoreQueueFromBackend();
   }
 
   private setupWebSocket(): void {
@@ -42,6 +49,207 @@ export class VideoProcessingService {
     this.wsUnsubscribes.push(
       this.websocketService.onTaskFailed((event) => this.handleTaskFailed(event))
     );
+  }
+
+  /**
+   * Restore queue from backend on initialization
+   * This ensures queue persists across page refreshes
+   */
+  private async restoreQueueFromBackend(): Promise<void> {
+    console.log('[VideoProcessingService] Starting queue restoration...');
+    try {
+      console.log(`[VideoProcessingService] Fetching from ${this.API_BASE}/queue/jobs`);
+      const response = await firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/queue/jobs`)
+      );
+
+      console.log('[VideoProcessingService] Response received:', response);
+
+      if (response.success && Array.isArray(response.jobs)) {
+        const backendJobs = response.jobs;
+        console.log(`[VideoProcessingService] Found ${backendJobs.length} backend jobs:`, backendJobs);
+
+        // Convert backend jobs to frontend format
+        const frontendJobs: VideoJob[] = backendJobs.map((backendJob: any) => {
+          const frontendJob = this.mapBackendToFrontendJob(backendJob);
+
+          // Map backend job ID to frontend job ID for WebSocket updates
+          this.jobIdMap.set(backendJob.id, frontendJob.id);
+
+          return frontendJob;
+        });
+
+        console.log(`[VideoProcessingService] Converted to ${frontendJobs.length} frontend jobs:`, frontendJobs);
+
+        // Update the jobs observable
+        this.jobs$.next(frontendJobs);
+        this.updateStats();
+        console.log('[VideoProcessingService] Updated jobs$ observable');
+
+        // Determine active job
+        const activeJob = frontendJobs.find(j => j.status === 'processing');
+        if (activeJob) {
+          this.activeJobId$.next(activeJob.id);
+          console.log('[VideoProcessingService] Set active job:', activeJob.id);
+        }
+
+        console.log(`✅ [VideoProcessingService] Restored ${frontendJobs.length} jobs from backend queue`);
+      } else {
+        console.log('[VideoProcessingService] No jobs to restore or invalid response');
+      }
+    } catch (error) {
+      console.error('❌ [VideoProcessingService] Failed to restore queue from backend:', error);
+      // Don't throw - allow the app to continue with empty queue
+    }
+  }
+
+  /**
+   * Map a backend QueueJob to frontend VideoJob format
+   */
+  private mapBackendToFrontendJob(backendJob: any): VideoJob {
+    // Create frontend job structure
+    const frontendJob: VideoJob = {
+      id: this.generateId(), // Generate new frontend ID
+      videoId: backendJob.videoId,
+      videoUrl: backendJob.url,
+      videoPath: backendJob.videoPath,
+      videoName: backendJob.displayName || 'Unknown',
+      status: this.mapBackendStatus(backendJob.status),
+      addedAt: new Date(backendJob.createdAt),
+      startedAt: backendJob.startedAt ? new Date(backendJob.startedAt) : undefined,
+      completedAt: backendJob.completedAt ? new Date(backendJob.completedAt) : undefined,
+      settings: this.extractSettingsFromBackendJob(backendJob),
+      tasks: this.mapBackendTasksToFrontend(backendJob.tasks, backendJob.currentTaskIndex),
+      progress: backendJob.progress || 0
+    };
+
+    return frontendJob;
+  }
+
+  /**
+   * Map backend job status to frontend status
+   */
+  private mapBackendStatus(backendStatus: string): VideoJob['status'] {
+    switch (backendStatus) {
+      case 'pending':
+        return 'queued';
+      case 'processing':
+        return 'processing';
+      case 'completed':
+        return 'completed';
+      case 'failed':
+      case 'cancelled':
+        return 'failed';
+      default:
+        return 'queued';
+    }
+  }
+
+  /**
+   * Extract settings from backend job tasks
+   */
+  private extractSettingsFromBackendJob(backendJob: any): VideoJobSettings {
+    const tasks = backendJob.tasks || [];
+    const settings: VideoJobSettings = {
+      fixAspectRatio: false,
+      normalizeAudio: false,
+      transcribe: false,
+      aiAnalysis: false
+    };
+
+    tasks.forEach((task: any) => {
+      switch (task.type) {
+        case 'fix-aspect-ratio':
+          settings.fixAspectRatio = true;
+          settings.aspectRatio = task.options?.aspectRatio || '16:9';
+          break;
+        case 'normalize-audio':
+          settings.normalizeAudio = true;
+          settings.audioLevel = task.options?.audioLevel;
+          break;
+        case 'transcribe':
+          settings.transcribe = true;
+          settings.whisperModel = task.options?.model || 'base';
+          settings.whisperLanguage = task.options?.language;
+          break;
+        case 'analyze':
+          settings.aiAnalysis = true;
+          settings.aiModel = task.options?.aiModel;
+          settings.customInstructions = task.options?.customInstructions;
+          break;
+      }
+    });
+
+    return settings;
+  }
+
+  /**
+   * Map backend tasks to frontend task format with current status
+   */
+  private mapBackendTasksToFrontend(backendTasks: any[], currentTaskIndex: number): VideoTask[] {
+    return backendTasks.map((backendTask: any, index: number) => {
+      const taskType = this.mapBackendToFrontendTaskType(backendTask.type);
+      let status: VideoTask['status'] = 'pending';
+
+      if (index < currentTaskIndex) {
+        status = 'completed';
+      } else if (index === currentTaskIndex) {
+        status = 'in-progress';
+      }
+
+      return {
+        id: this.generateId(),
+        type: taskType,
+        name: this.getTaskName(taskType, backendTask.options),
+        status,
+        progress: status === 'completed' ? 100 : (status === 'in-progress' ? 0 : 0),
+        estimatedTime: this.getEstimatedTime(taskType)
+      };
+    });
+  }
+
+  /**
+   * Get human-readable task name
+   */
+  private getTaskName(taskType: VideoTask['type'], options?: any): string {
+    switch (taskType) {
+      case 'download':
+        return 'Download Video';
+      case 'import':
+        return 'Import to Database';
+      case 'aspect-ratio':
+        return `Fix Aspect Ratio (${options?.aspectRatio || '16:9'})`;
+      case 'normalize-audio':
+        return 'Normalize Audio';
+      case 'transcribe':
+        return `Transcribe (${options?.model || 'base'})`;
+      case 'ai-analysis':
+        return `AI Analysis (${options?.aiModel || 'Unknown'})`;
+      default:
+        return 'Unknown Task';
+    }
+  }
+
+  /**
+   * Get estimated time for a task type
+   */
+  private getEstimatedTime(taskType: VideoTask['type']): number {
+    switch (taskType) {
+      case 'download':
+        return 30;
+      case 'import':
+        return 10;
+      case 'aspect-ratio':
+        return 45;
+      case 'normalize-audio':
+        return 20;
+      case 'transcribe':
+        return 60;
+      case 'ai-analysis':
+        return 30;
+      default:
+        return 15;
+    }
   }
 
   private handleTaskStarted(event: TaskStarted): void {
