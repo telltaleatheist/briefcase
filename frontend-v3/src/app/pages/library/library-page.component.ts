@@ -301,8 +301,15 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.videoProcessingService.getJobs().subscribe(jobs => {
       console.log('[LibraryPage] Received jobs from VideoProcessingService:', jobs);
       console.log('[LibraryPage] Jobs count:', jobs.length);
+
+      // Filter out completed and failed jobs - they should not be in the processing queue
+      const activeJobs = jobs.filter(job =>
+        job.status !== 'completed' && job.status !== 'failed'
+      );
+      console.log('[LibraryPage] Active jobs (filtered):', activeJobs.length);
+
       // Convert VideoJob[] to ProcessingQueueItem[] format
-      const queueItems: ProcessingQueueItem[] = jobs.map(job => ({
+      const queueItems: ProcessingQueueItem[] = activeJobs.map(job => ({
         id: job.id,
         jobId: job.id,
         backendJobId: job.id,
@@ -1263,7 +1270,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   loadLibrary() {
     console.log('Loading library videos...');
-    // Get processing queue IDs to exclude from "Past 24 Hours" section
+    // Get processing queue IDs to exclude from "New" section
     const processingQueueIds = this.processingQueue().map(item => item.id);
 
     this.libraryService.getVideosByWeek(processingQueueIds).subscribe({
@@ -1517,8 +1524,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // Sort sections by their date (weekLabel is in format YYYY-MM-DD)
       weeks.sort((a, b) => {
         // Handle special labels
-        if (a.weekLabel === 'Past 24 Hours') return ascending ? 1 : -1;
-        if (b.weekLabel === 'Past 24 Hours') return ascending ? -1 : 1;
+        if (a.weekLabel === 'New') return ascending ? 1 : -1;
+        if (b.weekLabel === 'New') return ascending ? -1 : 1;
         if (a.weekLabel === 'Unknown') return 1;
         if (b.weekLabel === 'Unknown') return -1;
 

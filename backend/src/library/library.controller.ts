@@ -1126,15 +1126,23 @@ export class LibraryController {
       }
 
       // Generate clip filename
+      // For marker exports from RippleCut, use description (marker name) as the title
+      // Otherwise use title if provided
       const originalFilename = path.basename(body.videoPath);
+
+      // Log what we received from RippleCut
+      this.logger.log(`Extract-clip request: title="${body.title}", description="${body.description}", category="${body.category}"`);
+
       const clipFilename = this.clipExtractor.generateClipFilename(
         originalFilename,
         body.startTime,
         body.endTime,
         body.category,
-        body.title,
+        body.description || body.title,
         parentVideo?.upload_date
       );
+
+      this.logger.log(`Generated clip filename: ${clipFilename}`);
 
       // Determine output path
       let outputDir: string;
@@ -1195,6 +1203,14 @@ export class LibraryController {
           parentVideoId
         );
         this.logger.log(`Imported clip to library: ${importResult.imported.length > 0 ? 'success' : 'failed'}${parentVideoId ? ` (linked to parent ${parentVideoId})` : ''}`);
+
+        // Set lastProcessedDate so clip appears in "New" section
+        if (importResult.imported.length > 0) {
+          const videoId = importResult.imported[0];
+          this.databaseService.updateLastProcessedDate(videoId);
+          this.logger.log(`Set lastProcessedDate for exported clip: ${videoId}`);
+        }
+
         if (importResult.errors.length > 0) {
           this.logger.warn(`Import warnings: ${importResult.errors.join(', ')}`);
         }

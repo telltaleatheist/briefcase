@@ -340,10 +340,10 @@ export class LibraryService {
     // Build result array
     const result: VideoWeek[] = [];
 
-    // Add "Past 24 hours" section first if it has items
+    // Add "New" section first if it has items
     if (past24Hours.length > 0) {
       result.push({
-        weekLabel: 'Past 24 Hours',
+        weekLabel: 'New',
         videos: past24Hours
       });
     }

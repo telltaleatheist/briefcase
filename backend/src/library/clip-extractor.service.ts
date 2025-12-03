@@ -207,6 +207,13 @@ export class ClipExtractorService {
 
   /**
    * Generate a clip filename based on metadata
+   *
+   * If title (marker text) is provided:
+   *   - With upload date: "{uploadDate} {title}.ext"
+   *   - Without upload date: "{title}.ext"
+   *
+   * If no title:
+   *   - Fall back to: "{basename}_{category}_{startTime}_{endTime}.ext"
    */
   generateClipFilename(
     originalFilename: string,
@@ -218,20 +225,22 @@ export class ClipExtractorService {
   ): string {
     const ext = path.extname(originalFilename);
 
-    // If both uploadDate and title are provided, use the new format:
-    // "{uploadDate} {title}.{ext}"
-    if (uploadDate && title) {
+    // If title (marker text) is provided, use it as the filename
+    if (title && title.trim()) {
       // Sanitize the title to be filesystem-safe
       const safeTitle = title
         .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filesystem characters
         .replace(/\s+/g, ' ') // Normalize whitespace
         .trim();
 
-      // Format: "YYYY-MM-DD title"
-      return `${uploadDate} ${safeTitle}${ext}`;
+      // Prepend upload date if available
+      if (uploadDate) {
+        return `${uploadDate} ${safeTitle}${ext}`;
+      }
+      return `${safeTitle}${ext}`;
     }
 
-    // Fall back to old timestamp-based naming if either is missing
+    // Fall back to timestamp-based naming if no title
     const basename = path.basename(originalFilename, ext);
     const startStr = this.formatTimestamp(startTime).replace(/:/g, '-');
     const endStr = this.formatTimestamp(endTime).replace(/:/g, '-');

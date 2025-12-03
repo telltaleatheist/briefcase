@@ -329,6 +329,16 @@ export class VideoProcessingService {
       job.completedAt = new Date();
       job.progress = 100;
       this.activeJobId$.next(null);
+
+      // Remove completed job from the jobs list after a short delay
+      // This prevents the flash of the item reappearing
+      setTimeout(() => {
+        const currentJobs = this.jobs$.value;
+        const filteredJobs = currentJobs.filter(j => j.id !== jobId);
+        this.jobs$.next(filteredJobs);
+        this.updateStats();
+        console.log('Removed completed job from VideoProcessingService:', jobId);
+      }, 500);
     } else {
       this.updateJobProgress(job);
     }

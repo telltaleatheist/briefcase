@@ -712,7 +712,15 @@ export class FfmpegService {
       if (!outputPath) {
         if (videoId) {
           // Use ThumbnailService to get the correct path for this library
-          outputPath = this.thumbnailService.getThumbnailPath(videoId);
+          try {
+            outputPath = this.thumbnailService.getThumbnailPath(videoId);
+          } catch (thumbnailError) {
+            // ThumbnailService library path not set - fall back to video directory
+            this.logger.warn(`ThumbnailService not ready, using fallback path: ${(thumbnailError as Error).message}`);
+            const fileDir = path.dirname(videoPath);
+            const fileBase = path.parse(videoPath).name;
+            outputPath = path.join(fileDir, `${fileBase}_thumbnail.jpg`);
+          }
         } else {
           // Fall back to old behavior for backwards compatibility
           const fileDir = path.dirname(videoPath);
@@ -721,17 +729,33 @@ export class FfmpegService {
         }
       }
 
+      // Validate outputPath is set
+      if (!outputPath) {
+        this.logger.error('Failed to determine thumbnail output path');
+        return null;
+      }
+
+      // Ensure the output folder exists
+      const outputFolder = path.dirname(outputPath);
+      if (!fs.existsSync(outputFolder)) {
+        fs.mkdirSync(outputFolder, { recursive: true });
+        this.logger.log(`Created thumbnail folder: ${outputFolder}`);
+      }
+
       // First, get video duration to calculate 10% mark
       const metadata = await this.getVideoMetadata(videoPath);
-      const duration = metadata.duration || 0;
+      const duration = metadata?.duration || 0;
       const thumbnailTime = Math.max(1, duration * 0.1); // 10% of duration, minimum 1 second
+
+      const filename = path.basename(outputPath);
+      const folder = path.dirname(outputPath);
 
       return new Promise<string | null>((resolve, reject) => {
         const command = ffmpeg(videoPath)
           .screenshots({
             timestamps: [thumbnailTime], // Take screenshot at 10% of the video duration
-            filename: path.basename(outputPath || ''),
-            folder: path.dirname(outputPath || ''),
+            filename: filename,
+            folder: folder,
             size: '?x360', // Height of 360px, width auto-calculated to preserve aspect ratio
           })
           .on('start', (cmdline) => {

@@ -209,6 +209,7 @@ export interface PreviewItem {
 
     .media-info {
       margin-bottom: $spacing-sm;
+      flex-shrink: 0;
     }
 
     .filename {
@@ -231,6 +232,7 @@ export interface PreviewItem {
       display: flex;
       flex-direction: column;
       gap: $spacing-sm;
+      flex-shrink: 0;
     }
 
     .controls-row {
@@ -469,7 +471,7 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   duration = signal(0);
   progress = signal(0);
   position = signal({ x: 100, y: 100 });
-  windowSize = signal({ width: 480, height: 360 });
+  windowSize = signal({ width: 640, height: 480 });
   volume = signal(1.0); // 0.0 to 1.0
   isMuted = signal(false);
   playbackRate = signal(1.0); // Playback speed
@@ -481,8 +483,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   private resizeStart = { x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 };
   private pendingAutoplay = false;
   private needsCenter = false;
-  private readonly minWidth = 320;
-  private readonly minHeight = 240;
+  private readonly minWidth = 400;
+  private readonly minHeight = 320;
 
   currentItem = () => this.items()[this.currentIndex()];
 
