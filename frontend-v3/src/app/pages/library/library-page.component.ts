@@ -1161,14 +1161,15 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onConfigSave(tasks: QueueItemTask[]) {
     const pendingVideos = this.pendingConfigVideos();
     const itemIds = this.configItemIds();
-    const queue = [...this.processingQueue()];
 
     if (pendingVideos.length > 0) {
-      // Adding new videos from analyzeVideos - create queue items
+      // Adding new videos from analyzeVideos - add to STAGING queue
+      const staging = [...this.stagingQueue()];
+
       for (const video of pendingVideos) {
         const id = `lib-${++this.queueIdCounter}`;
 
-        queue.push({
+        staging.push({
           id,
           videoId: video.id,
           title: video.name,
@@ -1184,12 +1185,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         });
       }
 
+      this.stagingQueue.set(staging);
+
       // Clear pending videos
       this.pendingConfigVideos.set([]);
+
+      // Switch to Queue tab to show staging items
+      this.setActiveTab('queue');
     } else {
-      // Updating existing queue items
+      // Updating existing staging items
+      const staging = [...this.stagingQueue()];
       for (const id of itemIds) {
-        const item = queue.find(q => q.id === id);
+        const item = staging.find(q => q.id === id);
         if (item) {
           item.tasks = tasks.map(t => ({
             type: t.type,
@@ -1199,9 +1206,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           }));
         }
       }
+      this.stagingQueue.set(staging);
     }
-
-    this.processingQueue.set(queue);
 
     // Save as defaults
     this.saveDefaultTaskSettings(tasks);
@@ -1919,6 +1925,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   onAddSelectedToQueue() {
+    console.log('[ADD TO QUEUE] Starting...');
+
     if (this.selectedCount() === 0) {
       this.notificationService.warning('No Selection', 'Please select at least one video');
       return;
@@ -1931,6 +1939,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     });
 
     const selectedItemIds = this.selectedVideoIds();
+    console.log('[ADD TO QUEUE] Selected item IDs:', selectedItemIds);
 
     // Extract unique video IDs from itemIds (format: "weekLabel|videoId")
     const uniqueVideoIds = new Set<string>();
@@ -1942,6 +1951,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         uniqueVideoIds.add(videoId);
       }
     });
+
+    console.log('[ADD TO QUEUE] Unique video IDs:', Array.from(uniqueVideoIds));
 
     if (uniqueVideoIds.size === 0) return;
 
@@ -1973,19 +1984,25 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
+    console.log('[ADD TO QUEUE] New staging queue:', staging);
     this.stagingQueue.set(staging);
+    console.log('[ADD TO QUEUE] Staging queue after set:', this.stagingQueue());
 
-    // Clear selection
-    if (this.cascadeComponent) {
-      this.cascadeComponent.clearSelection();
-    }
+    // Switch to Queue tab using the proper method
+    console.log('[ADD TO QUEUE] Current tab before switch:', this.activeTab());
+    this.setActiveTab('queue');
+    console.log('[ADD TO QUEUE] Current tab after switch:', this.activeTab());
 
-    // Show notification and switch to Queue tab
+    // Show notification
     this.notificationService.success(
       'Added to Staging',
       `Added ${uniqueVideoIds.size} ${uniqueVideoIds.size === 1 ? 'video' : 'videos'} to staging queue`
     );
-    this.setActiveTab('queue');
+
+    // Clear selection (Angular will handle this reactively)
+    if (this.cascadeComponent) {
+      this.cascadeComponent.clearSelection();
+    }
   }
 
   onPasteUrls() {

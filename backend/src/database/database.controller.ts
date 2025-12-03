@@ -1261,27 +1261,26 @@ export class DatabaseController {
       const oldPath = video.current_path as string;
       const oldFilename = video.filename as string;
 
-      // FILENAME IS SOURCE OF TRUTH: Extract date from old filename first
-      // Only fall back to database upload_date if filename has no date
-      // NOTE: upload_date should ONLY be the actual upload date from yt-dlp metadata, NEVER the download_date
+      // FILENAME IS SOURCE OF TRUTH for rename operations
+      // When renaming, ONLY use dates that are explicitly in the filename
+      // DO NOT pull upload_date from database during rename (it may be incorrect/stale)
+      // The database will be UPDATED after rename based on the final filename
       const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
-      let uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
-      if (!uploadDate) {
-        // Filename has no date, check database for upload_date (NOT download_date)
-        uploadDate = video.upload_date as string | undefined;
-      }
 
-      // Check if user provided a NEW date in their input
+      // Check if user provided a date in their new input
       const newTitleInfo = FilenameDateUtil.extractDateInfo(body.filename.trim());
-      if (newTitleInfo.hasDate && newTitleInfo.date !== uploadDate) {
-        this.logger.log(`User provided NEW date: "${newTitleInfo.date}" (replacing old date: "${uploadDate}")`);
+      if (newTitleInfo.hasDate) {
+        this.logger.log(`User provided date in new filename: "${newTitleInfo.date}"`);
       }
 
-      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}", uploadDate="${uploadDate}" (source: ${oldDateInfo.hasDate ? 'filename' : 'database upload_date'})`);
+      this.logger.log(`updateVideoFilename: oldFilename="${oldFilename}", requested="${body.filename.trim()}"`);
 
-      // Ensure new filename has the date prefix (preserves existing or adds upload date)
-      // If user provided a new date in their input, that takes priority
-      const newFilename = FilenameDateUtil.updateTitle(oldFilename, body.filename.trim(), uploadDate);
+      // Create new filename:
+      // - If user provides date in new title → use it
+      // - If old filename has date → preserve it (unless user provides new date)
+      // - If neither has date → no date in new filename
+      // DO NOT add date from database during rename
+      const newFilename = FilenameDateUtil.updateTitle(oldFilename, body.filename.trim(), undefined);
 
       this.logger.log(`updateVideoFilename: computed newFilename="${newFilename}"`);
 
@@ -1460,34 +1459,33 @@ export class DatabaseController {
 
       const oldFilename = video.filename as string;
 
-      // FILENAME IS SOURCE OF TRUTH: Extract date from old filename first
-      // Only fall back to database upload_date if filename has no date
-      // NOTE: upload_date should ONLY be the actual upload date from yt-dlp metadata, NEVER the download_date
+      // FILENAME IS SOURCE OF TRUTH for rename operations
+      // When accepting AI suggestions, ONLY use dates that are explicitly in the filename
+      // DO NOT pull upload_date from database during rename (it may be incorrect/stale)
+      // The database will be UPDATED after rename based on the final filename
       const oldDateInfo = FilenameDateUtil.extractDateInfo(oldFilename);
-      let uploadDate = oldDateInfo.hasDate ? oldDateInfo.date : undefined;
-      if (!uploadDate) {
-        // Filename has no date, check database for upload_date (NOT download_date)
-        uploadDate = video.upload_date as string | undefined;
-      }
 
       // Use custom filename if provided, otherwise format from suggested title
       let newFilename: string;
       if (body?.customFilename) {
-        // Check if user provided a NEW date in their custom filename
+        // Check if user provided a date in their custom filename
         const newTitleInfo = FilenameDateUtil.extractDateInfo(body.customFilename);
-        if (newTitleInfo.hasDate && newTitleInfo.date !== uploadDate) {
-          this.logger.log(`User provided NEW date in AI suggestion: "${newTitleInfo.date}" (replacing old date: "${uploadDate}")`);
+        if (newTitleInfo.hasDate) {
+          this.logger.log(`User provided date in AI suggestion: "${newTitleInfo.date}"`);
         }
 
-        // Process custom filename to ensure date and extension are present
-        // If user provided a new date in their input, that takes priority
+        // Process custom filename:
+        // - If user provides date in new title → use it
+        // - If old filename has date → preserve it (unless user provides new date)
+        // - If neither has date → no date in new filename
+        // DO NOT add date from database during rename
         this.logger.log(`Processing custom filename: ${body.customFilename}`);
-        newFilename = FilenameDateUtil.updateTitle(oldFilename, body.customFilename, uploadDate);
+        newFilename = FilenameDateUtil.updateTitle(oldFilename, body.customFilename, undefined);
         this.logger.log(`Processed to: ${newFilename}`);
       } else {
-        // Format the new filename from suggested title
+        // Format the new filename from suggested title (no date added from database)
         const suggestedTitle = String(video.suggested_title || '').trim();
-        newFilename = FilenameDateUtil.updateTitle(oldFilename, suggestedTitle, uploadDate);
+        newFilename = FilenameDateUtil.updateTitle(oldFilename, suggestedTitle, undefined);
       }
 
       // Extract the final date from the new filename to update the database

@@ -8,24 +8,36 @@
       </p>
     </div>
     <div class="toolbar-actions">
-      <!-- Staging actions (only show when staging items selected) -->
-      @if (selectedStagingIds().size > 0) {
-        <button class="btn btn-secondary" (click)="onConfigureSelected()">
-          <span class="btn-icon">⚙️</span>
-          <span>Configure</span>
-          <span class="badge">{{ selectedStagingIds().size }}</span>
-        </button>
-        <button class="btn btn-secondary" (click)="onRemoveSelected()">
-          <span class="btn-icon">🗑️</span>
-          <span>Remove</span>
-        </button>
-        <button class="btn btn-primary" (click)="onProcessSelected()">
-          <span class="btn-icon">▶</span>
-          <span>Process Selected</span>
-        </button>
-      }
-      <!-- Process All button (show when no selection and staging items exist) -->
-      @if (selectedStagingIds().size === 0 && stagingQueue.length > 0) {
+      <!-- Show buttons when staging items exist -->
+      @if (stagingQueue.length > 0) {
+        <!-- Configure button (only when items selected) -->
+        @if (selectedStagingIds().size > 0) {
+          <button class="btn btn-secondary" (click)="onConfigureSelected()">
+            <span class="btn-icon">⚙️</span>
+            <span>Configure</span>
+            <span class="badge">{{ selectedStagingIds().size }}</span>
+          </button>
+        }
+
+        <!-- Remove button (only when items selected) -->
+        @if (selectedStagingIds().size > 0) {
+          <button class="btn btn-secondary" (click)="onRemoveSelected()">
+            <span class="btn-icon">🗑️</span>
+            <span>Remove Selected</span>
+            <span class="badge">{{ selectedStagingIds().size }}</span>
+          </button>
+        }
+
+        <!-- Process Selected button (only when items selected) -->
+        @if (selectedStagingIds().size > 0) {
+          <button class="btn btn-primary" (click)="onProcessSelected()">
+            <span class="btn-icon">▶</span>
+            <span>Process Selected</span>
+            <span class="badge">{{ selectedStagingIds().size }}</span>
+          </button>
+        }
+
+        <!-- Process All button (always show when staging items exist) -->
         <button class="btn btn-primary" (click)="onProcessAll()">
           <span class="btn-icon">▶▶</span>
           <span>Process All</span>

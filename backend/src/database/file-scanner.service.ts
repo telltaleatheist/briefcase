@@ -71,17 +71,13 @@ export class FileScannerService {
     const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
     const sundayDate = new Date(date);
 
-    // Find closest Sunday:
-    // - If Sunday-Wednesday (0-3): use current/previous Sunday
-    // - If Thursday-Saturday (4-6): use next Sunday
+    // Always use the Sunday that ends the current week (upcoming Sunday)
+    // Week runs Monday-Sunday, folder named after the Sunday
     if (dayOfWeek === 0) {
       // Already Sunday, use current day
       // No adjustment needed
-    } else if (dayOfWeek <= 3) {
-      // Monday-Wednesday: go back to previous Sunday
-      sundayDate.setDate(date.getDate() - dayOfWeek);
     } else {
-      // Thursday-Saturday: go forward to next Sunday
+      // Monday-Saturday: go forward to next Sunday
       sundayDate.setDate(date.getDate() + (7 - dayOfWeek));
     }
 
