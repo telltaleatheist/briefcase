@@ -39,11 +39,7 @@ try {
   console.log('   ✓ Copying dist/...');
   fs.copySync(path.join(backendDir, 'dist'), path.join(tempDir, 'dist'));
 
-  // Copy python folder if it exists
-  if (fs.existsSync(path.join(backendDir, 'python'))) {
-    console.log('   ✓ Copying python/...');
-    fs.copySync(path.join(backendDir, 'python'), path.join(tempDir, 'python'));
-  }
+  // Note: Python folder removed - we now use native whisper.cpp and Node.js for all processing
 
   // 4. Install ONLY production dependencies
   console.log('\n📦 Installing production dependencies only...');

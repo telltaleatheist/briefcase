@@ -10,9 +10,9 @@ const getRuntimePaths = () => {
   // First check environment variables - these are set by Electron when spawning the backend
   if (process.env.FFMPEG_PATH && process.env.YT_DLP_PATH) {
     // All required env vars must be set - no partial fallbacks
-    if (!process.env.FFMPEG_PATH || !process.env.FFPROBE_PATH || !process.env.YT_DLP_PATH || !process.env.PYTHON_PATH) {
+    if (!process.env.FFMPEG_PATH || !process.env.FFPROBE_PATH || !process.env.YT_DLP_PATH) {
       throw new Error(
-        'Incomplete binary paths. Required env vars: FFMPEG_PATH, FFPROBE_PATH, YT_DLP_PATH, PYTHON_PATH. ' +
+        'Incomplete binary paths. Required env vars: FFMPEG_PATH, FFPROBE_PATH, YT_DLP_PATH. ' +
         'App must be started via Electron which sets these paths.'
       );
     }
@@ -23,7 +23,6 @@ const getRuntimePaths = () => {
       whisper: process.env.WHISPER_PATH || '', // Optional - whisper-cpp may not be installed
       whisperCpp: process.env.WHISPER_CPP_PATH || '',
       whisperModel: process.env.WHISPER_MODEL_PATH || '',
-      python: process.env.PYTHON_PATH
     };
   }
 
@@ -77,10 +76,6 @@ export class SharedConfigService {
 
   getWhisperPath(): string {
     return getRuntimePaths().whisper;
-  }
-
-  getPythonPath(): string {
-    return getRuntimePaths().python;
   }
 
   // Legacy method - no longer needed but kept for compatibility

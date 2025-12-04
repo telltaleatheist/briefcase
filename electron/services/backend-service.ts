@@ -355,7 +355,6 @@ export class BackendService {
         // whisper.cpp paths (standalone binary - no Python needed!)
         WHISPER_CPP_PATH: runtimePaths.whisperCpp || process.env.WHISPER_CPP_PATH,
         WHISPER_MODEL_PATH: runtimePaths.whisperModel || process.env.WHISPER_MODEL_PATH,
-        PYTHON_PATH: runtimePaths.python || process.env.PYTHON_PATH,
       };
       
       // Set the working directory to the backend directory for proper module resolution

@@ -7,7 +7,7 @@ import { WhisperService } from './whisper.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
-import { PythonBridgeService } from '../analysis/python-bridge.service';
+import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { ApiKeysService } from '../config/api-keys.service';
 import {
   GetInfoResult,
@@ -32,7 +32,7 @@ export class MediaOperationsService {
     private readonly databaseService: DatabaseService,
     private readonly mediaProcessingService: MediaProcessingService,
     private readonly whisperService: WhisperService,
-    private readonly pythonBridgeService: PythonBridgeService,
+    private readonly aiAnalysisService: AIAnalysisService,
     private readonly eventService: MediaEventService,
     private readonly apiKeysService: ApiKeysService,
   ) {}
@@ -512,6 +512,9 @@ export class MediaOperationsService {
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
+    console.log('=== MediaOperationsService.analyzeVideo CALLED ===');
+    console.log(`VideoId: ${videoId}, Options: ${JSON.stringify(options)}, JobId: ${jobId}`);
+
     try {
       this.logger.log(`[${jobId || 'standalone'}] Analyzing video: ${videoId}`);
 
@@ -579,23 +582,28 @@ export class MediaOperationsService {
       // Use filename (always present) - strip extension for display
       const videoTitle = video.filename.replace(/\.[^/.]+$/, '');
 
-      const analysisResult = await this.pythonBridgeService.analyze(
-        options.ollamaEndpoint || 'http://localhost:11434',
-        cleanModelName,
-        transcriptText,
+      // Load categories from config
+      const categories = this.loadCategories();
+
+      // Use native AIAnalysisService (replaces Python bridge)
+      const analysisResult = await this.aiAnalysisService.analyzeTranscript({
+        provider,
+        model: cleanModelName,
+        transcript: transcriptText,
         segments,
-        analysisOutputPath,
-        (progress) => {
+        outputFile: analysisOutputPath,
+        customInstructions: options.customInstructions,
+        videoTitle,
+        categories,
+        apiKey,
+        ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
+        onProgress: (progress) => {
           this.eventService.emitTaskProgress(jobId || '', 'analyze', progress.progress, progress.message);
         },
-        options.customInstructions,
-        provider,
-        apiKey,
-        videoTitle,
-      );
+      });
 
-      // Log what we received from Python
-      this.logger.log(`[${jobId || 'standalone'}] Analysis result from Python:`, JSON.stringify({
+      // Log analysis result
+      this.logger.log(`[${jobId || 'standalone'}] Analysis result:`, JSON.stringify({
         sections_count: analysisResult.sections_count,
         has_sections: !!analysisResult.sections,
         sections_length: analysisResult.sections?.length || 0,
@@ -664,12 +672,14 @@ export class MediaOperationsService {
       if (analysisResult.sections && Array.isArray(analysisResult.sections)) {
         for (const section of analysisResult.sections) {
           const sectionId = `section-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const startSeconds = this.parseTimeToSeconds(section.start_time);
+          const endSeconds = section.end_time ? this.parseTimeToSeconds(section.end_time) : startSeconds + 30;
           this.databaseService.insertAnalysisSection({
             id: sectionId,
             videoId,
-            startSeconds: this.parseTimeToSeconds(section.start_time),
-            endSeconds: this.parseTimeToSeconds(section.end_time),
-            timestampText: `${section.start_time} - ${section.end_time}`,
+            startSeconds,
+            endSeconds,
+            timestampText: `${section.start_time}${section.end_time ? ' - ' + section.end_time : ''}`,
             title: section.category,
             description: section.description,
             category: section.category,
@@ -787,5 +797,41 @@ export class MediaOperationsService {
     const db = this.databaseService.getDatabase();
     db.prepare(`UPDATE videos SET ${flagName} = ? WHERE id = ?`).run(value, videoId);
     this.logger.log(`Set ${flagName} = ${value} for video ${videoId}`);
+  }
+
+  /**
+   * Load analysis categories from config file
+   * Throws error if categories not configured - forces proper initialization via Settings
+   */
+  private loadCategories(): any[] {
+    const userDataPath = process.env.APPDATA ||
+                      (process.platform === 'darwin' ?
+                      path.join(process.env.HOME || '', 'Library', 'Application Support') :
+                      path.join(process.env.HOME || '', '.config'));
+
+    const categoriesPath = path.join(userDataPath, 'ClipChimp', 'analysis-categories.json');
+
+    if (!fs.existsSync(categoriesPath)) {
+      throw new Error(
+        'Analysis categories not initialized. ' +
+        'The categories file should be created automatically when the app starts. ' +
+        'Try opening Settings or restart the app.'
+      );
+    }
+
+    const data = fs.readFileSync(categoriesPath, 'utf8');
+    const parsed = JSON.parse(data);
+
+    // Handle both formats: array directly or { categories: [...] }
+    const categories = Array.isArray(parsed) ? parsed : parsed.categories;
+
+    if (!categories || categories.length === 0) {
+      throw new Error(
+        'No analysis categories found in config file. ' +
+        'Please configure categories in Settings > Analysis Categories.'
+      );
+    }
+
+    return categories;
   }
 }

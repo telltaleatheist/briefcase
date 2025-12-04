@@ -2,9 +2,11 @@ import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/co
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { PythonBridgeService } from './python-bridge.service';
+import * as fsSync from 'fs';
 import { OllamaService } from './ollama.service';
 import { AIProviderService } from './ai-provider.service';
+import { AIAnalysisService } from './ai-analysis.service';
+import { WhisperService } from '../media/whisper.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { PathService } from '../path/path.service';
@@ -18,6 +20,7 @@ import { MediaProcessingService } from '../media/media-processing.service';
 import { QueueManagerService } from '../queue/queue-manager.service';
 import { ApiKeysService } from '../config/api-keys.service';
 import { Task } from '../common/interfaces/task.interface';
+import { DEFAULT_CATEGORIES } from './prompts/analysis-prompts';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -121,9 +124,10 @@ export class AnalysisService implements OnModuleInit {
   }
 
   constructor(
-    private pythonBridge: PythonBridgeService,
     private ollama: OllamaService,
     private aiProvider: AIProviderService,
+    private aiAnalysis: AIAnalysisService,
+    private whisperService: WhisperService,
     private ffmpeg: FfmpegService,
     private downloader: DownloaderService,
     private pathService: PathService,
@@ -144,6 +148,9 @@ export class AnalysisService implements OnModuleInit {
    * Initialize event listeners on module initialization
    */
   onModuleInit() {
+    // Initialize categories file if it doesn't exist
+    this.initializeCategoriesFile();
+
     // Listen for FFmpeg processing progress events
     this.eventEmitter.on('processing-progress', (data: { jobId: string; progress: number; task: string }) => {
       this.logger.log(`[FFmpeg Progress] Job ${data.jobId}: ${data.progress}% - ${data.task}`);
@@ -591,59 +598,44 @@ export class AnalysisService implements OnModuleInit {
       }
     }
 
-    // Extract audio (part of transcription process)
+    // Transcribe using native whisper.cpp (handles audio extraction internally)
     this.updateJob(jobId, {
       status: 'transcribing',
-      progress: 0,
-      currentPhase: 'Preparing audio for transcription...',
-      timing: { ...job.timing, extractionStart: new Date() },
-    });
-
-    const audioPath = await this.extractAudio(request.videoPath!, jobId);
-    request.audioPath = audioPath;
-
-    this.updateJob(jobId, {
       progress: 5,
-      audioPath,
-      timing: { ...job.timing, extractionEnd: new Date() },
-    });
-
-    // Transcribe
-    this.updateJob(jobId, {
-      status: 'transcribing',
-      progress: 30,
-      currentPhase: 'Transcribing audio (this may take a few minutes)...',
+      currentPhase: 'Starting transcription (this may take a few minutes)...',
       timing: { ...job.timing, transcriptionStart: new Date() },
     });
 
-    this.logger.log(`Transcription started for job ${jobId}`);
+    this.logger.log(`Transcription started for job ${jobId} using whisper.cpp`);
 
-    const transcriptResult = await this.pythonBridge.transcribe(
-      audioPath,
+    // Use WhisperService which handles audio extraction and whisper.cpp transcription
+    const srtFilePath = await this.whisperService.transcribeVideo(
+      request.videoPath!,
+      jobId,
       request.whisperModel || 'base',
-      request.language || 'en',
-      (progress) => {
-        // Map Python's transcription progress (0-100%) to overall job progress (30-60%)
-        const mappedProgress = Math.round(30 + (progress.progress / 100) * 30);
-        this.updateJob(jobId, {
-          progress: Math.min(Math.max(mappedProgress, 30), 60),
-          currentPhase: progress.message,
-        });
-      },
     );
 
-    request.transcriptText = transcriptResult.text;
-    request.transcriptSrt = transcriptResult.srt;
+    if (!srtFilePath) {
+      throw new Error('Transcription failed - whisper.cpp did not produce output');
+    }
+
+    // Read the SRT file content
+    const srtContent = await fs.readFile(srtFilePath, 'utf-8');
+
+    // Parse SRT to get plain text (segments are parsed later in processAnalyzePhase)
+    const segments = this.parseSrtToSegments(srtContent);
+    const plainText = segments.map((seg: any) => seg.text).join(' ');
+
+    request.transcriptText = plainText;
+    request.transcriptSrt = srtContent;
 
     this.updateJob(jobId, {
       progress: 60,
       timing: { ...job.timing, transcriptionEnd: new Date() },
     });
 
-    // Clean up audio file
-    if (audioPath) {
-      await fs.unlink(audioPath).catch(() => {});
-    }
+    // Clean up the SRT temp file (we've read its content)
+    await fs.unlink(srtFilePath).catch(() => {});
   }
 
   /**
@@ -769,14 +761,19 @@ export class AnalysisService implements OnModuleInit {
     // Load user's categories from config
     const categories = this.loadCategories();
 
-    // modelName already stripped earlier in this method
-    const analysisResult = await this.pythonBridge.analyze(
-      request.ollamaEndpoint,
-      modelName,  // Use stripped model name
-      request.transcriptText,
+    // Use native AIAnalysisService (replaces Python bridge)
+    const analysisResult = await this.aiAnalysis.analyzeTranscript({
+      provider: provider as 'ollama' | 'openai' | 'claude',
+      model: modelName,
+      transcript: request.transcriptText!,
       segments,
-      analysisOutputPath,
-      (progress) => {
+      outputFile: analysisOutputPath,
+      customInstructions: request.customInstructions,
+      videoTitle: request.videoTitle,
+      categories,
+      apiKey,
+      ollamaEndpoint: request.ollamaEndpoint,
+      onProgress: (progress) => {
         // Handle indeterminate progress (single-chunk videos)
         if (progress.progress === -1) {
           this.updateJob(jobId, {
@@ -784,8 +781,7 @@ export class AnalysisService implements OnModuleInit {
             currentPhase: progress.message,
           });
         } else {
-          // Map Python's chunk completion progress (0-100%) to overall job progress (60-95%)
-          // This shows meaningful chunk-based updates
+          // Map chunk completion progress (0-100%) to overall job progress (60-95%)
           const mappedProgress = Math.round(60 + (progress.progress / 100) * 35);
           this.updateJob(jobId, {
             progress: Math.min(Math.max(mappedProgress, 60), 95),
@@ -793,12 +789,7 @@ export class AnalysisService implements OnModuleInit {
           });
         }
       },
-      request.customInstructions,
-      provider,
-      apiKey,
-      request.videoTitle,
-      categories,
-    );
+    });
 
     // Read and save analysis
     const analysisText = await fs.readFile(analysisOutputPath, 'utf-8');
@@ -1271,58 +1262,6 @@ export class AnalysisService implements OnModuleInit {
   }
 
   /**
-   * Extract audio from video using FFmpeg
-   * IMPORTANT: Creates temporary WAV file in system tmp directory, NOT in library location
-   */
-  private async extractAudio(videoPath: string, jobId: string): Promise<string> {
-    const os = require('os');
-    const tmpDir = os.tmpdir();
-
-    // Verify that the video file exists before attempting extraction
-    try {
-      await fs.access(videoPath);
-    } catch (error) {
-      const errorMsg = `Video file not found: ${videoPath}`;
-      this.logger.error(errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    // Create unique filename in tmp directory to avoid conflicts
-    const audioFilename = `${jobId}_${Date.now()}_audio.wav`;
-    const audioPath = path.join(tmpDir, audioFilename);
-
-    this.logger.log(`Extracting audio from: ${videoPath}`);
-    this.logger.log(`Extracting audio to temporary file: ${audioPath}`);
-
-    // Use FFmpeg to extract audio
-    return new Promise((resolve, reject) => {
-      const ffmpeg = require('fluent-ffmpeg');
-
-      // fluent-ffmpeg should handle path escaping internally, but we'll also
-      // ensure the input is properly set using .input() method
-      ffmpeg()
-        .input(videoPath)
-        .noVideo()
-        .audioCodec('pcm_s16le')
-        .audioFrequency(16000)
-        .audioChannels(1)
-        .format('wav')
-        .on('start', (cmdline: string) => {
-          this.logger.log(`FFmpeg command: ${cmdline}`);
-        })
-        .on('end', () => {
-          this.logger.log(`Audio extraction complete: ${audioPath}`);
-          resolve(audioPath);
-        })
-        .on('error', (err: Error) => {
-          this.logger.error(`Audio extraction failed: ${err.message}`);
-          reject(err);
-        })
-        .save(audioPath);
-    });
-  }
-
-  /**
    * Get default output path
    */
   private getDefaultOutputPath(): string {
@@ -1657,5 +1596,38 @@ export class AnalysisService implements OnModuleInit {
     stats.progress = stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0;
 
     return stats;
+  }
+
+  /**
+   * Initialize categories file with defaults if it doesn't exist
+   * Called on module init to ensure categories are always available
+   */
+  private initializeCategoriesFile(): void {
+    try {
+      const configDir = this.configService.getConfigDir();
+      const categoriesPath = path.join(configDir, 'analysis-categories.json');
+
+      if (!fsSync.existsSync(categoriesPath)) {
+        this.logger.log('Categories file not found, initializing with defaults');
+
+        // Ensure directory exists
+        if (!fsSync.existsSync(configDir)) {
+          fsSync.mkdirSync(configDir, { recursive: true });
+        }
+
+        // Write default categories
+        fsSync.writeFileSync(
+          categoriesPath,
+          JSON.stringify(DEFAULT_CATEGORIES, null, 2),
+          'utf-8'
+        );
+
+        this.logger.log(`Created categories file at: ${categoriesPath}`);
+      } else {
+        this.logger.log(`Categories file exists at: ${categoriesPath}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to initialize categories file: ${(error as Error).message}`);
+    }
   }
 }

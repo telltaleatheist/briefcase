@@ -309,16 +309,19 @@ export class QueueManagerService implements OnModuleDestroy {
    * Get next AI task from any job
    */
   private getNextAITask(): { task: Task; job: QueueJob } | null {
+    this.logger.debug(`getNextAITask: Checking ${this.jobQueue.size} jobs`);
     for (const job of this.jobQueue.values()) {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
 
       const currentTask = job.tasks[job.currentTaskIndex];
+      this.logger.debug(`getNextAITask: Job ${job.id} currentTaskIndex=${job.currentTaskIndex}, task=${currentTask?.type}`);
       if (!currentTask) continue;
 
       if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
 
       // Only return AI tasks
       if (currentTask.type === 'analyze') {
+        this.logger.log(`getNextAITask: Found analyze task for job ${job.id}`);
         // Check if any previous task in this job is still running
         // Tasks must be sequential within a job
         let previousTaskRunning = false;

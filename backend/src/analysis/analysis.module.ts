@@ -4,9 +4,8 @@ import { AnalysisService } from './analysis.service';
 import { SimpleTranscribeController } from './simple-transcribe.controller';
 import { SimpleAnalyzeController } from './simple-analyze.controller';
 import { OllamaService } from './ollama.service';
-import { PythonBridgeService } from './python-bridge.service';
 import { AIProviderService } from './ai-provider.service';
-import { TextExtractionService } from './text-extraction.service';
+import { AIAnalysisService } from './ai-analysis.service';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { PathModule } from '../path/path.module';
@@ -34,7 +33,7 @@ import { ApiKeysModule } from '../config/config.module';
     SimpleTranscribeController,
     SimpleAnalyzeController,
   ],
-  providers: [AnalysisService, OllamaService, PythonBridgeService, AIProviderService, TextExtractionService],
-  exports: [AnalysisService, OllamaService, AIProviderService, PythonBridgeService, TextExtractionService],
+  providers: [AnalysisService, OllamaService, AIProviderService, AIAnalysisService],
+  exports: [AnalysisService, OllamaService, AIProviderService, AIAnalysisService],
 })
 export class AnalysisModule {}

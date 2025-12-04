@@ -580,10 +580,26 @@ export class VideoProcessingService {
     }
 
     if (settings.aiAnalysis) {
+      // Parse model string: "provider:model" (e.g., "ollama:cogito:14b")
+      const modelValue = settings.aiModel || 'ollama:qwen2.5:7b';
+      let aiProvider = 'ollama';
+      let aiModel = modelValue;
+
+      if (modelValue.includes(':')) {
+        const firstColon = modelValue.indexOf(':');
+        const possibleProvider = modelValue.substring(0, firstColon);
+        if (['ollama', 'claude', 'openai'].includes(possibleProvider)) {
+          aiProvider = possibleProvider;
+          aiModel = modelValue.substring(firstColon + 1);
+        }
+      }
+
+      console.log('Sending to backend - provider:', aiProvider, 'model:', aiModel);
       tasks.push({
         type: 'analyze',
         options: {
-          aiModel: settings.aiModel || 'qwen2.5:7b',
+          aiModel,
+          aiProvider,
           customInstructions: settings.customInstructions
         }
       });
@@ -737,20 +753,11 @@ export class VideoProcessingService {
           job.settings.whisperLanguage = transcribeConfig.language;
         }
 
-        // Get AI analyze config
+        // Get AI analyze config - keep full model string with provider
         const aiConfig = taskConfigs.get('ai-analyze');
         if (aiConfig && aiConfig.aiModel) {
-          // Strip provider prefix if present (e.g., "ollama:qwen2.5:32b" -> "qwen2.5:32b")
-          let aiModel = aiConfig.aiModel;
-          console.log('Saving AI model - original:', aiConfig.aiModel);
-          if (aiModel.includes(':')) {
-            const parts = aiModel.split(':');
-            if (['ollama', 'claude', 'openai'].includes(parts[0])) {
-              aiModel = parts.slice(1).join(':');
-            }
-          }
-          console.log('Saving AI model - stripped:', aiModel);
-          job.settings.aiModel = aiModel;
+          console.log('Saving AI model:', aiConfig.aiModel);
+          job.settings.aiModel = aiConfig.aiModel;
           job.settings.customInstructions = aiConfig.customInstructions;
         }
 

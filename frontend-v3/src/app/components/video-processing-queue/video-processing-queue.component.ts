@@ -440,21 +440,10 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
           translate: false
         };
       case 'ai-analyze':
-        // Reconstruct the full model ID with provider prefix
+        // Model is stored as full string with provider (e.g., "ollama:cogito:14b")
         console.log('getConfigForTask ai-analyze - settings.aiModel:', settings.aiModel);
-        let aiModel = settings.aiModel || 'ollama:qwen2.5:7b';
-        // If the model doesn't have a provider prefix, assume ollama
-        if (aiModel && !aiModel.includes(':')) {
-          aiModel = `ollama:${aiModel}`;
-        } else if (aiModel && aiModel.split(':').length === 2) {
-          // Model like "qwen2.5:32b" needs ollama prefix
-          const parts = aiModel.split(':');
-          if (!['ollama', 'claude', 'openai'].includes(parts[0])) {
-            aiModel = `ollama:${aiModel}`;
-          }
-        }
         return {
-          aiModel,
+          aiModel: settings.aiModel || 'ollama:qwen2.5:7b',
           customInstructions: settings.customInstructions || ''
         };
       case 'fix-aspect-ratio':

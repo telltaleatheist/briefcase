@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { MediaEventService } from '../media/media-event.service';
-import { PythonBridgeService } from './python-bridge.service';
+import { AIAnalysisService } from './ai-analysis.service';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
@@ -35,7 +35,7 @@ export class SimpleAnalyzeController {
   constructor(
     private databaseService: DatabaseService,
     private mediaEventService: MediaEventService,
-    private pythonBridge: PythonBridgeService,
+    private aiAnalysis: AIAnalysisService,
   ) {}
 
   /**
@@ -210,15 +210,20 @@ export class SimpleAnalyzeController {
       // Load user's categories from config
       const categories = this.loadCategories();
 
-      // Run AI analysis using PythonBridgeService
-      const analysisResult = await this.pythonBridge.analyze(
-        ollamaEndpoint,
-        aiModel,
-        transcriptText,
+      // Run AI analysis using native AIAnalysisService
+      const analysisResult = await this.aiAnalysis.analyzeTranscript({
+        provider: aiProvider,
+        model: aiModel,
+        transcript: transcriptText,
         segments,
         outputFile,
-        (progress) => {
-          // Map Python progress (0-100) to our progress range (0-95)
+        customInstructions,
+        videoTitle,
+        categories,
+        apiKey: aiProvider === 'claude' ? claudeApiKey : aiProvider === 'openai' ? openaiApiKey : undefined,
+        ollamaEndpoint,
+        onProgress: (progress) => {
+          // Map progress (0-100) to our progress range (0-95)
           const mappedProgress = Math.round((progress.progress / 100) * 95);
           this.mediaEventService.emitAnalysisProgress(
             videoId,
@@ -227,12 +232,7 @@ export class SimpleAnalyzeController {
             jobId
           );
         },
-        customInstructions,
-        aiProvider,
-        aiProvider === 'claude' ? claudeApiKey : aiProvider === 'openai' ? openaiApiKey : undefined,
-        videoTitle,
-        categories,
-      );
+      });
 
       // Read analysis text from output file
       const analysisText = await fs.readFile(outputFile, 'utf-8');

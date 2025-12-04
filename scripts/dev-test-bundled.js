@@ -2,10 +2,9 @@
  * Development Test Script - Uses EXACT same binaries as production
  *
  * This script:
- * 1. Ensures Python environment exists (creates if missing)
- * 2. Ensures all binaries are downloaded
- * 3. Builds the app
- * 4. Runs Electron with bundled binaries
+ * 1. Ensures all binaries are downloaded
+ * 2. Builds the app
+ * 3. Runs Electron with bundled binaries
  *
  * Usage: npm run dev:test-bundled
  */
@@ -15,73 +14,18 @@ const fs = require('fs');
 const path = require('path');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
-const PYTHON_DIR = path.join(PROJECT_ROOT, 'dist-python', 'python-x64');
 
 console.log('╔═══════════════════════════════════════════════════════════╗');
 console.log('║   ClipChimp Dev Test (Using Bundled Binaries)            ║');
 console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
-// Step 1: Check if Python environment exists
-console.log('📦 Step 1: Checking Python environment...');
-const pythonExe = path.join(PYTHON_DIR, 'python.exe');
-
-if (!fs.existsSync(pythonExe)) {
-  console.log('   ⚠️  Python environment not found. Creating...');
-  console.log('   This will take a few minutes (downloading packages)...\n');
-
-  try {
-    execSync('npm run package:python:win-x64', {
-      cwd: PROJECT_ROOT,
-      stdio: 'inherit'
-    });
-  } catch (error) {
-    console.error('❌ Failed to create Python environment');
-    process.exit(1);
-  }
-} else {
-  console.log('   ✅ Python environment exists');
-
-  // Verify key packages
-  const sitePackages = path.join(PYTHON_DIR, 'Lib', 'site-packages');
-  const requiredPackages = ['whisper', 'openai', 'anthropic', 'torch'];
-  let missing = [];
-
-  for (const pkg of requiredPackages) {
-    const exists = fs.readdirSync(sitePackages).some(f =>
-      f.toLowerCase().includes(pkg.toLowerCase())
-    );
-    if (!exists) {
-      missing.push(pkg);
-    }
-  }
-
-  if (missing.length > 0) {
-    console.log(`   ⚠️  Missing packages: ${missing.join(', ')}`);
-    console.log('   Reinstalling Python environment...\n');
-
-    // Delete and recreate
-    fs.rmSync(PYTHON_DIR, { recursive: true, force: true });
-
-    try {
-      execSync('npm run package:python:win-x64', {
-        cwd: PROJECT_ROOT,
-        stdio: 'inherit'
-      });
-    } catch (error) {
-      console.error('❌ Failed to recreate Python environment');
-      process.exit(1);
-    }
-  } else {
-    console.log('   ✅ All required packages present');
-  }
-}
-
-// Step 2: Check binaries
-console.log('\n📦 Step 2: Checking bundled binaries...');
+// Step 1: Check binaries
+console.log('📦 Step 1: Checking bundled binaries...');
 const binaries = {
   'yt-dlp': path.join(PROJECT_ROOT, 'utilities', 'bin', 'yt-dlp.exe'),
   'ffmpeg': path.join(PROJECT_ROOT, 'node_modules', '@ffmpeg-installer', 'win32-x64', 'ffmpeg.exe'),
   'ffprobe': path.join(PROJECT_ROOT, 'node_modules', '@ffprobe-installer', 'win32-x64', 'ffprobe.exe'),
+  'whisper': path.join(PROJECT_ROOT, 'utilities', 'bin', 'whisper-cli.exe'),
 };
 
 let allBinariesExist = true;
@@ -107,8 +51,8 @@ if (!allBinariesExist) {
   }
 }
 
-// Step 3: Build shared and backend
-console.log('\n📦 Step 3: Building project...');
+// Step 2: Build shared and backend
+console.log('\n📦 Step 2: Building project...');
 try {
   execSync('npm run build:shared && npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload', {
     cwd: PROJECT_ROOT,
@@ -119,15 +63,15 @@ try {
   process.exit(1);
 }
 
-// Step 4: Print paths that will be used
+// Step 3: Print paths that will be used
 console.log('\n📋 Binary paths that will be used:');
-console.log(`   Python:  ${pythonExe}`);
 console.log(`   FFmpeg:  ${binaries['ffmpeg']}`);
 console.log(`   FFprobe: ${binaries['ffprobe']}`);
 console.log(`   yt-dlp:  ${binaries['yt-dlp']}`);
+console.log(`   Whisper: ${binaries['whisper']}`);
 
-// Step 5: Run Electron with environment variables pointing to bundled binaries
-console.log('\n🚀 Step 4: Starting Electron with bundled binaries...\n');
+// Step 4: Run Electron with environment variables pointing to bundled binaries
+console.log('\n🚀 Step 3: Starting Electron with bundled binaries...\n');
 
 const mainScript = path.join(PROJECT_ROOT, 'dist-electron', 'electron', 'main.js');
 
@@ -137,11 +81,10 @@ const mainScript = path.join(PROJECT_ROOT, 'dist-electron', 'electron', 'main.js
 const env = {
   ...process.env,
   CLIPCHIMP_PROJECT_ROOT: PROJECT_ROOT,
-  PYTHON_PATH: pythonExe,
   FFMPEG_PATH: binaries['ffmpeg'],
   FFPROBE_PATH: binaries['ffprobe'],
   YT_DLP_PATH: binaries['yt-dlp'],
-  WHISPER_PATH: path.join(PROJECT_ROOT, 'utilities', 'bin', 'whisper.exe'),
+  WHISPER_PATH: binaries['whisper'],
   // Don't set NODE_ENV to production - we want dev tools
 };
 

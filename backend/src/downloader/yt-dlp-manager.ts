@@ -7,7 +7,6 @@ import { spawn, ChildProcess } from 'child_process';
 import { SharedConfigService } from '../config/shared-config.service';
 import * as readline from 'readline';
 import { log } from '../common/logger';
-import { getPythonConfig } from '../shared/python-config';
 
 export interface YtDlpProgress {
   percent: number;
@@ -209,23 +208,10 @@ export class YtDlpManager extends EventEmitter {
       let command: string;
       let args: string[];
 
-      // On Windows, yt-dlp.exe is a standalone executable - run directly
-      // On macOS/Linux, the bundled yt-dlp is a Python script - run with Python
-      const isWindowsExe = process.platform === 'win32' && this.ytDlpPath.endsWith('.exe');
-
-      if (isWindowsExe || !path.isAbsolute(this.ytDlpPath)) {
-        // Windows .exe or system PATH command: execute directly
-        command = this.ytDlpPath;
-        args = finalArgs;
-        log.info(`Running yt-dlp directly: ${this.ytDlpPath}`);
-      } else {
-        // macOS/Linux bundled yt-dlp: execute with bundled Python
-        // Execute: python3 /path/to/yt-dlp [args...]
-        const pythonConfig = getPythonConfig();
-        command = pythonConfig.fullPath || 'python3';
-        args = [this.ytDlpPath, ...finalArgs];
-        log.info(`Using Python to run bundled yt-dlp: ${command} ${this.ytDlpPath}`);
-      }
+      // yt-dlp is always a standalone executable (no Python needed)
+      command = this.ytDlpPath;
+      args = finalArgs;
+      log.info(`Running yt-dlp: ${this.ytDlpPath}`);
 
       this.currentProcess = spawn(command, args);
       
