@@ -1,11 +1,13 @@
 // ClipChimp/backend/src/saved-links/saved-links.service.ts
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DatabaseService } from '../database/database.service';
 import { QueueManagerService } from '../queue/queue-manager.service';
 import { MediaEventService } from '../media/media-event.service';
 import { WebSocketService } from '../common/websocket.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { LibraryManagerService } from '../database/library-manager.service';
+import { DownloaderService } from '../downloader/downloader.service';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
 
@@ -34,6 +36,9 @@ export class SavedLinksService implements OnModuleInit {
     private readonly websocketService: WebSocketService,
     private readonly fileScannerService: FileScannerService,
     private readonly libraryManagerService: LibraryManagerService,
+    @Inject(forwardRef(() => DownloaderService))
+    private readonly downloaderService: DownloaderService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -48,22 +53,52 @@ export class SavedLinksService implements OnModuleInit {
    * Listen for download/processing completion events
    */
   private setupEventListeners() {
-    // Listen for job status updates
-    const server = this.websocketService.getServer();
-    server?.on('job-status-updated', (data: { jobId: string; status: string; task: string }) => {
-      // Check if this is a saved-link job
-      if (data.jobId.startsWith('saved-link-')) {
-        const savedLinkId = data.jobId.replace('saved-link-', '');
-        this.logger.log(`Job status update for saved link ${savedLinkId}: ${data.status}`);
-
-        // Update status based on job status
-        if (data.status === 'completed') {
-          this.handleDownloadCompleted(savedLinkId);
-        } else if (data.status === 'failed') {
-          this.handleDownloadFailed(savedLinkId, data.task);
-        }
-      }
+    // Listen for job completed events
+    this.eventEmitter.on('job.completed', (data: { jobId: string; status: string; downloadedPath?: string }) => {
+      this.logger.log(`Received job.completed event: ${JSON.stringify(data)}`);
+      this.handleJobEvent(data.jobId, 'completed', data.downloadedPath);
     });
+
+    // Listen for job failed events
+    this.eventEmitter.on('task.failed', (data: { jobId: string; error?: { message?: string } }) => {
+      this.logger.log(`Received task.failed event: ${JSON.stringify(data)}`);
+      this.handleJobEvent(data.jobId, 'failed', undefined, data.error?.message);
+    });
+  }
+
+  /**
+   * Handle job completion/failure events
+   */
+  private handleJobEvent(jobId: string, status: 'completed' | 'failed', downloadedPath?: string, errorMessage?: string) {
+    // Find saved link by job ID in metadata
+    const allLinks = this.databaseService.getAllSavedLinks();
+    const savedLink = allLinks.find(link => {
+      if (link.metadata) {
+        // Metadata is already parsed by getAllSavedLinks(), so check if it's an object or string
+        let metadata = link.metadata;
+        if (typeof metadata === 'string') {
+          try {
+            metadata = JSON.parse(metadata);
+          } catch {
+            return false;
+          }
+        }
+        return metadata.jobId === jobId;
+      }
+      return false;
+    });
+
+    if (savedLink) {
+      this.logger.log(`Job ${status} for saved link ${savedLink.id}, downloadedPath: ${downloadedPath || 'undefined'}`);
+
+      if (status === 'completed') {
+        this.handleDownloadCompleted(savedLink.id, downloadedPath);
+      } else if (status === 'failed') {
+        this.handleDownloadFailed(savedLink.id, errorMessage || 'Download failed');
+      }
+    } else {
+      this.logger.warn(`No saved link found with jobId ${jobId} in metadata`);
+    }
   }
 
   /**
@@ -71,8 +106,8 @@ export class SavedLinksService implements OnModuleInit {
    * Note: With the new batch downloader implementation using analysis queue,
    * download + import + processing happens automatically. This just marks as completed.
    */
-  private async handleDownloadCompleted(savedLinkId: string) {
-    this.logger.log(`Download completed for saved link: ${savedLinkId}`);
+  private async handleDownloadCompleted(savedLinkId: string, downloadedPath?: string) {
+    this.logger.log(`Download completed for saved link: ${savedLinkId}, path: ${downloadedPath}`);
 
     const savedLink = this.databaseService.findSavedLinkById(savedLinkId) as unknown as SavedLink;
     if (!savedLink) {
@@ -80,13 +115,12 @@ export class SavedLinksService implements OnModuleInit {
       return;
     }
 
-    // Update status to completed
-    // Note: The analysis queue handles download + import + processing automatically
+    // Update status to completed with download path
     this.databaseService.updateSavedLinkStatus(
       savedLinkId,
       'completed',
       undefined,
-      undefined, // Output file path handled by analysis queue
+      downloadedPath,
     );
 
     this.logger.log(`Marked saved link ${savedLinkId} as completed`);
@@ -135,7 +169,7 @@ export class SavedLinksService implements OnModuleInit {
     const savedLink: any = {
       id,
       url,
-      title: title || url,
+      title: title || null, // Don't use URL as title - let download logic generate hash
       status: doDownload ? 'pending' as const : 'completed' as const,
     };
 
@@ -180,8 +214,8 @@ export class SavedLinksService implements OnModuleInit {
     });
 
     try {
-      // Determine output directory based on library ID
-      let outputDir: string;
+      // Determine base output directory based on library ID
+      let baseDir: string;
 
       if (libraryId) {
         // Look up the library's clips folder path
@@ -189,40 +223,119 @@ export class SavedLinksService implements OnModuleInit {
         const targetLibrary = libraries.find(lib => lib.id === libraryId);
 
         if (targetLibrary) {
-          outputDir = targetLibrary.clipsFolderPath;
-          this.logger.log(`Using library clips folder: ${outputDir}`);
+          baseDir = targetLibrary.clipsFolderPath;
+          this.logger.log(`Using library clips folder: ${baseDir}`);
         } else {
           this.logger.warn(`Library not found: ${libraryId}, using active library instead`);
           const activeLibrary = this.libraryManagerService.getActiveLibrary();
-          outputDir = activeLibrary?.clipsFolderPath || 'saved-links';
+          baseDir = activeLibrary?.clipsFolderPath || 'saved-links';
         }
       } else {
         // No library ID provided, use active library's clips folder
         const activeLibrary = this.libraryManagerService.getActiveLibrary();
         if (activeLibrary) {
-          outputDir = activeLibrary.clipsFolderPath;
-          this.logger.log(`Using active library clips folder: ${outputDir}`);
+          baseDir = activeLibrary.clipsFolderPath;
+          this.logger.log(`Using active library clips folder: ${baseDir}`);
         } else {
           // Fallback to saved-links if no active library
-          outputDir = 'saved-links';
+          baseDir = 'saved-links';
           this.logger.warn('No active library found, using fallback folder: saved-links');
         }
       }
 
+      // Fetch video info to get title and upload date
+      let displayName = savedLink.title;
+      let uploadDate: string | undefined;
+
+      if (!displayName) {
+        try {
+          this.logger.log(`Fetching video info for: ${savedLink.url}`);
+          const videoInfo = await this.downloaderService.getVideoInfo(savedLink.url);
+
+          if (videoInfo) {
+            // Extract title
+            if (videoInfo.title) {
+              displayName = videoInfo.title;
+              this.logger.log(`Extracted title: ${displayName}`);
+
+              // Update the saved link title in the database immediately
+              this.databaseService.updateSavedLinkTitle(savedLinkId, videoInfo.title);
+
+              // Fetch the updated record and emit to frontend
+              const updatedLink = this.databaseService.findSavedLinkById(savedLinkId);
+              if (updatedLink) {
+                this.logger.log(`Emitting updated title to frontend: ${videoInfo.title}`);
+                this.websocketService.emitSavedLinkUpdated(updatedLink as unknown as SavedLink);
+              }
+            }
+
+            // Extract upload date (format: YYYYMMDD or YYYY-MM-DD)
+            if (videoInfo.upload_date) {
+              const dateStr = videoInfo.upload_date.toString();
+              if (dateStr.length === 8) {
+                // YYYYMMDD format
+                uploadDate = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+              } else if (dateStr.includes('-')) {
+                uploadDate = dateStr;
+              }
+              this.logger.log(`Extracted upload date: ${uploadDate}`);
+            }
+          }
+        } catch (infoError: any) {
+          this.logger.warn(`Failed to fetch video info: ${infoError.message}, will use hash-based name`);
+        }
+      }
+
+      // If still no title, generate a hash-based name
+      if (!displayName) {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('md5').update(savedLink.url + Date.now()).digest('hex').substring(0, 12);
+        displayName = `download-${hash}`;
+        this.logger.warn(`No title available for ${savedLink.url}, using generated name: ${displayName}`);
+      }
+
+      // Sanitize filename - remove slashes and other invalid characters
+      displayName = displayName
+        .replace(/[\/\\:*?"<>|]/g, '-') // Replace invalid chars with dash
+        .replace(/\s+/g, ' ')           // Normalize whitespace
+        .trim();
+
+      // Prepend upload date if available
+      if (uploadDate) {
+        displayName = `${uploadDate} ${displayName}`;
+      }
+
       // Add to unified queue using new queue system
+      // Note: Downloads will go to the library's clips folder in a date-based subfolder
+      // The file will be moved to _pending after download completes (handled by event listener)
       const jobId = this.queueManagerService.addJob({
         url: savedLink.url,
-        displayName: savedLink.title || savedLink.url,
+        displayName: displayName,
+        libraryId: libraryId, // Ensure it downloads to the correct library
         tasks: [
-          { type: 'download', options: { quality: '720' } },
-          { type: 'import', options: {} }
+          { type: 'download', options: { quality: '720' } }
+          // No import task - files will be moved to _pending folder after download
         ]
       });
 
-      this.logger.log(`Started download job ${jobId} for saved link ${savedLinkId} (library: ${libraryId || 'default'})`);
+      this.logger.log(`Started download job ${jobId} for saved link ${savedLinkId} (library: ${libraryId || 'default'}, pending: true)`);
 
-      // TODO: Listen for job completion events and update saved link status
-      // This will be handled by listening to MediaEventService events
+      // Store job ID in metadata for tracking
+      // Metadata may already be parsed by findSavedLinkById, so handle both cases
+      let currentMetadata = {};
+      if (savedLink.metadata) {
+        if (typeof savedLink.metadata === 'string') {
+          try {
+            currentMetadata = JSON.parse(savedLink.metadata);
+          } catch {
+            currentMetadata = {};
+          }
+        } else {
+          currentMetadata = savedLink.metadata;
+        }
+      }
+      const updatedMetadata = { ...currentMetadata, jobId };
+      this.databaseService.updateSavedLinkMetadata(savedLinkId, JSON.stringify(updatedMetadata));
 
     } catch (error: any) {
       this.logger.error(`Failed to start download for saved link ${savedLinkId}: ${error.message}`);
@@ -254,9 +367,25 @@ export class SavedLinksService implements OnModuleInit {
   }
 
   /**
-   * Delete a saved link
+   * Delete a saved link and its downloaded file
    */
   deleteLink(id: string): void {
+    const savedLink = this.databaseService.findSavedLinkById(id) as unknown as SavedLink;
+
+    if (savedLink && savedLink.download_path) {
+      // Delete the downloaded file if it exists
+      const fs = require('fs');
+      try {
+        if (fs.existsSync(savedLink.download_path)) {
+          fs.unlinkSync(savedLink.download_path);
+          this.logger.log(`Deleted file: ${savedLink.download_path}`);
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to delete file ${savedLink.download_path}: ${error.message}`);
+      }
+    }
+
+    // Delete the database record
     this.databaseService.deleteSavedLink(id);
     this.logger.log(`Deleted saved link: ${id}`);
     this.websocketService.emitSavedLinkDeleted(id);
@@ -359,5 +488,86 @@ export class SavedLinksService implements OnModuleInit {
     }
 
     return updatedLink;
+  }
+
+  /**
+   * Import a downloaded video to the library database
+   * The file is already in the clips folder from the download process
+   */
+  async addToLibrary(savedLinkId: string): Promise<{ success: boolean; videoId?: string; error?: string }> {
+    const savedLink = this.databaseService.findSavedLinkById(savedLinkId) as unknown as SavedLink;
+    if (!savedLink) {
+      throw new Error('Saved link not found');
+    }
+
+    if (savedLink.status !== 'completed') {
+      throw new Error('Can only add completed downloads to library');
+    }
+
+    if (!savedLink.download_path) {
+      throw new Error('No download path found for this saved link');
+    }
+
+    try {
+      const fs = require('fs');
+      const filePath = savedLink.download_path;
+
+      this.logger.log(`Adding to library: ${filePath}`);
+
+      // Verify the file exists
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`File not found: ${filePath}`);
+      }
+
+      const filename = path.basename(filePath);
+
+      // Import the video to the database using file scanner
+      // The file is already in the clips folder from the download process
+      const result = await this.fileScannerService.importVideos([filePath]);
+
+      this.logger.log(`Import result: imported=${result.imported.length}, skipped=${result.skipped.length}, errors=${result.errors.length}`);
+
+      // Check if import was successful - find by filename
+      const importedVideo = result.imported.length > 0
+        ? this.databaseService.findVideoByFilename(filename)
+        : null;
+
+      if (!importedVideo && result.skipped.length === 0) {
+        // Import failed
+        this.logger.warn(`Failed to import ${filePath}`);
+        return {
+          success: false,
+          error: 'Failed to import video to library'
+        };
+      }
+
+      // Delete the saved link record
+      this.databaseService.deleteSavedLink(savedLinkId);
+      this.websocketService.emitSavedLinkDeleted(savedLinkId);
+
+      // Emit video-added event if a new video was imported
+      if (importedVideo) {
+        this.websocketService.emitVideoAdded({
+          videoId: importedVideo.id,
+          filename: importedVideo.filename,
+          filepath: importedVideo.current_path,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      this.logger.log(`Added saved link ${savedLinkId} to library as video ${importedVideo?.id || 'already existed'}`);
+
+      return {
+        success: true,
+        videoId: importedVideo?.id
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Failed to add saved link ${savedLinkId} to library: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 }

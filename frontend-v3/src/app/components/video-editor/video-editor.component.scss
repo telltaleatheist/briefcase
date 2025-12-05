@@ -1379,3 +1379,148 @@
     pointer-events: none;
   }
 }
+
+// Scale control styling
+// Border control styling
+.border-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin-left: 8px;
+
+  .border-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+
+    input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      accent-color: var(--primary-orange);
+    }
+
+    .checkbox-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  }
+
+  .aspect-ratio-select {
+    padding: 2px 6px;
+    font-size: 11px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary-orange);
+    }
+  }
+}
+
+.scale-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin-left: 8px;
+
+  .scale-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .scale-slider {
+    width: 150px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border-color);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--primary-orange);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.15s ease;
+
+      &:hover {
+        transform: scale(1.2);
+      }
+    }
+
+    &::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: var(--primary-orange);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+      transition: transform 0.15s ease;
+
+      &:hover {
+        transform: scale(1.2);
+      }
+    }
+  }
+
+  .scale-value {
+    font-size: 11px;
+    color: var(--text-primary);
+    font-family: 'Monaco', monospace;
+    min-width: 38px;
+    text-align: right;
+  }
+}
+
+// Video scaling wrapper
+.video-scale-wrapper {
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  transition: transform 0.1s ease-out;
+}
+
+// Orange 16:9 border overlay - shows export frame boundary
+// Dimensions are calculated by JavaScript ResizeObserver to ensure exact 16:9
+// This border stays FIXED while video scales behind it
+.video-border-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #ff6b35;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 10;
+  // Width and height are set via [style.width.px] and [style.height.px] bindings
+}

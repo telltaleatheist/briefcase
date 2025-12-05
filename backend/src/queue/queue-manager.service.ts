@@ -1,6 +1,7 @@
 // Queue Manager Service - Executes task-based jobs with configurable concurrency
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaOperationsService } from '../media/media-operations.service';
 import { LibraryManagerService } from '../database/library-manager.service';
@@ -48,6 +49,7 @@ export class QueueManagerService implements OnModuleDestroy {
     private readonly eventService: MediaEventService,
     private readonly libraryManager: LibraryManagerService,
     private readonly databaseService: DatabaseService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -451,7 +453,16 @@ export class QueueManagerService implements OnModuleDestroy {
         job.currentPhase = 'Completed';
         job.completedAt = new Date();
 
-        this.logger.log(`Job \${job.id} completed successfully`);
+        this.logger.log(`Job ${job.id} completed successfully`);
+
+        // Emit job completed event for saved-links and other listeners (via EventEmitter2)
+        const eventData = {
+          jobId: job.id,
+          status: 'completed',
+          downloadedPath: job.videoPath,
+        };
+        this.logger.log(`Emitting job.completed event: ${JSON.stringify(eventData)}`);
+        this.eventEmitter.emit('job.completed', eventData);
 
         // Remove from queue after a delay
         setTimeout(() => this.jobQueue.delete(job.id), 5000);

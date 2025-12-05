@@ -129,7 +129,7 @@ export class TabsController {
 
   /**
    * GET /api/tabs/:id/videos
-   * Get all videos in a tab
+   * Get all videos in a tab (legacy - for backwards compatibility)
    */
   @Get(':id/videos')
   getTabVideos(@Param('id') id: string) {
@@ -139,6 +139,23 @@ export class TabsController {
       this.logger.error(`Failed to get tab videos: ${error?.message}`);
       throw new HttpException(
         error?.message || 'Failed to get tab videos',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * GET /api/tabs/:id/items
+   * Get all items in a tab (videos, links, etc.)
+   */
+  @Get(':id/items')
+  getTabItems(@Param('id') id: string) {
+    try {
+      return this.databaseService.getTabItems(id);
+    } catch (error: any) {
+      this.logger.error(`Failed to get tab items: ${error?.message}`);
+      throw new HttpException(
+        error?.message || 'Failed to get tab items',
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -186,6 +203,53 @@ export class TabsController {
       this.logger.error(`Failed to add video to tab: ${error?.message}`);
       throw new HttpException(
         error?.message || 'Failed to add video to tab',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
+   * POST /api/tabs/:id/links
+   * Add one or more saved links to a tab
+   * Body: { savedLinkId: string | string[], title?: string }
+   */
+  @Post(':id/links')
+  addSavedLinkToTab(@Param('id') tabId: string, @Body() body: { savedLinkId: string | string[], title?: string }) {
+    try {
+      if (!body.savedLinkId) {
+        throw new HttpException('Saved link ID is required', HttpStatus.BAD_REQUEST);
+      }
+
+      const linkIds = Array.isArray(body.savedLinkId) ? body.savedLinkId : [body.savedLinkId];
+      const results: { savedLinkId: string; success: boolean; itemId?: string; error?: string }[] = [];
+
+      for (const savedLinkId of linkIds) {
+        try {
+          const itemId = this.databaseService.addSavedLinkToTab(tabId, savedLinkId, body.title);
+          results.push({ savedLinkId, success: true, itemId });
+        } catch (error: any) {
+          if (error?.message?.includes('already in this tab')) {
+            results.push({ savedLinkId, success: false, error: 'Already in tab' });
+          } else {
+            results.push({ savedLinkId, success: false, error: error.message || 'Unknown error' });
+          }
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length;
+      return {
+        success: successCount > 0,
+        results,
+        addedCount: successCount,
+        totalCount: linkIds.length
+      };
+    } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Failed to add saved link to tab: ${error?.message}`);
+      throw new HttpException(
+        error?.message || 'Failed to add saved link to tab',
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }

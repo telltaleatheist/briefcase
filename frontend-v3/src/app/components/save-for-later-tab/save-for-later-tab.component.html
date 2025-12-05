@@ -1,0 +1,102 @@
+<div class="save-for-later-container">
+  <!-- Header with URL input -->
+  <div class="header-section">
+    <div class="url-input-container">
+      <input
+        type="text"
+        class="url-input"
+        placeholder="Enter URL to save..."
+        [ngModel]="urlInput()"
+        (ngModelChange)="urlInput.set($event)"
+        (keyup.enter)="onUrlSubmit()"
+        [disabled]="isLoading()"
+      />
+      <label class="download-checkbox">
+        <input
+          type="checkbox"
+          [checked]="shouldDownload()"
+          (change)="shouldDownload.set($any($event.target).checked)"
+        />
+        <span>Download</span>
+      </label>
+      <button
+        class="btn-add"
+        (click)="onUrlSubmit()"
+        [disabled]="!urlInput() || isLoading()"
+      >
+        Add
+      </button>
+    </div>
+
+    <!-- Quick actions for selected items (always visible to prevent layout shift) -->
+    <div class="selected-actions">
+      @if (selectedItems().size > 0) {
+        <span class="selected-count">{{ selectedItems().size }} selected</span>
+      }
+      <button
+        class="btn-action"
+        [disabled]="selectedItems().size === 0"
+        (click)="onAddSelectedToLibraryAndTabs()"
+      >
+        <span class="btn-icon">📚</span>
+        <span>Add to Library & Tabs</span>
+        @if (selectedItems().size > 0) {
+          <span class="badge">{{ selectedItems().size }}</span>
+        }
+      </button>
+    </div>
+  </div>
+
+  <!-- Saved links list -->
+  <div class="links-container">
+    @if (isLoading()) {
+      <div class="loading-state">
+        <span class="loading-spinner">⏳</span>
+        <p>Loading saved links...</p>
+      </div>
+    } @else if (savedWeeks().length === 0) {
+      <div class="empty-state">
+        <span class="empty-icon">💾</span>
+        <p>No saved links yet</p>
+        <span class="empty-hint">Enter a URL above to save for later</span>
+      </div>
+    } @else {
+      <app-cascade
+        [weeks]="savedWeeks()"
+        [showStatusIndicator]="true"
+        [showDeleteButton]="false"
+        [showDuration]="false"
+        [showEditButton]="false"
+        [deleteMode]="'simple'"
+        [childrenConfig]="childrenConfig"
+        [draggable]="false"
+        (selectionChanged)="onSelectionChanged($event)"
+        (videoAction)="onVideoAction($event)"
+      />
+    }
+  </div>
+
+  <!-- Footer actions -->
+  @if (stats().completed > 0 || stats().failed > 0) {
+    <div class="footer-actions">
+      @if (stats().completed > 0) {
+        <button class="btn-secondary" (click)="clearCompleted()">
+          Clear Completed ({{ stats().completed }})
+        </button>
+      }
+      @if (stats().failed > 0) {
+        <button class="btn-secondary" (click)="clearFailed()">
+          Clear Failed ({{ stats().failed }})
+        </button>
+      }
+    </div>
+  }
+</div>
+
+<!-- Add to Tabs Dialog -->
+<app-add-to-tabs-dialog
+  [show]="addToTabsDialogOpen()"
+  [selectedCount]="pendingItemIds().length"
+  (confirm)="onAddToTabsConfirm($event)"
+  (closed)="onAddToTabsDialogClosed()"
+/>

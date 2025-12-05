@@ -564,7 +564,7 @@ export class VideoProcessingService {
       tasks.push({
         type: 'normalize-audio',
         options: {
-          audioLevel: settings.audioLevel
+          level: settings.audioLevel
         }
       });
     }

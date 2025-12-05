@@ -798,14 +798,15 @@ export class LibraryController {
   async extractClipFromCustomVideo(
     @Body() body: {
       videoPath: string;
-      startTime: number;
-      endTime: number;
+      startTime: number | null;
+      endTime: number | null;
       title?: string;
       description?: string;
       category?: string;
       customDirectory?: string;
       progressId?: string;
       reEncode?: boolean;
+      scale?: number;
     }
   ) {
     try {
@@ -813,12 +814,14 @@ export class LibraryController {
         throw new HttpException('videoPath is required', HttpStatus.BAD_REQUEST);
       }
 
-      // Validate time range
-      if (body.startTime < 0 || body.endTime <= body.startTime) {
-        throw new HttpException(
-          'Invalid time range',
-          HttpStatus.BAD_REQUEST
-        );
+      // Validate time range (skip validation if processing full video)
+      if (body.startTime !== null && body.endTime !== null) {
+        if (body.startTime < 0 || body.endTime <= body.startTime) {
+          throw new HttpException(
+            'Invalid time range',
+            HttpStatus.BAD_REQUEST
+          );
+        }
       }
 
       // Check if file exists
@@ -892,6 +895,7 @@ export class LibraryController {
         endTime: body.endTime,
         outputPath,
         reEncode: body.reEncode || false,
+        scale: body.scale,
         metadata: {
           title: body.title,
           description: body.description,
@@ -1073,21 +1077,25 @@ export class LibraryController {
   async extractClipFromPath(
     @Body() body: {
       videoPath: string;
-      startTime: number;
-      endTime: number;
+      startTime: number | null;
+      endTime: number | null;
       title?: string;
       description?: string;
       category?: string;
       customDirectory?: string;
+      reEncode?: boolean;
+      scale?: number;
     }
   ) {
     try {
-      // Validate time range
-      if (body.startTime < 0 || body.endTime <= body.startTime) {
-        throw new HttpException(
-          'Invalid time range',
-          HttpStatus.BAD_REQUEST
-        );
+      // Validate time range (skip validation if processing full video)
+      if (body.startTime !== null && body.endTime !== null) {
+        if (body.startTime < 0 || body.endTime <= body.startTime) {
+          throw new HttpException(
+            'Invalid time range',
+            HttpStatus.BAD_REQUEST
+          );
+        }
       }
 
       // Check if video file exists
@@ -1181,6 +1189,8 @@ export class LibraryController {
         startTime: body.startTime,
         endTime: body.endTime,
         outputPath,
+        reEncode: body.reEncode,
+        scale: body.scale,
         metadata: {
           title: body.title,
           description: body.description,
@@ -1247,18 +1257,21 @@ export class LibraryController {
     @Body() body: {
       videoId: string;
       videoPath: string;
-      startTime: number;
-      endTime: number;
+      startTime: number | null;
+      endTime: number | null;
       reEncode?: boolean;
+      scale?: number;
     }
   ) {
     try {
-      // Validate time range
-      if (body.startTime < 0 || body.endTime <= body.startTime) {
-        throw new HttpException(
-          'Invalid time range',
-          HttpStatus.BAD_REQUEST
-        );
+      // Validate time range (skip validation if processing full video)
+      if (body.startTime !== null && body.endTime !== null) {
+        if (body.startTime < 0 || body.endTime <= body.startTime) {
+          throw new HttpException(
+            'Invalid time range',
+            HttpStatus.BAD_REQUEST
+          );
+        }
       }
 
       // Check if video file exists
@@ -1297,6 +1310,7 @@ export class LibraryController {
         endTime: body.endTime,
         outputPath: tempPath,
         reEncode: body.reEncode || false,
+        scale: body.scale,
       });
 
       if (!extractionResult.success) {
@@ -1361,38 +1375,80 @@ export class LibraryController {
         this.databaseService.deleteAnalysis(body.videoId);
         this.logger.log(`Deleted analysis for video ${body.videoId}`);
 
-        // Update video record with new duration and file size, but preserve dates and other metadata
-        const newDuration = extractionResult.duration || (body.endTime - body.startTime);
+        // Recalculate file hash for the updated file
+        let newFileHash: string | null = null;
+        try {
+          const stats = fs.statSync(body.videoPath);
+          newFileHash = await this.fileScannerService.quickHashFile(body.videoPath, stats.size);
+          this.logger.log(`Recalculated file hash: ${newFileHash}`);
+        } catch (hashError) {
+          this.logger.warn(`Failed to recalculate file hash: ${(hashError as Error).message}`);
+          // Continue without hash update - not critical
+        }
+
+        // Update video record with new duration, file size, hash, but preserve dates and other metadata
+        const newDuration = extractionResult.duration || (body.endTime !== null && body.startTime !== null ? (body.endTime - body.startTime) : 0);
         const db = this.databaseService['db'];
         if (db) {
-          db.prepare(`
-            UPDATE videos
-            SET duration = ?,
-                file_size = ?,
-                has_transcript = 0,
-                has_analysis = 0,
-                transcript_status = NULL,
-                analysis_status = NULL,
-                upload_date = ?,
-                download_date = ?,
-                added_at = ?,
-                source_url = ?,
-                ai_description = ?,
-                suggested_title = ?
-            WHERE id = ?
-          `).run(
-            newDuration,
-            extractionResult.fileSize,
-            originalMetadata.uploadDate,
-            originalMetadata.downloadDate,
-            originalMetadata.addedAt,
-            originalMetadata.sourceUrl,
-            originalMetadata.aiDescription,
-            originalMetadata.suggestedTitle,
-            body.videoId
-          );
+          const updateQuery = newFileHash
+            ? `UPDATE videos
+               SET duration_seconds = ?,
+                   file_size_bytes = ?,
+                   file_hash = ?,
+                   has_transcript = 0,
+                   has_analysis = 0,
+                   transcript_status = NULL,
+                   analysis_status = NULL,
+                   upload_date = ?,
+                   download_date = ?,
+                   added_at = ?,
+                   source_url = ?,
+                   ai_description = ?,
+                   suggested_title = ?
+               WHERE id = ?`
+            : `UPDATE videos
+               SET duration_seconds = ?,
+                   file_size_bytes = ?,
+                   has_transcript = 0,
+                   has_analysis = 0,
+                   transcript_status = NULL,
+                   analysis_status = NULL,
+                   upload_date = ?,
+                   download_date = ?,
+                   added_at = ?,
+                   source_url = ?,
+                   ai_description = ?,
+                   suggested_title = ?
+               WHERE id = ?`;
+
+          const params = newFileHash
+            ? [
+                newDuration,
+                extractionResult.fileSize,
+                newFileHash,
+                originalMetadata.uploadDate,
+                originalMetadata.downloadDate,
+                originalMetadata.addedAt,
+                originalMetadata.sourceUrl,
+                originalMetadata.aiDescription,
+                originalMetadata.suggestedTitle,
+                body.videoId
+              ]
+            : [
+                newDuration,
+                extractionResult.fileSize,
+                originalMetadata.uploadDate,
+                originalMetadata.downloadDate,
+                originalMetadata.addedAt,
+                originalMetadata.sourceUrl,
+                originalMetadata.aiDescription,
+                originalMetadata.suggestedTitle,
+                body.videoId
+              ];
+
+          db.prepare(updateQuery).run(...params);
           this.databaseService['saveDatabase']();
-          this.logger.log(`Updated video ${body.videoId} with new duration: ${newDuration}, preserved original metadata`);
+          this.logger.log(`Updated video ${body.videoId} with new duration: ${newDuration}${newFileHash ? ' and file hash' : ''}, preserved original metadata`);
         }
       } catch (error) {
         this.logger.error(`Failed to clear metadata: ${(error as Error).message}`);
@@ -1403,7 +1459,7 @@ export class LibraryController {
       return {
         success: true,
         message: 'Video file overwritten successfully',
-        newDuration: extractionResult.duration || (body.endTime - body.startTime),
+        newDuration: extractionResult.duration || (body.endTime !== null && body.startTime !== null ? (body.endTime - body.startTime) : 0),
         fileSize: extractionResult.fileSize,
       };
     } catch (error: any) {
@@ -1427,14 +1483,15 @@ export class LibraryController {
   async extractClipFromAnalysis(
     @Param('id') id: string,
     @Body() body: {
-      startTime: number;
-      endTime: number;
+      startTime: number | null;
+      endTime: number | null;
       title?: string;
       description?: string;
       category?: string;
       customDirectory?: string;
       progressId?: string;
       reEncode?: boolean;
+      scale?: number;
     }
   ) {
     try {
@@ -1448,12 +1505,14 @@ export class LibraryController {
         throw new HttpException('Video file is not linked', HttpStatus.NOT_FOUND);
       }
 
-      // Validate time range
-      if (body.startTime < 0 || body.endTime <= body.startTime) {
-        throw new HttpException(
-          'Invalid time range',
-          HttpStatus.BAD_REQUEST
-        );
+      // Validate time range (skip validation if processing full video)
+      if (body.startTime !== null && body.endTime !== null) {
+        if (body.startTime < 0 || body.endTime <= body.startTime) {
+          throw new HttpException(
+            'Invalid time range',
+            HttpStatus.BAD_REQUEST
+          );
+        }
       }
 
       // Try to get the parent video from database to retrieve upload_date
@@ -1503,6 +1562,7 @@ export class LibraryController {
         endTime: body.endTime,
         outputPath,
         reEncode: body.reEncode || false,
+        scale: body.scale,
         metadata: {
           title: body.title,
           description: body.description,
@@ -1520,15 +1580,18 @@ export class LibraryController {
         );
       }
 
-      // Create clip record in library
-      const clip = await this.libraryService.createClip({
-        analysisId: id,
-        name: body.title || `Clip from ${analysis.title}`,
-        startSeconds: body.startTime,
-        endSeconds: body.endTime,
-        outputPath: extractionResult.outputPath!,
-        notes: body.description || undefined,
-      });
+      // Create clip record in library (only for actual clips, not full video exports)
+      let clip = null;
+      if (body.startTime !== null && body.endTime !== null) {
+        clip = await this.libraryService.createClip({
+          analysisId: id,
+          name: body.title || `Clip from ${analysis.title}`,
+          startSeconds: body.startTime,
+          endSeconds: body.endTime,
+          outputPath: extractionResult.outputPath!,
+          notes: body.description || undefined,
+        });
+      }
 
       // Import the created clip to the library as a video
       let videoId: string | undefined;

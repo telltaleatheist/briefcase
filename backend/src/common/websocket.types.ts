@@ -116,6 +116,16 @@ export interface SavedLinksCountPayload {
 }
 
 /**
+ * Library/Video Events
+ */
+export interface VideoAddedPayload {
+  videoId: string;
+  filename: string;
+  filepath: string;
+  timestamp: string;
+}
+
+/**
  * WebSocket Event Names
  * Using const enum for type safety and better autocomplete
  */
@@ -137,6 +147,9 @@ export enum WebSocketEvent {
   SAVED_LINK_UPDATED = 'saved-link-updated',
   SAVED_LINK_DELETED = 'saved-link-deleted',
   SAVED_LINKS_COUNT = 'saved-links-count',
+
+  // Library/Video Events
+  VIDEO_ADDED = 'video-added',
 
   // Connection Management
   CONNECTION = 'connection',
@@ -183,4 +196,7 @@ export interface WebSocketEventMap {
   [WebSocketEvent.SAVED_LINK_UPDATED]: SavedLinkUpdatedPayload;
   [WebSocketEvent.SAVED_LINK_DELETED]: SavedLinkDeletedPayload;
   [WebSocketEvent.SAVED_LINKS_COUNT]: SavedLinksCountPayload;
+
+  // Library/Video events
+  [WebSocketEvent.VIDEO_ADDED]: VideoAddedPayload;
 }

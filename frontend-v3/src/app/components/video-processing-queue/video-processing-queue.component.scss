@@ -190,16 +190,23 @@
     align-items: center;
     gap: $spacing-md;
     padding: $spacing-md;
-    cursor: pointer;
     transition: background 0.15s;
 
-    &:hover {
-      background: var(--bg-secondary);
+    &.clickable {
+      cursor: pointer;
+
+      &:hover {
+        background: var(--bg-secondary);
+      }
     }
 
     .expand-icon {
       font-size: $font-size-xs;
       color: var(--text-secondary);
+      width: 16px;
+    }
+
+    .expand-icon-placeholder {
       width: 16px;
     }
   }

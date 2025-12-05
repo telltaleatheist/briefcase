@@ -149,6 +149,14 @@ export class WebSocketService {
     this.emit(WebSocketEvent.SAVED_LINK_ADDED, { link });
   }
 
+  /**
+   * Library/Video Events
+   */
+  emitVideoAdded(payload: WebSocketEventMap[WebSocketEvent.VIDEO_ADDED]): void {
+    this.logger.log(`Emitted video-added event for: ${payload.filename} (${payload.videoId})`);
+    this.emit(WebSocketEvent.VIDEO_ADDED, payload);
+  }
+
   emitSavedLinkUpdated(link: SavedLink): void {
     this.logger.log(`Emitted saved-link-updated event for: ${link.id}`);
     this.emit(WebSocketEvent.SAVED_LINK_UPDATED, { link });

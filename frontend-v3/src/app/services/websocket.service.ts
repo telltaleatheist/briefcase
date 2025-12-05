@@ -60,6 +60,28 @@ export interface SuggestionRejected {
   timestamp: string;
 }
 
+export interface SavedLink {
+  id: string;
+  url: string;
+  title?: string;
+  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  date_added: string;
+  date_completed?: string;
+  download_path?: string;
+  thumbnail_path?: string;
+  video_id?: string;
+  error_message?: string;
+  metadata?: any;
+  library_id?: string;
+}
+
+export interface VideoAdded {
+  videoId: string;
+  filename: string;
+  filepath: string;
+  timestamp: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -79,6 +101,10 @@ export class WebsocketService implements OnDestroy {
   private videoRenamedCallbacks: ((event: VideoRenamed) => void)[] = [];
   private analysisCompletedCallbacks: ((event: AnalysisCompleted) => void)[] = [];
   private suggestionRejectedCallbacks: ((event: SuggestionRejected) => void)[] = [];
+  private savedLinkAddedCallbacks: ((event: SavedLink) => void)[] = [];
+  private savedLinkUpdatedCallbacks: ((event: SavedLink) => void)[] = [];
+  private savedLinkDeletedCallbacks: ((id: string) => void)[] = [];
+  private videoAddedCallbacks: ((event: VideoAdded) => void)[] = [];
 
   connect(): void {
     if (this.socket?.connected) {
@@ -174,6 +200,28 @@ export class WebsocketService implements OnDestroy {
       this.suggestionRejectedCallbacks.forEach(cb => cb(event));
     });
 
+    // Saved link events
+    this.socket.on('saved-link-added', (payload: { link: SavedLink }) => {
+      console.log('WS saved-link-added received:', payload);
+      this.savedLinkAddedCallbacks.forEach(cb => cb(payload.link));
+    });
+
+    this.socket.on('saved-link-updated', (payload: { link: SavedLink }) => {
+      console.log('WS saved-link-updated received:', payload);
+      this.savedLinkUpdatedCallbacks.forEach(cb => cb(payload.link));
+    });
+
+    this.socket.on('saved-link-deleted', (payload: { id: string }) => {
+      console.log('WS saved-link-deleted received:', payload);
+      this.savedLinkDeletedCallbacks.forEach(cb => cb(payload.id));
+    });
+
+    // Library/Video events
+    this.socket.on('video-added', (event: VideoAdded) => {
+      console.log('WS video-added received:', event);
+      this.videoAddedCallbacks.forEach(cb => cb(event));
+    });
+
     // Legacy events for backward compatibility
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
@@ -242,6 +290,46 @@ export class WebsocketService implements OnDestroy {
     this.suggestionRejectedCallbacks.push(callback);
     return () => {
       this.suggestionRejectedCallbacks = this.suggestionRejectedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onSavedLinkAdded(): { subscribe: (callback: (event: SavedLink) => void) => () => void } {
+    return {
+      subscribe: (callback: (event: SavedLink) => void) => {
+        this.savedLinkAddedCallbacks.push(callback);
+        return () => {
+          this.savedLinkAddedCallbacks = this.savedLinkAddedCallbacks.filter(cb => cb !== callback);
+        };
+      }
+    };
+  }
+
+  onSavedLinkUpdated(): { subscribe: (callback: (event: SavedLink) => void) => () => void } {
+    return {
+      subscribe: (callback: (event: SavedLink) => void) => {
+        this.savedLinkUpdatedCallbacks.push(callback);
+        return () => {
+          this.savedLinkUpdatedCallbacks = this.savedLinkUpdatedCallbacks.filter(cb => cb !== callback);
+        };
+      }
+    };
+  }
+
+  onSavedLinkDeleted(): { subscribe: (callback: (id: string) => void) => () => void } {
+    return {
+      subscribe: (callback: (id: string) => void) => {
+        this.savedLinkDeletedCallbacks.push(callback);
+        return () => {
+          this.savedLinkDeletedCallbacks = this.savedLinkDeletedCallbacks.filter(cb => cb !== callback);
+        };
+      }
+    };
+  }
+
+  onVideoAdded(callback: (event: VideoAdded) => void): () => void {
+    this.videoAddedCallbacks.push(callback);
+    return () => {
+      this.videoAddedCallbacks = this.videoAddedCallbacks.filter(cb => cb !== callback);
     };
   }
 

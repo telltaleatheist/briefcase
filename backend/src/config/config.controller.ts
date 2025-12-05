@@ -1,12 +1,18 @@
-import { Controller, Post, Body, Get, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Post, Body, Get, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { ApiKeysService } from './api-keys.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Controller('config')
-export class ConfigController {
+export class ConfigController implements OnModuleInit {
   private configPath: string;
+  private logsDir: string;
+  private cleanupIntervalId: NodeJS.Timeout | null = null;
+
+  // Log retention settings
+  private readonly LOG_MAX_AGE_DAYS = 7; // Keep logs for 7 days
+  private readonly LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // Run cleanup every 6 hours
 
   constructor(
     private readonly configService: SharedConfigService,
@@ -18,6 +24,54 @@ export class ConfigController {
                       path.join(process.env.HOME || '', '.config'));
 
     this.configPath = path.join(userDataPath, 'ClipChimp', 'app-config.json');
+    this.logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'ClipChimp');
+  }
+
+  onModuleInit() {
+    // Run cleanup on startup
+    this.cleanupOldLogs();
+
+    // Schedule periodic cleanup
+    this.cleanupIntervalId = setInterval(() => {
+      this.cleanupOldLogs();
+    }, this.LOG_CLEANUP_INTERVAL_MS);
+  }
+
+  /**
+   * Clean up old log files (console logs older than LOG_MAX_AGE_DAYS)
+   */
+  private cleanupOldLogs(): void {
+    try {
+      if (!fs.existsSync(this.logsDir)) {
+        return;
+      }
+
+      const now = Date.now();
+      const maxAge = this.LOG_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+      const files = fs.readdirSync(this.logsDir);
+
+      let deletedCount = 0;
+      for (const file of files) {
+        // Only clean up frontend console log files (not Winston's backend.log files)
+        if (!file.startsWith('clipchimp-console-')) {
+          continue;
+        }
+
+        const filePath = path.join(this.logsDir, file);
+        const stats = fs.statSync(filePath);
+
+        if (now - stats.mtimeMs > maxAge) {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        }
+      }
+
+      if (deletedCount > 0) {
+        console.log(`[LogCleanup] Deleted ${deletedCount} old log file(s)`);
+      }
+    } catch (error) {
+      console.error('[LogCleanup] Error cleaning up logs:', error);
+    }
   }
 
   /**

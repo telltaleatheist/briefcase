@@ -230,6 +230,23 @@ export class CascadeComponent {
     return items;
   });
 
+  // Computed list of ALL videos in display order (for navigation)
+  // This includes videos from collapsed sections so navigation is stable
+  allVideosInOrder = computed<Array<{ itemId: string; video: VideoItem; weekLabel: string }>>(() => {
+    const videos: Array<{ itemId: string; video: VideoItem; weekLabel: string }> = [];
+    const weeks = this.videoWeeks();
+
+    for (const week of weeks) {
+      // Include ALL videos regardless of expand state
+      for (const video of week.videos) {
+        const itemId = `${week.weekLabel}|${video.id}`;
+        videos.push({ itemId, video, weekLabel: week.weekLabel });
+      }
+    }
+    console.log(`[NAV] allVideosInOrder computed: ${videos.length} videos from ${weeks.length} weeks`);
+    return videos;
+  });
+
   private initialized = false;
   private lastLibraryId: string | null = null;
 
@@ -336,6 +353,28 @@ export class CascadeComponent {
         actions.push({ label: 'Open File Location', icon: '📁', action: 'openLocation' });
         actions.push({ label: 'Copy Filename', icon: '📋', action: 'copyFilename' });
       }
+      return actions;
+    }
+
+    // Saved Link items (from Save for Later)
+    const isSavedLink = video?.tags?.includes('saved-link');
+    const isDownloading = video?.tags?.includes('downloading');
+    const isDownloadComplete = video?.tags?.includes('download-complete');
+    const isDownloadFailed = video?.tags?.includes('download-failed');
+
+    if (isSavedLink) {
+      // Only show Import if download is complete
+      if (isDownloadComplete) {
+        actions.push({ label: `Import to Library${countSuffix}`, icon: '📥', action: 'add-to-library' });
+      }
+      // Show retry for failed downloads
+      if (isDownloadFailed) {
+        actions.push({ label: `Retry Download${countSuffix}`, icon: '🔄', action: 'retry' });
+      }
+      // Open URL in browser
+      actions.push({ label: 'Open URL', icon: '🌐', action: 'open' });
+      actions.push({ label: '', icon: '', action: '', divider: true });
+      actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
       return actions;
     }
 
@@ -906,28 +945,35 @@ export class CascadeComponent {
    * Navigate up/down in the list with arrow keys
    */
   private navigateWithArrowKey(direction: 1 | -1, extendSelection: boolean): void {
-    const videoItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
+    // Use stable list of ALL videos for navigation (not just visible ones)
+    const videoItems = this.allVideosInOrder();
+    console.log(`[NAV] Total videos in list: ${videoItems.length}`);
     if (videoItems.length === 0) return;
 
     const currentId = this.highlightedItemId();
     let currentIndex = currentId ? videoItems.findIndex(item => item.itemId === currentId) : -1;
+    console.log(`[NAV] Current ID: ${currentId}, Current Index: ${currentIndex}, Direction: ${direction > 0 ? 'DOWN' : 'UP'}`);
 
-    // If current item doesn't exist in filtered list, find closest item or start fresh
+    // If current item doesn't exist in list, start from beginning or end
     if (currentIndex === -1) {
       // Nothing highlighted or highlighted item not in current list
       // Start from beginning if going down, or end if going up
-      currentIndex = direction === 1 ? -1 : videoItems.length;
+      currentIndex = direction === 1 ? -1 : videoItems.length - 1;
+      console.log(`[NAV] No current item found, starting at index: ${currentIndex}`);
     }
 
     // Calculate new index
     const newIndex = Math.max(0, Math.min(videoItems.length - 1, currentIndex + direction));
+    console.log(`[NAV] Calculated new index: ${newIndex} (from ${currentIndex} + ${direction})`);
 
     // Don't navigate if we're already at the boundary
     if (newIndex === currentIndex) {
+      console.log(`[NAV] At boundary, not navigating (newIndex=${newIndex}, currentIndex=${currentIndex})`);
       return;
     }
 
     const newItem = videoItems[newIndex];
+    console.log(`[NAV] Moving to item: ${newItem?.itemId} (index ${newIndex})`);
 
     if (newItem) {
       this.highlightedItemId.set(newItem.itemId);
@@ -1074,6 +1120,25 @@ export class CascadeComponent {
    * - blue: transcribed + analyzed + > 10 minutes
    */
   getProcessingStatus(video: VideoItem): string {
+    // Check if it's a saved link item
+    if (video.tags?.includes('saved-link')) {
+      if (video.tags?.includes('download-complete')) {
+        return 'status-complete'; // Green - ready to import
+      }
+      if (video.tags?.includes('download-failed')) {
+        return 'status-failed'; // Red - failed
+      }
+      if (video.tags?.includes('downloading')) {
+        return 'status-downloading'; // Orange/animated - in progress
+      }
+      return 'status-pending'; // Pending
+    }
+
+    // Check if it's a webpage link (from saved links)
+    if (video.tags?.includes('webpage') || video.mediaType === 'text/html') {
+      return 'status-webpage'; // Purple - webpage link
+    }
+
     // Check if it's a non-video file (image, pdf, etc.)
     const mediaType = video.mediaType?.toLowerCase() || '';
     const ext = video.fileExtension?.toLowerCase() || '';

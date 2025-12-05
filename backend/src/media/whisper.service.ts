@@ -136,49 +136,65 @@ export class WhisperService {
    * Optimized for whisper: 16kHz, mono, WAV format
    */
   private async extractAudio(videoPath: string, outputDir: string, jobId: string): Promise<string> {
+    const { spawn } = require('child_process');
     const audioFilename = `${jobId}_audio.wav`;
     const audioPath = path.join(outputDir, audioFilename);
 
     this.logger.log(`Extracting audio from: ${videoPath}`);
     this.logger.log(`Audio output: ${audioPath}`);
 
+    const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+
+    const args = [
+      '-y',
+      '-i', videoPath,
+      '-vn',                    // No video
+      '-acodec', 'pcm_s16le',   // PCM 16-bit little-endian
+      '-ar', '16000',           // 16kHz sample rate (optimal for whisper)
+      '-ac', '1',               // Mono
+      '-f', 'wav',              // WAV format
+      audioPath
+    ];
+
+    this.logger.log(`FFmpeg command: ${ffmpegPath} ${args.join(' ')}`);
+
     return new Promise((resolve, reject) => {
-      const ffmpeg = require('fluent-ffmpeg');
-      const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+      const proc = spawn(ffmpegPath, args);
+      let stderrBuffer = '';
 
-      // Set ffmpeg binary path
-      ffmpeg.setFfmpegPath(ffmpegPath);
+      proc.stderr.on('data', (data: Buffer) => {
+        stderrBuffer += data.toString();
+        const lines = stderrBuffer.split('\r');
+        stderrBuffer = lines.pop() || '';
 
-      ffmpeg()
-        .input(videoPath)
-        .noVideo()
-        .audioCodec('pcm_s16le')
-        .audioFrequency(16000)  // 16kHz is optimal for whisper
-        .audioChannels(1)        // Mono
-        .format('wav')
-        .on('start', (cmdline: string) => {
-          this.logger.log(`FFmpeg command: ${cmdline}`);
-        })
-        .on('progress', (progress: any) => {
-          if (progress.percent) {
-            const extractPercent = Math.min(10, Math.round(progress.percent / 10));
+        for (const line of lines) {
+          const timeMatch = line.match(/time=(\d+:\d+:\d+\.\d+)/);
+          if (timeMatch) {
+            // Estimate progress (we don't know total duration here, so just report activity)
             this.eventService.emitTaskProgress(
               jobId,
               'transcribe',
-              5 + extractPercent,
-              `Extracting audio: ${Math.round(progress.percent)}%`
+              10,
+              `Extracting audio...`
             );
           }
-        })
-        .on('end', () => {
+        }
+      });
+
+      proc.on('close', (code: number) => {
+        if (code === 0) {
           this.logger.log(`Audio extraction complete: ${audioPath}`);
           resolve(audioPath);
-        })
-        .on('error', (err: Error) => {
-          this.logger.error(`Audio extraction failed: ${err.message}`);
-          reject(new Error(`Failed to extract audio: ${err.message}`));
-        })
-        .save(audioPath);
+        } else {
+          this.logger.error(`Audio extraction failed with code ${code}`);
+          reject(new Error(`Failed to extract audio: FFmpeg exited with code ${code}`));
+        }
+      });
+
+      proc.on('error', (err: Error) => {
+        this.logger.error(`Audio extraction failed: ${err.message}`);
+        reject(new Error(`Failed to extract audio: ${err.message}`));
+      });
     });
   }
 }

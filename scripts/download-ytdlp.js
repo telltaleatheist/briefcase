@@ -1,8 +1,7 @@
 /**
- * Download fast Python-based yt-dlp binaries for all platforms
+ * Download yt-dlp binaries for all platforms
  *
- * This script downloads the Python script versions of yt-dlp instead of
- * the slow PyInstaller-compiled binaries that have 8+ second startup overhead.
+ * Downloads standalone yt-dlp executables - no Python required!
  *
  * Usage:
  *   node scripts/download-ytdlp.js
@@ -11,18 +10,13 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { execSync } = require('child_process');
 
-const YTDLP_VERSION = 'latest'; // or specify a version like '2025.10.07'
 const BIN_DIR = path.join(__dirname, '..', 'utilities', 'bin');
 
-// URLs for Python script versions (NOT the compiled binaries)
+// URLs for standalone yt-dlp binaries
 const DOWNLOAD_URLS = {
-  // For macOS and Linux, we download the Python script
-  macos: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
+  macos: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos',
   linux: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
-
-  // For Windows, we MUST use the .exe as Windows doesn't have Python by default
   windows: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
 };
 
@@ -97,7 +91,7 @@ function downloadFile(url, dest, redirectCount = 0) {
       file.on('finish', () => {
         file.close();
         cleanupBackup();
-        console.log('✅ Download complete');
+        console.log('Download complete');
         resolve();
       });
 
@@ -122,7 +116,7 @@ function downloadFile(url, dest, redirectCount = 0) {
 async function downloadYtDlp() {
   try {
     console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log('║        Downloading Fast yt-dlp Binaries                   ║');
+    console.log('║        Downloading yt-dlp Binaries                        ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
     // Create bin directory if it doesn't exist
@@ -130,13 +124,12 @@ async function downloadYtDlp() {
       fs.mkdirSync(BIN_DIR, { recursive: true });
     }
 
-    // Download for each platform
     console.log('\n📥 Downloading yt-dlp binaries...\n');
 
     const results = { macos: false, linux: false, windows: false };
 
     // macOS
-    console.log('▶️  Downloading macOS version (Python script)...');
+    console.log('▶️  Downloading macOS version...');
     try {
       await downloadFile(
         DOWNLOAD_URLS.macos,
@@ -144,12 +137,13 @@ async function downloadYtDlp() {
       );
       fs.chmodSync(path.join(BIN_DIR, 'yt-dlp_macos'), 0o755);
       results.macos = true;
+      console.log('   ✅ macOS: Done');
     } catch (err) {
       console.error(`   ❌ Failed to download macOS version: ${err.message}`);
     }
 
     // Linux
-    console.log('\n▶️  Downloading Linux version (Python script)...');
+    console.log('\n▶️  Downloading Linux version...');
     try {
       await downloadFile(
         DOWNLOAD_URLS.linux,
@@ -157,18 +151,20 @@ async function downloadYtDlp() {
       );
       fs.chmodSync(path.join(BIN_DIR, 'yt-dlp_linux'), 0o755);
       results.linux = true;
+      console.log('   ✅ Linux: Done');
     } catch (err) {
       console.error(`   ❌ Failed to download Linux version: ${err.message}`);
     }
 
     // Windows
-    console.log('\n▶️  Downloading Windows version (.exe)...');
+    console.log('\n▶️  Downloading Windows version...');
     try {
       await downloadFile(
         DOWNLOAD_URLS.windows,
         path.join(BIN_DIR, 'yt-dlp.exe')
       );
       results.windows = true;
+      console.log('   ✅ Windows: Done');
     } catch (err) {
       console.error(`   ❌ Failed to download Windows version: ${err.message}`);
     }
@@ -179,52 +175,23 @@ async function downloadYtDlp() {
       throw new Error('Failed to download yt-dlp for any platform');
     }
 
-    // Verify downloads
-    console.log('\n✅ Verifying downloads...');
+    // Show file sizes
+    console.log('\n📊 File sizes:');
     const macosPath = path.join(BIN_DIR, 'yt-dlp_macos');
     const linuxPath = path.join(BIN_DIR, 'yt-dlp_linux');
     const windowsPath = path.join(BIN_DIR, 'yt-dlp.exe');
 
-    // Check macOS is a Python script (only if downloaded)
     if (results.macos && fs.existsSync(macosPath)) {
-      const macosContent = fs.readFileSync(macosPath, 'utf8', { length: 100 });
-      if (!macosContent.startsWith('#!/usr/bin/env python')) {
-        console.warn('⚠️  WARNING: macOS binary is not a Python script! May have slow startup.');
-      } else {
-        console.log('   ✅ macOS: Python script (fast startup)');
-      }
-    }
-
-    // Check Linux is a Python script (only if downloaded)
-    if (results.linux && fs.existsSync(linuxPath)) {
-      const linuxContent = fs.readFileSync(linuxPath, 'utf8', { length: 100 });
-      if (!linuxContent.startsWith('#!/usr/bin/env python')) {
-        console.warn('⚠️  WARNING: Linux binary is not a Python script! May have slow startup.');
-      } else {
-        console.log('   ✅ Linux: Python script (fast startup)');
-      }
-    }
-
-    // Check Windows is an .exe (only if downloaded)
-    if (results.windows && fs.existsSync(windowsPath)) {
-      const windowsStats = fs.statSync(windowsPath);
-      if (windowsStats.size < 1000000) {
-        console.warn('⚠️  WARNING: Windows binary seems too small!');
-      } else {
-        console.log('   ✅ Windows: Executable (.exe)');
-      }
-    }
-
-    // Show file sizes
-    console.log('\n📊 File sizes:');
-    if (results.macos && fs.existsSync(macosPath)) {
-      console.log(`   macOS:   ${(fs.statSync(macosPath).size / 1024).toFixed(2)} KB`);
+      const size = fs.statSync(macosPath).size;
+      console.log(`   macOS:   ${(size / 1024 / 1024).toFixed(2)} MB`);
     }
     if (results.linux && fs.existsSync(linuxPath)) {
-      console.log(`   Linux:   ${(fs.statSync(linuxPath).size / 1024).toFixed(2)} KB`);
+      const size = fs.statSync(linuxPath).size;
+      console.log(`   Linux:   ${(size / 1024 / 1024).toFixed(2)} MB`);
     }
     if (results.windows && fs.existsSync(windowsPath)) {
-      console.log(`   Windows: ${(fs.statSync(windowsPath).size / 1024 / 1024).toFixed(2)} MB`);
+      const size = fs.statSync(windowsPath).size;
+      console.log(`   Windows: ${(size / 1024 / 1024).toFixed(2)} MB`);
     }
 
     console.log('\n╔═══════════════════════════════════════════════════════════╗');

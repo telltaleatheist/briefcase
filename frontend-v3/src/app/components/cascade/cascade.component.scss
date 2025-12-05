@@ -344,6 +344,41 @@ cdk-virtual-scroll-viewport.library-content {
   background: #38bdf8;
 }
 
+.video-item .selection-indicator.status-webpage {
+  background: #a78bfa; // Purple for webpage links
+}
+
+.video-item .selection-indicator.status-downloading {
+  background: var(--primary-orange);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.video-item .selection-indicator.status-pending {
+  background: #9ca3af; // Gray for pending
+}
+
+.video-item .selection-indicator.status-failed {
+  background: #ef4444; // Red for failed
+}
+
+.video-item.selected .selection-indicator.status-downloading {
+  background: var(--primary-orange);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.video-item.selected .selection-indicator.status-pending {
+  background: #9ca3af;
+}
+
+.video-item.selected .selection-indicator.status-failed {
+  background: #ef4444;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .video-item.selected .selection-indicator.status-unprocessed {
   background: #ef4444;
 }
@@ -358,6 +393,10 @@ cdk-virtual-scroll-viewport.library-content {
 
 .video-item.selected .selection-indicator.status-complete-long {
   background: #38bdf8;
+}
+
+.video-item.selected .selection-indicator.status-webpage {
+  background: #a78bfa; // Purple for webpage links
 }
 
 // Video Icon
@@ -382,9 +421,11 @@ cdk-virtual-scroll-viewport.library-content {
   color: var(--text-primary);
   line-height: $line-height-tight;
   transition: color $transition-fast;
-  // Allow full title to display - removed truncate
-  word-wrap: break-word;
-  overflow-wrap: break-word;
+  // Prevent text overflow
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .video-meta {

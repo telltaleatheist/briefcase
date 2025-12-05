@@ -151,6 +151,21 @@ export class TabsService {
   }
 
   /**
+   * Add one or more saved links to a tab
+   */
+  addSavedLinksToTab(tabId: string, savedLinkIds: string[]): Observable<AddVideoToTabResponse> {
+    return this.http.post<AddVideoToTabResponse>(`${this.baseUrl}/tabs/${tabId}/links`, {
+      savedLinkId: savedLinkIds
+    }).pipe(
+      map(result => {
+        // Reload tabs to update counts
+        this.loadTabs().subscribe();
+        return result;
+      })
+    );
+  }
+
+  /**
    * Get all tabs that contain a specific video
    */
   getTabsForVideo(videoId: string): Observable<VideoTab[]> {

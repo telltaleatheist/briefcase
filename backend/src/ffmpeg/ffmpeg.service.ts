@@ -1,18 +1,19 @@
 // ClipChimp/backend/src/ffmpeg/ffmpeg.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import * as ffmpeg from 'fluent-ffmpeg';
 import * as path from 'path';
 import * as fs from 'fs';
 import { VideoMetadata } from '../common/interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { ThumbnailService } from '../database/thumbnail.service';
+import { FfmpegWrapper } from './ffmpeg-wrapper';
 
 @Injectable()
 export class FfmpegService {
   private lastReportedProgress: Map<string, number> = new Map();
   private readonly logger = new Logger(FfmpegService.name);
+  private ffmpeg: FfmpegWrapper;
 
   constructor(
     private readonly eventService: MediaEventService,
@@ -33,7 +34,6 @@ export class FfmpegService {
       let ffprobeExecutablePath = process.env.FFPROBE_PATH || configFfprobePath;
 
       // If not configured, try packaged binaries in production
-      // In production: Check if RESOURCES_PATH env var is set OR resourcesPath property exists
       const isPackaged = process.env.NODE_ENV === 'production' &&
                          (process.env.RESOURCES_PATH !== undefined ||
                           (process as any).resourcesPath !== undefined ||
@@ -43,13 +43,9 @@ export class FfmpegService {
 
       if (isPackaged && (!ffmpegExecutablePath || !ffprobeExecutablePath)) {
         const resourcesPath = process.env.RESOURCES_PATH || (process as any).resourcesPath || path.join(process.cwd(), 'resources');
-        this.logger.log(`RESOURCES_PATH env: ${process.env.RESOURCES_PATH}`);
-        this.logger.log(`process.resourcesPath: ${(process as any).resourcesPath}`);
-        this.logger.log(`process.cwd(): ${process.cwd()}`);
         this.logger.log(`Final resources path for ffmpeg lookup: ${resourcesPath}`);
 
         if (!ffmpegExecutablePath) {
-          // Try to find packaged ffmpeg in backend/node_modules
           let platformFolder = '';
           if (process.platform === 'win32') {
             platformFolder = 'win32-x64';
@@ -59,19 +55,15 @@ export class FfmpegService {
             platformFolder = 'linux-x64';
           }
 
-          // Try multiple possible locations for ffmpeg
           const possibleFfmpegPaths = [
-            // app.asar.unpacked location
             path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
               process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
-            // extraResources location
             path.join(resourcesPath, 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
               process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
           ];
 
           for (const packagedFfmpegPath of possibleFfmpegPaths) {
             this.logger.log(`Looking for packaged ffmpeg at: ${packagedFfmpegPath}`);
-            this.logger.log(`ffmpeg exists: ${fs.existsSync(packagedFfmpegPath)}`);
             if (fs.existsSync(packagedFfmpegPath)) {
               ffmpegExecutablePath = packagedFfmpegPath;
               break;
@@ -80,7 +72,6 @@ export class FfmpegService {
         }
 
         if (!ffprobeExecutablePath) {
-          // Try to find packaged ffprobe in backend/node_modules
           let platformFolder = '';
           if (process.platform === 'win32') {
             platformFolder = 'win32-x64';
@@ -90,19 +81,15 @@ export class FfmpegService {
             platformFolder = 'linux-x64';
           }
 
-          // Try multiple possible locations for ffprobe
           const possibleFfprobePaths = [
-            // app.asar.unpacked location
             path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
               process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
-            // extraResources location
             path.join(resourcesPath, 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
               process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
           ];
 
           for (const packagedFfprobePath of possibleFfprobePaths) {
             this.logger.log(`Looking for packaged ffprobe at: ${packagedFfprobePath}`);
-            this.logger.log(`ffprobe exists: ${fs.existsSync(packagedFfprobePath)}`);
             if (fs.existsSync(packagedFfprobePath)) {
               ffprobeExecutablePath = packagedFfprobePath;
               break;
@@ -113,37 +100,23 @@ export class FfmpegService {
 
       // Fall back to trying to find ffmpeg/ffprobe in backend's node_modules
       if (!ffmpegExecutablePath) {
-        console.log('[FfmpegService] Looking for FFmpeg - process.cwd():', process.cwd(), '__dirname:', __dirname);
-
         const platformFolder = process.platform === 'win32' ? 'win32-x64' :
                               (process.platform === 'darwin' ?
                                 (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
                                 'linux-x64');
 
-        // Try to find in node_modules relative to this file
         const possiblePaths = [
           path.join(process.cwd(), 'node_modules', '@ffmpeg-installer', platformFolder, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
           path.join(__dirname, '..', '..', 'node_modules', '@ffmpeg-installer', platformFolder, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
         ];
 
-        console.log('[FfmpegService] Checking FFmpeg paths:', possiblePaths);
-
         for (const possiblePath of possiblePaths) {
-          const exists = fs.existsSync(possiblePath);
-          console.log('[FfmpegService] Checking if exists:', possiblePath, '=', exists);
-          if (exists) {
+          if (fs.existsSync(possiblePath)) {
             ffmpegExecutablePath = possiblePath;
-            console.log('[FfmpegService] Found FFmpeg at:', possiblePath);
             break;
           }
         }
-
-        if (!ffmpegExecutablePath) {
-          console.error('[FfmpegService] FFmpeg not found in any of the checked paths');
-        }
       }
-
-      console.log('[FfmpegService] Final ffmpegExecutablePath:', ffmpegExecutablePath);
 
       if (!ffprobeExecutablePath) {
         const platformFolder = process.platform === 'win32' ? 'win32-x64' :
@@ -159,7 +132,6 @@ export class FfmpegService {
         for (const possiblePath of possiblePaths) {
           if (fs.existsSync(possiblePath)) {
             ffprobeExecutablePath = possiblePath;
-            this.logger.log(`Found FFprobe at: ${possiblePath}`);
             break;
           }
         }
@@ -173,14 +145,7 @@ export class FfmpegService {
         throw new Error('FFprobe path not found. Please configure it in the application settings or ensure @ffprobe-installer is installed.');
       }
 
-      // Set paths for fluent-ffmpeg
-      ffmpeg.setFfmpegPath(ffmpegExecutablePath);
-      ffmpeg.setFfprobePath(ffprobeExecutablePath);
-
-      this.logger.log(`FFmpeg path: ${ffmpegExecutablePath}`);
-      this.logger.log(`FFprobe path: ${ffprobeExecutablePath}`);
-
-      // Verify if the paths are valid by checking file existence
+      // Verify paths exist
       if (!fs.existsSync(ffmpegExecutablePath)) {
         throw new Error(`FFmpeg executable not found at path: ${ffmpegExecutablePath}`);
       }
@@ -188,71 +153,68 @@ export class FfmpegService {
       if (!fs.existsSync(ffprobeExecutablePath)) {
         throw new Error(`FFprobe executable not found at path: ${ffprobeExecutablePath}`);
       }
+
+      // Create wrapper
+      this.ffmpeg = new FfmpegWrapper(ffmpegExecutablePath, ffprobeExecutablePath);
+
+      this.logger.log(`FFmpeg path: ${ffmpegExecutablePath}`);
+      this.logger.log(`FFprobe path: ${ffprobeExecutablePath}`);
     } catch (error) {
       this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
       throw error;
     }
   }
-  
+
   async getVideoMetadata(videoPath: string): Promise<VideoMetadata> {
-    return new Promise<VideoMetadata>((resolve, reject) => {
-      ffmpeg.ffprobe(videoPath, (err, metadata) => {
-        if (err) {
-          this.logger.error(`Error probing video: ${err.message}`);
-          return reject(err);
+    try {
+      const metadata = await this.ffmpeg.probe(videoPath);
+
+      const videoStream = metadata.streams?.find((stream: any) => stream.codec_type === 'video');
+      const audioStream = metadata.streams?.find((stream: any) => stream.codec_type === 'audio');
+
+      if (!videoStream && !audioStream) {
+        throw new Error('No video or audio stream found');
+      }
+
+      const primaryStream = videoStream || audioStream!;
+
+      let fileDuration = 0;
+      if (primaryStream.duration) {
+        fileDuration = parseFloat(primaryStream.duration);
+      }
+      if (!fileDuration && metadata.format?.duration) {
+        fileDuration = typeof metadata.format.duration === 'string'
+          ? parseFloat(metadata.format.duration)
+          : metadata.format.duration;
+      }
+
+      let fps: number | undefined;
+      if (videoStream?.r_frame_rate) {
+        const [numerator, denominator] = videoStream.r_frame_rate.split('/').map(Number);
+        if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
+          fps = numerator / denominator;
         }
+      }
 
-        // Try to find video stream first
-        const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
+      let aspectRatio: string | undefined;
+      if (videoStream?.width && videoStream?.height) {
+        const gcd = this.calculateGCD(videoStream.width, videoStream.height);
+        aspectRatio = `${videoStream.width / gcd}:${videoStream.height / gcd}`;
+      }
 
-        // If no video stream, try audio stream (for audio-only files)
-        const audioStream = metadata.streams.find(stream => stream.codec_type === 'audio');
-
-        if (!videoStream && !audioStream) {
-          return reject(new Error('No video or audio stream found'));
-        }
-
-        // Prefer video stream, fall back to audio stream (we know at least one exists)
-        const primaryStream = videoStream || audioStream!;
-
-        // Get duration from stream, or fall back to format duration
-        let fileDuration = 0;
-        if (primaryStream.duration) {
-          fileDuration = parseFloat(primaryStream.duration as any);
-        }
-        if (!fileDuration && metadata.format && metadata.format.duration) {
-          fileDuration = typeof metadata.format.duration === 'string'
-            ? parseFloat(metadata.format.duration)
-            : metadata.format.duration;
-        }
-
-        // Calculate FPS from rational frame rate (e.g., "30000/1001") - only for video
-        let fps: number | undefined;
-        if (videoStream && videoStream.r_frame_rate) {
-          const [numerator, denominator] = videoStream.r_frame_rate.split('/').map(Number);
-          if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
-            fps = numerator / denominator;
-          }
-        }
-
-        // Calculate aspect ratio - only for video
-        let aspectRatio: string | undefined;
-        if (videoStream && videoStream.width && videoStream.height) {
-          const gcd = this.calculateGCD(videoStream.width, videoStream.height);
-          aspectRatio = `${videoStream.width / gcd}:${videoStream.height / gcd}`;
-        }
-
-        resolve({
-          width: videoStream?.width,
-          height: videoStream?.height,
-          duration: fileDuration,
-          codecName: primaryStream.codec_name,
-          bitrate: primaryStream.bit_rate ? parseInt(primaryStream.bit_rate as any) : undefined,
-          fps,
-          aspectRatio,
-        });
-      });
-    });
+      return {
+        width: videoStream?.width,
+        height: videoStream?.height,
+        duration: fileDuration,
+        codecName: primaryStream.codec_name,
+        bitrate: primaryStream.bit_rate ? parseInt(primaryStream.bit_rate) : undefined,
+        fps,
+        aspectRatio,
+      };
+    } catch (err: any) {
+      this.logger.error(`Error probing video: ${err.message}`);
+      throw err;
+    }
   }
 
   async reencodeVideo(
@@ -267,73 +229,89 @@ export class FfmpegService {
       useCompression?: boolean,
       compressionLevel?: number
     },
-    taskType?: string  // NEW: Task type for new queue system
+    taskType?: string
   ): Promise<string | null> {
     this.logger.log('Received reencoding options:', JSON.stringify({
       fixAspectRatio: options?.fixAspectRatio,
       normalizeAudio: options?.normalizeAudio,
       audioNormalizationMethod: options?.audioNormalizationMethod
     }, null, 2));
-        
+
     try {
-      // Use a single default encoder without detection
       const selectedEncoder = 'libx264';
-  
-      return new Promise<string | null>((resolve, reject) => {
-        this.probeVideo(videoFile, (err, metadata) => {
-          if (err) {
-            this.logger.error(`CRITICAL: Error probing video file: ${err.message}`);
-            resolve(null);
-            return;
+      const metadata = await this.ffmpeg.probe(videoFile);
+      const videoAnalysis = this.analyzeVideoMetadata(metadata);
+
+      if (!videoAnalysis.isValid) {
+        return null;
+      }
+
+      const duration = videoAnalysis.duration || 0;
+      const needsAspectRatioFix = videoAnalysis.needsAspectRatioFix ?? false;
+
+      const fileDir = path.dirname(videoFile);
+      const fileName = path.basename(videoFile);
+      const fileBase = path.parse(fileName).name;
+      const outputFile = path.join(fileDir, `${fileBase}_reencoded.mov`);
+      const progressKey = outputFile;
+
+      this.lastReportedProgress.set(progressKey, 0);
+
+      const args = this.buildFfmpegArgs(videoFile, outputFile, needsAspectRatioFix, selectedEncoder, options);
+
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, 0, 'Preparing video re-encoding');
+      }
+
+      this.logger.log(`FFmpeg re-encoding command: ${this.ffmpeg.ffmpeg} ${args.join(' ')}`);
+
+      await this.ffmpeg.run(args, {
+        duration,
+        onProgress: (progress) => {
+          const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
+          const boundedPercent = Math.max(5, Math.min(progress.percent, 95));
+
+          if (boundedPercent > lastProgress) {
+            this.lastReportedProgress.set(progressKey, boundedPercent);
+            const message = `Re-encoding video ${progress.speed ? `(Speed: ${progress.speed}x)` : ''}`;
+            if (taskType && jobId) {
+              this.eventService.emitTaskProgress(jobId, taskType, boundedPercent, message);
+            }
           }
-  
-          const videoAnalysis = this.analyzeVideoMetadata(metadata);
-          if (!videoAnalysis.isValid) {
-            resolve(null);
-            return;
-          }
-  
-          // Set defaults for potentially undefined values
-          const dimensions = videoAnalysis.dimensions || { width: 0, height: 0 };
-          const duration = videoAnalysis.duration || 0;
-          const isVertical = videoAnalysis.isVertical ?? false;
-          const needsAspectRatioFix = videoAnalysis.needsAspectRatioFix ?? false;
-
-          const { outputFile, progressKey } = this.generateOutputPath(videoFile);
-
-          // Reset the progress counter for this file
-          this.lastReportedProgress.set(progressKey, 0);
-
-          // Create FFmpeg command
-          const command = this.buildFfmpegCommand(
-            videoFile,
-            outputFile,
-            isVertical,
-            needsAspectRatioFix,
-            selectedEncoder,
-            options,
-            duration
-          );
-
-          // Start progress at 0%
-          if (taskType && jobId) {
-            this.eventService.emitTaskProgress(jobId, taskType, 0, 'Preparing video re-encoding');
-          }
-
-          this.setupCommandEventHandlers(command, videoFile, outputFile, progressKey, duration, jobId, resolve, taskType);
-
-          // Make sure the command is explicitly run
-          command.run();
-        });
+        }
       });
-    } catch (error) {
-      this.logger.error('CRITICAL: Unexpected error in aspect ratio processing:', error);
+
+      this.logger.log(`Successfully re-encoded video: ${outputFile}`);
+
+      // Preserve original file timestamps before deletion
+      const originalStats = fs.statSync(videoFile);
+      const originalAtime = originalStats.atime;
+      const originalMtime = originalStats.mtime;
+
+      // Delete original and rename
+      if (this.safeDeleteFile(videoFile)) {
+        this.logger.log(`Deleted original video: ${videoFile}`);
+        try {
+          fs.renameSync(outputFile, videoFile);
+          fs.utimesSync(videoFile, originalAtime, originalMtime);
+          this.logger.log(`Renamed and preserved timestamps`);
+
+          this.lastReportedProgress.set(progressKey, 100);
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
+          }
+          return videoFile;
+        } catch (err: any) {
+          this.logger.error(`Failed to rename file: ${err.message}`);
+          return outputFile;
+        }
+      }
+
+      return outputFile;
+    } catch (error: any) {
+      this.logger.error('CRITICAL: Unexpected error in re-encoding:', error);
       return null;
     }
-  }
-  
-  private probeVideo(videoFile: string, callback: (err: any, metadata: any) => void): void {
-    ffmpeg.ffprobe(videoFile, callback);
   }
 
   private analyzeVideoMetadata(metadata: any): {
@@ -343,48 +321,35 @@ export class FfmpegService {
     isVertical?: boolean,
     needsAspectRatioFix?: boolean
   } {
-    const stream = metadata.streams.find((s: { codec_type: string; }) => s.codec_type === 'video');
+    const stream = metadata.streams?.find((s: any) => s.codec_type === 'video');
     if (!stream) {
       this.logger.error('CRITICAL: No video stream found');
       return { isValid: false };
     }
-  
+
     let width = stream.width;
     let height = stream.height;
-    let totalDuration = parseFloat(stream.duration || '0');
-    
+    let totalDuration = parseFloat(stream.duration || metadata.format?.duration || '0');
+
     if (!width || !height) {
       this.logger.error('Could not determine video dimensions');
       return { isValid: false };
     }
-    
-    // Check for rotation metadata
+
     const tags = stream.tags || {};
     const rotation = stream.rotation || tags.rotate || 0;
-    
+
     if (rotation === '90' || rotation === '270' || rotation === 90 || rotation === 270) {
       [width, height] = [height, width];
     }
-  
+
     const aspectRatio = width / height;
-
-    // Target aspect ratio is 16:9 (1.777...)
     const targetAspectRatio = 16 / 9;
-    const aspectRatioTolerance = 0.01; // Allow small variations
-
-    // Does it need aspect ratio correction? (Not already 16:9)
+    const aspectRatioTolerance = 0.01;
     const needsAspectRatioFix = Math.abs(aspectRatio - targetAspectRatio) > aspectRatioTolerance;
-
-    // Is it a vertical video?
     const isVertical = aspectRatio <= 1.0;
 
-    this.logger.log(`REENCODING ANALYSIS:
-      Original Dimensions: ${width}x${height}
-      Calculated Aspect Ratio: ${aspectRatio.toFixed(4)}
-      Target Aspect Ratio: ${targetAspectRatio.toFixed(4)}
-      Is Vertical Video: ${isVertical}
-      Needs Aspect Ratio Fix: ${needsAspectRatioFix}
-      Video Duration: ${totalDuration}s`);
+    this.logger.log(`REENCODING ANALYSIS: ${width}x${height}, AR: ${aspectRatio.toFixed(4)}, Vertical: ${isVertical}, NeedsFix: ${needsAspectRatioFix}`);
 
     return {
       isValid: true,
@@ -395,37 +360,9 @@ export class FfmpegService {
     };
   }
 
-  private generateOutputPath(videoFile: string): { outputFile: string, progressKey: string } {
-    const fileDir = path.dirname(videoFile);
-    const fileName = path.basename(videoFile);
-    const fileBase = path.parse(fileName).name;
-  
-    // Force .mov extension for Final Cut Pro compatibility
-    const outputFile = path.join(fileDir, `${fileBase}_reencoded.mov`);
-    
-    // Set the progress key
-    const progressKey = outputFile;
-    
-    return { outputFile, progressKey };
-  }
-
-  private getFilterOptions(isVertical: boolean): string[] {
-    if (isVertical) {
-      return [
-        '-filter_complex', 
-        "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p"
-      ];
-    } else {
-      // For non-vertical videos, apply a simpler filter
-      return ['-filter_complex', "[0:v]format=yuv420p"];
-    }
-  }
-  
-  // Helper to build the full FFmpeg command
-  private buildFfmpegCommand(
+  private buildFfmpegArgs(
     videoFile: string,
     outputFile: string,
-    isVertical: boolean,
     needsAspectRatioFix: boolean,
     encoder: string,
     options?: {
@@ -434,273 +371,71 @@ export class FfmpegService {
       rmsNormalizationLevel?: number,
       useCompression?: boolean,
       compressionLevel?: number
-    },
-    duration?: number
-  ): any {
+    }
+  ): string[] {
     let filterComplex = '';
 
-    // Apply blurred background fix if fixAspectRatio is enabled AND video needs fixing
     if (options?.fixAspectRatio && needsAspectRatioFix) {
-      // Use the same blurred background technique for ALL non-16:9 videos
       filterComplex = "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];" +
                        "[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];" +
                        "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]";
     } else {
       filterComplex = "[0:v]format=yuv420p[v]";
     }
-    
-    const commandOptions = ['-map', '[v]'];
-    
+
+    const mapOptions = ['-map', '[v]'];
+
     if (options?.useRmsNormalization || options?.useCompression) {
       let audioFilter = '';
-      
+
       if (options?.useRmsNormalization) {
         const level = options.rmsNormalizationLevel ?? 0;
         audioFilter = `[0:a]volume=${level}dB`;
-        
-        if (options?.useCompression) {
-          audioFilter += `[a1];[a1]`;
-        } else {
-          audioFilter += '[aout]';
-        }
+        audioFilter += options?.useCompression ? '[a1];[a1]' : '[aout]';
       } else {
         audioFilter = '[0:a]';
       }
-      
+
       if (options?.useCompression) {
         const level = options.compressionLevel ?? 5;
         audioFilter += `compand=attacks=0.3:decays=0.3:points=-90/-900|-45/-900|-30/-15|0/-6|15/0:gain=${level}[aout]`;
       }
-      
+
       filterComplex += `;${audioFilter}`;
-      commandOptions.push('-map', '[aout]?');
+      mapOptions.push('-map', '[aout]?');
     } else {
-      commandOptions.push('-map', '0:a?');
+      mapOptions.push('-map', '0:a?');
     }
-    
-    commandOptions.unshift('-filter_complex', filterComplex);
-    commandOptions.push(
+
+    return [
+      '-y',
+      '-i', videoFile,
+      '-filter_complex', filterComplex,
+      ...mapOptions,
       '-pix_fmt', 'yuv420p',
       '-c:v', encoder,
       '-b:v', '3M',
       '-c:a', 'aac',
       '-b:a', '128k',
-      '-movflags', '+faststart'
-    );
-    
-    return ffmpeg(videoFile)
-      .outputOptions(commandOptions)
-      .output(outputFile);
-  }
-  
-  private parseProgress(
-    stderrLine: string, 
-    totalDuration: number, 
-    progressKey: string
-  ): { progressPercent: number, speedInfo: string } | null {
-    const timeMatch = stderrLine.match(/time=(\d+:\d+:\d+\.\d+)/);
-    const speedMatch = stderrLine.match(/speed=(\d+\.\d+)x/);
-    
-    if (!timeMatch) return null;
-    
-    const timeStr = timeMatch[1];
-    const timeParts = timeStr.split(/[:\.]/);
-    
-    if (timeParts.length < 3) return null;
-    
-    const hours = parseInt(timeParts[0]);
-    const minutes = parseInt(timeParts[1]);
-    const seconds = parseInt(timeParts[2]);
-    const millis = timeParts.length > 3 ? parseInt(timeParts[3]) : 0;
-    
-    const currentTimeInSeconds = hours * 3600 + minutes * 60 + seconds + (millis / 100);
-    
-    // Make sure totalDuration is valid (fallback to default if not)
-    let effectiveDuration = totalDuration;
-    if (effectiveDuration <= 0 || isNaN(effectiveDuration)) {
-      this.logger.warn(`Invalid duration: ${totalDuration}, using default`);
-      effectiveDuration = 100; // Use a default if duration is invalid
-    }
-    
-    let progressPercent = Math.min(Math.round((currentTimeInSeconds / effectiveDuration) * 100), 100);
-    
-    // Always force progress to be between 5-95% (leaving room for start and end operations)
-    progressPercent = Math.max(5, Math.min(progressPercent, 95));
-    
-    // Skip if progress is too small or moving backwards
-    const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
-    if (progressPercent <= lastProgress) {
-      return null;
-    }
-    
-    this.lastReportedProgress.set(progressKey, progressPercent);
-    
-    let speedInfo = '';
-    if (speedMatch) {
-      speedInfo = `(Speed: ${speedMatch[1]}x)`;
-    }
-    
-    return { progressPercent, speedInfo };
-  }
-
-  private setupCommandEventHandlers(
-    command: any,
-    videoFile: string,
-    outputFile: string,
-    progressKey: string,
-    duration: number,
-    jobId?: string,
-    resolve?: (value: string | null) => void,
-    taskType?: string  // NEW: Task type for new queue system
-  ): void {
-    command.on('start', (cmdline: string) => {
-      this.logger.log(`FFmpeg re-encoding command started: ${cmdline}`);
-      if (taskType && jobId) {
-        this.eventService.emitTaskProgress(jobId, taskType, 0, 'Starting video re-encoding');
-      }
-    });
-
-    command.on('stderr', (stderrLine: string) => {
-      const progress = this.parseProgress(stderrLine, duration, progressKey);
-      if (progress) {
-        const message = `Re-encoding video ${progress.speedInfo}`;
-        // Emit task-progress for queue system
-        if (taskType && jobId) {
-          this.eventService.emitTaskProgress(jobId, taskType, progress.progressPercent, message);
-        }
-      }
-    });
-
-    command.on('end', () => {
-      this.logger.log(`Successfully re-encoded video: ${outputFile}`);
-
-      // Preserve original file timestamps before deletion
-      const fs = require('fs');
-      const originalStats = fs.statSync(videoFile);
-      const originalAtime = originalStats.atime;
-      const originalMtime = originalStats.mtime;
-
-      // Delete the original video safely
-      if (this.safeDeleteFile(videoFile)) {
-        this.logger.log(`Deleted original video: ${videoFile}`);
-
-        // Rename the reencoded file to the original name (keep original extension)
-        const originalName = videoFile;  // Keep exact original filename
-        try {
-          fs.renameSync(outputFile, originalName);
-          this.logger.log(`Renamed ${outputFile} to ${originalName}`);
-
-          // Preserve original timestamps (critical for maintaining download_date)
-          // atime = access time, mtime = modification time
-          // These determine the file's birthtime/creation date
-          fs.utimesSync(originalName, originalAtime, originalMtime);
-          this.logger.log(`Preserved original file timestamps (download_date maintained)`);
-
-          // Emit 100% completion
-          this.lastReportedProgress.set(progressKey, 100);
-          if (taskType && jobId) {
-            this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
-          }
-
-          if (resolve) resolve(originalName);
-        } catch (err: any) {
-          this.logger.error(`Failed to rename file: ${err.message}`);
-          // Still resolve with the _reencoded file if rename fails
-          this.lastReportedProgress.set(progressKey, 100);
-          if (taskType && jobId) {
-            this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
-          }
-          if (resolve) resolve(outputFile);
-        }
-      } else {
-        // If deletion failed, keep the _reencoded version
-        this.lastReportedProgress.set(progressKey, 100);
-        if (taskType && jobId) {
-          this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
-        }
-        if (resolve) resolve(outputFile);
-      }
-    });
-
-    command.on('error', (err: any) => {
-      this.logger.error(`Error re-encoding video: ${err.message}`);
-
-      if (resolve) resolve(null);
-    });
-  }
-  
-  private getAudioNormalizationFilter(options?: {
-    normalizeAudio?: boolean;
-    audioNormalizationMethod?: 'rms' | 'peak';
-    useRmsNormalization?: boolean;
-    rmsNormalizationLevel?: number;
-    useCompression?: boolean;
-    compressionLevel?: number;
-  }): string[] {
-    const filters: string[] = [];
-  
-    // New RMS Normalization
-    if (options?.useRmsNormalization) {
-      const rmsLevel = options.rmsNormalizationLevel || 0;
-      const rmsGain = rmsLevel; // Direct mapping of slider value to gain
-      filters.push(
-        '-filter_complex', 
-        `[0:a]volume=replaygain=track:replaygain-adjustment=${rmsGain}[rms_normalized]`,
-        '-map', '[rms_normalized]'
-      );
-    }
-  
-    // New Compression
-    if (options?.useCompression) {
-      const compressionLevel = options.compressionLevel || 5;
-      const compandPoints = this.getCompandPointsForLevel(compressionLevel);
-      filters.push(
-        '-filter_complex', 
-        `[0:a]compand=attacks=0.3:decays=0.3:points=${compandPoints}[compressed]`,
-        '-map', '[compressed]'
-      );
-    }
-  
-    return filters;
-  }
-
-  private getCompandPointsForLevel(level: number): string {
-    // Provide different compression curves based on level
-    switch (true) {
-      case level <= 2: 
-        return '-90/-900|-45/-900|-27/-18|0/-9|12/0'; // Light compression
-      case level <= 5: 
-        return '-90/-900|-45/-900|-30/-15|0/-6|15/0'; // Moderate compression
-      default: 
-        return '-90/-900|-45/-900|-35/-10|0/-3|20/0'; // Heavy compression
-    }
+      '-movflags', '+faststart',
+      outputFile
+    ];
   }
 
   private safeDeleteFile(filePath: string): boolean {
     if (!filePath) return false;
-    
     try {
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        this.logger.log(`Deleted file: ${filePath}`);
         return true;
-      } else {
-        this.logger.debug(`File doesn't exist, no need to delete: ${filePath}`);
-        return false;
       }
+      return false;
     } catch (error) {
       this.logger.error(`Error deleting file ${filePath}:`, error);
       return false;
     }
   }
-  
-  /**
-   * Create thumbnail for a video
-   * @param videoPath - Path to the video file
-   * @param outputPath - Optional output path (if not provided, generates based on video path)
-   * @param videoId - Optional video database ID (for storing in centralized thumbnails directory)
-   * @returns Path to created thumbnail or null on failure
-   */
+
   async createThumbnail(videoPath: string, outputPath?: string, videoId?: string): Promise<string | null> {
     if (!fs.existsSync(videoPath)) {
       this.logger.error(`Video file doesn't exist: ${videoPath}`);
@@ -708,72 +443,52 @@ export class FfmpegService {
     }
 
     try {
-      // Generate output path if not provided
       if (!outputPath) {
         if (videoId) {
-          // Use ThumbnailService to get the correct path for this library
           try {
             outputPath = this.thumbnailService.getThumbnailPath(videoId);
           } catch (thumbnailError) {
-            // ThumbnailService library path not set - fall back to video directory
-            this.logger.warn(`ThumbnailService not ready, using fallback path: ${(thumbnailError as Error).message}`);
+            this.logger.warn(`ThumbnailService not ready, using fallback path`);
             const fileDir = path.dirname(videoPath);
             const fileBase = path.parse(videoPath).name;
             outputPath = path.join(fileDir, `${fileBase}_thumbnail.jpg`);
           }
         } else {
-          // Fall back to old behavior for backwards compatibility
           const fileDir = path.dirname(videoPath);
           const fileBase = path.parse(videoPath).name;
           outputPath = path.join(fileDir, `${fileBase}_thumbnail.jpg`);
         }
       }
 
-      // Validate outputPath is set
       if (!outputPath) {
         this.logger.error('Failed to determine thumbnail output path');
         return null;
       }
 
-      // Ensure the output folder exists
       const outputFolder = path.dirname(outputPath);
       if (!fs.existsSync(outputFolder)) {
         fs.mkdirSync(outputFolder, { recursive: true });
-        this.logger.log(`Created thumbnail folder: ${outputFolder}`);
       }
 
-      // First, get video duration to calculate 10% mark
       const metadata = await this.getVideoMetadata(videoPath);
       const duration = metadata?.duration || 0;
-      const thumbnailTime = Math.max(1, duration * 0.1); // 10% of duration, minimum 1 second
+      const thumbnailTime = Math.max(1, duration * 0.1);
 
-      const filename = path.basename(outputPath);
-      const folder = path.dirname(outputPath);
+      const args = [
+        '-y',
+        '-ss', thumbnailTime.toString(),
+        '-i', videoPath,
+        '-vframes', '1',
+        '-vf', 'scale=-1:360',
+        outputPath
+      ];
 
-      return new Promise<string | null>((resolve, reject) => {
-        const command = ffmpeg(videoPath)
-          .screenshots({
-            timestamps: [thumbnailTime], // Take screenshot at 10% of the video duration
-            filename: filename,
-            folder: folder,
-            size: '?x360', // Height of 360px, width auto-calculated to preserve aspect ratio
-          })
-          .on('start', (cmdline) => {
-            this.logger.log(`FFmpeg thumbnail command started: ${cmdline}`);
-          })
-          .on('end', () => {
-            this.logger.log(`Thumbnail created at: ${outputPath}`);
-            resolve(outputPath || null);
-          })
-          .on('error', (err) => {
-            this.logger.error(`Error creating thumbnail: ${err.message}`);
-            resolve(null);
-          });
+      this.logger.log(`Creating thumbnail: ${this.ffmpeg.ffmpeg} ${args.join(' ')}`);
 
-        // Make sure the command is explicitly run
-        command.run();
-      });
-    } catch (error) {
+      await this.ffmpeg.run(args);
+      this.logger.log(`Thumbnail created at: ${outputPath}`);
+      return outputPath;
+    } catch (error: any) {
       this.logger.error('Error creating thumbnail:', error);
       return null;
     }
@@ -783,12 +498,6 @@ export class FfmpegService {
     return b === 0 ? a : this.calculateGCD(b, a % b);
   }
 
-  /**
-   * Normalize audio volume of a file
-   * @param filePath - Path to the input file
-   * @param targetVolume - Target volume in dB (e.g., -20)
-   * @returns Path to the normalized file
-   */
   async normalizeAudio(filePath: string, targetVolume: number = -20, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(filePath)) {
       this.logger.error(`File doesn't exist: ${filePath}`);
@@ -800,116 +509,66 @@ export class FfmpegService {
       const fileName = path.basename(filePath);
       const fileExt = path.extname(fileName);
       const fileBase = path.parse(fileName).name;
-
-      // Generate temporary output file path
       const tempOutputFile = path.join(fileDir, `${fileBase}_temp_normalized${fileExt}`);
 
-      return new Promise<string | null>((resolve, reject) => {
-        // Use loudnorm filter for professional audio normalization
-        // This uses EBU R128 standard for loudness normalization
-        const command = ffmpeg(filePath)
-          .audioFilters([
-            {
-              filter: 'loudnorm',
-              options: {
-                I: targetVolume,           // Integrated loudness target
-                TP: -1.5,                  // True peak limit
-                LRA: 11                    // Loudness range target
-              }
-            }
-          ])
-          .audioCodec('aac')              // Use AAC codec for audio
-          .audioBitrate('192k')           // Set audio bitrate
-          .output(tempOutputFile);
+      // Get duration for progress
+      const metadata = await this.getVideoMetadata(filePath);
+      const duration = metadata?.duration || 0;
 
-        command.on('start', (cmdline: string) => {
-          this.logger.log(`Audio normalization started: ${cmdline}`);
-          // Emit internal event for analysis service to track
+      const args = [
+        '-y',
+        '-i', filePath,
+        '-af', `loudnorm=I=${targetVolume}:TP=-1.5:LRA=11`,
+        '-c:v', 'copy',  // Copy video stream without re-encoding
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        tempOutputFile
+      ];
+
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 0, 'Starting audio normalization');
+      }
+
+      this.logger.log(`Audio normalization: ${this.ffmpeg.ffmpeg} ${args.join(' ')}`);
+
+      await this.ffmpeg.run(args, {
+        duration,
+        onProgress: (progress) => {
           if (jobId) {
-            this.eventEmitter.emit('processing-progress', {
-              jobId,
-              progress: 0,
-              task: 'Starting audio normalization'
-            });
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', progress.percent, `Normalizing audio: ${progress.percent}%`);
           }
-        });
-
-        command.on('progress', (progress: any) => {
-          if (progress.percent) {
-            const percent = Math.round(progress.percent);
-            this.logger.log(`Normalizing: ${percent}%`);
-            // Emit internal event for analysis service to track
-            if (jobId) {
-              this.eventEmitter.emit('processing-progress', {
-                jobId,
-                progress: percent,
-                task: `Normalizing audio: ${percent}%`
-              });
-            }
-          }
-        });
-
-        command.on('end', () => {
-          this.logger.log(`Successfully normalized audio to temp file: ${tempOutputFile}`);
-          // Emit internal event for analysis service to track
-          if (jobId) {
-            this.eventEmitter.emit('processing-progress', {
-              jobId,
-              progress: 95,
-              task: 'Audio normalization complete, finalizing...'
-            });
-          }
-
-          // Preserve original file timestamps before deletion
-          const originalStats = fs.statSync(filePath);
-          const originalAtime = originalStats.atime;
-          const originalMtime = originalStats.mtime;
-
-          // Delete the original file and rename temp file to original name
-          if (this.safeDeleteFile(filePath)) {
-            this.logger.log(`Deleted original file: ${filePath}`);
-
-            try {
-              fs.renameSync(tempOutputFile, filePath);
-              this.logger.log(`Renamed ${tempOutputFile} to ${filePath}`);
-
-              // Preserve original timestamps (critical for maintaining download_date)
-              fs.utimesSync(filePath, originalAtime, originalMtime);
-              this.logger.log(`Preserved original file timestamps (download_date maintained)`);
-
-              resolve(filePath);
-            } catch (err: any) {
-              this.logger.error(`Failed to rename file: ${err.message}`);
-              // If rename fails, return the temp file
-              resolve(tempOutputFile);
-            }
-          } else {
-            // If deletion failed, keep the temp file
-            this.logger.warn(`Could not delete original file, keeping temp file: ${tempOutputFile}`);
-            resolve(tempOutputFile);
-          }
-        });
-
-        command.on('error', (err: any) => {
-          this.logger.error(`Error normalizing audio: ${err.message}`);
-          // Clean up temp file if it exists
-          this.safeDeleteFile(tempOutputFile);
-          resolve(null);
-        });
-
-        command.run();
+        }
       });
-    } catch (error) {
+
+      this.logger.log(`Successfully normalized audio to temp file: ${tempOutputFile}`);
+
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 95, 'Audio normalization complete, finalizing...');
+      }
+
+      // Preserve timestamps and replace original
+      const originalStats = fs.statSync(filePath);
+      const originalAtime = originalStats.atime;
+      const originalMtime = originalStats.mtime;
+
+      if (this.safeDeleteFile(filePath)) {
+        try {
+          fs.renameSync(tempOutputFile, filePath);
+          fs.utimesSync(filePath, originalAtime, originalMtime);
+          return filePath;
+        } catch (err: any) {
+          this.logger.error(`Failed to rename file: ${err.message}`);
+          return tempOutputFile;
+        }
+      }
+
+      return tempOutputFile;
+    } catch (error: any) {
       this.logger.error('Error in normalizeAudio:', error);
       return null;
     }
   }
 
-  /**
-   * List all media files in a directory
-   * @param dirPath - Directory path to scan
-   * @returns Array of file paths
-   */
   async listMediaFiles(dirPath: string): Promise<string[]> {
     const mediaExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.aac', '.flac', '.m4a', '.webm'];
 
@@ -923,30 +582,18 @@ export class FfmpegService {
       const mediaFiles: string[] = [];
 
       for (const file of files) {
-        // Skip macOS metadata files that start with ._
-        if (file.startsWith('._')) {
-          continue;
-        }
-
-        // Skip hidden files
-        if (file.startsWith('.')) {
-          continue;
-        }
+        if (file.startsWith('._') || file.startsWith('.')) continue;
 
         const filePath = path.join(dirPath, file);
-
         try {
           const stat = fs.statSync(filePath);
-
           if (stat.isFile()) {
             const ext = path.extname(file).toLowerCase();
             if (mediaExtensions.includes(ext)) {
               mediaFiles.push(filePath);
             }
           }
-        } catch (statError) {
-          this.logger.warn(`Could not stat file: ${filePath}`, statError);
-          // Continue to next file if we can't stat this one
+        } catch {
           continue;
         }
       }
@@ -959,13 +606,6 @@ export class FfmpegService {
     }
   }
 
-  /**
-   * Generate waveform data from a video/audio file
-   * Uses FFmpeg to extract raw PCM audio and calculate RMS values
-   * @param filePath - Path to the media file
-   * @param samplesCount - Number of samples to generate (default: 500)
-   * @returns Array of amplitude values (0-1) and duration
-   */
   async generateWaveform(filePath: string, samplesCount: number = 500): Promise<{ samples: number[], duration: number }> {
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
@@ -973,7 +613,6 @@ export class FfmpegService {
 
     this.logger.log(`Generating waveform for: ${filePath} (${samplesCount} samples)`);
 
-    // Get duration first
     const metadata = await this.getVideoMetadata(filePath);
     const duration = metadata.duration || 0;
 
@@ -981,72 +620,57 @@ export class FfmpegService {
       return { samples: [], duration: 0 };
     }
 
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = [];
+    const chunks: Buffer[] = [];
 
-      // Extract raw PCM audio data using FFmpeg
-      ffmpeg(filePath)
-        .audioChannels(1) // Convert to mono
-        .audioFrequency(8000) // Downsample for faster processing
-        .format('s16le') // 16-bit signed little-endian PCM
-        .on('error', (error) => {
-          this.logger.error(`Waveform extraction error: ${error.message}`);
-          // Return flat waveform on error
-          resolve({
-            samples: new Array(samplesCount).fill(0.3),
-            duration
-          });
-        })
-        .on('end', () => {
-          try {
-            const audioBuffer = Buffer.concat(chunks);
+    const args = [
+      '-i', filePath,
+      '-ac', '1',
+      '-ar', '8000',
+      '-f', 's16le',
+      '-'
+    ];
 
-            // Convert buffer to Int16 array
-            const int16Array = new Int16Array(
-              audioBuffer.buffer,
-              audioBuffer.byteOffset,
-              Math.floor(audioBuffer.length / 2)
-            );
+    try {
+      await this.ffmpeg.runWithPipe(args, (chunk) => {
+        chunks.push(chunk);
+      });
 
-            const samples: number[] = [];
-            const samplesPerChunk = Math.max(1, Math.floor(int16Array.length / samplesCount));
+      const audioBuffer = Buffer.concat(chunks);
+      const int16Array = new Int16Array(
+        audioBuffer.buffer,
+        audioBuffer.byteOffset,
+        Math.floor(audioBuffer.length / 2)
+      );
 
-            for (let i = 0; i < samplesCount; i++) {
-              const start = i * samplesPerChunk;
-              const end = Math.min(start + samplesPerChunk, int16Array.length);
+      const samples: number[] = [];
+      const samplesPerChunk = Math.max(1, Math.floor(int16Array.length / samplesCount));
 
-              if (start >= int16Array.length) {
-                samples.push(0);
-                continue;
-              }
+      for (let i = 0; i < samplesCount; i++) {
+        const start = i * samplesPerChunk;
+        const end = Math.min(start + samplesPerChunk, int16Array.length);
 
-              // Calculate RMS (Root Mean Square) for this chunk
-              let sumSquares = 0;
-              for (let j = start; j < end; j++) {
-                sumSquares += int16Array[j] * int16Array[j];
-              }
-              const rms = Math.sqrt(sumSquares / (end - start));
+        if (start >= int16Array.length) {
+          samples.push(0);
+          continue;
+        }
 
-              // Normalize to 0-1 range and scale for visibility
-              // Max int16 value is 32767
-              const normalized = Math.min(1, (rms / 32767) * 4);
-              samples.push(normalized);
-            }
+        let sumSquares = 0;
+        for (let j = start; j < end; j++) {
+          sumSquares += int16Array[j] * int16Array[j];
+        }
+        const rms = Math.sqrt(sumSquares / (end - start));
+        const normalized = Math.min(1, (rms / 32767) * 4);
+        samples.push(normalized);
+      }
 
-            this.logger.log(`Generated ${samples.length} waveform samples for ${duration}s video`);
-            resolve({ samples, duration });
-          } catch (error) {
-            this.logger.error(`Waveform processing error: ${error}`);
-            resolve({
-              samples: new Array(samplesCount).fill(0.3),
-              duration
-            });
-          }
-        })
-        .pipe()
-        .on('data', (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
-    });
+      this.logger.log(`Generated ${samples.length} waveform samples for ${duration}s video`);
+      return { samples, duration };
+    } catch (error) {
+      this.logger.error(`Waveform extraction error: ${error}`);
+      return {
+        samples: new Array(samplesCount).fill(0.3),
+        duration
+      };
+    }
   }
 }

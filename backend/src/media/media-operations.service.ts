@@ -9,6 +9,7 @@ import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
 import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { ApiKeysService } from '../config/api-keys.service';
+import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import {
   GetInfoResult,
   DownloadResult,
@@ -35,6 +36,7 @@ export class MediaOperationsService {
     private readonly aiAnalysisService: AIAnalysisService,
     private readonly eventService: MediaEventService,
     private readonly apiKeysService: ApiKeysService,
+    private readonly ffmpegService: FfmpegService,
   ) {}
 
   /**
@@ -282,6 +284,8 @@ export class MediaOperationsService {
     jobId?: string,
   ): Promise<NormalizeAudioResult> {
     try {
+      console.log('=== MediaOperationsService.normalizeAudio CALLED ===');
+      console.log(`VideoIdOrPath: ${videoIdOrPath}, Options: ${JSON.stringify(options)}, JobId: ${jobId}`);
       this.logger.log(`[${jobId || 'standalone'}] Normalizing audio for: ${videoIdOrPath}`);
 
       // Determine if this is a video ID or file path
@@ -307,18 +311,13 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'normalize-audio', 5, 'Analyzing audio levels...');
 
-      const result = await this.mediaProcessingService.processMedia(
-        videoPath,
-        {
-          useRmsNormalization: options.method === 'rms' || !options.method,
-          rmsNormalizationLevel: options.level || -16,
-        },
-        jobId,
-        'normalize-audio'  // Pass task type for progress relay
-      );
+      // Use loudnorm filter for proper audio normalization (EBU R128 standard)
+      // This normalizes to target integrated loudness (LUFS) so all videos have consistent perceived volume
+      const targetLoudness = options.level || -16;  // Default to -16 LUFS (typical for web content)
+      const normalizedPath = await this.ffmpegService.normalizeAudio(videoPath, targetLoudness, jobId);
 
-      if (!result.success) {
-        throw new Error(result.error || 'Audio normalization failed');
+      if (!normalizedPath) {
+        throw new Error('Audio normalization failed');
       }
 
       this.eventService.emitTaskProgress(jobId || '', 'normalize-audio', 100, 'Audio normalized');
@@ -326,7 +325,7 @@ export class MediaOperationsService {
       return {
         success: true,
         data: {
-          outputPath: result.outputFile || videoPath,
+          outputPath: normalizedPath,
         },
       };
     } catch (error) {

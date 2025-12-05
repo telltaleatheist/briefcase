@@ -9,6 +9,10 @@
           Tabs
         } @else if (activeTab() === 'manager') {
           Library Manager
+        } @else if (activeTab() === 'saved') {
+          Saved for Later
+        } @else if (activeTab() === 'settings') {
+          Settings
         } @else {
           Media Library
         }
@@ -90,6 +94,18 @@
       (click)="setActiveTab('manager')">
       🔧 Manager
     </button>
+    <button
+      class="tab"
+      [class.active]="activeTab() === 'saved'"
+      (click)="setActiveTab('saved')">
+      💾 Saved
+    </button>
+    <button
+      class="tab"
+      [class.active]="activeTab() === 'settings'"
+      (click)="setActiveTab('settings')">
+      ⚙️ Settings
+    </button>
   </div>
 
   <!-- Search and Filters (Library Tab Only) -->
@@ -165,6 +181,12 @@
         [onVideoAction]="onVideoAction.bind(this)"
         [onPreviewRequested]="onPreviewRequested.bind(this)"
       />
+
+      <!-- Saved Tab: Save for Later links -->
+      <app-save-for-later-tab *ngIf="activeTab() === 'saved'" />
+
+      <!-- Settings Tab: App settings -->
+      <app-settings-page *ngIf="activeTab() === 'settings'" [embedded]="true" />
 
       <!-- Empty State - Library -->
       <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0">

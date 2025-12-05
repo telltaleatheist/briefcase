@@ -85,8 +85,8 @@
         </div>
       </div>
 
-      <!-- Expanded Content -->
-      <div class="item-content" *ngIf="isItemExpanded(item.id)">
+      <!-- Expanded Content (only show if multiple tasks) -->
+      <div class="item-content" *ngIf="item.tasks.length > 1 && isItemExpanded(item.id)">
         <div class="task-list">
           <div
             class="task-item"

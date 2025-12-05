@@ -21,7 +21,7 @@ export interface ExportDialogData {
   selectionStart?: number;
   selectionEnd?: number;
   videoId: string;
-  videoPath: string;
+  videoPath?: string | null;  // Optional - backend can look it up by videoId if missing
   videoTitle: string;
 }
 
@@ -75,6 +75,18 @@ export class ExportDialogComponent implements OnInit {
     // Prepare sections for cascade list
     const cascadeSections: ExportSection[] = [];
 
+    // Always add "Export Changes" option at the top (for scale/other changes to full video)
+    // Use 0 as start and a very large number as end to represent full video
+    cascadeSections.push({
+      id: '__full_video__',
+      category: ' Export Changes',
+      description: 'Export entire video with changes (scale, etc.)',
+      startSeconds: 0,
+      endSeconds: Number.MAX_SAFE_INTEGER, // Will be replaced with actual duration in backend
+      timeRange: 'Full Video',
+      icon: 'video'
+    });
+
     // Check if there's a valid selection and add it as the first item
     if (this.data.selectionStart !== undefined && this.data.selectionEnd !== undefined) {
       const duration = this.data.selectionEnd - this.data.selectionStart;
@@ -105,10 +117,12 @@ export class ExportDialogComponent implements OnInit {
 
     this.sections = cascadeSections;
 
-    // Initialize all groups as collapsed except Current Selection
+    // Initialize all groups as collapsed except Export Changes and Current Selection
     const categories = new Set(this.sections.map(s => s.category));
     this.collapsedGroups = new Set(
-      Array.from(categories).filter(cat => cat.trim() !== 'Current Selection')
+      Array.from(categories).filter(cat =>
+        cat.trim() !== 'Current Selection' && cat.trim() !== 'Export Changes'
+      )
     );
 
     this.updateAllCollapsedState();
@@ -156,11 +170,14 @@ export class ExportDialogComponent implements OnInit {
   }
 
   canOverwriteOriginal(): boolean {
-    if (!this.hasSelection) {
-      return false;
-    }
     const selectedSections = this.getSelectedSections();
-    return selectedSections.length === 1 && selectedSections[0].id === '__selection__';
+    // Can overwrite if only one section is selected and it's either:
+    // 1. The full video export (for scale-only changes)
+    // 2. The current selection
+    return selectedSections.length === 1 && (
+      selectedSections[0].id === '__full_video__' ||
+      selectedSections[0].id === '__selection__'
+    );
   }
 
   onGroupToggle(groupId: string) {
@@ -345,19 +362,22 @@ export class ExportDialogComponent implements OnInit {
     try {
       const url = await this.backendUrlService.getApiUrl('/library/overwrite-with-clip');
 
+      // For full video export with only scale changes, send null for times
+      const isFullVideo = section.id === '__full_video__';
+
       await firstValueFrom(
         this.http.post(url, {
           videoId: this.data.videoId,
           videoPath: this.data.videoPath,
-          startTime: section.startSeconds,
-          endTime: section.endSeconds,
+          startTime: isFullVideo ? null : section.startSeconds,
+          endTime: isFullVideo ? null : section.endSeconds,
           reEncode: this.reEncode,
         })
       );
 
       this.successCount = 1;
       this.exportProgress = 100;
-      this.notificationService.success('Success', 'Video file has been overwritten with the selected section');
+      this.notificationService.success('Success', 'Video file has been overwritten with the changes');
     } catch (error) {
       console.error('Failed to overwrite video:', error);
       this.failedCount = 1;
@@ -371,11 +391,14 @@ export class ExportDialogComponent implements OnInit {
   private async exportSection(section: ExportSection): Promise<void> {
     const url = await this.backendUrlService.getApiUrl('/library/extract-clip');
 
+    // For full video export, send null for times to indicate full video
+    const isFullVideo = section.id === '__full_video__';
+
     await firstValueFrom(
       this.http.post(url, {
         videoPath: this.data.videoPath,
-        startTime: section.startSeconds,
-        endTime: section.endSeconds,
+        startTime: isFullVideo ? null : section.startSeconds,
+        endTime: isFullVideo ? null : section.endSeconds,
         category: section.category,
         title: section.description,
         customDirectory: this.outputDirectory || undefined,

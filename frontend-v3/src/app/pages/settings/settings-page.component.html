@@ -1,9 +1,11 @@
 <div class="settings-page">
-  <!-- Page Header -->
-  <div class="page-header">
-    <h1 class="page-title">Settings</h1>
-    <p class="page-subtitle">Configure your ClipChimp preferences</p>
-  </div>
+  <!-- Page Header (only shown in standalone mode) -->
+  @if (!embedded) {
+    <div class="page-header">
+      <h1 class="page-title">Settings</h1>
+      <p class="page-subtitle">Configure your ClipChimp preferences</p>
+    </div>
+  }
 
   <!-- Settings Content -->
   <div class="settings-content">

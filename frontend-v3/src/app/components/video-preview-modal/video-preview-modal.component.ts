@@ -29,7 +29,19 @@ export interface PreviewItem {
 
         <div class="window-body">
           <div class="media-container" [attr.data-media-id]="currentItem().id">
-            @if (isVideo()) {
+            @if (hasError()) {
+              <div class="error-overlay">
+                <div class="error-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                </div>
+                <div class="error-message">{{ mediaError() }}</div>
+                <div class="error-details">{{ currentItem().name }}</div>
+              </div>
+            } @else if (isVideo()) {
               <video
                 #videoPlayer
                 [src]="mediaSrc()"
@@ -195,6 +207,7 @@ export interface PreviewItem {
       flex: 1;
       min-height: 0;
       @include flex-center;
+      position: relative;
 
       video, img {
         width: 100%;
@@ -205,6 +218,39 @@ export interface PreviewItem {
       video {
         cursor: pointer;
       }
+    }
+
+    .error-overlay {
+      @include flex-center;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      padding: $spacing-lg;
+      text-align: center;
+      gap: $spacing-md;
+    }
+
+    .error-icon {
+      color: var(--error);
+      opacity: 0.8;
+
+      svg {
+        width: 64px;
+        height: 64px;
+      }
+    }
+
+    .error-message {
+      font-size: 1rem;
+      font-weight: $font-weight-semibold;
+      color: var(--text-primary);
+    }
+
+    .error-details {
+      font-size: $font-size-sm;
+      color: var(--text-secondary);
+      word-break: break-all;
+      max-width: 100%;
     }
 
     .media-info {
@@ -475,6 +521,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   volume = signal(1.0); // 0.0 to 1.0
   isMuted = signal(false);
   playbackRate = signal(1.0); // Playback speed
+  mediaError = signal<string | null>(null); // Track media loading errors
+  hasError = signal(false); // Track if current media has an error
 
   private isDragging = false;
   private dragOffset = { x: 0, y: 0 };
@@ -516,7 +564,17 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
 
     // Use videoId if available for streaming from backend
     const mediaId = item.videoId || item.id;
-    return `${this.backendUrl}/api/database/videos/${mediaId}/stream`;
+    const url = `${this.backendUrl}/api/database/videos/${mediaId}/stream`;
+
+    console.log('Media source URL:', {
+      url,
+      mediaId,
+      itemId: item.id,
+      itemVideoId: item.videoId,
+      itemName: item.name
+    });
+
+    return url;
   };
 
   private async initBackendUrl() {
@@ -525,10 +583,15 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
         const url = await (window as any).electron.getBackendUrl();
         if (url) {
           this.backendUrl = url;
+          console.log('Backend URL initialized:', this.backendUrl);
+        } else {
+          console.log('Using fallback backend URL:', this.backendUrl);
         }
+      } else {
+        console.log('Electron API not available, using fallback backend URL:', this.backendUrl);
       }
-    } catch {
-      // Use fallback
+    } catch (error) {
+      console.warn('Failed to get backend URL, using fallback:', this.backendUrl, error);
     }
   }
 
@@ -541,11 +604,13 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   private loadCurrentMedia() {
-    // Reset playback state
+    // Reset playback state and error state
     this.currentTime.set(0);
     this.progress.set(0);
     this.duration.set(0);
     this.isPlaying.set(false);
+    this.hasError.set(false);
+    this.mediaError.set(null);
 
     const item = this.currentItem();
     if (!item) return;
@@ -949,20 +1014,54 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     const target = event.target as HTMLVideoElement | HTMLImageElement;
     const item = this.currentItem();
 
+    // Set error state
+    this.hasError.set(true);
+    this.isPlaying.set(false);
+    this.pendingAutoplay = false;
+
+    let errorMessage = 'Failed to load media';
+
     if (target instanceof HTMLVideoElement) {
+      const videoError = target.error;
+
+      // Provide specific error messages based on error code
+      if (videoError) {
+        switch (videoError.code) {
+          case MediaError.MEDIA_ERR_ABORTED:
+            errorMessage = 'Video loading was aborted';
+            break;
+          case MediaError.MEDIA_ERR_NETWORK:
+            errorMessage = 'Network error while loading video';
+            break;
+          case MediaError.MEDIA_ERR_DECODE:
+            errorMessage = 'Video file is corrupted or in an unsupported format';
+            break;
+          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            errorMessage = 'Video file not found or format not supported';
+            break;
+          default:
+            errorMessage = videoError.message || 'Unknown video error';
+        }
+      }
+
+      // Log detailed error for debugging
       console.error('Video load error:', {
         name: item?.name,
         src: target.src,
-        error: target.error?.message || 'Unknown error',
+        error: errorMessage,
+        errorCode: videoError?.code,
         mediaType: item?.mediaType
       });
     } else {
+      errorMessage = 'Failed to load image';
       console.error('Image load error:', {
         name: item?.name,
         src: (target as HTMLImageElement).src,
         mediaType: item?.mediaType
       });
     }
+
+    this.mediaError.set(errorMessage);
   }
 
   seek(event: MouseEvent) {

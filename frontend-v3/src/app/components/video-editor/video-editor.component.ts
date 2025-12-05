@@ -1,4 +1,4 @@
-import { Component, signal, computed, effect, ViewChild, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
@@ -112,6 +112,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   private readonly API_BASE = 'http://localhost:3000/api';
 
   @ViewChild(VideoPlayerComponent) videoPlayer?: VideoPlayerComponent;
+  @ViewChild('videoPlayerArea', { static: false }) videoPlayerArea?: ElementRef<HTMLDivElement>;
 
   // Keyboard shortcuts
   @HostListener('document:keydown', ['$event'])
@@ -157,6 +158,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
         this.resetZoom();
       } else if (event.key === 'e' || event.key === 'E') {
         event.preventDefault();
+        console.log('Cmd+E pressed, opening export dialog');
         this.openExportDialog();
       }
     }
@@ -350,6 +352,16 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Current active tool
   currentTool = signal<EditorTool>(EditorTool.CURSOR);
 
+  // Video scale/zoom
+  videoScale = signal<number>(1.0); // 1.0 = normal, 2.0 = 2x zoom
+
+  // 16:9 border overlay dimensions (calculated by ResizeObserver)
+  borderWidth = signal<number>(0);
+  borderHeight = signal<number>(0);
+  showBorder = signal<boolean>(false);
+  borderAspectRatio = signal<'16:9' | '4:3'>('16:9');
+  private resizeObserver?: ResizeObserver;
+
   // Selection state for highlighting
   highlightSelection = signal<TimelineSelection | null>(null);
   isSelecting = signal(false);
@@ -508,6 +520,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     document.addEventListener('fullscreenchange', this.onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', this.onFullscreenChange);
     document.addEventListener('mousemove', this.onMouseMoveInFullscreen);
+
+    // Set up ResizeObserver for 16:9 border calculation
+    this.setupResizeObserver();
 
     // Get video data from route state
     const navigation = this.router.getCurrentNavigation();
@@ -887,6 +902,75 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     document.removeEventListener('mouseup', this.onDocumentMouseUp);
 
     this.clearFullscreenTimeout();
+
+    // Clean up ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+  }
+
+  // Set up ResizeObserver to calculate 16:9 border dimensions
+  private setupResizeObserver() {
+    // Use requestAnimationFrame to wait for the view to be ready
+    requestAnimationFrame(() => {
+      const element = document.querySelector('.video-player-area') as HTMLElement;
+      if (!element) {
+        // Retry after a short delay
+        setTimeout(() => this.setupResizeObserver(), 100);
+        return;
+      }
+
+      this.resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          this.updateBorderDimensions(entry.contentRect.width, entry.contentRect.height);
+        }
+      });
+
+      this.resizeObserver.observe(element);
+
+      // Initial calculation
+      const rect = element.getBoundingClientRect();
+      this.updateBorderDimensions(rect.width, rect.height);
+    });
+  }
+
+  // Calculate the largest rectangle of the selected aspect ratio that fits within the container
+  private updateBorderDimensions(containerWidth: number, containerHeight: number) {
+    const aspectRatio = this.borderAspectRatio();
+    const targetAspectRatio = aspectRatio === '16:9' ? 16 / 9 : 4 / 3;
+    const containerAspectRatio = containerWidth / containerHeight;
+
+    let width: number;
+    let height: number;
+
+    if (containerAspectRatio > targetAspectRatio) {
+      // Container is wider than target - height is the limiting factor
+      height = containerHeight;
+      width = height * targetAspectRatio;
+    } else {
+      // Container is taller than target - width is the limiting factor
+      width = containerWidth;
+      height = width / targetAspectRatio;
+    }
+
+    this.borderWidth.set(width);
+    this.borderHeight.set(height);
+  }
+
+  // Toggle border visibility
+  toggleBorder() {
+    this.showBorder.update(v => !v);
+  }
+
+  // Change border aspect ratio
+  onAspectRatioChange(ratio: '16:9' | '4:3') {
+    this.borderAspectRatio.set(ratio);
+    // Recalculate border dimensions
+    const element = document.querySelector('.video-player-area') as HTMLElement;
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      this.updateBorderDimensions(rect.width, rect.height);
+    }
   }
 
   // Navigate back to library
@@ -1057,6 +1141,11 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   setToolHighlight() {
     this.setTool(EditorTool.HIGHLIGHT);
+  }
+
+  onScaleChange(value: string) {
+    const scale = parseFloat(value);
+    this.videoScale.set(scale);
   }
 
   // Get time from mouse position on timeline
@@ -1383,9 +1472,16 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     const videoPath = this.videoPath();
     const videoTitle = this.metadata().filename;
 
-    if (!videoId || !videoPath) {
-      console.error('Cannot open export dialog: missing video info');
+    console.log('openExportDialog called:', { videoId, videoPath, videoTitle });
+
+    if (!videoId) {
+      console.error('Cannot open export dialog: missing video ID');
       return;
+    }
+
+    // videoPath might be null if opened from certain routes - that's ok, backend can look it up
+    if (!videoPath) {
+      console.warn('videoPath is null, export dialog may need to fetch it');
     }
 
     // Prepare sections for export

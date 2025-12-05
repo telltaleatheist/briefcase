@@ -1,0 +1,116 @@
+@if (visible()) {
+  <div class="modal-overlay" (click)="onOverlayClick($event)">
+    <div class="modal-dialog" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">
+          Add {{ _selectedCount() === 1 ? 'Item' : _selectedCount() + ' Items' }} to Library & Tabs
+        </h3>
+        <button class="modal-close" (click)="close()">×</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Add to Library Option -->
+        <div class="option-section">
+          <label class="checkbox-option">
+            <input
+              type="checkbox"
+              [checked]="addToLibrary()"
+              (change)="addToLibrary.set($any($event.target).checked)"
+            />
+            <span class="checkmark"></span>
+            <div class="option-info">
+              <span class="option-label">📚 Add to Library</span>
+              <span class="option-description">Move downloaded files to the library</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Add to Tabs Option -->
+        <div class="option-section">
+          <label class="checkbox-option">
+            <input
+              type="checkbox"
+              [checked]="addToTabs()"
+              (change)="onAddToTabsChanged($any($event.target).checked)"
+            />
+            <span class="checkmark"></span>
+            <div class="option-info">
+              <span class="option-label">📑 Add to Tabs</span>
+              <span class="option-description">Organize into one or more tabs</span>
+            </div>
+          </label>
+
+          <!-- Tabs Selection (shown when Add to Tabs is enabled) -->
+          @if (addToTabs()) {
+            <div class="tabs-selection">
+              @if (availableTabs().length > 0) {
+                <div class="tabs-list">
+                  @for (tab of availableTabs(); track tab.id) {
+                    <label class="tab-item" [class.selected]="isTabSelected(tab.id)">
+                      <input
+                        type="checkbox"
+                        [checked]="isTabSelected(tab.id)"
+                        (change)="toggleTab(tab.id)"
+                      />
+                      <span class="tab-checkbox"></span>
+                      <span class="tab-name">{{ tab.name }}</span>
+                    </label>
+                  }
+                </div>
+              }
+
+              <!-- New Tab Creation -->
+              <div class="new-tab-section">
+                @if (!showNewTabInput()) {
+                  <button class="btn-new-tab" (click)="toggleNewTabInput()">
+                    <span class="btn-icon">➕</span>
+                    <span>Create New Tab</span>
+                  </button>
+                } @else {
+                  <div class="new-tab-input-wrapper">
+                    <input
+                      type="text"
+                      class="new-tab-input"
+                      placeholder="Enter new tab name..."
+                      [ngModel]="newTabName()"
+                      (ngModelChange)="newTabName.set($event)"
+                      [maxlength]="maxTabNameLength"
+                      autocomplete="off"
+                    />
+                    <button class="btn-cancel-new-tab" (click)="toggleNewTabInput()" title="Cancel">
+                      ×
+                    </button>
+                  </div>
+                  @if (newTabName().length > 0) {
+                    <div class="char-count" [class.near-limit]="newTabName().length > maxTabNameLength - 10">
+                      {{ newTabName().length }}/{{ maxTabNameLength }}
+                    </div>
+                  }
+                }
+              </div>
+
+              @if (availableTabs().length === 0 && !showNewTabInput()) {
+                <div class="empty-tabs">
+                  <p class="empty-text">No tabs yet. Create one above.</p>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <app-button variant="secondary" (click)="close()">
+          Cancel
+        </app-button>
+        <app-button
+          variant="gradient"
+          icon="✓"
+          (click)="confirm_action()"
+          [disabled]="!canConfirm()">
+          Add {{ _selectedCount() === 1 ? 'Item' : _selectedCount() + ' Items' }}
+        </app-button>
+      </div>
+    </div>
+  </div>
+}

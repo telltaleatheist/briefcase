@@ -115,6 +115,8 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
   private convertJobToQueueItem(job: VideoJob): QueueItem {
     const tasks: QueueItemTask[] = [];
 
+    console.log('[QUEUE] Converting job to queue item:', job.id, 'tasks:', job.tasks.map(t => t.type));
+
     // Combine download and import into a single displayed task
     const downloadTask = job.tasks.find(t => t.type === 'download');
     const importTask = job.tasks.find(t => t.type === 'import');
@@ -163,6 +165,8 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
       const taskType = this.mapTaskType(task.type);
       const config = this.getConfigForTask(taskType, job.settings);
 
+      console.log('[QUEUE] Adding additional task:', task.type, '→', taskType);
+
       tasks.push({
         type: taskType,
         status: this.mapTaskStatus(task.status),
@@ -170,6 +174,8 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
         config
       });
     }
+
+    console.log('[QUEUE] Final tasks for item:', tasks.map(t => t.type));
 
     return {
       id: job.id,

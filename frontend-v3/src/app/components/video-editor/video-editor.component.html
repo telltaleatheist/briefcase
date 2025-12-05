@@ -50,19 +50,29 @@
     <!-- Center Content Area -->
     <div class="editor-content">
       <!-- Video Player Area -->
-      <div class="video-player-area">
-        <app-video-player
-          [videoUrl]="videoUrl()"
-          [currentTime]="editorState().currentTime"
-          [isPlaying]="editorState().isPlaying"
-          [volume]="editorState().volume"
-          [playbackRate]="editorState().playbackRate"
-          (timeUpdate)="onVideoTimeUpdate($event)"
-          (durationChange)="onVideoDurationChange($event)"
-          (playStateChange)="onVideoPlayStateChange($event)"
-          (ended)="onVideoEnded()"
-          (doubleClick)="toggleFullscreen()">
-        </app-video-player>
+      <div class="video-player-area" #videoPlayerArea>
+        <!-- Orange border overlay - dimensions calculated by ResizeObserver -->
+        @if (showBorder()) {
+          <div class="video-border-overlay"
+               [style.width.px]="borderWidth()"
+               [style.height.px]="borderHeight()"></div>
+        }
+
+        <!-- Video player with scale transform -->
+        <div class="video-scale-wrapper" [style.transform]="'scale(' + videoScale() + ')'">
+          <app-video-player
+            [videoUrl]="videoUrl()"
+            [currentTime]="editorState().currentTime"
+            [isPlaying]="editorState().isPlaying"
+            [volume]="editorState().volume"
+            [playbackRate]="editorState().playbackRate"
+            (timeUpdate)="onVideoTimeUpdate($event)"
+            (durationChange)="onVideoDurationChange($event)"
+            (playStateChange)="onVideoPlayStateChange($event)"
+            (ended)="onVideoEnded()"
+            (doubleClick)="toggleFullscreen()">
+          </app-video-player>
+        </div>
       </div>
 
       <!-- Resize Handle -->
@@ -97,6 +107,40 @@
                   <path d="M3.5 18.5l4-4L11 18v3H8l-4.5-2.5zM20.7 7c.4-.4.4-1 0-1.4l-2.3-2.3c-.4-.4-1-.4-1.4 0l-1.5 1.5 3.7 3.7L20.7 7zM6 12.5L16.5 2l3.7 3.7L9.7 16.2l-4.2.5.5-4.2z"/>
                 </svg>
               </button>
+            </div>
+
+            <!-- Scale Control -->
+            <div class="scale-control">
+              <label class="scale-label">Scale</label>
+              <input
+                type="range"
+                class="scale-slider"
+                min="1.0"
+                max="10.0"
+                step="0.1"
+                [value]="videoScale()"
+                (input)="onScaleChange($any($event.target).value)"
+                title="Video Scale (Zoom)">
+              <span class="scale-value">{{ videoScale().toFixed(1) }}x</span>
+            </div>
+
+            <!-- Border Controls -->
+            <div class="border-control">
+              <label class="border-checkbox">
+                <input
+                  type="checkbox"
+                  [checked]="showBorder()"
+                  (change)="toggleBorder()">
+                <span class="checkbox-label">Border</span>
+              </label>
+              <select
+                class="aspect-ratio-select"
+                [value]="borderAspectRatio()"
+                (change)="onAspectRatioChange($any($event.target).value)"
+                [disabled]="!showBorder()">
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+              </select>
             </div>
           </div>
           <div class="toolbar-center">

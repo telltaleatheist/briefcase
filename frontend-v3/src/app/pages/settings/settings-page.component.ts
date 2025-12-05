@@ -1,4 +1,4 @@
-import { Component, signal, ChangeDetectionStrategy, inject, OnInit } from '@angular/core';
+import { Component, signal, ChangeDetectionStrategy, inject, OnInit, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -24,6 +24,8 @@ interface AnalysisCategory {
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class SettingsPageComponent implements OnInit {
+  @Input() embedded = false;
+
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private libraryService = inject(LibraryService);

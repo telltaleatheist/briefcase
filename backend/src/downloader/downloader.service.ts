@@ -293,14 +293,32 @@ export class DownloaderService implements OnModuleInit {
       let outputTemplate: string;
 
       if (options.displayName) {
-        // Use the pre-fetched and sanitized displayName from frontend metadata
-        // This avoids the slow metadata re-fetch by yt-dlp and prevents "NA" titles
+        // Sanitize displayName - NEVER allow URLs or paths as filenames!
+        let sanitizedName = options.displayName;
+
+        // Check if it looks like a URL and reject it
+        if (sanitizedName.includes('://') || sanitizedName.includes('www.')) {
+          this.logger.error(`❌ BUG DETECTED: URL passed as displayName: ${sanitizedName}`);
+          this.logger.error(`This should NEVER happen - caller should sanitize before passing to downloader`);
+          this.logger.error(`URL: ${options.url}`);
+          const crypto = require('crypto');
+          const hash = crypto.createHash('md5').update(options.url + Date.now()).digest('hex').substring(0, 12);
+          sanitizedName = `download-${hash}`;
+          this.logger.error(`Using emergency fallback filename: ${sanitizedName}`);
+        }
+
+        // Remove invalid filesystem characters
+        sanitizedName = sanitizedName
+          .replace(/[\/\\:*?"<>|]/g, '-')  // Replace invalid chars with dash
+          .replace(/\s+/g, ' ')             // Normalize whitespace
+          .trim();
+
         // Prepend upload date if available
         const displayNameWithDate = uploadDate
-          ? `${uploadDate} ${options.displayName}`
-          : options.displayName;
+          ? `${uploadDate} ${sanitizedName}`
+          : sanitizedName;
         outputTemplate = path.join(downloadFolder, `${displayNameWithDate}.%(ext)s`);
-        this.logger.log(`Using pre-fetched displayName for output: ${displayNameWithDate}`);
+        this.logger.log(`Using sanitized displayName for output: ${displayNameWithDate}`);
       } else {
         // Fallback to yt-dlp's dynamic title extraction
         // Include upload_date in filename if available from yt-dlp metadata

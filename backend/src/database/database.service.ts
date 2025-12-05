@@ -323,13 +323,20 @@ export class DatabaseService {
     // Check if path is inside clips folder
     if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
       // Get relative path from clips folder
-      const relativePath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+      let relativePath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+
+      // CRITICAL: Always use forward slashes for cross-platform compatibility
+      // This ensures paths work on both Windows and Unix systems
+      // Windows accepts forward slashes, but Unix doesn't accept backslashes
+      relativePath = relativePath.replace(/\\/g, '/');
+
       return relativePath;
     }
 
     // If outside clips folder, keep absolute (shouldn't happen in normal operation)
     this.logger.warn(`Path outside clips folder: ${absolutePath}`);
-    return absolutePath;
+    // Still normalize the absolute path to use forward slashes
+    return absolutePath.replace(/\\/g, '/');
   }
 
   /**
@@ -377,6 +384,11 @@ export class DatabaseService {
     // Resolve current_path from relative to absolute
     if (video.current_path) {
       video.current_path = this.toAbsolutePath(video.current_path, clipsFolder);
+
+      // Normalize path separators: replace backslashes with forward slashes
+      // This fixes cross-platform compatibility issues where paths may have been
+      // imported from Windows systems or stored with incorrect separators
+      video.current_path = video.current_path.replace(/\\/g, '/');
     }
 
     return video;
@@ -575,16 +587,20 @@ export class DatabaseService {
         display_order INTEGER DEFAULT 0
       );
 
-      -- Video tab items: Junction table for videos in tabs (many-to-many relationship)
+      -- Video tab items: Junction table for items in tabs (videos, links, etc.)
       CREATE TABLE IF NOT EXISTS video_tab_items (
         id TEXT PRIMARY KEY,
         tab_id TEXT NOT NULL,
-        video_id TEXT NOT NULL,
+        video_id TEXT,
+        saved_link_id TEXT,
+        url TEXT,
+        title TEXT,
+        item_type TEXT DEFAULT 'video',
         added_at TEXT NOT NULL,
         display_order INTEGER DEFAULT 0,
         FOREIGN KEY (tab_id) REFERENCES video_tabs(id) ON DELETE CASCADE,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
-        UNIQUE(tab_id, video_id)
+        FOREIGN KEY (saved_link_id) REFERENCES saved_links(id) ON DELETE CASCADE
       );
     `;
 
@@ -617,6 +633,7 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_video_tabs_display_order ON video_tabs(display_order);
       CREATE INDEX IF NOT EXISTS idx_video_tab_items_tab ON video_tab_items(tab_id);
       CREATE INDEX IF NOT EXISTS idx_video_tab_items_video ON video_tab_items(video_id);
+      CREATE INDEX IF NOT EXISTS idx_video_tab_items_saved_link ON video_tab_items(saved_link_id);
       CREATE INDEX IF NOT EXISTS idx_video_tab_items_display_order ON video_tab_items(display_order);
     `;
 
@@ -1114,6 +1131,76 @@ export class DatabaseService {
           this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
         }
       }
+    }
+
+    // Migration: Recreate video_tab_items to allow nullable video_id and add new columns
+    // This is needed because SQLite doesn't allow changing NOT NULL constraints
+    try {
+      // Check if video_id is nullable by trying to insert a NULL and rolling back
+      const testStmt = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='video_tab_items'");
+      const tableInfo = testStmt.get() as { sql: string } | undefined;
+
+      if (tableInfo && tableInfo.sql && tableInfo.sql.includes('video_id TEXT NOT NULL')) {
+        this.logger.log('Running migration: Recreating video_tab_items to support multiple item types');
+        try {
+          db.exec(`
+            -- Create new table with correct schema
+            CREATE TABLE video_tab_items_new (
+              id TEXT PRIMARY KEY,
+              tab_id TEXT NOT NULL,
+              video_id TEXT,
+              saved_link_id TEXT,
+              url TEXT,
+              title TEXT,
+              item_type TEXT DEFAULT 'video',
+              added_at TEXT NOT NULL,
+              display_order INTEGER DEFAULT 0,
+              FOREIGN KEY (tab_id) REFERENCES video_tabs(id) ON DELETE CASCADE,
+              FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+              FOREIGN KEY (saved_link_id) REFERENCES saved_links(id) ON DELETE CASCADE
+            );
+
+            -- Copy existing data
+            INSERT INTO video_tab_items_new (id, tab_id, video_id, added_at, display_order, item_type)
+            SELECT id, tab_id, video_id, added_at, display_order, 'video'
+            FROM video_tab_items;
+
+            -- Drop old table
+            DROP TABLE video_tab_items;
+
+            -- Rename new table
+            ALTER TABLE video_tab_items_new RENAME TO video_tab_items;
+
+            -- Recreate indexes
+            CREATE INDEX IF NOT EXISTS idx_video_tab_items_tab ON video_tab_items(tab_id);
+            CREATE INDEX IF NOT EXISTS idx_video_tab_items_video ON video_tab_items(video_id);
+            CREATE INDEX IF NOT EXISTS idx_video_tab_items_saved_link ON video_tab_items(saved_link_id);
+            CREATE INDEX IF NOT EXISTS idx_video_tab_items_display_order ON video_tab_items(display_order);
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: video_tab_items now supports multiple item types');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      } else if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('item_type')) {
+        // Table exists with nullable video_id but missing new columns
+        this.logger.log('Running migration: Adding flexible item type columns to video_tab_items');
+        try {
+          db.exec(`
+            ALTER TABLE video_tab_items ADD COLUMN item_type TEXT DEFAULT 'video';
+            ALTER TABLE video_tab_items ADD COLUMN saved_link_id TEXT;
+            ALTER TABLE video_tab_items ADD COLUMN url TEXT;
+            ALTER TABLE video_tab_items ADD COLUMN title TEXT;
+            UPDATE video_tab_items SET item_type = 'video' WHERE item_type IS NULL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: Added item_type columns');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Error checking video_tab_items schema: ${error?.message}`);
     }
 
   }
@@ -1654,6 +1741,10 @@ export class DatabaseService {
     const now = new Date().toISOString();
     const downloadDate = video.downloadDate || now;
 
+    // Convert to relative path for cross-platform compatibility
+    const clipsFolder = this.getClipsFolderPath();
+    const pathToStore = clipsFolder ? this.toRelativePath(video.currentPath, clipsFolder) : video.currentPath;
+
     // Determine media type from file extension if not provided
     let mediaType = video.mediaType;
     let fileExtension = video.fileExtension;
@@ -1676,7 +1767,7 @@ export class DatabaseService {
       video.id,
       video.filename,
       video.fileHash,
-      video.currentPath,
+      pathToStore,
       video.uploadDate || null,
       video.durationSeconds || null,
       video.fileSizeBytes || null,
@@ -3237,6 +3328,19 @@ export class DatabaseService {
   }
 
   /**
+   * Update saved link metadata
+   */
+  updateSavedLinkMetadata(id: string, metadata: string) {
+    const db = this.ensureInitialized();
+
+    db.prepare(
+      `UPDATE saved_links SET metadata = ? WHERE id = ?`
+    ).run(metadata, id);
+
+    this.saveDatabase();
+  }
+
+  /**
    * Delete saved link by ID
    */
   deleteSavedLink(id: string) {
@@ -3742,8 +3846,8 @@ export class DatabaseService {
 
     try {
       db.prepare(`
-        INSERT INTO video_tab_items (id, tab_id, video_id, added_at, display_order)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO video_tab_items (id, tab_id, video_id, added_at, display_order, item_type)
+        VALUES (?, ?, ?, ?, ?, 'video')
       `).run(id, tabId, videoId, now, 0);
 
       // Update tab's updated_at timestamp
@@ -3758,6 +3862,98 @@ export class DatabaseService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Add a saved link to a tab
+   */
+  addSavedLinkToTab(tabId: string, savedLinkId: string, title?: string): string {
+    const db = this.ensureInitialized();
+    const id = require('crypto').randomUUID();
+    const now = new Date().toISOString();
+
+    try {
+      db.prepare(`
+        INSERT INTO video_tab_items (id, tab_id, saved_link_id, added_at, display_order, item_type, title)
+        VALUES (?, ?, ?, ?, ?, 'link', ?)
+      `).run(id, tabId, savedLinkId, now, 0, title || null);
+
+      // Update tab's updated_at timestamp
+      db.prepare('UPDATE video_tabs SET updated_at = ? WHERE id = ?')
+        .run(now, tabId);
+
+      this.saveDatabase();
+      return id;
+    } catch (error: any) {
+      if (error.message && error.message.includes('UNIQUE constraint failed')) {
+        throw new Error('Link is already in this tab');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Add a URL directly to a tab (for external links)
+   */
+  addUrlToTab(tabId: string, url: string, title?: string): string {
+    const db = this.ensureInitialized();
+    const id = require('crypto').randomUUID();
+    const now = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO video_tab_items (id, tab_id, url, added_at, display_order, item_type, title)
+      VALUES (?, ?, ?, ?, ?, 'link', ?)
+    `).run(id, tabId, url, now, 0, title || null);
+
+    // Update tab's updated_at timestamp
+    db.prepare('UPDATE video_tabs SET updated_at = ? WHERE id = ?')
+      .run(now, tabId);
+
+    this.saveDatabase();
+    return id;
+  }
+
+  /**
+   * Get all items in a tab (videos, links, etc.)
+   */
+  getTabItems(tabId: string): any[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT
+        vti.id,
+        vti.tab_id,
+        vti.video_id,
+        vti.saved_link_id,
+        vti.url,
+        vti.title as item_title,
+        vti.item_type,
+        vti.added_at,
+        vti.display_order,
+        -- Video fields (if item_type = 'video')
+        v.filename,
+        v.current_path,
+        v.duration_seconds,
+        v.file_size_bytes,
+        v.suggested_title,
+        v.ai_description,
+        v.source_url as video_source_url,
+        v.media_type,
+        v.file_extension,
+        v.has_transcript,
+        v.has_analysis,
+        v.upload_date,
+        -- Saved link fields (if item_type = 'link')
+        sl.url as saved_link_url,
+        sl.title as saved_link_title,
+        sl.status as saved_link_status,
+        sl.thumbnail_path as saved_link_thumbnail
+      FROM video_tab_items vti
+      LEFT JOIN videos v ON vti.video_id = v.id AND vti.item_type = 'video'
+      LEFT JOIN saved_links sl ON vti.saved_link_id = sl.id AND vti.item_type = 'link'
+      WHERE vti.tab_id = ?
+      ORDER BY vti.display_order ASC, vti.added_at DESC
+    `);
+    return stmt.all(tabId) as any[];
   }
 
   /**

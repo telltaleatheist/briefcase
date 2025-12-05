@@ -91,6 +91,23 @@ export class SavedLinksController {
   }
 
   /**
+   * Add a downloaded video to the library
+   * POST /api/saved-links/:id/add-to-library
+   */
+  @Post(':id/add-to-library')
+  @HttpCode(HttpStatus.OK)
+  async addToLibrary(@Param('id') id: string): Promise<{ success: boolean; videoId?: string; error?: string; message?: string }> {
+    this.logger.log(`Adding saved link to library: ${id}`);
+    const result = await this.savedLinksService.addToLibrary(id);
+    return {
+      ...result,
+      message: result.success
+        ? `Video added to library${result.videoId ? ` as ${result.videoId}` : ''}`
+        : `Failed to add video: ${result.error}`
+    };
+  }
+
+  /**
    * Get count of saved links
    * GET /api/saved-links/count
    */

@@ -862,13 +862,22 @@ export class DatabaseController {
       const video = this.databaseService.getVideoById(videoId);
 
       if (!video) {
-        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
+        this.logger.warn(`Video not found in database: ${videoId}`);
+        throw new HttpException(`Video not found in database: ${videoId}`, HttpStatus.NOT_FOUND);
       }
 
-      const videoPath = video.current_path;
+      // Normalize path: replace backslashes with forward slashes for cross-platform compatibility
+      let videoPath = video.current_path;
+      if (videoPath) {
+        videoPath = videoPath.replace(/\\/g, '/');
+      }
 
       if (!videoPath || !fs.existsSync(videoPath)) {
-        throw new HttpException('Video file not found on disk', HttpStatus.NOT_FOUND);
+        this.logger.warn(`Video file not found on disk for video ${videoId}: ${videoPath || 'no path'} (original: ${video.current_path})`);
+        throw new HttpException(
+          `Video file not found on disk: ${videoPath || 'no path'}`,
+          HttpStatus.NOT_FOUND
+        );
       }
 
       const stat = statSync(videoPath);
@@ -2161,11 +2170,18 @@ export class DatabaseController {
       // Auto-scan: search in existing library directories
       const allVideos = this.databaseService.getAllVideos();
       const libraryDirs = new Set<string>();
+      const clipsFolder = this.databaseService.getClipsFolderPath();
 
       // Get all unique directories from existing videos
       for (const video of allVideos) {
         if (video.current_path) {
-          const dir = path.dirname(video.current_path);
+          // Convert relative paths to absolute using clips folder
+          let absolutePath = String(video.current_path);
+          if (clipsFolder && !path.isAbsolute(absolutePath)) {
+            absolutePath = path.join(clipsFolder, absolutePath);
+          }
+
+          const dir = path.dirname(absolutePath);
           libraryDirs.add(dir);
         }
       }
