@@ -47,6 +47,56 @@ export class SavedLinksService implements OnModuleInit {
   onModuleInit() {
     this.logger.log('Setting up saved links event listeners');
     this.setupEventListeners();
+    this.recoverStuckDownloads();
+  }
+
+  /**
+   * Recover downloads that got stuck in 'downloading' or 'pending' state
+   * This can happen if the app was closed while downloads were in progress
+   */
+  private recoverStuckDownloads() {
+    try {
+      // Check if database is initialized before accessing it
+      if (!this.databaseService.isInitialized()) {
+        this.logger.log('Database not yet initialized, skipping stuck download recovery (will run when library opens)');
+        return;
+      }
+
+      const allLinks = this.databaseService.getAllSavedLinks() as unknown as SavedLink[];
+      const stuckLinks = allLinks.filter(link =>
+        (link.status === 'downloading' || link.status === 'pending') &&
+        link.date_added
+      );
+
+      if (stuckLinks.length === 0) {
+        return;
+      }
+
+      // Consider downloads stuck if they've been in progress for more than 1 hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+      for (const link of stuckLinks) {
+        const addedDate = new Date(link.date_added);
+        if (addedDate < oneHourAgo) {
+          this.logger.warn(`Recovering stuck download: ${link.id} (status: ${link.status}, added: ${link.date_added})`);
+
+          // Mark as failed so user can retry
+          this.databaseService.updateSavedLinkStatus(
+            link.id,
+            'failed',
+            'Download was interrupted - please retry'
+          );
+
+          // Notify frontend
+          const updatedLink = this.databaseService.findSavedLinkById(link.id);
+          if (updatedLink) {
+            this.websocketService.emitSavedLinkUpdated(updatedLink as any);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error('Failed to recover stuck downloads:', error);
+    }
   }
 
   /**
@@ -64,6 +114,7 @@ export class SavedLinksService implements OnModuleInit {
       this.logger.log(`Received task.failed event: ${JSON.stringify(data)}`);
       this.handleJobEvent(data.jobId, 'failed', undefined, data.error?.message);
     });
+
   }
 
   /**

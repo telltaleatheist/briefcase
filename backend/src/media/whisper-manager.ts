@@ -70,14 +70,32 @@ export class WhisperManager extends EventEmitter {
   }
 
   /**
+   * Get the platform/architecture-specific binary name
+   */
+  private getBinaryName(): string {
+    const platform = process.platform;
+    const arch = process.arch;
+
+    if (platform === 'win32') {
+      return 'whisper-cli.exe';
+    } else if (platform === 'darwin') {
+      // macOS: architecture-specific binaries
+      return arch === 'arm64' ? 'whisper-cli-arm64' : 'whisper-cli-x64';
+    } else {
+      // Linux
+      return 'whisper-cli';
+    }
+  }
+
+  /**
    * Get the path to the whisper.cpp executable
    */
   private getWhisperCppPath(): string {
-    const isWindows = process.platform === 'win32';
-    const binaryName = isWindows ? 'whisper-cli.exe' : 'whisper-cli';
+    const binaryName = this.getBinaryName();
 
     this.logger.log('-'.repeat(60));
     this.logger.log('RESOLVING WHISPER BINARY PATH');
+    this.logger.log(`  Platform: ${process.platform}, Arch: ${process.arch}`);
     this.logger.log(`  Looking for: ${binaryName}`);
 
     // Check environment variable first (set by Electron)

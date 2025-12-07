@@ -117,6 +117,7 @@ export class SettingsPageComponent implements OnInit {
   async onWizardCompleted() {
     this.wizardOpen.set(false);
     await this.refreshAiStatus();
+    await this.loadAvailableModels();
   }
 
   // Category Management

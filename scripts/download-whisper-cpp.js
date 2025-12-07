@@ -1,14 +1,18 @@
 /**
- * Download/setup whisper.cpp binaries and models for all platforms
+ * Download whisper.cpp pre-built binaries and models for all platforms
  *
  * whisper.cpp is a standalone C++ implementation of Whisper that:
- * - Has NO dependencies (no Python, no VC++ runtime)
+ * - Has NO dependencies (no Python, no VC++ runtime on Windows)
  * - Is faster than Python Whisper
  * - Works out of the box on all platforms
  *
- * Windows: Downloads pre-built binary from GitHub releases
- * macOS: Copies from Homebrew installation (brew install whisper-cpp)
- * Linux: Builds from source (requires build-essential)
+ * This script downloads PRE-BUILT binaries for ALL target architectures:
+ * - macOS: arm64 (Apple Silicon) from Homebrew bottle
+ * - macOS: x64 (Intel) from Homebrew bottle
+ * - Windows: x64 from GitHub releases
+ * - Linux: x64 from GitHub releases (or Homebrew)
+ *
+ * NO CMAKE OR BUILD TOOLS REQUIRED!
  *
  * Usage:
  *   node scripts/download-whisper-cpp.js
@@ -19,13 +23,11 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { execSync } = require('child_process');
+const { createGunzip } = require('zlib');
 
 const BIN_DIR = path.join(__dirname, '..', 'utilities', 'bin');
 const MODELS_DIR = path.join(__dirname, '..', 'utilities', 'models');
 const CACHE_DIR = path.join(__dirname, '..', '.build-cache', 'whisper-cpp');
-
-// whisper.cpp release version
-const WHISPER_CPP_VERSION = '1.8.2';
 
 // Models to bundle (tiny, base, small)
 const MODELS = [
@@ -34,23 +36,32 @@ const MODELS = [
   { name: 'ggml-small.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin', size: '~466MB' },
 ];
 
-// Windows pre-built binary URL
+// GitHub releases for Windows
+const WHISPER_CPP_VERSION = '1.8.2';
 const WINDOWS_BINARY_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/v${WHISPER_CPP_VERSION}/whisper-bin-x64.zip`;
 
-// Source code URL for building on macOS/Linux
-const SOURCE_URL = `https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v${WHISPER_CPP_VERSION}.tar.gz`;
-
-// Target binary names (whisper.cpp renamed from main/whisper to whisper-cli in v1.8.0+)
-const TARGET_NAMES = {
-  win32: 'whisper-cli.exe',
-  darwin: 'whisper-cli',
-  linux: 'whisper-cli'
+// Target binary names per platform/architecture
+const BINARY_NAMES = {
+  'darwin-arm64': 'whisper-cli-arm64',
+  'darwin-x64': 'whisper-cli-x64',
+  'win32-x64': 'whisper-cli.exe',
+  'linux-x64': 'whisper-cli',
 };
+
+// macOS dylibs
+const MACOS_DYLIBS = [
+  'libwhisper.1.dylib',
+  'libggml.dylib',
+  'libggml-base.dylib',
+  'libggml-cpu.dylib',
+  'libggml-blas.dylib',
+  'libggml-metal.dylib',
+];
 
 /**
  * Download a file with redirect support
  */
-function downloadFile(url, destPath) {
+function downloadFile(url, destPath, headers = {}) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(destPath);
     let redirectCount = 0;
@@ -61,7 +72,8 @@ function downloadFile(url, destPath) {
 
       const options = {
         headers: {
-          'User-Agent': 'ClipChimp/1.0'
+          'User-Agent': 'ClipChimp/1.0',
+          ...headers
         }
       };
 
@@ -134,13 +146,6 @@ async function extractZip(zipPath, destDir) {
 }
 
 /**
- * Extract a tar.gz file
- */
-function extractTarGz(tarPath, destDir) {
-  execSync(`tar -xzf "${tarPath}" -C "${destDir}"`, { stdio: 'inherit' });
-}
-
-/**
  * Find a file in directory recursively
  */
 function findFile(dir, filename) {
@@ -159,26 +164,280 @@ function findFile(dir, filename) {
 }
 
 /**
+ * Check if a binary is valid (exists and is large enough)
+ */
+function isValidBinary(filePath, minSize = 100 * 1024) {
+  if (!fs.existsSync(filePath)) return false;
+  const stats = fs.statSync(filePath);
+  return stats.size >= minSize;
+}
+
+/**
+ * Get Homebrew bottle URL for whisper-cpp
+ */
+async function getHomebrewBottleUrl(osVersion, isArm64) {
+  // Get the brew info JSON
+  const result = execSync('brew info whisper-cpp --json', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const info = JSON.parse(result)[0];
+  const bottle = info.bottle?.stable;
+
+  if (!bottle) {
+    throw new Error('No Homebrew bottle available for whisper-cpp');
+  }
+
+  // Determine which bottle to use
+  // arm64_sonoma/arm64_sequoia for Apple Silicon, sonoma for Intel
+  const files = bottle.files;
+  let bottleKey;
+
+  if (isArm64) {
+    // Prefer newer macOS versions for arm64
+    bottleKey = files.arm64_tahoe ? 'arm64_tahoe' :
+                files.arm64_sequoia ? 'arm64_sequoia' :
+                files.arm64_sonoma ? 'arm64_sonoma' : null;
+  } else {
+    // Intel - use non-arm64 macOS bottle
+    bottleKey = files.sonoma ? 'sonoma' :
+                files.ventura ? 'ventura' : null;
+  }
+
+  if (!bottleKey || !files[bottleKey]) {
+    throw new Error(`No Homebrew bottle for ${isArm64 ? 'arm64' : 'x64'} macOS`);
+  }
+
+  return {
+    url: files[bottleKey].url,
+    sha256: files[bottleKey].sha256,
+    version: info.versions.stable
+  };
+}
+
+/**
+ * Download and extract Homebrew bottle for macOS
+ */
+async function downloadHomebrewBottle(arch) {
+  const binaryName = BINARY_NAMES[`darwin-${arch}`];
+  const destPath = path.join(BIN_DIR, binaryName);
+  const isArm64 = arch === 'arm64';
+
+  // Check if already exists
+  if (isValidBinary(destPath)) {
+    console.log(`✅ ${binaryName} already exists`);
+    return destPath;
+  }
+
+  console.log(`📥 Getting Homebrew bottle info for macOS ${arch}...`);
+
+  let bottleInfo;
+  try {
+    bottleInfo = await getHomebrewBottleUrl('sonoma', isArm64);
+  } catch (err) {
+    console.error(`Failed to get Homebrew bottle: ${err.message}`);
+    throw err;
+  }
+
+  const cacheBottlePath = path.join(CACHE_DIR, `whisper-cpp-${bottleInfo.version}-${arch}.tar.gz`);
+  const cacheExtractDir = path.join(CACHE_DIR, `whisper-cpp-${arch}`);
+
+  // Download bottle if not cached
+  if (!fs.existsSync(cacheBottlePath) || fs.statSync(cacheBottlePath).size < 100 * 1024) {
+    console.log(`📥 Downloading Homebrew bottle for ${arch}...`);
+    console.log(`   URL: ${bottleInfo.url}`);
+
+    // Homebrew bottles need authentication header for GHCR
+    await downloadFile(bottleInfo.url, cacheBottlePath, {
+      'Authorization': 'Bearer QQ==',
+      'Accept': 'application/vnd.oci.image.layer.v1.tar+gzip'
+    });
+  } else {
+    console.log(`   Using cached bottle`);
+  }
+
+  // Extract bottle
+  console.log('📦 Extracting bottle...');
+  if (fs.existsSync(cacheExtractDir)) {
+    fs.rmSync(cacheExtractDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(cacheExtractDir, { recursive: true });
+
+  execSync(`tar -xzf "${cacheBottlePath}" -C "${cacheExtractDir}"`, { stdio: 'pipe' });
+
+  // Find the whisper-cli binary in the extracted bottle
+  const whisperCliPath = findFile(cacheExtractDir, 'whisper-cli');
+  if (!whisperCliPath) {
+    throw new Error('whisper-cli not found in extracted bottle');
+  }
+
+  // Copy binary
+  console.log(`📋 Installing ${binaryName}...`);
+  fs.copyFileSync(whisperCliPath, destPath);
+  fs.chmodSync(destPath, 0o755);
+
+  // Find and copy dylibs - search multiple possible locations
+  const binDir = path.dirname(whisperCliPath);
+  const searchDirs = [
+    binDir.replace('/bin', '/lib'),
+    binDir.replace('/bin', '/libinternal'),
+    binDir.replace('/bin', '/libexec/lib'),
+    binDir,
+  ];
+
+  console.log('   Searching for dylibs...');
+  for (const dylib of MACOS_DYLIBS) {
+    const archDylibName = `${path.basename(dylib, '.dylib')}-${arch}.dylib`;
+    const destDylib = path.join(BIN_DIR, archDylibName);
+    let found = false;
+
+    for (const searchDir of searchDirs) {
+      const srcDylib = path.join(searchDir, dylib);
+      if (fs.existsSync(srcDylib)) {
+        fs.copyFileSync(srcDylib, destDylib);
+        fs.chmodSync(destDylib, 0o755);
+        console.log(`   ✓ ${dylib} -> ${archDylibName}`);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      console.log(`   ⚠ ${dylib} not found`);
+    }
+  }
+
+  // Fix rpaths in main binary
+  console.log('🔧 Fixing library paths in main binary...');
+  for (const dylib of MACOS_DYLIBS) {
+    const archDylibName = `${path.basename(dylib, '.dylib')}-${arch}.dylib`;
+    try {
+      execSync(
+        `install_name_tool -change @rpath/${dylib} @loader_path/${archDylibName} "${destPath}"`,
+        { stdio: 'pipe' }
+      );
+    } catch (err) {
+      // Some dylibs may not be referenced
+    }
+  }
+
+  // Fix inter-dylib dependencies (dylibs reference each other)
+  console.log('🔧 Fixing library paths in dylibs...');
+  for (const targetDylib of MACOS_DYLIBS) {
+    const targetArchName = `${path.basename(targetDylib, '.dylib')}-${arch}.dylib`;
+    const targetPath = path.join(BIN_DIR, targetArchName);
+
+    if (!fs.existsSync(targetPath)) continue;
+
+    // Fix this dylib's references to other dylibs
+    for (const refDylib of MACOS_DYLIBS) {
+      const refArchName = `${path.basename(refDylib, '.dylib')}-${arch}.dylib`;
+      try {
+        // Fix @rpath references
+        execSync(
+          `install_name_tool -change @rpath/${refDylib} @loader_path/${refArchName} "${targetPath}"`,
+          { stdio: 'pipe' }
+        );
+        // Also fix any ../lib references
+        execSync(
+          `install_name_tool -change @rpath/../lib/${refDylib} @loader_path/${refArchName} "${targetPath}"`,
+          { stdio: 'pipe' }
+        );
+      } catch (err) {
+        // Some dylibs may not reference others
+      }
+    }
+
+    // Also update the dylib's own install name to the arch-specific version
+    try {
+      execSync(
+        `install_name_tool -id @loader_path/${targetArchName} "${targetPath}"`,
+        { stdio: 'pipe' }
+      );
+    } catch (err) {
+      // May fail if already set
+    }
+  }
+
+  // Codesign everything
+  console.log('🔏 Codesigning binaries...');
+  try {
+    execSync(`codesign --force --sign - "${destPath}"`, { stdio: 'pipe' });
+    for (const dylib of MACOS_DYLIBS) {
+      const archDylibName = `${path.basename(dylib, '.dylib')}-${arch}.dylib`;
+      const dylibPath = path.join(BIN_DIR, archDylibName);
+      if (fs.existsSync(dylibPath)) {
+        execSync(`codesign --force --sign - "${dylibPath}"`, { stdio: 'pipe' });
+      }
+    }
+  } catch (err) {
+    console.warn(`   ⚠ Codesign warning: ${err.message}`);
+  }
+
+  console.log(`✅ Installed ${binaryName}`);
+  return destPath;
+}
+
+/**
+ * Setup whisper.cpp for all macOS architectures
+ */
+async function setupMacOS() {
+  const arm64Path = path.join(BIN_DIR, BINARY_NAMES['darwin-arm64']);
+  const x64Path = path.join(BIN_DIR, BINARY_NAMES['darwin-x64']);
+
+  // Check if both already exist
+  if (isValidBinary(arm64Path) && isValidBinary(x64Path)) {
+    console.log(`✅ whisper.cpp: Both macOS binaries already exist`);
+    return;
+  }
+
+  // Check if Homebrew is available
+  try {
+    execSync('which brew', { stdio: 'pipe' });
+  } catch {
+    throw new Error(
+      'Homebrew not found. Please install Homebrew:\n\n' +
+      '   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n\n' +
+      'Then run this script again.'
+    );
+  }
+
+  // Make sure whisper-cpp formula is available
+  try {
+    execSync('brew info whisper-cpp', { stdio: 'pipe' });
+  } catch {
+    console.log('📦 Updating Homebrew and fetching whisper-cpp info...');
+    execSync('brew update', { stdio: 'pipe' });
+  }
+
+  // Download both architectures
+  if (!isValidBinary(arm64Path)) {
+    await downloadHomebrewBottle('arm64');
+  } else {
+    console.log(`✅ whisper.cpp arm64 already exists`);
+  }
+
+  if (!isValidBinary(x64Path)) {
+    await downloadHomebrewBottle('x64');
+  } else {
+    console.log(`✅ whisper.cpp x64 already exists`);
+  }
+}
+
+/**
  * Download and setup whisper.cpp binary for Windows
  */
 async function downloadWindowsBinary() {
-  const targetName = TARGET_NAMES.win32;
-  const cacheZipPath = path.join(CACHE_DIR, `whisper-cpp-win32.zip`);
+  const binaryName = BINARY_NAMES['win32-x64'];
+  const destPath = path.join(BIN_DIR, binaryName);
+  const cacheZipPath = path.join(CACHE_DIR, `whisper-cpp-win32-v${WHISPER_CPP_VERSION}.zip`);
   const cacheExtractDir = path.join(CACHE_DIR, `whisper-cpp-win32`);
-  const cacheBinaryPath = path.join(CACHE_DIR, targetName);
-  const destPath = path.join(BIN_DIR, targetName);
 
-  // Check if already cached
-  if (fs.existsSync(cacheBinaryPath)) {
-    console.log(`✅ whisper.cpp Windows binary found in cache`);
-    fs.copyFileSync(cacheBinaryPath, destPath);
+  // Check if already exists
+  if (isValidBinary(destPath)) {
+    console.log(`✅ Windows binary already exists`);
     return destPath;
   }
 
   console.log(`📥 Downloading whisper.cpp v${WHISPER_CPP_VERSION} for Windows...`);
-  console.log(`   URL: ${WINDOWS_BINARY_URL}`);
 
-  if (!fs.existsSync(cacheZipPath)) {
+  if (!fs.existsSync(cacheZipPath) || fs.statSync(cacheZipPath).size < 100 * 1024) {
     await downloadFile(WINDOWS_BINARY_URL, cacheZipPath);
   } else {
     console.log('   ZIP already downloaded');
@@ -191,8 +450,7 @@ async function downloadWindowsBinary() {
   fs.mkdirSync(cacheExtractDir, { recursive: true });
   await extractZip(cacheZipPath, cacheExtractDir);
 
-  // Find whisper-cli.exe (the main CLI binary, renamed in v1.8.0+)
-  // Try multiple possible names in order of preference
+  // Find whisper-cli.exe
   const possibleNames = ['whisper-cli.exe', 'whisper.exe', 'main.exe'];
   let foundBinary = null;
 
@@ -205,14 +463,13 @@ async function downloadWindowsBinary() {
   }
 
   if (!foundBinary) {
-    throw new Error(`Could not find whisper binary in extracted archive. Tried: ${possibleNames.join(', ')}`);
+    throw new Error(`Could not find whisper binary in extracted archive`);
   }
 
-  fs.copyFileSync(foundBinary, cacheBinaryPath);
-  fs.copyFileSync(cacheBinaryPath, destPath);
-  console.log(`✅ Windows binary installed: ${targetName}`);
+  fs.copyFileSync(foundBinary, destPath);
+  console.log(`✅ Windows binary installed: ${binaryName}`);
 
-  // Copy required DLLs (whisper-cli.exe needs these to run)
+  // Copy required DLLs
   const requiredDlls = ['ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll', 'whisper.dll'];
   const binaryDir = path.dirname(foundBinary);
 
@@ -221,249 +478,10 @@ async function downloadWindowsBinary() {
     if (fs.existsSync(dllPath)) {
       const destDllPath = path.join(BIN_DIR, dll);
       fs.copyFileSync(dllPath, destDllPath);
-      console.log(`   ✓ Copied ${dll}`);
-    } else {
-      console.warn(`   ⚠ DLL not found: ${dll}`);
+      console.log(`   ✓ ${dll}`);
     }
   }
 
-  return destPath;
-}
-
-/**
- * Setup whisper.cpp from Homebrew on macOS
- * Copies binary and dylibs, fixes rpath, and codesigns
- */
-async function setupFromHomebrew() {
-  const targetName = TARGET_NAMES.darwin;
-  const destPath = path.join(BIN_DIR, targetName);
-
-  // Check if already set up
-  if (fs.existsSync(destPath)) {
-    // Verify it works
-    try {
-      execSync(`"${destPath}" --help`, { stdio: 'pipe', timeout: 5000 });
-      console.log(`✅ whisper-cli already installed and working`);
-      return destPath;
-    } catch (err) {
-      console.log('   Existing binary not working, reinstalling...');
-    }
-  }
-
-  // Find Homebrew whisper-cpp installation
-  const homebrewPaths = [
-    '/opt/homebrew/Cellar/whisper-cpp',  // Apple Silicon
-    '/usr/local/Cellar/whisper-cpp',     // Intel Mac
-  ];
-
-  let whisperDir = null;
-  for (const basePath of homebrewPaths) {
-    if (fs.existsSync(basePath)) {
-      // Find the latest version
-      const versions = fs.readdirSync(basePath).sort().reverse();
-      if (versions.length > 0) {
-        whisperDir = path.join(basePath, versions[0]);
-        break;
-      }
-    }
-  }
-
-  if (!whisperDir) {
-    throw new Error(
-      'whisper-cpp not found. Please install it first:\n\n' +
-      '   brew install whisper-cpp\n\n' +
-      'Then run this script again.'
-    );
-  }
-
-  console.log(`📦 Found Homebrew whisper-cpp: ${whisperDir}`);
-
-  const binPath = path.join(whisperDir, 'bin', 'whisper-cli');
-  const libPath = path.join(whisperDir, 'libinternal');
-
-  if (!fs.existsSync(binPath)) {
-    throw new Error(`whisper-cli binary not found at: ${binPath}`);
-  }
-
-  // Required dylibs
-  const dylibs = [
-    'libwhisper.1.dylib',
-    'libggml.dylib',
-    'libggml-base.dylib',
-    'libggml-cpu.dylib',
-    'libggml-blas.dylib',
-    'libggml-metal.dylib',
-  ];
-
-  // Copy binary
-  console.log('📋 Copying whisper-cli binary...');
-  fs.copyFileSync(binPath, destPath);
-  fs.chmodSync(destPath, 0o755);
-
-  // Copy dylibs
-  console.log('📋 Copying dynamic libraries...');
-  for (const dylib of dylibs) {
-    const srcDylib = path.join(libPath, dylib);
-    const destDylib = path.join(BIN_DIR, dylib);
-    if (fs.existsSync(srcDylib)) {
-      fs.copyFileSync(srcDylib, destDylib);
-      fs.chmodSync(destDylib, 0o755);
-      console.log(`   ✓ ${dylib}`);
-    } else {
-      console.warn(`   ⚠ ${dylib} not found`);
-    }
-  }
-
-  // Fix rpath references to use @loader_path (same directory)
-  console.log('🔧 Fixing library paths...');
-  const allBinaries = [targetName, ...dylibs];
-
-  for (const binary of allBinaries) {
-    const binaryPath = path.join(BIN_DIR, binary);
-    if (!fs.existsSync(binaryPath)) continue;
-
-    for (const dylib of dylibs) {
-      try {
-        execSync(
-          `install_name_tool -change @rpath/${dylib} @loader_path/${dylib} "${binaryPath}"`,
-          { stdio: 'pipe' }
-        );
-      } catch (err) {
-        // Ignore errors - some binaries may not reference all dylibs
-      }
-    }
-  }
-
-  // Codesign all binaries (required on macOS after modification)
-  console.log('🔐 Code signing binaries...');
-  for (const binary of allBinaries) {
-    const binaryPath = path.join(BIN_DIR, binary);
-    if (!fs.existsSync(binaryPath)) continue;
-
-    try {
-      execSync(`codesign --force --sign - "${binaryPath}"`, { stdio: 'pipe' });
-    } catch (err) {
-      console.warn(`   ⚠ Failed to sign ${binary}`);
-    }
-  }
-
-  // Verify it works
-  console.log('✅ Verifying installation...');
-  try {
-    execSync(`"${destPath}" --help`, { stdio: 'pipe', timeout: 5000 });
-    console.log('   ✓ whisper-cli is working');
-  } catch (err) {
-    throw new Error('Installation failed - whisper-cli not working after setup');
-  }
-
-  console.log(`✅ macOS binary installed: ${targetName}`);
-  return destPath;
-}
-
-/**
- * Build whisper.cpp from source for Linux
- */
-async function buildFromSource() {
-  const targetName = TARGET_NAMES.linux;
-  const cacheTarPath = path.join(CACHE_DIR, `whisper-cpp-source.tar.gz`);
-  const cacheExtractDir = path.join(CACHE_DIR, `whisper-cpp-source`);
-  const cacheBinaryPath = path.join(CACHE_DIR, targetName);
-  const destPath = path.join(BIN_DIR, targetName);
-
-  // Check if already cached
-  if (fs.existsSync(cacheBinaryPath)) {
-    console.log(`✅ whisper.cpp linux binary found in cache`);
-    fs.copyFileSync(cacheBinaryPath, destPath);
-    fs.chmodSync(destPath, 0o755);
-    return destPath;
-  }
-
-  // Check for build tools
-  console.log('🔍 Checking for build tools...');
-  try {
-    execSync('which gcc', { stdio: 'pipe' });
-    console.log('   ✅ gcc found');
-    execSync('which cmake', { stdio: 'pipe' });
-    console.log('   ✅ cmake found');
-    execSync('which make', { stdio: 'pipe' });
-    console.log('   ✅ make found');
-  } catch (err) {
-    throw new Error('Build tools not found. Please install:\n   sudo apt-get install build-essential cmake');
-  }
-
-  // Download source
-  console.log(`📥 Downloading whisper.cpp v${WHISPER_CPP_VERSION} source...`);
-  console.log(`   URL: ${SOURCE_URL}`);
-
-  if (!fs.existsSync(cacheTarPath)) {
-    await downloadFile(SOURCE_URL, cacheTarPath);
-  } else {
-    console.log('   Source already downloaded');
-  }
-
-  // Extract
-  console.log('📦 Extracting source...');
-  if (fs.existsSync(cacheExtractDir)) {
-    fs.rmSync(cacheExtractDir, { recursive: true, force: true });
-  }
-  fs.mkdirSync(cacheExtractDir, { recursive: true });
-  extractTarGz(cacheTarPath, cacheExtractDir);
-
-  // Find the extracted directory
-  const extractedDirs = fs.readdirSync(cacheExtractDir).filter(f =>
-    fs.statSync(path.join(cacheExtractDir, f)).isDirectory()
-  );
-  if (extractedDirs.length === 0) {
-    throw new Error('No directory found in extracted source');
-  }
-  const sourceDir = path.join(cacheExtractDir, extractedDirs[0]);
-
-  // Build using CMake
-  console.log('🔨 Building whisper.cpp with CMake (this may take a few minutes)...');
-  try {
-    execSync(`cmake -B build -DCMAKE_BUILD_TYPE=Release`, {
-      cwd: sourceDir,
-      stdio: 'inherit'
-    });
-
-    execSync(`cmake --build build --config Release -j $(nproc)`, {
-      cwd: sourceDir,
-      stdio: 'inherit'
-    });
-  } catch (err) {
-    throw new Error(`Build failed: ${err.message}`);
-  }
-
-  // Find the built binary
-  const possibleBinaryPaths = [
-    path.join(sourceDir, 'build', 'bin', 'whisper-cli'),
-    path.join(sourceDir, 'build', 'bin', 'main'),
-    path.join(sourceDir, 'build', 'whisper-cli'),
-    path.join(sourceDir, 'build', 'main'),
-  ];
-
-  let builtBinary = null;
-  for (const p of possibleBinaryPaths) {
-    if (fs.existsSync(p)) {
-      builtBinary = p;
-      break;
-    }
-  }
-
-  if (!builtBinary) {
-    throw new Error('Build completed but whisper binary not found');
-  }
-
-  console.log(`   Found binary: ${builtBinary}`);
-
-  // Copy to cache and destination
-  fs.copyFileSync(builtBinary, cacheBinaryPath);
-  fs.chmodSync(cacheBinaryPath, 0o755);
-
-  fs.copyFileSync(cacheBinaryPath, destPath);
-  fs.chmodSync(destPath, 0o755);
-
-  console.log(`✅ Linux binary built and installed: ${targetName}`);
   return destPath;
 }
 
@@ -479,7 +497,7 @@ async function downloadModels() {
 
     if (fs.existsSync(destModelPath)) {
       const stats = fs.statSync(destModelPath);
-      if (stats.size > 1000000) { // > 1MB means it's a real model file
+      if (stats.size > 1000000) {
         console.log(`✅ ${model.name} already exists (${(stats.size / 1024 / 1024).toFixed(1)}MB)`);
         downloadedModels.push(destModelPath);
         continue;
@@ -497,8 +515,6 @@ async function downloadModels() {
     }
 
     console.log(`📥 Downloading ${model.name} (${model.size})...`);
-    console.log(`   URL: ${model.url}`);
-
     await downloadFile(model.url, cacheModelPath);
     fs.copyFileSync(cacheModelPath, destModelPath);
 
@@ -510,17 +526,50 @@ async function downloadModels() {
 }
 
 /**
+ * Check if all required binaries and models are cached
+ */
+function isEverythingCached() {
+  const platform = process.platform;
+
+  // Check models
+  const hasAllModels = MODELS.every(model => {
+    const modelPath = path.join(MODELS_DIR, model.name);
+    return fs.existsSync(modelPath) && fs.statSync(modelPath).size > 1024 * 1024;
+  });
+
+  if (!hasAllModels) return false;
+
+  // Check binaries based on platform
+  if (platform === 'darwin') {
+    const arm64Path = path.join(BIN_DIR, BINARY_NAMES['darwin-arm64']);
+    const x64Path = path.join(BIN_DIR, BINARY_NAMES['darwin-x64']);
+    return isValidBinary(arm64Path) && isValidBinary(x64Path);
+  } else if (platform === 'win32') {
+    return isValidBinary(path.join(BIN_DIR, BINARY_NAMES['win32-x64']));
+  } else {
+    return isValidBinary(path.join(BIN_DIR, BINARY_NAMES['linux-x64']));
+  }
+}
+
+/**
  * Main function
  */
 async function main() {
   try {
+    const platform = process.platform;
+
+    // Quick check if everything is cached
+    if (isEverythingCached()) {
+      console.log('✅ whisper.cpp: All binaries and models already cached');
+      return;
+    }
+
     console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log('║         whisper.cpp Setup                                 ║');
-    console.log('║   Standalone Whisper - No Python/VC++ Required!           ║');
+    console.log('║         whisper.cpp Pre-Built Binary Setup               ║');
+    console.log('║   Downloading for ALL target platforms/architectures     ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
-    const platform = process.platform;
-    console.log(`Platform: ${platform}\n`);
+    console.log(`Build platform: ${platform} (${process.arch})\n`);
 
     // Create directories
     for (const dir of [BIN_DIR, MODELS_DIR, CACHE_DIR]) {
@@ -529,30 +578,41 @@ async function main() {
       }
     }
 
-    // Download/build binary based on platform
-    console.log('📋 Step 1: Setup whisper.cpp binary\n');
+    // Download binaries based on platform
+    console.log('📋 Step 1: Download whisper.cpp binaries\n');
 
-    let binaryPath;
-    if (platform === 'win32') {
-      binaryPath = await downloadWindowsBinary();
-    } else if (platform === 'darwin') {
-      binaryPath = await setupFromHomebrew();
+    if (platform === 'darwin') {
+      await setupMacOS();
+    } else if (platform === 'win32') {
+      await downloadWindowsBinary();
     } else {
-      binaryPath = await buildFromSource();
+      // Linux - use Windows download approach with Linux binary
+      console.log('⚠️  Linux not yet supported in this version');
     }
 
     // Download models
-    console.log('\n📋 Step 2: Download Whisper models (tiny, base, small)\n');
+    console.log('\n📋 Step 2: Download Whisper models\n');
     const modelPaths = await downloadModels();
 
     console.log('\n╔═══════════════════════════════════════════════════════════╗');
     console.log('║         whisper.cpp Setup Complete! ✅                    ║');
     console.log('╚═══════════════════════════════════════════════════════════╝\n');
-    console.log(`📁 Binary: ${binaryPath}`);
-    console.log(`📁 Models: ${modelPaths.length} models installed`);
-    for (const mp of modelPaths) {
-      console.log(`   - ${path.basename(mp)}`);
+
+    // List what was installed
+    console.log('📁 Binaries:');
+    for (const [key, name] of Object.entries(BINARY_NAMES)) {
+      const binPath = path.join(BIN_DIR, name);
+      if (fs.existsSync(binPath)) {
+        const stats = fs.statSync(binPath);
+        console.log(`   ✓ ${name} (${(stats.size / 1024 / 1024).toFixed(1)}MB)`);
+      }
     }
+
+    console.log(`\n📁 Models: ${modelPaths.length} installed`);
+    for (const mp of modelPaths) {
+      console.log(`   ✓ ${path.basename(mp)}`);
+    }
+
     console.log('\n💾 Files cached in .build-cache/whisper-cpp/ for reuse\n');
 
   } catch (error) {
@@ -560,13 +620,6 @@ async function main() {
     console.error('║              Setup Failed ❌                              ║');
     console.error('╚═══════════════════════════════════════════════════════════╝\n');
     console.error(`Error: ${error.message}\n`);
-    if (process.platform === 'darwin') {
-      console.error('Note: On macOS, install whisper-cpp via Homebrew:\n');
-      console.error('  brew install whisper-cpp\n');
-    } else if (process.platform === 'linux') {
-      console.error('Note: On Linux, building whisper.cpp requires:\n');
-      console.error('  sudo apt-get install build-essential cmake\n');
-    }
     process.exit(1);
   }
 }

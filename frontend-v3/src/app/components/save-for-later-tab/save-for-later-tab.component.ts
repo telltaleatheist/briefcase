@@ -453,6 +453,7 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
    * Add multiple saved links to library
    */
   async addMultipleToLibrary(linkIds: string[]): Promise<void> {
+    console.log('[AddMultipleToLibrary] Called with linkIds:', linkIds);
     let successCount = 0;
     let errorCount = 0;
 
@@ -514,9 +515,10 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
    * Handle add to tabs dialog confirmation
    */
   async onAddToTabsConfirm(result: AddToTabsResult): Promise<void> {
-    console.log('[AddToTabs] onAddToTabsConfirm called with:', result);
+    console.log('[AddToTabs] ========== onAddToTabsConfirm START ==========');
+    console.log('[AddToTabs] result:', JSON.stringify(result));
     const linkIds = this.pendingItemIds();
-    console.log('[AddToTabs] pendingItemIds:', linkIds);
+    console.log('[AddToTabs] pendingItemIds:', linkIds, 'count:', linkIds.length);
 
     // Filter to only IDs that still exist in our saved links
     const currentLinks = this.savedLinks();
@@ -536,10 +538,13 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
 
       // Step 1: Add to library if requested (only for completed downloads)
       if (result.addToLibrary) {
+        console.log('[AddToTabs] Processing library add...');
         const completedLinkIds = validLinkIds.filter(id => {
           const link = currentLinks.find(l => l.id === id);
+          console.log(`[AddToTabs] Link ${id}: status=${link?.status}`);
           return link && link.status === 'completed';
         });
+        console.log('[AddToTabs] completedLinkIds:', completedLinkIds, 'count:', completedLinkIds.length);
 
         let librarySuccessCount = 0;
         let libraryFailCount = 0;
@@ -571,10 +576,12 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
           }
           this.notificationService.success('Added to Library', message);
         } else if (completedLinkIds.length === 0) {
-          this.notificationService.info('Skipped Library', 'No completed downloads to add to library');
+          this.notificationService.warning('Cannot Add', 'No completed downloads to add - items may still be downloading or have failed');
         } else if (libraryFailCount > 0) {
           this.notificationService.error('Failed', 'Could not add items to library');
         }
+      } else {
+        console.log('[AddToTabs] result.addToLibrary is FALSE - skipping library add');
       }
 
       // Step 2: Add to tabs
@@ -644,8 +651,11 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
       } else {
         console.log('[AddToTabs] addToTabs is false, skipping tabs');
       }
+
+      // Ensure we show some feedback if nothing else was shown
+      console.log('[AddToTabs] ========== onAddToTabsConfirm END ==========');
     } catch (error) {
-      console.error('Failed to process:', error);
+      console.error('[AddToTabs] EXCEPTION in processing:', error);
       this.notificationService.error('Error', 'An error occurred');
     }
 

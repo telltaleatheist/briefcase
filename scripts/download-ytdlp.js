@@ -111,62 +111,86 @@ function downloadFile(url, dest, redirectCount = 0) {
 }
 
 /**
+ * Check if a binary already exists and has a reasonable size (> 1MB)
+ */
+function binaryExists(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  const stats = fs.statSync(filePath);
+  return stats.size > 1024 * 1024; // > 1MB
+}
+
+/**
  * Main download function
  */
 async function downloadYtDlp() {
   try {
-    console.log('╔═══════════════════════════════════════════════════════════╗');
-    console.log('║        Downloading yt-dlp Binaries                        ║');
-    console.log('╚═══════════════════════════════════════════════════════════╝\n');
-
     // Create bin directory if it doesn't exist
     if (!fs.existsSync(BIN_DIR)) {
       fs.mkdirSync(BIN_DIR, { recursive: true });
     }
 
-    console.log('\n📥 Downloading yt-dlp binaries...\n');
+    const macosPath = path.join(BIN_DIR, 'yt-dlp_macos');
+    const linuxPath = path.join(BIN_DIR, 'yt-dlp_linux');
+    const windowsPath = path.join(BIN_DIR, 'yt-dlp.exe');
 
-    const results = { macos: false, linux: false, windows: false };
+    // Check if all binaries already exist
+    const macosExists = binaryExists(macosPath);
+    const linuxExists = binaryExists(linuxPath);
+    const windowsExists = binaryExists(windowsPath);
+
+    if (macosExists && linuxExists && windowsExists) {
+      console.log('✅ yt-dlp: All binaries already cached, skipping download');
+      return;
+    }
+
+    console.log('╔═══════════════════════════════════════════════════════════╗');
+    console.log('║        Downloading yt-dlp Binaries                        ║');
+    console.log('╚═══════════════════════════════════════════════════════════╝\n');
+
+    const results = { macos: macosExists, linux: linuxExists, windows: windowsExists };
 
     // macOS
-    console.log('▶️  Downloading macOS version...');
-    try {
-      await downloadFile(
-        DOWNLOAD_URLS.macos,
-        path.join(BIN_DIR, 'yt-dlp_macos')
-      );
-      fs.chmodSync(path.join(BIN_DIR, 'yt-dlp_macos'), 0o755);
-      results.macos = true;
-      console.log('   ✅ macOS: Done');
-    } catch (err) {
-      console.error(`   ❌ Failed to download macOS version: ${err.message}`);
+    if (!macosExists) {
+      console.log('▶️  Downloading macOS version...');
+      try {
+        await downloadFile(DOWNLOAD_URLS.macos, macosPath);
+        fs.chmodSync(macosPath, 0o755);
+        results.macos = true;
+        console.log('   ✅ macOS: Done');
+      } catch (err) {
+        console.error(`   ❌ Failed to download macOS version: ${err.message}`);
+      }
+    } else {
+      console.log('✅ macOS: Already cached');
     }
 
     // Linux
-    console.log('\n▶️  Downloading Linux version...');
-    try {
-      await downloadFile(
-        DOWNLOAD_URLS.linux,
-        path.join(BIN_DIR, 'yt-dlp_linux')
-      );
-      fs.chmodSync(path.join(BIN_DIR, 'yt-dlp_linux'), 0o755);
-      results.linux = true;
-      console.log('   ✅ Linux: Done');
-    } catch (err) {
-      console.error(`   ❌ Failed to download Linux version: ${err.message}`);
+    if (!linuxExists) {
+      console.log('\n▶️  Downloading Linux version...');
+      try {
+        await downloadFile(DOWNLOAD_URLS.linux, linuxPath);
+        fs.chmodSync(linuxPath, 0o755);
+        results.linux = true;
+        console.log('   ✅ Linux: Done');
+      } catch (err) {
+        console.error(`   ❌ Failed to download Linux version: ${err.message}`);
+      }
+    } else {
+      console.log('✅ Linux: Already cached');
     }
 
     // Windows
-    console.log('\n▶️  Downloading Windows version...');
-    try {
-      await downloadFile(
-        DOWNLOAD_URLS.windows,
-        path.join(BIN_DIR, 'yt-dlp.exe')
-      );
-      results.windows = true;
-      console.log('   ✅ Windows: Done');
-    } catch (err) {
-      console.error(`   ❌ Failed to download Windows version: ${err.message}`);
+    if (!windowsExists) {
+      console.log('\n▶️  Downloading Windows version...');
+      try {
+        await downloadFile(DOWNLOAD_URLS.windows, windowsPath);
+        results.windows = true;
+        console.log('   ✅ Windows: Done');
+      } catch (err) {
+        console.error(`   ❌ Failed to download Windows version: ${err.message}`);
+      }
+    } else {
+      console.log('✅ Windows: Already cached');
     }
 
     // Check if at least one platform succeeded
@@ -177,10 +201,6 @@ async function downloadYtDlp() {
 
     // Show file sizes
     console.log('\n📊 File sizes:');
-    const macosPath = path.join(BIN_DIR, 'yt-dlp_macos');
-    const linuxPath = path.join(BIN_DIR, 'yt-dlp_linux');
-    const windowsPath = path.join(BIN_DIR, 'yt-dlp.exe');
-
     if (results.macos && fs.existsSync(macosPath)) {
       const size = fs.statSync(macosPath).size;
       console.log(`   macOS:   ${(size / 1024 / 1024).toFixed(2)} MB`);

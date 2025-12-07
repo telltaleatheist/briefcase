@@ -122,7 +122,13 @@ export class AddToTabsDialogComponent {
   }
 
   confirm_action() {
+    console.log('[AddToTabsDialog] confirm_action called');
+    console.log('[AddToTabsDialog] canConfirm():', this.canConfirm());
+    console.log('[AddToTabsDialog] addToLibrary:', this.addToLibrary());
+    console.log('[AddToTabsDialog] addToTabs:', this.addToTabs());
+
     if (!this.canConfirm()) {
+      console.log('[AddToTabsDialog] canConfirm returned false, returning early');
       return;
     }
 
@@ -133,6 +139,7 @@ export class AddToTabsDialogComponent {
       createNewTab: this.newTabName().trim() || undefined
     };
 
+    console.log('[AddToTabsDialog] Emitting confirm with result:', result);
     this.confirm.emit(result);
     this.close();
   }

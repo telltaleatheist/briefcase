@@ -101,6 +101,24 @@ function getYtDlpBinaryName(): string {
 }
 
 /**
+ * Get whisper.cpp binary name for current platform/architecture
+ */
+function getWhisperBinaryName(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+
+  if (platform === 'win32') {
+    return 'whisper-cli.exe';
+  } else if (platform === 'darwin') {
+    // macOS: architecture-specific binaries
+    return arch === 'arm64' ? 'whisper-cli-arm64' : 'whisper-cli-x64';
+  } else {
+    // Linux
+    return 'whisper-cli';
+  }
+}
+
+/**
  * Get the Python directory path
  * In dev: dist-python/python-x64 (or python-arm64)
  * In prod: resources/python
@@ -152,11 +170,12 @@ export function getRuntimePaths() {
     ),
 
     // whisper.cpp - standalone binary, no Python needed!
+    // macOS has architecture-specific binaries
     whisperCpp: path.join(
       resourcesPath,
       'utilities',
       'bin',
-      process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
+      getWhisperBinaryName()
     ),
 
     // Whisper model file

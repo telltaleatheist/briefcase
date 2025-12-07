@@ -19,7 +19,10 @@
     "prebuild:all": "npm run verify:deps || npm run install:backend",
     "build:all": "npm run build:shared && npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
     "build:backend": "cd backend && npm install --prefer-offline && tsc -p tsconfig.json && npm run build",
+    "build:backend:fast": "cd backend && npm run build",
     "build:frontend": "cd frontend-v3 && npm run build",
+    "build:frontend:dev": "cd frontend-v3 && npx ng build --configuration=development",
+    "build:fast": "npm run build:shared && npm run build:backend:fast && npm run build:frontend:dev && npm run build:electron && npm run build:preload",
     "build:electron": "tsc -p electron/tsconfig.electron.json",
     "build:preload": "tsc -p electron/tsconfig.preload.json",
     "build:shared": "tsc -p shared",
@@ -40,6 +43,7 @@
     "electron:test-packaged": "npm run build:all && cross-env NODE_ENV=production electron .",
     "electron": "npm run build:all && electron .",
     "package:mac": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64 && npm run package:mac:electron-x64",
+    "package:mac:fast": "npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:fast && npm run package:backend:prod && npm run package:mac:electron-arm64 && npm run package:mac:electron-x64",
     "package:mac:electron-arm64": "electron-builder --mac --arm64 --publish never",
     "package:mac:electron-x64": "electron-builder --mac --x64 --publish never",
     "package:mac-arm64": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
@@ -76,6 +80,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/electron": "^1.6.12",
     "@types/node": "^22.15.3",
+    "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
     "electron-builder": "^24.13.3",
@@ -106,6 +111,7 @@
     "productName": "ClipChimp",
     "asar": true,
     "compression": "normal",
+    "afterPack": "./scripts/afterPack.js",
     "directories": {
       "output": "dist-electron",
       "buildResources": "assets"
@@ -143,12 +149,26 @@
           "bin/yt-dlp_linux",
           "bin/whisper-cli",
           "bin/whisper-cli.exe",
+          "bin/whisper-cli-arm64",
+          "bin/whisper-cli-x64",
           "bin/libwhisper.1.dylib",
+          "bin/libwhisper.1-arm64.dylib",
+          "bin/libwhisper.1-x64.dylib",
           "bin/libggml.dylib",
+          "bin/libggml-arm64.dylib",
+          "bin/libggml-x64.dylib",
           "bin/libggml-base.dylib",
+          "bin/libggml-base-arm64.dylib",
+          "bin/libggml-base-x64.dylib",
           "bin/libggml-cpu.dylib",
+          "bin/libggml-cpu-arm64.dylib",
+          "bin/libggml-cpu-x64.dylib",
           "bin/libggml-blas.dylib",
+          "bin/libggml-blas-arm64.dylib",
+          "bin/libggml-blas-x64.dylib",
           "bin/libggml-metal.dylib",
+          "bin/libggml-metal-arm64.dylib",
+          "bin/libggml-metal-x64.dylib",
           "bin/ggml.dll",
           "bin/ggml-base.dll",
           "bin/ggml-cpu.dll",
@@ -210,6 +230,14 @@
         {
           "from": "node_modules/@ffprobe-installer/darwin-arm64",
           "to": "node_modules/@ffprobe-installer/darwin-arm64"
+        },
+        {
+          "from": "node_modules/@ffmpeg-installer/darwin-x64",
+          "to": "node_modules/@ffmpeg-installer/darwin-x64"
+        },
+        {
+          "from": "node_modules/@ffprobe-installer/darwin-x64",
+          "to": "node_modules/@ffprobe-installer/darwin-x64"
         }
       ],
       "extendInfo": {

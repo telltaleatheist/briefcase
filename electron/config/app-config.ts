@@ -3,6 +3,7 @@ import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as log from 'electron-log';
+import { execSync } from 'child_process';
 import { EnvironmentUtil } from '../environment.util';
 
 /**
@@ -75,5 +76,68 @@ export class AppConfig {
     process.env.ELECTRON_RESOURCES_PATH = this.resourcesPath;
     process.env.ELECTRON_PRELOAD_PATH = this.preloadPath;
     process.env.APP_ROOT = this.appPath;
+
+    // Clear quarantine attributes on macOS to prevent Gatekeeper delays
+    this.clearQuarantineAttributes();
+  }
+
+  /**
+   * Clear macOS quarantine attributes from bundled binaries
+   * This prevents Gatekeeper from causing multi-minute delays on first run
+   */
+  private static clearQuarantineAttributes(): void {
+    if (process.platform !== 'darwin') {
+      return;
+    }
+
+    // Only do this in production (packaged app)
+    if (!app.isPackaged) {
+      return;
+    }
+
+    const markerFile = path.join(this.userDataPath, '.quarantine-cleared');
+
+    // Check if we've already cleared quarantine for this version
+    const currentVersion = app.getVersion();
+    if (fs.existsSync(markerFile)) {
+      try {
+        const clearedVersion = fs.readFileSync(markerFile, 'utf8').trim();
+        if (clearedVersion === currentVersion) {
+          log.info('Quarantine already cleared for version', currentVersion);
+          return;
+        }
+      } catch {
+        // Continue with clearing
+      }
+    }
+
+    log.info('Clearing quarantine attributes from bundled binaries...');
+
+    // Paths to clear quarantine from
+    const pathsToClear = [
+      path.join(this.resourcesPath, 'utilities'),
+      path.join(this.resourcesPath, 'node_modules', '@ffmpeg-installer'),
+      path.join(this.resourcesPath, 'node_modules', '@ffprobe-installer'),
+    ];
+
+    for (const targetPath of pathsToClear) {
+      if (fs.existsSync(targetPath)) {
+        try {
+          // xattr -cr removes all extended attributes recursively
+          execSync(`xattr -cr "${targetPath}"`, { stdio: 'ignore' });
+          log.info(`Cleared quarantine from: ${targetPath}`);
+        } catch (error: any) {
+          log.warn(`Failed to clear quarantine from ${targetPath}:`, error.message);
+        }
+      }
+    }
+
+    // Write marker file
+    try {
+      fs.writeFileSync(markerFile, currentVersion);
+      log.info('Quarantine clearing complete');
+    } catch (error: any) {
+      log.warn('Failed to write quarantine marker:', error.message);
+    }
   }
 }
