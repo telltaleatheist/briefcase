@@ -43,11 +43,22 @@ export class AiSetupService {
     this.availability.update(v => ({ ...v, isChecking: true }));
 
     try {
-      // Check Ollama
-      const ollamaResult = await this.checkOllama().toPromise();
-
-      // Check API keys
+      // Check API keys first (this also returns lastUsedProvider)
       const keysResult = await this.checkAPIKeys().toPromise();
+
+      // Only check Ollama if:
+      // 1. No provider is set yet (first run)
+      // 2. Ollama is the selected provider
+      // 3. No API keys are configured (user might want to use Ollama)
+      const shouldCheckOllama =
+        !keysResult?.lastUsedProvider ||
+        keysResult.lastUsedProvider === 'ollama' ||
+        (!keysResult.hasClaudeKey && !keysResult.hasOpenAIKey);
+
+      let ollamaResult = { available: false, models: [] as string[] };
+      if (shouldCheckOllama) {
+        ollamaResult = await this.checkOllama().toPromise() || { available: false, models: [] };
+      }
 
       const newAvailability: AIAvailability = {
         hasOllama: ollamaResult?.available || false,
@@ -136,16 +147,17 @@ export class AiSetupService {
   /**
    * Check which API keys are configured
    */
-  private checkAPIKeys(): Observable<{ hasClaudeKey: boolean; hasOpenAIKey: boolean }> {
+  private checkAPIKeys(): Observable<{ hasClaudeKey: boolean; hasOpenAIKey: boolean; lastUsedProvider?: string }> {
     return this.http.get<any>(`${this.API_BASE}/config/api-keys`).pipe(
       map(response => ({
         // Backend returns '***' when key is set (masked for security), so '***' means key EXISTS
         hasClaudeKey: !!response.claudeApiKey && response.claudeApiKey !== '',
-        hasOpenAIKey: !!response.openaiApiKey && response.openaiApiKey !== ''
+        hasOpenAIKey: !!response.openaiApiKey && response.openaiApiKey !== '',
+        lastUsedProvider: response.lastUsedProvider
       })),
       catchError(error => {
         console.error('Error checking API keys:', error);
-        return of({ hasClaudeKey: false, hasOpenAIKey: false });
+        return of({ hasClaudeKey: false, hasOpenAIKey: false, lastUsedProvider: undefined });
       })
     );
   }
