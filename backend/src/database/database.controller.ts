@@ -26,9 +26,23 @@ import { FilenameDateUtil } from '../common/utils/filename-date.util';
  * - Batch analysis operations
  * - Migration from legacy library.json (optional)
  */
+// Undo entry structure for tracking deleted items
+interface UndoEntry {
+  id: string;
+  type: 'video' | 'file';
+  data: any;
+  timestamp: Date;
+  description: string;
+}
+
 @Controller('database')
 export class DatabaseController {
   private readonly logger = new Logger(DatabaseController.name);
+
+  // Undo stack for recent operations (max 50 entries, expires after 30 minutes)
+  private undoStack: UndoEntry[] = [];
+  private readonly UNDO_MAX_ENTRIES = 50;
+  private readonly UNDO_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -197,33 +211,53 @@ export class DatabaseController {
           media_type: video.media_type,
           download_date: video.download_date,
           upload_date: video.upload_date,
+          added_at: video.added_at, // Include added_at for sorting
         });
       }
     }
 
-    // Find duplicate entries (all entries except the first one for each path)
+    // Find duplicate entries - keep OLDEST entry (by added_at), mark NEWER ones as duplicates
     const duplicateEntries: any[] = [];
     const pathsWithDuplicates: string[] = [];
+    const keptEntries: any[] = []; // Track which entries we're keeping (for reference)
 
-    for (const [path, entries] of pathMap.entries()) {
+    for (const [filePath, entries] of pathMap.entries()) {
       if (entries.length > 1) {
-        pathsWithDuplicates.push(path);
-        // Keep the first entry, mark the rest as duplicates
+        pathsWithDuplicates.push(filePath);
+
+        // Sort by added_at ascending - oldest first
+        entries.sort((a, b) => {
+          const dateA = a.added_at ? new Date(a.added_at).getTime() : 0;
+          const dateB = b.added_at ? new Date(b.added_at).getTime() : 0;
+          return dateA - dateB;
+        });
+
+        // Keep the oldest entry (index 0), mark the rest as duplicates
+        const originalEntry = entries[0];
+        keptEntries.push({
+          id: originalEntry.id,
+          filename: originalEntry.filename,
+          added_at: originalEntry.added_at,
+        });
+
         for (let i = 1; i < entries.length; i++) {
           duplicateEntries.push({
             ...entries[i],
             duplicate_count: entries.length,
-            is_duplicate_of: path,
+            is_duplicate_of: filePath,
+            original_id: originalEntry.id, // Reference to the entry being kept
+            original_added_at: originalEntry.added_at,
           });
         }
       }
     }
 
-    this.logger.log(`Found ${pathsWithDuplicates.length} paths with duplicates (${duplicateEntries.length} duplicate entries total)`);
+    this.logger.log(`Found ${pathsWithDuplicates.length} paths with duplicates (${duplicateEntries.length} duplicate entries to remove, keeping oldest)`);
 
     return {
       success: true,
       duplicateEntries,
+      keptEntries, // Show which entries are being preserved
       pathsWithDuplicates: pathsWithDuplicates.length,
       totalDuplicates: duplicateEntries.length,
     };
@@ -349,6 +383,24 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/debug-counts
+   * Debug endpoint to trace video count issues
+   */
+  @Get('debug-counts')
+  debugCounts() {
+    const db = this.databaseService['ensureInitialized']();
+    const rawCount = db.prepare('SELECT COUNT(*) as c FROM videos').get() as any;
+    const allVideos = this.databaseService.getAllVideos({ linkedOnly: true });
+
+    return {
+      rawSqlCount: rawCount.c,
+      getAllVideosCount: allVideos.length,
+      firstFiveIds: allVideos.slice(0, 5).map((v: any) => v.id),
+      lastFiveIds: allVideos.slice(-5).map((v: any) => v.id),
+    };
+  }
+
+  /**
    * GET /api/database/videos
    * Get all videos with optional filters
    */
@@ -370,10 +422,12 @@ export class DatabaseController {
       videos = this.databaseService.getAllVideosHierarchical({
         linkedOnly: shouldFilterLinked,
       });
+      this.logger.debug(`[getVideos] Hierarchical query returned ${videos.length} videos`);
     } else {
       videos = this.databaseService.getAllVideos({
         linkedOnly: shouldFilterLinked,
       });
+      this.logger.debug(`[getVideos] getAllVideos returned ${videos.length} videos`);
     }
 
     // Enrich with parent/child relationship data if requested
@@ -1959,6 +2013,24 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/cleanup-duplicates
+   * Clean up duplicate video entries where filename doesn't match current_path
+   */
+  @Post('cleanup-duplicates')
+  cleanupDuplicateEntries() {
+    this.logger.log('Cleaning up duplicate video entries');
+    const result = this.databaseService.cleanupDuplicateEntries();
+    return {
+      success: true,
+      deletedCount: result.deletedCount,
+      deletedEntries: result.deletedEntries,
+      message: result.deletedCount > 0
+        ? `Cleaned up ${result.deletedCount} duplicate video entr${result.deletedCount > 1 ? 'ies' : 'y'}`
+        : 'No duplicate entries found'
+    };
+  }
+
+  /**
    * GET /api/database/missing-files
    * Find database entries where the file doesn't exist on disk
    * Actually checks file existence, not just is_linked flag
@@ -2064,6 +2136,7 @@ export class DatabaseController {
   /**
    * POST /api/database/prune-selected
    * Delete selected orphaned videos from the database
+   * Stores deleted entries for undo functionality
    */
   @Post('prune-selected')
   pruneSelectedVideos(@Body() body: { videoIds: string[] }) {
@@ -2077,9 +2150,37 @@ export class DatabaseController {
       };
     }
 
+    // Clean up expired undo entries
+    this.cleanupUndoStack();
+
     let deletedCount = 0;
+    const deletedVideos: any[] = [];
+
     for (const videoId of body.videoIds) {
       try {
+        // Get full video data before deletion for undo
+        const video = this.databaseService.getVideoById(videoId);
+        if (video) {
+          // Get related data (transcript, tags, etc.)
+          const transcript = this.databaseService.getTranscript(videoId);
+          const tags = this.databaseService.getTags(videoId);
+
+          // Store for undo
+          this.undoStack.push({
+            id: videoId,
+            type: 'video',
+            data: {
+              video,
+              transcript,
+              tags,
+            },
+            timestamp: new Date(),
+            description: `Deleted: ${video.filename}`,
+          });
+
+          deletedVideos.push({ id: videoId, filename: video.filename });
+        }
+
         this.databaseService.deleteVideo(videoId);
         deletedCount++;
       } catch (error: any) {
@@ -2087,13 +2188,154 @@ export class DatabaseController {
       }
     }
 
+    // Trim undo stack if too large
+    while (this.undoStack.length > this.UNDO_MAX_ENTRIES) {
+      this.undoStack.shift();
+    }
+
     return {
       success: true,
       deletedCount,
+      deletedVideos,
+      canUndo: deletedCount > 0,
       message: deletedCount > 0
-        ? `Deleted ${deletedCount} orphaned video${deletedCount > 1 ? 's' : ''} from database`
+        ? `Deleted ${deletedCount} video${deletedCount > 1 ? 's' : ''} from database (Ctrl+Z to undo)`
         : 'No videos were deleted'
     };
+  }
+
+  /**
+   * Clean up expired undo entries
+   */
+  private cleanupUndoStack() {
+    const now = Date.now();
+    this.undoStack = this.undoStack.filter(
+      entry => now - entry.timestamp.getTime() < this.UNDO_TTL_MS
+    );
+  }
+
+  /**
+   * GET /api/database/undo-status
+   * Check if undo is available
+   */
+  @Get('undo-status')
+  getUndoStatus() {
+    this.cleanupUndoStack();
+
+    const lastEntry = this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1] : null;
+
+    return {
+      canUndo: this.undoStack.length > 0,
+      undoCount: this.undoStack.length,
+      lastOperation: lastEntry ? lastEntry.description : null,
+      lastTimestamp: lastEntry ? lastEntry.timestamp : null,
+    };
+  }
+
+  /**
+   * POST /api/database/undo
+   * Undo the last deletion operation
+   */
+  @Post('undo')
+  undoLastOperation() {
+    this.cleanupUndoStack();
+
+    if (this.undoStack.length === 0) {
+      return {
+        success: false,
+        error: 'Nothing to undo',
+      };
+    }
+
+    // Pop the last entry
+    const entry = this.undoStack.pop()!;
+    this.logger.log(`Undoing: ${entry.description}`);
+
+    try {
+      if (entry.type === 'video') {
+        const { video, transcript, tags } = entry.data;
+
+        // Re-insert the video with only supported fields
+        this.databaseService.insertVideo({
+          id: video.id,
+          filename: video.filename,
+          currentPath: video.current_path,
+          downloadDate: video.download_date,
+          fileHash: video.file_hash || '',
+          uploadDate: video.upload_date,
+          durationSeconds: video.duration_seconds,
+          fileSizeBytes: video.file_size_bytes,
+          sourceUrl: video.source_url,
+          mediaType: video.media_type,
+          fileExtension: video.file_extension,
+        });
+
+        // Restore additional fields via direct update if they exist
+        if (video.ai_description || video.suggested_title) {
+          const db = this.databaseService['ensureInitialized']();
+          if (video.ai_description) {
+            db.prepare('UPDATE videos SET ai_description = ? WHERE id = ?').run(video.ai_description, video.id);
+          }
+          if (video.suggested_title) {
+            db.prepare('UPDATE videos SET suggested_title = ? WHERE id = ?').run(video.suggested_title, video.id);
+          }
+        }
+
+        // Re-insert transcript if exists
+        if (transcript) {
+          this.databaseService.insertTranscript({
+            videoId: video.id,
+            plainText: transcript.plain_text,
+            srtFormat: transcript.srt_format,
+            whisperModel: transcript.whisper_model,
+            language: transcript.language,
+            transcriptionTimeSeconds: transcript.transcription_time_seconds,
+          });
+        }
+
+        // Re-insert tags
+        if (tags && tags.length > 0) {
+          for (const tag of tags) {
+            try {
+              this.databaseService.insertTag({
+                id: tag.id,
+                videoId: video.id,
+                tagName: tag.tag_name,
+                tagType: tag.tag_type,
+                source: tag.source,
+                confidence: tag.confidence,
+              });
+            } catch (e) {
+              // Ignore tag errors (might already exist)
+            }
+          }
+        }
+
+        this.databaseService.saveDatabaseToDisk();
+        this.logger.log(`Restored video: ${video.filename}`);
+
+        return {
+          success: true,
+          restored: {
+            id: video.id,
+            filename: video.filename,
+          },
+          message: `Restored: ${video.filename}`,
+          remainingUndos: this.undoStack.length,
+        };
+      }
+
+      return {
+        success: false,
+        error: 'Unknown undo entry type',
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to undo: ${error.message}`);
+      return {
+        success: false,
+        error: `Failed to undo: ${error.message}`,
+      };
+    }
   }
 
   /**
@@ -2332,10 +2574,13 @@ export class DatabaseController {
               // Check if it's a video file
               const ext = path.extname(entry.name).toLowerCase();
               if (videoExtensions.includes(ext)) {
-                files.push({
-                  filename: entry.name,
-                  fullPath: fullPath
-                });
+                // Skip ignored files (._*, .DS_Store, etc.)
+                if (!this.ignoreService.shouldIgnore(fullPath)) {
+                  files.push({
+                    filename: entry.name,
+                    fullPath: fullPath
+                  });
+                }
               }
             }
           }

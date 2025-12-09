@@ -29,6 +29,8 @@ export interface VideoItem {
   isGhost?: boolean; // True if this is a ghost item (shown in different week)
   ghostType?: 'parent' | 'child'; // Type of ghost relationship
   ghostRelatedName?: string; // Name of the related video (parent or child)
+  // Queue-specific fields
+  titleLoading?: boolean; // True when title/filename is being fetched
 }
 
 export interface VideoWeek {

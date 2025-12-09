@@ -1,6 +1,7 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { LibraryManagerService } from './library-manager.service';
+import { IgnoreService } from './ignore.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
@@ -59,6 +60,7 @@ export class FileScannerService {
     private readonly databaseService: DatabaseService,
     @Inject(forwardRef(() => LibraryManagerService))
     private readonly libraryManagerService: LibraryManagerService,
+    private readonly ignoreService: IgnoreService,
     private readonly ffmpegService: FfmpegService,
     private readonly mediaEventService: MediaEventService,
   ) {}
@@ -323,6 +325,11 @@ export class FileScannerService {
             const ext = path.extname(entry.name).toLowerCase();
 
             if (this.ALL_MEDIA_EXTENSIONS.includes(ext)) {
+              // Check if file should be ignored (._* files, .DS_Store, etc.)
+              if (this.ignoreService.shouldIgnore(fullPath)) {
+                continue;
+              }
+
               // Extract upload date from filename using FilenameDateUtil
               // Handles: YYYY-MM-DD, YYYY-MM-T#, YYYY-MM, YYYY formats
               const dateInfo = FilenameDateUtil.extractDateInfo(entry.name);

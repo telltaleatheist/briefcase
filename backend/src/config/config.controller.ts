@@ -1,6 +1,7 @@
 import { Controller, Post, Body, Get, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { ApiKeysService } from './api-keys.service';
+import { DEFAULT_PROMPTS } from '../analysis/prompts/analysis-prompts';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -428,5 +429,122 @@ export class ConfigController implements OnModuleInit {
       .split('-')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
+  }
+
+  /**
+   * Get custom analysis prompts
+   * Returns user's custom prompts merged with defaults
+   */
+  @Get('analysis-prompts')
+  async getAnalysisPrompts() {
+    try {
+      const promptsPath = path.join(path.dirname(this.configPath), 'analysis-prompts.json');
+
+      let customPrompts: any = {};
+      if (fs.existsSync(promptsPath)) {
+        const data = fs.readFileSync(promptsPath, 'utf8');
+        customPrompts = JSON.parse(data).prompts || {};
+      }
+
+      // Merge with defaults - custom prompts override defaults
+      return {
+        success: true,
+        prompts: {
+          description: customPrompts.description || DEFAULT_PROMPTS.description,
+          title: customPrompts.title || DEFAULT_PROMPTS.title,
+          tags: customPrompts.tags || DEFAULT_PROMPTS.tags,
+          quotes: customPrompts.quotes || DEFAULT_PROMPTS.quotes,
+        },
+        defaults: DEFAULT_PROMPTS,
+        hasCustom: {
+          description: !!customPrompts.description,
+          title: !!customPrompts.title,
+          tags: !!customPrompts.tags,
+          quotes: !!customPrompts.quotes,
+        }
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to get analysis prompts: ${(error as Error).message}`,
+        prompts: DEFAULT_PROMPTS,
+        defaults: DEFAULT_PROMPTS,
+        hasCustom: { description: false, title: false, tags: false, quotes: false }
+      };
+    }
+  }
+
+  /**
+   * Save custom analysis prompts
+   * Pass null or empty string to reset a prompt to default
+   */
+  @Post('analysis-prompts')
+  async saveAnalysisPrompts(@Body() body: { prompts: { description?: string; title?: string; tags?: string; quotes?: string } }) {
+    try {
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      const promptsPath = path.join(configDir, 'analysis-prompts.json');
+
+      // Read existing prompts
+      let existingPrompts: any = {};
+      if (fs.existsSync(promptsPath)) {
+        const data = fs.readFileSync(promptsPath, 'utf8');
+        existingPrompts = JSON.parse(data).prompts || {};
+      }
+
+      // Merge new prompts (null/empty removes the custom prompt)
+      const updatedPrompts: any = { ...existingPrompts };
+      for (const [key, value] of Object.entries(body.prompts)) {
+        if (value && value.trim()) {
+          updatedPrompts[key] = value.trim();
+        } else {
+          delete updatedPrompts[key]; // Reset to default
+        }
+      }
+
+      // Save prompts
+      fs.writeFileSync(promptsPath, JSON.stringify({
+        prompts: updatedPrompts,
+        lastUpdated: new Date().toISOString()
+      }, null, 2), 'utf8');
+
+      return {
+        success: true,
+        message: 'Analysis prompts saved'
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to save analysis prompts: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Reset all analysis prompts to defaults
+   */
+  @Post('analysis-prompts/reset')
+  async resetAnalysisPrompts() {
+    try {
+      const promptsPath = path.join(path.dirname(this.configPath), 'analysis-prompts.json');
+
+      if (fs.existsSync(promptsPath)) {
+        fs.unlinkSync(promptsPath);
+      }
+
+      return {
+        success: true,
+        message: 'Analysis prompts reset to defaults',
+        prompts: DEFAULT_PROMPTS
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to reset analysis prompts: ${(error as Error).message}`
+      };
+    }
   }
 }

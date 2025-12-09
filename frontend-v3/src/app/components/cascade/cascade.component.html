@@ -78,7 +78,12 @@
               }
 
               <!-- Title -->
-              <div class="video-title">{{ item.video.name }}</div>
+              <div class="video-title">
+                @if (item.video.titleLoading) {
+                  <span class="title-spinner"></span>
+                }
+                {{ item.video.name }}
+              </div>
 
               <!-- Ghost relationship indicator for parents (BELOW title) -->
               @if (item.video.isGhost && item.video.ghostType === 'parent') {

@@ -216,13 +216,13 @@ export class SharedDatabaseService extends DatabaseService {
     mediaType?: string;
     fileExtension?: string;
     downloadDate?: string;
-  }): void {
+  }): { inserted: boolean; existingId?: string } {
     // Convert absolute path to NAS-relative if in shared mode
     const pathToStore = this.isSharedMode
       ? this.pathMapper.toRelativePath(video.currentPath)
       : video.currentPath;
 
-    super.insertVideo({
+    return super.insertVideo({
       ...video,
       currentPath: pathToStore,
     });

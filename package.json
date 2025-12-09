@@ -141,41 +141,12 @@
         ]
       },
       {
-        "from": "utilities",
-        "to": "utilities",
+        "from": "utilities/models",
+        "to": "utilities/models",
         "filter": [
-          "bin/yt-dlp_macos",
-          "bin/yt-dlp.exe",
-          "bin/yt-dlp_linux",
-          "bin/whisper-cli",
-          "bin/whisper-cli.exe",
-          "bin/whisper-cli-arm64",
-          "bin/whisper-cli-x64",
-          "bin/libwhisper.1.dylib",
-          "bin/libwhisper.1-arm64.dylib",
-          "bin/libwhisper.1-x64.dylib",
-          "bin/libggml.dylib",
-          "bin/libggml-arm64.dylib",
-          "bin/libggml-x64.dylib",
-          "bin/libggml-base.dylib",
-          "bin/libggml-base-arm64.dylib",
-          "bin/libggml-base-x64.dylib",
-          "bin/libggml-cpu.dylib",
-          "bin/libggml-cpu-arm64.dylib",
-          "bin/libggml-cpu-x64.dylib",
-          "bin/libggml-blas.dylib",
-          "bin/libggml-blas-arm64.dylib",
-          "bin/libggml-blas-x64.dylib",
-          "bin/libggml-metal.dylib",
-          "bin/libggml-metal-arm64.dylib",
-          "bin/libggml-metal-x64.dylib",
-          "bin/ggml.dll",
-          "bin/ggml-base.dll",
-          "bin/ggml-cpu.dll",
-          "bin/whisper.dll",
-          "models/ggml-tiny.bin",
-          "models/ggml-base.bin",
-          "models/ggml-small.bin"
+          "ggml-tiny.bin",
+          "ggml-base.bin",
+          "ggml-small.bin"
         ]
       }
     ],
@@ -238,6 +209,29 @@
         {
           "from": "node_modules/@ffprobe-installer/darwin-x64",
           "to": "node_modules/@ffprobe-installer/darwin-x64"
+        },
+        {
+          "from": "utilities/bin/yt-dlp_macos_dir",
+          "to": "utilities/bin/yt-dlp_macos_dir"
+        },
+        {
+          "from": "utilities/bin",
+          "to": "utilities/bin",
+          "filter": [
+            "whisper-cli-arm64",
+            "whisper-cli-x64",
+            "libwhisper.1-arm64.dylib",
+            "libwhisper.1-x64.dylib",
+            "libggml-arm64.dylib",
+            "libggml-x64.dylib",
+            "libggml-base-arm64.dylib",
+            "libggml-base-x64.dylib",
+            "libggml-cpu-arm64.dylib",
+            "libggml-cpu-x64.dylib",
+            "libggml-blas-arm64.dylib",
+            "libggml-blas-x64.dylib",
+            "libggml-metal-arm64.dylib"
+          ]
         }
       ],
       "extendInfo": {
@@ -278,6 +272,10 @@
         {
           "from": "node_modules/@ffprobe-installer/win32-x64",
           "to": "node_modules/@ffprobe-installer/win32-x64"
+        },
+        {
+          "from": "utilities/bin/yt-dlp_win_dir",
+          "to": "utilities/bin/yt-dlp_win_dir"
         }
       ]
     },
@@ -312,6 +310,10 @@
         {
           "from": "node_modules/@ffprobe-installer/linux-x64",
           "to": "node_modules/@ffprobe-installer/linux-x64"
+        },
+        {
+          "from": "utilities/bin/yt-dlp_linux_dir",
+          "to": "utilities/bin/yt-dlp_linux_dir"
         }
       ]
     },

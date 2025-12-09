@@ -488,6 +488,21 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     this.items.set(value);
   }
 
+  // Refresh key - increment to force reload of current video (e.g., after path update)
+  @Input() set refreshKey(value: number) {
+    const prevKey = this.internalRefreshKey();
+    if (prevKey !== value && prevKey !== 0) {
+      // Key changed (and not initial load), force reload current media
+      console.log('Refresh key changed, reloading current media');
+      this.internalRefreshKey.set(value);
+      if (this.visible()) {
+        this.loadCurrentMedia();
+      }
+    } else {
+      this.internalRefreshKey.set(value);
+    }
+  }
+
   @Input() set selectedId(value: string | undefined) {
     if (!value) return;
     const items = this.items();
@@ -513,6 +528,7 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   items = signal<PreviewItem[]>([]);
   currentIndex = signal(0);
   isPlaying = signal(false);
+  internalRefreshKey = signal(0);
   currentTime = signal(0);
   duration = signal(0);
   progress = signal(0);
@@ -564,14 +580,21 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
 
     // Use videoId if available for streaming from backend
     const mediaId = item.videoId || item.id;
-    const url = `${this.backendUrl}/api/database/videos/${mediaId}/stream`;
+    let url = `${this.backendUrl}/api/database/videos/${mediaId}/stream`;
+
+    // Add cache-busting parameter if refresh key is set (video was re-processed)
+    const refreshKey = this.internalRefreshKey();
+    if (refreshKey > 0) {
+      url += `?t=${refreshKey}`;
+    }
 
     console.log('Media source URL:', {
       url,
       mediaId,
       itemId: item.id,
       itemVideoId: item.videoId,
-      itemName: item.name
+      itemName: item.name,
+      refreshKey
     });
 
     return url;

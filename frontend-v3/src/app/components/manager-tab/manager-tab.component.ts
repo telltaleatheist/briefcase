@@ -1,4 +1,4 @@
-import { Component, signal, computed, inject, input, output } from '@angular/core';
+import { Component, signal, computed, inject, input, output, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { IgnoreFileModalComponent } from '../ignore-file-modal/ignore-file-modal.component';
@@ -33,6 +33,68 @@ export class ManagerTabComponent {
 
   // Ignore file modal state
   ignoreFileModalOpen = signal(false);
+
+  // Undo state
+  canUndo = signal(false);
+  lastUndoOperation = signal<string | null>(null);
+
+  /**
+   * Listen for Cmd+Z / Ctrl+Z keyboard shortcut for undo
+   */
+  @HostListener('document:keydown', ['$event'])
+  handleKeyboardShortcut(event: KeyboardEvent) {
+    // Check for Cmd+Z (Mac) or Ctrl+Z (Windows/Linux)
+    if ((event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey) {
+      if (this.canUndo()) {
+        event.preventDefault();
+        this.performUndo();
+      }
+    }
+  }
+
+  /**
+   * Perform undo operation
+   */
+  performUndo() {
+    if (!this.canUndo()) return;
+
+    this.videoManagerService.undo().subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.notificationService.success(
+            'Undo Successful',
+            response.message || 'Operation undone'
+          );
+          // Refresh the library
+          const refreshCallback = this.onLibraryRefresh();
+          if (refreshCallback) refreshCallback();
+          // Update undo status
+          this.checkUndoStatus();
+        } else {
+          this.notificationService.error('Undo Failed', response.error || 'Could not undo');
+        }
+      },
+      error: (error) => {
+        this.notificationService.error('Undo Failed', error.message || 'Could not undo');
+      }
+    });
+  }
+
+  /**
+   * Check if undo is available
+   */
+  checkUndoStatus() {
+    this.videoManagerService.getUndoStatus().subscribe({
+      next: (status) => {
+        this.canUndo.set(status.canUndo);
+        this.lastUndoOperation.set(status.lastOperation);
+      },
+      error: () => {
+        this.canUndo.set(false);
+        this.lastUndoOperation.set(null);
+      }
+    });
+  }
 
   /**
    * Check if manager has results to display
@@ -331,7 +393,14 @@ export class ManagerTabComponent {
                 this.scanResults.set({ ...currentResults, data: filtered });
               }
             }
-            this.notificationService.success('Removed', `Removed ${response.deletedCount || videos.length} database entr${videos.length !== 1 ? 'ies' : 'y'}`);
+            // Update undo status
+            this.checkUndoStatus();
+            // Show success with undo hint
+            const count = response.deletedCount || videos.length;
+            this.notificationService.success(
+              'Removed',
+              `Removed ${count} database entr${count !== 1 ? 'ies' : 'y'}. Press Ctrl+Z to undo.`
+            );
           } else {
             this.notificationService.error('Delete Failed', response.error || 'Unknown error');
           }

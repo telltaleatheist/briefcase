@@ -618,6 +618,170 @@
   }
 }
 
+// ==================== PROMPTS LIST ====================
+.prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+}
+
+.prompt-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  overflow: hidden;
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: var(--text-tertiary);
+  }
+
+  &.expanded {
+    border-color: var(--primary-orange);
+  }
+}
+
+.prompt-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-tertiary);
+  }
+}
+
+.prompt-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.prompt-name {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.custom-badge {
+  padding: 2px $spacing-sm;
+  background: var(--primary-orange);
+  color: white;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  border-radius: $radius-sm;
+}
+
+.prompt-description {
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+}
+
+.expand-toggle {
+  width: 28px;
+  height: 28px;
+  @include flex-center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  .expand-icon {
+    display: inline-block;
+    font-size: $font-size-xs;
+    color: var(--text-tertiary);
+    transition: transform $transition-fast;
+
+    &.expanded {
+      transform: rotate(90deg);
+    }
+  }
+}
+
+.prompt-editor {
+  padding: $spacing-md;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+}
+
+.prompt-textarea {
+  width: 100%;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  color: var(--text-primary);
+  resize: vertical;
+  min-height: 200px;
+  line-height: $line-height-relaxed;
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-orange);
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+  }
+}
+
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-top: $spacing-md;
+}
+
+.btn-reset {
+  padding: $spacing-sm $spacing-md;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-secondary);
+    border-color: var(--text-tertiary);
+  }
+}
+
+.prompt-help {
+  margin-top: $spacing-md;
+  padding: $spacing-md;
+  background: rgba(59, 130, 246, 0.05);
+  border-left: 3px solid #3b82f6;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  color: var(--text-secondary);
+  line-height: $line-height-relaxed;
+
+  strong {
+    color: var(--text-primary);
+    display: block;
+    margin-bottom: $spacing-xs;
+  }
+
+  code {
+    padding: 2px $spacing-xs;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    color: var(--primary-orange);
+  }
+}
+
 // ==================== RESPONSIVE ====================
 @media (max-width: 768px) {
   .page-header {

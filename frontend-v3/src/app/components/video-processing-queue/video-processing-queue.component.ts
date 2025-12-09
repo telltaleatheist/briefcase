@@ -122,7 +122,7 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
     const importTask = job.tasks.find(t => t.type === 'import');
 
     if (downloadTask || importTask) {
-      // Combine progress: download is first half, import is second half
+      // Use download progress for the full 0-100% range (import is instant, so no need to split the bar)
       let combinedProgress = 0;
       let combinedStatus: 'pending' | 'running' | 'completed' | 'failed' = 'pending';
 
@@ -131,13 +131,16 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
           combinedProgress = 100;
           combinedStatus = 'completed';
         } else if (importTask.status === 'in-progress') {
-          combinedProgress = 50 + (importTask.progress / 2);
+          // Import is running - show 100% since download is done
+          combinedProgress = 100;
           combinedStatus = 'running';
         } else if (downloadTask.status === 'completed') {
-          combinedProgress = 50;
+          // Download done, import pending - show 100% (import is instant)
+          combinedProgress = 100;
           combinedStatus = 'running';
         } else if (downloadTask.status === 'in-progress') {
-          combinedProgress = downloadTask.progress / 2;
+          // Download in progress - show full 0-100% range for download
+          combinedProgress = downloadTask.progress;
           combinedStatus = 'running';
         } else if (downloadTask.status === 'failed' || importTask.status === 'failed') {
           combinedStatus = 'failed';
@@ -158,9 +161,10 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
       });
     }
 
-    // Add other tasks (not download/import) with their configs from job.settings
+    // Add other tasks (not download/import/get-info) with their configs from job.settings
     for (const task of job.tasks) {
-      if (task.type === 'download' || task.type === 'import') continue;
+      // Skip tasks that are part of the combined download-import task
+      if (task.type === 'download' || task.type === 'import' || task.type === 'get-info') continue;
 
       const taskType = this.mapTaskType(task.type);
       const config = this.getConfigForTask(taskType, job.settings);
@@ -192,12 +196,18 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
     const mapping: Record<string, TaskType> = {
       'download': 'download-import',
       'import': 'download-import',
+      'get-info': 'download-import',
       'aspect-ratio': 'fix-aspect-ratio',
       'normalize-audio': 'normalize-audio',
       'transcribe': 'transcribe',
-      'ai-analysis': 'ai-analyze'
+      'ai-analysis': 'ai-analyze',
+      'analyze': 'ai-analyze'
     };
-    return mapping[type] || 'download-import';
+    // Don't fallback to download-import for unknown types - log warning instead
+    if (!mapping[type]) {
+      console.warn(`[QUEUE] Unknown task type: ${type}`);
+    }
+    return mapping[type] || 'transcribe'; // Safer fallback
   }
 
   private mapTaskStatus(status: string): 'pending' | 'running' | 'completed' | 'failed' {

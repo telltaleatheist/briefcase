@@ -230,6 +230,94 @@
         </div>
       </div>
     </section>
+
+    <!-- Analysis Prompts Section -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">📝</div>
+        <div class="section-info">
+          <h2>Analysis Prompts</h2>
+          <p>Customize the prompts used by AI to analyze videos, generate titles, and extract tags</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        @if (loadingPrompts()) {
+          <div class="loading-state">Loading prompts...</div>
+        } @else if (prompts()) {
+          <div class="prompts-list">
+            @for (key of ['description', 'title', 'tags', 'quotes']; track key) {
+              <div class="prompt-item" [class.expanded]="expandedPrompt() === key">
+                <div class="prompt-header" (click)="togglePromptExpanded(key)">
+                  <div class="prompt-info">
+                    <div class="prompt-name">
+                      {{ getPromptLabel(key) }}
+                      @if ($any(hasCustomPrompts())[key]) {
+                        <span class="custom-badge">Custom</span>
+                      }
+                    </div>
+                    <div class="prompt-description">{{ getPromptDescription(key) }}</div>
+                  </div>
+                  <button class="expand-toggle">
+                    <span class="expand-icon" [class.expanded]="expandedPrompt() === key">▶</span>
+                  </button>
+                </div>
+
+                @if (expandedPrompt() === key) {
+                  <div class="prompt-editor">
+                    <textarea
+                      class="prompt-textarea"
+                      [value]="$any(prompts())[key]"
+                      (blur)="savePrompt($any(key), $any($event.target).value)"
+                      placeholder="Enter custom prompt..."
+                      rows="12"
+                    ></textarea>
+                    <div class="prompt-actions">
+                      @if ($any(hasCustomPrompts())[key]) {
+                        <button class="btn-reset" (click)="resetPrompt($any(key))">
+                          Reset to Default
+                        </button>
+                      }
+                      @if (savingPrompts()) {
+                        <span class="save-indicator">
+                          <span class="indicator-icon">✓</span>
+                          Saved!
+                        </span>
+                      }
+                    </div>
+                    <div class="prompt-help">
+                      <strong>Available placeholders:</strong>
+                      @switch (key) {
+                        @case ('description') {
+                          <code>{{ '{' }}titleContext{{ '}' }}</code>, <code>{{ '{' }}sectionsSummary{{ '}' }}</code>
+                        }
+                        @case ('title') {
+                          <code>{{ '{' }}currentTitle{{ '}' }}</code>, <code>{{ '{' }}description{{ '}' }}</code>, <code>{{ '{' }}peopleTags{{ '}' }}</code>, <code>{{ '{' }}topicTags{{ '}' }}</code>, <code>{{ '{' }}transcriptExcerpt{{ '}' }}</code>
+                        }
+                        @case ('tags') {
+                          <code>{{ '{' }}sectionsContext{{ '}' }}</code>, <code>{{ '{' }}excerpt{{ '}' }}</code>
+                        }
+                        @case ('quotes') {
+                          <code>{{ '{' }}category{{ '}' }}</code>, <code>{{ '{' }}description{{ '}' }}</code>, <code>{{ '{' }}timestampedText{{ '}' }}</code>
+                        }
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Reset All Prompts -->
+          <div class="section-actions">
+            <button class="action-btn secondary" (click)="resetAllPrompts()">
+              <span class="btn-icon">↺</span>
+              <span>Reset All Prompts to Defaults</span>
+            </button>
+          </div>
+        }
+      </div>
+    </section>
   </div>
 </div>
 

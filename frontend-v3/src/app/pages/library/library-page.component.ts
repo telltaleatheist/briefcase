@@ -242,6 +242,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   previewModalOpen = signal(false);
   previewItems = signal<PreviewItem[]>([]);
   previewSelectedId = signal<string | undefined>(undefined);
+  previewRefreshKey = signal(0); // Increment to force preview reload after video path update
 
   // New tab dialog state
   newTabDialogOpen = signal(false);
@@ -428,6 +429,21 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.websocketService.onVideoRenamed((event) => {
       console.log('Video renamed event received:', event);
       this.updateVideoName(event.videoId, event.newFilename, event.uploadDate);
+      this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
+    });
+
+    // Video path updated - refresh video data (e.g., after aspect ratio fix or audio normalization)
+    this.websocketService.onVideoPathUpdated((event) => {
+      console.log('Video path updated event received:', event);
+      this.updateVideoPath(event.videoId, event.newPath);
+
+      // If the video is currently being previewed, force the preview modal to reload
+      const selectedId = this.previewSelectedId();
+      if (selectedId && selectedId === event.videoId && this.previewModalOpen()) {
+        console.log('Video being previewed was updated, triggering refresh');
+        this.previewRefreshKey.update(k => k + 1);
+      }
+
       this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
     });
 
@@ -803,6 +819,56 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  // Update video path in the library when it changes (e.g., after aspect ratio fix or audio normalization)
+  private updateVideoPath(videoId: string, newPath: string) {
+    const weeks = this.videoWeeks();
+    let updated = false;
+
+    // Extract new filename from path (handle both forward and backslashes)
+    const pathParts = newPath.replace(/\\/g, '/').split('/');
+    const newFilename = pathParts[pathParts.length - 1] || newPath;
+
+    // Find and update the video in the weeks array
+    const updatedWeeks = weeks.map(week => {
+      const videos = week.videos.map(video => {
+        if (video.id === videoId) {
+          updated = true;
+          return {
+            ...video,
+            currentPath: newPath,
+            name: newFilename
+          };
+        }
+        return video;
+      });
+      return { ...week, videos };
+    });
+
+    if (updated) {
+      this.videoWeeks.set(updatedWeeks);
+      console.log(`Updated video ${videoId} path to: ${newPath}`);
+
+      // Also update filtered weeks
+      const filtered = this.filteredWeeks();
+      if (filtered.length > 0) {
+        const updatedFiltered = filtered.map(week => {
+          const videos = week.videos.map(video => {
+            if (video.id === videoId) {
+              return {
+                ...video,
+                currentPath: newPath,
+                name: newFilename
+              };
+            }
+            return video;
+          });
+          return { ...week, videos };
+        });
+        this.filteredWeeks.set(updatedFiltered);
+      }
+    }
+  }
+
   // Update queue task status from websocket events
   private updateQueueTaskStatus(jobId: string, taskType: string, status: 'pending' | 'running' | 'completed' | 'failed', progress: number) {
     const queue = this.processingQueue();
@@ -975,12 +1041,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Handle URLs added from input
   onUrlsAdded(entries: UrlEntry[]) {
-    // Create a new array to avoid mutating the original
-    const queue = [...this.processingQueue()];
+    // Items should go to stagingQueue first, then move to processingQueue when user clicks "Start"
+    const staging = [...this.stagingQueue()];
+    const processing = [...this.processingQueue()];
 
     for (const entry of entries) {
       if (entry.loading) {
-        // New URL - add to queue with default tasks
+        // New URL - add to STAGING queue with default tasks
         const id = `url-${++this.queueIdCounter}`;
         const tasks = this.defaultTaskSettings.map(t => ({
           type: t.type,
@@ -989,36 +1056,58 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           progress: 0
         }));
 
-        queue.push({
+        staging.push({
           id,
           url: entry.url,
           title: entry.title,
           status: 'pending',
-          tasks
+          tasks,
+          titleResolved: false // Title is still being fetched
         });
       } else {
-        // Metadata update - find and update existing item
-        const itemIndex = queue.findIndex(q => q.url === entry.url);
+        // Metadata update - find and update existing item in EITHER queue
+        let itemIndex = staging.findIndex(q => q.url === entry.url);
         if (itemIndex !== -1) {
-          const item = queue[itemIndex];
+          const item = staging[itemIndex];
           // Update all metadata fields
-          queue[itemIndex] = {
+          staging[itemIndex] = {
             ...item,
             title: entry.title,
             duration: entry.duration || item.duration,
-            thumbnail: entry.thumbnail || item.thumbnail
+            thumbnail: entry.thumbnail || item.thumbnail,
+            titleResolved: true // Title has been fetched
           };
+        } else {
+          // Also check processing queue (item might have been moved there already)
+          itemIndex = processing.findIndex(q => q.url === entry.url);
+          if (itemIndex !== -1) {
+            const item = processing[itemIndex];
+            // Update all metadata fields
+            processing[itemIndex] = {
+              ...item,
+              title: entry.title,
+              duration: entry.duration || item.duration,
+              thumbnail: entry.thumbnail || item.thumbnail,
+              titleResolved: true // Title has been fetched
+            };
 
-          // If download already completed (videoId exists), rename the file
-          if (item.videoId && entry.title !== item.title) {
-            console.log('Title updated after download - renaming file:', item.videoId, 'to:', entry.title);
-            this.renameDownloadedVideo(item.videoId, entry.title);
+            // If download already completed (videoId exists), rename the file
+            if (item.videoId && entry.title !== item.title) {
+              console.log('Title updated after download - renaming file:', item.videoId, 'to:', entry.title);
+              this.renameDownloadedVideo(item.videoId, entry.title);
+            }
           }
         }
       }
     }
 
-    this.processingQueue.set(queue);
+    this.stagingQueue.set(staging);
+    this.processingQueue.set(processing);
+
+    // Switch to Queue tab to show newly added items
+    if (entries.some(e => e.loading)) {
+      this.setActiveTab('queue');
+    }
   }
 
   // Remove item from queue
@@ -1658,6 +1747,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Handle queue items differently
     if (queueVideos.length > 0) {
       switch (action) {
+        case 'processing':
         case 'analyze':
           // Open config modal for queue items
           const queueIds = queueVideos.map(v => v.id);
@@ -2622,8 +2712,29 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Open config modal for selected staging items
    */
   onQueueConfigureSelected(itemIds: string[]) {
-    // TODO: Open config modal for these staging items
-    console.log('Configure staging items:', itemIds);
+    if (itemIds.length === 0) return;
+
+    // Find staging items by ID
+    const stagingItems = this.stagingQueue().filter(item =>
+      itemIds.includes(item.id)
+    );
+
+    if (stagingItems.length === 0) return;
+
+    // Get existing tasks from first item
+    const firstItem = stagingItems[0];
+    const existingTasks: QueueItemTask[] = firstItem.tasks?.map(t => ({
+      type: t.type as any,
+      status: 'pending' as const,
+      progress: 0,
+      config: t.options
+    })) || [];
+
+    this.configItemIds.set(stagingItems.map(item => item.id));
+    this.configBulkMode.set(stagingItems.length > 1);
+    this.configItemSource.set(firstItem.url ? 'url' : 'library');
+    this.configExistingTasks.set(existingTasks);
+    this.configModalOpen.set(true);
   }
 
   /**

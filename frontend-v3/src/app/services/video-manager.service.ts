@@ -138,4 +138,33 @@ export class VideoManagerService {
       }))
     );
   }
+
+  /**
+   * Get undo status (check if undo is available)
+   */
+  getUndoStatus(): Observable<{
+    canUndo: boolean;
+    undoCount: number;
+    lastOperation: string | null;
+    lastTimestamp: string | null;
+  }> {
+    return from(this.baseUrlPromise).pipe(
+      switchMap(baseUrl => this.http.get<any>(`${baseUrl}/undo-status`))
+    );
+  }
+
+  /**
+   * Undo the last deletion operation
+   */
+  undo(): Observable<{
+    success: boolean;
+    restored?: { id: string; filename: string };
+    message?: string;
+    error?: string;
+    remainingUndos?: number;
+  }> {
+    return from(this.baseUrlPromise).pipe(
+      switchMap(baseUrl => this.http.post<any>(`${baseUrl}/undo`, {}))
+    );
+  }
 }

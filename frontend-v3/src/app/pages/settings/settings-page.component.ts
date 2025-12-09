@@ -15,6 +15,20 @@ interface AnalysisCategory {
   enabled: boolean;
 }
 
+interface AnalysisPrompts {
+  description: string;
+  title: string;
+  tags: string;
+  quotes: string;
+}
+
+interface PromptsResponse {
+  success: boolean;
+  prompts: AnalysisPrompts;
+  defaults: AnalysisPrompts;
+  hasCustom: { description: boolean; title: boolean; tags: boolean; quotes: boolean };
+}
+
 @Component({
   selector: 'app-settings-page',
   standalone: true,
@@ -49,6 +63,16 @@ export class SettingsPageComponent implements OnInit {
   editingCategory = signal<AnalysisCategory | null>(null);
   isAddingCategory = signal(false);
 
+  // Analysis Prompts
+  prompts = signal<AnalysisPrompts | null>(null);
+  defaultPrompts = signal<AnalysisPrompts | null>(null);
+  hasCustomPrompts = signal<{ description: boolean; title: boolean; tags: boolean; quotes: boolean }>({
+    description: false, title: false, tags: false, quotes: false
+  });
+  loadingPrompts = signal(false);
+  savingPrompts = signal(false);
+  expandedPrompt = signal<string | null>(null); // Which prompt section is expanded
+
   // New category form
   newCategory: Partial<AnalysisCategory> = {
     name: '',
@@ -75,6 +99,7 @@ export class SettingsPageComponent implements OnInit {
     await this.loadCategories();
     await this.loadDefaultAI();
     await this.loadAvailableModels();
+    await this.loadPrompts();
   }
 
   private async loadCategories() {
@@ -297,5 +322,122 @@ export class SettingsPageComponent implements OnInit {
       console.error('Failed to save default AI:', error);
       this.savingDefaultAI.set(false);
     }
+  }
+
+  // ========================================
+  // Prompt Management
+  // ========================================
+
+  private async loadPrompts() {
+    this.loadingPrompts.set(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/config/analysis-prompts');
+      if (response.ok) {
+        const data: PromptsResponse = await response.json();
+        this.prompts.set(data.prompts);
+        this.defaultPrompts.set(data.defaults);
+        this.hasCustomPrompts.set(data.hasCustom);
+      }
+    } catch (error) {
+      console.error('Failed to load prompts:', error);
+    } finally {
+      this.loadingPrompts.set(false);
+    }
+  }
+
+  togglePromptExpanded(promptKey: string) {
+    if (this.expandedPrompt() === promptKey) {
+      this.expandedPrompt.set(null);
+    } else {
+      this.expandedPrompt.set(promptKey);
+    }
+  }
+
+  async savePrompt(promptKey: keyof AnalysisPrompts, value: string) {
+    this.savingPrompts.set(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/config/analysis-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompts: { [promptKey]: value } })
+      });
+
+      if (response.ok) {
+        // Update local state
+        const currentPrompts = this.prompts();
+        if (currentPrompts) {
+          this.prompts.set({ ...currentPrompts, [promptKey]: value || this.defaultPrompts()?.[promptKey] || '' });
+        }
+        // Update hasCustom status
+        const hasCustom = this.hasCustomPrompts();
+        this.hasCustomPrompts.set({ ...hasCustom, [promptKey]: !!value.trim() });
+
+        // Show success feedback briefly
+        setTimeout(() => {
+          this.savingPrompts.set(false);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Failed to save prompt:', error);
+      this.savingPrompts.set(false);
+    }
+  }
+
+  async resetPrompt(promptKey: keyof AnalysisPrompts) {
+    const defaults = this.defaultPrompts();
+    if (!defaults) return;
+
+    // Save empty string to reset to default
+    await this.savePrompt(promptKey, '');
+
+    // Update local state to show default
+    const currentPrompts = this.prompts();
+    if (currentPrompts) {
+      this.prompts.set({ ...currentPrompts, [promptKey]: defaults[promptKey] });
+    }
+    const hasCustom = this.hasCustomPrompts();
+    this.hasCustomPrompts.set({ ...hasCustom, [promptKey]: false });
+  }
+
+  async resetAllPrompts() {
+    if (!confirm('Reset all prompts to defaults? Your custom prompts will be lost.')) return;
+
+    this.savingPrompts.set(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/config/analysis-prompts/reset', {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.prompts.set(data.prompts);
+        this.defaultPrompts.set(data.prompts);
+        this.hasCustomPrompts.set({ description: false, title: false, tags: false, quotes: false });
+      }
+    } catch (error) {
+      console.error('Failed to reset prompts:', error);
+    } finally {
+      this.savingPrompts.set(false);
+    }
+  }
+
+  getPromptLabel(key: string): string {
+    const labels: Record<string, string> = {
+      description: 'Video Description Prompt',
+      title: 'Suggested Title Prompt',
+      tags: 'Tag Extraction Prompt',
+      quotes: 'Quote Extraction Prompt'
+    };
+    return labels[key] || key;
+  }
+
+  getPromptDescription(key: string): string {
+    const descriptions: Record<string, string> = {
+      description: 'Generates the 2-3 sentence summary of the video content',
+      title: 'Creates suggested filenames based on video analysis',
+      tags: 'Extracts people names and topic tags from transcripts',
+      quotes: 'Identifies significant quotes from flagged sections'
+    };
+    return descriptions[key] || '';
   }
 }

@@ -316,6 +316,12 @@ export class DatabaseService {
    * @returns Relative path from clips folder, or absolute path if outside clips folder
    */
   toRelativePath(absolutePath: string, clipsFolderPath: string): string {
+    // Check if path is already relative (doesn't start with / or drive letter on Windows)
+    if (!path.isAbsolute(absolutePath)) {
+      // Already relative - just normalize slashes and return
+      return absolutePath.replace(/\\/g, '/');
+    }
+
     // Normalize both paths for comparison
     const normalizedAbsolute = path.normalize(absolutePath);
     const normalizedClipsFolder = path.normalize(clipsFolderPath);
@@ -1736,10 +1742,32 @@ export class DatabaseService {
     mediaType?: string;
     fileExtension?: string;
     downloadDate?: string; // File's creation timestamp (when you downloaded it)
-  }) {
+  }): { inserted: boolean; existingId?: string } {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
     const downloadDate = video.downloadDate || now;
+
+    // Check for existing video by hash (most reliable - same content)
+    if (video.fileHash) {
+      const existingByHash = db.prepare(
+        `SELECT id FROM videos WHERE file_hash = ? LIMIT 1`
+      ).get(video.fileHash) as { id: string } | undefined;
+
+      if (existingByHash) {
+        this.logger.warn(`Duplicate detected by hash: ${video.filename} matches existing ${existingByHash.id}`);
+        return { inserted: false, existingId: existingByHash.id };
+      }
+    }
+
+    // Check for existing video by filename (fallback)
+    const existingByFilename = db.prepare(
+      `SELECT id FROM videos WHERE filename = ? LIMIT 1`
+    ).get(video.filename) as { id: string } | undefined;
+
+    if (existingByFilename) {
+      this.logger.warn(`Duplicate detected by filename: ${video.filename} matches existing ${existingByFilename.id}`);
+      return { inserted: false, existingId: existingByFilename.id };
+    }
 
     // Convert to relative path for cross-platform compatibility
     const clipsFolder = this.getClipsFolderPath();
@@ -1788,6 +1816,7 @@ export class DatabaseService {
     ).run(video.id, video.filename, video.currentPath || '', ''); // ai_description is empty initially, updated later
 
     this.saveDatabase();
+    return { inserted: true };
   }
 
   /**
@@ -2218,6 +2247,57 @@ export class DatabaseService {
   }
 
   /**
+   * Clean up duplicate video entries where filename doesn't match current_path basename
+   * This fixes data integrity issues from improper file renames
+   */
+  cleanupDuplicateEntries(): { deletedCount: number; deletedEntries: Array<{ id: string; filename: string; current_path: string }> } {
+    const db = this.ensureInitialized();
+
+    // Find all videos where the filename doesn't match the current_path basename
+    const mismatchedStmt = db.prepare(`
+      SELECT id, filename, current_path
+      FROM videos
+      WHERE filename != REPLACE(current_path, RTRIM(current_path, REPLACE(current_path, '/', '')), '')
+    `);
+    const mismatched = mismatchedStmt.all() as Array<{ id: string; filename: string; current_path: string }>;
+
+    // Filter to only entries where basename(current_path) != filename
+    const toDelete = mismatched.filter(v => {
+      const basename = path.basename(v.current_path);
+      return basename !== v.filename;
+    });
+
+    if (toDelete.length === 0) {
+      this.logger.log('[Cleanup] No mismatched duplicate entries found');
+      return { deletedCount: 0, deletedEntries: [] };
+    }
+
+    this.logger.log(`[Cleanup] Found ${toDelete.length} entries with mismatched filename/path`);
+
+    // Delete the mismatched entries
+    const deleteStmt = db.prepare('DELETE FROM videos WHERE id = ?');
+    let deletedCount = 0;
+
+    for (const entry of toDelete) {
+      try {
+        deleteStmt.run(entry.id);
+        deletedCount++;
+        this.logger.log(`[Cleanup] Deleted entry: id=${entry.id}, filename=${entry.filename}, path=${entry.current_path}`);
+      } catch (error: any) {
+        this.logger.error(`[Cleanup] Failed to delete entry ${entry.id}: ${error.message}`);
+      }
+    }
+
+    this.saveDatabase();
+    this.logger.log(`[Cleanup] Successfully deleted ${deletedCount} mismatched duplicate entries`);
+
+    return {
+      deletedCount,
+      deletedEntries: toDelete
+    };
+  }
+
+  /**
    * Get all videos (excluding children - they are fetched separately via getChildVideos)
    */
   getAllVideos(options?: { linkedOnly?: boolean; limit?: number; offset?: number; includeChildren?: boolean }): VideoRecordWithFlags[] {
@@ -2262,6 +2342,7 @@ export class DatabaseService {
 
     const stmt = db.prepare(query);
     const results = params.length > 0 ? stmt.all(...params) : stmt.all();
+    this.logger.debug(`[getAllVideos] SQL returned ${results.length} rows`);
 
     return this.resolveVideoPathsArray(results as VideoRecordWithFlags[]);
   }

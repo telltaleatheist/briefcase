@@ -305,15 +305,15 @@ export class CascadeComponent {
 
     // Staging queue item specific actions
     if (isStaging) {
-      actions.push({ label: `Configure Tasks${countSuffix}`, icon: '⚙️', action: 'analyze' });
+      actions.push({ label: `Configure${countSuffix}`, icon: '⚙️', action: 'processing' });
       actions.push({ label: '', icon: '', action: '', divider: true });
       actions.push({ label: `Remove from Queue${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
       return actions;
     }
 
-    // Legacy queue item specific actions (for backwards compatibility)
+    // Queue item specific actions
     if (isQueue) {
-      actions.push({ label: `Configure Tasks${countSuffix}`, icon: '⚙️', action: 'analyze' });
+      actions.push({ label: `Configure${countSuffix}`, icon: '⚙️', action: 'processing' });
       actions.push({ label: '', icon: '', action: '', divider: true });
       actions.push({ label: `Remove from Queue${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
       return actions;
@@ -604,6 +604,10 @@ export class CascadeComponent {
 
       case 'analyze':
         this.videoAction.emit({ action: 'analyze', videos });
+        break;
+
+      case 'processing':
+        this.videoAction.emit({ action: 'processing', videos });
         break;
 
       case 'moveToLibrary':
@@ -1040,8 +1044,9 @@ export class CascadeComponent {
    */
   highlightAndScrollToVideoId(videoId: string): void {
     // Find the itemId for this video (could be in multiple weeks)
+    // IMPORTANT: Filter out ghost items - they are duplicates and shouldn't be selected
     const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
-    const found = allItems.find(item => item.video.id === videoId);
+    const found = allItems.find(item => item.video.id === videoId && !item.video.isGhost);
 
     if (found) {
       this.highlightedItemId.set(found.itemId);
@@ -1104,11 +1109,14 @@ export class CascadeComponent {
   }
 
   // TrackBy function for virtual scroll
+  // IMPORTANT: Use unique itemId (includes week label) to avoid duplicate tracking keys
+  // for ghost videos that appear in multiple weeks
   trackItem(index: number, item: VirtualListItem): string {
     if (item.type === 'header') {
       return `header-${item.week.weekLabel}`;
     }
-    return `video-${item.video.id}`;
+    // Use itemId which is unique per week: `${weekLabel}|${video.id}`
+    return `video-${item.itemId}`;
   }
 
   /**

@@ -324,12 +324,15 @@ export class LibraryService {
       // 2. Video hasn't completed any tasks yet (no lastProcessedDate)
       const isInProcessingQueue = processingQueueIds.includes(video.id);
       const hasCompletedTasks = !!video.lastProcessedDate;
+      const isInNewSection = hoursDiff <= 24 && !isInProcessingQueue && hasCompletedTasks;
 
-      if (hoursDiff <= 24 && !isInProcessingQueue && hasCompletedTasks) {
+      if (isInNewSection) {
         past24Hours.push(video);
+        // Don't also add to date group - video should only appear in one section
+        continue;
       }
 
-      // Always add to date group based on download date
+      // Add to date group based on download date (only if not in "New" section)
       const dateKey = this.getDateKey(new Date(video.downloadDate));
       if (!dateMap.has(dateKey)) {
         dateMap.set(dateKey, []);
@@ -382,6 +385,7 @@ export class LibraryService {
     weeks.forEach(week => {
       const processedVideos: VideoItem[] = [];
       const handledIds = new Set<string>();
+      const ghostIds = new Set<string>(); // Track ghost items to avoid duplicates
 
       week.videos.forEach(video => {
         // Skip if already handled as a child
@@ -413,9 +417,11 @@ export class LibraryService {
             });
 
             // Add ghost children with relationship indicator only on the first one
-            ghostChildren.forEach((child, index) => {
+            // Skip ghosts that have already been added (to avoid duplicates from multi-parent scenarios)
+            const newGhostChildren = ghostChildren.filter(c => !ghostIds.has(c.id));
+            newGhostChildren.forEach((child, index) => {
               const isFirstGhost = index === 0;
-              const ghostCount = ghostChildren.length;
+              const ghostCount = newGhostChildren.length;
 
               const ghostChild: VideoItem = {
                 ...child,
@@ -427,6 +433,7 @@ export class LibraryService {
                 })
               };
               processedVideos.push(ghostChild);
+              ghostIds.add(child.id); // Track this ghost to avoid duplicates
               // Don't add to handledIds - it can still appear in its own week
             });
           }
@@ -460,7 +467,7 @@ export class LibraryService {
 
       childrenByParent.forEach((children, parentId) => {
         const parent = videoMap.get(parentId);
-        if (parent) {
+        if (parent && !ghostIds.has(parentId)) {
           // Check if any of these children already have an indicator
           const firstChildWithoutIndicator = children.find(c => !childrenWithIndicators.has(c.id));
           const shouldShowIndicator = firstChildWithoutIndicator !== undefined;
@@ -479,6 +486,7 @@ export class LibraryService {
             })
           };
           processedVideos.push(ghostParent);
+          ghostIds.add(parentId); // Track this ghost parent
 
           // Add all children of this parent (only once)
           children.forEach(child => {

@@ -91,13 +91,22 @@ function getPlatformFolder(): string {
 }
 
 /**
- * Get yt-dlp binary name for current platform
+ * Get yt-dlp binary path relative to utilities/bin
+ * ALL platforms use "onedir" builds (pre-extracted, fast startup)
+ * The "onefile" builds take ~8 seconds to start because they extract on every run
+ *
+ * Structure: yt-dlp_<platform>_dir/<executable> + yt-dlp_<platform>_dir/_internal/
  */
-function getYtDlpBinaryName(): string {
+function getYtDlpRelativePath(): string {
   const platform = process.platform;
-  if (platform === 'win32') return 'yt-dlp.exe';
-  if (platform === 'darwin') return 'yt-dlp_macos';
-  return 'yt-dlp_linux';
+  if (platform === 'win32') {
+    return path.join('yt-dlp_win_dir', 'yt-dlp.exe');
+  }
+  if (platform === 'darwin') {
+    return path.join('yt-dlp_macos_dir', 'yt-dlp_macos');
+  }
+  // Linux
+  return path.join('yt-dlp_linux_dir', 'yt-dlp_linux');
 }
 
 /**
@@ -161,12 +170,12 @@ export function getRuntimePaths() {
       getBinaryName('ffprobe')
     ),
 
-    // yt-dlp from utilities folder - ALWAYS bundled
+    // yt-dlp from utilities folder - ALWAYS bundled (onedir build for fast startup)
     ytdlp: path.join(
       resourcesPath,
       'utilities',
       'bin',
-      getYtDlpBinaryName()
+      getYtDlpRelativePath()
     ),
 
     // whisper.cpp - standalone binary, no Python needed!

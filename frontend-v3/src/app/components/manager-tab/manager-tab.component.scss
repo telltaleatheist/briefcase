@@ -1,7 +1,19 @@
+// Host element must fill parent container
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0; // Force flex to calculate height
+  overflow: hidden;
+}
+
 .manager-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0; // Force flex to calculate height
   overflow: hidden;
 }
 
@@ -40,13 +52,17 @@
 
 .manager-content {
   position: relative;
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0; // Force flex to calculate height
   overflow: hidden;
   display: flex;
   flex-direction: column;
 
   app-cascade {
-    flex: 1;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 0; // Force flex to calculate height
     display: flex;
     flex-direction: column;
     overflow: hidden;

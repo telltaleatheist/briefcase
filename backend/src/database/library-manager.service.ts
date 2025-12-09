@@ -111,6 +111,9 @@ export class LibraryManagerService implements OnModuleInit {
 
     const activeLibrary = this.getActiveLibrary();
     if (activeLibrary) {
+      // Create backup of library database before loading
+      this.backupLibraryDatabase(activeLibrary);
+
       this.logger.log(`[onModuleInit] Auto-loading active library: ${activeLibrary.name} (${activeLibrary.id})`);
       const initStart = Date.now();
       await this.initializeActiveLibrary();
@@ -120,6 +123,50 @@ export class LibraryManagerService implements OnModuleInit {
     }
 
     this.logger.log(`[onModuleInit] Total initialization took ${Date.now() - startTime}ms`);
+  }
+
+  /**
+   * Create a backup of the library database file
+   * Only backs up once per day - skips if backup already exists from today
+   */
+  private backupLibraryDatabase(library: ClipLibrary): void {
+    try {
+      const dbPath = library.databasePath;
+      if (!fs.existsSync(dbPath)) {
+        this.logger.warn(`[Backup] Database file not found: ${dbPath}`);
+        return;
+      }
+
+      // Create backup path: .library.db -> .library.db.bak
+      const backupPath = dbPath + '.bak';
+
+      // Check if backup already exists from today
+      if (fs.existsSync(backupPath)) {
+        const backupStats = fs.statSync(backupPath);
+        const backupDate = backupStats.mtime;
+        const today = new Date();
+
+        // Compare year, month, and day
+        if (
+          backupDate.getFullYear() === today.getFullYear() &&
+          backupDate.getMonth() === today.getMonth() &&
+          backupDate.getDate() === today.getDate()
+        ) {
+          this.logger.log(`[Backup] Skipping - backup already created today`);
+          return;
+        }
+      }
+
+      // Copy the database file (overwrites existing backup)
+      fs.copyFileSync(dbPath, backupPath);
+
+      const stats = fs.statSync(backupPath);
+      const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+      this.logger.log(`[Backup] ✓ Created backup: ${backupPath} (${sizeMB} MB)`);
+    } catch (error: any) {
+      this.logger.error(`[Backup] Failed to backup database: ${error.message}`);
+      // Don't throw - backup failure shouldn't prevent app from starting
+    }
   }
 
   /**
@@ -340,6 +387,9 @@ export class LibraryManagerService implements OnModuleInit {
       this.logger.warn(`Library not found: ${libraryId}`);
       return false;
     }
+
+    // Create backup before switching (once per day)
+    this.backupLibraryDatabase(library);
 
     // Update active library
     this.config.activeLibraryId = libraryId;

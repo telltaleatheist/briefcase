@@ -10,14 +10,21 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { execSync } = require('child_process');
 
 const BIN_DIR = path.join(__dirname, '..', 'utilities', 'bin');
 
-// URLs for standalone yt-dlp binaries
+// URLs for yt-dlp binaries - USE THE .ZIP (ONEDIR) BUILDS FOR ALL PLATFORMS!
+//
+// The "onefile" builds (yt-dlp_macos, yt-dlp.exe, etc.) are PyInstaller binaries
+// that extract themselves to a temp folder on EVERY run. This takes ~8 seconds!
+//
+// The "onedir" builds (.zip files) are pre-extracted and start INSTANTLY.
+//
 const DOWNLOAD_URLS = {
-  macos: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos',
-  linux: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp',
-  windows: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+  macos: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos.zip',
+  linux: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux.zip',
+  windows: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_win.zip'
 };
 
 /**
@@ -129,9 +136,11 @@ async function downloadYtDlp() {
       fs.mkdirSync(BIN_DIR, { recursive: true });
     }
 
-    const macosPath = path.join(BIN_DIR, 'yt-dlp_macos');
-    const linuxPath = path.join(BIN_DIR, 'yt-dlp_linux');
-    const windowsPath = path.join(BIN_DIR, 'yt-dlp.exe');
+    // All platforms use onedir builds (extracted to directories)
+    // Structure after extraction: yt-dlp_<platform>_dir/<executable> + yt-dlp_<platform>_dir/_internal/
+    const macosPath = path.join(BIN_DIR, 'yt-dlp_macos_dir', 'yt-dlp_macos');
+    const linuxPath = path.join(BIN_DIR, 'yt-dlp_linux_dir', 'yt-dlp_linux');
+    const windowsPath = path.join(BIN_DIR, 'yt-dlp_win_dir', 'yt-dlp.exe');
 
     // Check if all binaries already exist
     const macosExists = binaryExists(macosPath);
@@ -149,45 +158,105 @@ async function downloadYtDlp() {
 
     const results = { macos: macosExists, linux: linuxExists, windows: windowsExists };
 
-    // macOS
+    // macOS - download and extract the zip (onedir build for fast startup)
     if (!macosExists) {
-      console.log('▶️  Downloading macOS version...');
+      console.log('▶️  Downloading macOS version (onedir build)...');
+      const zipPath = path.join(BIN_DIR, 'yt-dlp_macos.zip');
+      const extractDir = path.join(BIN_DIR, 'yt-dlp_macos_dir');
       try {
-        await downloadFile(DOWNLOAD_URLS.macos, macosPath);
-        fs.chmodSync(macosPath, 0o755);
+        // Download the zip
+        await downloadFile(DOWNLOAD_URLS.macos, zipPath);
+
+        // Remove old extracted directory if it exists
+        if (fs.existsSync(extractDir)) {
+          fs.rmSync(extractDir, { recursive: true });
+        }
+
+        // Extract using unzip command (available on macOS)
+        console.log('   Extracting zip...');
+        execSync(`unzip -q -o "${zipPath}" -d "${extractDir}"`, { stdio: 'inherit' });
+
+        // The zip extracts directly: yt-dlp_macos (executable) + _internal/ (support files)
+        const executablePath = path.join(extractDir, 'yt-dlp_macos');
+
+        // Make the executable... executable
+        if (fs.existsSync(executablePath)) {
+          fs.chmodSync(executablePath, 0o755);
+        }
+
+        // Clean up the zip file
+        fs.unlinkSync(zipPath);
+
         results.macos = true;
-        console.log('   ✅ macOS: Done');
+        console.log('   ✅ macOS: Done (extracted onedir build)');
       } catch (err) {
-        console.error(`   ❌ Failed to download macOS version: ${err.message}`);
+        console.error(`   ❌ Failed to download/extract macOS version: ${err.message}`);
+        // Clean up partial downloads
+        if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
       }
     } else {
       console.log('✅ macOS: Already cached');
     }
 
-    // Linux
+    // Linux - download and extract the zip (onedir build for fast startup)
     if (!linuxExists) {
-      console.log('\n▶️  Downloading Linux version...');
+      console.log('\n▶️  Downloading Linux version (onedir build)...');
+      const zipPath = path.join(BIN_DIR, 'yt-dlp_linux.zip');
+      const extractDir = path.join(BIN_DIR, 'yt-dlp_linux_dir');
       try {
-        await downloadFile(DOWNLOAD_URLS.linux, linuxPath);
-        fs.chmodSync(linuxPath, 0o755);
+        await downloadFile(DOWNLOAD_URLS.linux, zipPath);
+
+        if (fs.existsSync(extractDir)) {
+          fs.rmSync(extractDir, { recursive: true });
+        }
+
+        console.log('   Extracting zip...');
+        execSync(`unzip -q -o "${zipPath}" -d "${extractDir}"`, { stdio: 'inherit' });
+
+        // The zip extracts directly: yt-dlp_linux (executable) + _internal/ (support files)
+        const executablePath = path.join(extractDir, 'yt-dlp_linux');
+        if (fs.existsSync(executablePath)) {
+          fs.chmodSync(executablePath, 0o755);
+        }
+
+        fs.unlinkSync(zipPath);
         results.linux = true;
-        console.log('   ✅ Linux: Done');
+        console.log('   ✅ Linux: Done (extracted onedir build)');
       } catch (err) {
-        console.error(`   ❌ Failed to download Linux version: ${err.message}`);
+        console.error(`   ❌ Failed to download/extract Linux version: ${err.message}`);
+        if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
       }
     } else {
       console.log('✅ Linux: Already cached');
     }
 
-    // Windows
+    // Windows - download and extract the zip (onedir build for fast startup)
     if (!windowsExists) {
-      console.log('\n▶️  Downloading Windows version...');
+      console.log('\n▶️  Downloading Windows version (onedir build)...');
+      const zipPath = path.join(BIN_DIR, 'yt-dlp_win.zip');
+      const extractDir = path.join(BIN_DIR, 'yt-dlp_win_dir');
       try {
-        await downloadFile(DOWNLOAD_URLS.windows, windowsPath);
+        await downloadFile(DOWNLOAD_URLS.windows, zipPath);
+
+        if (fs.existsSync(extractDir)) {
+          fs.rmSync(extractDir, { recursive: true });
+        }
+
+        console.log('   Extracting zip...');
+        // Use PowerShell on Windows for extraction
+        if (process.platform === 'win32') {
+          execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractDir}' -Force"`, { stdio: 'inherit' });
+        } else {
+          // When building on non-Windows, use unzip
+          execSync(`unzip -q -o "${zipPath}" -d "${extractDir}"`, { stdio: 'inherit' });
+        }
+
+        fs.unlinkSync(zipPath);
         results.windows = true;
-        console.log('   ✅ Windows: Done');
+        console.log('   ✅ Windows: Done (extracted onedir build)');
       } catch (err) {
-        console.error(`   ❌ Failed to download Windows version: ${err.message}`);
+        console.error(`   ❌ Failed to download/extract Windows version: ${err.message}`);
+        if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
       }
     } else {
       console.log('✅ Windows: Already cached');

@@ -66,7 +66,8 @@ export class QueueTabComponent {
         duration: item.duration,
         thumbnailUrl: item.thumbnail,
         sourceUrl: item.url,
-        tags: [`staging:${item.id}`]
+        tags: [`staging:${item.id}`],
+        titleLoading: item.titleResolved === false // Show spinner if title not yet resolved
       }));
 
       weeks.push({
@@ -86,7 +87,8 @@ export class QueueTabComponent {
           duration: item.duration,
           thumbnailUrl: item.thumbnail,
           sourceUrl: item.url,
-          tags: [`processing:${item.id}`, `status:${item.status}`]
+          tags: [`processing:${item.id}`, `status:${item.status}`],
+          titleLoading: item.titleResolved === false // Show spinner if title not yet resolved
         };
       });
 
@@ -126,6 +128,15 @@ export class QueueTabComponent {
     });
 
     switch (action) {
+      case 'processing':
+        // Processing config action for staging items
+        const configIds = videos
+          .filter((v: VideoItem) => v.id.startsWith('staging-'))
+          .map((v: VideoItem) => v.id.replace('staging-', ''));
+        if (configIds.length > 0) {
+          this.configureSelected.emit(configIds);
+        }
+        break;
       case 'cancel':
         this.cancelProcessing.emit(videoIds);
         break;
@@ -136,6 +147,7 @@ export class QueueTabComponent {
         break;
       case 'delete':
       case 'remove':
+      case 'removeFromQueue':
         // For staging items, remove them
         const stagingIds = videos
           .filter((v: VideoItem) => v.id.startsWith('staging-'))

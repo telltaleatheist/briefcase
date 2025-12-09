@@ -9,9 +9,11 @@ import {
 } from '@nestjs/common';
 import { FfmpegService } from './ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
+import { DatabaseService } from '../database/database.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
+import * as path from 'path';
 
 interface ProcessRequest {
   videoId: string;
@@ -36,6 +38,7 @@ export class SimpleProcessController implements OnModuleInit {
   constructor(
     private ffmpegService: FfmpegService,
     private mediaEventService: MediaEventService,
+    private databaseService: DatabaseService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -211,6 +214,17 @@ export class SimpleProcessController implements OnModuleInit {
 
       this.logger.log(`Processing completed for video ${videoId}`);
 
+      // Update the database with the new file path if it changed
+      if (outputFile !== filePath) {
+        const newFilename = path.basename(outputFile);
+        this.databaseService.updateVideoPath(videoId, outputFile);
+        this.databaseService.updateVideoFilename(videoId, newFilename);
+        this.logger.log(`Updated database path for ${videoId}: ${outputFile}`);
+
+        // Emit event so frontend knows the video was updated
+        this.mediaEventService.emitVideoPathUpdated(videoId, outputFile, filePath);
+      }
+
       // Emit completion event via WebSocket
       this.mediaEventService.emitProcessingProgress(100, 'Video processing completed', jobId);
     } catch (error: any) {
@@ -230,6 +244,17 @@ export class SimpleProcessController implements OnModuleInit {
       }
 
       this.logger.log(`Normalization completed for video ${videoId}`);
+
+      // Update the database with the new file path if it changed
+      if (outputFile !== filePath) {
+        const newFilename = path.basename(outputFile);
+        this.databaseService.updateVideoPath(videoId, outputFile);
+        this.databaseService.updateVideoFilename(videoId, newFilename);
+        this.logger.log(`Updated database path for ${videoId}: ${outputFile}`);
+
+        // Emit event so frontend knows the video was updated
+        this.mediaEventService.emitVideoPathUpdated(videoId, outputFile, filePath);
+      }
 
       // Emit completion event via WebSocket
       this.mediaEventService.emitProcessingProgress(100, 'Audio normalization completed', jobId);

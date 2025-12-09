@@ -48,6 +48,13 @@ export interface VideoRenamed {
   timestamp: string;
 }
 
+export interface VideoPathUpdated {
+  videoId: string;
+  newPath: string;
+  oldPath?: string;
+  timestamp: string;
+}
+
 export interface AnalysisCompleted {
   videoId: string;
   suggestedTitle: string;
@@ -99,6 +106,7 @@ export class WebsocketService implements OnDestroy {
   private taskCompletedCallbacks: ((event: TaskCompleted) => void)[] = [];
   private taskFailedCallbacks: ((event: TaskFailed) => void)[] = [];
   private videoRenamedCallbacks: ((event: VideoRenamed) => void)[] = [];
+  private videoPathUpdatedCallbacks: ((event: VideoPathUpdated) => void)[] = [];
   private analysisCompletedCallbacks: ((event: AnalysisCompleted) => void)[] = [];
   private suggestionRejectedCallbacks: ((event: SuggestionRejected) => void)[] = [];
   private savedLinkAddedCallbacks: ((event: SavedLink) => void)[] = [];
@@ -186,6 +194,11 @@ export class WebsocketService implements OnDestroy {
     this.socket.on('video-renamed', (event: VideoRenamed) => {
       console.log('WS video-renamed received:', event);
       this.videoRenamedCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('video-path-updated', (event: VideoPathUpdated) => {
+      console.log('WS video-path-updated received:', event);
+      this.videoPathUpdatedCallbacks.forEach(cb => cb(event));
     });
 
     // Analysis events
@@ -276,6 +289,13 @@ export class WebsocketService implements OnDestroy {
     this.videoRenamedCallbacks.push(callback);
     return () => {
       this.videoRenamedCallbacks = this.videoRenamedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onVideoPathUpdated(callback: (event: VideoPathUpdated) => void): () => void {
+    this.videoPathUpdatedCallbacks.push(callback);
+    return () => {
+      this.videoPathUpdatedCallbacks = this.videoPathUpdatedCallbacks.filter(cb => cb !== callback);
     };
   }
 

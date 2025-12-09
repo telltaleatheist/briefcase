@@ -9,6 +9,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AIProviderService, AIProviderConfig } from './ai-provider.service';
 import { OllamaService } from './ollama.service';
 import * as fs from 'fs';
+import * as path from 'path';
 import {
   buildSectionIdentificationPrompt,
   interpolatePrompt,
@@ -16,8 +17,17 @@ import {
   TAG_EXTRACTION_PROMPT,
   QUOTE_EXTRACTION_PROMPT,
   SUGGESTED_TITLE_PROMPT,
+  DEFAULT_PROMPTS,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
+
+// Interface for custom prompts loaded from config
+interface CustomPrompts {
+  description?: string;
+  title?: string;
+  tags?: string;
+  quotes?: string;
+}
 
 // =============================================================================
 // INTERFACES
@@ -118,11 +128,63 @@ const CHUNK_MINUTES = 5;
 @Injectable()
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
+  private customPromptsCache: CustomPrompts | null = null;
+  private customPromptsCacheTime = 0;
+  private readonly PROMPTS_CACHE_TTL = 30000; // 30 seconds
 
   constructor(
     private readonly aiProviderService: AIProviderService,
     private readonly ollamaService: OllamaService,
   ) {}
+
+  /**
+   * Load custom prompts from config file
+   * Caches for 30 seconds to avoid reading file on every call
+   */
+  private loadCustomPrompts(): CustomPrompts {
+    const now = Date.now();
+
+    // Check cache validity
+    const cacheValid = this.customPromptsCache !== null &&
+                       now - this.customPromptsCacheTime < this.PROMPTS_CACHE_TTL;
+    if (cacheValid && this.customPromptsCache) {
+      return this.customPromptsCache;
+    }
+
+    let prompts: CustomPrompts = {};
+
+    try {
+      const userDataPath = process.env.APPDATA ||
+        (process.platform === 'darwin' ?
+          path.join(process.env.HOME || '', 'Library', 'Application Support') :
+          path.join(process.env.HOME || '', '.config'));
+      const promptsPath = path.join(userDataPath, 'ClipChimp', 'analysis-prompts.json');
+
+      if (fs.existsSync(promptsPath)) {
+        const data = fs.readFileSync(promptsPath, 'utf8');
+        const parsed = JSON.parse(data);
+        prompts = parsed.prompts || {};
+      }
+    } catch (error) {
+      this.logger.warn('Failed to load custom prompts, using defaults:', error);
+    }
+
+    this.customPromptsCache = prompts;
+    this.customPromptsCacheTime = now;
+    return prompts;
+  }
+
+  /**
+   * Get the effective prompt (custom or default)
+   */
+  private getPrompt(promptKey: keyof CustomPrompts): string {
+    const customPrompts = this.loadCustomPrompts();
+    if (customPrompts[promptKey]) {
+      return customPrompts[promptKey]!;
+    }
+    // Return default
+    return DEFAULT_PROMPTS[promptKey];
+  }
 
   /**
    * Main entry point: Analyze transcript using AI
@@ -360,6 +422,7 @@ export class AIAnalysisService {
         aiConfig,
         analyzedSections,
         videoTitle,
+        transcript,
       );
 
       // Prepend summary to file
@@ -372,6 +435,7 @@ export class AIAnalysisService {
         videoTitle,
         summary,
         tags,
+        transcript,
       );
 
       sendProgress('analysis', 100, 'Analysis complete!');
@@ -595,8 +659,8 @@ Pay special attention to the custom instructions above when analyzing the conten
       // Build timestamped transcript for this specific section
       const timestampedText = this.buildTimestampedTranscript(sectionSegments);
 
-      // Ask AI to extract quotes
-      const prompt = interpolatePrompt(QUOTE_EXTRACTION_PROMPT, {
+      // Ask AI to extract quotes (use custom prompt if configured)
+      const prompt = interpolatePrompt(this.getPrompt('quotes'), {
         category: section.category,
         description: section.description,
         timestampedText: timestampedText.substring(0, 6000),
@@ -747,7 +811,8 @@ Pay special attention to the custom instructions above when analyzing the conten
         .slice(0, 10);
       const sectionsContext = sectionDescriptions.join(' ');
 
-      const prompt = interpolatePrompt(TAG_EXTRACTION_PROMPT, {
+      // Use custom tags prompt if configured
+      const prompt = interpolatePrompt(this.getPrompt('tags'), {
         sectionsContext,
         excerpt,
       });
@@ -795,8 +860,14 @@ Pay special attention to the custom instructions above when analyzing the conten
     config: AIProviderConfig,
     analyzedSections: AnalyzedSection[],
     videoTitle: string,
+    transcript?: string,
   ): Promise<string> {
     try {
+      // Check for insufficient transcript first
+      if (!transcript || transcript.trim().length < 100) {
+        return 'This video contains little or no useful audio to analyze.';
+      }
+
       if (!analyzedSections || analyzedSections.length === 0) {
         return 'No content could be analyzed in this video.';
       }
@@ -819,7 +890,8 @@ Pay special attention to the custom instructions above when analyzing the conten
         ? `\nVideo title/filename: ${videoTitle}\n`
         : '';
 
-      const prompt = interpolatePrompt(VIDEO_SUMMARY_PROMPT, {
+      // Use custom description prompt if configured
+      const prompt = interpolatePrompt(this.getPrompt('description'), {
         titleContext,
         sectionsSummary,
       });
@@ -827,7 +899,32 @@ Pay special attention to the custom instructions above when analyzing the conten
       const response = await this.aiProviderService.generateText(prompt, config);
 
       if (response && response.text) {
-        return response.text.trim();
+        const summary = response.text.trim();
+
+        // Reject AI refusals/meta-commentary
+        const invalidPatterns = [
+          /^i apologize/i,
+          /^i'm sorry/i,
+          /^i cannot/i,
+          /^i don't have access/i,
+          /^i do not have access/i,
+          /^unfortunately/i,
+          /^as an ai/i,
+          /^i'm unable/i,
+          /^without being able/i,
+          /^based on the filename/i,
+        ];
+        for (const pattern of invalidPatterns) {
+          if (pattern.test(summary)) {
+            this.logger.warn(`Rejected AI refusal response: "${summary.substring(0, 100)}..."`);
+            break; // Fall through to fallback summary
+          }
+        }
+
+        // If summary looks valid, return it
+        if (!invalidPatterns.some(p => p.test(summary))) {
+          return summary;
+        }
       }
 
       // Fallback summary
@@ -862,8 +959,15 @@ Pay special attention to the custom instructions above when analyzing the conten
     currentTitle: string,
     description: string,
     tags: Tags,
+    transcript: string,
   ): Promise<string | null> {
     try {
+      // Skip if transcript is too short (likely music/no speech)
+      if (!transcript || transcript.trim().length < 100) {
+        this.logger.debug('Skipping title generation - insufficient transcript content');
+        return null;
+      }
+
       const peopleTags =
         tags.people && tags.people.length > 0
           ? tags.people.slice(0, 5).join(', ')
@@ -873,11 +977,18 @@ Pay special attention to the custom instructions above when analyzing the conten
           ? tags.topics.slice(0, 5).join(', ')
           : 'None';
 
-      const prompt = interpolatePrompt(SUGGESTED_TITLE_PROMPT, {
+      // Include first ~1500 chars of transcript for context
+      const transcriptExcerpt = transcript.length > 1500
+        ? transcript.substring(0, 1500) + '...'
+        : transcript;
+
+      // Use custom title prompt if configured
+      const prompt = interpolatePrompt(this.getPrompt('title'), {
         currentTitle,
         description: description.substring(0, 500),
         peopleTags,
         topicTags,
+        transcriptExcerpt,
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
@@ -917,12 +1028,38 @@ Pay special attention to the custom instructions above when analyzing the conten
         // Clean up multiple spaces
         suggestedTitle = suggestedTitle.replace(/\s+/g, ' ').trim();
 
+        // Reject AI meta-commentary (not actual titles)
+        const invalidPatterns = [
+          /^based on/i,
+          /^the transcript/i,
+          /^this video/i,
+          /^i would/i,
+          /^i suggest/i,
+          /^here is/i,
+          /^the suggested/i,
+          /^a suggested/i,
+          /^filename:/i,
+          /^title:/i,
+        ];
+        for (const pattern of invalidPatterns) {
+          if (pattern.test(suggestedTitle)) {
+            this.logger.warn(`Rejected invalid AI title: "${suggestedTitle}"`);
+            return null;
+          }
+        }
+
         // Length limit
         if (suggestedTitle.length > 200) {
           suggestedTitle = suggestedTitle.substring(0, 200).split(',').slice(0, -1).join(',');
           if (suggestedTitle.length > 200) {
             suggestedTitle = suggestedTitle.substring(0, 200).split(' ').slice(0, -1).join(' ');
           }
+        }
+
+        // Reject if too short (likely garbage)
+        if (suggestedTitle.length < 10) {
+          this.logger.warn(`Rejected too-short AI title: "${suggestedTitle}"`);
+          return null;
         }
 
         this.logger.debug(`Generated suggested title: ${suggestedTitle}`);

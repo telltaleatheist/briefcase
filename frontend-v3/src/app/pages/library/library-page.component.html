@@ -115,18 +115,19 @@
     />
   </div>
 
-  <!-- Manager Toolbar (Manager Tab Only) -->
-  <div class="manager-tab-container" *ngIf="activeTab() === 'manager'">
-    <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
-  </div>
-
-  <!-- Main Container with Drag & Drop -->
-  <div
-    class="main-container"
-    [class.dragging-over]="isDraggingOver()"
-    (drop)="onDrop($event)"
-    (dragover)="onDragOver($event)"
-    (dragleave)="onDragLeave($event)">
+  <!-- Manager Tab: Full height container -->
+  @if (activeTab() === 'manager') {
+    <div class="manager-tab-container">
+      <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
+    </div>
+  } @else {
+    <!-- Main Container with Drag & Drop (all other tabs) -->
+    <div
+      class="main-container"
+      [class.dragging-over]="isDraggingOver()"
+      (drop)="onDrop($event)"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)">
 
     <!-- Drop overlay -->
     <div class="drop-overlay" *ngIf="isDraggingOver()">
@@ -203,6 +204,7 @@
       </div>
     </div>
   </div>
+  }
 </div>
 
 <!-- Config Modal -->
@@ -240,6 +242,7 @@
   [show]="previewModalOpen()"
   [previewItems]="previewItems()"
   [selectedId]="previewSelectedId()"
+  [refreshKey]="previewRefreshKey()"
   (closed)="onPreviewModalClosed()"
   (selectionChanged)="onPreviewSelectionChanged($event)"
 />

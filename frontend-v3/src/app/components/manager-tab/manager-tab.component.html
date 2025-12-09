@@ -29,6 +29,17 @@
       <span class="btn-icon">🚫</span>
       <span>Ignore Patterns</span>
     </button>
+
+    <!-- Undo Button -->
+    <button
+      class="btn btn-secondary undo-btn"
+      [disabled]="!canUndo()"
+      (click)="performUndo()"
+      [title]="canUndo() ? 'Undo: ' + lastUndoOperation() + ' (Ctrl+Z)' : 'Nothing to undo'">
+      <span class="btn-icon">↩️</span>
+      <span>Undo</span>
+    </button>
+
     <div class="scan-status" *ngIf="scanResults()">
       <span class="status-text">{{ getScanResultSummary() }}</span>
     </div>

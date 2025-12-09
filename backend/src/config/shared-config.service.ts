@@ -20,7 +20,6 @@ const getRuntimePaths = () => {
       ffmpeg: process.env.FFMPEG_PATH,
       ffprobe: process.env.FFPROBE_PATH,
       ytdlp: process.env.YT_DLP_PATH,
-      whisper: process.env.WHISPER_PATH || '', // Optional - whisper-cpp may not be installed
       whisperCpp: process.env.WHISPER_CPP_PATH || '',
       whisperModel: process.env.WHISPER_MODEL_PATH || '',
     };
@@ -75,25 +74,30 @@ export class SharedConfigService {
   }
 
   getWhisperPath(): string {
-    return getRuntimePaths().whisper;
+    return getRuntimePaths().whisperCpp;
   }
 
-  // Legacy method - no longer needed but kept for compatibility
+  getWhisperModelPath(): string {
+    return getRuntimePaths().whisperModel;
+  }
+
   getOutputDir(): string | undefined {
+    // Output directory is now handled by the library's clips folder
     return undefined;
   }
 
-  // Legacy method - no longer needed but kept for compatibility
-  getConfig(): any {
+  getConfig() {
     return {
       ffmpegPath: this.getFfmpegPath(),
       ffprobePath: this.getFfprobePath(),
       ytDlpPath: this.getYtDlpPath(),
-      whisperPath: this.getWhisperPath()
+      whisperPath: this.getWhisperPath(),
+      whisperModelPath: this.getWhisperModelPath(),
+      aiModel: process.env.AI_MODEL || 'qwen2.5:7b',
+      ollamaEndpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
     };
   }
 
-  // Legacy method - no longer needed but kept for compatibility
   getConfigDir(): string {
     const os = require('os');
     const path = require('path');
@@ -108,8 +112,7 @@ export class SharedConfigService {
     }
   }
 
-  // No longer needed - paths are fixed to bundled binaries
   refreshConfig(): void {
-    this.logger.log('refreshConfig called (no-op - using bundled binaries)');
+    // No-op - paths are determined at runtime from bundled binaries
   }
 }

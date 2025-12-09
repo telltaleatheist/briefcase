@@ -5,16 +5,18 @@
 :host {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  height: 0; // Force flex to calculate height
   overflow: hidden;
 }
 
 .cascade {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  height: 0; // Force flex to calculate height
   overflow: hidden;
   position: relative;
 }
@@ -54,8 +56,9 @@
 
 // Content wrapper for virtual scroll
 .library-content {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
+  height: 0; // Force flex to calculate height
   display: flex;
   flex-direction: column;
 
@@ -72,6 +75,7 @@ cdk-virtual-scroll-viewport.library-content {
   @include custom-scrollbar;
   flex: 1 1 0;
   min-height: 0;
+  height: 0; // Force flex to calculate height
   max-height: 100%;
 }
 
@@ -416,6 +420,9 @@ cdk-virtual-scroll-viewport.library-content {
 }
 
 .video-title {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
   font-size: $font-size-sm;
   font-weight: $font-weight-medium;
   color: var(--text-primary);
@@ -426,6 +433,23 @@ cdk-virtual-scroll-viewport.library-content {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+// Title loading spinner (shown when fetching video info)
+.title-spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top-color: $primary-orange;
+  border-radius: 50%;
+  animation: title-spin 0.8s linear infinite;
+}
+
+@keyframes title-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .video-meta {

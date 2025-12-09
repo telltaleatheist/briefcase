@@ -106,3 +106,5 @@ clipchimp-console*
 utilities/bin/*.dll
 utilities/bin/*.dylib
 utilities/bin/whisper-cli
+utilities/bin/yt-dlp_linux_dir/_internal/Cryptodome/Cipher/*
+utilities/bin/*
