@@ -7,13 +7,21 @@ import { VideoMetadata } from '../common/interfaces/download.interface';
 import { MediaEventService } from '../media/media-event.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { ThumbnailService } from '../database/thumbnail.service';
-import { FfmpegWrapper } from './ffmpeg-wrapper';
+import {
+  FfmpegBridge,
+  FfprobeBridge,
+  getRuntimePaths,
+  verifyBinary,
+  type FfmpegProgress,
+  type ProbeResult,
+} from '../bridges';
 
 @Injectable()
 export class FfmpegService {
   private lastReportedProgress: Map<string, number> = new Map();
   private readonly logger = new Logger(FfmpegService.name);
-  private ffmpeg: FfmpegWrapper;
+  private ffmpeg: FfmpegBridge;
+  private ffprobe: FfprobeBridge;
 
   constructor(
     private readonly eventService: MediaEventService,
@@ -22,155 +30,55 @@ export class FfmpegService {
     private readonly thumbnailService: ThumbnailService
   ) {
     try {
-      // Prioritize environment variables FIRST (set by Electron), then config service paths
-      const configFfmpegPath = this.configService.getFfmpegPath();
-      const configFfprobePath = this.configService.getFfprobePath();
+      // Try environment variables first (set by Electron), then runtime paths
+      let ffmpegPath = process.env.FFMPEG_PATH;
+      let ffprobePath = process.env.FFPROBE_PATH;
 
-      console.log('[FfmpegService] Env FFmpeg:', process.env.FFMPEG_PATH, 'Config FFmpeg:', configFfmpegPath);
-      console.log('[FfmpegService] Env FFprobe:', process.env.FFPROBE_PATH, 'Config FFprobe:', configFfprobePath);
+      // Fall back to runtime paths resolution
+      if (!ffmpegPath || !ffprobePath || !fs.existsSync(ffmpegPath) || !fs.existsSync(ffprobePath)) {
+        const paths = getRuntimePaths();
+        ffmpegPath = ffmpegPath && fs.existsSync(ffmpegPath) ? ffmpegPath : paths.ffmpeg;
+        ffprobePath = ffprobePath && fs.existsSync(ffprobePath) ? ffprobePath : paths.ffprobe;
+      }
 
-      // Prioritize env vars over config (Electron sets correct paths via env vars)
-      let ffmpegExecutablePath = process.env.FFMPEG_PATH || configFfmpegPath;
-      let ffprobeExecutablePath = process.env.FFPROBE_PATH || configFfprobePath;
-
-      // If not configured, try packaged binaries in production
-      const isPackaged = process.env.NODE_ENV === 'production' &&
-                         (process.env.RESOURCES_PATH !== undefined ||
-                          (process as any).resourcesPath !== undefined ||
-                          (process as any).defaultApp === false);
-
-      this.logger.log(`isPackaged: ${isPackaged}, NODE_ENV: ${process.env.NODE_ENV}`);
-
-      if (isPackaged && (!ffmpegExecutablePath || !ffprobeExecutablePath)) {
-        const resourcesPath = process.env.RESOURCES_PATH || (process as any).resourcesPath || path.join(process.cwd(), 'resources');
-        this.logger.log(`Final resources path for ffmpeg lookup: ${resourcesPath}`);
-
-        if (!ffmpegExecutablePath) {
-          let platformFolder = '';
-          if (process.platform === 'win32') {
-            platformFolder = 'win32-x64';
-          } else if (process.platform === 'darwin') {
-            platformFolder = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-          } else if (process.platform === 'linux') {
-            platformFolder = 'linux-x64';
-          }
-
-          const possibleFfmpegPaths = [
-            path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
-              process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
-            path.join(resourcesPath, 'backend', 'node_modules', '@ffmpeg-installer', platformFolder,
-              process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
-          ];
-
-          for (const packagedFfmpegPath of possibleFfmpegPaths) {
-            this.logger.log(`Looking for packaged ffmpeg at: ${packagedFfmpegPath}`);
-            if (fs.existsSync(packagedFfmpegPath)) {
-              ffmpegExecutablePath = packagedFfmpegPath;
-              break;
-            }
-          }
+      // Try config service as last resort
+      if (!fs.existsSync(ffmpegPath)) {
+        try {
+          ffmpegPath = this.configService.getFfmpegPath();
+        } catch {
+          // Ignore config errors
         }
-
-        if (!ffprobeExecutablePath) {
-          let platformFolder = '';
-          if (process.platform === 'win32') {
-            platformFolder = 'win32-x64';
-          } else if (process.platform === 'darwin') {
-            platformFolder = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-          } else if (process.platform === 'linux') {
-            platformFolder = 'linux-x64';
-          }
-
-          const possibleFfprobePaths = [
-            path.join(resourcesPath, 'app.asar.unpacked', 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
-              process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
-            path.join(resourcesPath, 'backend', 'node_modules', '@ffprobe-installer', platformFolder,
-              process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
-          ];
-
-          for (const packagedFfprobePath of possibleFfprobePaths) {
-            this.logger.log(`Looking for packaged ffprobe at: ${packagedFfprobePath}`);
-            if (fs.existsSync(packagedFfprobePath)) {
-              ffprobeExecutablePath = packagedFfprobePath;
-              break;
-            }
-          }
+      }
+      if (!fs.existsSync(ffprobePath)) {
+        try {
+          ffprobePath = this.configService.getFfprobePath();
+        } catch {
+          // Ignore config errors
         }
       }
 
-      // Fall back to trying to find ffmpeg/ffprobe in backend's node_modules
-      if (!ffmpegExecutablePath) {
-        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
-                              (process.platform === 'darwin' ?
-                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
-                                'linux-x64');
+      // Verify binaries exist
+      verifyBinary(ffmpegPath, 'FFmpeg');
+      verifyBinary(ffprobePath, 'FFprobe');
 
-        const possiblePaths = [
-          path.join(process.cwd(), 'node_modules', '@ffmpeg-installer', platformFolder, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
-          path.join(__dirname, '..', '..', 'node_modules', '@ffmpeg-installer', platformFolder, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
-        ];
+      // Initialize bridges
+      this.ffmpeg = new FfmpegBridge(ffmpegPath);
+      this.ffprobe = new FfprobeBridge(ffprobePath);
 
-        for (const possiblePath of possiblePaths) {
-          if (fs.existsSync(possiblePath)) {
-            ffmpegExecutablePath = possiblePath;
-            break;
-          }
-        }
-      }
-
-      if (!ffprobeExecutablePath) {
-        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
-                              (process.platform === 'darwin' ?
-                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
-                                'linux-x64');
-
-        const possiblePaths = [
-          path.join(process.cwd(), 'node_modules', '@ffprobe-installer', platformFolder, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
-          path.join(__dirname, '..', '..', 'node_modules', '@ffprobe-installer', platformFolder, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
-        ];
-
-        for (const possiblePath of possiblePaths) {
-          if (fs.existsSync(possiblePath)) {
-            ffprobeExecutablePath = possiblePath;
-            break;
-          }
-        }
-      }
-
-      if (!ffmpegExecutablePath) {
-        throw new Error('FFmpeg path not found. Please configure it in the application settings or ensure @ffmpeg-installer is installed.');
-      }
-
-      if (!ffprobeExecutablePath) {
-        throw new Error('FFprobe path not found. Please configure it in the application settings or ensure @ffprobe-installer is installed.');
-      }
-
-      // Verify paths exist
-      if (!fs.existsSync(ffmpegExecutablePath)) {
-        throw new Error(`FFmpeg executable not found at path: ${ffmpegExecutablePath}`);
-      }
-
-      if (!fs.existsSync(ffprobeExecutablePath)) {
-        throw new Error(`FFprobe executable not found at path: ${ffprobeExecutablePath}`);
-      }
-
-      // Create wrapper
-      this.ffmpeg = new FfmpegWrapper(ffmpegExecutablePath, ffprobeExecutablePath);
-
-      this.logger.log(`FFmpeg path: ${ffmpegExecutablePath}`);
-      this.logger.log(`FFprobe path: ${ffprobeExecutablePath}`);
+      this.logger.log(`FFmpeg path: ${ffmpegPath}`);
+      this.logger.log(`FFprobe path: ${ffprobePath}`);
     } catch (error) {
-      this.logger.error('Failed to set FFmpeg/FFprobe paths', error);
+      this.logger.error('Failed to initialize FFmpeg/FFprobe bridges', error);
       throw error;
     }
   }
 
   async getVideoMetadata(videoPath: string): Promise<VideoMetadata> {
     try {
-      const metadata = await this.ffmpeg.probe(videoPath);
+      const metadata = await this.ffprobe.probe(videoPath);
 
-      const videoStream = metadata.streams?.find((stream: any) => stream.codec_type === 'video');
-      const audioStream = metadata.streams?.find((stream: any) => stream.codec_type === 'audio');
+      const videoStream = metadata.streams?.find((stream) => stream.codec_type === 'video');
+      const audioStream = metadata.streams?.find((stream) => stream.codec_type === 'audio');
 
       if (!videoStream && !audioStream) {
         throw new Error('No video or audio stream found');
@@ -239,7 +147,7 @@ export class FfmpegService {
 
     try {
       const selectedEncoder = 'libx264';
-      const metadata = await this.ffmpeg.probe(videoFile);
+      const metadata = await this.ffprobe.probe(videoFile);
       const videoAnalysis = this.analyzeVideoMetadata(metadata);
 
       if (!videoAnalysis.isValid) {
@@ -254,6 +162,7 @@ export class FfmpegService {
       const fileBase = path.parse(fileName).name;
       const outputFile = path.join(fileDir, `${fileBase}_reencoded.mov`);
       const progressKey = outputFile;
+      const processId = `reencode-${Date.now()}`;
 
       this.lastReportedProgress.set(progressKey, 0);
 
@@ -263,23 +172,36 @@ export class FfmpegService {
         this.eventService.emitTaskProgress(jobId, taskType, 0, 'Preparing video re-encoding');
       }
 
-      this.logger.log(`FFmpeg re-encoding command: ${this.ffmpeg.ffmpeg} ${args.join(' ')}`);
+      this.logger.log(`FFmpeg re-encoding command: ${this.ffmpeg.path} ${args.join(' ')}`);
 
-      await this.ffmpeg.run(args, {
-        duration,
-        onProgress: (progress) => {
-          const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
-          const boundedPercent = Math.max(5, Math.min(progress.percent, 95));
+      // Set up progress listener
+      const progressHandler = (progress: FfmpegProgress) => {
+        if (progress.processId !== processId) return;
 
-          if (boundedPercent > lastProgress) {
-            this.lastReportedProgress.set(progressKey, boundedPercent);
-            const message = `Re-encoding video ${progress.speed ? `(Speed: ${progress.speed}x)` : ''}`;
-            if (taskType && jobId) {
-              this.eventService.emitTaskProgress(jobId, taskType, boundedPercent, message);
-            }
+        const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
+        const boundedPercent = Math.max(5, Math.min(progress.percent, 95));
+
+        if (boundedPercent > lastProgress) {
+          this.lastReportedProgress.set(progressKey, boundedPercent);
+          const message = `Re-encoding video ${progress.speed ? `(Speed: ${progress.speed}x)` : ''}`;
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, boundedPercent, message);
           }
         }
-      });
+      };
+
+      this.ffmpeg.on('progress', progressHandler);
+
+      try {
+        const result = await this.ffmpeg.run(args, { duration, processId });
+
+        if (!result.success) {
+          this.logger.error(`Re-encoding failed: ${result.error}`);
+          return null;
+        }
+      } finally {
+        this.ffmpeg.off('progress', progressHandler);
+      }
 
       this.logger.log(`Successfully re-encoded video: ${outputFile}`);
 
@@ -314,14 +236,14 @@ export class FfmpegService {
     }
   }
 
-  private analyzeVideoMetadata(metadata: any): {
+  private analyzeVideoMetadata(metadata: ProbeResult): {
     isValid: boolean,
     dimensions?: { width: number, height: number },
     duration?: number,
     isVertical?: boolean,
     needsAspectRatioFix?: boolean
   } {
-    const stream = metadata.streams?.find((s: any) => s.codec_type === 'video');
+    const stream = metadata.streams?.find((s) => s.codec_type === 'video');
     if (!stream) {
       this.logger.error('CRITICAL: No video stream found');
       return { isValid: false };
@@ -483,9 +405,15 @@ export class FfmpegService {
         outputPath
       ];
 
-      this.logger.log(`Creating thumbnail: ${this.ffmpeg.ffmpeg} ${args.join(' ')}`);
+      this.logger.log(`Creating thumbnail: ${this.ffmpeg.path} ${args.join(' ')}`);
 
-      await this.ffmpeg.run(args);
+      const result = await this.ffmpeg.run(args);
+
+      if (!result.success) {
+        this.logger.error(`Thumbnail creation failed: ${result.error}`);
+        return null;
+      }
+
       this.logger.log(`Thumbnail created at: ${outputPath}`);
       return outputPath;
     } catch (error: any) {
@@ -510,6 +438,7 @@ export class FfmpegService {
       const fileExt = path.extname(fileName);
       const fileBase = path.parse(fileName).name;
       const tempOutputFile = path.join(fileDir, `${fileBase}_temp_normalized${fileExt}`);
+      const processId = `normalize-${Date.now()}`;
 
       // Get duration for progress
       const metadata = await this.getVideoMetadata(filePath);
@@ -529,16 +458,28 @@ export class FfmpegService {
         this.eventService.emitTaskProgress(jobId, 'normalize-audio', 0, 'Starting audio normalization');
       }
 
-      this.logger.log(`Audio normalization: ${this.ffmpeg.ffmpeg} ${args.join(' ')}`);
+      this.logger.log(`Audio normalization: ${this.ffmpeg.path} ${args.join(' ')}`);
 
-      await this.ffmpeg.run(args, {
-        duration,
-        onProgress: (progress) => {
-          if (jobId) {
-            this.eventService.emitTaskProgress(jobId, 'normalize-audio', progress.percent, `Normalizing audio: ${progress.percent}%`);
-          }
+      // Set up progress listener
+      const progressHandler = (progress: FfmpegProgress) => {
+        if (progress.processId !== processId) return;
+        if (jobId) {
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', progress.percent, `Normalizing audio: ${progress.percent}%`);
         }
-      });
+      };
+
+      this.ffmpeg.on('progress', progressHandler);
+
+      try {
+        const result = await this.ffmpeg.run(args, { duration, processId });
+
+        if (!result.success) {
+          this.logger.error(`Audio normalization failed: ${result.error}`);
+          return null;
+        }
+      } finally {
+        this.ffmpeg.off('progress', progressHandler);
+      }
 
       this.logger.log(`Successfully normalized audio to temp file: ${tempOutputFile}`);
 
@@ -631,9 +572,13 @@ export class FfmpegService {
     ];
 
     try {
-      await this.ffmpeg.runWithPipe(args, (chunk) => {
+      const result = await this.ffmpeg.runWithPipe(args, (chunk) => {
         chunks.push(chunk);
       });
+
+      if (!result.success) {
+        throw new Error(result.error || 'Waveform extraction failed');
+      }
 
       const audioBuffer = Buffer.concat(chunks);
       const int16Array = new Int16Array(

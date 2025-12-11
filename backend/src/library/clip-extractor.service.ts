@@ -1,8 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import { SharedConfigService } from '../config/shared-config.service';
+import {
+  FfmpegBridge,
+  FfprobeBridge,
+  getRuntimePaths,
+  verifyBinary,
+  type FfmpegProgress,
+} from '../bridges';
 
 export interface ClipExtractionRequest {
   videoPath: string;
@@ -30,12 +35,33 @@ export interface ClipExtractionResult {
 @Injectable()
 export class ClipExtractorService {
   private readonly logger = new Logger(ClipExtractorService.name);
-  private ffmpegPath: string;
-  private ffprobePath: string;
+  private ffmpeg: FfmpegBridge;
+  private ffprobe: FfprobeBridge;
 
-  constructor(private readonly configService: SharedConfigService) {
-    this.ffmpegPath = this.configService.getFfmpegPath();
-    this.ffprobePath = this.configService.getFfprobePath();
+  constructor() {
+    // Initialize bridges using runtime paths or environment variables
+    let ffmpegPath = process.env.FFMPEG_PATH;
+    let ffprobePath = process.env.FFPROBE_PATH;
+
+    const runtimePaths = getRuntimePaths();
+
+    if (!ffmpegPath || !(require('fs').existsSync(ffmpegPath))) {
+      ffmpegPath = runtimePaths.ffmpeg;
+    }
+
+    if (!ffprobePath || !(require('fs').existsSync(ffprobePath))) {
+      ffprobePath = runtimePaths.ffprobe;
+    }
+
+    verifyBinary(ffmpegPath, 'FFmpeg');
+    verifyBinary(ffprobePath, 'FFprobe');
+
+    this.ffmpeg = new FfmpegBridge(ffmpegPath);
+    this.ffprobe = new FfprobeBridge(ffprobePath);
+
+    this.logger.log(`ClipExtractorService initialized`);
+    this.logger.log(`  FFmpeg: ${ffmpegPath}`);
+    this.logger.log(`  FFprobe: ${ffprobePath}`);
   }
 
   /**
@@ -105,9 +131,9 @@ export class ClipExtractorService {
   }
 
   /**
-   * Run FFmpeg extraction
+   * Run FFmpeg extraction using the bridge
    */
-  private runFFmpegExtraction(
+  private async runFFmpegExtraction(
     inputPath: string,
     startTime: number,
     duration: number,
@@ -116,162 +142,100 @@ export class ClipExtractorService {
     scale?: number,
     onProgress?: (progress: number) => void
   ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const args: string[] = ['-y'];
+    const args: string[] = ['-y'];
 
-      // If scale is specified and not 1.0, we must re-encode
-      const needsReEncode = reEncode || (scale && scale !== 1.0);
+    // If scale is specified and not 1.0, we must re-encode
+    const needsReEncode = reEncode || (scale && scale !== 1.0);
 
-      if (needsReEncode) {
-        // Re-encode mode: Frame-accurate extraction with optional scaling
-        this.logger.log('Using re-encoding mode for frame-accurate extraction');
-        if (scale && scale !== 1.0) {
-          this.logger.log(`Applying scale: ${scale}x`);
-        }
-
-        const seekBuffer = Math.max(0, startTime - 10);
-        if (seekBuffer > 0) {
-          args.push('-ss', seekBuffer.toString());
-        }
-
-        args.push('-i', inputPath);
-
-        const adjustedStart = startTime - seekBuffer;
-        args.push(
-          '-ss', adjustedStart.toString(),
-          '-t', duration.toString(),
-          '-c:v', 'libx264',
-          '-c:a', 'aac',
-          '-preset', 'medium',
-          '-crf', '18'
-        );
-
-        // Add scale filter if needed
-        if (scale && scale !== 1.0) {
-          // Scale video using ffmpeg's scale filter
-          // iw and ih are input width and height
-          // This scales both dimensions by the scale factor
-          args.push('-vf', `scale=iw*${scale}:ih*${scale}:flags=lanczos`);
-        }
-
-        args.push(
-          '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart',
-          '-avoid_negative_ts', 'make_zero',
-          '-async', '1',
-          '-vsync', 'cfr',
-          outputPath
-        );
-      } else {
-        // Stream copy mode: Fast extraction (no scaling)
-        this.logger.log('Using stream copy mode for fast extraction');
-
-        args.push(
-          '-ss', startTime.toString(),
-          '-i', inputPath,
-          '-t', duration.toString(),
-          '-c', 'copy',
-          '-avoid_negative_ts', 'make_zero',
-          '-async', '1',
-          outputPath
-        );
+    if (needsReEncode) {
+      // Re-encode mode: Frame-accurate extraction with optional scaling
+      this.logger.log('Using re-encoding mode for frame-accurate extraction');
+      if (scale && scale !== 1.0) {
+        this.logger.log(`Applying scale: ${scale}x`);
       }
 
-      this.logger.log(`FFmpeg command: ${this.ffmpegPath} ${args.join(' ')}`);
+      const seekBuffer = Math.max(0, startTime - 10);
+      if (seekBuffer > 0) {
+        args.push('-ss', seekBuffer.toString());
+      }
 
-      const proc = spawn(this.ffmpegPath, args);
-      let stderrBuffer = '';
+      args.push('-i', inputPath);
 
-      proc.stderr.on('data', (data: Buffer) => {
-        stderrBuffer += data.toString();
+      const adjustedStart = startTime - seekBuffer;
+      args.push(
+        '-ss', adjustedStart.toString(),
+        '-t', duration.toString(),
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-preset', 'medium',
+        '-crf', '18'
+      );
 
-        if (onProgress && duration > 0) {
-          const lines = stderrBuffer.split('\r');
-          stderrBuffer = lines.pop() || '';
+      // Add scale filter if needed
+      if (scale && scale !== 1.0) {
+        args.push('-vf', `scale=iw*${scale}:ih*${scale}:flags=lanczos`);
+      }
 
-          for (const line of lines) {
-            const timeMatch = line.match(/time=(\d+:\d+:\d+\.\d+)/);
-            if (timeMatch) {
-              const timeStr = timeMatch[1];
-              const timeParts = timeStr.split(/[:.]/);
-              if (timeParts.length >= 3) {
-                const hours = parseInt(timeParts[0]);
-                const minutes = parseInt(timeParts[1]);
-                const seconds = parseInt(timeParts[2]);
-                const currentTime = hours * 3600 + minutes * 60 + seconds;
-                const percent = Math.min(100, Math.round((currentTime / duration) * 100));
-                this.logger.log(`Progress: ${percent}%`);
-                onProgress(percent);
-              }
-            }
-          }
-        }
-      });
+      args.push(
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-avoid_negative_ts', 'make_zero',
+        '-async', '1',
+        '-vsync', 'cfr',
+        outputPath
+      );
+    } else {
+      // Stream copy mode: Fast extraction (no scaling)
+      this.logger.log('Using stream copy mode for fast extraction');
 
-      proc.on('close', (code) => {
-        if (code === 0) {
-          this.logger.log('FFmpeg extraction completed');
-          if (onProgress) onProgress(100);
-          resolve();
-        } else {
-          reject(new Error(`FFmpeg exited with code ${code}`));
-        }
-      });
+      args.push(
+        '-ss', startTime.toString(),
+        '-i', inputPath,
+        '-t', duration.toString(),
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        '-async', '1',
+        outputPath
+      );
+    }
 
-      proc.on('error', (err) => {
-        this.logger.error('FFmpeg error:', err.message);
-        reject(err);
-      });
-    });
+    this.logger.log(`FFmpeg command: ${this.ffmpeg.path} ${args.join(' ')}`);
+
+    const processId = `clip-extract-${Date.now()}`;
+
+    // Set up progress listener if callback provided
+    let progressHandler: ((progress: FfmpegProgress) => void) | null = null;
+
+    if (onProgress && duration > 0) {
+      progressHandler = (progress: FfmpegProgress) => {
+        if (progress.processId !== processId) return;
+        this.logger.log(`Progress: ${progress.percent}%`);
+        onProgress(progress.percent);
+      };
+      this.ffmpeg.on('progress', progressHandler);
+    }
+
+    try {
+      const result = await this.ffmpeg.run(args, { duration, processId });
+
+      if (!result.success) {
+        throw new Error(result.error || `FFmpeg exited with code ${result.exitCode}`);
+      }
+
+      this.logger.log('FFmpeg extraction completed');
+      if (onProgress) onProgress(100);
+    } finally {
+      if (progressHandler) {
+        this.ffmpeg.off('progress', progressHandler);
+      }
+    }
   }
 
   /**
-   * Get video duration using FFprobe
+   * Get video duration using FFprobe bridge
    */
   async getVideoDuration(videoPath: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const args = [
-        '-v', 'quiet',
-        '-print_format', 'json',
-        '-show_format',
-        videoPath
-      ];
-
-      const proc = spawn(this.ffprobePath, args);
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      proc.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      proc.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`ffprobe exited with code ${code}: ${stderr}`));
-          return;
-        }
-
-        try {
-          const metadata = JSON.parse(stdout);
-          const duration = metadata.format?.duration;
-          if (duration) {
-            resolve(parseFloat(duration));
-          } else {
-            reject(new Error('Could not determine video duration'));
-          }
-        } catch (e) {
-          reject(new Error(`Failed to parse ffprobe output: ${e}`));
-        }
-      });
-
-      proc.on('error', (err) => {
-        reject(err);
-      });
-    });
+    return this.ffprobe.getDuration(videoPath);
   }
 
   /**

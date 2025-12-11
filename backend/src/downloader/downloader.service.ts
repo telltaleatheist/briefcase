@@ -332,7 +332,7 @@ export class DownloaderService implements OnModuleInit {
       }
       
       // Create ytDlpManager instance
-      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
+      const ytDlpManager = new YtDlpManager();
       
       // Configure download
       ytDlpManager.input(options.url).output(outputTemplate);
@@ -440,7 +440,7 @@ export class DownloaderService implements OnModuleInit {
               this.logger.log(`Attempting YouTube download with ${clientType} client...`);
 
               // Re-create ytDlpManager with new client configuration
-              const newYtDlpManager = new YtDlpManager(this.sharedConfigService);
+              const newYtDlpManager = new YtDlpManager();
               newYtDlpManager.input(options.url).output(outputTemplate);
 
               const ffmpegPath = this.sharedConfigService.getFfmpegPath();
@@ -705,7 +705,7 @@ export class DownloaderService implements OnModuleInit {
       const cleanUrl = url.split('?')[0];
       
       // Create and configure YtDlpManager
-      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
+      const ytDlpManager = new YtDlpManager();
       ytDlpManager
         .input(cleanUrl)  // Use clean URL
         .addOption('--dump-json')
@@ -919,7 +919,7 @@ export class DownloaderService implements OnModuleInit {
       this.logger.log(`Fetching info for Twitter image URL: ${url}`);
 
       // Use yt-dlp to get tweet metadata
-      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
+      const ytDlpManager = new YtDlpManager();
       ytDlpManager
         .input(url)
         .addOption('--dump-json')
@@ -1175,7 +1175,7 @@ export class DownloaderService implements OnModuleInit {
       this.logger.log(`Checking URL validity: ${url}`);
       
       // Create and configure YtDlpManager
-      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
+      const ytDlpManager = new YtDlpManager();
       ytDlpManager
         .input(url)
         .addOption('--dump-json')
@@ -1215,7 +1215,7 @@ export class DownloaderService implements OnModuleInit {
       this.logger.log(`[TIMING] Fetching video info for URL: ${url}`);
 
       // Create and configure YtDlpManager
-      const ytDlpManager = new YtDlpManager(this.sharedConfigService);
+      const ytDlpManager = new YtDlpManager();
       ytDlpManager
         .input(url)
         .addOption('--dump-json')

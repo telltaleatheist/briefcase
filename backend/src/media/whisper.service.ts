@@ -4,16 +4,32 @@ import { MediaEventService } from './media-event.service';
 import * as path from 'path';
 import * as fs from 'fs';
 import { WhisperManager } from './whisper-manager';
-import { SharedConfigService } from '../config/shared-config.service';
+import {
+  FfmpegBridge,
+  getRuntimePaths,
+  verifyBinary,
+} from '../bridges';
 
 @Injectable()
 export class WhisperService {
   private readonly logger = new Logger(WhisperService.name);
+  private ffmpeg: FfmpegBridge;
 
   constructor(
     private readonly eventService: MediaEventService,
-    private readonly sharedConfigService: SharedConfigService
-  ) {}
+  ) {
+    // Initialize FFmpeg bridge for audio extraction
+    let ffmpegPath = process.env.FFMPEG_PATH;
+
+    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+      const paths = getRuntimePaths();
+      ffmpegPath = paths.ffmpeg;
+    }
+
+    verifyBinary(ffmpegPath, 'FFmpeg');
+    this.ffmpeg = new FfmpegBridge(ffmpegPath);
+    this.logger.log(`WhisperService initialized with FFmpeg: ${ffmpegPath}`);
+  }
 
   async transcribeVideo(videoFile: string, jobId?: string, model?: string): Promise<string | null> {
     console.log(`[WHISPER SERVICE] Transcription started`);
@@ -49,8 +65,8 @@ export class WhisperService {
       this.logger.log(`Audio extracted to: ${audioFile}`);
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 15, 'Starting transcription...');
 
-      const whisperManager = new WhisperManager(this.sharedConfigService);
-  
+      const whisperManager = new WhisperManager();
+
       // Set up progress tracking
       whisperManager.on('progress', (progress) => {
         this.logger.log(`Transcription progress: ${progress.percent}% - ${progress.task}`);
@@ -67,7 +83,7 @@ export class WhisperService {
 
         console.log(`Progress event: ${JSON.stringify(progress)}`);
       });
-    
+
       this.logger.log(`Starting transcription for ${audioFile}`);
       this.eventService.emitTranscriptionStarted(videoFile, jobId);
 
@@ -132,69 +148,28 @@ export class WhisperService {
   }
 
   /**
-   * Extract audio from video using FFmpeg
+   * Extract audio from video using FFmpeg bridge
    * Optimized for whisper: 16kHz, mono, WAV format
    */
   private async extractAudio(videoPath: string, outputDir: string, jobId: string): Promise<string> {
-    const { spawn } = require('child_process');
     const audioFilename = `${jobId}_audio.wav`;
     const audioPath = path.join(outputDir, audioFilename);
 
     this.logger.log(`Extracting audio from: ${videoPath}`);
     this.logger.log(`Audio output: ${audioPath}`);
 
-    const ffmpegPath = this.sharedConfigService.getFfmpegPath();
-
-    const args = [
-      '-y',
-      '-i', videoPath,
-      '-vn',                    // No video
-      '-acodec', 'pcm_s16le',   // PCM 16-bit little-endian
-      '-ar', '16000',           // 16kHz sample rate (optimal for whisper)
-      '-ac', '1',               // Mono
-      '-f', 'wav',              // WAV format
-      audioPath
-    ];
-
-    this.logger.log(`FFmpeg command: ${ffmpegPath} ${args.join(' ')}`);
-
-    return new Promise((resolve, reject) => {
-      const proc = spawn(ffmpegPath, args);
-      let stderrBuffer = '';
-
-      proc.stderr.on('data', (data: Buffer) => {
-        stderrBuffer += data.toString();
-        const lines = stderrBuffer.split('\r');
-        stderrBuffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const timeMatch = line.match(/time=(\d+:\d+:\d+\.\d+)/);
-          if (timeMatch) {
-            // Estimate progress (we don't know total duration here, so just report activity)
-            this.eventService.emitTaskProgress(
-              jobId,
-              'transcribe',
-              10,
-              `Extracting audio...`
-            );
-          }
-        }
-      });
-
-      proc.on('close', (code: number) => {
-        if (code === 0) {
-          this.logger.log(`Audio extraction complete: ${audioPath}`);
-          resolve(audioPath);
-        } else {
-          this.logger.error(`Audio extraction failed with code ${code}`);
-          reject(new Error(`Failed to extract audio: FFmpeg exited with code ${code}`));
-        }
-      });
-
-      proc.on('error', (err: Error) => {
-        this.logger.error(`Audio extraction failed: ${err.message}`);
-        reject(new Error(`Failed to extract audio: ${err.message}`));
-      });
+    const result = await this.ffmpeg.extractAudio(videoPath, audioPath, {
+      sampleRate: 16000,
+      channels: 1,
+      format: 'wav',
+      processId: `audio-extract-${jobId}`,
     });
+
+    if (!result.success) {
+      throw new Error(`Failed to extract audio: ${result.error}`);
+    }
+
+    this.logger.log(`Audio extraction complete: ${audioPath}`);
+    return audioPath;
   }
 }

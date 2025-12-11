@@ -102,7 +102,6 @@
     "proper-lockfile": "^4.1.2",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
-    "whisper-node": "^1.1.1",
     "yt-dlp-wrap": "^2.3.12",
     "yt-dlp-wrap-extended": "^2.3.15"
   },

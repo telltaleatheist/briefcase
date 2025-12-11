@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
-import { SharedConfigService } from '../config/shared-config.service';
-
-const execAsync = promisify(exec);
+import {
+  FfmpegBridge,
+  FfprobeBridge,
+  getRuntimePaths,
+  verifyBinary,
+} from '../bridges';
 
 export interface WaveformData {
   samples: number[];
@@ -19,8 +20,32 @@ export class WaveformService {
   private readonly logger = new Logger(WaveformService.name);
   private readonly waveformCache = new Map<string, WaveformData>();
   private readonly progressCache = new Map<string, { progress: number; status: string; partial?: WaveformData }>();
+  private ffmpeg: FfmpegBridge;
+  private ffprobe: FfprobeBridge;
 
-  constructor(private readonly configService: SharedConfigService) {}
+  constructor() {
+    // Initialize bridges using runtime paths or environment variables
+    let ffmpegPath = process.env.FFMPEG_PATH;
+    let ffprobePath = process.env.FFPROBE_PATH;
+
+    const runtimePaths = getRuntimePaths();
+
+    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+      ffmpegPath = runtimePaths.ffmpeg;
+    }
+
+    if (!ffprobePath || !fs.existsSync(ffprobePath)) {
+      ffprobePath = runtimePaths.ffprobe;
+    }
+
+    verifyBinary(ffmpegPath, 'FFmpeg');
+    verifyBinary(ffprobePath, 'FFprobe');
+
+    this.ffmpeg = new FfmpegBridge(ffmpegPath);
+    this.ffprobe = new FfprobeBridge(ffprobePath);
+
+    this.logger.log(`WaveformService initialized`);
+  }
 
   /**
    * Generate waveform data for a video file using FFmpeg
@@ -46,11 +71,8 @@ export class WaveformService {
     this.logger.log(`Generating waveform for ${path.basename(videoPath)} with ${samples} samples`);
 
     try {
-      // Get FFmpeg path
-      const ffmpegPath = process.env.FFMPEG_PATH || this.configService.getFfmpegPath() || 'ffmpeg';
-
       // First, get the video duration
-      const duration = await this.getVideoDuration(videoPath, ffmpegPath);
+      const duration = await this.getVideoDuration(videoPath);
 
       if (!duration || duration <= 0) {
         throw new Error('Invalid video duration');
@@ -67,7 +89,6 @@ export class WaveformService {
       this.logger.log(`Generating final waveform with ${samples} samples...`);
       const waveformSamples = await this.extractAudioSamples(
         videoPath,
-        ffmpegPath,
         samples,
         duration,
         2000,
@@ -110,21 +131,11 @@ export class WaveformService {
   }
 
   /**
-   * Get video duration using ffprobe
+   * Get video duration using FFprobe bridge
    */
-  private async getVideoDuration(videoPath: string, ffmpegPath: string): Promise<number> {
+  private async getVideoDuration(videoPath: string): Promise<number> {
     try {
-      // Get ffprobe path - prioritize env var, then try to derive from ffmpeg path
-      const ffprobePath = process.env.FFPROBE_PATH ||
-                         this.configService.getFfprobePath() ||
-                         ffmpegPath.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
-
-      const command = `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`;
-
-      const { stdout } = await execAsync(command);
-      const duration = parseFloat(stdout.trim());
-
-      return duration;
+      return await this.ffprobe.getDuration(videoPath);
     } catch (error) {
       this.logger.error(`Failed to get video duration: ${(error as Error).message}`);
       return 0;
@@ -132,12 +143,11 @@ export class WaveformService {
   }
 
   /**
-   * Extract audio samples using FFmpeg
+   * Extract audio samples using FFmpeg bridge
    * Supports progressive updates by reporting progress as chunks are processed
    */
   private async extractAudioSamples(
     videoPath: string,
-    ffmpegPath: string,
     sampleCount: number,
     duration: number,
     forceSampleRate?: number,
@@ -150,22 +160,33 @@ export class WaveformService {
 
       this.logger.log(`Extracting waveform: ${sampleCount} samples at ${targetSampleRate} Hz...`);
 
-      // Extract mono audio - lower sample rate = much faster processing
-      const command = `"${ffmpegPath}" -i "${videoPath}" -f f32le -ac 1 -ar ${targetSampleRate} -`;
+      // Extract mono audio using pipe
+      const args = [
+        '-i', videoPath,
+        '-f', 'f32le',
+        '-ac', '1',
+        '-ar', targetSampleRate.toString(),
+        '-'
+      ];
 
       const startTime = Date.now();
       this.logger.log(`Running FFmpeg audio extraction at ${targetSampleRate} Hz...`);
 
-      const result = await execAsync(command, {
-        encoding: null as any, // Return Buffer instead of string
-        maxBuffer: 100 * 1024 * 1024, // 100MB max buffer for longer videos
+      const chunks: Buffer[] = [];
+
+      const result = await this.ffmpeg.runWithPipe(args, (chunk) => {
+        chunks.push(chunk);
       });
+
+      if (!result.success) {
+        throw new Error(result.error || 'FFmpeg extraction failed');
+      }
 
       const extractTime = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(`FFmpeg extraction completed in ${extractTime}s`);
 
-      // stdout is a Buffer containing raw 32-bit float PCM audio samples
-      const audioBuffer = result.stdout as Buffer;
+      // Combine chunks into a single buffer
+      const audioBuffer = Buffer.concat(chunks);
       const float32Array = new Float32Array(
         audioBuffer.buffer,
         audioBuffer.byteOffset,
