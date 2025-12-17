@@ -299,6 +299,19 @@ export class QueueManagerService implements OnModuleDestroy {
       // Skip if this task is already running
       if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
 
+      // Check if any previous task in this job is still running
+      // Tasks must be sequential within a job
+      let previousTaskRunning = false;
+      for (let i = 0; i < job.currentTaskIndex; i++) {
+        if (this.isTaskRunning(job.id, i)) {
+          previousTaskRunning = true;
+          break;
+        }
+      }
+      if (previousTaskRunning) {
+        continue; // Wait for previous tasks to complete
+      }
+
       // Only return non-AI tasks
       if (currentTask.type !== 'analyze') {
         return { task: currentTask, job };

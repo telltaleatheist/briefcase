@@ -1455,11 +1455,7 @@ Tip: Right-click on the timeline for additional options.
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
 
-    if (hours > 0) {
-      return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    } else {
-      return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   formatTimeRange(startSeconds: number, endSeconds: number): string {

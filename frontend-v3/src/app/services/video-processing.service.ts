@@ -327,9 +327,16 @@ export class VideoProcessingService {
     const taskType = this.mapBackendToFrontendTaskType(event.type);
     const task = job.tasks.find(t => t.type === taskType);
     if (task) {
-      task.status = 'in-progress';
-      task.startedAt = new Date();
-      task.progress = 0;
+      // Don't reset completed tasks (e.g., download shouldn't reset when import starts)
+      if (task.status === 'completed') {
+        return;
+      }
+      // Only update if not already in progress (prevent reset from sub-tasks like get-info, import)
+      if (task.status !== 'in-progress') {
+        task.status = 'in-progress';
+        task.startedAt = new Date();
+        task.progress = 0;
+      }
     }
 
     job.status = 'processing';
@@ -350,10 +357,39 @@ export class VideoProcessingService {
     const job = jobs.find(j => j.id === jobId);
     if (!job) return;
 
-    const taskType = this.mapBackendToFrontendTaskType(event.type);
-    const task = job.tasks.find(t => t.type === taskType);
-    if (task) {
-      task.progress = event.progress === -1 ? 0 : event.progress;
+    const progress = event.progress === -1 ? 0 : event.progress;
+    let updatedTaskId: string | undefined;
+
+    // Handle process-video which combines aspect-ratio and normalize-audio
+    if (event.type === 'process-video') {
+      // Update both aspect-ratio and normalize-audio if they exist
+      const aspectTask = job.tasks.find(t => t.type === 'aspect-ratio');
+      const audioTask = job.tasks.find(t => t.type === 'normalize-audio');
+      if (aspectTask && aspectTask.status !== 'completed') {
+        aspectTask.status = 'in-progress';
+        aspectTask.progress = progress;
+        updatedTaskId = aspectTask.id;
+      }
+      if (audioTask && audioTask.status !== 'completed') {
+        audioTask.status = 'in-progress';
+        audioTask.progress = progress;
+      }
+    } else {
+      const taskType = this.mapBackendToFrontendTaskType(event.type);
+      const task = job.tasks.find(t => t.type === taskType);
+      if (task) {
+        // Don't update completed tasks
+        if (task.status === 'completed') {
+          // Update overall job progress even if this specific task is done
+          this.updateJobProgress(job);
+          this.jobs$.next([...jobs]);
+          this.updateStats();
+          return;
+        }
+        task.status = 'in-progress';
+        task.progress = progress;
+        updatedTaskId = task.id;
+      }
     }
 
     // Update overall job progress
@@ -365,7 +401,7 @@ export class VideoProcessingService {
     // Emit progress update
     this.progressUpdates$.next({
       jobId,
-      taskId: task?.id,
+      taskId: updatedTaskId,
       type: 'progress',
       data: { progress: event.progress, status: 'in-progress' }
     });
@@ -379,12 +415,29 @@ export class VideoProcessingService {
     const job = jobs.find(j => j.id === jobId);
     if (!job) return;
 
-    const taskType = this.mapBackendToFrontendTaskType(event.type);
-    const task = job.tasks.find(t => t.type === taskType);
-    if (task) {
-      task.status = 'completed';
-      task.progress = 100;
-      task.completedAt = new Date();
+    // Handle process-video which combines aspect-ratio and normalize-audio
+    if (event.type === 'process-video') {
+      // Mark both aspect-ratio and normalize-audio as completed
+      const aspectTask = job.tasks.find(t => t.type === 'aspect-ratio');
+      const audioTask = job.tasks.find(t => t.type === 'normalize-audio');
+      if (aspectTask) {
+        aspectTask.status = 'completed';
+        aspectTask.progress = 100;
+        aspectTask.completedAt = new Date();
+      }
+      if (audioTask) {
+        audioTask.status = 'completed';
+        audioTask.progress = 100;
+        audioTask.completedAt = new Date();
+      }
+    } else {
+      const taskType = this.mapBackendToFrontendTaskType(event.type);
+      const task = job.tasks.find(t => t.type === taskType);
+      if (task) {
+        task.status = 'completed';
+        task.progress = 100;
+        task.completedAt = new Date();
+      }
     }
 
     // Check if all tasks are completed
@@ -419,11 +472,27 @@ export class VideoProcessingService {
     const job = jobs.find(j => j.id === jobId);
     if (!job) return;
 
-    const taskType = this.mapBackendToFrontendTaskType(event.type);
-    const task = job.tasks.find(t => t.type === taskType);
-    if (task) {
-      task.status = 'failed';
-      task.error = event.error?.message || 'Unknown error';
+    const errorMessage = event.error?.message || 'Unknown error';
+
+    // Handle process-video which combines aspect-ratio and normalize-audio
+    if (event.type === 'process-video') {
+      const aspectTask = job.tasks.find(t => t.type === 'aspect-ratio');
+      const audioTask = job.tasks.find(t => t.type === 'normalize-audio');
+      if (aspectTask) {
+        aspectTask.status = 'failed';
+        aspectTask.error = errorMessage;
+      }
+      if (audioTask) {
+        audioTask.status = 'failed';
+        audioTask.error = errorMessage;
+      }
+    } else {
+      const taskType = this.mapBackendToFrontendTaskType(event.type);
+      const task = job.tasks.find(t => t.type === taskType);
+      if (task) {
+        task.status = 'failed';
+        task.error = errorMessage;
+      }
     }
 
     job.status = 'failed';

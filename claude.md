@@ -134,6 +134,23 @@ The video editor (`components/video-editor/`) supports:
 4. Analysis stored in `analysis` table as JSON
 5. Frontend displays sections on video timeline
 
+## Code Conventions
+
+### Time Formatting
+All timestamps in the UI must use the `HH:MM:SS` format (always showing hours with leading zeros). Example: `00:05:32` for 5 minutes and 32 seconds.
+
+For components that require millisecond precision (like the video editor timeline), use `HH:MM:SS.mm` format. Example: `00:05:32.45`.
+
+The standard `formatTime` function signature:
+```typescript
+formatTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+```
+
 ## Notes
 
 - The app runs backend on a dynamic port (finds available port)

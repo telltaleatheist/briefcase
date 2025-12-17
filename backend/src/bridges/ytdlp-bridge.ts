@@ -111,6 +111,10 @@ export class YtDlpBridge extends EventEmitter {
       // Progress template for parsing
       args.push('--progress-template', '%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress.speed)s eta %(progress.eta)s [%(progress._percent_str)s]');
 
+      // Impersonate Chrome to bypass anti-bot protection (Rumble, etc.)
+      // This uses curl_cffi to fully impersonate Chrome's TLS fingerprint
+      args.push('--impersonate', 'chrome');
+
       // Format selection
       if (options?.format) {
         args.push('-f', options.format);
@@ -294,6 +298,7 @@ export class YtDlpBridge extends EventEmitter {
       '--dump-json',
       '--no-playlist',
       '--flat-playlist',
+      '--impersonate', 'chrome',
       url,
     ];
 
@@ -342,6 +347,7 @@ export class YtDlpBridge extends EventEmitter {
     const args = [
       '--simulate',
       '--quiet',
+      '--impersonate', 'chrome',
       url,
     ];
 
@@ -483,7 +489,8 @@ export class YtDlpBridge extends EventEmitter {
     }
 
     // Try standard download format: [download] 32.5% of ~50.33MiB at 2.43MiB/s ETA 00:20
-    const downloadMatch = line.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*)(\w+)\s+at\s+(\d+\.?\d*)(\w+\/s)\s+ETA\s+(\d+:\d+)/);
+    // Also handles HLS format: [download]   0.1% of ~   3.26GiB at    4.04MiB/s ETA Unknown (frag 1/1371)
+    const downloadMatch = line.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?\s*(\d+\.?\d*)\s*(\w+)\s+at\s+(\d+\.?\d*)\s*(\w+\/s)\s+ETA\s+(\S+)/);
     if (downloadMatch) {
       const [, percent, size, sizeUnit, speed, speedUnit, eta] = downloadMatch;
 
@@ -498,8 +505,17 @@ export class YtDlpBridge extends EventEmitter {
       if (speedUnit.startsWith('GiB')) bytesPerSec *= 1024 * 1024 * 1024;
 
       const downloadedBytes = totalBytes * (parseFloat(percent) / 100);
-      const [minutes, seconds] = eta.split(':').map(Number);
-      const etaSeconds = minutes * 60 + seconds;
+
+      // Parse ETA - could be "00:20" or "Unknown"
+      let etaSeconds = 0;
+      if (eta !== 'Unknown' && eta.includes(':')) {
+        const parts = eta.split(':').map(Number);
+        if (parts.length === 2) {
+          etaSeconds = parts[0] * 60 + parts[1];
+        } else if (parts.length === 3) {
+          etaSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        }
+      }
 
       this.emit('progress', {
         processId,
@@ -508,6 +524,24 @@ export class YtDlpBridge extends EventEmitter {
         downloadedBytes,
         downloadSpeed: bytesPerSec,
         eta: etaSeconds,
+        phase: 'download',
+      } as YtDlpProgress);
+      return;
+    }
+
+    // Try HLS fragment progress: (frag 123/1371) - extract percent from fragment ratio
+    const fragMatch = line.match(/\(frag\s+(\d+)\/(\d+)\)/);
+    if (fragMatch) {
+      const [, current, total] = fragMatch;
+      const fragPercent = (parseInt(current) / parseInt(total)) * 100;
+
+      this.emit('progress', {
+        processId,
+        percent: fragPercent,
+        totalSize: 0,
+        downloadedBytes: 0,
+        downloadSpeed: 0,
+        eta: 0,
         phase: 'download',
       } as YtDlpProgress);
       return;
