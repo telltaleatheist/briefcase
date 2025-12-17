@@ -81,6 +81,10 @@ export class QueueTabComponent {
     console.log('[QueueTab] Processing queue length:', processingQueue.length);
     if (processingQueue.length > 0) {
       const processingVideos: VideoItem[] = processingQueue.map(item => {
+        // Get error message from any failed task
+        const failedTask = item.tasks?.find(t => t.status === 'failed' && t.errorMessage);
+        const errorMessage = failedTask?.errorMessage;
+
         return {
           id: `processing-${item.id}`,
           name: item.title,
@@ -88,7 +92,8 @@ export class QueueTabComponent {
           thumbnailUrl: item.thumbnail,
           sourceUrl: item.url,
           tags: [`processing:${item.id}`, `status:${item.status}`],
-          titleLoading: item.titleResolved === false // Show spinner if title not yet resolved
+          titleLoading: item.titleResolved === false, // Show spinner if title not yet resolved
+          errorMessage: errorMessage
         };
       });
 

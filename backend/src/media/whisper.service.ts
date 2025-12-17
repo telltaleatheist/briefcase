@@ -18,13 +18,9 @@ export class WhisperService {
   constructor(
     private readonly eventService: MediaEventService,
   ) {
-    // Initialize FFmpeg bridge for audio extraction
-    let ffmpegPath = process.env.FFMPEG_PATH;
-
-    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
-      const paths = getRuntimePaths();
-      ffmpegPath = paths.ffmpeg;
-    }
+    // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
+    const paths = getRuntimePaths();
+    const ffmpegPath = paths.ffmpeg;
 
     verifyBinary(ffmpegPath, 'FFmpeg');
     this.ffmpeg = new FfmpegBridge(ffmpegPath);

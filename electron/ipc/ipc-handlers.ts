@@ -35,6 +35,7 @@ const store = new Store<Settings>({
 
 // Store backend service reference for IPC handlers
 let backendServiceRef: BackendService;
+let windowServiceRef: WindowService;
 
 /**
  * Set up all IPC handlers
@@ -43,8 +44,9 @@ export function setupIpcHandlers(
   windowService: WindowService,
   backendService: BackendService
 ): void {
-  // Store reference for use in handlers
+  // Store references for use in handlers
   backendServiceRef = backendService;
+  windowServiceRef = windowService;
 
   // Create services
   downloadService = new DownloadService(windowService);
@@ -56,6 +58,7 @@ export function setupIpcHandlers(
   setupFileSystemHandlers();
   setupUpdateHandlers();
   setupSettingsHandlers();
+  setupWindowHandlers();
 }
 
 /**
@@ -456,6 +459,23 @@ function setupSettingsHandlers(): void {
         message: error.message,
         error: error.toString()
       };
+    }
+  });
+}
+
+/**
+ * Set up window-related IPC handlers
+ */
+function setupWindowHandlers(): void {
+  // Open video editor in a new window
+  ipcMain.handle('open-editor-window', async (_, videoData: { videoId: string; videoPath?: string; videoTitle: string }) => {
+    try {
+      log.info('Opening editor window for video:', videoData.videoId);
+      windowServiceRef.createEditorWindow(videoData);
+      return { success: true };
+    } catch (error: any) {
+      log.error('Error opening editor window:', error);
+      return { success: false, error: error.message };
     }
   });
 }

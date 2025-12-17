@@ -77,6 +77,11 @@ export class VideoInfoPageComponent implements OnInit {
 
   @ViewChild('videoSelectorCascade') videoSelectorCascade?: CascadeComponent;
 
+  // Context menu state
+  showRelationshipContextMenu = false;
+  contextMenuPosition = { x: 0, y: 0 };
+  contextMenuTarget: { video: any; type: 'parent' | 'child' } | null = null;
+
   // UI State
   activeTab: 'overview' | 'metadata' | 'ai-analysis' | 'transcription' = 'overview';
   expandedSections = {
@@ -909,6 +914,70 @@ export class VideoInfoPageComponent implements OnInit {
 
   onThumbnailError(event: Event): void {
     const img = event.target as HTMLImageElement;
-    img.src = 'assets/default-thumbnail.png';
+    img.style.display = 'none';
+  }
+
+  // ============================================================================
+  // CONTEXT MENU
+  // ============================================================================
+
+  onRelationshipContextMenu(event: MouseEvent, video: any, type: 'parent' | 'child'): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.contextMenuPosition = { x: event.clientX, y: event.clientY };
+    this.contextMenuTarget = { video, type };
+    this.showRelationshipContextMenu = true;
+
+    // Close context menu when clicking elsewhere
+    const closeHandler = () => {
+      this.showRelationshipContextMenu = false;
+      this.contextMenuTarget = null;
+      document.removeEventListener('click', closeHandler);
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  contextMenuAction(action: string): void {
+    if (!this.contextMenuTarget) return;
+
+    const { video, type } = this.contextMenuTarget;
+    const videoId = video.id;
+    const videoPath = video.current_path || video.filePath;
+
+    switch (action) {
+      case 'open':
+        this.navigateToVideo(videoId);
+        break;
+
+      case 'edit':
+        // Open in video editor - use electron IPC if available
+        const electron = (window as any).electron;
+        if (electron?.openVideoEditor) {
+          electron.openVideoEditor(videoId);
+        } else {
+          // Fallback: navigate to editor route
+          this.router.navigate(['/editor', videoId]);
+        }
+        break;
+
+      case 'reveal':
+        // Show in Finder - use electron IPC if available
+        if ((window as any).electron?.showItemInFolder && videoPath) {
+          (window as any).electron.showItemInFolder(videoPath);
+        }
+        break;
+
+      case 'remove':
+        if (type === 'parent') {
+          this.removeParent(videoId);
+        } else {
+          this.removeChild(videoId);
+        }
+        break;
+    }
+
+    this.showRelationshipContextMenu = false;
+    this.contextMenuTarget = null;
   }
 }

@@ -204,7 +204,7 @@ export class QueueController {
    * Quick add for browser extension (simplified endpoint)
    * POST /queue/quick-add
    * Body: { url: string, displayName?: string }
-   * Creates a standard download+import+transcribe+analyze job
+   * Creates a standard download+import job with optional post-processing
    */
   @Post('quick-add')
   async quickAdd(
@@ -213,31 +213,62 @@ export class QueueController {
       url: string;
       displayName?: string;
       libraryId?: string;
+      // Post-processing options (run after import)
+      fixAspectRatio?: boolean;
+      normalizeAudio?: boolean;
+      audioLevel?: number; // Target audio level in LUFS (default -16)
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
+      aiProvider?: 'ollama' | 'claude' | 'openai';
     },
   ) {
     if (!body.url) {
       throw new HttpException('URL is required', HttpStatus.BAD_REQUEST);
     }
 
-    // Build standard task list
+    // Build standard task list: get-info -> download -> import
     const tasks: Task[] = [
       { type: 'get-info' },
       { type: 'download', options: {} },
       { type: 'import', options: {} },
     ];
 
-    // Add optional tasks
+    // Add video processing tasks (after import, before transcribe)
+    // Use 'process-video' for combined processing (single re-encode)
+    // or individual tasks if only one is requested
+    if (body.fixAspectRatio && body.normalizeAudio) {
+      // Combined processing - single re-encode pass
+      tasks.push({
+        type: 'process-video',
+        options: {
+          fixAspectRatio: true,
+          normalizeAudio: true,
+          level: body.audioLevel || -16,
+        },
+      });
+    } else if (body.fixAspectRatio) {
+      tasks.push({ type: 'fix-aspect-ratio', options: {} });
+    } else if (body.normalizeAudio) {
+      tasks.push({
+        type: 'normalize-audio',
+        options: { level: body.audioLevel || -16 },
+      });
+    }
+
+    // Add transcription (after any video processing)
     if (body.includeTranscript !== false) {
       tasks.push({ type: 'transcribe', options: {} });
     }
 
+    // Add AI analysis (requires transcript)
     if (body.includeAnalysis) {
       tasks.push({
         type: 'analyze',
-        options: { aiModel: body.aiModel || 'claude-3.5-sonnet' },
+        options: {
+          aiModel: body.aiModel || 'claude-3.5-sonnet',
+          aiProvider: body.aiProvider,
+        },
       });
     }
 

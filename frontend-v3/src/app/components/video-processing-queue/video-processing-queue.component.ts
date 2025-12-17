@@ -117,59 +117,11 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
 
     console.log('[QUEUE] Converting job to queue item:', job.id, 'tasks:', job.tasks.map(t => t.type));
 
-    // Combine download and import into a single displayed task
-    const downloadTask = job.tasks.find(t => t.type === 'download');
-    const importTask = job.tasks.find(t => t.type === 'import');
-
-    if (downloadTask || importTask) {
-      // Use download progress for the full 0-100% range (import is instant, so no need to split the bar)
-      let combinedProgress = 0;
-      let combinedStatus: 'pending' | 'running' | 'completed' | 'failed' = 'pending';
-
-      if (downloadTask && importTask) {
-        if (importTask.status === 'completed') {
-          combinedProgress = 100;
-          combinedStatus = 'completed';
-        } else if (importTask.status === 'in-progress') {
-          // Import is running - show 100% since download is done
-          combinedProgress = 100;
-          combinedStatus = 'running';
-        } else if (downloadTask.status === 'completed') {
-          // Download done, import pending - show 100% (import is instant)
-          combinedProgress = 100;
-          combinedStatus = 'running';
-        } else if (downloadTask.status === 'in-progress') {
-          // Download in progress - show full 0-100% range for download
-          combinedProgress = downloadTask.progress;
-          combinedStatus = 'running';
-        } else if (downloadTask.status === 'failed' || importTask.status === 'failed') {
-          combinedStatus = 'failed';
-        }
-      } else if (downloadTask) {
-        combinedProgress = downloadTask.progress;
-        combinedStatus = this.mapTaskStatus(downloadTask.status);
-      } else if (importTask) {
-        combinedProgress = importTask.progress;
-        combinedStatus = this.mapTaskStatus(importTask.status);
-      }
-
-      tasks.push({
-        type: 'download-import',
-        status: combinedStatus,
-        progress: combinedProgress,
-        config: {}
-      });
-    }
-
-    // Add other tasks (not download/import/get-info) with their configs from job.settings
+    // Convert each frontend task to queue item task
+    // The VideoProcessingService already combines download-related tasks
     for (const task of job.tasks) {
-      // Skip tasks that are part of the combined download-import task
-      if (task.type === 'download' || task.type === 'import' || task.type === 'get-info') continue;
-
       const taskType = this.mapTaskType(task.type);
       const config = this.getConfigForTask(taskType, job.settings);
-
-      console.log('[QUEUE] Adding additional task:', task.type, '→', taskType);
 
       tasks.push({
         type: taskType,
@@ -194,20 +146,16 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
 
   private mapTaskType(type: string): TaskType {
     const mapping: Record<string, TaskType> = {
-      'download': 'download-import',
-      'import': 'download-import',
-      'get-info': 'download-import',
+      'download': 'download-import',  // Download task displays as "Download & Import"
       'aspect-ratio': 'fix-aspect-ratio',
       'normalize-audio': 'normalize-audio',
       'transcribe': 'transcribe',
-      'ai-analysis': 'ai-analyze',
-      'analyze': 'ai-analyze'
+      'ai-analysis': 'ai-analyze'
     };
-    // Don't fallback to download-import for unknown types - log warning instead
     if (!mapping[type]) {
       console.warn(`[QUEUE] Unknown task type: ${type}`);
     }
-    return mapping[type] || 'transcribe'; // Safer fallback
+    return mapping[type] || 'download-import';
   }
 
   private mapTaskStatus(status: string): 'pending' | 'running' | 'completed' | 'failed' {

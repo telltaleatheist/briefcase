@@ -1,7 +1,7 @@
 import { Component, signal, computed, effect, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ExportDialogComponent, ExportDialogData } from '../export-dialog/export-dialog.component';
 import { NavigationService } from '../../services/navigation.service';
@@ -105,6 +105,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 })
 export class VideoEditorComponent implements OnInit, OnDestroy {
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private navService = inject(NavigationService);
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
@@ -332,6 +333,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   private videoPath = signal<string | null>(null);
   private videoTitle = signal<string>('Untitled Video');
 
+  // True when opened in a separate popout window
+  isPopoutMode = false;
+
   // Track if video has analysis
   hasAnalysis = signal(false);
 
@@ -524,10 +528,24 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     // Set up ResizeObserver for 16:9 border calculation
     this.setupResizeObserver();
 
-    // Get video data from route state
+    // Get video data from route state or query params (for popout window)
     const navigation = this.router.getCurrentNavigation();
     const state = navigation?.extras?.state || history.state;
-    const videoEditorData = state?.videoEditorData;
+    let videoEditorData = state?.videoEditorData;
+
+    // Check query params if no route state (popout window case)
+    if (!videoEditorData) {
+      const queryParams = this.route.snapshot.queryParams;
+      if (queryParams['videoId']) {
+        videoEditorData = {
+          videoId: queryParams['videoId'],
+          videoPath: queryParams['videoPath'] || null,
+          videoTitle: queryParams['videoTitle'] ? decodeURIComponent(queryParams['videoTitle']) : 'Untitled Video'
+        };
+        // Mark as popout mode for potential UI adjustments
+        this.isPopoutMode = queryParams['popout'] === 'true';
+      }
+    }
 
     if (videoEditorData) {
       this.videoId.set(videoEditorData.videoId);
@@ -973,9 +991,13 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  // Navigate back to library
+  // Navigate back to library or close window in popout mode
   goBack() {
-    this.router.navigate(['/']);
+    if (this.isPopoutMode) {
+      window.close();
+    } else {
+      this.router.navigate(['/']);
+    }
   }
 
   private updateCategoryFilters(sections: TimelineSection[]): void {

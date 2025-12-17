@@ -12,6 +12,7 @@ interface ElectronAPI {
   getBackendUrl: () => Promise<string>;
   getAppVersion: () => Promise<string>;
   saveConsoleLogs: (filename: string, content: string) => Promise<string>;
+  openEditorWindow: (videoData: { videoId: string; videoPath?: string; videoTitle: string }) => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {
@@ -187,6 +188,24 @@ export class ElectronService {
       console.error('Error opening external URL:', error);
       // Fallback to window.open
       window.open(url, '_blank');
+    }
+  }
+
+  /**
+   * Open video editor in a new window
+   */
+  async openEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string }): Promise<boolean> {
+    if (!this.isElectron) {
+      console.warn('openEditorWindow: Not running in Electron');
+      return false;
+    }
+
+    try {
+      const result = await window.electron!.openEditorWindow(videoData);
+      return result.success;
+    } catch (error) {
+      console.error('Error opening editor window:', error);
+      return false;
     }
   }
 }

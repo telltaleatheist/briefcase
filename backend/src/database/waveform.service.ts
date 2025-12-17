@@ -24,19 +24,10 @@ export class WaveformService {
   private ffprobe: FfprobeBridge;
 
   constructor() {
-    // Initialize bridges using runtime paths or environment variables
-    let ffmpegPath = process.env.FFMPEG_PATH;
-    let ffprobePath = process.env.FFPROBE_PATH;
-
+    // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
     const runtimePaths = getRuntimePaths();
-
-    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
-      ffmpegPath = runtimePaths.ffmpeg;
-    }
-
-    if (!ffprobePath || !fs.existsSync(ffprobePath)) {
-      ffprobePath = runtimePaths.ffprobe;
-    }
+    const ffmpegPath = runtimePaths.ffmpeg;
+    const ffprobePath = runtimePaths.ffprobe;
 
     verifyBinary(ffmpegPath, 'FFmpeg');
     verifyBinary(ffprobePath, 'FFprobe');

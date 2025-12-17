@@ -126,7 +126,12 @@
       },
       {
         "from": "backend/node_modules",
-        "to": "backend/node_modules"
+        "to": "backend/node_modules",
+        "filter": [
+          "**/*",
+          "!@ffmpeg-installer/**",
+          "!@ffprobe-installer/**"
+        ]
       },
       {
         "from": "backend/dist",
@@ -171,7 +176,9 @@
       "!**/node_modules/**/coverage/**",
       "!**/node_modules/**/*.ts",
       "!**/node_modules/**/README*",
-      "!**/node_modules/**/CHANGELOG*"
+      "!**/node_modules/**/CHANGELOG*",
+      "!**/node_modules/@ffmpeg-installer/**",
+      "!**/node_modules/@ffprobe-installer/**"
     ],
     "asarUnpack": [
       "utilities/**"
@@ -275,6 +282,17 @@
         {
           "from": "utilities/bin/yt-dlp_win_dir",
           "to": "utilities/bin/yt-dlp_win_dir"
+        },
+        {
+          "from": "utilities/bin",
+          "to": "utilities/bin",
+          "filter": [
+            "whisper-cli.exe",
+            "ggml.dll",
+            "ggml-base.dll",
+            "ggml-cpu.dll",
+            "whisper.dll"
+          ]
         }
       ]
     },
@@ -313,6 +331,13 @@
         {
           "from": "utilities/bin/yt-dlp_linux_dir",
           "to": "utilities/bin/yt-dlp_linux_dir"
+        },
+        {
+          "from": "utilities/bin",
+          "to": "utilities/bin",
+          "filter": [
+            "whisper-cli"
+          ]
         }
       ]
     },

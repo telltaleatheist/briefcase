@@ -11,6 +11,7 @@ import { ServerConfig } from '../config/server-config';
  */
 export class WindowService {
   private mainWindow: BrowserWindow | null = null;
+  private editorWindows: Map<string, BrowserWindow> = new Map();
   private frontendPort: number = 8080;
   private isQuitting: boolean = false;
 
@@ -79,10 +80,74 @@ export class WindowService {
     this.mainWindow.on('closed', () => {
       this.mainWindow = null;
     });
-    
+
     return this.mainWindow;
   }
-  
+
+  /**
+   * Create a new editor window for video editing
+   * Opens the editor in a separate window with the given video data
+   */
+  createEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string }): BrowserWindow {
+    const windowId = `editor-${videoData.videoId}-${Date.now()}`;
+
+    // Get icon path
+    const iconPath = path.join(AppConfig.appPath, 'assets', 'icon.png');
+
+    const editorWindow = new BrowserWindow({
+      width: 1400,
+      height: 900,
+      minWidth: 1000,
+      minHeight: 600,
+      autoHideMenuBar: true,
+      icon: iconPath,
+      title: videoData.videoTitle || 'Video Editor',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        preload: AppConfig.preloadPath,
+      },
+    });
+
+    // Build the editor URL with query params for the video data
+    const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
+    const params = new URLSearchParams({
+      videoId: videoData.videoId,
+      videoTitle: videoData.videoTitle || '',
+      ...(videoData.videoPath && { videoPath: videoData.videoPath }),
+      popout: 'true'
+    });
+    const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
+
+    log.info(`Opening editor window: ${editorUrl}`);
+    editorWindow.loadURL(editorUrl);
+
+    // Store reference
+    this.editorWindows.set(windowId, editorWindow);
+
+    // Clean up on close
+    editorWindow.on('closed', () => {
+      this.editorWindows.delete(windowId);
+      log.info(`Editor window closed: ${windowId}`);
+    });
+
+    // Set up keyboard shortcuts for this window too
+    editorWindow.webContents.on('before-input-event', (event, input) => {
+      if ((input.meta || input.control) && input.key.toLowerCase() === 'r' && !input.shift) {
+        event.preventDefault();
+        editorWindow.reload();
+      }
+      if ((input.meta || input.control) && input.shift && input.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        editorWindow.webContents.reloadIgnoringCache();
+      }
+    });
+
+    return editorWindow;
+  }
+
   /**
    * Show error window when backend fails to start
    */

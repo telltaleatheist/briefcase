@@ -67,8 +67,8 @@
             </button>
           </div>
 
-          <!-- Category Sections -->
-          @if (sections.length > 0) {
+          <!-- Category Sections using Cascade Component -->
+          @if (cascadeWeeks().length > 0) {
             <div class="categories-container">
               <div class="export-header">
                 <p class="hint-text">Select clips to export:</p>
@@ -76,57 +76,19 @@
                   <button class="select-toggle" (click)="areAllSelected() ? deselectAll() : selectAll()">
                     {{ areAllSelected() ? 'Deselect All' : 'Select All' }}
                   </button>
-                  <button
-                    class="collapse-toggle"
-                    (click)="allCollapsed ? expandAll() : collapseAll()"
-                    [title]="allCollapsed ? 'Expand All' : 'Collapse All'">
-                    @if (allCollapsed) {
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M7 15l5 5 5-5M7 9l5-5 5 5"/>
-                      </svg>
-                    } @else {
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M7 20l5-5 5 5M7 4l5 5 5-5"/>
-                      </svg>
-                    }
-                  </button>
                 </div>
               </div>
 
-              <div class="sections-list">
-                @for (category of getCategories(); track category) {
-                  <div class="category-group">
-                    <div class="category-header" (click)="onGroupToggle(category)">
-                      <svg class="collapse-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        @if (isGroupCollapsed(category)) {
-                          <polyline points="9 18 15 12 9 6"/>
-                        } @else {
-                          <polyline points="6 9 12 15 18 9"/>
-                        }
-                      </svg>
-                      <span class="category-label" [style.border-left-color]="getCategoryColor(category)">
-                        {{ category }}
-                      </span>
-                      <span class="category-count">{{ getSectionsByCategory().get(category)?.length || 0 }}</span>
-                    </div>
-                    @if (!isGroupCollapsed(category)) {
-                      <div class="category-sections">
-                        @for (section of getSectionsByCategory().get(category); track section.id) {
-                          <div
-                            class="section-item"
-                            [class.selected]="isSectionSelected(section)"
-                            (click)="toggleSection(section)">
-                            <div class="selection-indicator" [style.background-color]="getCategoryColor(section.category)"></div>
-                            <div class="section-info">
-                              <div class="section-description">{{ section.description }}</div>
-                            </div>
-                            <div class="section-time">{{ section.timeRange }}</div>
-                          </div>
-                        }
-                      </div>
-                    }
-                  </div>
-                }
+              <div class="cascade-wrapper">
+                <app-cascade
+                  [weeks]="cascadeWeeks()"
+                  [showDuration]="true"
+                  [showEditButton]="false"
+                  [showDeleteButton]="false"
+                  [showStatusIndicator]="true"
+                  (selectionChanged)="onCascadeSelectionChanged($event)"
+                  (videoAction)="onCascadeVideoAction($event)"
+                />
               </div>
             </div>
           }

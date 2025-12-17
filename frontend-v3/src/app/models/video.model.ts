@@ -17,6 +17,7 @@ export interface VideoItem {
   // Searchable fields
   aiDescription?: string;
   sourceUrl?: string;
+  errorMessage?: string; // Error message for failed downloads/operations
   tags?: string[];
   // Media type info
   mediaType?: string;

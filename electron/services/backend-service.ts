@@ -10,33 +10,6 @@ import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 import { PortUtil } from '../utilities/port-util';
 
-// Import runtime paths for binary locations - lazy loaded to avoid issues with app not being ready
-let _runtimePathsCache: any = null;
-function getRuntimePaths(): any {
-  if (_runtimePathsCache) {
-    return _runtimePathsCache;
-  }
-
-  try {
-    // In packaged app, runtime-paths is in resources/dist-electron/shared/
-    // In development, it's built to dist-electron/shared/
-    // This file compiles to dist-electron/electron/services/backend-service.js
-    // From there: ../../shared/runtime-paths goes to dist-electron/shared/runtime-paths
-    // (one level up to electron/, another level up to dist-electron/, then into shared/)
-    if (app && app.isPackaged) {
-      const runtimePathsFile = path.join(process.resourcesPath!, 'dist-electron', 'shared', 'runtime-paths.js');
-      _runtimePathsCache = require(runtimePathsFile).getRuntimePaths();
-    } else {
-      _runtimePathsCache = require('../../shared/runtime-paths').getRuntimePaths();
-    }
-  } catch (error) {
-    log.warn('runtime-paths not available, will use environment variables:', error);
-    _runtimePathsCache = { ffmpeg: '', ffprobe: '', ytdlp: '', python: '' };
-  }
-
-  return _runtimePathsCache;
-}
-
 /**
  * Backend server management service
  * Handles starting, stopping, and communicating with the NestJS backend
@@ -302,41 +275,9 @@ export class BackendService {
       log.info(`Backend node_modules: ${backendNodeModules}`);
       log.info(`Node modules exists: ${fs.existsSync(backendNodeModules)}`);
 
-      // Get binary paths from runtime-paths
-      const runtimePaths = getRuntimePaths();
-      log.info(`Binary paths: ffmpeg=${runtimePaths.ffmpeg}, ffprobe=${runtimePaths.ffprobe}, ytdlp=${runtimePaths.ytdlp}`);
-
-      // Determine FFmpeg/FFprobe paths - prioritize runtime paths, then env vars, then backend node_modules installers
-      let ffmpegPath = runtimePaths.ffmpeg || process.env.FFMPEG_PATH;
-      let ffprobePath = runtimePaths.ffprobe || process.env.FFPROBE_PATH;
-
-      // If not provided, look for them in backend's node_modules
-      if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
-        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
-                              (process.platform === 'darwin' ?
-                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
-                                'linux-x64');
-        const ffmpegInstaller = path.join(backendNodeModules, '@ffmpeg-installer', platformFolder,
-                                         process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-        if (fs.existsSync(ffmpegInstaller)) {
-          ffmpegPath = ffmpegInstaller;
-          log.info(`Using FFmpeg from backend node_modules: ${ffmpegPath}`);
-        }
-      }
-
-      if (!ffprobePath || !fs.existsSync(ffprobePath)) {
-        const platformFolder = process.platform === 'win32' ? 'win32-x64' :
-                              (process.platform === 'darwin' ?
-                                (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') :
-                                'linux-x64');
-        const ffprobeInstaller = path.join(backendNodeModules, '@ffprobe-installer', platformFolder,
-                                          process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
-        if (fs.existsSync(ffprobeInstaller)) {
-          ffprobePath = ffprobeInstaller;
-          log.info(`Using FFprobe from backend node_modules: ${ffprobePath}`);
-        }
-      }
-
+      // Backend will use getRuntimePaths() directly to find bundled binaries
+      // We only pass RESOURCES_PATH so the backend can locate the runtime-paths module
+      // NO binary paths are passed via env vars to prevent using system binaries
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -348,13 +289,12 @@ export class BackendService {
         NODE_ENV: process.env.NODE_ENV || 'production',
         APP_ROOT: resourcesPath,
         VERBOSE: 'true',
-        // Set binary paths for backend to use
-        FFMPEG_PATH: ffmpegPath,
-        FFPROBE_PATH: ffprobePath,
-        YT_DLP_PATH: runtimePaths.ytdlp || process.env.YT_DLP_PATH,
-        // whisper.cpp paths (standalone binary - no Python needed!)
-        WHISPER_CPP_PATH: runtimePaths.whisperCpp || process.env.WHISPER_CPP_PATH,
-        WHISPER_MODEL_PATH: runtimePaths.whisperModel || process.env.WHISPER_MODEL_PATH,
+        // Remove any user-set binary paths to prevent using system binaries
+        FFMPEG_PATH: undefined,
+        FFPROBE_PATH: undefined,
+        YT_DLP_PATH: undefined,
+        WHISPER_CPP_PATH: undefined,
+        WHISPER_MODEL_PATH: undefined,
       };
       
       // Set the working directory to the backend directory for proper module resolution

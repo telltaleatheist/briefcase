@@ -30,34 +30,14 @@ export class FfmpegService {
     private readonly thumbnailService: ThumbnailService
   ) {
     try {
-      // Try environment variables first (set by Electron), then runtime paths
-      let ffmpegPath = process.env.FFMPEG_PATH;
-      let ffprobePath = process.env.FFPROBE_PATH;
+      // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
+      // This ensures consistent behavior across all platforms and prevents using
+      // user's system-installed binaries which may be incompatible versions
+      const paths = getRuntimePaths();
+      const ffmpegPath = paths.ffmpeg;
+      const ffprobePath = paths.ffprobe;
 
-      // Fall back to runtime paths resolution
-      if (!ffmpegPath || !ffprobePath || !fs.existsSync(ffmpegPath) || !fs.existsSync(ffprobePath)) {
-        const paths = getRuntimePaths();
-        ffmpegPath = ffmpegPath && fs.existsSync(ffmpegPath) ? ffmpegPath : paths.ffmpeg;
-        ffprobePath = ffprobePath && fs.existsSync(ffprobePath) ? ffprobePath : paths.ffprobe;
-      }
-
-      // Try config service as last resort
-      if (!fs.existsSync(ffmpegPath)) {
-        try {
-          ffmpegPath = this.configService.getFfmpegPath();
-        } catch {
-          // Ignore config errors
-        }
-      }
-      if (!fs.existsSync(ffprobePath)) {
-        try {
-          ffprobePath = this.configService.getFfprobePath();
-        } catch {
-          // Ignore config errors
-        }
-      }
-
-      // Verify binaries exist
+      // Verify binaries exist and have correct architecture
       verifyBinary(ffmpegPath, 'FFmpeg');
       verifyBinary(ffprobePath, 'FFprobe');
 
@@ -166,6 +146,9 @@ export class FfmpegService {
 
       this.lastReportedProgress.set(progressKey, 0);
 
+      // Log whether aspect ratio fix will be applied (now applies whenever requested)
+      this.logger.log(`ASPECT RATIO FIX: requested=${options?.fixAspectRatio}, videoNeeds=${needsAspectRatioFix}, will apply=${options?.fixAspectRatio}`);
+
       const args = this.buildFfmpegArgs(videoFile, outputFile, needsAspectRatioFix, selectedEncoder, options);
 
       if (taskType && jobId) {
@@ -203,33 +186,41 @@ export class FfmpegService {
         this.ffmpeg.off('progress', progressHandler);
       }
 
-      this.logger.log(`Successfully re-encoded video: ${outputFile}`);
+      this.logger.log(`FFmpeg completed, verifying output: ${outputFile}`);
 
-      // Preserve original file timestamps before deletion
-      const originalStats = fs.statSync(videoFile);
-      const originalAtime = originalStats.atime;
-      const originalMtime = originalStats.mtime;
-
-      // Delete original and rename
-      if (this.safeDeleteFile(videoFile)) {
-        this.logger.log(`Deleted original video: ${videoFile}`);
-        try {
-          fs.renameSync(outputFile, videoFile);
-          fs.utimesSync(videoFile, originalAtime, originalMtime);
-          this.logger.log(`Renamed and preserved timestamps`);
-
-          this.lastReportedProgress.set(progressKey, 100);
-          if (taskType && jobId) {
-            this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
-          }
-          return videoFile;
-        } catch (err: any) {
-          this.logger.error(`Failed to rename file: ${err.message}`);
-          return outputFile;
-        }
+      // CRITICAL: Verify the output file before touching the original
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, 92, 'Verifying processed video...');
       }
 
-      return outputFile;
+      const verification = await this.verifyProcessedVideo(outputFile, duration);
+      if (!verification.valid) {
+        this.logger.error(`VERIFICATION FAILED: ${verification.error}`);
+        // Clean up the bad output file but KEEP the original
+        this.safeDeleteFile(outputFile);
+        if (taskType && jobId) {
+          this.eventService.emitTaskProgress(jobId, taskType, 0, `Verification failed: ${verification.error}`);
+        }
+        return null;
+      }
+
+      this.logger.log(`Verification passed, performing atomic replacement`);
+
+      // Atomically replace original with verified new file
+      const replaceResult = await this.atomicFileReplace(videoFile, outputFile, true);
+      if (!replaceResult.success) {
+        this.logger.error(`ATOMIC REPLACE FAILED: ${replaceResult.error}`);
+        // Original should be intact due to atomic replace logic
+        // Clean up output file if it still exists
+        this.safeDeleteFile(outputFile);
+        return null;
+      }
+
+      this.lastReportedProgress.set(progressKey, 100);
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, 100, 'Video re-encoding completed');
+      }
+      return videoFile;
     } catch (error: any) {
       this.logger.error('CRITICAL: Unexpected error in re-encoding:', error);
       return null;
@@ -297,7 +288,8 @@ export class FfmpegService {
   ): string[] {
     let filterComplex = '';
 
-    if (options?.fixAspectRatio && needsAspectRatioFix) {
+    // Apply aspect ratio fix if user requested it - don't second-guess the user
+    if (options?.fixAspectRatio) {
       filterComplex = "[0:v]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg];" +
                        "[0:v]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg];" +
                        "[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]";
@@ -355,6 +347,136 @@ export class FfmpegService {
     } catch (error) {
       this.logger.error(`Error deleting file ${filePath}:`, error);
       return false;
+    }
+  }
+
+  /**
+   * Verify a processed video file is valid by checking:
+   * - File exists
+   * - File has non-zero size
+   * - Duration is within tolerance of expected duration
+   */
+  private async verifyProcessedVideo(
+    outputFile: string,
+    expectedDuration: number,
+    toleranceSeconds: number = 2
+  ): Promise<{ valid: boolean; error?: string; actualDuration?: number }> {
+    // Check file exists
+    if (!fs.existsSync(outputFile)) {
+      return { valid: false, error: 'Output file does not exist' };
+    }
+
+    // Check file has content
+    const stats = fs.statSync(outputFile);
+    if (stats.size === 0) {
+      return { valid: false, error: 'Output file is empty (0 bytes)' };
+    }
+
+    // Minimum reasonable size - 10KB per second of video
+    const minExpectedSize = expectedDuration * 10000;
+    if (stats.size < minExpectedSize && expectedDuration > 1) {
+      return {
+        valid: false,
+        error: `Output file suspiciously small: ${stats.size} bytes for ${expectedDuration}s video`
+      };
+    }
+
+    // Verify duration matches within tolerance
+    try {
+      const metadata = await this.ffprobe.probe(outputFile);
+      const videoStream = metadata.streams?.find(s => s.codec_type === 'video');
+      const actualDuration = parseFloat(
+        videoStream?.duration || metadata.format?.duration || '0'
+      );
+
+      if (actualDuration === 0) {
+        return { valid: false, error: 'Could not determine output video duration' };
+      }
+
+      const durationDiff = Math.abs(actualDuration - expectedDuration);
+      if (durationDiff > toleranceSeconds) {
+        return {
+          valid: false,
+          error: `Duration mismatch: expected ${expectedDuration.toFixed(1)}s, got ${actualDuration.toFixed(1)}s (diff: ${durationDiff.toFixed(1)}s)`,
+          actualDuration
+        };
+      }
+
+      this.logger.log(`Video verification passed: ${stats.size} bytes, ${actualDuration.toFixed(1)}s duration`);
+      return { valid: true, actualDuration };
+    } catch (error: any) {
+      return { valid: false, error: `Failed to probe output file: ${error.message}` };
+    }
+  }
+
+  /**
+   * Atomically replace original file with new file.
+   * Uses backup strategy to ensure original is never lost if replacement fails.
+   */
+  private async atomicFileReplace(
+    originalFile: string,
+    newFile: string,
+    preserveTimestamps: boolean = true
+  ): Promise<{ success: boolean; error?: string }> {
+    const backupFile = `${originalFile}.backup`;
+
+    try {
+      // Get original timestamps if needed
+      let originalAtime: Date | undefined;
+      let originalMtime: Date | undefined;
+      if (preserveTimestamps && fs.existsSync(originalFile)) {
+        const stats = fs.statSync(originalFile);
+        originalAtime = stats.atime;
+        originalMtime = stats.mtime;
+      }
+
+      // Step 1: Rename original to backup (not delete!)
+      if (fs.existsSync(originalFile)) {
+        fs.renameSync(originalFile, backupFile);
+        this.logger.log(`Backed up original: ${originalFile} -> ${backupFile}`);
+      }
+
+      // Step 2: Rename new file to original name
+      try {
+        fs.renameSync(newFile, originalFile);
+        this.logger.log(`Renamed new file: ${newFile} -> ${originalFile}`);
+      } catch (renameError: any) {
+        // CRITICAL: Restore backup if rename fails
+        this.logger.error(`Failed to rename new file, restoring backup: ${renameError.message}`);
+        if (fs.existsSync(backupFile)) {
+          fs.renameSync(backupFile, originalFile);
+          this.logger.log(`Restored original from backup`);
+        }
+        return { success: false, error: `Rename failed: ${renameError.message}` };
+      }
+
+      // Step 3: Restore timestamps
+      if (preserveTimestamps && originalAtime && originalMtime) {
+        try {
+          fs.utimesSync(originalFile, originalAtime, originalMtime);
+        } catch (timeError) {
+          this.logger.warn(`Could not preserve timestamps: ${timeError}`);
+        }
+      }
+
+      // Step 4: Delete backup only after successful replacement
+      if (fs.existsSync(backupFile)) {
+        fs.unlinkSync(backupFile);
+        this.logger.log(`Deleted backup file`);
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      // Try to restore from backup if anything went wrong
+      if (fs.existsSync(backupFile) && !fs.existsSync(originalFile)) {
+        try {
+          fs.renameSync(backupFile, originalFile);
+          this.logger.log(`Restored original from backup after error`);
+        } catch (restoreError) {
+          this.logger.error(`CRITICAL: Could not restore backup: ${restoreError}`);
+        }
+      }
+      return { success: false, error: error.message };
     }
   }
 
@@ -481,29 +603,39 @@ export class FfmpegService {
         this.ffmpeg.off('progress', progressHandler);
       }
 
-      this.logger.log(`Successfully normalized audio to temp file: ${tempOutputFile}`);
+      this.logger.log(`FFmpeg completed, verifying output: ${tempOutputFile}`);
 
       if (jobId) {
-        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 95, 'Audio normalization complete, finalizing...');
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 92, 'Verifying normalized audio...');
       }
 
-      // Preserve timestamps and replace original
-      const originalStats = fs.statSync(filePath);
-      const originalAtime = originalStats.atime;
-      const originalMtime = originalStats.mtime;
-
-      if (this.safeDeleteFile(filePath)) {
-        try {
-          fs.renameSync(tempOutputFile, filePath);
-          fs.utimesSync(filePath, originalAtime, originalMtime);
-          return filePath;
-        } catch (err: any) {
-          this.logger.error(`Failed to rename file: ${err.message}`);
-          return tempOutputFile;
+      // CRITICAL: Verify the output file before touching the original
+      const verification = await this.verifyProcessedVideo(tempOutputFile, duration);
+      if (!verification.valid) {
+        this.logger.error(`VERIFICATION FAILED: ${verification.error}`);
+        // Clean up the bad output file but KEEP the original
+        this.safeDeleteFile(tempOutputFile);
+        if (jobId) {
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', 0, `Verification failed: ${verification.error}`);
         }
+        return null;
       }
 
-      return tempOutputFile;
+      this.logger.log(`Verification passed, performing atomic replacement`);
+
+      // Atomically replace original with verified new file
+      const replaceResult = await this.atomicFileReplace(filePath, tempOutputFile, true);
+      if (!replaceResult.success) {
+        this.logger.error(`ATOMIC REPLACE FAILED: ${replaceResult.error}`);
+        // Original should be intact due to atomic replace logic
+        this.safeDeleteFile(tempOutputFile);
+        return null;
+      }
+
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 100, 'Audio normalization complete');
+      }
+      return filePath;
     } catch (error: any) {
       this.logger.error('Error in normalizeAudio:', error);
       return null;

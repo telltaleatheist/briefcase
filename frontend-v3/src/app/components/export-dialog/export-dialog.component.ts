@@ -1,10 +1,12 @@
-import { Component, Input, Output, EventEmitter, OnInit, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { CascadeComponent } from '../cascade/cascade.component';
+import { VideoWeek, VideoItem } from '../../models/video.model';
 
 export interface ExportSection {
   id: string;
@@ -25,10 +27,28 @@ export interface ExportDialogData {
   videoTitle: string;
 }
 
+// Category colors for consistent styling
+const CATEGORY_COLORS: Record<string, string> = {
+  'export changes': '#22c55e',      // Green
+  'current selection': '#ff6b35',   // Orange
+  'routine': '#3b82f6',             // Blue
+  'shocking': '#f59e0b',            // Amber
+  'political-violence': '#b91c1c',  // Dark Red
+  'hate': '#dc2626',                // Red
+  'violence': '#ef4444',            // Red
+  'extremism': '#f97316',           // Orange
+  'misinformation': '#eab308',      // Yellow
+  'conspiracy': '#a855f7',          // Purple
+  'christian-nationalism': '#ec4899', // Pink
+  'false-prophecy': '#8b5cf6',      // Violet
+  'marker': '#6b7280',              // Gray
+  'default': '#6c757d'
+};
+
 @Component({
   selector: 'app-export-dialog',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CascadeComponent],
   templateUrl: './export-dialog.component.html',
   styleUrls: ['./export-dialog.component.scss']
 })
@@ -61,9 +81,11 @@ export class ExportDialogComponent implements OnInit {
   sections: ExportSection[] = [];
   selectedSectionIds = new Set<string>();
 
-  // Track which groups are collapsed
-  collapsedGroups = new Set<string>();
-  allCollapsed = true;
+  // Cascade weeks data (sections grouped by category)
+  cascadeWeeks = signal<VideoWeek[]>([]);
+
+  // Map section IDs to ExportSection for lookup
+  private sectionMap = new Map<string, ExportSection>();
 
   constructor(
     private http: HttpClient,
@@ -79,7 +101,7 @@ export class ExportDialogComponent implements OnInit {
     // Use 0 as start and a very large number as end to represent full video
     cascadeSections.push({
       id: '__full_video__',
-      category: ' Export Changes',
+      category: 'Export Changes',
       description: 'Export entire video with changes (scale, etc.)',
       startSeconds: 0,
       endSeconds: Number.MAX_SAFE_INTEGER, // Will be replaced with actual duration in backend
@@ -99,7 +121,7 @@ export class ExportDialogComponent implements OnInit {
         // Add selection as a cascade list item at the top
         cascadeSections.push({
           id: '__selection__',
-          category: ' Current Selection',
+          category: 'Current Selection',
           description: 'Current timeline selection',
           startSeconds: this.selectionStart,
           endSeconds: this.selectionEnd,
@@ -117,15 +139,111 @@ export class ExportDialogComponent implements OnInit {
 
     this.sections = cascadeSections;
 
-    // Initialize all groups as collapsed except Export Changes and Current Selection
-    const categories = new Set(this.sections.map(s => s.category));
-    this.collapsedGroups = new Set(
-      Array.from(categories).filter(cat =>
-        cat.trim() !== 'Current Selection' && cat.trim() !== 'Export Changes'
-      )
-    );
+    // Build section map for lookup
+    cascadeSections.forEach(section => {
+      this.sectionMap.set(section.id, section);
+    });
 
-    this.updateAllCollapsedState();
+    // Build cascadeWeeks by grouping sections by category
+    this.buildCascadeWeeks(cascadeSections);
+  }
+
+  /**
+   * Build VideoWeek[] grouped by category for the cascade component
+   */
+  private buildCascadeWeeks(sections: ExportSection[]) {
+    // Group sections by category
+    const categoryMap = new Map<string, ExportSection[]>();
+
+    // Define the order of categories (special ones first)
+    const categoryOrder = ['Export Changes', 'Current Selection'];
+
+    sections.forEach(section => {
+      const category = section.category;
+      if (!categoryMap.has(category)) {
+        categoryMap.set(category, []);
+      }
+      categoryMap.get(category)!.push(section);
+    });
+
+    // Sort categories: special ones first, then alphabetically
+    const sortedCategories = Array.from(categoryMap.keys()).sort((a, b) => {
+      const aIndex = categoryOrder.indexOf(a);
+      const bIndex = categoryOrder.indexOf(b);
+
+      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+      if (aIndex !== -1) return -1;
+      if (bIndex !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
+    // Build weeks array
+    const weeks: VideoWeek[] = sortedCategories.map(category => {
+      const categorySections = categoryMap.get(category)!;
+      const categoryColor = this.getCategoryColor(category);
+
+      // Convert ExportSections to VideoItems
+      const videos: VideoItem[] = categorySections.map(section => ({
+        id: section.id,
+        name: section.description,
+        duration: section.timeRange,
+        tags: [`category:${section.category}`, `color:${categoryColor}`],
+        suggestedTitle: section.timeRange // Show time range as secondary info
+      }));
+
+      // Get icon for category
+      const icon = this.getCategoryIcon(category);
+
+      return {
+        weekLabel: `${icon} ${category}`,
+        videos,
+        expanded: category === 'Export Changes' || category === 'Current Selection' // Expand special categories by default
+      };
+    });
+
+    this.cascadeWeeks.set(weeks);
+  }
+
+  /**
+   * Get icon for category
+   */
+  private getCategoryIcon(category: string): string {
+    const icons: Record<string, string> = {
+      'export changes': '📹',
+      'current selection': '✂️',
+      'hate': '🚫',
+      'violence': '⚠️',
+      'extremism': '🔥',
+      'misinformation': '❌',
+      'conspiracy': '🔮',
+      'marker': '📍',
+      'routine': '📋',
+      'shocking': '⚡'
+    };
+    return icons[category.toLowerCase()] || '📍';
+  }
+
+  /**
+   * Handle selection changes from cascade component
+   */
+  onCascadeSelectionChanged(event: { count: number; ids: Set<string> }) {
+    this.selectedSectionIds = event.ids;
+  }
+
+  /**
+   * Handle video actions from cascade (like double-click)
+   */
+  onCascadeVideoAction(event: { action: string; videos: VideoItem[] }) {
+    // Toggle selection on action
+    if (event.action === 'open' || event.action === 'edit') {
+      event.videos.forEach(video => {
+        if (this.selectedSectionIds.has(video.id)) {
+          this.selectedSectionIds.delete(video.id);
+        } else {
+          this.selectedSectionIds.add(video.id);
+        }
+      });
+    }
   }
 
   onOverlayClick(event: MouseEvent) {
@@ -136,17 +254,7 @@ export class ExportDialogComponent implements OnInit {
   }
 
   getCategoryColor(category: string): string {
-    const colors: { [key: string]: string } = {
-      ' current selection': '#ff6600',
-      'hate': '#ff4444',
-      'custom': '#ff6600',
-      'highlight': '#ffaa00',
-      'general': '#4488ff',
-      'intro': '#44ff88',
-      'outro': '#ff44aa',
-      'other': '#999999'
-    };
-    return colors[category.toLowerCase()] || '#999999';
+    return CATEGORY_COLORS[category.toLowerCase()] || CATEGORY_COLORS['default'];
   }
 
   formatTime(seconds: number): string {
@@ -180,63 +288,6 @@ export class ExportDialogComponent implements OnInit {
     );
   }
 
-  onGroupToggle(groupId: string) {
-    if (this.collapsedGroups.has(groupId)) {
-      this.collapsedGroups.delete(groupId);
-    } else {
-      this.collapsedGroups.add(groupId);
-    }
-    this.updateAllCollapsedState();
-  }
-
-  toggleSection(section: ExportSection) {
-    if (this.selectedSectionIds.has(section.id)) {
-      this.selectedSectionIds.delete(section.id);
-    } else {
-      this.selectedSectionIds.add(section.id);
-    }
-  }
-
-  isSectionSelected(section: ExportSection): boolean {
-    return this.selectedSectionIds.has(section.id);
-  }
-
-  getSectionsByCategory(): Map<string, ExportSection[]> {
-    const grouped = new Map<string, ExportSection[]>();
-    for (const section of this.sections) {
-      if (!grouped.has(section.category)) {
-        grouped.set(section.category, []);
-      }
-      grouped.get(section.category)!.push(section);
-    }
-    return grouped;
-  }
-
-  getCategories(): string[] {
-    return Array.from(this.getSectionsByCategory().keys()).sort((a, b) => {
-      if (a.trim() === 'Current Selection') return -1;
-      if (b.trim() === 'Current Selection') return 1;
-      return a.localeCompare(b);
-    });
-  }
-
-  isGroupCollapsed(category: string): boolean {
-    return this.collapsedGroups.has(category);
-  }
-
-  expandAll() {
-    this.collapsedGroups.clear();
-    this.allCollapsed = false;
-  }
-
-  collapseAll() {
-    const categories = new Set(this.sections.map(s => s.category));
-    this.collapsedGroups = new Set(
-      Array.from(categories).filter(cat => cat.trim() !== 'Current Selection')
-    );
-    this.allCollapsed = true;
-  }
-
   selectAll() {
     this.sections.forEach(section => this.selectedSectionIds.add(section.id));
   }
@@ -255,14 +306,6 @@ export class ExportDialogComponent implements OnInit {
       0
     );
     return this.formatTime(totalSeconds);
-  }
-
-  private updateAllCollapsedState() {
-    const categories = new Set(this.sections.map(s => s.category));
-    const collapsibleCategories = Array.from(categories).filter(cat => cat.trim() !== 'Current Selection');
-    const totalCollapsibleGroups = collapsibleCategories.length;
-    const collapsedCount = Array.from(this.collapsedGroups).filter(cat => cat.trim() !== 'Current Selection').length;
-    this.allCollapsed = collapsedCount === totalCollapsibleGroups;
   }
 
   cancel() {

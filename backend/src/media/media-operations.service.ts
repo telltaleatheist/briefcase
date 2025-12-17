@@ -241,6 +241,7 @@ export class MediaOperationsService {
         videoPath = videoIdOrPath;
       }
 
+      this.logger.log(`[${jobId || 'standalone'}] Fix aspect ratio using path: ${videoPath}`);
       this.eventService.emitTaskProgress(jobId || '', 'fix-aspect-ratio', 5, 'Analyzing video dimensions...');
 
       const result = await this.mediaProcessingService.processMedia(

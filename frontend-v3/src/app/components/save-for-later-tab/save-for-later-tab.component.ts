@@ -192,7 +192,9 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
       fileExtension: link.download_path ? this.getFileExtension(link.download_path) : undefined,
       mediaType: link.metadata?.is_webpage ? 'text/html' : 'video/mp4',
       // Store the original URL for context menu "Open URL" action
-      sourceUrl: link.url
+      sourceUrl: link.url,
+      // Store error message for failed downloads
+      errorMessage: link.error_message || undefined
     };
 
     return baseItem;
@@ -403,6 +405,19 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
           const link = this.savedLinks().find(l => l.id === video.id);
           if (link) this.deleteLink(link.id);
         });
+        break;
+      case 'copy-url':
+        // Copy URL to clipboard (use first video's URL)
+        const firstVideo = event.videos[0];
+        const link = this.savedLinks().find(l => l.id === firstVideo?.id);
+        if (link) {
+          navigator.clipboard.writeText(link.url).then(() => {
+            this.notificationService.success('Copied', 'URL copied to clipboard');
+          }).catch((err) => {
+            console.error('Failed to copy to clipboard:', err);
+            this.notificationService.error('Error', 'Failed to copy to clipboard');
+          });
+        }
         break;
     }
   }

@@ -93,6 +93,21 @@
                 </div>
               }
 
+              <!-- Error Message Row (for failed downloads/operations) -->
+              @if (item.video.errorMessage && (item.video.tags?.includes('download-failed') || item.video.tags?.includes('status:failed'))) {
+                <div class="video-meta error-meta">
+                  <span class="meta-icon">❌</span>
+                  <span class="meta-filename error-text">{{ item.video.errorMessage }}</span>
+                  @if (item.video.sourceUrl) {
+                    <span
+                      class="meta-action"
+                      (click)="copyToClipboard(item.video.sourceUrl); $event.stopPropagation()"
+                      title="Copy URL to clipboard"
+                    >Copy URL</span>
+                  }
+                </div>
+              }
+
               <!-- Suggested Title Row (not for ghosts) -->
               @if (item.video.suggestedTitle && !item.video.isGhost) {
                 <div class="video-meta">

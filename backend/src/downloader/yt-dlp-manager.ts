@@ -45,26 +45,19 @@ export class YtDlpManager extends EventEmitter {
   constructor() {
     super();
 
-    // Get paths from runtime-paths or environment
-    let ytdlpPath = process.env.YT_DLP_PATH;
-    let ffmpegPath = process.env.FFMPEG_PATH;
-
+    // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
+    // This ensures consistent behavior across all platforms and prevents using
+    // user's system-installed binaries which may be incompatible versions
     const runtimePaths = getRuntimePaths();
-
-    if (!ytdlpPath || !fs.existsSync(ytdlpPath)) {
-      ytdlpPath = runtimePaths.ytdlp;
-    }
-
-    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
-      ffmpegPath = runtimePaths.ffmpeg;
-    }
+    const ytdlpPath = runtimePaths.ytdlp;
+    const ffmpegPath = runtimePaths.ffmpeg;
 
     this.ffmpegPath = ffmpegPath;
 
-    // Verify yt-dlp exists (ffmpeg verification is optional for downloads)
-    if (path.isAbsolute(ytdlpPath) && !fs.existsSync(ytdlpPath)) {
+    // Verify yt-dlp exists
+    if (!fs.existsSync(ytdlpPath)) {
       this.logger.error(`yt-dlp not found at: ${ytdlpPath}`);
-      throw new Error(`yt-dlp executable not found at path: ${ytdlpPath}`);
+      throw new Error(`yt-dlp executable not found at path: ${ytdlpPath}. Bundled binary is missing.`);
     }
 
     // Initialize the YtDlpBridge

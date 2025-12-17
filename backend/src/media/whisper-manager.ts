@@ -37,17 +37,12 @@ export class WhisperManager extends EventEmitter {
     this.logger.log(`Process CWD: ${process.cwd()}`);
     this.logger.log(`Resources path: ${(process as any).resourcesPath || 'NOT SET (development mode)'}`);
 
-    // Get paths from runtime-paths or environment
-    let whisperPath = process.env.WHISPER_CPP_PATH;
-    let modelsDir: string;
-
+    // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
+    // This ensures consistent behavior across all platforms and prevents using
+    // user's system-installed binaries which may be incompatible versions
     const runtimePaths = getRuntimePaths();
-
-    if (!whisperPath || !fs.existsSync(whisperPath)) {
-      whisperPath = runtimePaths.whisper;
-    }
-
-    modelsDir = runtimePaths.whisperModelsDir;
+    const whisperPath = runtimePaths.whisper;
+    const modelsDir = runtimePaths.whisperModelsDir;
 
     this.logger.log('-'.repeat(60));
     this.logger.log('RESOLVED PATHS:');

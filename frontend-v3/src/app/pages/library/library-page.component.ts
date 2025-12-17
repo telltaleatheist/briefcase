@@ -29,6 +29,7 @@ import { VideoJobSettings } from '../../models/video-processing.model';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { FileImportService } from '../../services/file-import.service';
+import { ElectronService } from '../../services/electron.service';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -50,6 +51,7 @@ export interface ProcessingTask {
   options: any;
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
+  errorMessage?: string; // Error message when task fails
 }
 
 @Component({
@@ -86,6 +88,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private notificationService = inject(NotificationService);
   private tabsService = inject(TabsService);
   private fileImportService = inject(FileImportService);
+  private electronService = inject(ElectronService);
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
@@ -340,14 +343,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         status: job.status === 'queued' ? 'pending' as const :
                 job.status === 'processing' ? 'processing' as const :
                 job.status === 'completed' ? 'completed' as const : 'failed' as const,
-        tasks: job.tasks.map(task => ({
-          type: this.mapVideoTaskTypeToQueueTaskType(task.type),
-          options: {}, // Add empty options object
-          status: task.status === 'pending' ? 'pending' as const :
-                  task.status === 'in-progress' ? 'running' as const :
-                  task.status === 'completed' ? 'completed' as const : 'failed' as const,
-          progress: task.progress
-        }))
+        tasks: this.combineJobTasks(job.tasks)
       }));
       console.log('[LibraryPage] Converted to queue items:', queueItems);
       console.log('[LibraryPage] Setting processingQueue with', queueItems.length, 'items');
@@ -381,7 +377,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
       // Refresh library when a task completes
       // Skip if there's a pending rename for this video to avoid race conditions
-      if (event.type === 'analyze' || event.type === 'transcribe' || event.type === 'import' || event.type === 'download') {
+      const refreshTaskTypes = ['analyze', 'transcribe', 'import', 'download', 'fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      if (refreshTaskTypes.includes(event.type)) {
         if (event.videoId && this.pendingRenames.has(event.videoId)) {
           console.log('Skipping library refresh - pending rename for videoId:', event.videoId);
         } else {
@@ -398,7 +395,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       if (event.type) {
         // Translate backend job ID to frontend job ID
         const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
-        this.updateQueueTaskStatus(frontendJobId, event.type, 'running', event.progress);
+        // Pass undefined for status - let updateQueueTaskStatus handle it without overwriting completed status
+        this.updateQueueTaskProgress(frontendJobId, event.type, event.progress);
       }
     });
 
@@ -409,13 +407,15 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // Translate backend job ID to frontend job ID
       const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
 
-      // Update queue item task status to failed
+      // Get error message
+      const errorMessage = event.error?.message || 'Unknown error';
+
+      // Update queue item task status to failed with error message
       if (event.type) {
-        this.updateQueueTaskStatus(frontendJobId, event.type, 'failed', 0);
+        this.updateQueueTaskStatus(frontendJobId, event.type, 'failed', 0, errorMessage);
       }
 
       // Show notification to user
-      const errorMessage = event.error?.message || 'Unknown error';
       this.notificationService.error(
         `Task failed: ${event.type}`,
         errorMessage,
@@ -684,10 +684,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     return queueItem.tasks.map(task => {
       const taskInfo = AVAILABLE_TASKS.find(t => t.type === task.type);
+      // Use "Download" instead of "Download and Import" for cleaner display
+      const label = task.type === 'download-import' ? 'Download' : (taskInfo?.label || task.type);
       return {
         id: `${queueId}-${task.type}`,
         parentId: video.id,
-        label: taskInfo?.label || task.type,
+        label,
         icon: this.getTaskStatusIcon(task.status),
         status: this.mapTaskStatus(task.status),
         progress: task.status === 'running' ? {
@@ -869,8 +871,68 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  // Update queue task progress only (don't change status if already completed)
+  private updateQueueTaskProgress(jobId: string, taskType: string, progress: number) {
+    const queue = this.processingQueue();
+
+    // Find the queue item
+    let itemIndex = queue.findIndex(q => q.jobId === jobId);
+    if (itemIndex === -1) {
+      itemIndex = queue.findIndex(q => q.backendJobId === jobId);
+    }
+    if (itemIndex === -1) {
+      try {
+        const mapping = localStorage.getItem('clipchimp-job-id-mapping');
+        if (mapping) {
+          const jobIdMap: Record<string, string> = JSON.parse(mapping);
+          const frontendJobId = jobIdMap[jobId];
+          if (frontendJobId) {
+            itemIndex = queue.findIndex(q => q.jobId === frontendJobId);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load job ID mapping:', e);
+      }
+    }
+    if (itemIndex === -1) return;
+
+    const item = queue[itemIndex];
+    const mappedType = this.mapBackendTaskType(taskType);
+    const taskIndex = item.tasks.findIndex(t => t.type === mappedType);
+    if (taskIndex === -1) return;
+
+    const currentTask = item.tasks[taskIndex];
+
+    // Don't update if task is already completed or failed
+    if (currentTask.status === 'completed' || currentTask.status === 'failed') {
+      return;
+    }
+
+    // Update progress and set to running if not already
+    const updatedTask = {
+      ...currentTask,
+      status: 'running' as const,
+      progress
+    };
+    const updatedTasks = [...item.tasks];
+    updatedTasks[taskIndex] = updatedTask;
+
+    const updatedItem: ProcessingQueueItem = {
+      ...item,
+      tasks: updatedTasks,
+      status: 'processing'
+    };
+
+    const newQueue = [...queue];
+    newQueue[itemIndex] = updatedItem;
+    this.processingQueue.set(newQueue);
+  }
+
+  // Track which backend sub-tasks have completed for combined frontend tasks
+  private completedSubTasks = new Map<string, Set<string>>();
+
   // Update queue task status from websocket events
-  private updateQueueTaskStatus(jobId: string, taskType: string, status: 'pending' | 'running' | 'completed' | 'failed', progress: number) {
+  private updateQueueTaskStatus(jobId: string, taskType: string, status: 'pending' | 'running' | 'completed' | 'failed', progress: number, errorMessage?: string) {
     const queue = this.processingQueue();
 
     // First try to find by frontend jobId
@@ -913,8 +975,27 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Handle combined tasks (download-import combines download, import, get-info)
+    const combinedTaskKey = `${jobId}:${mappedType}`;
+    if (mappedType === 'download-import') {
+      // Track which sub-tasks have completed
+      if (status === 'completed') {
+        if (!this.completedSubTasks.has(combinedTaskKey)) {
+          this.completedSubTasks.set(combinedTaskKey, new Set());
+        }
+        this.completedSubTasks.get(combinedTaskKey)!.add(taskType);
+
+        // Only mark as completed when import is done (the final step)
+        if (taskType !== 'import') {
+          // download or get-info completed, but import hasn't yet - keep as running
+          status = 'running';
+          progress = taskType === 'download' ? 80 : 50; // Show progress
+        }
+      }
+    }
+
     // Create new task object to trigger change detection
-    const updatedTask = { ...item.tasks[taskIndex], status, progress };
+    const updatedTask = { ...item.tasks[taskIndex], status, progress, errorMessage: errorMessage || item.tasks[taskIndex].errorMessage };
     const updatedTasks = [...item.tasks];
     updatedTasks[taskIndex] = updatedTask;
 
@@ -939,7 +1020,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const newQueue = [...queue];
     newQueue[itemIndex] = updatedItem;
 
-    console.log('Updating queue item:', updatedItem.title, 'task:', taskType, '→', mappedType, 'progress:', progress, '%');
+    console.log('Updating queue item:', updatedItem.title, 'task:', taskType, '→', mappedType, 'status:', status, 'progress:', progress, '%');
 
     // Trigger update with new array
     this.processingQueue.set(newQueue);
@@ -971,6 +1052,70 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       'ai-analysis': 'ai-analyze'
     };
     return mapping[type] || 'download-import';
+  }
+
+  /**
+   * Combine backend job tasks into frontend ProcessingTask format
+   * Combines download + import + get-info into a single "Download" task
+   */
+  private combineJobTasks(tasks: any[]): ProcessingTask[] {
+    const result: ProcessingTask[] = [];
+
+    // Find download-related tasks
+    const downloadTask = tasks.find(t => t.type === 'download');
+    const importTask = tasks.find(t => t.type === 'import');
+    const getInfoTask = tasks.find(t => t.type === 'get-info');
+
+    // Combine download/import/get-info into single "Download" task
+    if (downloadTask || importTask || getInfoTask) {
+      // Determine combined status and progress
+      let status: 'pending' | 'running' | 'completed' | 'failed' = 'pending';
+      let progress = 0;
+      let errorMessage: string | undefined;
+
+      // Check for failures first
+      if (downloadTask?.status === 'failed' || importTask?.status === 'failed') {
+        status = 'failed';
+        errorMessage = downloadTask?.error || importTask?.error;
+      } else if (importTask?.status === 'completed') {
+        status = 'completed';
+        progress = 100;
+      } else if (importTask?.status === 'in-progress' || downloadTask?.status === 'completed') {
+        status = 'running';
+        progress = 100; // Download done, import is quick
+      } else if (downloadTask?.status === 'in-progress') {
+        status = 'running';
+        progress = downloadTask.progress || 0;
+      } else if (getInfoTask?.status === 'in-progress') {
+        status = 'running';
+        progress = 0;
+      }
+
+      result.push({
+        type: 'download-import',
+        options: {},
+        status,
+        progress,
+        errorMessage
+      });
+    }
+
+    // Add other tasks (skip download/import/get-info)
+    for (const task of tasks) {
+      if (task.type === 'download' || task.type === 'import' || task.type === 'get-info') continue;
+
+      result.push({
+        type: this.mapVideoTaskTypeToQueueTaskType(task.type),
+        options: {},
+        status: task.status === 'pending' ? 'pending' as const :
+                task.status === 'in-progress' ? 'running' as const :
+                task.status === 'completed' ? 'completed' as const : 'failed' as const,
+        progress: task.progress || 0,
+        errorMessage: task.error
+      });
+    }
+
+    return result;
   }
 
   // Store videoId in queue item when download/import completes
@@ -1889,18 +2034,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Navigate to editor with video data
-    // VideoPlayerComponent expects data wrapped in 'videoEditorData'
+    // Open editor in a new window via Electron
     // videoPath is optional - the editor can stream by videoId if path is missing
-    this.router.navigate(['/editor'], {
-      state: {
-        videoEditorData: {
-          videoId: video.id,
-          videoPath: video.filePath, // May be undefined, editor will use videoId to stream
-          videoTitle: video.name
+    if (this.electronService.isElectron) {
+      this.electronService.openEditorWindow({
+        videoId: video.id,
+        videoPath: video.filePath,
+        videoTitle: video.name
+      });
+    } else {
+      // Fallback for non-Electron: navigate to editor route
+      this.router.navigate(['/editor'], {
+        state: {
+          videoEditorData: {
+            videoId: video.id,
+            videoPath: video.filePath,
+            videoTitle: video.name
+          }
         }
-      }
-    });
+      });
+    }
   }
 
   viewMore() {
@@ -2436,6 +2589,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       status: 'pending',
       progress: 0
     });
+
+    // Add fix aspect ratio task
+    if (settings.fixAspectRatio) {
+      tasks.push({
+        type: 'fix-aspect-ratio',
+        options: { aspectRatio: settings.aspectRatio || '16:9' },
+        status: 'pending',
+        progress: 0
+      });
+    }
+
+    // Add normalize audio task
+    if (settings.normalizeAudio) {
+      tasks.push({
+        type: 'normalize-audio',
+        options: { targetLevel: settings.audioLevel || -16 },
+        status: 'pending',
+        progress: 0
+      });
+    }
 
     if (settings.transcribe) {
       tasks.push({

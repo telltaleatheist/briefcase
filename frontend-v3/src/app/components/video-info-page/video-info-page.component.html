@@ -232,13 +232,14 @@
                 <div
                   *ngFor="let parent of parentVideos"
                   class="child-item parent-item"
-                  (click)="navigateToVideo(parent.id)">
+                  (click)="navigateToVideo(parent.id)"
+                  (contextmenu)="onRelationshipContextMenu($event, parent, 'parent')">
                   <div class="relationship-icon">↑</div>
-                  <div class="child-thumbnail">
-                    <img
-                      [src]="'http://localhost:3000/api/database/videos/' + parent.id + '/thumbnail'"
-                      [alt]="parent.filename"
-                      (error)="onThumbnailError($event)">
+                  <div class="child-thumbnail video-icon-placeholder">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="2" y="3" width="20" height="18" rx="2" />
+                      <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/>
+                    </svg>
                   </div>
                   <div class="child-info">
                     <div class="child-name">{{ parent.filename }}</div>
@@ -266,13 +267,14 @@
                 <div
                   *ngFor="let child of childVideos"
                   class="child-item child-item-actual"
-                  (click)="navigateToVideo(child.id)">
+                  (click)="navigateToVideo(child.id)"
+                  (contextmenu)="onRelationshipContextMenu($event, child, 'child')">
                   <div class="relationship-icon">↓</div>
-                  <div class="child-thumbnail">
-                    <img
-                      [src]="'http://localhost:3000/api/database/videos/' + child.id + '/thumbnail'"
-                      [alt]="child.filename"
-                      (error)="onThumbnailError($event)">
+                  <div class="child-thumbnail video-icon-placeholder">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="2" y="3" width="20" height="18" rx="2" />
+                      <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/>
+                    </svg>
                   </div>
                   <div class="child-info">
                     <div class="child-name">{{ child.filename }}</div>
@@ -300,6 +302,41 @@
                   <line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
                 Add More Children
+              </button>
+            </div>
+
+            <!-- Context Menu for relationships -->
+            <div
+              class="context-menu"
+              *ngIf="showRelationshipContextMenu"
+              [style.left.px]="contextMenuPosition.x"
+              [style.top.px]="contextMenuPosition.y">
+              <button class="context-menu-item" (click)="contextMenuAction('open')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                Open Video Info
+              </button>
+              <button class="context-menu-item" (click)="contextMenuAction('edit')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Open in Editor
+              </button>
+              <button class="context-menu-item" (click)="contextMenuAction('reveal')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                Show in Finder
+              </button>
+              <div class="context-menu-divider"></div>
+              <button class="context-menu-item danger" (click)="contextMenuAction('remove')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+                Remove Relationship
               </button>
             </div>
 

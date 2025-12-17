@@ -500,6 +500,19 @@ cdk-virtual-scroll-viewport.library-content {
   color: var(--text-tertiary);
 }
 
+// Error message styling for failed downloads
+.error-meta {
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-top: 2px;
+}
+
+.error-text {
+  color: var(--error-red, #ef4444) !important;
+  font-size: 10px;
+}
+
 // Ghost relationship indicator
 .ghost-relationship {
   display: flex;

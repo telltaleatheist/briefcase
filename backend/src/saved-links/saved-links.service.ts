@@ -358,14 +358,13 @@ export class SavedLinksService implements OnModuleInit {
 
       // Add to unified queue using new queue system
       // Note: Downloads will go to the library's clips folder in a date-based subfolder
-      // The file will be moved to _pending after download completes (handled by event listener)
+      // User must manually import to library from the "Ready to Add" section
       const jobId = this.queueManagerService.addJob({
         url: savedLink.url,
         displayName: displayName,
         libraryId: libraryId, // Ensure it downloads to the correct library
         tasks: [
           { type: 'download', options: { quality: '720' } }
-          // No import task - files will be moved to _pending folder after download
         ]
       });
 

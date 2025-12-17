@@ -373,6 +373,8 @@ export class CascadeComponent {
       }
       // Open URL in browser
       actions.push({ label: 'Open URL', icon: '🌐', action: 'open' });
+      // Copy URL to clipboard
+      actions.push({ label: 'Copy URL', icon: '📋', action: 'copy-url' });
       actions.push({ label: '', icon: '', action: '', divider: true });
       actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
       return actions;
@@ -756,6 +758,18 @@ export class CascadeComponent {
   openSuggestedTitleModal(video: VideoItem) {
     this.editingSuggestedTitleVideo.set(video);
     this.suggestedTitleModalVisible.set(true);
+  }
+
+  /**
+   * Copy text to clipboard
+   */
+  copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      this.notificationService.success('Copied', 'URL copied to clipboard');
+    }).catch((err) => {
+      console.error('Failed to copy to clipboard:', err);
+      this.notificationService.error('Error', 'Failed to copy to clipboard');
+    });
   }
 
   onSuggestedTitleSaved(newTitle: string) {

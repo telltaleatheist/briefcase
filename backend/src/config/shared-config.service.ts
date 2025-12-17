@@ -1,33 +1,14 @@
 // backend/src/config/shared-config.service.ts
-// SIMPLIFIED: No more user configuration, just use bundled binaries
+// SIMPLIFIED: ALWAYS use bundled binaries - NEVER use system binaries or environment variables
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
 
-// Import simple runtime path resolver
-// Priority: Environment variables (passed from Electron) > runtime-paths module
-// NO FALLBACK TO SYSTEM BINARIES - app must be started correctly
+// Import bundled binary path resolver
+// NEVER uses environment variables for binary paths to prevent using system binaries
 const getRuntimePaths = () => {
-  // First check environment variables - these are set by Electron when spawning the backend
-  if (process.env.FFMPEG_PATH && process.env.YT_DLP_PATH) {
-    // All required env vars must be set - no partial fallbacks
-    if (!process.env.FFMPEG_PATH || !process.env.FFPROBE_PATH || !process.env.YT_DLP_PATH) {
-      throw new Error(
-        'Incomplete binary paths. Required env vars: FFMPEG_PATH, FFPROBE_PATH, YT_DLP_PATH. ' +
-        'App must be started via Electron which sets these paths.'
-      );
-    }
-    return {
-      ffmpeg: process.env.FFMPEG_PATH,
-      ffprobe: process.env.FFPROBE_PATH,
-      ytdlp: process.env.YT_DLP_PATH,
-      whisperCpp: process.env.WHISPER_CPP_PATH || '',
-      whisperModel: process.env.WHISPER_MODEL_PATH || '',
-    };
-  }
-
-  // Try to load runtime-paths module
+  // Try to load runtime-paths module - this is the ONLY source of binary paths
   try {
-    // In packaged app, use RESOURCES_PATH env var
+    // In packaged app, use RESOURCES_PATH env var to locate the module
     if (process.env.RESOURCES_PATH) {
       const runtimePathsFile = path.join(process.env.RESOURCES_PATH, 'dist-electron', 'shared', 'runtime-paths.js');
       return require(runtimePathsFile).getRuntimePaths();
@@ -37,7 +18,7 @@ const getRuntimePaths = () => {
   } catch (error) {
     // NO FALLBACK - throw error instead of using system binaries
     throw new Error(
-      'runtime-paths module not available and no environment variables set. ' +
+      'runtime-paths module not available. ' +
       'This usually means the app was not started correctly. ' +
       'In development, use: npm run electron:dev (NOT npm run start:dev). ' +
       'The backend must be spawned by Electron to receive proper binary paths.'

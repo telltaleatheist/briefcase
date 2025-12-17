@@ -165,7 +165,17 @@ export class VideoProcessingService {
           break;
         case 'normalize-audio':
           settings.normalizeAudio = true;
-          settings.audioLevel = task.options?.audioLevel;
+          settings.audioLevel = task.options?.level || task.options?.audioLevel;
+          break;
+        case 'process-video':
+          // Combined processing task
+          if (task.options?.fixAspectRatio) {
+            settings.fixAspectRatio = true;
+          }
+          if (task.options?.normalizeAudio) {
+            settings.normalizeAudio = true;
+            settings.audioLevel = task.options?.level;
+          }
           break;
         case 'transcribe':
           settings.transcribe = true;
@@ -185,27 +195,81 @@ export class VideoProcessingService {
 
   /**
    * Map backend tasks to frontend task format with current status
+   * Combines get-info/download/import into a single "download" task
    */
   private mapBackendTasksToFrontend(backendTasks: any[], currentTaskIndex: number): VideoTask[] {
-    return backendTasks.map((backendTask: any, index: number) => {
-      const taskType = this.mapBackendToFrontendTaskType(backendTask.type);
-      let status: VideoTask['status'] = 'pending';
+    const frontendTasks: VideoTask[] = [];
+    const seenTypes = new Set<string>();
 
-      if (index < currentTaskIndex) {
+    // Find download-related tasks (get-info, download, import)
+    const downloadTasks = ['get-info', 'download', 'import'];
+    const hasDownloadTasks = backendTasks.some(t => downloadTasks.includes(t.type));
+
+    if (hasDownloadTasks) {
+      // Find the highest index among download-related tasks
+      let downloadStatus: VideoTask['status'] = 'pending';
+      let downloadProgress = 0;
+
+      for (let i = 0; i < backendTasks.length; i++) {
+        const task = backendTasks[i];
+        if (!downloadTasks.includes(task.type)) continue;
+
+        if (i < currentTaskIndex) {
+          // This download-related task is complete
+          downloadStatus = 'completed';
+          downloadProgress = 100;
+        } else if (i === currentTaskIndex) {
+          // This download-related task is in progress
+          downloadStatus = 'in-progress';
+          // Use download task progress, not get-info or import
+          if (task.type === 'download') {
+            downloadProgress = task.progress || 0;
+          }
+        }
+        // If still pending, leave as pending
+      }
+
+      frontendTasks.push({
+        id: this.generateId(),
+        type: 'download',
+        name: 'Download Video',
+        status: downloadStatus,
+        progress: downloadProgress,
+        estimatedTime: 30
+      });
+    }
+
+    // Add other tasks (not download-related)
+    for (let i = 0; i < backendTasks.length; i++) {
+      const backendTask = backendTasks[i];
+
+      // Skip download-related tasks (already combined above)
+      if (downloadTasks.includes(backendTask.type)) continue;
+
+      const taskType = this.mapBackendToFrontendTaskType(backendTask.type);
+
+      // Skip if we've already added this type (e.g., process-video maps to aspect-ratio)
+      if (seenTypes.has(taskType)) continue;
+      seenTypes.add(taskType);
+
+      let status: VideoTask['status'] = 'pending';
+      if (i < currentTaskIndex) {
         status = 'completed';
-      } else if (index === currentTaskIndex) {
+      } else if (i === currentTaskIndex) {
         status = 'in-progress';
       }
 
-      return {
+      frontendTasks.push({
         id: this.generateId(),
         type: taskType,
         name: this.getTaskName(taskType, backendTask.options),
         status,
         progress: status === 'completed' ? 100 : (status === 'in-progress' ? 0 : 0),
         estimatedTime: this.getEstimatedTime(taskType)
-      };
-    });
+      });
+    }
+
+    return frontendTasks;
   }
 
   /**
@@ -370,20 +434,22 @@ export class VideoProcessingService {
   }
 
   private mapBackendToFrontendTaskType(backendType: string | undefined): VideoTask['type'] {
-    if (!backendType) return 'import';
+    if (!backendType) return 'download';
 
     const mapping: Record<string, VideoTask['type']> = {
       'analyze': 'ai-analysis',
       'download': 'download',
-      'import': 'import',
+      'get-info': 'download',  // Part of download workflow
+      'import': 'download',    // Part of download workflow (atomic, not visible)
       'fix-aspect': 'aspect-ratio',
       'fix-aspect-ratio': 'aspect-ratio',
+      'process-video': 'aspect-ratio',  // Combined processing shows as aspect-ratio
       'normalize': 'normalize-audio',
       'normalize-audio': 'normalize-audio',
       'transcribe': 'transcribe'
     };
 
-    return mapping[backendType] || 'import';
+    return mapping[backendType] || 'download';
   }
 
   private updateJobProgress(job: VideoJob): void {
@@ -547,24 +613,34 @@ export class VideoProcessingService {
     const tasks: BackendTask[] = [];
 
     if (isUrl) {
+      tasks.push({ type: 'get-info' });  // Fetch video metadata first
       tasks.push({ type: 'download' });
       tasks.push({ type: 'import' });
     }
 
-    if (settings.fixAspectRatio) {
+    // Use 'process-video' for combined processing (single re-encode pass)
+    // or individual tasks if only one is requested
+    if (settings.fixAspectRatio && settings.normalizeAudio) {
+      tasks.push({
+        type: 'process-video',
+        options: {
+          fixAspectRatio: true,
+          normalizeAudio: true,
+          level: settings.audioLevel || -16
+        }
+      });
+    } else if (settings.fixAspectRatio) {
       tasks.push({
         type: 'fix-aspect-ratio',
         options: {
           aspectRatio: settings.aspectRatio || '16:9'
         }
       });
-    }
-
-    if (settings.normalizeAudio) {
+    } else if (settings.normalizeAudio) {
       tasks.push({
         type: 'normalize-audio',
         options: {
-          level: settings.audioLevel
+          level: settings.audioLevel || -16
         }
       });
     }
@@ -612,6 +688,7 @@ export class VideoProcessingService {
     const tasks: VideoTask[] = [];
 
     if (isUrl) {
+      // Single "Download" task that includes import (import is atomic and shouldn't be visible)
       tasks.push({
         id: this.generateId(),
         type: 'download',
@@ -619,15 +696,6 @@ export class VideoProcessingService {
         status: 'pending',
         progress: 0,
         estimatedTime: 30
-      });
-
-      tasks.push({
-        id: this.generateId(),
-        type: 'import',
-        name: 'Import to Database',
-        status: 'pending',
-        progress: 0,
-        estimatedTime: 10
       });
     }
 

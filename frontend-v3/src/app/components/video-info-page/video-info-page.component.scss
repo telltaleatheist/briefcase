@@ -1874,6 +1874,18 @@
         height: 100%;
         object-fit: cover;
       }
+
+      &.video-icon-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+
+        svg {
+          opacity: 0.6;
+        }
+      }
     }
 
     .child-info {
@@ -2049,5 +2061,71 @@
   &:hover {
     background: rgba(239, 68, 68, 0.2);
     border-color: rgba(239, 68, 68, 0.3);
+  }
+}
+
+// Context menu for relationships
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  animation: contextMenuFadeIn 0.1s ease-out;
+
+  .context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+
+    svg {
+      flex-shrink: 0;
+      color: var(--text-secondary);
+    }
+
+    &:hover {
+      background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+    }
+
+    &.danger {
+      color: #ef4444;
+
+      svg {
+        color: #ef4444;
+      }
+
+      &:hover {
+        background: rgba(239, 68, 68, 0.1);
+      }
+    }
+  }
+
+  .context-menu-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+  }
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
