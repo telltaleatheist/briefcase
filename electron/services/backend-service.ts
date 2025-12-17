@@ -278,6 +278,15 @@ export class BackendService {
       // Backend will use getRuntimePaths() directly to find bundled binaries
       // We only pass RESOURCES_PATH so the backend can locate the runtime-paths module
       // NO binary paths are passed via env vars to prevent using system binaries
+
+      // In development, we need to pass the project root so the backend can find binaries
+      // In packaged mode, RESOURCES_PATH is sufficient
+      // __dirname in compiled code is dist-electron/electron/services/, so go up 3 levels
+      const projectRoot = app.isPackaged ? resourcesPath : path.resolve(__dirname, '..', '..', '..');
+      log.info(`Project root for binaries: ${projectRoot}`);
+      log.info(`app.isPackaged: ${app.isPackaged}`);
+      log.info(`__dirname: ${__dirname}`);
+
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -285,6 +294,7 @@ export class BackendService {
         FRONTEND_PATH: frontendPath,
         NODE_PATH: backendNodeModules,
         RESOURCES_PATH: resourcesPath,
+        CLIPCHIMP_PROJECT_ROOT: projectRoot, // Critical for development mode
         PORT: this.actualBackendPort.toString(),
         NODE_ENV: process.env.NODE_ENV || 'production',
         APP_ROOT: resourcesPath,

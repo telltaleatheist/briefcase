@@ -265,10 +265,13 @@ export class MediaOperationsService {
         },
       };
     } catch (error) {
-      this.logger.error(`Fix aspect ratio failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Fix aspect ratio failed';
+      this.logger.error(`Fix aspect ratio failed: ${errorMsg}`);
+      // Emit failure progress so UI updates immediately
+      this.eventService.emitTaskProgress(jobId || '', 'fix-aspect-ratio', -1, `Failed: ${errorMsg}`);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Fix aspect ratio failed',
+        error: errorMsg,
       };
     }
   }
@@ -330,10 +333,13 @@ export class MediaOperationsService {
         },
       };
     } catch (error) {
-      this.logger.error(`Normalize audio failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Audio normalization failed';
+      this.logger.error(`Normalize audio failed: ${errorMsg}`);
+      // Emit failure progress so UI updates immediately
+      this.eventService.emitTaskProgress(jobId || '', 'normalize-audio', -1, `Failed: ${errorMsg}`);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Audio normalization failed',
+        error: errorMsg,
       };
     }
   }
@@ -405,10 +411,13 @@ export class MediaOperationsService {
         },
       };
     } catch (error) {
-      this.logger.error(`Process video failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Video processing failed';
+      this.logger.error(`Process video failed: ${errorMsg}`);
+      // Emit failure progress so UI updates immediately
+      this.eventService.emitTaskProgress(jobId || '', 'process-video', -1, `Failed: ${errorMsg}`);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Video processing failed',
+        error: errorMsg,
       };
     }
   }

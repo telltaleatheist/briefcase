@@ -149,8 +149,7 @@
         "to": "utilities/models",
         "filter": [
           "ggml-tiny.bin",
-          "ggml-base.bin",
-          "ggml-small.bin"
+          "ggml-base.bin"
         ]
       }
     ],

@@ -205,6 +205,7 @@ export class SimpleProcessController implements OnModuleInit {
   private async runProcessing(videoId: string, filePath: string, jobId: string): Promise<void> {
     try {
       this.logger.log(`Starting aspect ratio fix for ${videoId}`);
+      this.mediaEventService.emitProcessingProgress(5, 'Starting video processing...', jobId);
 
       const outputFile = await this.ffmpegService.reencodeVideo(filePath, jobId, { fixAspectRatio: true });
 
@@ -229,13 +230,15 @@ export class SimpleProcessController implements OnModuleInit {
       this.mediaEventService.emitProcessingProgress(100, 'Video processing completed', jobId);
     } catch (error: any) {
       this.logger.error(`Processing failed for video ${videoId}:`, error);
-      throw error;
+      // Emit failure event so frontend knows the task failed (don't throw - this is fire-and-forget)
+      this.mediaEventService.emitProcessingProgress(-1, `Processing failed: ${error.message}`, jobId);
     }
   }
 
   private async runNormalization(videoId: string, filePath: string, jobId: string): Promise<void> {
     try {
       this.logger.log(`Starting audio normalization for ${videoId}`);
+      this.mediaEventService.emitProcessingProgress(5, 'Starting audio normalization...', jobId);
 
       const outputFile = await this.ffmpegService.normalizeAudio(filePath, -20, jobId);
 
@@ -260,7 +263,8 @@ export class SimpleProcessController implements OnModuleInit {
       this.mediaEventService.emitProcessingProgress(100, 'Audio normalization completed', jobId);
     } catch (error: any) {
       this.logger.error(`Normalization failed for video ${videoId}:`, error);
-      throw error;
+      // Emit failure event so frontend knows the task failed (don't throw - this is fire-and-forget)
+      this.mediaEventService.emitProcessingProgress(-1, `Normalization failed: ${error.message}`, jobId);
     }
   }
 }

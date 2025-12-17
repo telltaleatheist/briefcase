@@ -515,8 +515,14 @@ export class CascadeComponent {
     event.preventDefault();
     event.stopPropagation();
 
+    // If right-clicking on an unselected item, clear all selections and select only this item
     if (!this.isSelected(itemId)) {
       this.selectedVideos.set(new Set([itemId]));
+      this.highlightedItemId.set(itemId);
+    }
+    // If right-clicking on a selected item, keep all selections but update highlight to this item
+    else {
+      this.highlightedItemId.set(itemId);
     }
 
     this.contextMenuVideo.set(video);

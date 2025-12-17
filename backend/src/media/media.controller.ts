@@ -2,10 +2,14 @@
 
 import { Controller, Post, Get, Body, Query, HttpException, HttpStatus } from '@nestjs/common';
 import { MediaOperationsService } from './media-operations.service';
+import { WhisperManager } from './whisper-manager';
 
 @Controller('media')
 export class MediaController {
-  constructor(private readonly mediaOps: MediaOperationsService) {}
+  constructor(
+    private readonly mediaOps: MediaOperationsService,
+    private readonly whisperManager: WhisperManager,
+  ) {}
 
   /**
    * Get video metadata without downloading
@@ -180,6 +184,20 @@ export class MediaController {
     return {
       success: true,
       data: result.data,
+    };
+  }
+
+  /**
+   * Get available whisper models (dynamically discovered from disk)
+   * GET /media/whisper-models
+   */
+  @Get('whisper-models')
+  getWhisperModels() {
+    const models = this.whisperManager.getAvailableModelsWithInfo();
+    return {
+      success: true,
+      models,
+      default: models.length > 0 ? (models.find(m => m.id === 'base')?.id || models[0].id) : null,
     };
   }
 

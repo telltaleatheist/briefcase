@@ -8,20 +8,27 @@ import * as path from 'path';
 const getRuntimePaths = () => {
   // Try to load runtime-paths module - this is the ONLY source of binary paths
   try {
+    // In development, use CLIPCHIMP_PROJECT_ROOT (set by Electron)
+    // Check this FIRST because RESOURCES_PATH points to electron's resources in dev mode
+    if (process.env.CLIPCHIMP_PROJECT_ROOT) {
+      const runtimePathsFile = path.join(process.env.CLIPCHIMP_PROJECT_ROOT, 'dist-electron', 'shared', 'runtime-paths.js');
+      return require(runtimePathsFile).getRuntimePaths();
+    }
     // In packaged app, use RESOURCES_PATH env var to locate the module
     if (process.env.RESOURCES_PATH) {
       const runtimePathsFile = path.join(process.env.RESOURCES_PATH, 'dist-electron', 'shared', 'runtime-paths.js');
       return require(runtimePathsFile).getRuntimePaths();
     }
-    // In development, use relative path
+    // Fallback to relative path
     return require('../../../dist-electron/shared/runtime-paths').getRuntimePaths();
-  } catch (error) {
+  } catch (error: any) {
     // NO FALLBACK - throw error instead of using system binaries
     throw new Error(
       'runtime-paths module not available. ' +
       'This usually means the app was not started correctly. ' +
       'In development, use: npm run electron:dev (NOT npm run start:dev). ' +
-      'The backend must be spawned by Electron to receive proper binary paths.'
+      'The backend must be spawned by Electron to receive proper binary paths. ' +
+      'Original error: ' + error.message
     );
   }
 };

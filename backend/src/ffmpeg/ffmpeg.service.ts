@@ -15,6 +15,12 @@ import {
   type FfmpegProgress,
   type ProbeResult,
 } from '../bridges';
+import {
+  copyToTemp,
+  copyFromTemp,
+  cleanupTempFiles,
+  isFileAccessible,
+} from '../common/utils/temp-file.util';
 
 @Injectable()
 export class FfmpegService {
@@ -125,34 +131,67 @@ export class FfmpegService {
       audioNormalizationMethod: options?.audioNormalizationMethod
     }, null, 2));
 
+    const fileName = path.basename(videoFile);
+    let tempInputFile: string | undefined;
+    let tempOutputFile: string | undefined;
+
     try {
       const selectedEncoder = 'libx264';
-      const metadata = await this.ffprobe.probe(videoFile);
+      const processId = `reencode-${Date.now()}`;
+
+      // STEP 1: Copy source file to temp directory to avoid file locks (Syncthing, etc.)
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, 2, 'Preparing file for processing...');
+      }
+
+      const copyResult = await copyToTemp(videoFile, {
+        maxRetries: 5,
+        retryDelayMs: 1000,
+        onProgress: (msg) => {
+          this.logger.log(`[CopyToTemp] ${msg}`);
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, 3, msg);
+          }
+        }
+      });
+
+      if (!copyResult.success || !copyResult.tempPath) {
+        this.logger.error(`Failed to copy file to temp: ${copyResult.error}`);
+        if (taskType && jobId) {
+          this.eventService.emitTaskProgress(jobId, taskType, -1, `File access error: ${copyResult.error}`);
+        }
+        return null;
+      }
+
+      tempInputFile = copyResult.tempPath;
+      this.logger.log(`Copied source to temp: ${tempInputFile}`);
+
+      // STEP 2: Probe the temp file for metadata
+      const metadata = await this.ffprobe.probe(tempInputFile);
       const videoAnalysis = this.analyzeVideoMetadata(metadata);
 
       if (!videoAnalysis.isValid) {
+        this.safeDeleteFile(tempInputFile);
         return null;
       }
 
       const duration = videoAnalysis.duration || 0;
       const needsAspectRatioFix = videoAnalysis.needsAspectRatioFix ?? false;
 
-      const fileDir = path.dirname(videoFile);
-      const fileName = path.basename(videoFile);
+      // Create output path in temp directory
       const fileBase = path.parse(fileName).name;
-      const outputFile = path.join(fileDir, `${fileBase}_reencoded.mov`);
-      const progressKey = outputFile;
-      const processId = `reencode-${Date.now()}`;
+      tempOutputFile = `${tempInputFile}_reencoded.mov`;
+      const progressKey = tempOutputFile;
 
       this.lastReportedProgress.set(progressKey, 0);
 
-      // Log whether aspect ratio fix will be applied (now applies whenever requested)
       this.logger.log(`ASPECT RATIO FIX: requested=${options?.fixAspectRatio}, videoNeeds=${needsAspectRatioFix}, will apply=${options?.fixAspectRatio}`);
 
-      const args = this.buildFfmpegArgs(videoFile, outputFile, needsAspectRatioFix, selectedEncoder, options);
+      // Build args using temp files
+      const args = this.buildFfmpegArgs(tempInputFile, tempOutputFile, needsAspectRatioFix, selectedEncoder, options);
 
       if (taskType && jobId) {
-        this.eventService.emitTaskProgress(jobId, taskType, 0, 'Preparing video re-encoding');
+        this.eventService.emitTaskProgress(jobId, taskType, 5, 'Starting video re-encoding...');
       }
 
       this.logger.log(`FFmpeg re-encoding command: ${this.ffmpeg.path} ${args.join(' ')}`);
@@ -162,7 +201,8 @@ export class FfmpegService {
         if (progress.processId !== processId) return;
 
         const lastProgress = this.lastReportedProgress.get(progressKey) || 0;
-        const boundedPercent = Math.max(5, Math.min(progress.percent, 95));
+        // Reserve 5-85% for FFmpeg processing, 85-100% for verification and copy-back
+        const boundedPercent = Math.max(5, Math.min(Math.round(progress.percent * 0.8) + 5, 85));
 
         if (boundedPercent > lastProgress) {
           this.lastReportedProgress.set(progressKey, boundedPercent);
@@ -180,41 +220,62 @@ export class FfmpegService {
 
         if (!result.success) {
           this.logger.error(`Re-encoding failed: ${result.error}`);
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, -1, `Re-encoding failed: ${result.error}`);
+          }
           return null;
         }
       } finally {
         this.ffmpeg.off('progress', progressHandler);
       }
 
-      this.logger.log(`FFmpeg completed, verifying output: ${outputFile}`);
+      this.logger.log(`FFmpeg completed, verifying output: ${tempOutputFile}`);
 
-      // CRITICAL: Verify the output file before touching the original
+      // STEP 3: Verify the output file
       if (taskType && jobId) {
-        this.eventService.emitTaskProgress(jobId, taskType, 92, 'Verifying processed video...');
+        this.eventService.emitTaskProgress(jobId, taskType, 88, 'Verifying processed video...');
       }
 
-      const verification = await this.verifyProcessedVideo(outputFile, duration);
+      const verification = await this.verifyProcessedVideo(tempOutputFile, duration);
       if (!verification.valid) {
         this.logger.error(`VERIFICATION FAILED: ${verification.error}`);
-        // Clean up the bad output file but KEEP the original
-        this.safeDeleteFile(outputFile);
+        this.safeDeleteFile(tempOutputFile);
         if (taskType && jobId) {
-          this.eventService.emitTaskProgress(jobId, taskType, 0, `Verification failed: ${verification.error}`);
+          this.eventService.emitTaskProgress(jobId, taskType, -1, `Verification failed: ${verification.error}`);
         }
         return null;
       }
 
-      this.logger.log(`Verification passed, performing atomic replacement`);
+      this.logger.log(`Verification passed, copying back to original location`);
 
-      // Atomically replace original with verified new file
-      const replaceResult = await this.atomicFileReplace(videoFile, outputFile, true);
-      if (!replaceResult.success) {
-        this.logger.error(`ATOMIC REPLACE FAILED: ${replaceResult.error}`);
-        // Original should be intact due to atomic replace logic
-        // Clean up output file if it still exists
-        this.safeDeleteFile(outputFile);
+      // STEP 4: Copy processed file back to original location with retry logic
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, 92, 'Saving processed video...');
+      }
+
+      const copyBackResult = await copyFromTemp(tempOutputFile, videoFile, {
+        maxRetries: 5,
+        retryDelayMs: 1500,
+        preserveTimestamps: true,
+        deleteTemp: true,
+        onProgress: (msg) => {
+          this.logger.log(`[CopyFromTemp] ${msg}`);
+          if (taskType && jobId) {
+            this.eventService.emitTaskProgress(jobId, taskType, 95, msg);
+          }
+        }
+      });
+
+      if (!copyBackResult.success) {
+        this.logger.error(`Failed to copy processed file back: ${copyBackResult.error}`);
+        if (taskType && jobId) {
+          this.eventService.emitTaskProgress(jobId, taskType, -1, `Failed to save: ${copyBackResult.error}`);
+        }
         return null;
       }
+
+      // Clean up temp input file
+      this.safeDeleteFile(tempInputFile);
 
       this.lastReportedProgress.set(progressKey, 100);
       if (taskType && jobId) {
@@ -223,6 +284,12 @@ export class FfmpegService {
       return videoFile;
     } catch (error: any) {
       this.logger.error('CRITICAL: Unexpected error in re-encoding:', error);
+      // Clean up temp files on error
+      if (tempInputFile) this.safeDeleteFile(tempInputFile);
+      if (tempOutputFile) this.safeDeleteFile(tempOutputFile);
+      if (taskType && jobId) {
+        this.eventService.emitTaskProgress(jobId, taskType, -1, `Unexpected error: ${error.message}`);
+      }
       return null;
     }
   }
@@ -551,24 +618,57 @@ export class FfmpegService {
   async normalizeAudio(filePath: string, targetVolume: number = -20, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(filePath)) {
       this.logger.error(`File doesn't exist: ${filePath}`);
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, 'File not found');
+      }
       return null;
     }
 
+    const fileName = path.basename(filePath);
+    const fileExt = path.extname(fileName);
+    let tempInputFile: string | undefined;
+    let tempOutputFile: string | undefined;
+
     try {
-      const fileDir = path.dirname(filePath);
-      const fileName = path.basename(filePath);
-      const fileExt = path.extname(fileName);
-      const fileBase = path.parse(fileName).name;
-      const tempOutputFile = path.join(fileDir, `${fileBase}_temp_normalized${fileExt}`);
       const processId = `normalize-${Date.now()}`;
 
-      // Get duration for progress
-      const metadata = await this.getVideoMetadata(filePath);
+      // STEP 1: Copy source file to temp directory to avoid file locks (Syncthing, etc.)
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 2, 'Preparing file for processing...');
+      }
+
+      const copyResult = await copyToTemp(filePath, {
+        maxRetries: 5,
+        retryDelayMs: 1000,
+        onProgress: (msg) => {
+          this.logger.log(`[CopyToTemp] ${msg}`);
+          if (jobId) {
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', 3, msg);
+          }
+        }
+      });
+
+      if (!copyResult.success || !copyResult.tempPath) {
+        this.logger.error(`Failed to copy file to temp: ${copyResult.error}`);
+        if (jobId) {
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, `File access error: ${copyResult.error}`);
+        }
+        return null;
+      }
+
+      tempInputFile = copyResult.tempPath;
+      this.logger.log(`Copied source to temp: ${tempInputFile}`);
+
+      // STEP 2: Get duration for progress tracking
+      const metadata = await this.getVideoMetadata(tempInputFile);
       const duration = metadata?.duration || 0;
+
+      // Create output path in temp directory
+      tempOutputFile = `${tempInputFile}_normalized${fileExt}`;
 
       const args = [
         '-y',
-        '-i', filePath,
+        '-i', tempInputFile,
         '-af', `loudnorm=I=${targetVolume}:TP=-1.5:LRA=11`,
         '-c:v', 'copy',  // Copy video stream without re-encoding
         '-c:a', 'aac',
@@ -577,7 +677,7 @@ export class FfmpegService {
       ];
 
       if (jobId) {
-        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 0, 'Starting audio normalization');
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 5, 'Starting audio normalization...');
       }
 
       this.logger.log(`Audio normalization: ${this.ffmpeg.path} ${args.join(' ')}`);
@@ -585,8 +685,10 @@ export class FfmpegService {
       // Set up progress listener
       const progressHandler = (progress: FfmpegProgress) => {
         if (progress.processId !== processId) return;
+        // Reserve 5-85% for FFmpeg processing, 85-100% for verification and copy-back
+        const boundedPercent = Math.max(5, Math.min(Math.round(progress.percent * 0.8) + 5, 85));
         if (jobId) {
-          this.eventService.emitTaskProgress(jobId, 'normalize-audio', progress.percent, `Normalizing audio: ${progress.percent}%`);
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', boundedPercent, `Normalizing audio: ${progress.percent}%`);
         }
       };
 
@@ -597,6 +699,9 @@ export class FfmpegService {
 
         if (!result.success) {
           this.logger.error(`Audio normalization failed: ${result.error}`);
+          if (jobId) {
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, `Normalization failed: ${result.error}`);
+          }
           return null;
         }
       } finally {
@@ -605,32 +710,51 @@ export class FfmpegService {
 
       this.logger.log(`FFmpeg completed, verifying output: ${tempOutputFile}`);
 
+      // STEP 3: Verify the output file
       if (jobId) {
-        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 92, 'Verifying normalized audio...');
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 88, 'Verifying normalized audio...');
       }
 
-      // CRITICAL: Verify the output file before touching the original
       const verification = await this.verifyProcessedVideo(tempOutputFile, duration);
       if (!verification.valid) {
         this.logger.error(`VERIFICATION FAILED: ${verification.error}`);
-        // Clean up the bad output file but KEEP the original
         this.safeDeleteFile(tempOutputFile);
         if (jobId) {
-          this.eventService.emitTaskProgress(jobId, 'normalize-audio', 0, `Verification failed: ${verification.error}`);
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, `Verification failed: ${verification.error}`);
         }
         return null;
       }
 
-      this.logger.log(`Verification passed, performing atomic replacement`);
+      this.logger.log(`Verification passed, copying back to original location`);
 
-      // Atomically replace original with verified new file
-      const replaceResult = await this.atomicFileReplace(filePath, tempOutputFile, true);
-      if (!replaceResult.success) {
-        this.logger.error(`ATOMIC REPLACE FAILED: ${replaceResult.error}`);
-        // Original should be intact due to atomic replace logic
-        this.safeDeleteFile(tempOutputFile);
+      // STEP 4: Copy processed file back to original location with retry logic
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 92, 'Saving normalized audio...');
+      }
+
+      const copyBackResult = await copyFromTemp(tempOutputFile, filePath, {
+        maxRetries: 5,
+        retryDelayMs: 1500,
+        preserveTimestamps: true,
+        deleteTemp: true,
+        onProgress: (msg) => {
+          this.logger.log(`[CopyFromTemp] ${msg}`);
+          if (jobId) {
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', 95, msg);
+          }
+        }
+      });
+
+      if (!copyBackResult.success) {
+        this.logger.error(`Failed to copy processed file back: ${copyBackResult.error}`);
+        if (jobId) {
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, `Failed to save: ${copyBackResult.error}`);
+        }
         return null;
       }
+
+      // Clean up temp input file
+      this.safeDeleteFile(tempInputFile);
 
       if (jobId) {
         this.eventService.emitTaskProgress(jobId, 'normalize-audio', 100, 'Audio normalization complete');
@@ -638,6 +762,12 @@ export class FfmpegService {
       return filePath;
     } catch (error: any) {
       this.logger.error('Error in normalizeAudio:', error);
+      // Clean up temp files on error
+      if (tempInputFile) this.safeDeleteFile(tempInputFile);
+      if (tempOutputFile) this.safeDeleteFile(tempOutputFile);
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, `Unexpected error: ${error.message}`);
+      }
       return null;
     }
   }

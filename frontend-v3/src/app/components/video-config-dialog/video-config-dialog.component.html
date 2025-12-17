@@ -76,9 +76,9 @@
                 <div class="form-group">
                   <label>Whisper Model</label>
                   <select [(ngModel)]="settings.whisperModel">
-                    <option value="tiny">Tiny - Fastest</option>
-                    <option value="base">Base - Balanced</option>
-                    <option value="small">Small - Best quality, slower</option>
+                    <option *ngFor="let model of whisperModels" [value]="model.id">
+                      {{ model.name }} - {{ model.description }}
+                    </option>
                   </select>
                 </div>
               </div>

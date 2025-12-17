@@ -72,12 +72,12 @@ export class WhisperManager extends EventEmitter {
       } as WhisperProgress);
     });
 
-    // Log available models
-    this.logger.log('  Available models:');
+    // Log available models (dynamically discovered from disk)
     const availableModels = this.whisper.getAvailableModels();
-    for (const model of WhisperBridge.AVAILABLE_MODELS) {
-      const available = availableModels.includes(model);
-      this.logger.log(`    - ${model}: ${available ? '✓' : '✗'}`);
+    this.logger.log(`  Available models (${availableModels.length} found):`);
+    for (const model of availableModels) {
+      const info = WhisperBridge.MODEL_INFO[model];
+      this.logger.log(`    - ${model}: ${info?.description || 'Custom model'}`);
     }
 
     this.logger.log('='.repeat(60));
@@ -88,6 +88,13 @@ export class WhisperManager extends EventEmitter {
    */
   getAvailableModels(): string[] {
     return this.whisper.getAvailableModels();
+  }
+
+  /**
+   * Get available models with display info
+   */
+  getAvailableModelsWithInfo(): Array<{ id: string; name: string; description: string }> {
+    return this.whisper.getAvailableModelsWithInfo();
   }
 
   /**

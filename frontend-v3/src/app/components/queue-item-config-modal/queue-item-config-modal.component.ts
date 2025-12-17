@@ -54,6 +54,7 @@ export class QueueItemConfigModalComponent implements OnInit {
 
   // AI Models
   aiModels = signal<AIModelOption[]>([]);
+  whisperModels = signal<{ id: string; name: string; description: string }[]>([]);
   loadingModels = signal(false);
   defaultAIModel = ''; // No fallback - user must have saved a default or select one
   savedAsDefault = signal(false);
@@ -104,6 +105,23 @@ export class QueueItemConfigModalComponent implements OnInit {
     this.loadingModels.set(true);
 
     try {
+      // Load whisper models dynamically
+      try {
+        const whisperResponse = await firstValueFrom(
+          this.http.get<{ success: boolean; models: any[]; default: string }>(`${this.API_BASE}/media/whisper-models`)
+        );
+        if (whisperResponse.success && whisperResponse.models.length > 0) {
+          this.whisperModels.set(whisperResponse.models);
+        }
+      } catch (error) {
+        console.error('Failed to fetch whisper models:', error);
+        // Fallback to defaults if API fails
+        this.whisperModels.set([
+          { id: 'tiny', name: 'Tiny', description: 'Fastest' },
+          { id: 'base', name: 'Base', description: 'Best quality' }
+        ]);
+      }
+
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
 

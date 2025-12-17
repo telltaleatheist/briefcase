@@ -15,9 +15,12 @@
 .dialog-content {
   background: var(--bg-card, #1e1e1e);
   border-radius: 8px;
-  width: 600px;
-  max-width: 90vw;
-  max-height: 80vh;
+  width: 70vw;
+  min-width: 500px;
+  max-width: 900px;
+  height: 70vh;
+  min-height: 400px;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -68,8 +71,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 300px;
-  max-height: 60vh;
+  min-height: 0;
 }
 
 .export-options-wrapper {
@@ -266,11 +268,55 @@
   background: var(--bg-card, #1e1e1e);
   border-radius: 4px;
   margin: 0;
+  // Ensure content doesn't overflow horizontally
+  width: 100%;
+  max-width: 100%;
 
   app-cascade {
     flex: 1 1 0;
     min-height: 0;
     height: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  // Override cascade video items to fit within modal
+  ::ng-deep {
+    .cascade,
+    .library-content {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    .video-item {
+      max-width: 100%;
+      overflow: hidden;
+    }
+
+    .video-content {
+      min-width: 0;
+      flex: 1 1 0;
+      overflow: hidden;
+    }
+
+    .video-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .video-meta {
+      overflow: hidden;
+
+      .meta-filename {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+      }
+    }
   }
 }
 

@@ -46,8 +46,14 @@ export class WhisperBridge extends EventEmitter {
   private activeProcesses = new Map<string, WhisperProcessInfo>();
   private readonly logger = new Logger(WhisperBridge.name);
 
-  // Supported models
-  static readonly AVAILABLE_MODELS = ['tiny', 'base', 'small', 'medium', 'large'];
+  // All known whisper models (for display names)
+  static readonly MODEL_INFO: Record<string, { name: string; description: string }> = {
+    'tiny': { name: 'Tiny', description: 'Fastest, lower accuracy' },
+    'base': { name: 'Base', description: 'Good balance of speed and accuracy' },
+    'small': { name: 'Small', description: 'Better accuracy, slower' },
+    'medium': { name: 'Medium', description: 'High accuracy, much slower' },
+    'large': { name: 'Large', description: 'Best accuracy, very slow' },
+  };
   static readonly DEFAULT_MODEL = 'base';
 
   constructor(config: WhisperConfig) {
@@ -85,34 +91,80 @@ export class WhisperBridge extends EventEmitter {
       normalizedName = normalizedName.slice(0, -4);
     }
 
-    // Validate model
-    if (!WhisperBridge.AVAILABLE_MODELS.includes(normalizedName)) {
-      this.logger.warn(`Invalid model: ${modelName}, using ${WhisperBridge.DEFAULT_MODEL}`);
-      normalizedName = WhisperBridge.DEFAULT_MODEL;
-    }
-
     const modelFile = `ggml-${normalizedName}.bin`;
     const modelPath = path.join(this.config.modelsDir, modelFile);
 
+    // Check if this model exists on disk
     if (!fs.existsSync(modelPath)) {
-      throw new Error(`Model ${modelFile} not found at ${modelPath}`);
+      // Fall back to default if requested model doesn't exist
+      const availableModels = this.getAvailableModels();
+      if (availableModels.length === 0) {
+        throw new Error(`No whisper models found in ${this.config.modelsDir}`);
+      }
+
+      if (!availableModels.includes(normalizedName)) {
+        // Try default, otherwise use first available
+        const fallback = availableModels.includes(WhisperBridge.DEFAULT_MODEL)
+          ? WhisperBridge.DEFAULT_MODEL
+          : availableModels[0];
+        this.logger.warn(`Model ${modelName} not found, using ${fallback}`);
+        normalizedName = fallback;
+        return path.join(this.config.modelsDir, `ggml-${normalizedName}.bin`);
+      }
     }
 
     return modelPath;
   }
 
   /**
-   * Get list of available models on disk
+   * Get list of available models on disk (scans directory for ggml-*.bin files)
    */
   getAvailableModels(): string[] {
-    const available: string[] = [];
-    for (const model of WhisperBridge.AVAILABLE_MODELS) {
-      const modelPath = path.join(this.config.modelsDir, `ggml-${model}.bin`);
-      if (fs.existsSync(modelPath)) {
-        available.push(model);
+    try {
+      if (!fs.existsSync(this.config.modelsDir)) {
+        this.logger.warn(`Models directory not found: ${this.config.modelsDir}`);
+        return [];
       }
+
+      const files = fs.readdirSync(this.config.modelsDir);
+      const models: string[] = [];
+
+      for (const file of files) {
+        // Match ggml-{modelname}.bin pattern
+        const match = file.match(/^ggml-([a-z0-9-]+)\.bin$/i);
+        if (match) {
+          models.push(match[1].toLowerCase());
+        }
+      }
+
+      // Sort by model size (tiny < base < small < medium < large)
+      const sizeOrder = ['tiny', 'base', 'small', 'medium', 'large'];
+      models.sort((a, b) => {
+        const aIndex = sizeOrder.indexOf(a);
+        const bIndex = sizeOrder.indexOf(b);
+        if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+
+      return models;
+    } catch (error) {
+      this.logger.error(`Error scanning models directory: ${(error as Error).message}`);
+      return [];
     }
-    return available;
+  }
+
+  /**
+   * Get available models with their display info
+   */
+  getAvailableModelsWithInfo(): Array<{ id: string; name: string; description: string }> {
+    const models = this.getAvailableModels();
+    return models.map(id => ({
+      id,
+      name: WhisperBridge.MODEL_INFO[id]?.name || id.charAt(0).toUpperCase() + id.slice(1),
+      description: WhisperBridge.MODEL_INFO[id]?.description || 'Whisper model',
+    }));
   }
 
   /**

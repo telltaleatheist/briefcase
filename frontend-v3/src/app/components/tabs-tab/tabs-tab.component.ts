@@ -157,15 +157,48 @@ export class TabsTabComponent {
         return;
       }
 
-      // Delete the tab
+      // Delete the tab from backend
       await firstValueFrom(this.tabsService.deleteTab(tab.id));
 
-      // Clear the current tabs to force reactivity
+      // Clear local state immediately for UI reactivity
       this.allTabs.set([]);
       this.tabVideosMap.set(new Map());
 
-      // Reload tabs with fresh data
-      await this.loadTabsData();
+      // Force fresh reload from backend (bypass cache by calling loadTabs directly)
+      const freshTabs = await firstValueFrom(this.tabsService.loadTabs());
+      this.allTabs.set(freshTabs);
+
+      // Load videos for each remaining tab
+      const videosMap = new Map<string, VideoItem[]>();
+      for (const remainingTab of freshTabs) {
+        try {
+          const videoRecords = await firstValueFrom(this.tabsService.getTabVideos(remainingTab.id));
+          // Map backend video records to VideoItem format
+          const videos: VideoItem[] = videoRecords.map((v: any) => ({
+            id: v.id,
+            name: v.filename,
+            suggestedFilename: v.suggested_title || undefined,
+            suggestedTitle: v.suggested_title || undefined,
+            duration: v.duration_seconds ? `${Math.floor(v.duration_seconds / 3600)}:${String(Math.floor((v.duration_seconds % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(v.duration_seconds % 60)).padStart(2, '0')}` : undefined,
+            size: v.file_size_bytes || undefined,
+            uploadDate: v.upload_date ? new Date(v.upload_date) : undefined,
+            downloadDate: v.download_date ? new Date(v.download_date) : undefined,
+            lastProcessedDate: v.last_processed_date ? new Date(v.last_processed_date) : undefined,
+            filePath: v.current_path,
+            hasTranscript: v.has_transcript === 1,
+            hasAnalysis: v.has_analysis === 1,
+            aiDescription: v.ai_description || undefined,
+            sourceUrl: v.source_url || undefined,
+            mediaType: v.media_type || 'video',
+            fileExtension: v.file_extension || undefined,
+          }));
+          videosMap.set(remainingTab.id, videos);
+        } catch (error) {
+          console.error(`Failed to load videos for tab ${remainingTab.id}:`, error);
+          videosMap.set(remainingTab.id, []);
+        }
+      }
+      this.tabVideosMap.set(videosMap);
 
       this.notificationService.success('Tab Deleted', `Tab "${tabName}" has been deleted`);
     } catch (error: any) {

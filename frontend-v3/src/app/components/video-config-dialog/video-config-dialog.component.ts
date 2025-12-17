@@ -31,6 +31,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   urlText = '';
   loadingModels = false;
   aiModels: AIModelOption[] = [];
+  whisperModels: { id: string; name: string; description: string }[] = [];
 
   settings: VideoJobSettings = {
     fixAspectRatio: false,
@@ -60,6 +61,27 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     this.loadingModels = true;
 
     try {
+      // Load whisper models dynamically
+      try {
+        const whisperResponse = await this.http.get<{ success: boolean; models: any[]; default: string }>(
+          `${this.API_BASE}/media/whisper-models`
+        ).toPromise();
+        if (whisperResponse?.success && whisperResponse.models.length > 0) {
+          this.whisperModels = whisperResponse.models;
+          // Set default whisper model if not already set
+          if (!this.settings.whisperModel || !whisperResponse.models.find(m => m.id === this.settings.whisperModel)) {
+            this.settings.whisperModel = whisperResponse.default || whisperResponse.models[0].id;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch whisper models:', error);
+        // Fallback to defaults if API fails
+        this.whisperModels = [
+          { id: 'tiny', name: 'Tiny', description: 'Fastest' },
+          { id: 'base', name: 'Base', description: 'Best quality' }
+        ];
+      }
+
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
 
