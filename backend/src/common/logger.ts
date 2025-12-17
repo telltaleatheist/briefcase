@@ -2,7 +2,7 @@ import * as winston from 'winston';
 import * as path from 'path';
 import * as fs from 'fs';
 
-// Determine log directory
+// Determine log directory based on platform
 const getLogDirectory = (): string => {
   const isDev = process.env.NODE_ENV === 'development';
 
@@ -10,9 +10,21 @@ const getLogDirectory = (): string => {
     // In development, log to project root
     return path.join(process.cwd(), 'logs');
   } else {
-    // In production, log to user data directory
+    // In production, log to platform-appropriate user data directory
+    const platform = process.platform;
     const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    return path.join(homeDir, 'Library', 'Logs', 'ClipChimp');
+
+    if (platform === 'darwin') {
+      // macOS: ~/Library/Logs/ClipChimp
+      return path.join(homeDir, 'Library', 'Logs', 'ClipChimp');
+    } else if (platform === 'win32') {
+      // Windows: %APPDATA%/clipchimp/logs
+      const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+      return path.join(appData, 'clipchimp', 'logs');
+    } else {
+      // Linux: ~/.config/clipchimp/logs
+      return path.join(homeDir, '.config', 'clipchimp', 'logs');
+    }
   }
 };
 

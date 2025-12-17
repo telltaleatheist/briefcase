@@ -265,12 +265,87 @@ export class FilenameDateUtil {
 
   /**
    * Sanitize title by removing/replacing invalid filename characters
+   * Handles: emojis, unicode, platform-specific restrictions
    */
   private static sanitizeTitle(title: string): string {
-    return title
-      .replace(/[\/\\:*?"<>|]/g, '-')  // Replace invalid chars
-      .replace(/\s+/g, ' ')             // Normalize spaces
-      .trim();
+    return this.sanitizeFilename(title);
+  }
+
+  /**
+   * Comprehensive filename sanitizer for cross-platform compatibility
+   * Removes emojis, special unicode, and platform-specific problematic characters
+   */
+  static sanitizeFilename(filename: string): string {
+    let sanitized = filename;
+
+    // 1. Remove emojis and other unicode symbols
+    // This regex matches most emoji ranges and special symbols
+    sanitized = sanitized
+      // Remove emoji modifiers and joiners
+      .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, '')  // Skin tone modifiers
+      .replace(/[\u{FE00}-\u{FE0F}]/gu, '')     // Variation selectors
+      .replace(/[\u{200D}]/gu, '')              // Zero-width joiner
+      // Remove emojis (comprehensive ranges)
+      .replace(/[\u{1F600}-\u{1F64F}]/gu, '')   // Emoticons
+      .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')   // Misc symbols and pictographs
+      .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')   // Transport and map symbols
+      .replace(/[\u{1F700}-\u{1F77F}]/gu, '')   // Alchemical symbols
+      .replace(/[\u{1F780}-\u{1F7FF}]/gu, '')   // Geometric shapes extended
+      .replace(/[\u{1F800}-\u{1F8FF}]/gu, '')   // Supplemental arrows-C
+      .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')   // Supplemental symbols and pictographs
+      .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')   // Chess symbols
+      .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')   // Symbols and pictographs extended-A
+      .replace(/[\u{2600}-\u{26FF}]/gu, '')     // Misc symbols
+      .replace(/[\u{2700}-\u{27BF}]/gu, '')     // Dingbats
+      .replace(/[\u{2300}-\u{23FF}]/gu, '')     // Misc technical
+      .replace(/[\u{2B50}-\u{2B55}]/gu, '')     // Additional symbols
+      .replace(/[\u{203C}\u{2049}]/gu, '')      // Exclamation marks
+      .replace(/[\u{20E3}]/gu, '')              // Combining enclosing keycap
+      .replace(/[\u{FE00}-\u{FE0F}]/gu, '')     // Variation selectors
+      .replace(/[\u{E0020}-\u{E007F}]/gu, '');  // Tag characters
+
+    // 2. Replace Windows/Unix invalid filename characters
+    sanitized = sanitized.replace(/[\/\\:*?"<>|]/g, '-');
+
+    // 3. Replace other problematic characters
+    sanitized = sanitized
+      .replace(/[\x00-\x1F\x7F]/g, '')          // Control characters
+      .replace(/[#%&{}$!'@+`=]/g, '-')          // Shell-problematic chars
+      .replace(/[\[\]()]/g, '-')                // Brackets (can cause issues)
+      .replace(/[;^~]/g, '-');                  // More problematic chars
+
+    // 4. Handle Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    const windowsReserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+    const nameWithoutExt = sanitized.replace(/\.[^.]+$/, '');
+    if (windowsReserved.test(nameWithoutExt)) {
+      sanitized = `_${sanitized}`;
+    }
+
+    // 5. Normalize whitespace
+    sanitized = sanitized
+      .replace(/\s+/g, ' ')                     // Multiple spaces to single
+      .replace(/^\s+|\s+$/g, '')                // Trim
+      .replace(/\s*-\s*/g, ' - ')               // Normalize around dashes
+      .replace(/-+/g, '-')                      // Multiple dashes to single
+      .replace(/^-+|-+$/g, '');                 // Trim leading/trailing dashes
+
+    // 6. Remove leading/trailing dots and spaces (Windows issue)
+    sanitized = sanitized.replace(/^[\s.]+|[\s.]+$/g, '');
+
+    // 7. Limit length (255 chars max for most filesystems, leave room for extension)
+    const maxLength = 200;
+    if (sanitized.length > maxLength) {
+      sanitized = sanitized.substring(0, maxLength).trim();
+      // Don't end with a dash or space
+      sanitized = sanitized.replace(/[-\s]+$/, '');
+    }
+
+    // 8. Fallback if completely empty
+    if (!sanitized || sanitized.length === 0) {
+      sanitized = 'untitled';
+    }
+
+    return sanitized;
   }
 
   /**

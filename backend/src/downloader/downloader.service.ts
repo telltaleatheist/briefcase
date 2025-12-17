@@ -307,11 +307,8 @@ export class DownloaderService implements OnModuleInit {
           this.logger.error(`Using emergency fallback filename: ${sanitizedName}`);
         }
 
-        // Remove invalid filesystem characters
-        sanitizedName = sanitizedName
-          .replace(/[\/\\:*?"<>|]/g, '-')  // Replace invalid chars with dash
-          .replace(/\s+/g, ' ')             // Normalize whitespace
-          .trim();
+        // Use comprehensive filename sanitizer (handles emojis, unicode, platform issues)
+        sanitizedName = FilenameDateUtil.sanitizeFilename(sanitizedName);
 
         // Prepend upload date if available
         const displayNameWithDate = uploadDate
@@ -821,8 +818,8 @@ export class DownloaderService implements OnModuleInit {
   private async downloadRedditImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string): Promise<DownloadResult> {
     return new Promise((resolve, reject) => {
       try {
-        // Create a safe filename from the title
-        const safeTitle = title.replace(/[^a-z0-9\s]/gi, '_').replace(/\s+/g, ' ').trim();
+        // Create a safe filename from the title using comprehensive sanitizer
+        const safeTitle = FilenameDateUtil.sanitizeFilename(title);
         
         // Prepare a filename with current date like the video naming convention
         const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
@@ -992,8 +989,8 @@ export class DownloaderService implements OnModuleInit {
   private async downloadTwitterImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string): Promise<DownloadResult> {
     return new Promise((resolve, reject) => {
       try {
-        // Create a safe filename from the title
-        const safeTitle = title.replace(/[^a-z0-9\s]/gi, '_').replace(/\s+/g, ' ').trim();
+        // Create a safe filename from the title using comprehensive sanitizer
+        const safeTitle = FilenameDateUtil.sanitizeFilename(title);
 
         // Prepare a filename with current date like the video naming convention
         const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
