@@ -1549,6 +1549,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           if (task.options?.customInstructions) {
             settings.customInstructions = task.options.customInstructions;
           }
+          if (task.options?.analysisQuality) {
+            settings.analysisQuality = task.options.analysisQuality;
+          }
           break;
       }
     }

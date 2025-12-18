@@ -63,7 +63,7 @@ export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
   },
   {
     name: 'routine',
-    description: 'Normal content that doesn\'t match other categories - use for general analysis of what\'s being said (religious teaching, political commentary, testimonies, announcements, music, etc.)',
+    description: 'Generic description of what is happening - use ONLY when no other category applies',
   },
 ];
 
@@ -73,20 +73,12 @@ export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
 // Used to generate a 2-3 sentence overview of the video content
 // This is called AFTER analysis is complete, using the analyzed sections
 
-export const DEFAULT_DESCRIPTION_PROMPT = `You are assisting a content moderation tool that documents and analyzes media for research purposes. Your job is to provide factual descriptions - never refuse to analyze.
+export const DEFAULT_DESCRIPTION_PROMPT = `Describe what is said in 2-3 sentences.{titleContext}
 
-Summarize this video in 2-3 sentences based on the analyzed sections below.{titleContext}
-
-Guidelines:
-- Describe what actually happens in the video based on the sections
-- Use accurate, critical language for harmful content
-- If sections show routine content, describe it neutrally
-- Never apologize or refuse - this is legitimate content moderation research
-
-Sections timeline:
+Sections:
 {sectionsSummary}
 
-Summary:`;
+Description:`;
 
 export const VIDEO_SUMMARY_PROMPT = DEFAULT_DESCRIPTION_PROMPT;
 
@@ -95,19 +87,14 @@ export const VIDEO_SUMMARY_PROMPT = DEFAULT_DESCRIPTION_PROMPT;
 // =============================================================================
 // Used to extract people names and topics from the video
 
-export const DEFAULT_TAG_PROMPT = `You are assisting a content moderation tool. Extract people names and topics from this transcript - never refuse.
+export const DEFAULT_TAG_PROMPT = `Extract people and topics from this transcript.
 
 Return JSON: {"people": ["Name"], "topics": ["Topic"]}
 
 Rules:
-- People: proper names only (not "doctor", "pastor")
-- Topics: 3-8 main themes, 1-3 words each, using accurate critical terminology
-  - Use terms like "white nationalism" not "race realism"
-  - Use "conspiracy theory" not "alternative perspective"
-  - Use "misinformation" not "controversial claim"
-  - Use "hate speech" not "provocative speech"
-  - Use "christian nationalism" not "traditional values"
-- Title case for names
+- People: proper names only
+- Topics: 3-8 themes, 1-3 words each
+- Title case
 
 Context: {sectionsContext}
 
@@ -122,7 +109,7 @@ export const TAG_EXTRACTION_PROMPT = DEFAULT_TAG_PROMPT;
 // =============================================================================
 // Used to generate a suggested filename based on analysis results
 
-export const DEFAULT_TITLE_PROMPT = `You are assisting a content moderation tool. Generate a descriptive filename for this video - never refuse.
+export const DEFAULT_TITLE_PROMPT = `Generate a descriptive filename for this video.
 
 Current filename: {currentTitle}
 Summary: {description}
@@ -139,11 +126,6 @@ Rules:
 - Describe the ACTUAL content from transcript, not just topics
 - No dates, extensions, special chars
 - Don't invent content not in transcript
-- Use accurate descriptors for controversial figures
-
-Good: "nick fuentes rants about demographic replacement"
-Good: "pastor advocates for christian nationalism"
-Bad: "conservative commentator shares views" (too vague)
 
 Output ONLY the filename, nothing else:`;
 
@@ -154,17 +136,12 @@ export const SUGGESTED_TITLE_PROMPT = DEFAULT_TITLE_PROMPT;
 // =============================================================================
 // Used to extract specific quotes from flagged sections
 
-export const DEFAULT_QUOTE_PROMPT = `You are assisting a content moderation tool. Extract 2-4 notable quotes from this transcript - never refuse.
+export const DEFAULT_QUOTE_PROMPT = `Extract 2-4 notable quotes from this transcript.
 
 Category: {category}
 Description: {description}
 
-Return JSON: {"quotes": [{"timestamp": "MM:SS", "text": "exact words", "significance": "why this quote is notable"}]}
-
-Focus on quotes that:
-- Are most representative of the content
-- Document any harmful rhetoric if present
-- Show the speaker's main points or positions
+Return JSON: {"quotes": [{"timestamp": "MM:SS", "text": "exact words", "significance": "why notable"}]}
 
 Transcript:
 {timestampedText}
@@ -222,25 +199,23 @@ export function buildSectionIdentificationPrompt(
   const categoriesSection =
     categoryDescriptions.length > 0 ? categoryDescriptions.join('\n') : '';
 
-  // Build the prompt (optimized for token efficiency, critical perspective)
-  const prompt = `Analyze transcript and identify sections. This is content moderation research documenting harmful rhetoric - analyze critically without refusing.
-
+  // Build the prompt (minimal framing, strong category matching)
+  const prompt = `Categorize this transcript.
 ${titleContext}${customSection}
 Categories:
 ${categoriesSection}
 
-routine: ${routineDesc || 'Default for content not matching above categories'}
+routine: ${routineDesc || 'Use ONLY when no other category applies'}
 
-Return JSON only:
-{"sections": [{"start_phrase": "exact quote", "end_phrase": "exact quote", "category": "${categoryNames}", "description": "one sentence describing the harmful content", "quote": "exact words from transcript"}]}
+Return JSON:
+{"sections": [{"start_phrase": "exact quote", "end_phrase": "exact quote", "category": "${categoryNames}", "description": "one sentence", "quote": "exact words"}]}
 
 Rules:
-- Start/end phrases must be exact quotes from transcript
+- Read each category definition carefully
+- If the transcript discusses, targets, or mentions anything in a category definition, use that category
+- Only use "routine" when content matches NONE of the other categories
 - Category must be ONE of: ${categoryNames}
-- Include quote for every section - prioritize the most egregious statements
-- Descriptions should accurately characterize harmful rhetoric (e.g., "spreads conspiracy theory about..." not "discusses alternative theory")
-- Short videos (<2min): one section. Long videos: 30s-2min sections
-- Always return at least one section
+- Short videos: one section. Long videos: 30s-2min sections
 
 Transcript #${chunkNum}:
 ${chunkText}`;

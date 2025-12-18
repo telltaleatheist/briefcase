@@ -518,6 +518,7 @@ export class MediaOperationsService {
       apiKey?: string;
       ollamaEndpoint?: string;
       customInstructions?: string;
+      analysisQuality?: 'fast' | 'thorough';
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
@@ -606,6 +607,7 @@ export class MediaOperationsService {
         categories,
         apiKey,
         ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
+        analysisQuality: options.analysisQuality,
         onProgress: (progress) => {
           this.eventService.emitTaskProgress(jobId || '', 'analyze', progress.progress, progress.message);
         },
@@ -677,7 +679,8 @@ export class MediaOperationsService {
         this.logger.log(`[${jobId || 'standalone'}] Saved suggested title: ${analysisResult.suggested_title}`);
       }
 
-      // Save analysis sections
+      // Save analysis sections (delete existing AI sections first to avoid duplicates)
+      this.databaseService.deleteAIAnalysisSections(videoId);
       if (analysisResult.sections && Array.isArray(analysisResult.sections)) {
         for (const section of analysisResult.sections) {
           const sectionId = `section-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

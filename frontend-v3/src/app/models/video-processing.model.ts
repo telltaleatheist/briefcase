@@ -29,6 +29,7 @@ export interface VideoJobSettings {
   aiAnalysis: boolean;
   aiModel?: string; // Full model ID from available models
   customInstructions?: string;
+  analysisQuality?: 'fast' | 'thorough'; // fast = single-pass (cheaper), thorough = multi-pass (better)
   outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
   outputQuality?: 'low' | 'medium' | 'high' | 'ultra';
 }

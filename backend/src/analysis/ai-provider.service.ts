@@ -227,10 +227,25 @@ export class AIProviderService {
 
       const data = await response.json();
 
-      this.logger.log(`Ollama response received (local model, no cost)`);
+      // Ollama returns token counts in the response
+      // Fields: prompt_eval_count (input tokens), eval_count (output tokens)
+      const inputTokens = data.prompt_eval_count || 0;
+      const outputTokens = data.eval_count || 0;
+      const tokensUsed = inputTokens + outputTokens;
+
+      // Debug: log raw Ollama response fields for token tracking
+      console.log(`[Ollama Response] prompt_eval_count=${data.prompt_eval_count}, eval_count=${data.eval_count}`);
+      console.log(`[Ollama Tokens] ${inputTokens} input + ${outputTokens} output = ${tokensUsed} total`);
+      this.logger.log(
+        `Ollama tokens: ${inputTokens} input + ${outputTokens} output = ${tokensUsed} total (local, $0.00)`,
+      );
 
       return {
         text: data.response,
+        tokensUsed,
+        inputTokens,
+        outputTokens,
+        estimatedCost: 0, // Local models are free
         provider: 'ollama',
         model: config.model,
       };

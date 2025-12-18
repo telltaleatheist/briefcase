@@ -73,7 +73,7 @@
                 <label>AI Model</label>
                 <select
                   [ngModel]="getTaskConfig(task.type).aiModel"
-                  (ngModelChange)="updateTaskConfig(task.type, { aiModel: $event })"
+                  (ngModelChange)="onAIModelChange($event)"
                   [disabled]="loadingModels()"
                 >
                   <option *ngIf="loadingModels()" value="">Loading models...</option>
@@ -115,6 +115,37 @@
                     💾 Save as Default
                   }
                 </button>
+              </div>
+              <div class="form-group">
+                <label>Analysis Quality</label>
+                <div class="quality-selector">
+                  <label class="quality-option" [class.selected]="getTaskConfig(task.type).analysisQuality === 'fast'">
+                    <input
+                      type="radio"
+                      name="analysisQuality"
+                      value="fast"
+                      [checked]="getTaskConfig(task.type).analysisQuality === 'fast'"
+                      (change)="updateTaskConfig(task.type, { analysisQuality: 'fast' })"
+                    />
+                    <span class="quality-label">
+                      <span class="quality-title">⚡ Fast</span>
+                      <span class="quality-desc">Single-pass analysis, lower cost</span>
+                    </span>
+                  </label>
+                  <label class="quality-option" [class.selected]="getTaskConfig(task.type).analysisQuality === 'thorough'">
+                    <input
+                      type="radio"
+                      name="analysisQuality"
+                      value="thorough"
+                      [checked]="getTaskConfig(task.type).analysisQuality === 'thorough'"
+                      (change)="updateTaskConfig(task.type, { analysisQuality: 'thorough' })"
+                    />
+                    <span class="quality-label">
+                      <span class="quality-title">🔍 Thorough</span>
+                      <span class="quality-desc">Multi-pass analysis, better quotes</span>
+                    </span>
+                  </label>
+                </div>
               </div>
               <div class="form-group">
                 <label>Custom Instructions (optional)</label>

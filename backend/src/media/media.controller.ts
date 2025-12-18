@@ -259,6 +259,7 @@ export class MediaController {
       apiKey?: string;
       ollamaEndpoint?: string;
       customInstructions?: string;
+      analysisQuality?: 'fast' | 'thorough';
     },
   ) {
     if (!body.videoId) {
@@ -275,6 +276,7 @@ export class MediaController {
       apiKey: body.apiKey,
       ollamaEndpoint: body.ollamaEndpoint,
       customInstructions: body.customInstructions,
+      analysisQuality: body.analysisQuality,
     });
 
     if (!result.success) {

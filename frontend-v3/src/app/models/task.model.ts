@@ -31,11 +31,14 @@ export interface TranscribeConfig {
   translate?: boolean;
 }
 
+export type AnalysisQuality = 'fast' | 'thorough';
+
 export interface AIAnalyzeConfig {
-  aiModel?: 'gpt-4' | 'gpt-4-turbo' | 'claude-3-opus' | 'claude-3-sonnet';
+  aiModel?: string; // Dynamic model string like "ollama:qwen2.5:7b" or "claude:claude-3-sonnet"
   customInstructions?: string;
   generateSummary?: boolean;
   extractKeyPoints?: boolean;
+  analysisQuality?: AnalysisQuality; // 'fast' = single-pass (cheaper), 'thorough' = multi-pass (better quotes)
 }
 
 export interface FixAspectRatioConfig {

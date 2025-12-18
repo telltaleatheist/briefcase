@@ -186,6 +186,7 @@ export class VideoProcessingService {
           settings.aiAnalysis = true;
           settings.aiModel = task.options?.aiModel;
           settings.customInstructions = task.options?.customInstructions;
+          settings.analysisQuality = task.options?.analysisQuality;
           break;
       }
     });
@@ -739,13 +740,14 @@ export class VideoProcessingService {
         }
       }
 
-      console.log('Sending to backend - provider:', aiProvider, 'model:', aiModel);
+      console.log('Sending to backend - provider:', aiProvider, 'model:', aiModel, 'quality:', settings.analysisQuality);
       tasks.push({
         type: 'analyze',
         options: {
           aiModel,
           aiProvider,
-          customInstructions: settings.customInstructions
+          customInstructions: settings.customInstructions,
+          analysisQuality: settings.analysisQuality || 'fast'
         }
       });
     }
@@ -893,9 +895,10 @@ export class VideoProcessingService {
         // Get AI analyze config - keep full model string with provider
         const aiConfig = taskConfigs.get('ai-analyze');
         if (aiConfig && aiConfig.aiModel) {
-          console.log('Saving AI model:', aiConfig.aiModel);
+          console.log('Saving AI model:', aiConfig.aiModel, 'quality:', aiConfig.analysisQuality);
           job.settings.aiModel = aiConfig.aiModel;
           job.settings.customInstructions = aiConfig.customInstructions;
+          job.settings.analysisQuality = aiConfig.analysisQuality;
         }
 
         // Get fix aspect ratio config

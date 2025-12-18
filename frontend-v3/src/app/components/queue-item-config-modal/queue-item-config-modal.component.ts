@@ -10,7 +10,8 @@ import {
   TranscribeConfig,
   AIAnalyzeConfig,
   FixAspectRatioConfig,
-  NormalizeAudioConfig
+  NormalizeAudioConfig,
+  AnalysisQuality
 } from '../../models/task.model';
 import { QueueItemTask } from '../../models/queue.model';
 import { AiSetupService, AIAvailability } from '../../services/ai-setup.service';
@@ -255,21 +256,28 @@ export class QueueItemConfigModalComponent implements OnInit {
 
     // Initialize from existing tasks or defaults
     const existing = this.existingTasks();
-    console.log('initializeTasks - existing tasks:', existing);
+    console.log('[initializeTasks] defaultAIModel:', this.defaultAIModel);
+    console.log('[initializeTasks] existing tasks:', existing);
     if (existing && existing.length > 0) {
       existing.forEach(task => {
-        console.log('Adding task to map:', task.type, 'config:', task.config);
-        const taskCopy = { ...task };
+        console.log('[initializeTasks] Processing task:', task.type, 'config:', task.config);
+        const taskCopy = { ...task, config: { ...task.config } };
 
-        // Ensure ai-analyze task has the default AI model if not specified
+        // Ensure ai-analyze task has the default AI model and quality if not specified
         if (task.type === 'ai-analyze') {
-          if (!task.config || !task.config['aiModel']) {
-            taskCopy.config = {
-              ...task.config,
-              aiModel: this.defaultAIModel
-            };
-            console.log('Set default AI model for ai-analyze task:', this.defaultAIModel);
-          }
+          const aiModel = task.config?.['aiModel'] || this.defaultAIModel;
+          // Always recalculate quality based on the AI model to ensure consistency
+          const existingQuality = task.config?.['analysisQuality'];
+          const computedQuality = this.getDefaultQualityForModel(aiModel);
+          // Use existing quality if set, otherwise compute based on model
+          const analysisQuality = existingQuality || computedQuality;
+
+          taskCopy.config = {
+            ...task.config,
+            aiModel,
+            analysisQuality
+          };
+          console.log(`[initializeTasks] ai-analyze: model=${aiModel}, existingQuality=${existingQuality}, computedQuality=${computedQuality}, finalQuality=${analysisQuality}`);
         }
 
         taskMap.set(task.type, taskCopy);
@@ -277,7 +285,7 @@ export class QueueItemConfigModalComponent implements OnInit {
     }
 
     this.tasks.set(taskMap);
-    console.log('Tasks map after init:', Array.from(taskMap.entries()));
+    console.log('[initializeTasks] Final tasks map:', Array.from(taskMap.entries()));
   }
 
   getAvailableTasks(): Task[] {
@@ -337,6 +345,25 @@ export class QueueItemConfigModalComponent implements OnInit {
     }
   }
 
+  /**
+   * Get the default quality based on the AI model's provider
+   * Local models (Ollama) = thorough (free, so maximize quality)
+   * API models (Claude, OpenAI) = fast (paid, so minimize cost)
+   */
+  getDefaultQualityForModel(modelValue: string): AnalysisQuality {
+    if (!modelValue) return 'fast';
+    const provider = modelValue.split(':')[0];
+    return provider === 'ollama' ? 'thorough' : 'fast';
+  }
+
+  /**
+   * Handle AI model change - auto-update quality based on provider
+   */
+  onAIModelChange(modelValue: string) {
+    const quality = this.getDefaultQualityForModel(modelValue);
+    this.updateTaskConfig('ai-analyze', { aiModel: modelValue, analysisQuality: quality });
+  }
+
   getDefaultConfig(taskType: TaskType): any {
     switch (taskType) {
       case 'download-import':
@@ -345,7 +372,8 @@ export class QueueItemConfigModalComponent implements OnInit {
         return { model: 'base', translate: false } as TranscribeConfig;
       case 'ai-analyze':
         return {
-          aiModel: this.defaultAIModel
+          aiModel: this.defaultAIModel,
+          analysisQuality: this.getDefaultQualityForModel(this.defaultAIModel)
         } as AIAnalyzeConfig;
       case 'fix-aspect-ratio':
         return { targetRatio: '16:9', cropMode: 'smart' } as FixAspectRatioConfig;
@@ -373,11 +401,35 @@ export class QueueItemConfigModalComponent implements OnInit {
     if (!config || Object.keys(config).length === 0) {
       return this.getDefaultConfig(taskType);
     }
+    // For ai-analyze, always ensure quality is set based on the model
+    if (taskType === 'ai-analyze' && !config['analysisQuality']) {
+      const aiModel = config['aiModel'] || this.defaultAIModel;
+      return {
+        ...config,
+        analysisQuality: this.getDefaultQualityForModel(aiModel)
+      };
+    }
     return config;
   }
 
   onSave() {
-    const tasksArray = Array.from(this.tasks().values());
+    // Ensure all task configs have computed values stored (especially quality for ai-analyze)
+    const currentTasks = new Map(this.tasks());
+    for (const [taskType, task] of currentTasks) {
+      if (taskType === 'ai-analyze') {
+        const config = task.config || {};
+        if (!config['analysisQuality']) {
+          const aiModel = config['aiModel'] || this.defaultAIModel;
+          const quality = this.getDefaultQualityForModel(aiModel);
+          task.config = { ...config, analysisQuality: quality };
+          console.log(`[onSave] Set missing quality for ai-analyze: ${quality} (model: ${aiModel})`);
+        }
+      }
+    }
+    this.tasks.set(currentTasks);
+
+    const tasksArray = Array.from(currentTasks.values());
+    console.log('[onSave] Emitting tasks:', JSON.stringify(tasksArray, null, 2));
     if (this.bulkMode()) {
       this.bulkSave.emit(tasksArray);
     } else {

@@ -644,7 +644,8 @@ export class LibraryService {
           options: {
             aiModel,
             aiProvider,
-            customInstructions: config?.customInstructions || ''
+            customInstructions: config?.customInstructions || '',
+            analysisQuality: config?.analysisQuality || 'fast'
           }
         }];
 

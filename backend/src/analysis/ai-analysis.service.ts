@@ -80,6 +80,8 @@ export interface AnalysisProgress {
   message: string;
 }
 
+export type AnalysisQuality = 'fast' | 'thorough';
+
 export interface AnalysisOptions {
   provider: 'ollama' | 'openai' | 'claude';
   model: string;
@@ -91,7 +93,16 @@ export interface AnalysisOptions {
   categories?: AnalysisCategory[];
   apiKey?: string;
   ollamaEndpoint?: string;
+  analysisQuality?: AnalysisQuality; // 'fast' = single-pass, 'thorough' = multi-pass (default for Ollama)
   onProgress?: (progress: AnalysisProgress) => void;
+}
+
+export interface TokenStats {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  apiCalls: number;
 }
 
 export interface AnalysisResult {
@@ -100,6 +111,7 @@ export interface AnalysisResult {
   tags?: Tags;
   description?: string;
   suggested_title?: string;
+  tokenStats?: TokenStats;
 }
 
 // =============================================================================
@@ -119,7 +131,8 @@ const REFUSAL_INDICATORS = [
 ];
 
 const MAX_RETRIES = 3;
-const CHUNK_MINUTES = 5;
+const CHUNK_MINUTES_FAST = 15; // Larger chunks for fast mode (fewer API calls)
+const CHUNK_MINUTES_THOROUGH = 5; // Smaller chunks for thorough mode (better detail)
 
 // =============================================================================
 // SERVICE
@@ -191,9 +204,9 @@ export class AIAnalysisService {
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
     console.log('=== AIAnalysisService.analyzeTranscript CALLED ===');
-    console.log(`Provider: ${options.provider}, Model: ${options.model}`);
+    console.log(`Provider: ${options.provider}, Model: ${options.model}, Quality: ${options.analysisQuality || 'fast'}`);
     this.logger.log('=== AIAnalysisService.analyzeTranscript CALLED ===');
-    this.logger.log(`Provider: ${options.provider}, Model: ${options.model}`);
+    this.logger.log(`Provider: ${options.provider}, Model: ${options.model}, Quality: ${options.analysisQuality || 'fast'}`);
 
     const {
       provider,
@@ -206,8 +219,13 @@ export class AIAnalysisService {
       categories,
       apiKey,
       ollamaEndpoint,
+      analysisQuality = 'fast', // Default to fast (cheaper) mode
       onProgress,
     } = options;
+
+    // Determine chunk size based on quality mode
+    const chunkMinutes = analysisQuality === 'thorough' ? CHUNK_MINUTES_THOROUGH : CHUNK_MINUTES_FAST;
+    const isFastMode = analysisQuality === 'fast';
 
     const sendProgress = (phase: string, progress: number, message: string) => {
       console.log(`[AI Analysis] ${progress}% - ${message}`);
@@ -216,8 +234,27 @@ export class AIAnalysisService {
       }
     };
 
+    // Token tracking for API calls
+    const tokenStats: TokenStats = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      estimatedCost: 0,
+      apiCalls: 0,
+    };
+
+    const trackTokens = (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => {
+      console.log(`[trackTokens] Received: inputTokens=${response.inputTokens}, outputTokens=${response.outputTokens}, cost=${response.estimatedCost}`);
+      if (response.inputTokens) tokenStats.inputTokens += response.inputTokens;
+      if (response.outputTokens) tokenStats.outputTokens += response.outputTokens;
+      tokenStats.totalTokens = tokenStats.inputTokens + tokenStats.outputTokens;
+      if (response.estimatedCost) tokenStats.estimatedCost += response.estimatedCost;
+      tokenStats.apiCalls++;
+      console.log(`[trackTokens] Running total: apiCalls=${tokenStats.apiCalls}, totalTokens=${tokenStats.totalTokens}`);
+    };
+
     try {
-      sendProgress('analysis', 0, `Starting AI analysis with ${model}...`);
+      sendProgress('analysis', 0, `Starting AI analysis with ${model} (${analysisQuality} mode)...`);
 
       // Check model availability (only for Ollama)
       if (provider === 'ollama') {
@@ -244,7 +281,7 @@ export class AIAnalysisService {
       );
 
       // Chunk transcript into time-based segments
-      const chunks = this.chunkTranscript(segments, CHUNK_MINUTES);
+      const chunks = this.chunkTranscript(segments, chunkMinutes);
       const totalChunks = chunks.length;
 
       if (totalChunks === 1) {
@@ -281,12 +318,15 @@ export class AIAnalysisService {
             customInstructions,
             videoTitle,
             categories || null,
+            trackTokens,
           );
 
           if (interestingSections && interestingSections.length > 0) {
             for (const section of interestingSections) {
-              if (section.category === 'routine') {
-                // For routine sections, just add with the quote from initial analysis
+              // In fast mode OR for routine sections: use quote from initial analysis (single-pass)
+              // In thorough mode for non-routine sections: do detailed analysis (two-pass)
+              if (isFastMode || section.category === 'routine') {
+                // Single-pass: use the quote from initial analysis
                 const startPhrase = section.start_phrase || '';
                 const startTime = this.findPhraseTimestamp(
                   startPhrase,
@@ -304,11 +344,23 @@ export class AIAnalysisService {
                     });
                   }
 
+                  // For non-routine sections, try to find end time
+                  let endTime: string | null = null;
+                  if (section.category !== 'routine' && section.end_phrase) {
+                    const endTimestamp = this.findPhraseTimestamp(
+                      section.end_phrase,
+                      chunk.segments,
+                    );
+                    if (endTimestamp !== null && endTimestamp > startTime) {
+                      endTime = this.formatDisplayTime(endTimestamp);
+                    }
+                  }
+
                   const analyzedSection: AnalyzedSection = {
-                    category: 'routine',
+                    category: section.category,
                     description: section.description,
                     start_time: this.formatDisplayTime(startTime),
-                    end_time: null,
+                    end_time: endTime,
                     quotes,
                   };
 
@@ -316,11 +368,12 @@ export class AIAnalysisService {
                   this.writeSectionToFile(outputFile, analyzedSection);
                 }
               } else {
-                // For interesting sections, do detailed analysis
+                // Thorough mode: do detailed analysis for better quotes
                 const detailedAnalysis = await this.analyzeSectionDetail(
                   aiConfig,
                   section,
                   chunk.segments,
+                  trackTokens,
                 );
 
                 if (detailedAnalysis) {
@@ -408,34 +461,58 @@ export class AIAnalysisService {
         this.writeSectionToFile(outputFile, defaultSection);
       }
 
-      // Extract tags
+      // Extract tags (uses section descriptions + quotes, not raw transcript)
       sendProgress('analysis', 92, 'Extracting tags (people, topics)...');
       const tags = await this.extractTags(
         aiConfig,
-        transcript,
         analyzedSections,
+        trackTokens,
       );
 
-      // Generate video summary
+      // Generate video summary (uses section descriptions only)
       sendProgress('analysis', 95, 'Generating video summary...');
       const summary = await this.generateSummary(
         aiConfig,
         analyzedSections,
         videoTitle,
-        transcript,
+        trackTokens,
       );
 
       // Prepend summary to file
       this.prependSummaryToFile(outputFile, summary);
 
-      // Generate suggested title
+      // Generate suggested title (uses quotes, not raw transcript)
       sendProgress('analysis', 98, 'Generating suggested title...');
       const suggestedTitle = await this.generateSuggestedTitle(
         aiConfig,
         videoTitle,
         summary,
         tags,
-        transcript,
+        analyzedSections,
+        trackTokens,
+      );
+
+      // Log token usage summary (use console.log for visibility in Electron)
+      console.log('');
+      console.log('='.repeat(60));
+      console.log('AI ANALYSIS TOKEN USAGE SUMMARY');
+      console.log('='.repeat(60));
+      console.log(`Mode: ${analysisQuality}`);
+      console.log(`Provider: ${provider}`);
+      console.log(`Model: ${model}`);
+      console.log(`API Calls: ${tokenStats.apiCalls}`);
+      console.log(`Input Tokens: ${tokenStats.inputTokens.toLocaleString()}`);
+      console.log(`Output Tokens: ${tokenStats.outputTokens.toLocaleString()}`);
+      console.log(`Total Tokens: ${tokenStats.totalTokens.toLocaleString()}`);
+      console.log('='.repeat(60));
+      console.log('');
+
+      // Also log via logger for NestJS logs
+      this.logger.log('AI ANALYSIS TOKEN SUMMARY: ' +
+        `apiCalls=${tokenStats.apiCalls}, ` +
+        `inputTokens=${tokenStats.inputTokens}, ` +
+        `outputTokens=${tokenStats.outputTokens}, ` +
+        `totalTokens=${tokenStats.totalTokens}`
       );
 
       sendProgress('analysis', 100, 'Analysis complete!');
@@ -446,6 +523,7 @@ export class AIAnalysisService {
         tags,
         description: summary,
         suggested_title: suggestedTitle || undefined,
+        tokenStats: tokenStats.apiCalls > 0 ? tokenStats : undefined,
       };
     } catch (error) {
       const message = `AI analysis failed: ${(error as Error).message}`;
@@ -507,6 +585,7 @@ export class AIAnalysisService {
     customInstructions: string,
     videoTitle: string,
     categories: AnalysisCategory[] | null,
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<Section[]> {
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -548,6 +627,7 @@ Pay special attention to the custom instructions above when analyzing the conten
         );
 
         const response = await this.aiProviderService.generateText(prompt, config);
+        onTokens?.(response); // Track tokens
 
         if (!response || !response.text) {
           this.logger.warn(
@@ -606,6 +686,7 @@ Pay special attention to the custom instructions above when analyzing the conten
     config: AIProviderConfig,
     section: Section,
     allSegments: Segment[],
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<AnalyzedSection | null> {
     try {
       this.logger.debug(
@@ -667,6 +748,7 @@ Pay special attention to the custom instructions above when analyzing the conten
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
+      onTokens?.(response); // Track tokens
 
       if (!response || !response.text) {
         this.logger.debug('No response from AI for detailed analysis');
@@ -792,32 +874,45 @@ Pay special attention to the custom instructions above when analyzing the conten
   }
 
   /**
-   * Extract tags from the transcript and analysis
+   * Build a summary of quotes from analyzed sections (for use in metadata extraction)
+   * This allows us to skip sending raw transcript for tags/title generation
    */
+  private buildQuotesSummary(analyzedSections: AnalyzedSection[]): string {
+    const quotes: string[] = [];
+    for (const section of analyzedSections.slice(0, 15)) {
+      if (section.quotes && section.quotes.length > 0) {
+        for (const quote of section.quotes.slice(0, 2)) {
+          quotes.push(`"${quote.text}"`);
+        }
+      }
+    }
+    return quotes.join(' ').substring(0, 2000); // Limit to ~2k chars
+  }
+
   private async extractTags(
     config: AIProviderConfig,
-    transcriptText: string,
     analyzedSections: AnalyzedSection[],
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<Tags> {
     try {
-      const excerpt =
-        transcriptText.length > 3000
-          ? transcriptText.substring(0, 3000)
-          : transcriptText;
-
+      // Build context from section descriptions and quotes (no raw transcript needed)
       const sectionDescriptions = analyzedSections
         .map((s) => s.description)
         .filter((d) => d)
-        .slice(0, 10);
-      const sectionsContext = sectionDescriptions.join(' ');
+        .slice(0, 15);
+      const sectionsContext = sectionDescriptions.join('. ');
+
+      // Use quotes as excerpt instead of raw transcript
+      const excerpt = this.buildQuotesSummary(analyzedSections);
 
       // Use custom tags prompt if configured
       const prompt = interpolatePrompt(this.getPrompt('tags'), {
         sectionsContext,
-        excerpt,
+        excerpt: excerpt || sectionsContext, // Fallback to descriptions if no quotes
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
+      onTokens?.(response); // Track tokens
 
       if (response && response.text) {
         try {
@@ -830,6 +925,14 @@ Pay special attention to the custom instructions above when analyzing the conten
               .filter((l) => !l.startsWith('```'))
               .join('\n');
           }
+
+          // Extract JSON object from response (handles extra text before/after)
+          const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) {
+            this.logger.warn('No JSON object found in tag extraction response');
+            return { people: [], topics: [] };
+          }
+          cleanResponse = jsonMatch[0];
 
           const tagsData = JSON.parse(cleanResponse);
 
@@ -860,14 +963,9 @@ Pay special attention to the custom instructions above when analyzing the conten
     config: AIProviderConfig,
     analyzedSections: AnalyzedSection[],
     videoTitle: string,
-    transcript?: string,
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<string> {
     try {
-      // Check for insufficient transcript first
-      if (!transcript || transcript.trim().length < 100) {
-        return 'This video contains little or no useful audio to analyze.';
-      }
-
       if (!analyzedSections || analyzedSections.length === 0) {
         return 'No content could be analyzed in this video.';
       }
@@ -897,6 +995,7 @@ Pay special attention to the custom instructions above when analyzing the conten
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
+      onTokens?.(response); // Track tokens
 
       if (response && response.text) {
         const summary = response.text.trim();
@@ -959,15 +1058,10 @@ Pay special attention to the custom instructions above when analyzing the conten
     currentTitle: string,
     description: string,
     tags: Tags,
-    transcript: string,
+    analyzedSections: AnalyzedSection[],
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<string | null> {
     try {
-      // Skip if transcript is too short (likely music/no speech)
-      if (!transcript || transcript.trim().length < 100) {
-        this.logger.debug('Skipping title generation - insufficient transcript content');
-        return null;
-      }
-
       const peopleTags =
         tags.people && tags.people.length > 0
           ? tags.people.slice(0, 5).join(', ')
@@ -977,10 +1071,8 @@ Pay special attention to the custom instructions above when analyzing the conten
           ? tags.topics.slice(0, 5).join(', ')
           : 'None';
 
-      // Include first ~1500 chars of transcript for context
-      const transcriptExcerpt = transcript.length > 1500
-        ? transcript.substring(0, 1500) + '...'
-        : transcript;
+      // Use quotes summary instead of raw transcript
+      const transcriptExcerpt = this.buildQuotesSummary(analyzedSections) || description;
 
       // Use custom title prompt if configured
       const prompt = interpolatePrompt(this.getPrompt('title'), {
@@ -992,6 +1084,7 @@ Pay special attention to the custom instructions above when analyzing the conten
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
+      onTokens?.(response); // Track tokens
 
       if (response && response.text) {
         let suggestedTitle = response.text.trim();
