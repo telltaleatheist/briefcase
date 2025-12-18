@@ -128,8 +128,8 @@
                       (change)="updateTaskConfig(task.type, { analysisQuality: 'fast' })"
                     />
                     <span class="quality-label">
-                      <span class="quality-title">⚡ Fast</span>
-                      <span class="quality-desc">Single-pass analysis, lower cost</span>
+                      <span class="quality-title">⚡ Single Pass</span>
+                      <span class="quality-desc">One API call, lower cost</span>
                     </span>
                   </label>
                   <label class="quality-option" [class.selected]="getTaskConfig(task.type).analysisQuality === 'thorough'">
@@ -141,8 +141,8 @@
                       (change)="updateTaskConfig(task.type, { analysisQuality: 'thorough' })"
                     />
                     <span class="quality-label">
-                      <span class="quality-title">🔍 Thorough</span>
-                      <span class="quality-desc">Multi-pass analysis, better quotes</span>
+                      <span class="quality-title">🔍 Multi Pass</span>
+                      <span class="quality-desc">Multiple API calls, better quotes</span>
                     </span>
                   </label>
                 </div>

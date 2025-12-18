@@ -135,8 +135,11 @@ export class SettingsPageComponent implements OnInit {
     this.wizardOpen.set(true);
   }
 
-  closeAiWizard() {
+  async closeAiWizard() {
     this.wizardOpen.set(false);
+    // Always refresh after closing wizard - user may have added keys even if they didn't click "Done"
+    await this.refreshAiStatus();
+    await this.loadAvailableModels();
   }
 
   async onWizardCompleted() {
