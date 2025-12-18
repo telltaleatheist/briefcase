@@ -1250,7 +1250,20 @@ Pay special attention to the custom instructions above when analyzing the conten
                 section.category &&
                 section.description
               ) {
-                sections.push(section);
+                // Safety net: if AI combined categories with comma, split them into separate sections
+                const categoryStr = section.category as string;
+                if (categoryStr.includes(',')) {
+                  const individualCategories = categoryStr.split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
+                  console.log(`[parseSectionResponse] Splitting combined category "${categoryStr}" into ${individualCategories.length} separate sections`);
+                  for (const cat of individualCategories) {
+                    sections.push({
+                      ...section,
+                      category: cat,
+                    });
+                  }
+                } else {
+                  sections.push(section);
+                }
               } else {
                 console.log(`[parseSectionResponse] SKIPPED section - missing fields. Has: start_phrase=${!!section.start_phrase}, end_phrase=${!!section.end_phrase}, category=${!!section.category}, description=${!!section.description}`);
               }

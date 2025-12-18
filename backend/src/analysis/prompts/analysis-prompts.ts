@@ -216,11 +216,11 @@ Rules:
 - start_phrase and end_phrase MUST be verbatim text copied from the transcript (3-8 words) - these are used for timestamp lookup
 - Read each category definition carefully
 - If the transcript discusses, targets, or mentions anything in a category definition, use that category
-- Flag ALL applicable categories - content often fits multiple categories (e.g., hate speech AND misinformation AND christian-nationalism)
-- Create separate sections for each category that applies, even if they overlap in time
+- CRITICAL: Each section must have EXACTLY ONE category - never combine categories with commas
+- If content matches multiple categories (e.g., both "violence" AND "christian-nationalism"), create SEPARATE sections for each - one section for "violence", another section for "christian-nationalism", even if they have the same start/end phrases
 - Only use "routine" when content matches NONE of the other categories
-- Category must be ONE of: ${categoryNames}
-- Short videos: one section. Long videos: 30s-2min sections
+- Category must be exactly ONE of: ${categoryNames} (no comma-separated lists)
+- Short videos: one section per category. Long videos: 30s-2min sections per category
 
 Transcript #${chunkNum}:
 ${chunkText}`;
