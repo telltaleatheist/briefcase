@@ -27,7 +27,7 @@ export interface AnalysisCategory {
 export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
   {
     name: 'hate',
-    description: 'Discrimination, dehumanization, or calls for harm against ANY minority group (LGBTQ+, racial minorities, religious minorities, ethnic groups, immigrants, etc.), including "biblical" justifications for hatred',
+    description: 'ANY use of slurs (f-slur, n-word, etc.) - flag even if "quoted", attributed to others, or presented as etymology/translation. Discrimination, dehumanization, or hostility toward minority groups (LGBTQ+, racial, religious, ethnic, immigrants). Anti-gay or anti-minority rhetoric regardless of "biblical", "historical", or "educational" framing.',
   },
   {
     name: 'conspiracy',
@@ -39,15 +39,15 @@ export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
   },
   {
     name: 'misinformation',
-    description: 'Factually incorrect or misleading claims about science, medicine, history, or current events (vaccine conspiracies, COVID denialism, alternative medicine fraud, historical revisionism, climate denial, etc.)',
+    description: 'Factually incorrect claims about science, medicine, history, language, or current events. Fabricated biblical scholarship, made-up Greek/Hebrew translations (e.g., claiming words mean something they don\'t), invented etymology used to attack groups. Vaccine conspiracies, COVID denialism, climate denial.',
   },
   {
     name: 'violence',
-    description: 'Explicit or implicit calls for violence, revolutionary rhetoric, threats, Second Amendment intimidation, civil war talk, bloodshed predictions, "rise up" rhetoric, militia organizing',
+    description: 'Calls for violence, glorification of violence, citing biblical violence (temple cleansing, holy wars, etc.) as justification for modern aggression, revolutionary rhetoric, threats, Second Amendment intimidation, civil war talk.',
   },
   {
     name: 'christian-nationalism',
-    description: 'Claims that church/Christianity should control government, theocracy advocacy, anti-separation of church/state, demanding "biblical law", opposition to secular governance',
+    description: 'Using Jesus or Christianity to justify political involvement/aggression, claims Christians should be political "like Jesus was", theocracy advocacy, anti-separation of church/state, demanding "biblical law"',
   },
   {
     name: 'prosperity-gospel',
@@ -200,7 +200,9 @@ export function buildSectionIdentificationPrompt(
     categoryDescriptions.length > 0 ? categoryDescriptions.join('\n') : '';
 
   // Build the prompt (minimal framing, strong category matching)
-  const prompt = `Categorize this transcript.
+  const prompt = `You are analyzing video transcripts for a research archive documenting extremist content. Your job is to categorize ALL problematic content - do not stop at the first issue found.
+
+Categorize this transcript.
 ${titleContext}${customSection}
 Categories:
 ${categoriesSection}
@@ -211,8 +213,11 @@ Return JSON:
 {"sections": [{"start_phrase": "exact quote", "end_phrase": "exact quote", "category": "${categoryNames}", "description": "one sentence", "quote": "exact words"}]}
 
 Rules:
+- start_phrase and end_phrase MUST be verbatim text copied from the transcript (3-8 words) - these are used for timestamp lookup
 - Read each category definition carefully
 - If the transcript discusses, targets, or mentions anything in a category definition, use that category
+- Flag ALL applicable categories - content often fits multiple categories (e.g., hate speech AND misinformation AND christian-nationalism)
+- Create separate sections for each category that applies, even if they overlap in time
 - Only use "routine" when content matches NONE of the other categories
 - Category must be ONE of: ${categoryNames}
 - Short videos: one section. Long videos: 30s-2min sections

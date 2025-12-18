@@ -1,7 +1,7 @@
 import { Controller, Post, Body, Get, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { ApiKeysService } from './api-keys.service';
-import { DEFAULT_PROMPTS } from '../analysis/prompts/analysis-prompts';
+import { DEFAULT_PROMPTS, DEFAULT_CATEGORIES } from '../analysis/prompts/analysis-prompts';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -220,6 +220,31 @@ export class ConfigController implements OnModuleInit {
       return {
         success: false,
         message: `Failed to save analysis categories: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Reset analysis categories to defaults
+   */
+  @Post('analysis-categories/reset')
+  async resetAnalysisCategories() {
+    try {
+      const categoriesPath = path.join(path.dirname(this.configPath), 'analysis-categories.json');
+
+      if (fs.existsSync(categoriesPath)) {
+        fs.unlinkSync(categoriesPath);
+      }
+
+      return {
+        success: true,
+        message: 'Analysis categories reset to defaults',
+        categories: DEFAULT_CATEGORIES
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to reset analysis categories: ${(error as Error).message}`
       };
     }
   }

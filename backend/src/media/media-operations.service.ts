@@ -738,12 +738,23 @@ export class MediaOperationsService {
    * Parse SRT content into segments for AI analysis
    */
   private parseSrtToSegments(srtContent: string): any[] {
+    console.log(`[parseSrtToSegments] SRT content length: ${srtContent?.length || 0}`);
+    console.log(`[parseSrtToSegments] SRT preview: ${srtContent?.substring(0, 300)}`);
+
     const segments: any[] = [];
-    const blocks = srtContent.split('\n\n').filter(b => b.trim());
+
+    // Normalize line endings: convert \r\n (Windows) to \n (Unix)
+    // This is critical on Windows where SRT files may have \r\n line endings
+    const normalizedContent = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const blocks = normalizedContent.split('\n\n').filter(b => b.trim());
+    console.log(`[parseSrtToSegments] Found ${blocks.length} blocks (after line ending normalization)`);
 
     for (const block of blocks) {
       const lines = block.split('\n');
-      if (lines.length < 3) continue;
+      if (lines.length < 3) {
+        console.log(`[parseSrtToSegments] Skipping block with ${lines.length} lines`);
+        continue;
+      }
 
       const timestampLine = lines[1];
       const textLines = lines.slice(2);
@@ -768,7 +779,15 @@ export class MediaOperationsService {
           end,
           text: textLines.join(' '),
         });
+      } else {
+        console.log(`[parseSrtToSegments] No timestamp match for line: "${timestampLine}"`);
       }
+    }
+
+    console.log(`[parseSrtToSegments] Parsed ${segments.length} segments`);
+    if (segments.length > 0) {
+      console.log(`[parseSrtToSegments] First segment: start=${segments[0].start}, end=${segments[0].end}, text="${segments[0].text.substring(0, 50)}"`);
+      console.log(`[parseSrtToSegments] Last segment: start=${segments[segments.length-1].start}, end=${segments[segments.length-1].end}`);
     }
 
     return segments;

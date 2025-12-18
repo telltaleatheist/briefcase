@@ -205,6 +205,13 @@ export class AIAnalysisService {
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
     console.log('=== AIAnalysisService.analyzeTranscript CALLED ===');
     console.log(`Provider: ${options.provider}, Model: ${options.model}, Quality: ${options.analysisQuality || 'fast'}`);
+    console.log(`[analyzeTranscript] SEGMENTS RECEIVED: ${options.segments?.length || 0}`);
+    if (options.segments && options.segments.length > 0) {
+      console.log(`[analyzeTranscript] First segment: start=${options.segments[0].start}, end=${options.segments[0].end}, text="${options.segments[0].text?.substring(0, 50)}"`);
+      console.log(`[analyzeTranscript] Last segment: start=${options.segments[options.segments.length-1].start}, end=${options.segments[options.segments.length-1].end}`);
+    } else {
+      console.log(`[analyzeTranscript] WARNING: No segments or empty segments array!`);
+    }
     this.logger.log('=== AIAnalysisService.analyzeTranscript CALLED ===');
     this.logger.log(`Provider: ${options.provider}, Model: ${options.model}, Quality: ${options.analysisQuality || 'fast'}`);
 
@@ -539,14 +546,18 @@ export class AIAnalysisService {
     segments: Segment[],
     chunkMinutes: number = 15,
   ): Chunk[] {
+    console.log(`[chunkTranscript] Input segments: ${segments?.length || 0}, chunkMinutes: ${chunkMinutes}`);
     const chunks: Chunk[] = [];
 
     if (!segments || segments.length === 0) {
+      console.log(`[chunkTranscript] WARNING: No segments to chunk!`);
       return [];
     }
 
     const chunkDuration = chunkMinutes * 60;
     const totalDuration = segments[segments.length - 1].end;
+    console.log(`[chunkTranscript] Total duration: ${totalDuration}s, chunk duration: ${chunkDuration}s`);
+
     let currentStart = 0;
     let chunkNum = 1;
 
@@ -566,12 +577,14 @@ export class AIAnalysisService {
           text: chunkText,
           segments: chunkSegments,
         });
+        console.log(`[chunkTranscript] Chunk ${chunkNum}: ${chunkSegments.length} segments, time ${currentStart}-${Math.min(chunkEnd, totalDuration)}`);
         chunkNum++;
       }
 
       currentStart = chunkEnd;
     }
 
+    console.log(`[chunkTranscript] Created ${chunks.length} chunks total`);
     return chunks;
   }
 
@@ -780,7 +793,7 @@ Pay special attention to the custom instructions above when analyzing the conten
 
   /**
    * Find the timestamp for a specific phrase in the transcript segments
-   * Uses fuzzy matching to find the best match
+   * Uses substring matching on the full transcript, then maps back to segment timestamps
    */
   private findPhraseTimestamp(
     phrase: string,
@@ -788,61 +801,93 @@ Pay special attention to the custom instructions above when analyzing the conten
     threshold: number = 0.5,
   ): number | null {
     if (!phrase || !segments || segments.length === 0) {
+      console.log(`[findPhraseTimestamp] Empty phrase or segments. phrase="${phrase}", segments.length=${segments?.length}`);
       return null;
     }
 
-    const phraseWords = phrase.toLowerCase().trim().split(/\s+/);
-
-    if (phraseWords.length === 0) {
+    const searchPhrase = phrase.toLowerCase().trim();
+    if (searchPhrase.length === 0) {
+      console.log(`[findPhraseTimestamp] Search phrase is empty after trim`);
       return null;
     }
 
-    let bestScore = 0;
-    let bestTimestamp: number | null = null;
+    console.log(`[findPhraseTimestamp] Searching for: "${searchPhrase.substring(0, 60)}..."`);
+    console.log(`[findPhraseTimestamp] Segments count: ${segments.length}, first segment start: ${segments[0]?.start}`);
+
+    // Build full transcript with character position to timestamp mapping
+    let fullText = '';
+    const charToTimestamp: { pos: number; timestamp: number }[] = [];
 
     for (const segment of segments) {
-      const segmentText = (segment.text || '').toLowerCase().trim();
-      const segmentWords = segmentText.split(/\s+/);
+      const segmentText = (segment.text || '').trim();
+      if (segmentText.length > 0) {
+        charToTimestamp.push({ pos: fullText.length, timestamp: segment.start });
+        fullText += segmentText + ' ';
+      }
+    }
 
-      if (segmentWords.length === 0) continue;
+    const fullTextLower = fullText.toLowerCase();
+    console.log(`[findPhraseTimestamp] Full transcript length: ${fullTextLower.length} chars`);
+    console.log(`[findPhraseTimestamp] Transcript preview: "${fullTextLower.substring(0, 100)}..."`);
 
-      // Check if phrase words appear in segment (in order)
-      let matches = 0;
-      let segIdx = 0;
+    // Try exact substring match first
+    let matchPos = fullTextLower.indexOf(searchPhrase);
+    console.log(`[findPhraseTimestamp] Exact match position: ${matchPos}`);
 
-      for (const phraseWord of phraseWords) {
-        while (segIdx < segmentWords.length) {
-          if (
-            segmentWords[segIdx].includes(phraseWord) ||
-            phraseWord.includes(segmentWords[segIdx])
-          ) {
-            matches++;
-            segIdx++;
-            break;
+    // If no exact match, try matching with normalized whitespace
+    if (matchPos === -1) {
+      const normalizedSearch = searchPhrase.replace(/\s+/g, ' ');
+      const normalizedText = fullTextLower.replace(/\s+/g, ' ');
+      matchPos = normalizedText.indexOf(normalizedSearch);
+      console.log(`[findPhraseTimestamp] Normalized match position: ${matchPos}`);
+    }
+
+    // If still no match, try word-based fuzzy matching
+    if (matchPos === -1) {
+      const phraseWords = searchPhrase.split(/\s+/).filter(w => w.length > 2);
+      console.log(`[findPhraseTimestamp] Trying fuzzy match with words: ${phraseWords.join(', ')}`);
+
+      if (phraseWords.length > 0) {
+        let bestPos = -1;
+        let bestWordCount = 0;
+
+        for (let i = 0; i < fullTextLower.length - 20; i += 10) {
+          const window = fullTextLower.substring(i, i + searchPhrase.length + 50);
+          let wordCount = 0;
+          for (const word of phraseWords) {
+            if (window.includes(word)) wordCount++;
           }
-          segIdx++;
+          if (wordCount > bestWordCount) {
+            bestWordCount = wordCount;
+            bestPos = i;
+          }
+        }
+
+        console.log(`[findPhraseTimestamp] Fuzzy match: bestPos=${bestPos}, bestWordCount=${bestWordCount}/${phraseWords.length}`);
+
+        if (bestWordCount >= phraseWords.length * threshold) {
+          matchPos = bestPos;
         }
       }
+    }
 
-      const score = matches / phraseWords.length;
+    if (matchPos === -1) {
+      console.log(`[findPhraseTimestamp] NO MATCH FOUND for phrase`);
+      return null;
+    }
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestTimestamp = segment.start;
+    // Find the timestamp for this character position
+    let timestamp = segments[0].start;
+    for (const entry of charToTimestamp) {
+      if (entry.pos <= matchPos) {
+        timestamp = entry.timestamp;
+      } else {
+        break;
       }
     }
 
-    if (bestScore >= threshold) {
-      this.logger.debug(
-        `Matched phrase '${phrase.substring(0, 50)}...' with score ${bestScore.toFixed(2)} at ${bestTimestamp}s`,
-      );
-      return bestTimestamp;
-    } else {
-      this.logger.debug(
-        `Could not match phrase '${phrase.substring(0, 50)}...' (best score: ${bestScore.toFixed(2)})`,
-      );
-      return null;
-    }
+    console.log(`[findPhraseTimestamp] MATCH FOUND at char ${matchPos} -> timestamp ${timestamp}s`);
+    return timestamp;
   }
 
   /**
@@ -1185,15 +1230,20 @@ Pay special attention to the custom instructions above when analyzing the conten
     const sections: Section[] = [];
 
     try {
+      console.log(`[parseSectionResponse] Raw AI response (first 500 chars): ${response.substring(0, 500)}`);
       this.logger.debug(`Parsing section response, length: ${response.length}`);
 
       // Try JSON parsing first
       const jsonMatch = response.match(/\{[\s\S]*"sections"[\s\S]*\}/);
+      console.log(`[parseSectionResponse] JSON match found: ${!!jsonMatch}`);
       if (jsonMatch) {
+        console.log(`[parseSectionResponse] JSON matched: ${jsonMatch[0].substring(0, 300)}...`);
         try {
           const data = JSON.parse(jsonMatch[0]);
+          console.log(`[parseSectionResponse] Parsed JSON, sections array length: ${data.sections?.length}`);
           if (data.sections && Array.isArray(data.sections)) {
             for (const section of data.sections) {
+              console.log(`[parseSectionResponse] Section: start_phrase="${section.start_phrase}", end_phrase="${section.end_phrase}", category="${section.category}", description="${section.description?.substring(0, 50)}"`);
               if (
                 section.start_phrase &&
                 section.end_phrase &&
@@ -1201,6 +1251,8 @@ Pay special attention to the custom instructions above when analyzing the conten
                 section.description
               ) {
                 sections.push(section);
+              } else {
+                console.log(`[parseSectionResponse] SKIPPED section - missing fields. Has: start_phrase=${!!section.start_phrase}, end_phrase=${!!section.end_phrase}, category=${!!section.category}, description=${!!section.description}`);
               }
             }
             this.logger.debug(
@@ -1209,6 +1261,7 @@ Pay special attention to the custom instructions above when analyzing the conten
             return sections;
           }
         } catch (jsonError) {
+          console.log(`[parseSectionResponse] JSON parse error: ${(jsonError as Error).message}`);
           this.logger.warn(
             `JSON parsing failed: ${(jsonError as Error).message}`,
           );
