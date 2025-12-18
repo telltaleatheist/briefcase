@@ -26,6 +26,7 @@ export interface VideoJobSettings {
   transcribe: boolean;
   whisperModel?: 'tiny' | 'base';
   whisperLanguage?: string;
+  whisperTranslate?: boolean; // Translate to English
   aiAnalysis: boolean;
   aiModel?: string; // Full model ID from available models
   customInstructions?: string;

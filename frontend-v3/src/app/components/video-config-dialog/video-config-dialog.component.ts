@@ -30,6 +30,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
 
   urlText = '';
   loadingModels = false;
+  savedAsDefault = false;
   aiModels: AIModelOption[] = [];
   whisperModels: { id: string; name: string; description: string }[] = [];
 
@@ -38,9 +39,12 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     normalizeAudio: false,
     transcribe: false,
     whisperModel: 'base',
+    whisperLanguage: '',
+    whisperTranslate: false,
     aiAnalysis: false,
     aiModel: '',
     customInstructions: '',
+    analysisQuality: 'fast',
     outputFormat: 'mp4',
     outputQuality: 'high'
   };
@@ -175,7 +179,9 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
 
         if (modelExists) {
           this.settings.aiModel = defaultModel!;
+          this.settings.analysisQuality = this.getDefaultQualityForModel(defaultModel!);
           console.log('✓ Step 4: Successfully set settings.aiModel to:', this.settings.aiModel);
+          console.log('✓ Step 4: Successfully set settings.analysisQuality to:', this.settings.analysisQuality);
           // Force change detection
           this.cdr.detectChanges();
           console.log('✓ Step 4: Change detection triggered, current value:', this.settings.aiModel);
@@ -215,10 +221,35 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   }
 
   /**
+   * Get the default quality based on the AI model's provider
+   * Local models (Ollama) = thorough (free, so maximize quality)
+   * API models (Claude, OpenAI) = fast (paid, so minimize cost)
+   */
+  getDefaultQualityForModel(modelValue: string): 'fast' | 'thorough' {
+    if (!modelValue) return 'fast';
+    const provider = modelValue.split(':')[0];
+    return provider === 'ollama' ? 'thorough' : 'fast';
+  }
+
+  /**
+   * Handle AI model change - auto-update quality based on provider
+   */
+  onAiModelChange() {
+    if (!this.settings.aiModel) {
+      return;
+    }
+
+    // Auto-update quality based on provider
+    this.settings.analysisQuality = this.getDefaultQualityForModel(this.settings.aiModel);
+    // Reset saved state when model changes
+    this.savedAsDefault = false;
+  }
+
+  /**
    * Save the selected AI model as both library-specific and global default
    * This ensures consistency across all dialogs and modals
    */
-  async onAiModelChange() {
+  async saveAsDefault() {
     if (!this.settings.aiModel) {
       return;
     }
@@ -239,6 +270,13 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
         { provider, model }
       ).toPromise();
       console.log('Saved default AI model to global config:', this.settings.aiModel);
+
+      // Show success feedback
+      this.savedAsDefault = true;
+      // Reset after 1 second
+      setTimeout(() => {
+        this.savedAsDefault = false;
+      }, 1000);
     } catch (error) {
       console.error('Failed to save default AI model:', error);
     }
@@ -282,9 +320,12 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
       normalizeAudio: false,
       transcribe: false,
       whisperModel: 'base',
+      whisperLanguage: '',
+      whisperTranslate: false,
       aiAnalysis: false,
       aiModel: '', // Will be set from saved default when dialog reopens
       customInstructions: '',
+      analysisQuality: 'fast', // Will be set based on model when dialog reopens
       outputFormat: 'mp4',
       outputQuality: 'high'
     };
