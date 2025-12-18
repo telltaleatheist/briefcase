@@ -2815,7 +2815,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     if (settings.aiAnalysis) {
       tasks.push({
         type: 'ai-analyze',
-        options: { model: settings.aiModel || 'claude-3.5-sonnet' },
+        options: {
+          aiModel: settings.aiModel,  // Use correct key name, no fallback
+          customInstructions: settings.customInstructions,
+          analysisQuality: settings.analysisQuality
+        },
         status: 'pending',
         progress: 0
       });

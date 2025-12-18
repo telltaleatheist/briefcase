@@ -47,12 +47,10 @@ export class WhisperBridge extends EventEmitter {
   private readonly logger = new Logger(WhisperBridge.name);
 
   // All known whisper models (for display names)
+  // Only tiny and base are bundled with the app
   static readonly MODEL_INFO: Record<string, { name: string; description: string }> = {
     'tiny': { name: 'Tiny', description: 'Fastest, lower accuracy' },
     'base': { name: 'Base', description: 'Good balance of speed and accuracy' },
-    'small': { name: 'Small', description: 'Better accuracy, slower' },
-    'medium': { name: 'Medium', description: 'High accuracy, much slower' },
-    'large': { name: 'Large', description: 'Best accuracy, very slow' },
   };
   static readonly DEFAULT_MODEL = 'base';
 

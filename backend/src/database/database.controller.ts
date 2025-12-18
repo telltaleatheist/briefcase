@@ -593,6 +593,85 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/videos/:id/chapters
+   * Get chapters for a video
+   */
+  @Get('videos/:id/chapters')
+  getChapters(@Param('id') videoId: string) {
+    const chapters = this.databaseService.getChapters(videoId);
+    return {
+      chapters,
+      count: chapters.length
+    };
+  }
+
+  /**
+   * DELETE /api/database/videos/:videoId/chapters/:chapterId
+   * Delete a specific chapter
+   */
+  @Delete('videos/:videoId/chapters/:chapterId')
+  deleteChapter(
+    @Param('videoId') videoId: string,
+    @Param('chapterId') chapterId: string
+  ) {
+    try {
+      this.databaseService.deleteChapter(chapterId);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * POST /api/database/chapters
+   * Add a chapter to a video
+   */
+  @Post('chapters')
+  async addChapter(
+    @Body() body: {
+      videoId: string;
+      startSeconds: number;
+      endSeconds: number;
+      title: string;
+      description?: string;
+      sequence?: number;
+    }
+  ) {
+    try {
+      const { v4: uuidv4 } = await import('uuid');
+      const id = uuidv4();
+
+      // Get existing chapters to determine sequence
+      const existingChapters = this.databaseService.getChapters(body.videoId);
+      const sequence = body.sequence ?? existingChapters.length + 1;
+
+      this.databaseService.insertChapter({
+        id,
+        videoId: body.videoId,
+        sequence,
+        startSeconds: body.startSeconds,
+        endSeconds: body.endSeconds,
+        title: body.title,
+        description: body.description,
+        source: 'user'
+      });
+
+      return {
+        success: true,
+        id
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
    * POST /api/database/analysis-sections
    * Add a custom marker to a video
    */

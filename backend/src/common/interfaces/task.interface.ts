@@ -67,7 +67,7 @@ export interface ProcessVideoTask extends BaseTask {
 export interface TranscribeTask extends BaseTask {
   type: 'transcribe';
   options?: {
-    model?: string; // Whisper model (base, small, medium, large)
+    model?: string; // Whisper model (tiny, base)
     language?: string; // Language code (en, es, fr, etc.)
   };
 }

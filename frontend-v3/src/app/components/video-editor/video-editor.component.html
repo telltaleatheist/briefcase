@@ -235,14 +235,19 @@
               <!-- Unified timeline track component -->
               <app-timeline-track
                 [sections]="filteredSections()"
+                [chapters]="chapters()"
                 [duration]="editorState().duration"
+                [currentTime]="editorState().currentTime"
                 [zoomState]="editorState().zoomState"
                 [selectedSection]="editorState().selectedSection"
+                [selectedChapterId]="selectedChapterId()"
                 [waveformData]="waveformData()"
                 [waveformColor]="settings().waveformColor"
                 [selection]="highlightSelection()"
                 (sectionClick)="onSectionClick($event)"
                 (sectionHover)="onSectionHover($event)"
+                (chapterClick)="onChapterClick($event)"
+                (chapterHover)="onChapterHover($event)"
                 (selectionHandleStart)="onSelectionHandleStart($event.event, $event.handle)"
                 (selectionDragStart)="onSelectionDragStart($event)">
               </app-timeline-track>
@@ -274,14 +279,19 @@
       <div class="analysis-sidebar">
         <app-analysis-panel
           [sections]="filteredSections()"
+          [chapters]="chapters()"
           [categoryFilters]="categoryFilters()"
           [selectedSection]="editorState().selectedSection"
+          [selectedChapterId]="selectedChapterId()"
+          [currentTime]="editorState().currentTime"
           [analysisData]="analysisData()"
           [hasAnalysis]="hasAnalysis()"
           [videoId]="videoId() ?? undefined"
           [transcript]="transcript()"
           (sectionClick)="onSectionClick($event)"
           (sectionDelete)="onSectionDeleteFromPanel($event)"
+          (chapterClick)="onChapterClick($event)"
+          (chapterDelete)="onChapterDelete($event)"
           (filterToggle)="onFilterToggle($event)"
           (generateAnalysis)="onGenerateAnalysis($event)"
           (transcriptSeek)="seekTo($event)">
@@ -306,8 +316,10 @@
   <app-marker-dialog
     [data]="markerDialogData()!"
     (save)="onMarkerSave($event)"
+    (saveChapter)="onChapterSave($event)"
     (cancel)="onMarkerCancel()"
-    (delete)="onMarkerDelete($event)">
+    (delete)="onMarkerDelete($event)"
+    (deleteChapter)="onChapterDelete($event)">
   </app-marker-dialog>
 }
 

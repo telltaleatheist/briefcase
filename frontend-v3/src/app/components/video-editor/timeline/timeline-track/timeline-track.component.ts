@@ -1,8 +1,9 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TimelineSectionsLayerComponent } from '../timeline-sections-layer/timeline-sections-layer.component';
+import { TimelineChaptersLayerComponent } from '../timeline-chapters-layer/timeline-chapters-layer.component';
 import { TimelineWaveformComponent } from '../timeline-waveform/timeline-waveform.component';
-import { TimelineSection, ZoomState, WaveformData, TimelineSelection } from '../../../../models/video-editor.model';
+import { TimelineSection, TimelineChapter, ZoomState, WaveformData, TimelineSelection } from '../../../../models/video-editor.model';
 
 @Component({
   selector: 'app-timeline-track',
@@ -10,6 +11,7 @@ import { TimelineSection, ZoomState, WaveformData, TimelineSelection } from '../
   imports: [
     CommonModule,
     TimelineSectionsLayerComponent,
+    TimelineChaptersLayerComponent,
     TimelineWaveformComponent
   ],
   templateUrl: './timeline-track.component.html',
@@ -17,9 +19,12 @@ import { TimelineSection, ZoomState, WaveformData, TimelineSelection } from '../
 })
 export class TimelineTrackComponent {
   @Input() sections: TimelineSection[] = [];
+  @Input() chapters: TimelineChapter[] = [];
   @Input() duration: number = 0;
+  @Input() currentTime: number = 0;
   @Input() zoomState: ZoomState = { level: 1, offset: 0 };
   @Input() selectedSection: TimelineSection | undefined;
+  @Input() selectedChapterId?: string;
   @Input() waveformData: WaveformData = { samples: [], sampleRate: 44100, duration: 0 };
   @Input() waveformColor: string = '#ff6b35';
 
@@ -28,6 +33,8 @@ export class TimelineTrackComponent {
 
   @Output() sectionClick = new EventEmitter<TimelineSection>();
   @Output() sectionHover = new EventEmitter<TimelineSection | null>();
+  @Output() chapterClick = new EventEmitter<TimelineChapter>();
+  @Output() chapterHover = new EventEmitter<TimelineChapter | null>();
   @Output() selectionHandleStart = new EventEmitter<{ event: MouseEvent; handle: 'left' | 'right' }>();
   @Output() selectionDragStart = new EventEmitter<MouseEvent>();
 
@@ -37,6 +44,14 @@ export class TimelineTrackComponent {
 
   onSectionHover(section: TimelineSection | null) {
     this.sectionHover.emit(section);
+  }
+
+  onChapterClick(chapter: TimelineChapter) {
+    this.chapterClick.emit(chapter);
+  }
+
+  onChapterHover(chapter: TimelineChapter | null) {
+    this.chapterHover.emit(chapter);
   }
 
   onSelectionHandleMouseDown(event: MouseEvent, handle: 'left' | 'right') {

@@ -1,7 +1,7 @@
-import { Component, Input, Output, EventEmitter, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TimelineSection, CategoryFilter, AnalysisData } from '../../../models/video-editor.model';
+import { TimelineSection, TimelineChapter, CategoryFilter, AnalysisData } from '../../../models/video-editor.model';
 import { TranscriptionSegment } from '../../../models/video-info.model';
 
 @Component({
@@ -13,23 +13,55 @@ import { TranscriptionSegment } from '../../../models/video-info.model';
 })
 export class AnalysisPanelComponent {
   @Input() sections: TimelineSection[] = [];
+  @Input() chapters: TimelineChapter[] = [];
   @Input() categoryFilters: CategoryFilter[] = [];
   @Input() selectedSection?: TimelineSection;
+  @Input() selectedChapterId?: string;
+  @Input() currentTime: number = 0;
   @Input() analysisData?: AnalysisData;
   @Input() hasAnalysis = false;
   @Input() videoId?: string;
   @Input() transcript: TranscriptionSegment[] = [];
   @Output() sectionClick = new EventEmitter<TimelineSection>();
   @Output() sectionDelete = new EventEmitter<string>(); // section id
+  @Output() chapterClick = new EventEmitter<TimelineChapter>();
+  @Output() chapterDelete = new EventEmitter<string>(); // chapter id
   @Output() filterToggle = new EventEmitter<string>();
   @Output() generateAnalysis = new EventEmitter<string>();
   @Output() transcriptSeek = new EventEmitter<number>();
 
-  // Tab state
+  // Tab state - only 2 tabs now
   activeTab = signal<'analysis' | 'transcript'>('analysis');
+
+  // Analysis sub-view: categories (sections) or chapters
+  analysisView = signal<'categories' | 'chapters'>('categories');
+
+  // Transcript sub-view: segments (timestamped) or plain (continuous text)
+  transcriptView = signal<'segments' | 'plain'>('segments');
 
   // Transcript search
   transcriptSearch = signal('');
+
+  // Computed plain text transcript
+  plainTranscript = computed(() => {
+    return this.transcript.map(s => s.text).join(' ').trim();
+  });
+
+  // Filtered plain text (for search)
+  get filteredPlainTranscript(): string {
+    const query = this.transcriptSearch().toLowerCase().trim();
+    if (!query) return this.plainTranscript();
+
+    // For plain view, just return the full text (highlighting handled in template)
+    return this.plainTranscript();
+  }
+
+  // Check if search matches plain text
+  get plainTextHasMatch(): boolean {
+    const query = this.transcriptSearch().toLowerCase().trim();
+    if (!query) return true;
+    return this.plainTranscript().toLowerCase().includes(query);
+  }
 
   get filteredTranscript(): TranscriptionSegment[] {
     const query = this.transcriptSearch().toLowerCase().trim();
@@ -41,11 +73,52 @@ export class AnalysisPanelComponent {
   }
 
   get transcriptResultCount(): number {
+    if (this.transcriptView() === 'plain') {
+      const query = this.transcriptSearch().toLowerCase().trim();
+      if (!query) return 0;
+      // Count occurrences in plain text
+      const text = this.plainTranscript().toLowerCase();
+      let count = 0;
+      let pos = 0;
+      while ((pos = text.indexOf(query, pos)) !== -1) {
+        count++;
+        pos += query.length;
+      }
+      return count;
+    }
     return this.filteredTranscript.length;
   }
 
   setActiveTab(tab: 'analysis' | 'transcript'): void {
     this.activeTab.set(tab);
+  }
+
+  setAnalysisView(view: 'categories' | 'chapters'): void {
+    this.analysisView.set(view);
+  }
+
+  setTranscriptView(view: 'segments' | 'plain'): void {
+    this.transcriptView.set(view);
+  }
+
+  // Check if a chapter is currently playing
+  isCurrentChapter(chapter: TimelineChapter): boolean {
+    return this.currentTime >= chapter.startTime && this.currentTime < chapter.endTime;
+  }
+
+  onChapterClick(chapter: TimelineChapter): void {
+    this.chapterClick.emit(chapter);
+  }
+
+  onChapterDelete(chapter: TimelineChapter): void {
+    this.chapterDelete.emit(chapter.id);
+  }
+
+  formatChapterDuration(chapter: TimelineChapter): string {
+    const duration = chapter.endTime - chapter.startTime;
+    const mins = Math.floor(duration / 60);
+    const secs = Math.floor(duration % 60);
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   }
 
   onTranscriptSearchChange(value: string): void {

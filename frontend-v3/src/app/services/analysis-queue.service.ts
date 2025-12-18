@@ -111,11 +111,15 @@ export class AnalysisQueueService {
     aiModel?: string;
     customInstructions?: string;
   }): string {
+    // Require AI model to be specified - no silent fallback to Ollama
+    if (!params.aiModel) {
+      throw new Error('AI model must be specified. Please select an AI model in settings.');
+    }
     return this.addPendingJob({
       input: params.videoPath,
       inputType: 'file',
       mode: params.mode || 'full',
-      aiModel: params.aiModel || 'ollama:qwen2.5:7b',
+      aiModel: params.aiModel,
       whisperModel: 'base',
       language: 'en',
       customInstructions: params.customInstructions || '',

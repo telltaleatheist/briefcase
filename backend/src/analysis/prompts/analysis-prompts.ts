@@ -61,10 +61,6 @@ export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
     name: 'political-violence',
     description: 'References to political violence events (Capitol riot, insurrections, political attacks), defending/downplaying political violence, false flag claims about violence',
   },
-  {
-    name: 'routine',
-    description: 'Generic description of what is happening - use ONLY when no other category applies',
-  },
 ];
 
 // =============================================================================
@@ -182,32 +178,21 @@ export function buildSectionIdentificationPrompt(
   // Build category list for JSON format
   const categoryNames = enabledCategories.map((c) => c.name).join(', ');
 
-  // Build category descriptions (excluding 'routine' which is default)
-  const categoryDescriptions: string[] = [];
-  let routineDesc: string | null = null;
-
-  for (const cat of enabledCategories) {
-    if (cat.name === 'routine') {
-      routineDesc = cat.description || 'Normal content analysis';
-    } else {
-      categoryDescriptions.push(
-        `- **${cat.name}** - ${cat.description || ''}`,
-      );
-    }
-  }
+  // Build category descriptions
+  const categoryDescriptions = enabledCategories.map(
+    (cat) => `- **${cat.name}** - ${cat.description || ''}`,
+  );
 
   const categoriesSection =
     categoryDescriptions.length > 0 ? categoryDescriptions.join('\n') : '';
 
-  // Build the prompt (minimal framing, strong category matching)
-  const prompt = `You are analyzing video transcripts for a research archive documenting extremist content. Your job is to categorize ALL problematic content - do not stop at the first issue found.
+  // Build the prompt (only flag problematic content, no routine sections)
+  const prompt = `You are analyzing video transcripts for a research archive documenting extremist content. Your job is to identify and categorize ALL problematic content - do not stop at the first issue found.
 
-Categorize this transcript.
+Flag problematic content in this transcript. ONLY return sections that match the defined categories - skip normal/routine content.
 ${titleContext}${customSection}
 Categories:
 ${categoriesSection}
-
-routine: ${routineDesc || 'Use ONLY when no other category applies'}
 
 Return JSON:
 {"sections": [{"start_phrase": "exact quote", "end_phrase": "exact quote", "category": "${categoryNames}", "description": "one sentence", "quote": "exact words"}]}
@@ -218,11 +203,52 @@ Rules:
 - If the transcript discusses, targets, or mentions anything in a category definition, use that category
 - CRITICAL: Each section must have EXACTLY ONE category - never combine categories with commas
 - If content matches multiple categories (e.g., both "violence" AND "christian-nationalism"), create SEPARATE sections for each - one section for "violence", another section for "christian-nationalism", even if they have the same start/end phrases
-- Only use "routine" when content matches NONE of the other categories
 - Category must be exactly ONE of: ${categoryNames} (no comma-separated lists)
+- If NO content matches any category, return {"sections": []} - do NOT create sections for normal content
 - Short videos: one section per category. Long videos: 30s-2min sections per category
 
 Transcript #${chunkNum}:
+${chunkText}`;
+
+  return prompt;
+}
+
+// =============================================================================
+// CHAPTER DETECTION PROMPT BUILDER
+// =============================================================================
+// Builds the chapter detection prompt for identifying topic changes in video
+
+export function buildChapterDetectionPrompt(
+  titleContext: string,
+  chunkText: string,
+): string {
+  const prompt = `Identify chapter boundaries based on topic/subject changes in this transcript.
+${titleContext}
+Rules:
+- First chapter MUST start at the very beginning of the transcript
+- Create a new chapter ONLY when the subject/topic significantly changes
+- Very short videos (under 2 minutes) may have just 1 chapter - that's fine
+- Longer videos should have 2-8 chapters depending on content
+- Minimum chapter length: ~30 seconds of content
+
+Title requirements:
+- Titles should be DETAILED DESCRIPTIONS - a sentence, two sentences, or even a short paragraph
+- Explain SPECIFICALLY what is being discussed, shown, or said in this section
+- Avoid generic section labels like "Introduction", "Opening", "Conclusion", "Overview"
+- Avoid vague references - be specific enough that someone reading just the title understands the content
+- Include key details: names, topics, actions, subjects being discussed
+
+Return JSON:
+{"chapters": [{"start_phrase": "exact quote from transcript", "title": "Detailed description of this section's content"}]}
+
+Important:
+- start_phrase MUST be verbatim text copied from the transcript (3-8 words) - these are used for timestamp lookup
+- The first chapter's start_phrase should be from the very beginning of the transcript
+- Each subsequent chapter's start_phrase marks where a new topic begins
+- Chapters are sequential - each one ends where the next begins
+- The last chapter extends to the end of the video
+
+Transcript:
 ${chunkText}`;
 
   return prompt;

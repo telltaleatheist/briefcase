@@ -84,6 +84,18 @@ export interface CustomMarkerRecord {
   source?: string;
 }
 
+export interface ChapterRecord {
+  id: string;
+  video_id: string;
+  sequence: number;
+  start_seconds: number;
+  end_seconds: number;
+  title: string;
+  description: string | null;
+  source: string;
+  created_at: string;
+}
+
 export interface TagRecord {
   id: string;
   video_id: string;
@@ -479,6 +491,20 @@ export class DatabaseService {
         description TEXT,
         category TEXT,
         source TEXT DEFAULT 'ai',
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      );
+
+      -- Chapters: Topic/subject-based segments covering entire video timeline
+      CREATE TABLE IF NOT EXISTS chapters (
+        id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        start_seconds REAL NOT NULL,
+        end_seconds REAL NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        source TEXT DEFAULT 'ai',
+        created_at TEXT NOT NULL,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -2750,6 +2776,119 @@ export class DatabaseService {
     db.prepare(sql).run(...values);
     this.saveDatabase();
     this.logger.log(`Updated custom marker ${marker.id}`);
+  }
+
+  // ==================== CHAPTERS ====================
+
+  /**
+   * Insert a chapter
+   */
+  insertChapter(chapter: {
+    id: string;
+    videoId: string;
+    sequence: number;
+    startSeconds: number;
+    endSeconds: number;
+    title: string;
+    description?: string;
+    source?: string;
+  }) {
+    const db = this.ensureInitialized();
+
+    db.prepare(
+      `INSERT INTO chapters (
+        id, video_id, sequence, start_seconds, end_seconds, title, description, source, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      chapter.id,
+      chapter.videoId,
+      chapter.sequence,
+      chapter.startSeconds,
+      chapter.endSeconds,
+      chapter.title,
+      chapter.description || null,
+      chapter.source || 'ai',
+      new Date().toISOString(),
+    );
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Get all chapters for a video, ordered by sequence
+   */
+  getChapters(videoId: string): ChapterRecord[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(
+      'SELECT * FROM chapters WHERE video_id = ? ORDER BY sequence'
+    );
+    return stmt.all(videoId) as ChapterRecord[];
+  }
+
+  /**
+   * Delete a specific chapter by ID
+   */
+  deleteChapter(chapterId: string) {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM chapters WHERE id = ?').run(chapterId);
+    this.saveDatabase();
+    this.logger.log(`Deleted chapter ${chapterId}`);
+  }
+
+  /**
+   * Delete all chapters for a video
+   */
+  deleteChapters(videoId: string) {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM chapters WHERE video_id = ?').run(videoId);
+    this.saveDatabase();
+    this.logger.log(`Deleted all chapters for video ${videoId}`);
+  }
+
+  /**
+   * Update a chapter
+   */
+  updateChapter(chapter: {
+    id: string;
+    sequence?: number;
+    startSeconds?: number;
+    endSeconds?: number;
+    title?: string;
+    description?: string;
+  }) {
+    const db = this.ensureInitialized();
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (chapter.sequence !== undefined) {
+      updates.push('sequence = ?');
+      values.push(chapter.sequence);
+    }
+    if (chapter.startSeconds !== undefined) {
+      updates.push('start_seconds = ?');
+      values.push(chapter.startSeconds);
+    }
+    if (chapter.endSeconds !== undefined) {
+      updates.push('end_seconds = ?');
+      values.push(chapter.endSeconds);
+    }
+    if (chapter.title !== undefined) {
+      updates.push('title = ?');
+      values.push(chapter.title);
+    }
+    if (chapter.description !== undefined) {
+      updates.push('description = ?');
+      values.push(chapter.description);
+    }
+
+    if (updates.length === 0) return;
+
+    values.push(chapter.id);
+    const sql = `UPDATE chapters SET ${updates.join(', ')} WHERE id = ?`;
+    db.prepare(sql).run(...values);
+    this.saveDatabase();
+    this.logger.log(`Updated chapter ${chapter.id}`);
   }
 
   /**

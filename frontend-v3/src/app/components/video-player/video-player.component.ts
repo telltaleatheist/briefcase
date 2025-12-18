@@ -1700,11 +1700,13 @@ Tip: Right-click on the timeline for additional options.
     }
 
     // Add to analysis queue (transcribe-only mode)
+    // Note: aiModel is not used for transcribe-only, but we need to pass something
+    // The actual processing will skip AI analysis for this mode
     this.analysisQueueService.addPendingJob({
       input: videoPath,
       inputType: 'file',
       mode: 'transcribe-only',
-      aiModel: 'ollama:qwen2.5:7b',
+      aiModel: '',  // Not used for transcribe-only mode
       whisperModel: 'base',
       language: 'en',
       customInstructions: '',
@@ -1746,11 +1748,13 @@ Tip: Right-click on the timeline for additional options.
     }
 
     // Add to analysis queue (full analysis mode)
+    // User must have configured a default AI model in settings
+    // The queue processing will prompt to select one if not configured
     this.analysisQueueService.addPendingJob({
       input: videoPath,
       inputType: 'file',
       mode: 'full',
-      aiModel: 'ollama:qwen2.5:7b',
+      aiModel: '',  // Will use configured default or prompt user to select
       whisperModel: 'base',
       language: 'en',
       customInstructions: '',

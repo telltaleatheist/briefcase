@@ -726,8 +726,13 @@ export class VideoProcessingService {
     }
 
     if (settings.aiAnalysis) {
-      // Parse model string: "provider:model" (e.g., "ollama:cogito:14b")
-      const modelValue = settings.aiModel || 'ollama:qwen2.5:7b';
+      // Parse model string: "provider:model" (e.g., "ollama:cogito:14b", "openai:gpt-4o")
+      // NO DEFAULT - user must explicitly select an AI model
+      if (!settings.aiModel) {
+        console.error('AI analysis requested but no AI model selected');
+        throw new Error('AI analysis requires an AI model to be selected. Please select a model in the configuration.');
+      }
+      const modelValue = settings.aiModel;
       let aiProvider = 'ollama';
       let aiModel = modelValue;
 

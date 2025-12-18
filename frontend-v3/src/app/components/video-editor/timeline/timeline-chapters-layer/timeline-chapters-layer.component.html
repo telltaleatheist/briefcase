@@ -1,0 +1,18 @@
+<div class="chapters-layer">
+  @for (chapter of chapters; track chapter.id) {
+    <div
+      class="chapter-block"
+      [class.current]="isCurrentChapter(chapter)"
+      [class.selected]="selectedChapterId === chapter.id"
+      [style.left]="getChapterStyle(chapter).left"
+      [style.width]="getChapterStyle(chapter).width"
+      [style.display]="getChapterStyle(chapter).display"
+      [title]="chapter.title + ' (' + formatDuration(chapter) + ')'"
+      (click)="onChapterClick(chapter, $event)"
+      (mouseenter)="onChapterMouseEnter(chapter)"
+      (mouseleave)="onChapterMouseLeave()">
+      <span class="chapter-number">{{ chapter.sequence }}</span>
+      <span class="chapter-title">{{ chapter.title }}</span>
+    </div>
+  }
+</div>

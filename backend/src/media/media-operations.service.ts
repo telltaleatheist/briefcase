@@ -701,6 +701,32 @@ export class MediaOperationsService {
         this.logger.log(`[${jobId || 'standalone'}] Saved ${analysisResult.sections.length} analysis sections`);
       }
 
+      // Save chapters (delete existing to avoid duplicates)
+      if (analysisResult.chapters && Array.isArray(analysisResult.chapters) && analysisResult.chapters.length > 0) {
+        this.logger.log(`[${jobId || 'standalone'}] Saving ${analysisResult.chapters.length} chapters...`);
+        this.databaseService.deleteChapters(videoId);
+
+        for (const chapter of analysisResult.chapters) {
+          const chapterId = `chapter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          const startSeconds = this.parseTimeToSeconds(chapter.start_time);
+          const endSeconds = chapter.end_time ? this.parseTimeToSeconds(chapter.end_time) : startSeconds + 60;
+
+          this.databaseService.insertChapter({
+            id: chapterId,
+            videoId,
+            sequence: chapter.sequence,
+            startSeconds,
+            endSeconds,
+            title: chapter.title,
+            description: chapter.description,
+            source: 'ai',
+          });
+        }
+        this.logger.log(`[${jobId || 'standalone'}] Saved ${analysisResult.chapters.length} chapters`);
+      } else {
+        this.logger.log(`[${jobId || 'standalone'}] No chapters to save (chapters: ${analysisResult.chapters?.length || 0})`);
+      }
+
       // Emit finalizing progress before completing
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 95, 'Finalizing and saving results...');
 

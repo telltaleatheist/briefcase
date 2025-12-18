@@ -491,13 +491,27 @@ export class AnalysisController {
         );
       }
 
-      // Get config defaults
+      // Get config defaults - NO HARDCODED FALLBACK for AI model
       const config = await this.configService.getConfig();
-      const aiModel = body.aiModel || config.aiModel || 'qwen2.5:7b';
-      const aiProvider = body.aiProvider || 'ollama';
+      const aiModel = body.aiModel || config.aiModel;
+      const aiProvider = body.aiProvider;
       const whisperModel = body.whisperModel || 'base';
       const forceReanalyze = body.forceReanalyze || false;
       const forceRetranscribe = body.forceRetranscribe || false;
+
+      // Validate AI model is configured
+      if (!aiModel) {
+        throw new HttpException(
+          'AI analysis requires an AI model to be configured. Please select a model in settings.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!aiProvider) {
+        throw new HttpException(
+          'AI analysis requires an AI provider to be configured. Please select a provider in settings.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
 
       // Start batch analysis for this single video
       const result = await this.analysisService.startBatchAnalysis({

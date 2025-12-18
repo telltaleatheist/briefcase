@@ -1,0 +1,63 @@
+.chapters-layer {
+  position: relative;
+  width: 100%;
+  height: 22px;
+  pointer-events: none;
+  background: var(--chapters-bg, rgba(0, 0, 0, 0.03));
+  border-bottom: 1px solid var(--border-color, #dee2e6);
+}
+
+.chapter-block {
+  position: absolute;
+  top: 2px;
+  height: 18px;
+  border-radius: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  background: var(--chapter-bg, rgba(99, 102, 241, 0.15));
+  border-left: 2px solid var(--chapter-border, rgba(99, 102, 241, 0.6));
+  overflow: hidden;
+  min-width: 0;
+
+  &:hover {
+    background: var(--chapter-hover-bg, rgba(99, 102, 241, 0.25));
+    z-index: 5;
+  }
+
+  &.current {
+    background: var(--chapter-current-bg, rgba(99, 102, 241, 0.35));
+    border-left-color: var(--chapter-current-border, rgba(99, 102, 241, 0.9));
+  }
+
+  &.selected {
+    background: var(--chapter-selected-bg, rgba(99, 102, 241, 0.4));
+    box-shadow: 0 0 0 1px var(--chapter-selected-border, rgba(99, 102, 241, 0.7));
+    z-index: 10;
+  }
+}
+
+.chapter-number {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--chapter-number-color, rgba(99, 102, 241, 0.9));
+  background: var(--chapter-number-bg, rgba(255, 255, 255, 0.8));
+  border-radius: 2px;
+  padding: 1px 3px;
+  line-height: 1;
+}
+
+.chapter-title {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary, #495057);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}

@@ -12,6 +12,7 @@ import {
   VideoMetadata,
   EditorSettings,
   TimelineSection,
+  TimelineChapter,
   CategoryFilter,
   ZoomState,
   AnalysisData,
@@ -393,6 +394,10 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Timeline sections from analysis
   sections = signal<TimelineSection[]>([]);
 
+  // Timeline chapters from analysis
+  chapters = signal<TimelineChapter[]>([]);
+  selectedChapterId = signal<string | undefined>(undefined);
+
   // Transcript for video
   transcript = signal<TranscriptionSegment[]>([]);
 
@@ -704,6 +709,34 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
         this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/sections`)
       );
       const sections = sectionsData?.sections || [];
+
+      // Fetch chapters
+      let chaptersData: any[] = [];
+      try {
+        const chaptersResponse = await firstValueFrom(
+          this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/chapters`)
+        );
+        chaptersData = chaptersResponse?.chapters || [];
+      } catch {
+        // Chapters don't exist, that's fine
+      }
+
+      // Process chapters
+      if (chaptersData.length > 0) {
+        const timelineChapters: TimelineChapter[] = chaptersData.map((chapter: any) => ({
+          id: chapter.id,
+          videoId: chapter.video_id,
+          sequence: chapter.sequence,
+          startTime: chapter.start_seconds || 0,
+          endTime: chapter.end_seconds || chapter.start_seconds + 60,
+          title: chapter.title || `Chapter ${chapter.sequence}`,
+          description: chapter.description,
+          source: chapter.source || 'ai'
+        }));
+        this.chapters.set(timelineChapters);
+      } else {
+        this.chapters.set([]);
+      }
 
       // Try to fetch analysis data (may not exist)
       let analysisData: any = null;
@@ -1465,6 +1498,35 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     this.showMarkerDialog.set(false);
   }
 
+  // Handle chapter save from marker dialog
+  async onChapterSave(chapter: Partial<TimelineChapter>) {
+    this.showMarkerDialog.set(false);
+
+    try {
+      const result = await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/database/chapters`, {
+          videoId: chapter.videoId,
+          startSeconds: chapter.startTime,
+          endSeconds: chapter.endTime,
+          title: chapter.title,
+          description: chapter.description,
+          sequence: chapter.sequence
+        })
+      );
+
+      if (result.success) {
+        // Refresh chapters to include new chapter
+        await this.loadAnalysisForVideo(this.videoId()!);
+        // Clear selection after adding chapter
+        this.clearSelection();
+      } else {
+        console.error('Failed to save chapter:', result.error);
+      }
+    } catch (error) {
+      console.error('Error saving chapter:', error);
+    }
+  }
+
   // Handle marker delete
   async onMarkerDelete(markerId: string) {
     this.showMarkerDialog.set(false);
@@ -1580,6 +1642,37 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   onSectionHover(section: TimelineSection | null) {
     // Could show tooltip or highlight
+  }
+
+  // Chapter interaction
+  onChapterClick(chapter: TimelineChapter) {
+    this.selectedChapterId.set(chapter.id);
+    // Seek to chapter start
+    this.seekTo(chapter.startTime);
+  }
+
+  onChapterHover(chapter: TimelineChapter | null) {
+    // Could show tooltip or highlight
+  }
+
+  // Delete chapter from analysis panel
+  async onChapterDelete(chapterId: string) {
+    const videoId = this.videoId();
+    if (!videoId) return;
+
+    try {
+      await firstValueFrom(
+        this.http.delete(`${this.API_BASE}/database/videos/${videoId}/chapters/${chapterId}`)
+      );
+      // Remove from local state
+      this.chapters.update(chapters => chapters.filter(c => c.id !== chapterId));
+      // Clear selection if deleted chapter was selected
+      if (this.selectedChapterId() === chapterId) {
+        this.selectedChapterId.set(undefined);
+      }
+    } catch (error) {
+      console.error('Failed to delete chapter:', error);
+    }
   }
 
   // Delete section from analysis panel

@@ -23,10 +23,27 @@
   background: var(--bg-secondary);
   border-radius: 8px 8px 0 0; // Only top corners rounded
   border: 1px solid var(--border-color);
-  border-bottom: none; // Remove bottom border to connect with waveform
+  border-bottom: none; // Remove bottom border to connect with chapters or waveform
   overflow: visible; // Allow lines to extend below
 
   app-timeline-sections-layer {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+// Chapters header - below sections, above waveform
+.track-chapters-header {
+  position: relative;
+  height: 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: none; // Connect with sections
+  border-bottom: none; // Connect with waveform
+  overflow: hidden;
+
+  app-timeline-chapters-layer {
     display: block;
     width: 100%;
     height: 100%;

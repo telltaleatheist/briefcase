@@ -24,7 +24,7 @@ export interface VideoJobSettings {
   normalizeAudio: boolean;
   audioLevel?: number; // -60 to 0 dB
   transcribe: boolean;
-  whisperModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large' | 'large-v2' | 'large-v3';
+  whisperModel?: 'tiny' | 'base';
   whisperLanguage?: string;
   aiAnalysis: boolean;
   aiModel?: string; // Full model ID from available models

@@ -2046,9 +2046,21 @@ export class LibraryController {
 
       this.logger.log('[AI Insights] Sending prompt to AI...');
 
-      // Call AI service
-      const aiProvider = (body.aiProvider || 'ollama') as 'ollama' | 'claude' | 'openai';
-      const aiModel = body.aiModel || 'qwen2.5:7b';
+      // Call AI service - NO HARDCODED FALLBACK for AI model
+      if (!body.aiProvider) {
+        throw new HttpException(
+          'AI insights requires an AI provider to be configured. Please select a provider in settings.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!body.aiModel) {
+        throw new HttpException(
+          'AI insights requires an AI model to be configured. Please select a model in settings.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const aiProvider = body.aiProvider as 'ollama' | 'claude' | 'openai';
+      const aiModel = body.aiModel;
       const aiResponse = await this.aiProviderService.generateText(
         prompt,
         {

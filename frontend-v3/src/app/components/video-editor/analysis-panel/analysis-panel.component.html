@@ -6,8 +6,8 @@
       [class.active]="activeTab() === 'analysis'"
       (click)="setActiveTab('analysis')">
       Analysis
-      @if (sections.length > 0) {
-        <span class="tab-count">{{ sections.length }}</span>
+      @if (sections.length > 0 || chapters.length > 0) {
+        <span class="tab-count">{{ analysisView() === 'chapters' ? chapters.length : sections.length }}</span>
       }
     </button>
     <button
@@ -23,8 +23,8 @@
 
   <!-- Analysis Tab Content -->
   @if (activeTab() === 'analysis') {
-    @if (!hasAnalysis && sections.length === 0) {
-    <!-- No Analysis State - only show if no analysis AND no custom markers -->
+    @if (!hasAnalysis && sections.length === 0 && chapters.length === 0) {
+    <!-- No Analysis State - only show if no analysis AND no custom markers AND no chapters -->
     <div class="no-analysis-state">
       <div class="no-analysis-icon">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -43,88 +43,169 @@
       </button>
     </div>
   } @else {
-    <!-- Summary -->
-    @if (analysisData?.summary) {
-      <div class="summary-section">
-        <h4 class="section-title">Summary</h4>
-        <p class="summary-text">{{ analysisData?.summary }}</p>
-      </div>
-    }
-
-    <!-- Category Filters -->
-    @if (categoryFilters.length > 0) {
-      <div class="filters-section">
-        <h4 class="section-title">Categories</h4>
-        <div class="filter-chips">
-          @for (filter of categoryFilters; track filter.category) {
-            <button
-              class="filter-chip"
-              [class.active]="filter.enabled"
-              [style.--chip-color]="filter.color"
-              (click)="onFilterToggle(filter.category)">
-              <span class="chip-dot" [style.backgroundColor]="filter.color"></span>
-              {{ filter.label }}
-              <span class="chip-count">{{ getSectionsForCategory(filter.category).length }}</span>
-            </button>
+    <!-- View Toggle: Categories / Chapters -->
+    <div class="view-toggle-section">
+      <div class="view-toggle">
+        <button
+          class="toggle-btn"
+          [class.active]="analysisView() === 'categories'"
+          (click)="setAnalysisView('categories')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+          Categories
+          @if (sections.length > 0) {
+            <span class="toggle-count">{{ sections.length }}</span>
           }
-        </div>
+        </button>
+        <button
+          class="toggle-btn"
+          [class.active]="analysisView() === 'chapters'"
+          (click)="setAnalysisView('chapters')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <path d="M9 9h6"/>
+            <path d="M9 13h6"/>
+            <path d="M9 17h4"/>
+          </svg>
+          Chapters
+          @if (chapters.length > 0) {
+            <span class="toggle-count">{{ chapters.length }}</span>
+          }
+        </button>
       </div>
-    }
-
-    <!-- Sections List (chronological) -->
-    <div class="sections-list">
-      @for (section of filteredSections; track section.id) {
-        <div
-          class="section-item"
-          [class.selected]="selectedSection?.id === section.id"
-          [style.--section-color]="section.color"
-          [title]="section.description">
-          <button class="section-content" (click)="onSectionClick(section)">
-            <div class="section-time">
-              {{ formatTimeRange(section.startTime, section.endTime) }}
-              <span class="section-category-badge" [style.backgroundColor]="section.color">{{ section.category }}</span>
-            </div>
-            <div class="section-description">
-              {{ section.description }}
-            </div>
-          </button>
-          <button class="section-delete" (click)="onSectionDelete(section)" title="Delete marker">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-      }
-
-      @if (sections.length === 0) {
-        <div class="empty-state">
-          <p>No sections found in analysis</p>
-        </div>
-      }
     </div>
-  }
 
-    <!-- Quotes -->
-    @if (analysisData?.quotes?.length) {
-      <div class="quotes-section">
-        <h4 class="section-title">Notable Quotes</h4>
-        <div class="quotes-list">
-          @for (quote of analysisData!.quotes!; track quote.timestamp) {
-            <div class="quote-item">
-              <div class="quote-timestamp">{{ quote.timestamp }}</div>
-              <blockquote class="quote-text">"{{ quote.text }}"</blockquote>
-              <div class="quote-significance">{{ quote.significance }}</div>
+    <!-- Categories View -->
+    @if (analysisView() === 'categories') {
+      <!-- Summary -->
+      @if (analysisData?.summary) {
+        <div class="summary-section">
+          <h4 class="section-title">Summary</h4>
+          <p class="summary-text">{{ analysisData?.summary }}</p>
+        </div>
+      }
+
+      <!-- Category Filters -->
+      @if (categoryFilters.length > 0) {
+        <div class="filters-section">
+          <h4 class="section-title">Filter</h4>
+          <div class="filter-chips">
+            @for (filter of categoryFilters; track filter.category) {
+              <button
+                class="filter-chip"
+                [class.active]="filter.enabled"
+                [style.--chip-color]="filter.color"
+                (click)="onFilterToggle(filter.category)">
+                <span class="chip-dot" [style.backgroundColor]="filter.color"></span>
+                {{ filter.label }}
+                <span class="chip-count">{{ getSectionsForCategory(filter.category).length }}</span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Sections List (chronological) -->
+      <div class="sections-list">
+        @for (section of filteredSections; track section.id) {
+          <div
+            class="section-item"
+            [class.selected]="selectedSection?.id === section.id"
+            [style.--section-color]="section.color"
+            [title]="section.description">
+            <button class="section-content" (click)="onSectionClick(section)">
+              <div class="section-time">
+                {{ formatTimeRange(section.startTime, section.endTime) }}
+                <span class="section-category-badge" [style.backgroundColor]="section.color">{{ section.category }}</span>
+              </div>
+              <div class="section-description">
+                {{ section.description }}
+              </div>
+            </button>
+            <button class="section-delete" (click)="onSectionDelete(section)" title="Delete marker">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        }
+
+        @if (sections.length === 0) {
+          <div class="empty-state">
+            <p>No flagged sections found</p>
+            <p class="empty-hint">Press M to add a marker</p>
+          </div>
+        }
+      </div>
+
+      <!-- Quotes -->
+      @if (analysisData?.quotes?.length) {
+        <div class="quotes-section">
+          <h4 class="section-title">Notable Quotes</h4>
+          <div class="quotes-list">
+            @for (quote of analysisData!.quotes!; track quote.timestamp) {
+              <div class="quote-item">
+                <div class="quote-timestamp">{{ quote.timestamp }}</div>
+                <blockquote class="quote-text">"{{ quote.text }}"</blockquote>
+                <div class="quote-significance">{{ quote.significance }}</div>
+              </div>
+            }
+          </div>
+        </div>
+      }
+    }
+
+    <!-- Chapters View -->
+    @if (analysisView() === 'chapters') {
+      <div class="chapters-list">
+        @if (chapters.length === 0) {
+          <div class="empty-state">
+            <div class="no-analysis-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M9 9h6"/>
+                <path d="M9 13h6"/>
+                <path d="M9 17h4"/>
+              </svg>
+            </div>
+            <p>No chapters available</p>
+            <p class="empty-hint">Chapters are generated during AI analysis</p>
+          </div>
+        } @else {
+          @for (chapter of chapters; track chapter.id) {
+            <div
+              class="chapter-item"
+              [class.current]="isCurrentChapter(chapter)"
+              [class.selected]="selectedChapterId === chapter.id"
+              [title]="chapter.title">
+              <button class="chapter-content" (click)="onChapterClick(chapter)">
+                <span class="chapter-number">{{ chapter.sequence }}</span>
+                <div class="chapter-info">
+                  <span class="chapter-title">{{ chapter.title }}</span>
+                  <span class="chapter-meta">
+                    {{ formatTime(chapter.startTime) }} - {{ formatChapterDuration(chapter) }}
+                  </span>
+                </div>
+              </button>
+              <button class="chapter-delete" (click)="onChapterDelete(chapter)" title="Delete chapter">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
             </div>
           }
-        </div>
+        }
       </div>
     }
+  }
   }
 
   <!-- Transcript Tab Content -->
   @if (activeTab() === 'transcript') {
-    <!-- Search Input -->
-    <div class="transcript-search-section">
+    <!-- Search and View Toggle -->
+    <div class="transcript-header">
+      <!-- Search Input -->
       <div class="search-input-wrapper">
         <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/>
@@ -145,41 +226,81 @@
         }
       </div>
       @if (transcriptSearch()) {
-        <span class="search-results">{{ transcriptResultCount }} of {{ transcript.length }}</span>
+        <span class="search-results">{{ transcriptResultCount }} {{ transcriptView() === 'plain' ? 'matches' : 'segments' }}</span>
       }
     </div>
 
-    <!-- Transcript List -->
-    <div class="transcript-list">
-      @if (transcript.length === 0) {
-        <div class="empty-state">
-          <div class="no-analysis-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14,2 14,8 20,8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-              <polyline points="10,9 9,9 8,9"/>
-            </svg>
-          </div>
-          <p>No transcript available</p>
+    <!-- View Toggle: Segments / Plain Text -->
+    <div class="view-toggle-section transcript-view-toggle">
+      <div class="view-toggle">
+        <button
+          class="toggle-btn"
+          [class.active]="transcriptView() === 'segments'"
+          (click)="setTranscriptView('segments')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20M2 12h20"/>
+          </svg>
+          Segments
+        </button>
+        <button
+          class="toggle-btn"
+          [class.active]="transcriptView() === 'plain'"
+          (click)="setTranscriptView('plain')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+          Plain Text
+        </button>
+      </div>
+    </div>
+
+    <!-- Transcript Content -->
+    @if (transcript.length === 0) {
+      <div class="empty-state">
+        <div class="no-analysis-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10,9 9,9 8,9"/>
+          </svg>
         </div>
-      } @else {
-        @for (segment of filteredTranscript; track segment.id) {
-          <button
-            class="transcript-segment"
-            (click)="onTranscriptSegmentClick(segment)">
-            <span class="segment-time">{{ formatTime(segment.startTime) }}</span>
-            <span class="segment-text">{{ segment.text }}</span>
-          </button>
-        }
+        <p>No transcript available</p>
+      </div>
+    } @else {
+      <!-- Segments View -->
+      @if (transcriptView() === 'segments') {
+        <div class="transcript-list">
+          @for (segment of filteredTranscript; track segment.id) {
+            <button
+              class="transcript-segment"
+              (click)="onTranscriptSegmentClick(segment)">
+              <span class="segment-time">{{ formatTime(segment.startTime) }}</span>
+              <span class="segment-text">{{ segment.text }}</span>
+            </button>
+          }
 
-        @if (filteredTranscript.length === 0 && transcriptSearch()) {
-          <div class="empty-state">
-            <p>No matches found for "{{ transcriptSearch() }}"</p>
-          </div>
-        }
+          @if (filteredTranscript.length === 0 && transcriptSearch()) {
+            <div class="empty-state">
+              <p>No matches found for "{{ transcriptSearch() }}"</p>
+            </div>
+          }
+        </div>
       }
-    </div>
+
+      <!-- Plain Text View -->
+      @if (transcriptView() === 'plain') {
+        <div class="plain-transcript">
+          @if (plainTextHasMatch || !transcriptSearch()) {
+            <p class="plain-text">{{ plainTranscript() }}</p>
+          } @else {
+            <div class="empty-state">
+              <p>No matches found for "{{ transcriptSearch() }}"</p>
+            </div>
+          }
+        </div>
+      }
+    }
   }
 </div>

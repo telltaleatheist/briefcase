@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   buildSectionIdentificationPrompt,
+  buildChapterDetectionPrompt,
   interpolatePrompt,
   VIDEO_SUMMARY_PROMPT,
   TAG_EXTRACTION_PROMPT,
@@ -69,6 +70,14 @@ export interface AnalyzedSection {
   quotes: Quote[];
 }
 
+export interface Chapter {
+  sequence: number;
+  start_time: string;
+  end_time: string;
+  title: string;
+  description?: string;
+}
+
 export interface Tags {
   people: string[];
   topics: string[];
@@ -108,6 +117,7 @@ export interface TokenStats {
 export interface AnalysisResult {
   sections_count: number;
   sections: AnalyzedSection[];
+  chapters: Chapter[];
   tags?: Tags;
   description?: string;
   suggested_title?: string;
@@ -468,6 +478,16 @@ export class AIAnalysisService {
         this.writeSectionToFile(outputFile, defaultSection);
       }
 
+      // Generate chapters (detects topic changes across the video)
+      sendProgress('analysis', 88, 'Detecting chapters...');
+      const chapters = await this.generateChapters(
+        aiConfig,
+        transcript,
+        segments,
+        videoTitle,
+        trackTokens,
+      );
+
       // Extract tags (uses section descriptions + quotes, not raw transcript)
       sendProgress('analysis', 92, 'Extracting tags (people, topics)...');
       const tags = await this.extractTags(
@@ -524,9 +544,16 @@ export class AIAnalysisService {
 
       sendProgress('analysis', 100, 'Analysis complete!');
 
+      // Debug: Log what we're returning
+      console.log(`[analyzeTranscript] RETURNING: sections=${analyzedSections.length}, chapters=${chapters?.length || 0}, tags=${JSON.stringify(tags)}`);
+      if (chapters && chapters.length > 0) {
+        console.log(`[analyzeTranscript] Chapters being returned: ${JSON.stringify(chapters)}`);
+      }
+
       return {
         sections_count: analyzedSections.length,
         sections: analyzedSections,
+        chapters,
         tags,
         description: summary,
         suggested_title: suggestedTitle || undefined,
@@ -665,10 +692,40 @@ Pay special attention to the custom instructions above when analyzing the conten
         const sections = this.parseSectionResponse(response.text);
 
         if (sections && sections.length > 0) {
-          this.logger.debug(
-            `Chunk ${chunkNum} analyzed successfully on attempt ${attempt}`,
+          // Validate categories - only allow categories that exist in user's settings
+          const validCategoryNames = new Set(
+            (categories || []).map(c => c.name.toLowerCase())
           );
-          return sections;
+
+          const validatedSections = sections.filter(section => {
+            const categoryLower = section.category.toLowerCase();
+            if (validCategoryNames.has(categoryLower)) {
+              // Normalize category name to match config exactly
+              const matchedCategory = (categories || []).find(
+                c => c.name.toLowerCase() === categoryLower
+              );
+              if (matchedCategory) {
+                section.category = matchedCategory.name;
+              }
+              return true;
+            } else {
+              this.logger.warn(
+                `Rejected invalid category "${section.category}" - not in user's configured categories`
+              );
+              return false;
+            }
+          });
+
+          if (validatedSections.length > 0) {
+            this.logger.debug(
+              `Chunk ${chunkNum} analyzed successfully on attempt ${attempt} (${validatedSections.length}/${sections.length} sections valid)`,
+            );
+            return validatedSections;
+          }
+
+          this.logger.warn(
+            `All ${sections.length} sections from chunk ${chunkNum} had invalid categories`
+          );
         }
 
         this.logger.warn(
@@ -801,18 +858,13 @@ Pay special attention to the custom instructions above when analyzing the conten
     threshold: number = 0.5,
   ): number | null {
     if (!phrase || !segments || segments.length === 0) {
-      console.log(`[findPhraseTimestamp] Empty phrase or segments. phrase="${phrase}", segments.length=${segments?.length}`);
       return null;
     }
 
     const searchPhrase = phrase.toLowerCase().trim();
     if (searchPhrase.length === 0) {
-      console.log(`[findPhraseTimestamp] Search phrase is empty after trim`);
       return null;
     }
-
-    console.log(`[findPhraseTimestamp] Searching for: "${searchPhrase.substring(0, 60)}..."`);
-    console.log(`[findPhraseTimestamp] Segments count: ${segments.length}, first segment start: ${segments[0]?.start}`);
 
     // Build full transcript with character position to timestamp mapping
     let fullText = '';
@@ -827,25 +879,20 @@ Pay special attention to the custom instructions above when analyzing the conten
     }
 
     const fullTextLower = fullText.toLowerCase();
-    console.log(`[findPhraseTimestamp] Full transcript length: ${fullTextLower.length} chars`);
-    console.log(`[findPhraseTimestamp] Transcript preview: "${fullTextLower.substring(0, 100)}..."`);
 
     // Try exact substring match first
     let matchPos = fullTextLower.indexOf(searchPhrase);
-    console.log(`[findPhraseTimestamp] Exact match position: ${matchPos}`);
 
     // If no exact match, try matching with normalized whitespace
     if (matchPos === -1) {
       const normalizedSearch = searchPhrase.replace(/\s+/g, ' ');
       const normalizedText = fullTextLower.replace(/\s+/g, ' ');
       matchPos = normalizedText.indexOf(normalizedSearch);
-      console.log(`[findPhraseTimestamp] Normalized match position: ${matchPos}`);
     }
 
     // If still no match, try word-based fuzzy matching
     if (matchPos === -1) {
       const phraseWords = searchPhrase.split(/\s+/).filter(w => w.length > 2);
-      console.log(`[findPhraseTimestamp] Trying fuzzy match with words: ${phraseWords.join(', ')}`);
 
       if (phraseWords.length > 0) {
         let bestPos = -1;
@@ -863,8 +910,6 @@ Pay special attention to the custom instructions above when analyzing the conten
           }
         }
 
-        console.log(`[findPhraseTimestamp] Fuzzy match: bestPos=${bestPos}, bestWordCount=${bestWordCount}/${phraseWords.length}`);
-
         if (bestWordCount >= phraseWords.length * threshold) {
           matchPos = bestPos;
         }
@@ -872,7 +917,6 @@ Pay special attention to the custom instructions above when analyzing the conten
     }
 
     if (matchPos === -1) {
-      console.log(`[findPhraseTimestamp] NO MATCH FOUND for phrase`);
       return null;
     }
 
@@ -886,7 +930,6 @@ Pay special attention to the custom instructions above when analyzing the conten
       }
     }
 
-    console.log(`[findPhraseTimestamp] MATCH FOUND at char ${matchPos} -> timestamp ${timestamp}s`);
     return timestamp;
   }
 
@@ -998,6 +1041,142 @@ Pay special attention to the custom instructions above when analyzing the conten
     } catch (error) {
       this.logger.warn(`Tag extraction failed: ${(error as Error).message}`);
       return { people: [], topics: [] };
+    }
+  }
+
+  /**
+   * Generate chapters by detecting topic changes in the transcript
+   */
+  private async generateChapters(
+    config: AIProviderConfig,
+    transcript: string,
+    segments: Segment[],
+    videoTitle: string,
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
+  ): Promise<Chapter[]> {
+    try {
+      if (!transcript || !segments || segments.length === 0) {
+        this.logger.warn('No transcript or segments available for chapter generation');
+        return [];
+      }
+
+      const titleContext = videoTitle
+        ? `Video title: ${videoTitle}\n`
+        : '';
+
+      // Build timestamped transcript for chapter detection
+      // Use a condensed format to fit in context
+      const timestampedLines: string[] = [];
+      let currentMinute = -1;
+
+      for (const segment of segments) {
+        const minute = Math.floor(segment.start / 60);
+        // Add timestamp every minute
+        if (minute > currentMinute) {
+          currentMinute = minute;
+          const timeStr = this.formatDisplayTime(segment.start);
+          timestampedLines.push(`\n[${timeStr}]`);
+        }
+        timestampedLines.push(segment.text);
+      }
+
+      const chunkText = timestampedLines.join(' ').substring(0, 30000); // Limit to ~30k chars
+
+      const prompt = buildChapterDetectionPrompt(titleContext, chunkText);
+
+      const response = await this.aiProviderService.generateText(prompt, config);
+      onTokens?.(response);
+
+      if (!response || !response.text) {
+        this.logger.warn('No response from AI for chapter generation');
+        return [];
+      }
+
+      // Parse the response
+      let cleanResponse = response.text.trim();
+
+      // Remove markdown code blocks
+      if (cleanResponse.startsWith('```')) {
+        const lines = cleanResponse.split('\n');
+        cleanResponse = lines
+          .filter((l) => !l.startsWith('```'))
+          .join('\n');
+      }
+
+      // Extract JSON object
+      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        this.logger.warn('No JSON object found in chapter detection response');
+        return [];
+      }
+      cleanResponse = jsonMatch[0];
+
+      const chaptersData = JSON.parse(cleanResponse);
+
+      if (!chaptersData.chapters || !Array.isArray(chaptersData.chapters)) {
+        this.logger.warn('Invalid chapters data in response');
+        return [];
+      }
+
+      // Convert raw chapters to Chapter interface with timestamps
+      const chapters: Chapter[] = [];
+      const videoDuration = segments[segments.length - 1].end;
+
+      console.log(`[generateChapters] AI returned ${chaptersData.chapters.length} raw chapters, video duration: ${videoDuration}s`);
+
+      for (let i = 0; i < chaptersData.chapters.length; i++) {
+        const rawChapter = chaptersData.chapters[i];
+        const startPhrase = rawChapter.start_phrase || '';
+        const title = rawChapter.title || `Chapter ${i + 1}`;
+
+        console.log(`[generateChapters] Processing chapter ${i + 1}: title="${title}", start_phrase="${startPhrase.substring(0, 40)}..."`);
+
+        // Find the timestamp for this chapter's start phrase
+        const startTime = this.findPhraseTimestamp(startPhrase, segments);
+
+        if (startTime !== null) {
+          // Calculate end time (next chapter's start or video end)
+          let endTime = videoDuration;
+
+          if (i < chaptersData.chapters.length - 1) {
+            const nextPhrase = chaptersData.chapters[i + 1].start_phrase || '';
+            const nextStart = this.findPhraseTimestamp(nextPhrase, segments);
+            if (nextStart !== null) {
+              endTime = nextStart;
+            }
+          }
+
+          const chapter = {
+            sequence: i + 1,
+            start_time: this.formatDisplayTime(startTime),
+            end_time: this.formatDisplayTime(endTime),
+            title,
+          };
+          console.log(`[generateChapters] Created chapter: ${JSON.stringify(chapter)}`);
+          chapters.push(chapter);
+        } else {
+          console.log(`[generateChapters] Could not find timestamp for chapter phrase: "${startPhrase.substring(0, 50)}..."`);
+          this.logger.debug(`Could not find timestamp for chapter phrase: "${startPhrase.substring(0, 50)}..."`);
+        }
+      }
+
+      // If we couldn't find any chapters, create a default one
+      if (chapters.length === 0 && videoDuration > 0) {
+        console.log(`[generateChapters] No chapters found from phrases, creating default chapter`);
+        chapters.push({
+          sequence: 1,
+          start_time: '0:00',
+          end_time: this.formatDisplayTime(videoDuration),
+          title: 'Full Video',
+        });
+      }
+
+      console.log(`[generateChapters] Final chapters count: ${chapters.length}`);
+      this.logger.log(`Generated ${chapters.length} chapters`);
+      return chapters;
+    } catch (error) {
+      this.logger.warn(`Chapter generation failed: ${(error as Error).message}`);
+      return [];
     }
   }
 

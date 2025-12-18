@@ -104,16 +104,35 @@ export class BatchAnalysisService implements OnModuleInit {
       throw new Error('A batch job is already running. Please pause or stop it first.');
     }
 
-    // Get default config
+    // Get default config - NO HARDCODED FALLBACK for AI model
     const config = await this.configService.getConfig();
     const transcribeOnly = options?.transcribeOnly || false;
     const forceReanalyze = options?.forceReanalyze || false;
-    const aiModel = options?.aiModel || config.aiModel || 'qwen2.5:7b';
-    const aiProvider = options?.aiProvider || 'ollama';
     const whisperModel = options?.whisperModel || 'base';
     const ollamaEndpoint = options?.ollamaEndpoint || config.ollamaEndpoint || 'http://localhost:11434';
     const claudeApiKey = options?.claudeApiKey;
     const openaiApiKey = options?.openaiApiKey;
+
+    // For transcribe-only, AI settings aren't used but we need placeholder values for the interface
+    // For full analysis, validate that AI model and provider are configured
+    let aiModel: string;
+    let aiProvider: 'ollama' | 'claude' | 'openai';
+
+    if (transcribeOnly) {
+      // Placeholder values - won't be used for transcribe-only
+      aiModel = options?.aiModel || config.aiModel || '';
+      aiProvider = options?.aiProvider || 'ollama';
+    } else {
+      // Full analysis - require AI configuration
+      aiModel = options?.aiModel || config.aiModel || '';
+      if (!aiModel) {
+        throw new Error('AI analysis requires an AI model to be configured. Please select a model in settings.');
+      }
+      if (!options?.aiProvider) {
+        throw new Error('AI analysis requires an AI provider to be configured. Please select a provider in settings.');
+      }
+      aiProvider = options.aiProvider;
+    }
 
     // Get videos to process
     let videosToProcess: Array<{ id: string; filename: string; current_path: string; upload_date?: string | null; download_date?: string | null; duration_seconds?: number | null }>;

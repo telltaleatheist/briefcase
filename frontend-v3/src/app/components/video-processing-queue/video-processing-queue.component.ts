@@ -404,10 +404,11 @@ export class VideoProcessingQueueComponent implements OnInit, OnDestroy, AfterVi
           translate: false
         };
       case 'ai-analyze':
-        // Model is stored as full string with provider (e.g., "ollama:cogito:14b")
+        // Model is stored as full string with provider (e.g., "ollama:cogito:14b", "openai:gpt-4o")
+        // NO DEFAULT - user must explicitly select an AI model
         console.log('getConfigForTask ai-analyze - settings.aiModel:', settings.aiModel);
         return {
-          aiModel: settings.aiModel || 'ollama:qwen2.5:7b',
+          aiModel: settings.aiModel || '',  // Empty string if not set, no silent fallback
           customInstructions: settings.customInstructions || ''
         };
       case 'fix-aspect-ratio':

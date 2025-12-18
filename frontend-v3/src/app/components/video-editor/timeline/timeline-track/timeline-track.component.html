@@ -11,6 +11,21 @@
     </app-timeline-sections-layer>
   </div>
 
+  <!-- Chapters layer - below sections, above waveform -->
+  @if (chapters.length > 0) {
+    <div class="track-chapters-header">
+      <app-timeline-chapters-layer
+        [chapters]="chapters"
+        [duration]="duration"
+        [zoomState]="zoomState"
+        [currentTime]="currentTime"
+        [selectedChapterId]="selectedChapterId"
+        (chapterClick)="onChapterClick($event)"
+        (chapterHover)="onChapterHover($event)">
+      </app-timeline-chapters-layer>
+    </div>
+  }
+
   <!-- Waveform container with square corners -->
   <div class="track-waveform-container">
     <app-timeline-waveform

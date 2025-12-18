@@ -628,8 +628,12 @@ export class LibraryService {
         }];
 
       case 'ai-analyze':
-        // Parse model value in format "provider:model" (e.g., "ollama:qwen2.5:7b")
-        const modelValue = config?.aiModel || 'ollama:qwen2.5:7b';
+        // Parse model value in format "provider:model" (e.g., "ollama:qwen2.5:7b", "openai:gpt-4o")
+        // NO DEFAULT - user must explicitly select an AI model
+        if (!config?.aiModel) {
+          throw new Error('AI analysis requires an AI model to be selected. Please select a model in the configuration.');
+        }
+        const modelValue = config.aiModel;
         let aiProvider = 'ollama';
         let aiModel = modelValue;
 

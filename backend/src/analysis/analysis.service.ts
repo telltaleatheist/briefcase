@@ -799,6 +799,10 @@ export class AnalysisService implements OnModuleInit {
     (request as any).analysisResult = analysisResult;
     (request as any).analysisOutputPath = analysisOutputPath;
 
+    // Debug: confirm chapters are in analysisResult before passing to finalize
+    console.log(`[processAnalyzePhase] Storing analysisResult for finalize. Keys: ${Object.keys(analysisResult).join(', ')}`);
+    console.log(`[processAnalyzePhase] chapters in result: ${analysisResult.chapters?.length || 0}`);
+
     this.updateJob(jobId, {
       progress: 95,
       tags: (analysisResult as any)?.tags || { people: [], topics: [] },
@@ -946,10 +950,12 @@ export class AnalysisService implements OnModuleInit {
    * Process finalize phase
    */
   private async processFinalizePhase(jobId: string, request: AnalysisRequestWithState): Promise<void> {
+    console.log(`[processFinalizePhase] STARTING finalize phase for job ${jobId}`);
     const job = this.jobs.get(jobId);
     if (!job) throw new Error('Job not found');
 
     const mode = request.mode || 'full';
+    console.log(`[processFinalizePhase] mode=${mode}, request has analysisResult=${!!(request as any).analysisResult}`);
 
     this.updateJob(jobId, {
       progress: 98,
@@ -1079,6 +1085,9 @@ export class AnalysisService implements OnModuleInit {
 
       // Get analysisResult first so it's accessible for description/tags even if analysis insert fails
       const analysisResult = (request as any).analysisResult;
+      console.log(`[processFinalizePhase] analysisResult keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
+      console.log(`[processFinalizePhase] analysisResult.chapters: ${analysisResult?.chapters ? `array of ${analysisResult.chapters.length}` : 'undefined'}`);
+
 
       if (mode !== 'transcribe-only' && (request as any).analysisText) {
         this.databaseService.insertAnalysis({
@@ -1121,8 +1130,79 @@ export class AnalysisService implements OnModuleInit {
           }
 
           this.logger.log(`Successfully saved ${analysisResult.sections.length} sections for video ${videoId}`);
+          console.log(`[processFinalizePhase] SECTIONS SAVED SUCCESSFULLY - now checking chapters`);
         } else {
           this.logger.warn(`No sections found in analysisResult for video ${videoId}`);
+          console.log(`[processFinalizePhase] NO SECTIONS - analysisResult keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'null'}`);
+        }
+
+        // Save chapters (topic-based segments)
+        console.log(`[processFinalizePhase] About to check chapters. analysisResult type: ${typeof analysisResult}`);
+        console.log(`[processFinalizePhase] analysisResult keys: ${analysisResult ? Object.keys(analysisResult).join(', ') : 'NULL'}`);
+        console.log(`[processFinalizePhase] Checking chapters: exists=${!!analysisResult.chapters}, isArray=${Array.isArray(analysisResult.chapters)}, length=${analysisResult.chapters?.length || 0}`);
+        if (analysisResult.chapters && analysisResult.chapters.length > 0) {
+          console.log(`[processFinalizePhase] Chapters data: ${JSON.stringify(analysisResult.chapters)}`);
+        }
+        if (analysisResult.chapters && Array.isArray(analysisResult.chapters) && analysisResult.chapters.length > 0) {
+          this.logger.log(`Saving ${analysisResult.chapters.length} chapters for video ${videoId}`);
+          console.log(`[processFinalizePhase] SAVING ${analysisResult.chapters.length} CHAPTERS`);
+
+          try {
+            // Delete existing chapters first
+            this.databaseService.deleteChapters(videoId);
+            console.log(`[processFinalizePhase] Deleted existing chapters for video ${videoId}`);
+
+            for (const chapter of analysisResult.chapters) {
+              console.log(`[processFinalizePhase] Processing chapter: ${JSON.stringify(chapter)}`);
+
+              // Parse start time to seconds
+              let startSeconds = 0;
+              if (chapter.start_time) {
+                const parts = chapter.start_time.split(':').map((p: string) => parseInt(p));
+                if (parts.length === 2) {
+                  startSeconds = parts[0] * 60 + parts[1];
+                } else if (parts.length === 3) {
+                  startSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                }
+              }
+
+              // Parse end time to seconds
+              let endSeconds = startSeconds + 60; // Default 1 minute duration
+              if (chapter.end_time) {
+                const parts = chapter.end_time.split(':').map((p: string) => parseInt(p));
+                if (parts.length === 2) {
+                  endSeconds = parts[0] * 60 + parts[1];
+                } else if (parts.length === 3) {
+                  endSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                }
+              }
+
+              console.log(`[processFinalizePhase] Inserting chapter: seq=${chapter.sequence}, start=${startSeconds}, end=${endSeconds}, title=${chapter.title}`);
+
+              this.databaseService.insertChapter({
+                id: require('uuid').v4(),
+                videoId,
+                sequence: chapter.sequence,
+                startSeconds,
+                endSeconds,
+                title: chapter.title,
+                description: chapter.description,
+                source: 'ai',
+              });
+
+              console.log(`[processFinalizePhase] Chapter inserted successfully`);
+            }
+            // Verify chapters were saved
+            const savedChapters = this.databaseService.getChapters(videoId);
+            console.log(`[processFinalizePhase] VERIFICATION: ${savedChapters.length} chapters now in database for video ${videoId}`);
+          } catch (chapterError) {
+            console.error(`[processFinalizePhase] ERROR SAVING CHAPTERS: ${(chapterError as Error).message}`);
+            console.error((chapterError as Error).stack);
+          }
+
+          this.logger.log(`Successfully saved ${analysisResult.chapters.length} chapters for video ${videoId}`);
+        } else {
+          this.logger.warn(`No chapters found in analysisResult for video ${videoId}`);
         }
 
         // Save suggested title if available (MOVED INSIDE analysis block)
@@ -1451,9 +1531,19 @@ export class AnalysisService implements OnModuleInit {
     const transcribeOnly = options?.transcribeOnly || false;
     const forceReanalyze = options?.forceReanalyze || false;
     const forceRetranscribe = options?.forceRetranscribe !== undefined ? options.forceRetranscribe : true; // Default true for batch operations
-    const aiModel = options?.aiModel || config.aiModel || 'qwen2.5:7b';
-    const aiProvider = options?.aiProvider || 'ollama';
+
+    // NO DEFAULT - user must explicitly select an AI model for analysis
+    const aiModel = options?.aiModel || config.aiModel;
+    const aiProvider = options?.aiProvider;
     const whisperModel = options?.whisperModel || 'base';
+
+    // Validate AI model is configured if not transcribe-only
+    if (!transcribeOnly && !aiModel) {
+      throw new Error('AI analysis requires an AI model to be configured. Please select a model in settings.');
+    }
+    if (!transcribeOnly && !aiProvider) {
+      throw new Error('AI analysis requires an AI provider to be configured. Please select a provider in settings.');
+    }
     const ollamaEndpoint = options?.ollamaEndpoint || config.ollamaEndpoint || 'http://localhost:11434';
     const apiKey = aiProvider === 'claude' ? options?.claudeApiKey : aiProvider === 'openai' ? options?.openaiApiKey : undefined;
 

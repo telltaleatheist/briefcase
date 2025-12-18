@@ -29,6 +29,17 @@ export interface TimelineSection {
   color: string;
 }
 
+export interface TimelineChapter {
+  id: string;
+  videoId: string;
+  sequence: number;
+  startTime: number;
+  endTime: number;
+  title: string;
+  description?: string;
+  source: 'ai' | 'user';
+}
+
 export interface AnalysisSection {
   timeRange: string; // e.g., "00:09 - 00:12"
   startSeconds: number;
