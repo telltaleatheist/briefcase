@@ -30,6 +30,7 @@ import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { FileImportService } from '../../services/file-import.service';
 import { ElectronService } from '../../services/electron.service';
+import { TourService } from '../../services/tour.service';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -89,6 +90,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private tabsService = inject(TabsService);
   private fileImportService = inject(FileImportService);
   private electronService = inject(ElectronService);
+  private tourService = inject(TourService);
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
@@ -100,6 +102,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Track videos with pending renames to avoid race conditions
   private pendingRenames = new Set<string>();
+
+  // Track videos pending analysis (waiting for AI wizard to complete)
+  private pendingAnalysisVideos: VideoItem[] = [];
 
   // Drag and drop state
   isDraggingOver = signal(false);
@@ -492,6 +497,16 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.addVideoToAnalysisQueue(state.videoId, state.videoName);
       }, 500);
     }
+
+    // Auto-start welcome tour on first app visit, then chain to tab-specific tour
+    if (!this.tourService.isTourCompleted('welcome')) {
+      // Queue the library tour to run after welcome tour completes
+      this.tourService.queueTour(this.activeTab());
+      this.tourService.tryAutoStartTour('welcome');
+    } else {
+      // Welcome already done, just show the tab tour
+      this.tourService.tryAutoStartTour(this.activeTab());
+    }
   }
 
   // Check for first-time setup (AI config and library)
@@ -513,6 +528,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Handle AI wizard completion
   onAiWizardCompleted() {
     this.aiWizardOpen.set(false);
+
+    // Refresh AI availability after setup
+    this.aiSetupService.checkAIAvailability();
+
+    // If there were videos pending analysis, continue with them
+    if (this.pendingAnalysisVideos.length > 0) {
+      const videos = [...this.pendingAnalysisVideos];
+      this.pendingAnalysisVideos = [];
+      // Use setTimeout to let wizard close fully before starting analysis
+      setTimeout(() => this.analyzeVideos(videos), 100);
+      return;
+    }
 
     // Load libraries after AI setup
     this.loadLibraries();
@@ -546,6 +573,15 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onAiWizardClosed() {
     this.aiWizardOpen.set(false);
 
+    // Clear any pending analysis videos since user skipped AI setup
+    if (this.pendingAnalysisVideos.length > 0) {
+      this.notificationService.info(
+        'AI Setup Required',
+        'Video analysis requires AI to be configured. Set up AI in Settings when ready.'
+      );
+      this.pendingAnalysisVideos = [];
+    }
+
     // Still need to load libraries even if AI setup was skipped
     this.loadLibraries();
 
@@ -570,6 +606,23 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.libraryManagerOpen.set(true);
       }
     });
+  }
+
+  // Start the tutorial tour for the current tab
+  startTour() {
+    const tab = this.activeTab();
+    let tourId = 'library';
+
+    // Map tabs to tour IDs
+    if (tab === 'queue') {
+      tourId = 'queue';
+    } else if (tab === 'settings') {
+      tourId = 'settings';
+    } else if (tab === 'library') {
+      tourId = 'library';
+    }
+
+    this.tourService.startTour(tourId);
   }
 
   // Load default task settings from localStorage
@@ -2271,8 +2324,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.router.navigate(['/video', videoId]);
   }
 
-  private analyzeVideos(videos: VideoItem[]) {
+  private async analyzeVideos(videos: VideoItem[]) {
     if (videos.length === 0) return;
+
+    // Check if AI is configured before proceeding
+    const setupStatus = this.aiSetupService.getSetupStatus();
+    if (setupStatus.needsSetup) {
+      // Store the videos to analyze after wizard completes
+      this.pendingAnalysisVideos = videos;
+      this.aiWizardOpen.set(true);
+      return;
+    }
 
     // Filter out non-video files (images, PDFs, etc.)
     // Transcribe and AI analysis only work on video/audio files
@@ -2906,6 +2968,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       console.log('[LibraryPage] Staging queue:', this.stagingQueue());
       console.log('[LibraryPage] Processing queue:', this.processingQueue());
     }
+
+    // Auto-start tour for this tab if user hasn't seen it
+    // Use longer delay (800ms) to ensure Angular has rendered the new tab content
+    this.tourService.tryAutoStartTour(tab, 800);
   }
 
   // ========================================

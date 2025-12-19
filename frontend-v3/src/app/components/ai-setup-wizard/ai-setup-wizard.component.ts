@@ -1,10 +1,12 @@
-import { Component, Output, EventEmitter, signal, ChangeDetectionStrategy, inject, OnInit } from '@angular/core';
+import { Component, Output, EventEmitter, signal, ChangeDetectionStrategy, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { AiSetupService, AIAvailability } from '../../services/ai-setup.service';
+import { AiSetupService, AIAvailability, LocalModelInfo, SystemInfo } from '../../services/ai-setup.service';
 import { ElectronService } from '../../services/electron.service';
+import { WebsocketService } from '../../services/websocket.service';
+import { TourService } from '../../services/tour.service';
 
-export type WizardStep = 'welcome' | 'ollama' | 'claude' | 'openai' | 'done';
+export type WizardStep = 'welcome' | 'local-models' | 'ollama' | 'claude' | 'openai' | 'done';
 
 export interface RecommendedModel {
   name: string;
@@ -23,9 +25,11 @@ export interface RecommendedModel {
   styleUrls: ['./ai-setup-wizard.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class AiSetupWizardComponent implements OnInit {
+export class AiSetupWizardComponent implements OnInit, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private electronService = inject(ElectronService);
+  private websocketService = inject(WebsocketService);
+  private tourService = inject(TourService);
 
   @Output() closed = new EventEmitter<void>();
   @Output() completed = new EventEmitter<void>();
@@ -52,9 +56,70 @@ export class AiSetupWizardComponent implements OnInit {
   // Platform detection
   platform = signal(this.detectPlatform());
 
+  // Local model management
+  systemInfo = signal<SystemInfo | null>(null);
+  localModels = signal<LocalModelInfo[]>([]);
+  downloadingModel = signal<string | null>(null);
+  downloadProgress = signal(0);
+  downloadSpeed = signal<string | null>(null);
+  downloadEta = signal<string | null>(null);
+  deletingModel = signal<string | null>(null);
+
+  // WebSocket unsubscribe functions
+  private wsUnsubscribers: (() => void)[] = [];
+
   async ngOnInit() {
     // Check initial AI availability
     await this.refreshAvailability();
+
+    // Subscribe to model download progress events
+    this.setupWebSocketListeners();
+
+    // Auto-start tour for AI wizard if user hasn't seen it
+    this.tourService.tryAutoStartTour('ai-wizard', 800);
+  }
+
+  ngOnDestroy() {
+    // Unsubscribe from WebSocket events
+    this.wsUnsubscribers.forEach(unsub => unsub());
+  }
+
+  private setupWebSocketListeners() {
+    // Listen for download progress
+    const unsubProgress = this.websocketService.onModelDownloadProgress((event) => {
+      this.downloadProgress.set(event.progress);
+      this.downloadSpeed.set(event.speed || null);
+      this.downloadEta.set(event.eta || null);
+    });
+    this.wsUnsubscribers.push(unsubProgress);
+
+    // Listen for download complete
+    const unsubComplete = this.websocketService.onModelDownloadComplete(async (event) => {
+      this.downloadingModel.set(null);
+      this.downloadProgress.set(0);
+      this.downloadSpeed.set(null);
+      this.downloadEta.set(null);
+      await this.loadLocalModels();
+      await this.refreshAvailability();
+    });
+    this.wsUnsubscribers.push(unsubComplete);
+
+    // Listen for download error
+    const unsubError = this.websocketService.onModelDownloadError((event) => {
+      this.downloadingModel.set(null);
+      this.downloadProgress.set(0);
+      alert(`Download failed: ${event.error}`);
+    });
+    this.wsUnsubscribers.push(unsubError);
+
+    // Listen for download cancelled
+    const unsubCancelled = this.websocketService.onModelDownloadCancelled(() => {
+      this.downloadingModel.set(null);
+      this.downloadProgress.set(0);
+      this.downloadSpeed.set(null);
+      this.downloadEta.set(null);
+    });
+    this.wsUnsubscribers.push(unsubCancelled);
   }
 
   private async refreshAvailability() {
@@ -127,11 +192,21 @@ export class AiSetupWizardComponent implements OnInit {
 
   selectProvider(provider: 'ollama' | 'claude' | 'openai') {
     this.currentStep.set(provider);
+    // Trigger provider-specific tour after DOM updates
+    setTimeout(() => {
+      this.tourService.tryAutoStartTour(`ai-wizard-${provider}`, 300);
+    }, 100);
   }
 
-  selectLocal() {
-    // Local AI doesn't need setup - go directly to done
-    this.currentStep.set('done');
+  async selectLocal() {
+    // Go to local models step to download/manage models
+    await this.loadSystemInfo();
+    await this.loadLocalModels();
+    this.currentStep.set('local-models');
+    // Trigger local models tour after DOM updates
+    setTimeout(() => {
+      this.tourService.tryAutoStartTour('ai-wizard-local', 300);
+    }, 100);
   }
 
   goToStep(step: WizardStep) {
@@ -140,6 +215,102 @@ export class AiSetupWizardComponent implements OnInit {
 
   goBack() {
     this.currentStep.set('welcome');
+  }
+
+  // ==================== Local Model Management ====================
+
+  private async loadSystemInfo() {
+    const info = await this.aiSetupService.getSystemInfo().toPromise();
+    if (info) {
+      this.systemInfo.set(info);
+    }
+  }
+
+  async loadLocalModels() {
+    const result = await this.aiSetupService.getLocalModels().toPromise();
+    if (result) {
+      this.localModels.set(result.models);
+    }
+  }
+
+  async downloadLocalModel(modelId: string) {
+    if (this.downloadingModel()) return;
+
+    const model = this.localModels().find(m => m.id === modelId);
+    if (!model) return;
+
+    const confirmed = confirm(
+      `Download ${model.name}?\n\n` +
+      `Size: ${model.sizeGB} GB\n` +
+      `Requires: ${model.minRAM}+ GB RAM\n\n` +
+      `This may take several minutes depending on your connection.`
+    );
+
+    if (!confirmed) return;
+
+    this.downloadingModel.set(modelId);
+    this.downloadProgress.set(0);
+
+    try {
+      await this.aiSetupService.downloadLocalModel(modelId).toPromise();
+      // Progress will be tracked via WebSocket
+    } catch (error: any) {
+      this.downloadingModel.set(null);
+      this.downloadProgress.set(0);
+      alert(`Failed to start download: ${error.message || error}`);
+    }
+  }
+
+  async cancelDownload() {
+    try {
+      await this.aiSetupService.cancelModelDownload().toPromise();
+    } catch (error) {
+      console.error('Error cancelling download:', error);
+    }
+  }
+
+  async deleteLocalModel(modelId: string) {
+    const model = this.localModels().find(m => m.id === modelId);
+    if (!model) return;
+
+    const confirmed = confirm(
+      `Delete ${model.name}?\n\n` +
+      `This will free up ${model.sizeGB} GB of disk space.\n\n` +
+      `You can re-download it later if needed.`
+    );
+
+    if (!confirmed) return;
+
+    this.deletingModel.set(modelId);
+
+    try {
+      await this.aiSetupService.deleteLocalModel(modelId).toPromise();
+      await this.loadLocalModels();
+      await this.refreshAvailability();
+    } catch (error: any) {
+      alert(`Failed to delete model: ${error.message || error}`);
+    } finally {
+      this.deletingModel.set(null);
+    }
+  }
+
+  async setDefaultModel(modelId: string) {
+    try {
+      await this.aiSetupService.setDefaultModel(modelId).toPromise();
+      await this.loadLocalModels();
+    } catch (error: any) {
+      alert(`Failed to set default model: ${error.message || error}`);
+    }
+  }
+
+  hasDownloadedModel(): boolean {
+    return this.localModels().some(m => m.downloaded);
+  }
+
+  continueFromLocalModels() {
+    if (this.hasDownloadedModel()) {
+      this.currentStep.set('done');
+    }
   }
 
   async openOllamaWebsite() {

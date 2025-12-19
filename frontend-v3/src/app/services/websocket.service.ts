@@ -89,6 +89,28 @@ export interface VideoAdded {
   timestamp: string;
 }
 
+export interface ModelDownloadProgress {
+  modelId: string;
+  progress: number;
+  downloadedGB: number;
+  totalGB: number;
+  speed?: string;
+  eta?: string;
+}
+
+export interface ModelDownloadComplete {
+  modelId: string;
+}
+
+export interface ModelDownloadError {
+  modelId: string;
+  error: string;
+}
+
+export interface ModelDownloadCancelled {
+  modelId: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -113,6 +135,10 @@ export class WebsocketService implements OnDestroy {
   private savedLinkUpdatedCallbacks: ((event: SavedLink) => void)[] = [];
   private savedLinkDeletedCallbacks: ((id: string) => void)[] = [];
   private videoAddedCallbacks: ((event: VideoAdded) => void)[] = [];
+  private modelDownloadProgressCallbacks: ((event: ModelDownloadProgress) => void)[] = [];
+  private modelDownloadCompleteCallbacks: ((event: ModelDownloadComplete) => void)[] = [];
+  private modelDownloadErrorCallbacks: ((event: ModelDownloadError) => void)[] = [];
+  private modelDownloadCancelledCallbacks: ((event: ModelDownloadCancelled) => void)[] = [];
 
   connect(): void {
     if (this.socket?.connected) {
@@ -235,6 +261,26 @@ export class WebsocketService implements OnDestroy {
       this.videoAddedCallbacks.forEach(cb => cb(event));
     });
 
+    // Model download events
+    this.socket.on('model.download.progress', (event: ModelDownloadProgress) => {
+      this.modelDownloadProgressCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('model.download.complete', (event: ModelDownloadComplete) => {
+      console.log('WS model.download.complete received:', event);
+      this.modelDownloadCompleteCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('model.download.error', (event: ModelDownloadError) => {
+      console.log('WS model.download.error received:', event);
+      this.modelDownloadErrorCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('model.download.cancelled', (event: ModelDownloadCancelled) => {
+      console.log('WS model.download.cancelled received:', event);
+      this.modelDownloadCancelledCallbacks.forEach(cb => cb(event));
+    });
+
     // Legacy events for backward compatibility
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
@@ -350,6 +396,35 @@ export class WebsocketService implements OnDestroy {
     this.videoAddedCallbacks.push(callback);
     return () => {
       this.videoAddedCallbacks = this.videoAddedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  // Model download event subscriptions
+  onModelDownloadProgress(callback: (event: ModelDownloadProgress) => void): () => void {
+    this.modelDownloadProgressCallbacks.push(callback);
+    return () => {
+      this.modelDownloadProgressCallbacks = this.modelDownloadProgressCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onModelDownloadComplete(callback: (event: ModelDownloadComplete) => void): () => void {
+    this.modelDownloadCompleteCallbacks.push(callback);
+    return () => {
+      this.modelDownloadCompleteCallbacks = this.modelDownloadCompleteCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onModelDownloadError(callback: (event: ModelDownloadError) => void): () => void {
+    this.modelDownloadErrorCallbacks.push(callback);
+    return () => {
+      this.modelDownloadErrorCallbacks = this.modelDownloadErrorCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onModelDownloadCancelled(callback: (event: ModelDownloadCancelled) => void): () => void {
+    this.modelDownloadCancelledCallbacks.push(callback);
+    return () => {
+      this.modelDownloadCancelledCallbacks = this.modelDownloadCancelledCallbacks.filter(cb => cb !== callback);
     };
   }
 

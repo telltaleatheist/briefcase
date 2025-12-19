@@ -1,4 +1,4 @@
-<div class="settings-page">
+<div class="settings-page" [class.embedded]="embedded">
   <!-- Page Header (only shown in standalone mode) -->
   @if (!embedded) {
     <div class="page-header">
@@ -227,6 +227,51 @@
             <span class="btn-icon">↺</span>
             <span>Reset to Defaults</span>
           </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Transcription Settings Section -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">🎤</div>
+        <div class="section-info">
+          <h2>Transcription Settings</h2>
+          <p>Configure Whisper speech-to-text settings</p>
+        </div>
+      </div>
+
+      <div class="section-content">
+        <div class="gpu-mode-selector">
+          <label class="input-label">GPU Acceleration</label>
+          <select
+            class="model-select"
+            [value]="whisperGpuMode()"
+            (change)="saveWhisperGpuMode($any($event.target).value)"
+            [disabled]="loadingWhisperGpu() || savingWhisperGpu()"
+          >
+            <option value="auto">Auto (recommended)</option>
+            <option value="gpu">Always GPU</option>
+            <option value="cpu">Always CPU</option>
+          </select>
+
+          @if (savingWhisperGpu()) {
+            <div class="save-indicator success">
+              <span class="indicator-icon">✓</span>
+              <span class="indicator-text">Saved!</span>
+            </div>
+          }
+
+          <div class="mode-description">
+            {{ getGpuModeDescription(whisperGpuMode()) }}
+          </div>
+
+          @if (whisperGpuFailed()) {
+            <div class="warning-message">
+              <span class="warning-icon">⚠️</span>
+              <span>GPU transcription failed on this system. Auto mode will use CPU.</span>
+            </div>
+          }
         </div>
       </div>
     </section>

@@ -115,6 +115,38 @@ export class AppGateway
   }
 
   /**
+   * Model download progress
+   */
+  @OnEvent(InternalEvent.MODEL_DOWNLOAD_PROGRESS)
+  handleModelDownloadProgress(payload: any): void {
+    this.websocketService.emitModelDownloadProgress(payload);
+  }
+
+  /**
+   * Model download complete
+   */
+  @OnEvent(InternalEvent.MODEL_DOWNLOAD_COMPLETE)
+  handleModelDownloadComplete(payload: any): void {
+    this.websocketService.emitModelDownloadComplete(payload);
+  }
+
+  /**
+   * Model download error
+   */
+  @OnEvent(InternalEvent.MODEL_DOWNLOAD_ERROR)
+  handleModelDownloadError(payload: any): void {
+    this.websocketService.emitModelDownloadError(payload);
+  }
+
+  /**
+   * Model download cancelled
+   */
+  @OnEvent(InternalEvent.MODEL_DOWNLOAD_CANCELLED)
+  handleModelDownloadCancelled(payload: any): void {
+    this.websocketService.emitModelDownloadCancelled(payload);
+  }
+
+  /**
    * Health Check Methods
    */
 

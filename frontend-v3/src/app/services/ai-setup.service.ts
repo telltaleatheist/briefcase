@@ -14,6 +14,36 @@ export interface AIAvailability {
   lastChecked?: Date;
 }
 
+export interface GpuInfo {
+  name: string;
+  vramGB: number;
+  driver?: string;
+}
+
+export interface SystemInfo {
+  totalMemoryGB: number;
+  freeMemoryGB: number;
+  cpuCores: number;
+  platform: string;
+  recommendedModel: string;
+  gpu: GpuInfo | null;
+  useGpu: boolean;
+  effectiveMemoryGB: number;
+}
+
+export interface LocalModelInfo {
+  id: string;
+  name: string;
+  filename: string;
+  sizeGB: number;
+  minRAM: number;
+  description: string;
+  downloaded: boolean;
+  isDefault: boolean;
+  downloadedAt?: string;
+  filePath?: string;
+}
+
 export interface AISetupStatus {
   isReady: boolean;
   needsSetup: boolean;
@@ -236,6 +266,121 @@ export class AiSetupService {
       })),
       catchError(error => {
         console.error('Error pulling model:', error);
+        throw error;
+      })
+    );
+  }
+
+  // ==================== Local Model Management ====================
+
+  /**
+   * Get system information and recommended model
+   */
+  getSystemInfo(): Observable<SystemInfo> {
+    return this.http.get<any>(`${this.API_BASE}/config/system-info`).pipe(
+      map(response => ({
+        totalMemoryGB: response.totalMemoryGB || 0,
+        freeMemoryGB: response.freeMemoryGB || 0,
+        cpuCores: response.cpuCores || 0,
+        platform: response.platform || 'unknown',
+        recommendedModel: response.recommendedModel || 'cogito-8b',
+        gpu: response.gpu || null,
+        useGpu: response.useGpu || false,
+        effectiveMemoryGB: response.effectiveMemoryGB || response.totalMemoryGB || 0
+      })),
+      catchError(error => {
+        console.error('Error getting system info:', error);
+        return of({
+          totalMemoryGB: 0,
+          freeMemoryGB: 0,
+          cpuCores: 0,
+          platform: 'unknown',
+          recommendedModel: 'cogito-8b',
+          gpu: null,
+          useGpu: false,
+          effectiveMemoryGB: 0
+        });
+      })
+    );
+  }
+
+  /**
+   * Get list of available and downloaded local models
+   */
+  getLocalModels(): Observable<{ models: LocalModelInfo[]; recommendedModel: string; modelsDir: string }> {
+    return this.http.get<any>(`${this.API_BASE}/config/local-models`).pipe(
+      map(response => ({
+        models: response.models || [],
+        recommendedModel: response.recommendedModel || 'cogito-8b',
+        modelsDir: response.modelsDir || ''
+      })),
+      catchError(error => {
+        console.error('Error getting local models:', error);
+        return of({ models: [], recommendedModel: 'cogito-8b', modelsDir: '' });
+      })
+    );
+  }
+
+  /**
+   * Start downloading a local model
+   * Progress is sent via WebSocket events
+   */
+  downloadLocalModel(modelId: string): Observable<{ success: boolean; message: string }> {
+    return this.http.post<any>(`${this.API_BASE}/config/download-model`, { modelId }).pipe(
+      map(response => ({
+        success: response.success || false,
+        message: response.message || 'Download started'
+      })),
+      catchError(error => {
+        console.error('Error starting model download:', error);
+        throw error;
+      })
+    );
+  }
+
+  /**
+   * Cancel an active model download
+   */
+  cancelModelDownload(): Observable<{ success: boolean; message: string }> {
+    return this.http.post<any>(`${this.API_BASE}/config/cancel-download`, {}).pipe(
+      map(response => ({
+        success: response.success || false,
+        message: response.message || ''
+      })),
+      catchError(error => {
+        console.error('Error cancelling download:', error);
+        throw error;
+      })
+    );
+  }
+
+  /**
+   * Delete a downloaded local model
+   */
+  deleteLocalModel(modelId: string): Observable<{ success: boolean; message: string }> {
+    return this.http.delete<any>(`${this.API_BASE}/config/local-model/${modelId}`).pipe(
+      map(response => ({
+        success: response.success || false,
+        message: response.message || 'Model deleted'
+      })),
+      catchError(error => {
+        console.error('Error deleting model:', error);
+        throw error;
+      })
+    );
+  }
+
+  /**
+   * Set a model as the default local model
+   */
+  setDefaultModel(modelId: string): Observable<{ success: boolean; message: string }> {
+    return this.http.post<any>(`${this.API_BASE}/config/set-default-model`, { modelId }).pipe(
+      map(response => ({
+        success: response.success || false,
+        message: response.message || 'Default model set'
+      })),
+      catchError(error => {
+        console.error('Error setting default model:', error);
         throw error;
       })
     );

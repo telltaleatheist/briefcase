@@ -12,6 +12,7 @@ import {
   getWhisperLibraryPath,
   verifyBinary,
   type WhisperProgress as BridgeProgress,
+  type WhisperGpuMode,
 } from '../bridges';
 
 export interface WhisperProgress {
@@ -70,6 +71,12 @@ export class WhisperManager extends EventEmitter {
         percent: progress.percent,
         task: progress.message,
       } as WhisperProgress);
+    });
+
+    // Forward GPU fallback events
+    this.whisper.on('gpu-fallback', (data: { processId: string; reason: string }) => {
+      this.logger.warn(`GPU fallback triggered: ${data.reason}`);
+      this.emit('gpu-fallback', data);
     });
 
     // Log available models (dynamically discovered from disk)
@@ -196,5 +203,26 @@ export class WhisperManager extends EventEmitter {
       this.currentProcessId = null;
       this.logger.log('='.repeat(60));
     }
+  }
+
+  /**
+   * Get current GPU mode
+   */
+  getGpuMode(): WhisperGpuMode {
+    return this.whisper.getGpuMode();
+  }
+
+  /**
+   * Set GPU mode (auto, gpu, cpu)
+   */
+  setGpuMode(mode: WhisperGpuMode): void {
+    this.whisper.setGpuMode(mode);
+  }
+
+  /**
+   * Check if GPU has failed (useful for status display)
+   */
+  hasGpuFailed(): boolean {
+    return this.whisper.hasGpuFailed();
   }
 }

@@ -202,6 +202,41 @@ export class MediaController {
   }
 
   /**
+   * Get Whisper GPU mode and status
+   * GET /media/whisper-gpu
+   */
+  @Get('whisper-gpu')
+  getWhisperGpuMode() {
+    return {
+      success: true,
+      mode: this.whisperManager.getGpuMode(),
+      gpuFailed: this.whisperManager.hasGpuFailed(),
+    };
+  }
+
+  /**
+   * Set Whisper GPU mode
+   * POST /media/whisper-gpu
+   * Body: { mode: 'auto' | 'gpu' | 'cpu' }
+   */
+  @Post('whisper-gpu')
+  setWhisperGpuMode(@Body() body: { mode: 'auto' | 'gpu' | 'cpu' }) {
+    if (!body.mode || !['auto', 'gpu', 'cpu'].includes(body.mode)) {
+      throw new HttpException(
+        'Invalid mode. Must be "auto", "gpu", or "cpu"',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.whisperManager.setGpuMode(body.mode);
+
+    return {
+      success: true,
+      mode: this.whisperManager.getGpuMode(),
+    };
+  }
+
+  /**
    * Transcribe video
    * POST /media/transcribe
    * Body: { videoId } or { videoPath }, model?, language?

@@ -218,6 +218,18 @@
   overflow: hidden;
   position: relative;
 
+  // Allow embedded components to fill available space and scroll
+  > app-settings-page,
+  > app-save-for-later-tab,
+  > app-tabs-tab,
+  > app-queue-tab {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
   // Queue items list at top (scrolls if too many)
   .queue-items-list {
     flex-shrink: 0;

@@ -1,6 +1,7 @@
-import { Controller, Post, Body, Get, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
+import { Controller, Post, Body, Get, Delete, Param, OnModuleInit } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { ApiKeysService } from './api-keys.service';
+import { ModelManagerService } from './model-manager.service';
 import { LlamaManager } from '../bridges';
 import { DEFAULT_PROMPTS, DEFAULT_CATEGORIES } from '../analysis/prompts/analysis-prompts';
 import * as fs from 'fs';
@@ -20,6 +21,7 @@ export class ConfigController implements OnModuleInit {
     private readonly configService: SharedConfigService,
     private readonly apiKeysService: ApiKeysService,
     private readonly llamaManager: LlamaManager,
+    private readonly modelManager: ModelManagerService,
   ) {
     const userDataPath = process.env.APPDATA ||
                       (process.platform === 'darwin' ?
@@ -581,16 +583,18 @@ export class ConfigController implements OnModuleInit {
   @Get('local-ai-status')
   async getLocalAIStatus() {
     try {
-      const available = this.llamaManager.isAvailable();
+      const hasModel = await this.modelManager.hasAnyModel();
+      const defaultModelPath = await this.modelManager.getDefaultModelPath();
       const ready = this.llamaManager.isReady();
       const status = this.llamaManager.getStatus();
 
       return {
         success: true,
-        available,
+        available: hasModel,
         ready,
-        model: 'cogito-8b',
-        modelName: 'Cogito 8B',
+        model: hasModel ? 'local' : null,
+        modelName: hasModel ? 'Local AI' : null,
+        modelPath: defaultModelPath,
         status,
       };
     } catch (error: any) {
@@ -599,6 +603,132 @@ export class ConfigController implements OnModuleInit {
         available: false,
         ready: false,
         message: `Failed to get local AI status: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  // ==================== Model Management Endpoints ====================
+
+  /**
+   * Get system information and recommended model
+   */
+  @Get('system-info')
+  async getSystemInfo() {
+    try {
+      const info = this.modelManager.getSystemInfo();
+      return {
+        success: true,
+        ...info,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to get system info: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * List all available and downloaded models
+   */
+  @Get('local-models')
+  async getLocalModels() {
+    try {
+      const models = await this.modelManager.listModels();
+      const systemInfo = this.modelManager.getSystemInfo();
+      return {
+        success: true,
+        models,
+        recommendedModel: systemInfo.recommendedModel,
+        modelsDir: this.modelManager.getModelsDir(),
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        models: [],
+        message: `Failed to list models: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * Download a model
+   * Progress is emitted via WebSocket events: model.download.progress
+   */
+  @Post('download-model')
+  async downloadModel(@Body() body: { modelId: string }) {
+    try {
+      // Start download in background (don't await)
+      this.modelManager.downloadModel(body.modelId).catch((err) => {
+        // Error handling is done via events
+        console.error(`Download failed: ${err.message}`);
+      });
+
+      return {
+        success: true,
+        message: `Download started for ${body.modelId}`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to start download: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * Cancel an active download
+   */
+  @Post('cancel-download')
+  async cancelDownload() {
+    try {
+      const cancelled = this.modelManager.cancelDownload();
+      return {
+        success: cancelled,
+        message: cancelled ? 'Download cancelled' : 'No active download to cancel',
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to cancel download: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * Delete a downloaded model
+   */
+  @Delete('local-model/:modelId')
+  async deleteModel(@Param('modelId') modelId: string) {
+    try {
+      await this.modelManager.deleteModel(modelId);
+      return {
+        success: true,
+        message: `Model ${modelId} deleted`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to delete model: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * Set the default local model
+   */
+  @Post('set-default-model')
+  async setDefaultModel(@Body() body: { modelId: string }) {
+    try {
+      await this.modelManager.setDefaultModel(body.modelId);
+      return {
+        success: true,
+        message: `Default model set to ${body.modelId}`,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to set default model: ${(error as Error).message}`,
       };
     }
   }

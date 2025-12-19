@@ -33,11 +33,6 @@
       "from": "utilities/models",
       "to": "utilities/models",
       "filter": ["ggml-tiny.bin", "ggml-base.bin"]
-    },
-    {
-      "from": "utilities/models/llama",
-      "to": "utilities/models/llama",
-      "filter": ["cogito-8b-q6_k.gguf"]
     }
   ],
   "files": [
@@ -154,11 +149,11 @@
     "icon": "assets/icon.ico",
     "target": [
       {
-        "target": "nsis",
+        "target": "dir",
         "arch": ["x64"]
       }
     ],
-    "artifactName": "${productName}-Full-Setup-${version}.${ext}",
+    "artifactName": "${productName}-Full-${version}.${ext}",
     "extraResources": [
       {
         "from": "node_modules/@ffmpeg-installer/win32-x64",
@@ -200,7 +195,7 @@
     "deleteAppDataOnUninstall": false,
     "runAfterFinish": true,
     "displayLanguageSelector": false,
-    "artifactName": "${productName}-Full-Setup-${version}.${ext}",
+    "artifactName": "${productName}-Full-${version}.${ext}",
     "include": "assets/installer.nsh",
     "warningsAsErrors": false,
     "packElevateHelper": true,

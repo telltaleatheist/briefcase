@@ -6,6 +6,7 @@ import { ThemeService } from '../../services/theme.service';
 import { LibraryService } from '../../services/library.service';
 import { LoggerService } from '../../services/logger.service';
 import { NotificationService } from '../../services/notification.service';
+import { TourService } from '../../services/tour.service';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { NotificationBellComponent } from '../../components/notification-bell/notification-bell.component';
 import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
@@ -23,12 +24,16 @@ export class NavigationComponent {
   libraryService = inject(LibraryService);
   private loggerService = inject(LoggerService);
   private notificationService = inject(NotificationService);
+  tourService = inject(TourService);
   mobileMenuOpen = signal(false);
   libraryManagerOpen = signal(false);
   currentUrl = signal('/');
 
   isHome = computed(() => this.currentUrl() === '/');
   isSettings = computed(() => this.currentUrl().startsWith('/settings'));
+
+  // Check if current page has a tour available
+  hasTour = computed(() => this.tourService.hasTourForRoute(this.currentUrl()));
 
   navLinks = [
     { path: '/', label: 'Media Library', icon: '📹' },
@@ -153,5 +158,15 @@ export class NavigationComponent {
 
   downloadLogs() {
     this.loggerService.downloadLogs();
+  }
+
+  /**
+   * Start the tutorial for the current page/route
+   */
+  startTour() {
+    const tour = this.tourService.getTourForRoute(this.currentUrl());
+    if (tour) {
+      this.tourService.startTour(tour.id);
+    }
   }
 }

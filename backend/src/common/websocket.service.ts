@@ -173,6 +173,35 @@ export class WebSocketService {
   }
 
   /**
+   * Model Download Events
+   */
+  emitModelDownloadProgress(payload: {
+    modelId: string;
+    progress: number;
+    downloadedGB: number;
+    totalGB: number;
+    speed?: string;
+    eta?: string;
+  }): void {
+    this.emit(WebSocketEvent.MODEL_DOWNLOAD_PROGRESS, payload);
+  }
+
+  emitModelDownloadComplete(payload: { modelId: string }): void {
+    this.logger.log(`Model download complete: ${payload.modelId}`);
+    this.emit(WebSocketEvent.MODEL_DOWNLOAD_COMPLETE, payload);
+  }
+
+  emitModelDownloadError(payload: { modelId: string; error: string }): void {
+    this.logger.error(`Model download error: ${payload.modelId} - ${payload.error}`);
+    this.emit(WebSocketEvent.MODEL_DOWNLOAD_ERROR, payload);
+  }
+
+  emitModelDownloadCancelled(payload: { modelId: string }): void {
+    this.logger.log(`Model download cancelled: ${payload.modelId}`);
+    this.emit(WebSocketEvent.MODEL_DOWNLOAD_CANCELLED, payload);
+  }
+
+  /**
    * Advanced Methods for Future Use
    */
 

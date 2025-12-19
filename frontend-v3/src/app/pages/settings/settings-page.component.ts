@@ -73,6 +73,12 @@ export class SettingsPageComponent implements OnInit {
   savingPrompts = signal(false);
   expandedPrompt = signal<string | null>(null); // Which prompt section is expanded
 
+  // Whisper GPU Mode
+  whisperGpuMode = signal<'auto' | 'gpu' | 'cpu'>('auto');
+  whisperGpuFailed = signal(false);
+  loadingWhisperGpu = signal(false);
+  savingWhisperGpu = signal(false);
+
   // New category form
   newCategory: Partial<AnalysisCategory> = {
     name: '',
@@ -100,6 +106,7 @@ export class SettingsPageComponent implements OnInit {
     await this.loadDefaultAI();
     await this.loadAvailableModels();
     await this.loadPrompts();
+    await this.loadWhisperGpuMode();
   }
 
   private async loadCategories() {
@@ -255,13 +262,23 @@ export class SettingsPageComponent implements OnInit {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: Array<{ value: string; label: string; provider: string }> = [];
 
-      // Add Local AI model first if available (bundled, no setup required)
+      // Add downloaded Local AI models first (fetched dynamically)
       if (availability.hasLocal) {
-        models.push({
-          value: 'local:cogito-8b',
-          label: 'Cogito 8B (Local)',
-          provider: 'local'
-        });
+        try {
+          const localModelsResult = await firstValueFrom(this.aiSetupService.getLocalModels());
+          if (localModelsResult?.models) {
+            const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
+            downloadedModels.forEach(model => {
+              models.push({
+                value: `local:${model.id}`,
+                label: `${model.name} (Local)`,
+                provider: 'local'
+              });
+            });
+          }
+        } catch (error) {
+          console.error('Failed to fetch local models:', error);
+        }
       }
 
       // Add Ollama models (fetched dynamically by aiSetupService)
@@ -452,5 +469,61 @@ export class SettingsPageComponent implements OnInit {
       quotes: 'Identifies significant quotes from flagged sections'
     };
     return descriptions[key] || '';
+  }
+
+  // ========================================
+  // Whisper GPU Mode Management
+  // ========================================
+
+  private async loadWhisperGpuMode() {
+    this.loadingWhisperGpu.set(true);
+    try {
+      const response = await fetch(`${this.API_BASE}/media/whisper-gpu`);
+      if (response.ok) {
+        const data = await response.json();
+        this.whisperGpuMode.set(data.mode || 'auto');
+        this.whisperGpuFailed.set(data.gpuFailed || false);
+      }
+    } catch (error) {
+      console.error('Failed to load Whisper GPU mode:', error);
+    } finally {
+      this.loadingWhisperGpu.set(false);
+    }
+  }
+
+  async saveWhisperGpuMode(mode: 'auto' | 'gpu' | 'cpu') {
+    this.savingWhisperGpu.set(true);
+    try {
+      const response = await fetch(`${this.API_BASE}/media/whisper-gpu`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.whisperGpuMode.set(data.mode);
+        // Reset GPU failed flag when user manually changes mode
+        if (mode !== 'auto') {
+          this.whisperGpuFailed.set(false);
+        }
+        // Show success feedback briefly
+        setTimeout(() => {
+          this.savingWhisperGpu.set(false);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Failed to save Whisper GPU mode:', error);
+      this.savingWhisperGpu.set(false);
+    }
+  }
+
+  getGpuModeDescription(mode: string): string {
+    const descriptions: Record<string, string> = {
+      auto: 'Tries GPU first, falls back to CPU if GPU fails',
+      gpu: 'Always use GPU (faster, but may fail on some systems)',
+      cpu: 'Always use CPU (slower, but more compatible)'
+    };
+    return descriptions[mode] || '';
   }
 }

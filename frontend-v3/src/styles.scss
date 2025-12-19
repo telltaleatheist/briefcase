@@ -12,6 +12,9 @@
 // Import timeline editor theme
 @import '../projects/ngx-video-timeline-editor/src/lib/styles/timeline-theme';
 
+// Import driver.js styles for product tours
+@import 'driver.js/dist/driver.css';
+
 // Additional global styles
 html, body {
   height: 100%;
@@ -117,4 +120,114 @@ app-root {
 
 .rotate {
   animation: rotate 20s linear infinite;
+}
+
+// ============================================================================
+// DRIVER.JS TOUR CUSTOMIZATION
+// ============================================================================
+.driver-popover {
+  background: var(--bg-primary, #1a1a2e) !important;
+  color: var(--text-primary, #ffffff) !important;
+  border: 1px solid var(--border-color, #333355) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
+  max-width: 360px !important;
+
+  .driver-popover-title {
+    font-size: 18px !important;
+    font-weight: 600 !important;
+    color: var(--text-primary, #ffffff) !important;
+    margin-bottom: 8px !important;
+  }
+
+  .driver-popover-description {
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    color: var(--text-secondary, #a0a0b0) !important;
+  }
+
+  .driver-popover-progress-text {
+    color: var(--text-tertiary, #666688) !important;
+    font-size: 12px !important;
+  }
+
+  .driver-popover-footer {
+    margin-top: 16px !important;
+    gap: 8px !important;
+  }
+
+  .driver-popover-prev-btn,
+  .driver-popover-next-btn {
+    padding: 8px 16px !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+  }
+
+  .driver-popover-prev-btn {
+    background: transparent !important;
+    border: 1px solid var(--border-color, #333355) !important;
+    color: var(--text-secondary, #a0a0b0) !important;
+
+    &:hover {
+      background: var(--bg-secondary, #252540) !important;
+      color: var(--text-primary, #ffffff) !important;
+    }
+  }
+
+  .driver-popover-next-btn {
+    background: var(--primary-orange, #ff6b35) !important;
+    border: none !important;
+    color: white !important;
+
+    &:hover {
+      background: var(--primary-orange-hover, #ff8c5a) !important;
+      transform: translateY(-1px) !important;
+    }
+  }
+
+  .driver-popover-close-btn {
+    color: var(--text-tertiary, #666688) !important;
+
+    &:hover {
+      color: var(--text-primary, #ffffff) !important;
+    }
+  }
+
+  .driver-popover-arrow-side-left,
+  .driver-popover-arrow-side-right,
+  .driver-popover-arrow-side-top,
+  .driver-popover-arrow-side-bottom {
+    &::before,
+    &::after {
+      border-color: var(--bg-primary, #1a1a2e) !important;
+    }
+  }
+}
+
+// Tour button in header
+.tour-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border-color, #333355);
+  color: var(--text-secondary, #a0a0b0);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 18px;
+
+  &:hover {
+    background: var(--bg-secondary, #252540);
+    color: var(--primary-orange, #ff6b35);
+    border-color: var(--primary-orange, #ff6b35);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
 }

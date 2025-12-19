@@ -65,6 +65,7 @@ export {
   type WhisperProcessInfo,
   type WhisperResult,
   type WhisperConfig,
+  type WhisperGpuMode,
 } from './whisper-bridge';
 
 // Llama bridge (local AI)

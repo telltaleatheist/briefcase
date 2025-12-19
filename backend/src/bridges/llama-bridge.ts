@@ -14,6 +14,7 @@ export interface LlamaConfig {
   modelsDir: string;
   libraryPath?: string; // DYLD_LIBRARY_PATH for macOS
   port?: number;
+  modelPath?: string; // Optional: specific model file path (overrides modelsDir scan)
 }
 
 export interface LlamaProgress {
@@ -43,10 +44,10 @@ export class LlamaBridge extends EventEmitter {
   private isReady = false;
   private startTime: number | null = null;
   private readonly logger = new Logger(LlamaBridge.name);
+  private currentModelPath: string | null = null;
 
   // Configuration
   private readonly DEFAULT_PORT = 8081;
-  private readonly MODEL_NAME = 'cogito-8b-q6_k.gguf';
   private readonly STARTUP_TIMEOUT_MS = 120000; // 2 minutes for model loading
   private readonly REQUEST_TIMEOUT_MS = 300000; // 5 minutes for generation
 
@@ -60,31 +61,64 @@ export class LlamaBridge extends EventEmitter {
       ...config,
       port: config.port || this.DEFAULT_PORT,
     };
+    this.currentModelPath = config.modelPath || null;
     this.logger.log(`Initialized with binary: ${config.binaryPath}`);
     this.logger.log(`Models directory: ${config.modelsDir}`);
+    if (config.modelPath) {
+      this.logger.log(`Model path: ${config.modelPath}`);
+    }
+  }
+
+  /**
+   * Set the model path to use
+   */
+  setModelPath(modelPath: string): void {
+    if (this.serverProcess) {
+      this.logger.warn('Cannot change model while server is running. Stop the server first.');
+      return;
+    }
+    this.currentModelPath = modelPath;
+    this.logger.log(`Model path set to: ${modelPath}`);
   }
 
   /**
    * Get the path to the model file
    */
-  getModelPath(): string {
-    return path.join(this.config.modelsDir, this.MODEL_NAME);
+  getModelPath(): string | null {
+    return this.currentModelPath;
   }
 
   /**
-   * Check if the model file exists
+   * Check if the model file exists and is valid
    */
   isModelAvailable(): boolean {
-    const modelPath = this.getModelPath();
+    const modelPath = this.currentModelPath;
+    if (!modelPath) {
+      return false;
+    }
     if (!fs.existsSync(modelPath)) {
       return false;
     }
-    // Verify it's a reasonable size (should be > 6GB)
+    // Verify it's a GGUF file with reasonable size (> 100MB)
     try {
       const stats = fs.statSync(modelPath);
-      return stats.size > 6 * 1024 * 1024 * 1024;
+      return stats.size > 100 * 1024 * 1024;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Scan the models directory for available GGUF files
+   */
+  getAvailableModels(): string[] {
+    if (!fs.existsSync(this.config.modelsDir)) {
+      return [];
+    }
+    try {
+      return fs.readdirSync(this.config.modelsDir).filter((f) => f.endsWith('.gguf'));
+    } catch {
+      return [];
     }
   }
 
@@ -124,7 +158,10 @@ export class LlamaBridge extends EventEmitter {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    const modelPath = this.getModelPath();
+    const modelPath = this.currentModelPath;
+    if (!modelPath) {
+      throw new Error('No model configured. Please download a model first.');
+    }
     if (!fs.existsSync(modelPath)) {
       throw new Error(`Model not found: ${modelPath}`);
     }

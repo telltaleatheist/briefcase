@@ -126,6 +126,31 @@ export interface VideoAddedPayload {
 }
 
 /**
+ * Model Download Events
+ */
+export interface ModelDownloadProgressPayload {
+  modelId: string;
+  progress: number;
+  downloadedGB: number;
+  totalGB: number;
+  speed?: string;
+  eta?: string;
+}
+
+export interface ModelDownloadCompletePayload {
+  modelId: string;
+}
+
+export interface ModelDownloadErrorPayload {
+  modelId: string;
+  error: string;
+}
+
+export interface ModelDownloadCancelledPayload {
+  modelId: string;
+}
+
+/**
  * WebSocket Event Names
  * Using const enum for type safety and better autocomplete
  */
@@ -151,6 +176,12 @@ export enum WebSocketEvent {
   // Library/Video Events
   VIDEO_ADDED = 'video-added',
 
+  // Model Download Events
+  MODEL_DOWNLOAD_PROGRESS = 'model.download.progress',
+  MODEL_DOWNLOAD_COMPLETE = 'model.download.complete',
+  MODEL_DOWNLOAD_ERROR = 'model.download.error',
+  MODEL_DOWNLOAD_CANCELLED = 'model.download.cancelled',
+
   // Connection Management
   CONNECTION = 'connection',
   DISCONNECT = 'disconnect',
@@ -172,6 +203,12 @@ export enum InternalEvent {
   TASK_COMPLETED = 'task.completed',
   TASK_FAILED = 'task.failed',
   SYSTEM_STATUS = 'system.status',
+
+  // Model download events
+  MODEL_DOWNLOAD_PROGRESS = 'model.download.progress',
+  MODEL_DOWNLOAD_COMPLETE = 'model.download.complete',
+  MODEL_DOWNLOAD_ERROR = 'model.download.error',
+  MODEL_DOWNLOAD_CANCELLED = 'model.download.cancelled',
 }
 
 /**
@@ -199,4 +236,10 @@ export interface WebSocketEventMap {
 
   // Library/Video events
   [WebSocketEvent.VIDEO_ADDED]: VideoAddedPayload;
+
+  // Model download events
+  [WebSocketEvent.MODEL_DOWNLOAD_PROGRESS]: ModelDownloadProgressPayload;
+  [WebSocketEvent.MODEL_DOWNLOAD_COMPLETE]: ModelDownloadCompletePayload;
+  [WebSocketEvent.MODEL_DOWNLOAD_ERROR]: ModelDownloadErrorPayload;
+  [WebSocketEvent.MODEL_DOWNLOAD_CANCELLED]: ModelDownloadCancelledPayload;
 }

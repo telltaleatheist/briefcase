@@ -32,6 +32,18 @@
 
     <!-- Right Section: Controls -->
     <div class="header-right">
+      <!-- Tutorial Button -->
+      @if (hasTour()) {
+        <button
+          class="header-btn tour-button"
+          (click)="startTour()"
+          aria-label="Start tutorial"
+          title="Start tutorial for this page"
+        >
+          <span class="btn-icon">❓</span>
+        </button>
+      }
+
       <!-- Notification Bell -->
       <app-notification-bell />
 

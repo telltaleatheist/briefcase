@@ -35,16 +35,20 @@ export interface WhisperResult {
   error?: string;
 }
 
+export type WhisperGpuMode = 'auto' | 'gpu' | 'cpu';
+
 export interface WhisperConfig {
   binaryPath: string;
   modelsDir: string;
   libraryPath?: string;  // DYLD_LIBRARY_PATH for macOS
+  gpuMode?: WhisperGpuMode;  // GPU preference: auto (try GPU, fallback to CPU), gpu (force), cpu (force)
 }
 
 export class WhisperBridge extends EventEmitter {
   private config: WhisperConfig;
   private activeProcesses = new Map<string, WhisperProcessInfo>();
   private readonly logger = new Logger(WhisperBridge.name);
+  private gpuFailedOnce = false;  // Track if GPU failed, for auto mode fallback
 
   // All known whisper models (for display names)
   // Only tiny and base are bundled with the app
@@ -56,9 +60,36 @@ export class WhisperBridge extends EventEmitter {
 
   constructor(config: WhisperConfig) {
     super();
-    this.config = config;
+    this.config = { ...config, gpuMode: config.gpuMode || 'auto' };
     this.logger.log(`Initialized with binary: ${config.binaryPath}`);
     this.logger.log(`Models directory: ${config.modelsDir}`);
+    this.logger.log(`GPU mode: ${this.config.gpuMode}`);
+  }
+
+  /**
+   * Get current GPU mode
+   */
+  getGpuMode(): WhisperGpuMode {
+    return this.config.gpuMode || 'auto';
+  }
+
+  /**
+   * Set GPU mode
+   */
+  setGpuMode(mode: WhisperGpuMode): void {
+    this.config.gpuMode = mode;
+    this.logger.log(`GPU mode set to: ${mode}`);
+    // Reset the GPU failed flag when mode is changed
+    if (mode !== 'auto') {
+      this.gpuFailedOnce = false;
+    }
+  }
+
+  /**
+   * Check if GPU has failed (for status reporting)
+   */
+  hasGpuFailed(): boolean {
+    return this.gpuFailedOnce;
   }
 
   /**
@@ -168,8 +199,9 @@ export class WhisperBridge extends EventEmitter {
   /**
    * Transcribe an audio file
    * Returns a process ID for tracking
+   * Implements GPU fallback: in 'auto' mode, tries GPU first, falls back to CPU if GPU fails
    */
-  transcribe(
+  async transcribe(
     audioPath: string,
     outputDir: string,
     options?: {
@@ -180,6 +212,74 @@ export class WhisperBridge extends EventEmitter {
     }
   ): Promise<WhisperResult> {
     const processId = options?.processId || crypto.randomBytes(8).toString('hex');
+    const gpuMode = this.config.gpuMode || 'auto';
+
+    // Determine if we should use GPU
+    let useGpu = gpuMode === 'gpu' || (gpuMode === 'auto' && !this.gpuFailedOnce);
+
+    if (gpuMode === 'cpu') {
+      useGpu = false;
+    }
+
+    this.logger.log(`[${processId}] GPU mode: ${gpuMode}, using GPU: ${useGpu}, gpuFailedOnce: ${this.gpuFailedOnce}`);
+
+    // First attempt
+    const result = await this._runTranscription(audioPath, outputDir, processId, useGpu, options);
+
+    // Check if GPU failed and we should retry with CPU (auto mode only)
+    if (!result.success && gpuMode === 'auto' && useGpu && this.isGpuError(result)) {
+      this.logger.warn(`[${processId}] GPU transcription failed, retrying with CPU...`);
+      this.gpuFailedOnce = true;
+
+      // Emit event so frontend knows GPU failed
+      this.emit('gpu-fallback', { processId, reason: result.error });
+
+      // Retry with CPU
+      const cpuResult = await this._runTranscription(audioPath, outputDir, processId + '-cpu', false, options);
+      return cpuResult;
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if an error is a GPU-related error
+   */
+  private isGpuError(result: WhisperResult): boolean {
+    if (!result.error) return false;
+
+    const gpuErrorPatterns = [
+      'GGML_ASSERT',
+      'device',
+      'CUDA',
+      'cuda',
+      'GPU',
+      'gpu',
+      'metal',
+      'Metal',
+      'vulkan',
+      'Vulkan',
+      '3221226505',  // Windows STATUS_STACK_BUFFER_OVERRUN often from GPU issues
+      'backend',
+    ];
+
+    return gpuErrorPatterns.some(pattern => result.error?.includes(pattern));
+  }
+
+  /**
+   * Internal method to run transcription with specific GPU setting
+   */
+  private _runTranscription(
+    audioPath: string,
+    outputDir: string,
+    processId: string,
+    useGpu: boolean,
+    options?: {
+      model?: string;
+      language?: string;
+      translate?: boolean;
+    }
+  ): Promise<WhisperResult> {
     const modelPath = this.getModelPath(options?.model);
 
     return new Promise((resolve, reject) => {
@@ -196,6 +296,11 @@ export class WhisperBridge extends EventEmitter {
         '-pp',                // Print progress
       ];
 
+      // Add no-GPU flag if not using GPU
+      if (!useGpu) {
+        args.push('-ng');
+      }
+
       // Optional language specification
       if (options?.language) {
         args.push('-l', options.language);
@@ -206,7 +311,7 @@ export class WhisperBridge extends EventEmitter {
         args.push('--translate');
       }
 
-      this.logger.log(`[${processId}] Starting: whisper-cli ${args.join(' ')}`);
+      this.logger.log(`[${processId}] Starting: whisper-cli ${args.join(' ')} (GPU: ${useGpu})`);
 
       // Set up environment for dylib loading
       const env = { ...process.env };

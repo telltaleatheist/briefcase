@@ -51,46 +51,52 @@
         <h3 class="section-title">Choose a Provider</h3>
 
         <div class="provider-cards">
-          <!-- Local AI Card (if available) -->
-          @if (localAvailable()) {
-            <div class="provider-card recommended" (click)="selectLocal()">
-              <div class="card-badge">Bundled</div>
-              <div class="card-header">
-                <span class="card-icon">🏠</span>
-                <div class="card-titles">
-                  <h4>Local AI</h4>
-                  <span class="card-tagline">Ready to Use</span>
-                </div>
+          <!-- Local AI Card - Always show -->
+          <div class="provider-card recommended" (click)="selectLocal()">
+            @if (localAvailable()) {
+              <div class="card-badge">Ready</div>
+            } @else {
+              <div class="card-badge">Recommended</div>
+            }
+            <div class="card-header">
+              <span class="card-icon">🏠</span>
+              <div class="card-titles">
+                <h4>Local AI</h4>
+                <span class="card-tagline">{{ localAvailable() ? 'Ready to Use' : 'Download & Run Locally' }}</span>
               </div>
-              <ul class="card-features">
-                <li class="pro"><span>✓</span> No setup required</li>
-                <li class="pro"><span>✓</span> Works offline</li>
-                <li class="pro"><span>✓</span> No API costs ever</li>
-                <li class="con"><span>✗</span> Requires 8GB RAM</li>
-              </ul>
-              <button class="card-btn primary">Use Local AI</button>
             </div>
-          }
+            <ul class="card-features">
+              <li class="pro"><span>✓</span> {{ localAvailable() ? 'No setup required' : 'One-click download' }}</li>
+              <li class="pro"><span>✓</span> Works offline</li>
+              <li class="pro"><span>✓</span> No API costs ever</li>
+              <li class="con"><span>✗</span> Requires 4-8GB+ RAM</li>
+            </ul>
+            <button class="card-btn primary">{{ localAvailable() ? 'Use Local AI' : 'Download Local AI' }}</button>
+          </div>
 
           <!-- Ollama Card -->
-          <div class="provider-card" [class.recommended]="!localAvailable()" (click)="selectProvider('ollama')">
-            @if (!localAvailable()) {
-              <div class="card-badge">Recommended</div>
+          <div class="provider-card" [class.has-status]="ollamaAvailable()" (click)="selectProvider('ollama')">
+            @if (ollamaAvailable() && ollamaModels().length > 0) {
+              <div class="card-badge success">Detected</div>
             }
             <div class="card-header">
               <span class="card-icon">💻</span>
               <div class="card-titles">
                 <h4>Ollama</h4>
-                <span class="card-tagline">Free & Private</span>
+                <span class="card-tagline">{{ ollamaAvailable() ? 'Running on your machine' : 'Free & Private' }}</span>
               </div>
             </div>
             <ul class="card-features">
               <li class="pro"><span>✓</span> No API costs ever</li>
               <li class="pro"><span>✓</span> Data stays on your machine</li>
               <li class="pro"><span>✓</span> Works offline</li>
-              <li class="con"><span>✗</span> 4+ GB download required</li>
+              @if (!ollamaAvailable()) {
+                <li class="con"><span>✗</span> Requires separate install</li>
+              } @else {
+                <li class="pro"><span>✓</span> {{ ollamaModels().length }} model(s) ready</li>
+              }
             </ul>
-            <button class="card-btn" [class.primary]="!localAvailable()">Configure Ollama</button>
+            <button class="card-btn" [class.primary]="ollamaAvailable()">{{ ollamaAvailable() ? 'Use Ollama' : 'Configure Ollama' }}</button>
           </div>
 
           <!-- Claude Card -->
@@ -134,6 +140,167 @@
           <button class="skip-btn" (click)="skipSetup()">
             Skip for now
           </button>
+        </div>
+      </div>
+    }
+
+    <!-- ==================== LOCAL MODELS STEP ==================== -->
+    @if (currentStep() === 'local-models') {
+      <div class="wizard-step local-models-step">
+        <button class="back-btn" (click)="goBack()">
+          <span>←</span> Back
+        </button>
+
+        <div class="step-header">
+          <span class="step-icon">🏠</span>
+          <h2 class="step-title">Local AI Setup</h2>
+          <p class="step-subtitle">Download an AI model to run on your computer</p>
+        </div>
+
+        <!-- System Info Card -->
+        @if (systemInfo()) {
+          <div class="system-info-card">
+            @if (systemInfo()?.gpu; as gpu) {
+              <div class="system-stat gpu">
+                <span class="stat-label">🎮 GPU</span>
+                <span class="stat-value">{{ gpu.name }}</span>
+              </div>
+              <div class="system-stat">
+                <span class="stat-label">VRAM</span>
+                <span class="stat-value highlight">{{ gpu.vramGB }} GB</span>
+              </div>
+            } @else {
+              <div class="system-stat">
+                <span class="stat-label">⚠️ No GPU</span>
+                <span class="stat-value">Using CPU</span>
+              </div>
+            }
+            <div class="system-stat">
+              <span class="stat-label">System RAM</span>
+              <span class="stat-value">{{ systemInfo()!.totalMemoryGB }} GB</span>
+            </div>
+          </div>
+          @if (systemInfo()!.useGpu) {
+            <p class="gpu-note success">✓ GPU acceleration enabled - models will run faster</p>
+          } @else if (!systemInfo()!.gpu) {
+            <p class="gpu-note warning">Models will run on CPU (slower but works)</p>
+          }
+        }
+
+        <div class="models-section">
+          <h3>Choose a Model</h3>
+          <p class="models-hint">
+            <span class="hint-icon">ℹ️</span>
+            @if (systemInfo()?.useGpu) {
+              Larger models produce better results but need more VRAM
+            } @else {
+              Larger models produce better results but need more RAM (slower on CPU)
+            }
+          </p>
+
+          <div class="model-cards">
+            @for (model of localModels(); track model.id) {
+              <div class="model-card"
+                   [class.recommended]="model.id === systemInfo()?.recommendedModel"
+                   [class.downloaded]="model.downloaded"
+                   [class.active]="model.isDefault">
+
+                @if (model.id === systemInfo()?.recommendedModel && !model.downloaded) {
+                  <div class="model-badge">Recommended</div>
+                }
+                @if (model.isDefault) {
+                  <div class="model-badge active">Active</div>
+                }
+
+                <div class="model-header">
+                  <h4>{{ model.name }}</h4>
+                  <span class="model-size">{{ model.sizeGB }} GB</span>
+                </div>
+                <p class="model-ram">
+                  @if (systemInfo()?.useGpu) {
+                    Requires {{ model.minRAM }}+ GB VRAM
+                  } @else {
+                    Requires {{ model.minRAM }}+ GB RAM
+                  }
+                </p>
+                <p class="model-desc">{{ model.description }}</p>
+
+                <div class="model-actions">
+                  @if (model.downloaded) {
+                    <!-- Downloaded model actions -->
+                    @if (!model.isDefault) {
+                      <button class="action-btn" (click)="setDefaultModel(model.id)">
+                        Use This
+                      </button>
+                    } @else {
+                      <button class="action-btn active" disabled>
+                        <span>✓</span> Active
+                      </button>
+                    }
+                    <button
+                      class="delete-btn"
+                      (click)="deleteLocalModel(model.id)"
+                      [disabled]="deletingModel() === model.id"
+                    >
+                      @if (deletingModel() === model.id) {
+                        <span class="spinner"></span>
+                      } @else {
+                        🗑️
+                      }
+                    </button>
+                  } @else {
+                    <!-- Not downloaded - show download button -->
+                    @if (downloadingModel() === model.id) {
+                      <div class="download-progress">
+                        <div class="progress-bar">
+                          <div class="progress-fill" [style.width.%]="downloadProgress()"></div>
+                        </div>
+                        <div class="progress-info">
+                          <span>{{ downloadProgress() | number:'1.0-0' }}%</span>
+                          @if (downloadSpeed()) {
+                            <span class="speed">{{ downloadSpeed() }}</span>
+                          }
+                          @if (downloadEta()) {
+                            <span class="eta">~{{ downloadEta() }}</span>
+                          }
+                        </div>
+                        <button class="cancel-btn" (click)="cancelDownload()">Cancel</button>
+                      </div>
+                    } @else {
+                      <button
+                        class="download-btn"
+                        (click)="downloadLocalModel(model.id)"
+                        [disabled]="downloadingModel() !== null"
+                      >
+                        <span>⬇️</span> Download
+                      </button>
+                    }
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Ollama alternative notice -->
+        @if (ollamaAvailable()) {
+          <div class="ollama-detected">
+            <span>💻</span>
+            <div>
+              <strong>Ollama detected</strong>
+              <p>You can also use your existing Ollama installation</p>
+            </div>
+            <button class="action-btn small" (click)="goToStep('ollama')">Use Ollama</button>
+          </div>
+        }
+
+        <div class="step-footer">
+          <button class="skip-btn" (click)="skipSetup()">Skip for now</button>
+          @if (hasDownloadedModel()) {
+            <button class="action-btn primary" (click)="continueFromLocalModels()">
+              Continue
+            </button>
+          }
         </div>
       </div>
     }

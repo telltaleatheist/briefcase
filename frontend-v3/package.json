@@ -25,6 +25,7 @@
     "@ngneat/hotkeys": "^4.1.0",
     "angular-split": "^17.2.0",
     "clipchimp": "file:..",
+    "driver.js": "^1.4.0",
     "rxjs": "^7.8.0",
     "socket.io-client": "^4.8.1",
     "tslib": "^2.6.0",
