@@ -553,39 +553,49 @@
 
     <!-- AI Analysis Tab -->
     <div class="ai-analysis-tab" *ngIf="activeTab === 'ai-analysis'">
-      <div class="analysis-header">
-        <div class="analysis-filters">
-          <button
-            class="filter-button"
-            [class.active]="analysisFilter === 'all'"
-            (click)="analysisFilter = 'all'">
-            All
-          </button>
-          <button
-            class="filter-button"
-            [class.active]="analysisFilter === 'summary'"
-            (click)="analysisFilter = 'summary'">
-            Summary
-          </button>
-          <button
-            class="filter-button"
-            [class.active]="analysisFilter === 'highlights'"
-            (click)="analysisFilter = 'highlights'">
-            Highlights
-          </button>
-          <button
-            class="filter-button"
-            [class.active]="analysisFilter === 'sentiment'"
-            (click)="analysisFilter = 'sentiment'">
-            Sentiment
-          </button>
-          <button
-            class="filter-button"
-            [class.active]="analysisFilter === 'topics'"
-            (click)="analysisFilter = 'topics'">
-            Topics
-          </button>
+      <!-- Analysis Configuration Info -->
+      <div class="analysis-config-card" *ngIf="analysisConfig">
+        <div class="config-header">
+          <span class="config-icon">🔧</span>
+          <span class="config-title">Analysis Configuration</span>
         </div>
+        <div class="config-grid">
+          <div class="config-item">
+            <span class="config-label">Model</span>
+            <span class="config-value">{{ analysisConfig.model }}</span>
+          </div>
+          <div class="config-item" *ngIf="analysisConfig.provider">
+            <span class="config-label">Provider</span>
+            <span class="config-value provider-badge" [class]="'provider-' + analysisConfig.provider">
+              {{ analysisConfig.provider | titlecase }}
+            </span>
+          </div>
+          <div class="config-item" *ngIf="analysisConfig.analyzedAt">
+            <span class="config-label">Analyzed</span>
+            <span class="config-value">{{ formatDate(analysisConfig.analyzedAt) }}</span>
+          </div>
+          <div class="config-item" *ngIf="analysisConfig.analysisTime">
+            <span class="config-label">Duration</span>
+            <span class="config-value">{{ formatAnalysisTime(analysisConfig.analysisTime) }}</span>
+          </div>
+        </div>
+        <div class="config-categories" *ngIf="analysisConfig.detectedCategories && analysisConfig.detectedCategories.length > 0">
+          <span class="config-label">Categories Detected</span>
+          <div class="category-badges">
+            <span
+              *ngFor="let category of analysisConfig.detectedCategories"
+              class="category-badge"
+              [attr.data-category]="category">
+              {{ category }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- No Analysis State -->
+      <div class="no-analysis-state" *ngIf="!analysisConfig && videoInfo?.aiAnalyses?.length === 0">
+        <span class="no-analysis-icon">🤖</span>
+        <p class="no-analysis-text">No AI analysis has been performed on this video yet.</p>
       </div>
 
       <!-- Section Cards - Each section is its own card -->

@@ -140,6 +140,71 @@ export interface AnalysisResult {
 
 const MAX_RETRIES = 3;
 
+// =============================================================================
+// FUZZY STRING MATCHING
+// =============================================================================
+
+/**
+ * Calculate Levenshtein distance between two strings
+ * Returns the minimum number of single-character edits needed
+ */
+function levenshteinDistance(str1: string, str2: string): number {
+  const m = str1.length;
+  const n = str2.length;
+
+  // Create a matrix of distances
+  const dp: number[][] = Array(m + 1)
+    .fill(null)
+    .map(() => Array(n + 1).fill(0));
+
+  // Initialize first column and row
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  // Fill in the rest of the matrix
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (str1[i - 1] === str2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = 1 + Math.min(
+          dp[i - 1][j],     // deletion
+          dp[i][j - 1],     // insertion
+          dp[i - 1][j - 1], // substitution
+        );
+      }
+    }
+  }
+
+  return dp[m][n];
+}
+
+/**
+ * Calculate similarity ratio between two strings (0 to 1)
+ * Uses Levenshtein distance normalized by the longer string length
+ */
+function stringSimilarity(str1: string, str2: string): number {
+  if (str1 === str2) return 1;
+  if (str1.length === 0 || str2.length === 0) return 0;
+
+  const distance = levenshteinDistance(str1, str2);
+  const maxLength = Math.max(str1.length, str2.length);
+
+  return 1 - distance / maxLength;
+}
+
+/**
+ * Normalize text for fuzzy comparison
+ * Removes punctuation, extra spaces, and lowercases
+ */
+function normalizeForComparison(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '') // Remove punctuation
+    .replace(/\s+/g, ' ')    // Normalize whitespace
+    .trim();
+}
+
 // Model size limits - conservative estimates based on typical context windows
 // These ensure chunks fit comfortably with room for prompts and output
 interface ModelLimits {
@@ -527,7 +592,10 @@ export class AIAnalysisService {
 
   /**
    * Find the timestamp for a specific phrase in the transcript segments
-   * Uses the first ~40 chars of the phrase to avoid cross-segment matching issues
+   * Uses multiple strategies including fuzzy matching to handle:
+   * - Whisper transcription errors
+   * - AI quote corrections/paraphrasing
+   * - Cross-segment quotes
    */
   private findPhraseTimestamp(
     phrase: string,
@@ -537,77 +605,157 @@ export class AIAnalysisService {
       return null;
     }
 
-    const normalizedPhrase = phrase.toLowerCase().trim();
+    const normalizedPhrase = normalizeForComparison(phrase);
     if (normalizedPhrase.length < 3) {
       return null;
     }
 
-    // Use first ~40 chars for matching (long quotes may span multiple segments)
-    const searchPhrase = normalizedPhrase.substring(0, 40);
+    // Use first ~50 chars for matching (long quotes may span multiple segments)
+    const searchPhrase = normalizedPhrase.substring(0, 50);
 
     // Strategy 1: Direct substring match using first part of phrase
     for (const segment of segments) {
-      const normalizedText = segment.text.toLowerCase();
+      const normalizedText = normalizeForComparison(segment.text);
       if (normalizedText.includes(searchPhrase)) {
         return segment.start;
       }
     }
 
-    // Strategy 1b: Try even shorter prefix (first 20 chars) if long match failed
-    if (searchPhrase.length > 20) {
-      const shortSearchPhrase = normalizedPhrase.substring(0, 20);
+    // Strategy 2: Shorter prefix match (first 25 chars)
+    if (searchPhrase.length > 25) {
+      const shortSearchPhrase = normalizedPhrase.substring(0, 25);
       for (const segment of segments) {
-        const normalizedText = segment.text.toLowerCase();
+        const normalizedText = normalizeForComparison(segment.text);
         if (normalizedText.includes(shortSearchPhrase)) {
           return segment.start;
         }
       }
     }
 
-    // Strategy 2: Word-based fuzzy match
-    const phraseWords = normalizedPhrase.split(/\s+/).filter((w) => w.length > 2);
-    if (phraseWords.length === 0) {
-      return null;
-    }
-
-    let bestMatch: { segment: Segment; score: number } | null = null;
+    // Strategy 3: Fuzzy matching with Levenshtein distance
+    // Compare the quote against each segment and find the best match
+    let bestFuzzyMatch: { segment: Segment; score: number } | null = null;
+    const FUZZY_THRESHOLD = 0.65; // 65% similarity required
 
     for (const segment of segments) {
-      const segmentWords = segment.text.toLowerCase().split(/\s+/);
-      let matchedWords = 0;
+      const normalizedText = normalizeForComparison(segment.text);
 
-      for (const phraseWord of phraseWords) {
-        if (
-          segmentWords.some(
-            (sw) => sw.includes(phraseWord) || phraseWord.includes(sw),
-          )
-        ) {
-          matchedWords++;
+      // For longer segments, use a sliding window to find best match
+      if (normalizedText.length >= searchPhrase.length) {
+        // Check similarity of the full segment text against the search phrase
+        const similarity = stringSimilarity(
+          searchPhrase,
+          normalizedText.substring(0, searchPhrase.length + 10), // Allow some overflow
+        );
+
+        if (similarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || similarity > bestFuzzyMatch.score)) {
+          bestFuzzyMatch = { segment, score: similarity };
         }
       }
 
-      const score = matchedWords / phraseWords.length;
-      if (score > 0.5 && (!bestMatch || score > bestMatch.score)) {
-        bestMatch = { segment, score };
+      // Also try matching the full normalized segment against the phrase
+      const fullSimilarity = stringSimilarity(
+        normalizedPhrase.substring(0, Math.min(normalizedPhrase.length, normalizedText.length)),
+        normalizedText.substring(0, Math.min(normalizedPhrase.length, normalizedText.length)),
+      );
+
+      if (fullSimilarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || fullSimilarity > bestFuzzyMatch.score)) {
+        bestFuzzyMatch = { segment, score: fullSimilarity };
       }
     }
 
-    if (bestMatch) {
-      return bestMatch.segment.start;
+    if (bestFuzzyMatch) {
+      this.logger.debug(
+        `[Fuzzy Match] Found "${phrase.substring(0, 30)}..." at ${bestFuzzyMatch.segment.start}s (score: ${bestFuzzyMatch.score.toFixed(2)})`,
+      );
+      return bestFuzzyMatch.segment.start;
     }
 
-    // Strategy 3: Check across segment boundaries
+    // Strategy 4: Distinctive word matching
+    // Find uncommon words in the quote and search for segments containing them
+    const commonWords = new Set([
+      'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+      'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare',
+      'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as',
+      'into', 'through', 'during', 'before', 'after', 'above', 'below',
+      'and', 'but', 'or', 'nor', 'so', 'yet', 'both', 'either', 'neither',
+      'not', 'only', 'own', 'same', 'than', 'too', 'very', 'just',
+      'that', 'this', 'these', 'those', 'what', 'which', 'who', 'whom',
+      'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
+      'my', 'your', 'his', 'its', 'our', 'their', 'mine', 'yours', 'hers', 'ours', 'theirs',
+      'about', 'also', 'back', 'because', 'come', 'could', 'day', 'even',
+      'first', 'get', 'give', 'go', 'good', 'know', 'like', 'look', 'make',
+      'new', 'now', 'one', 'people', 'say', 'see', 'some', 'take', 'think',
+      'time', 'two', 'use', 'want', 'way', 'well', 'work', 'year',
+    ]);
+
+    const phraseWords = normalizedPhrase.split(/\s+/).filter((w) => w.length > 3 && !commonWords.has(w));
+
+    if (phraseWords.length > 0) {
+      let bestWordMatch: { segment: Segment; matchCount: number; fuzzyScore: number } | null = null;
+
+      for (const segment of segments) {
+        const segmentText = normalizeForComparison(segment.text);
+        const segmentWords = segmentText.split(/\s+/);
+        let matchCount = 0;
+        let fuzzyMatchCount = 0;
+
+        for (const phraseWord of phraseWords) {
+          // Exact word match
+          if (segmentWords.some((sw) => sw === phraseWord || sw.includes(phraseWord) || phraseWord.includes(sw))) {
+            matchCount++;
+          } else {
+            // Fuzzy word match (for typos like "Somalies" vs "Somalis")
+            for (const segmentWord of segmentWords) {
+              if (segmentWord.length > 3 && stringSimilarity(phraseWord, segmentWord) > 0.75) {
+                fuzzyMatchCount++;
+                break;
+              }
+            }
+          }
+        }
+
+        const totalMatches = matchCount + fuzzyMatchCount * 0.8; // Fuzzy matches count slightly less
+        const score = totalMatches / phraseWords.length;
+
+        if (score > 0.4 && (!bestWordMatch || totalMatches > bestWordMatch.matchCount + bestWordMatch.fuzzyScore)) {
+          bestWordMatch = { segment, matchCount, fuzzyScore: fuzzyMatchCount * 0.8 };
+        }
+      }
+
+      if (bestWordMatch) {
+        this.logger.debug(
+          `[Word Match] Found "${phrase.substring(0, 30)}..." at ${bestWordMatch.segment.start}s (${bestWordMatch.matchCount} exact + ${bestWordMatch.fuzzyScore.toFixed(1)} fuzzy)`,
+        );
+        return bestWordMatch.segment.start;
+      }
+    }
+
+    // Strategy 5: Check across segment boundaries with fuzzy matching
     for (let i = 0; i < segments.length - 1; i++) {
-      const combinedText = (
-        segments[i].text +
-        ' ' +
-        segments[i + 1].text
-      ).toLowerCase();
-      if (combinedText.includes(normalizedPhrase)) {
+      const combinedText = normalizeForComparison(segments[i].text + ' ' + segments[i + 1].text);
+
+      // Try exact match first
+      if (combinedText.includes(searchPhrase)) {
+        return segments[i].start;
+      }
+
+      // Try fuzzy match on combined text
+      const similarity = stringSimilarity(
+        searchPhrase,
+        combinedText.substring(0, searchPhrase.length + 15),
+      );
+
+      if (similarity > FUZZY_THRESHOLD) {
+        this.logger.debug(
+          `[Cross-segment Fuzzy] Found "${phrase.substring(0, 30)}..." at ${segments[i].start}s (score: ${similarity.toFixed(2)})`,
+        );
         return segments[i].start;
       }
     }
 
+    this.logger.debug(`[No Match] Could not find: "${phrase.substring(0, 50)}..."`);
     return null;
   }
 

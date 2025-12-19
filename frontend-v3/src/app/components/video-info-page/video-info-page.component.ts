@@ -55,7 +55,13 @@ export class VideoInfoPageComponent implements OnInit {
 
   // AI Analysis
   selectedAnalysis: AIAnalysis | null = null;
-  analysisFilter: AIAnalysis['type'] | 'all' = 'all';
+  analysisConfig: {
+    model: string;
+    provider?: string;
+    analyzedAt?: Date;
+    analysisTime?: number; // in seconds
+    detectedCategories?: string[];
+  } | null = null;
 
   // Transcription
   transcriptionSearchQuery = '';
@@ -144,6 +150,25 @@ export class VideoInfoPageComponent implements OnInit {
 
         // Transform backend data to VideoInfo format
         this.videoInfo = this.transformToVideoInfo(video, transcript, analysis, tags, sections);
+
+        // Extract analysis configuration
+        if (analysis) {
+          const uniqueCategories = [...new Set(
+            sections
+              .filter((s: any) => s.category)
+              .map((s: any) => s.category.toLowerCase())
+          )];
+
+          this.analysisConfig = {
+            model: analysis.ai_model || analysis.model || 'Unknown',
+            provider: analysis.ai_provider || analysis.provider,
+            analyzedAt: analysis.analyzed_at ? new Date(analysis.analyzed_at) : undefined,
+            analysisTime: analysis.analysis_time_seconds,
+            detectedCategories: uniqueCategories.length > 0 ? uniqueCategories : undefined
+          };
+        } else {
+          this.analysisConfig = null;
+        }
 
         // Auto-expand the first analysis by default
         if (this.videoInfo.aiAnalyses.length > 0) {
@@ -486,8 +511,21 @@ export class VideoInfoPageComponent implements OnInit {
 
   getFilteredAnalyses(): AIAnalysis[] {
     if (!this.videoInfo) return [];
-    if (this.analysisFilter === 'all') return this.videoInfo.aiAnalyses;
-    return this.videoInfo.aiAnalyses.filter(a => a.type === this.analysisFilter);
+    return this.videoInfo.aiAnalyses;
+  }
+
+  formatAnalysisTime(seconds: number): string {
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    }
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    if (mins < 60) {
+      return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+    }
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
   }
 
   formatAnalysisContent(analysis: AIAnalysis): string {

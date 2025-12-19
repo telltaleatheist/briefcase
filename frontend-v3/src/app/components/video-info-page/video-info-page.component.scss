@@ -727,37 +727,185 @@
   }
 }
 
-// AI Analysis Tab
-.analysis-header {
+// AI Analysis Tab - Configuration Card
+.analysis-config-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  padding: $spacing-md;
   margin-bottom: $spacing-lg;
 
-  .analysis-filters {
+  .config-header {
     display: flex;
+    align-items: center;
     gap: $spacing-sm;
-    flex-wrap: wrap;
+    margin-bottom: $spacing-md;
+    padding-bottom: $spacing-sm;
+    border-bottom: 1px solid var(--border-color);
 
-    .filter-button {
-      padding: $spacing-sm $spacing-md;
-      background: var(--bg-card);
-      border: 2px solid var(--border-color);
-      border-radius: $radius-md;
+    .config-icon {
+      font-size: 18px;
+    }
+
+    .config-title {
+      font-size: $font-size-sm;
+      font-weight: $font-weight-semibold;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  }
+
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: $spacing-md;
+    margin-bottom: $spacing-md;
+  }
+
+  .config-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .config-label {
+      font-size: 11px;
+      font-weight: $font-weight-medium;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .config-value {
       font-size: $font-size-sm;
       font-weight: $font-weight-medium;
       color: var(--text-primary);
-      cursor: pointer;
-      transition: all $transition-fast;
 
-      &:hover {
-        border-color: $primary-orange;
-        background: rgba(255, 107, 53, 0.05);
-      }
+      &.provider-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: $radius-sm;
+        font-size: 12px;
+        width: fit-content;
 
-      &.active {
-        background: $gradient-sunset;
-        color: white;
-        border-color: $primary-orange;
+        &.provider-ollama {
+          background: rgba(76, 175, 80, 0.15);
+          color: #4caf50;
+        }
+
+        &.provider-claude {
+          background: rgba(217, 119, 87, 0.15);
+          color: #d97757;
+        }
+
+        &.provider-openai {
+          background: rgba(16, 163, 127, 0.15);
+          color: #10a37f;
+        }
+
+        &.provider-local {
+          background: rgba(107, 114, 128, 0.15);
+          color: #6b7280;
+        }
       }
     }
+  }
+
+  .config-categories {
+    padding-top: $spacing-sm;
+    border-top: 1px solid var(--border-color);
+
+    .config-label {
+      display: block;
+      font-size: 11px;
+      font-weight: $font-weight-medium;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: $spacing-sm;
+    }
+
+    .category-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+
+      .category-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: $font-weight-medium;
+        color: var(--text-secondary);
+        text-transform: capitalize;
+
+        // Category-specific colors
+        &[data-category="hate"] {
+          background: rgba(220, 38, 38, 0.1);
+          border-color: rgba(220, 38, 38, 0.3);
+          color: #dc2626;
+        }
+
+        &[data-category="violence"] {
+          background: rgba(239, 68, 68, 0.1);
+          border-color: rgba(239, 68, 68, 0.3);
+          color: #ef4444;
+        }
+
+        &[data-category="misinformation"] {
+          background: rgba(234, 179, 8, 0.1);
+          border-color: rgba(234, 179, 8, 0.3);
+          color: #ca8a04;
+        }
+
+        &[data-category="conspiracy"] {
+          background: rgba(168, 85, 247, 0.1);
+          border-color: rgba(168, 85, 247, 0.3);
+          color: #a855f7;
+        }
+
+        &[data-category="extremism"] {
+          background: rgba(249, 115, 22, 0.1);
+          border-color: rgba(249, 115, 22, 0.3);
+          color: #f97316;
+        }
+
+        &[data-category="shocking"] {
+          background: rgba(245, 158, 11, 0.1);
+          border-color: rgba(245, 158, 11, 0.3);
+          color: #d97706;
+        }
+
+        &[data-category="routine"] {
+          background: rgba(59, 130, 246, 0.1);
+          border-color: rgba(59, 130, 246, 0.3);
+          color: #3b82f6;
+        }
+      }
+    }
+  }
+}
+
+.no-analysis-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xl * 2;
+  text-align: center;
+  color: var(--text-tertiary);
+
+  .no-analysis-icon {
+    font-size: 48px;
+    margin-bottom: $spacing-md;
+    opacity: 0.5;
+  }
+
+  .no-analysis-text {
+    font-size: $font-size-base;
+    margin: 0;
   }
 }
 

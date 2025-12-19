@@ -237,26 +237,31 @@ ${categoryList}`
     ? `
 
 FLAGS RULES:
-1. "quote" = copy/paste exact words from TRANSCRIPT above. Do NOT summarize.
-2. Each unique quote gets exactly ONE flag with ONE category. Never flag the same quote twice.
-3. category should be one of: ${categoryNames}
+1. FLAG GENEROUSLY - if content MIGHT qualify for a category, flag it. Missing a flag is worse than a false positive.
+2. "quote" = copy/paste exact words from TRANSCRIPT above. Do NOT paraphrase or summarize.
+3. Each unique quote gets exactly ONE flag with ONE category. Never flag the same quote twice.
+4. category should be one of: ${categoryNames}
    - OR create a new category if content doesn't fit (use lowercase-with-dashes, e.g., "cult-tactics")
    - Do NOT combine categories (wrong: "hate-conspiracy", right: pick one or create new)
-4. "flags": [] if nothing matches
+5. "flags": [] ONLY if absolutely nothing matches any category
+
+EXAMPLE FLAG:
+{"category": "hate", "description": "dehumanizing language toward immigrants", "quote": "these people are like animals invading our country"}
 
 WRONG: Two flags for same content with different categories
 WRONG: Combined categories like "misinformation-conspiracy"
-RIGHT: One flag per quote, one category (existing or new)`
+WRONG: Paraphrasing the quote instead of copying exact words
+RIGHT: One flag per quote, one category (existing or new), exact transcript words`
     : '';
 
-  return `Analyze this transcript chapter.
+  return `Analyze this transcript chapter. Be thorough - flag any potentially problematic content.
 Video: ${videoTitle}
 Chapter: ${chapterNumber}
 ${prevContext}${customContext}
 Return JSON with:
 - title: 1-3 sentence description
 - summary: 2-3 sentence summary
-- flags: array of problematic quotes (see rules below)${categorySection}
+- flags: array of problematic quotes - ERR ON THE SIDE OF FLAGGING${categorySection}
 
 JSON format:
 {
