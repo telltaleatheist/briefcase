@@ -95,6 +95,21 @@ function getWhisperBinaryName(): string {
 }
 
 /**
+ * Get llama-server binary name for current platform/architecture
+ */
+function getLlamaBinaryName(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+
+  if (platform === 'win32') {
+    return 'llama-server.exe';
+  } else if (platform === 'darwin') {
+    return arch === 'arm64' ? 'llama-server-arm64' : 'llama-server-x64';
+  }
+  return 'llama-server';
+}
+
+/**
  * Get yt-dlp binary path relative to utilities/bin
  * ALL platforms use "onedir" builds (pre-extracted, fast startup)
  */
@@ -119,6 +134,8 @@ export interface RuntimePaths {
   ytdlp: string;
   whisper: string;
   whisperModelsDir: string;
+  llama: string;
+  llamaModelsDir: string;
 }
 
 /**
@@ -133,16 +150,18 @@ export function getRuntimePaths(): RuntimePaths {
   let ffprobePath: string;
   let ytdlpPath: string;
   let whisperPath: string;
+  let llamaPath: string;
 
   if (isPackaged()) {
     // Packaged: binaries in resources/node_modules (for ffmpeg/ffprobe)
-    // and resources/utilities/bin (for whisper and yt-dlp)
+    // and resources/utilities/bin (for whisper, yt-dlp, and llama)
     ffmpegPath = path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, `ffmpeg${ext}`);
     ffprobePath = path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, `ffprobe${ext}`);
     ytdlpPath = path.join(resourcesPath, 'utilities', 'bin', getYtDlpRelativePath());
     whisperPath = path.join(resourcesPath, 'utilities', 'bin', getWhisperBinaryName());
+    llamaPath = path.join(resourcesPath, 'utilities', 'bin', getLlamaBinaryName());
   } else {
-    // Development: ffmpeg from npm package, yt-dlp and whisper from utilities/bin
+    // Development: ffmpeg from npm package, yt-dlp, whisper, and llama from utilities/bin
     ffmpegPath = path.join(
       resourcesPath,
       'node_modules',
@@ -159,6 +178,7 @@ export function getRuntimePaths(): RuntimePaths {
     );
     ytdlpPath = path.join(resourcesPath, 'utilities', 'bin', getYtDlpRelativePath());
     whisperPath = path.join(resourcesPath, 'utilities', 'bin', getWhisperBinaryName());
+    llamaPath = path.join(resourcesPath, 'utilities', 'bin', getLlamaBinaryName());
   }
 
   return {
@@ -167,6 +187,8 @@ export function getRuntimePaths(): RuntimePaths {
     ytdlp: ytdlpPath,
     whisper: whisperPath,
     whisperModelsDir: path.join(resourcesPath, 'utilities', 'models'),
+    llama: llamaPath,
+    llamaModelsDir: path.join(resourcesPath, 'utilities', 'models', 'llama'),
   };
 }
 
@@ -204,6 +226,21 @@ export function verifyBinary(binaryPath: string, name: string): void {
  * Get DYLD_LIBRARY_PATH for whisper dylibs (macOS)
  */
 export function getWhisperLibraryPath(): string | undefined {
+  if (process.platform !== 'darwin') {
+    return undefined;
+  }
+
+  const resourcesPath = getResourcesPath();
+  const binDir = path.join(resourcesPath, 'utilities', 'bin');
+
+  return binDir;
+}
+
+/**
+ * Get DYLD_LIBRARY_PATH for llama dylibs (macOS)
+ * Same location as whisper dylibs
+ */
+export function getLlamaLibraryPath(): string | undefined {
   if (process.platform !== 'darwin') {
     return undefined;
   }

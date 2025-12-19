@@ -27,6 +27,7 @@ export {
   getBinaryExtension,
   verifyBinary,
   getWhisperLibraryPath,
+  getLlamaLibraryPath,
   type RuntimePaths,
 } from './runtime-paths';
 
@@ -65,3 +66,18 @@ export {
   type WhisperResult,
   type WhisperConfig,
 } from './whisper-bridge';
+
+// Llama bridge (local AI)
+export {
+  LlamaBridge,
+  type LlamaConfig,
+  type LlamaProgress,
+  type LlamaServerStatus,
+  type LlamaGenerateResult,
+} from './llama-bridge';
+
+// Llama manager
+export { LlamaManager, type LocalAIProgress } from './llama-manager';
+
+// Bridges module
+export { BridgesModule } from './bridges.module';

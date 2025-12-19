@@ -57,7 +57,7 @@ export interface AnalysisRequest {
   inputType: 'url' | 'file';
   mode?: 'full' | 'transcribe-only' | 'analysis-only' | 'process-only' | 'normalize-audio' | 'download-and-process'; // Analysis mode: full, transcription only, analysis only (using existing transcript), process only (fix aspect ratio), normalize audio, or download and process (download + import + fix aspect ratio)
   aiModel: string;
-  aiProvider?: 'ollama' | 'claude' | 'openai'; // AI provider to use
+  aiProvider?: 'local' | 'ollama' | 'claude' | 'openai'; // AI provider to use
   apiKey?: string; // API key for Claude/OpenAI
   ollamaEndpoint: string;
   whisperModel?: string;
@@ -689,11 +689,19 @@ export class AnalysisService implements OnModuleInit {
     let modelName = request.aiModel || 'default-model';
     this.logger.log(`[processAnalyzePhase] Original aiModel: ${request.aiModel}, aiProvider: ${request.aiProvider}`);
 
+    // Extract provider from model string if not explicitly set (e.g., "local:cogito-8b" -> provider="local", model="cogito-8b")
+    const validProviders = ['local', 'ollama', 'claude', 'openai'];
     try {
       if (modelName && typeof modelName === 'string' && modelName.includes(':')) {
         const parts = modelName.split(':');
-        // If first part matches provider, strip it
-        if (request.aiProvider && parts[0] === request.aiProvider) {
+        const potentialProvider = parts[0];
+
+        // If first part is a valid provider, extract it
+        if (validProviders.includes(potentialProvider)) {
+          if (!request.aiProvider || request.aiProvider !== potentialProvider) {
+            request.aiProvider = potentialProvider as 'local' | 'ollama' | 'claude' | 'openai';
+            this.logger.log(`[processAnalyzePhase] Extracted provider from model string: ${potentialProvider}`);
+          }
           modelName = parts.slice(1).join(':');
           this.logger.log(`[processAnalyzePhase] Stripped model name: ${modelName}`);
         }
@@ -714,7 +722,8 @@ export class AnalysisService implements OnModuleInit {
     this.logger.log(`Analysis started for job ${jobId}`);
 
     // Prepare AI model (preload if not loaded, unload others if different model)
-    if (request.aiProvider === 'ollama' || !request.aiProvider) {
+    // Only for Ollama - local, claude, and openai providers handle their own model loading
+    if (request.aiProvider === 'ollama') {
       try {
         await this.ollama.prepareModel(modelName, request.ollamaEndpoint);
       } catch (error: any) {
@@ -741,8 +750,8 @@ export class AnalysisService implements OnModuleInit {
     const provider = request.aiProvider || 'ollama';
     let apiKey = request.apiKey;
 
-    // Fetch API key from stored config if not provided and not using Ollama
-    if (!apiKey && provider !== 'ollama') {
+    // Fetch API key from stored config if not provided and not using Ollama or local
+    if (!apiKey && provider !== 'ollama' && provider !== 'local') {
       if (provider === 'openai') {
         apiKey = this.apiKeysService.getOpenAiApiKey();
         this.logger.log(`[${jobId}] Using stored OpenAI API key`);
@@ -763,7 +772,7 @@ export class AnalysisService implements OnModuleInit {
 
     // Use native AIAnalysisService (replaces Python bridge)
     const analysisResult = await this.aiAnalysis.analyzeTranscript({
-      provider: provider as 'ollama' | 'openai' | 'claude',
+      provider: provider as 'local' | 'ollama' | 'openai' | 'claude',
       model: modelName,
       transcript: request.transcriptText!,
       segments,

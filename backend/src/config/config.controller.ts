@@ -1,6 +1,7 @@
 import { Controller, Post, Body, Get, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { ApiKeysService } from './api-keys.service';
+import { LlamaManager } from '../bridges';
 import { DEFAULT_PROMPTS, DEFAULT_CATEGORIES } from '../analysis/prompts/analysis-prompts';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,6 +19,7 @@ export class ConfigController implements OnModuleInit {
   constructor(
     private readonly configService: SharedConfigService,
     private readonly apiKeysService: ApiKeysService,
+    private readonly llamaManager: LlamaManager,
   ) {
     const userDataPath = process.env.APPDATA ||
                       (process.platform === 'darwin' ?
@@ -569,6 +571,34 @@ export class ConfigController implements OnModuleInit {
       return {
         success: false,
         message: `Failed to reset analysis prompts: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Get local AI status (bundled llama.cpp + Cogito 8B)
+   */
+  @Get('local-ai-status')
+  async getLocalAIStatus() {
+    try {
+      const available = this.llamaManager.isAvailable();
+      const ready = this.llamaManager.isReady();
+      const status = this.llamaManager.getStatus();
+
+      return {
+        success: true,
+        available,
+        ready,
+        model: 'cogito-8b',
+        modelName: 'Cogito 8B',
+        status,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        available: false,
+        ready: false,
+        message: `Failed to get local AI status: ${(error as Error).message}`,
       };
     }
   }

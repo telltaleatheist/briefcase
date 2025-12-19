@@ -315,7 +315,7 @@ export class DatabaseLibraryService {
    */
   async startBatchAnalysis(options?: {
     aiModel?: string;
-    aiProvider?: 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
     whisperModel?: string;
     ollamaEndpoint?: string;
     limit?: number;

@@ -19,6 +19,7 @@ import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
 import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { BridgesModule } from './bridges';
 import { join } from 'path';
 
 @Global()
@@ -39,6 +40,7 @@ import { join } from 'path';
         })]
       : []),
     CommonModule,
+    BridgesModule,
     SharedConfigModule,
     ApiKeysModule,
     DatabaseModule,

@@ -1,0 +1,211 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.owenmorgan.clipchimp",
+  "productName": "ClipChimp",
+  "asar": true,
+  "compression": "normal",
+  "afterPack": "./scripts/afterPack.js",
+  "directories": {
+    "output": "dist-electron",
+    "buildResources": "assets"
+  },
+  "extraResources": [
+    {
+      "from": "assets",
+      "to": "assets",
+      "filter": ["tray-icon-*.png", "tray-icon-*.ico"]
+    },
+    {
+      "from": "backend/node_modules",
+      "to": "backend/node_modules",
+      "filter": ["**/*", "!@ffmpeg-installer/**", "!@ffprobe-installer/**"]
+    },
+    {
+      "from": "backend/dist",
+      "to": "backend/dist"
+    },
+    {
+      "from": "dist-electron/shared",
+      "to": "dist-electron/shared",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "utilities/models",
+      "to": "utilities/models",
+      "filter": ["ggml-tiny.bin", "ggml-base.bin"]
+    }
+  ],
+  "files": [
+    "dist-electron/electron/**/*",
+    "dist-electron/config/**/*",
+    "dist-electron/utilities/**/*",
+    "dist-electron/shared/**/*",
+    "!dist-electron/**/*.map",
+    "!backend/**",
+    "frontend-v3/dist/frontend-v3/**/*",
+    "!utilities/**",
+    "node_modules/**/*",
+    "!**/node_modules/**/test/**",
+    "!**/node_modules/**/tests/**",
+    "!**/node_modules/**/*.md",
+    "!**/node_modules/**/*.d.ts",
+    "!**/node_modules/**/*.map",
+    "!**/node_modules/**/LICENSE*",
+    "!**/node_modules/**/license*",
+    "!**/node_modules/**/docs/**",
+    "!**/node_modules/**/example*/**",
+    "!**/node_modules/**/coverage/**",
+    "!**/node_modules/**/*.ts",
+    "!**/node_modules/**/README*",
+    "!**/node_modules/**/CHANGELOG*",
+    "!**/node_modules/@ffmpeg-installer/**",
+    "!**/node_modules/@ffprobe-installer/**"
+  ],
+  "asarUnpack": ["utilities/**"],
+  "mac": {
+    "category": "public.app-category.utilities",
+    "icon": "assets/icon.icns",
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["arm64", "x64"]
+      }
+    ],
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "assets/entitlements.mac.plist",
+    "entitlementsInherit": "assets/entitlements.mac.plist",
+    "artifactName": "${productName}-Lite-${version}-${arch}.${ext}",
+    "extraResources": [
+      {
+        "from": "node_modules/@ffmpeg-installer/darwin-arm64",
+        "to": "node_modules/@ffmpeg-installer/darwin-arm64"
+      },
+      {
+        "from": "node_modules/@ffprobe-installer/darwin-arm64",
+        "to": "node_modules/@ffprobe-installer/darwin-arm64"
+      },
+      {
+        "from": "node_modules/@ffmpeg-installer/darwin-x64",
+        "to": "node_modules/@ffmpeg-installer/darwin-x64"
+      },
+      {
+        "from": "node_modules/@ffprobe-installer/darwin-x64",
+        "to": "node_modules/@ffprobe-installer/darwin-x64"
+      },
+      {
+        "from": "utilities/bin/yt-dlp_macos_dir",
+        "to": "utilities/bin/yt-dlp_macos_dir"
+      },
+      {
+        "from": "utilities/bin",
+        "to": "utilities/bin",
+        "filter": [
+          "whisper-cli-arm64",
+          "whisper-cli-x64",
+          "libwhisper.1-arm64.dylib",
+          "libwhisper.1-x64.dylib",
+          "libggml-arm64.dylib",
+          "libggml-x64.dylib",
+          "libggml-base-arm64.dylib",
+          "libggml-base-x64.dylib",
+          "libggml-cpu-arm64.dylib",
+          "libggml-cpu-x64.dylib",
+          "libggml-blas-arm64.dylib",
+          "libggml-blas-x64.dylib",
+          "libggml-metal-arm64.dylib"
+        ]
+      }
+    ],
+    "extendInfo": {
+      "LSUIElement": false
+    }
+  },
+  "dmg": {
+    "format": "ULFO",
+    "contents": [
+      { "x": 130, "y": 220 },
+      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+    ]
+  },
+  "win": {
+    "icon": "assets/icon.ico",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "artifactName": "${productName}-Lite-Setup-${version}.${ext}",
+    "extraResources": [
+      {
+        "from": "node_modules/@ffmpeg-installer/win32-x64",
+        "to": "node_modules/@ffmpeg-installer/win32-x64"
+      },
+      {
+        "from": "node_modules/@ffprobe-installer/win32-x64",
+        "to": "node_modules/@ffprobe-installer/win32-x64"
+      },
+      {
+        "from": "utilities/bin/yt-dlp_win_dir",
+        "to": "utilities/bin/yt-dlp_win_dir"
+      },
+      {
+        "from": "utilities/bin",
+        "to": "utilities/bin",
+        "filter": [
+          "whisper-cli.exe",
+          "ggml.dll",
+          "ggml-base.dll",
+          "ggml-cpu.dll",
+          "whisper.dll"
+        ]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "perMachine": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": true,
+    "displayLanguageSelector": false,
+    "artifactName": "${productName}-Lite-Setup-${version}.${ext}",
+    "include": "assets/installer.nsh",
+    "warningsAsErrors": false,
+    "packElevateHelper": true,
+    "differentialPackage": false
+  },
+  "linux": {
+    "icon": "assets/icon.png",
+    "target": ["AppImage", "deb"],
+    "category": "Utility",
+    "artifactName": "${productName}-Lite-${version}.${ext}",
+    "extraResources": [
+      {
+        "from": "node_modules/@ffmpeg-installer/linux-x64",
+        "to": "node_modules/@ffmpeg-installer/linux-x64"
+      },
+      {
+        "from": "node_modules/@ffprobe-installer/linux-x64",
+        "to": "node_modules/@ffprobe-installer/linux-x64"
+      },
+      {
+        "from": "utilities/bin/yt-dlp_linux_dir",
+        "to": "utilities/bin/yt-dlp_linux_dir"
+      },
+      {
+        "from": "utilities/bin",
+        "to": "utilities/bin",
+        "filter": ["whisper-cli"]
+      }
+    ]
+  },
+  "publish": {
+    "provider": "github",
+    "releaseType": "release"
+  }
+}

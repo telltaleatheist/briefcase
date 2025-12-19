@@ -123,6 +123,7 @@ export class SettingsPageComponent implements OnInit {
     this.aiConfigured.set(status.isReady);
     this.activeProviders.set(status.availableProviders.map(p => {
       switch (p) {
+        case 'local': return 'Local AI';
         case 'ollama': return 'Ollama';
         case 'claude': return 'Claude';
         case 'openai': return 'OpenAI';
@@ -253,6 +254,15 @@ export class SettingsPageComponent implements OnInit {
     try {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: Array<{ value: string; label: string; provider: string }> = [];
+
+      // Add Local AI model first if available (bundled, no setup required)
+      if (availability.hasLocal) {
+        models.push({
+          value: 'local:cogito-8b',
+          label: 'Cogito 8B (Local)',
+          provider: 'local'
+        });
+      }
 
       // Add Ollama models (fetched dynamically by aiSetupService)
       if (availability.hasOllama && availability.ollamaModels.length > 0) {

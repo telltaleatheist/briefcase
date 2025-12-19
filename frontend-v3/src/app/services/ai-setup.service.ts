@@ -4,6 +4,8 @@ import { Observable, of } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 
 export interface AIAvailability {
+  hasLocal: boolean;
+  localReady: boolean;
   hasOllama: boolean;
   hasClaudeKey: boolean;
   hasOpenAIKey: boolean;
@@ -15,7 +17,7 @@ export interface AIAvailability {
 export interface AISetupStatus {
   isReady: boolean;
   needsSetup: boolean;
-  availableProviders: ('ollama' | 'claude' | 'openai')[];
+  availableProviders: ('local' | 'ollama' | 'claude' | 'openai')[];
   message?: string;
 }
 
@@ -27,6 +29,8 @@ export class AiSetupService {
 
   // Reactive state
   availability = signal<AIAvailability>({
+    hasLocal: false,
+    localReady: false,
     hasOllama: false,
     hasClaudeKey: false,
     hasOpenAIKey: false,
@@ -43,17 +47,20 @@ export class AiSetupService {
     this.availability.update(v => ({ ...v, isChecking: true }));
 
     try {
-      // Check API keys first (this also returns lastUsedProvider)
-      const keysResult = await this.checkAPIKeys().toPromise();
+      // Check local AI status and API keys in parallel
+      const [localResult, keysResult] = await Promise.all([
+        this.checkLocalAI().toPromise().catch(() => ({ available: false, ready: false })),
+        this.checkAPIKeys().toPromise()
+      ]);
 
       // Only check Ollama if:
       // 1. No provider is set yet (first run)
       // 2. Ollama is the selected provider
-      // 3. No API keys are configured (user might want to use Ollama)
+      // 3. No API keys are configured and local AI is not available
       const shouldCheckOllama =
         !keysResult?.lastUsedProvider ||
         keysResult.lastUsedProvider === 'ollama' ||
-        (!keysResult.hasClaudeKey && !keysResult.hasOpenAIKey);
+        (!keysResult.hasClaudeKey && !keysResult.hasOpenAIKey && !localResult?.available);
 
       let ollamaResult = { available: false, models: [] as string[] };
       if (shouldCheckOllama) {
@@ -61,6 +68,8 @@ export class AiSetupService {
       }
 
       const newAvailability: AIAvailability = {
+        hasLocal: localResult?.available || false,
+        localReady: localResult?.ready || false,
         hasOllama: ollamaResult?.available || false,
         ollamaModels: ollamaResult?.models || [],
         hasClaudeKey: keysResult?.hasClaudeKey || false,
@@ -87,8 +96,12 @@ export class AiSetupService {
    */
   getSetupStatus(): AISetupStatus {
     const avail = this.availability();
-    const providers: ('ollama' | 'claude' | 'openai')[] = [];
+    const providers: ('local' | 'ollama' | 'claude' | 'openai')[] = [];
 
+    // Local AI is always first option if available (bundled, no setup required)
+    if (avail.hasLocal) {
+      providers.push('local');
+    }
     if (avail.hasOllama && avail.ollamaModels.length > 0) {
       providers.push('ollama');
     }
@@ -104,6 +117,8 @@ export class AiSetupService {
 
     if (!isReady) {
       message = 'No AI providers configured';
+    } else if (providers.includes('local')) {
+      message = 'Local AI ready (Cogito 8B)';
     } else if (providers.includes('ollama')) {
       message = `Ollama ready with ${avail.ollamaModels.length} model(s)`;
     } else {
@@ -158,6 +173,22 @@ export class AiSetupService {
       catchError(error => {
         console.error('Error checking API keys:', error);
         return of({ hasClaudeKey: false, hasOpenAIKey: false, lastUsedProvider: undefined });
+      })
+    );
+  }
+
+  /**
+   * Check if bundled local AI (Cogito 8B) is available
+   */
+  private checkLocalAI(): Observable<{ available: boolean; ready: boolean }> {
+    return this.http.get<any>(`${this.API_BASE}/config/local-ai-status`).pipe(
+      map(response => ({
+        available: response.available || false,
+        ready: response.ready || false
+      })),
+      catchError(error => {
+        console.error('Error checking local AI:', error);
+        return of({ available: false, ready: false });
       })
     );
   }

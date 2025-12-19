@@ -8,7 +8,7 @@ import { AiSetupService } from '../../services/ai-setup.service';
 interface AIModelOption {
   value: string;
   label: string;
-  provider: 'ollama' | 'claude' | 'openai';
+  provider: 'local' | 'ollama' | 'claude' | 'openai';
 }
 
 @Component({
@@ -87,6 +87,15 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
 
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
+
+      // Add Local AI model first if available (bundled, no setup required)
+      if (availability.hasLocal) {
+        models.push({
+          value: 'local:cogito-8b',
+          label: 'Cogito 8B (Local)',
+          provider: 'local'
+        });
+      }
 
       // Add Ollama models (fetched dynamically by aiSetupService)
       if (availability.hasOllama && availability.ollamaModels.length > 0) {
@@ -209,11 +218,11 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     return 0;
   }
 
-  getModelsByProvider(provider: 'ollama' | 'claude' | 'openai'): AIModelOption[] {
+  getModelsByProvider(provider: 'local' | 'ollama' | 'claude' | 'openai'): AIModelOption[] {
     return this.aiModels.filter(m => m.provider === provider);
   }
 
-  hasModelsForProvider(provider: 'ollama' | 'claude' | 'openai'): boolean {
+  hasModelsForProvider(provider: 'local' | 'ollama' | 'claude' | 'openai'): boolean {
     return this.aiModels.some(m => m.provider === provider);
   }
 

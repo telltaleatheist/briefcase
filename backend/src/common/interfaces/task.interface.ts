@@ -76,7 +76,7 @@ export interface AnalyzeTask extends BaseTask {
   type: 'analyze';
   options?: {
     aiModel: string;
-    aiProvider?: 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
     apiKey?: string;
     ollamaEndpoint?: string;
     customInstructions?: string;

@@ -42,6 +42,8 @@ export class AiSetupWizardComponent implements OnInit {
   pullingModel = signal<string | null>(null);
 
   // Availability status
+  localAvailable = signal(false);
+  localReady = signal(false);
   ollamaAvailable = signal(false);
   ollamaModels = signal<string[]>([]);
   claudeKeySet = signal(false);
@@ -57,6 +59,8 @@ export class AiSetupWizardComponent implements OnInit {
 
   private async refreshAvailability() {
     const availability = await this.aiSetupService.checkAIAvailability();
+    this.localAvailable.set(availability.hasLocal);
+    this.localReady.set(availability.localReady);
     this.ollamaAvailable.set(availability.hasOllama);
     this.ollamaModels.set(availability.ollamaModels);
     this.claudeKeySet.set(availability.hasClaudeKey);
@@ -123,6 +127,11 @@ export class AiSetupWizardComponent implements OnInit {
 
   selectProvider(provider: 'ollama' | 'claude' | 'openai') {
     this.currentStep.set(provider);
+  }
+
+  selectLocal() {
+    // Local AI doesn't need setup - go directly to done
+    this.currentStep.set('done');
   }
 
   goToStep(step: WizardStep) {
@@ -264,6 +273,6 @@ export class AiSetupWizardComponent implements OnInit {
   }
 
   hasAnyProvider(): boolean {
-    return this.ollamaAvailable() || this.claudeKeySet() || this.openaiKeySet();
+    return this.localAvailable() || this.ollamaAvailable() || this.claudeKeySet() || this.openaiKeySet();
   }
 }

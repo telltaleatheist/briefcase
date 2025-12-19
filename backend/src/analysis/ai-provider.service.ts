@@ -2,9 +2,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import { LlamaManager } from '../bridges';
 
 export interface AIProviderConfig {
-  provider: 'ollama' | 'claude' | 'openai';
+  provider: 'local' | 'ollama' | 'claude' | 'openai';
   model: string;
   apiKey?: string;
   ollamaEndpoint?: string;
@@ -25,6 +26,8 @@ export class AIProviderService {
   private readonly logger = new Logger(AIProviderService.name);
   private anthropic: Anthropic | null = null;
   private openai: OpenAI | null = null;
+
+  constructor(private readonly llamaManager: LlamaManager) {}
 
   // Pricing per 1M tokens (as of January 2025)
   private readonly PRICING: Record<'claude' | 'openai', Record<string, { input: number; output: number }>> = {
@@ -76,6 +79,8 @@ export class AIProviderService {
     this.logger.log(`Generating text with provider: ${config.provider}, model: ${config.model}`);
 
     switch (config.provider) {
+      case 'local':
+        return this.generateWithLocal(prompt);
       case 'claude':
         return this.generateWithClaude(prompt, config);
       case 'openai':
@@ -271,6 +276,36 @@ export class AIProviderService {
     } catch (error) {
       this.logger.error(`Ollama API error: ${(error as Error).message}`);
       throw new Error(`Ollama API error: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Generate text using bundled local AI (Cogito 8B via llama.cpp)
+   */
+  private async generateWithLocal(prompt: string): Promise<AIResponse> {
+    if (!this.llamaManager.isAvailable()) {
+      throw new Error('Local AI model not available. Please reinstall the application.');
+    }
+
+    try {
+      const result = await this.llamaManager.generateText(prompt);
+
+      this.logger.log(
+        `Local AI tokens: ${result.inputTokens} input + ${result.outputTokens} output = ${result.totalTokens} total (local, $0.00)`,
+      );
+
+      return {
+        text: result.text,
+        tokensUsed: result.totalTokens,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        estimatedCost: 0, // Local model is free
+        provider: 'local',
+        model: 'cogito-8b',
+      };
+    } catch (error) {
+      this.logger.error(`Local AI error: ${(error as Error).message}`);
+      throw new Error(`Local AI error: ${(error as Error).message}`);
     }
   }
 

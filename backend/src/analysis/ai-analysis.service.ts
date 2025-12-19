@@ -103,7 +103,7 @@ export interface AnalysisProgress {
 }
 
 export interface AnalysisOptions {
-  provider: 'ollama' | 'openai' | 'claude';
+  provider: 'local' | 'ollama' | 'openai' | 'claude';
   model: string;
   transcript: string;
   segments: Segment[];
@@ -273,7 +273,7 @@ export class AIAnalysisService {
     this.logger.log('=== AIAnalysisService.analyzeTranscript CALLED (Two-Pass) ===');
     this.logger.log(`Provider: ${options.provider}, Model: ${options.model}`);
 
-    const {
+    let {
       provider,
       model,
       segments,
@@ -285,6 +285,21 @@ export class AIAnalysisService {
       ollamaEndpoint,
       onProgress,
     } = options;
+
+    // Safety: Strip provider prefix from model if present (e.g., "local:cogito-8b" -> "cogito-8b")
+    const validProviders = ['local', 'ollama', 'claude', 'openai'];
+    if (model && model.includes(':')) {
+      const parts = model.split(':');
+      if (validProviders.includes(parts[0])) {
+        const extractedProvider = parts[0] as 'local' | 'ollama' | 'claude' | 'openai';
+        if (provider !== extractedProvider) {
+          this.logger.log(`[analyzeTranscript] Correcting provider: ${provider} -> ${extractedProvider}`);
+          provider = extractedProvider;
+        }
+        model = parts.slice(1).join(':');
+        this.logger.log(`[analyzeTranscript] Stripped model prefix: ${model}`);
+      }
+    }
 
     const sendProgress = (phase: string, progress: number, message: string) => {
       console.log(`[AI Analysis] ${progress}% - ${message}`);

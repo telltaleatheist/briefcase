@@ -57,6 +57,14 @@
     "package:win-arm64:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
     "package:linux": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
     "package:linux:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
+    "package:mac-arm64:lite": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --mac --arm64 --publish never",
+    "package:mac-arm64:full": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --mac --arm64 --publish never",
+    "package:mac-x64:lite": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --mac --x64 --publish never",
+    "package:mac-x64:full": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --mac --x64 --publish never",
+    "package:win-x64:lite": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --win --x64 --publish never",
+    "package:win-x64:full": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --win --x64 --publish never",
+    "package:linux:lite": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --linux --publish never",
+    "package:linux:full": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --linux --publish never",
     "clean:cache": "find . -name '.DS_Store' -delete && find . -name '*.tsbuildinfo' -not -path '*/node_modules/*' -delete"
   },
   "keywords": [
@@ -151,6 +159,13 @@
           "ggml-tiny.bin",
           "ggml-base.bin"
         ]
+      },
+      {
+        "from": "utilities/models/llama",
+        "to": "utilities/models/llama",
+        "filter": [
+          "cogito-8b-q6_k.gguf"
+        ]
       }
     ],
     "files": [
@@ -235,7 +250,24 @@
             "libggml-cpu-x64.dylib",
             "libggml-blas-arm64.dylib",
             "libggml-blas-x64.dylib",
-            "libggml-metal-arm64.dylib"
+            "libggml-metal-arm64.dylib",
+            "llama-server-arm64",
+            "llama-server-x64",
+            "libllama-arm64.dylib",
+            "libllama-x64.dylib",
+            "llama-libggml-arm64.dylib",
+            "llama-libggml-x64.dylib",
+            "llama-libggml-base-arm64.dylib",
+            "llama-libggml-base-x64.dylib",
+            "llama-libggml-cpu-arm64.dylib",
+            "llama-libggml-cpu-x64.dylib",
+            "llama-libggml-metal-arm64.dylib",
+            "llama-libggml-blas-arm64.dylib",
+            "llama-libggml-blas-x64.dylib",
+            "llama-libggml-rpc-arm64.dylib",
+            "llama-libggml-rpc-x64.dylib",
+            "libmtmd-arm64.dylib",
+            "libmtmd-x64.dylib"
           ]
         }
       ],
@@ -290,7 +322,9 @@
             "ggml.dll",
             "ggml-base.dll",
             "ggml-cpu.dll",
-            "whisper.dll"
+            "whisper.dll",
+            "llama-server.exe",
+            "llama.dll"
           ]
         }
       ]

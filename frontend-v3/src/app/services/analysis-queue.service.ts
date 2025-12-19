@@ -107,7 +107,7 @@ export class AnalysisQueueService {
     videoPath: string;
     filename: string;
     mode?: 'full' | 'transcribe-only' | 'process-only';
-    aiProvider?: 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
     aiModel?: string;
     customInstructions?: string;
   }): string {

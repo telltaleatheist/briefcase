@@ -51,9 +51,32 @@
         <h3 class="section-title">Choose a Provider</h3>
 
         <div class="provider-cards">
+          <!-- Local AI Card (if available) -->
+          @if (localAvailable()) {
+            <div class="provider-card recommended" (click)="selectLocal()">
+              <div class="card-badge">Bundled</div>
+              <div class="card-header">
+                <span class="card-icon">🏠</span>
+                <div class="card-titles">
+                  <h4>Local AI</h4>
+                  <span class="card-tagline">Ready to Use</span>
+                </div>
+              </div>
+              <ul class="card-features">
+                <li class="pro"><span>✓</span> No setup required</li>
+                <li class="pro"><span>✓</span> Works offline</li>
+                <li class="pro"><span>✓</span> No API costs ever</li>
+                <li class="con"><span>✗</span> Requires 8GB RAM</li>
+              </ul>
+              <button class="card-btn primary">Use Local AI</button>
+            </div>
+          }
+
           <!-- Ollama Card -->
-          <div class="provider-card recommended" (click)="selectProvider('ollama')">
-            <div class="card-badge">Recommended</div>
+          <div class="provider-card" [class.recommended]="!localAvailable()" (click)="selectProvider('ollama')">
+            @if (!localAvailable()) {
+              <div class="card-badge">Recommended</div>
+            }
             <div class="card-header">
               <span class="card-icon">💻</span>
               <div class="card-titles">
@@ -67,7 +90,7 @@
               <li class="pro"><span>✓</span> Works offline</li>
               <li class="con"><span>✗</span> 4+ GB download required</li>
             </ul>
-            <button class="card-btn primary">Configure Ollama</button>
+            <button class="card-btn" [class.primary]="!localAvailable()">Configure Ollama</button>
           </div>
 
           <!-- Claude Card -->
@@ -337,6 +360,15 @@
         <div class="success-card">
           <h3>Active Providers</h3>
           <div class="provider-list">
+            @if (localAvailable()) {
+              <div class="provider-item">
+                <span class="check-icon">✓</span>
+                <div>
+                  <strong>Local AI</strong>
+                  <span>Cogito 8B - Ready to use</span>
+                </div>
+              </div>
+            }
             @if (ollamaAvailable() && ollamaModels().length > 0) {
               <div class="provider-item">
                 <span class="check-icon">✓</span>

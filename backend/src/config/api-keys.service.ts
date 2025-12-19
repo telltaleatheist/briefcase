@@ -7,7 +7,7 @@ import * as os from 'os';
 export interface ApiKeysConfig {
   claudeApiKey?: string;
   openaiApiKey?: string;
-  lastUsedProvider?: 'ollama' | 'claude' | 'openai';
+  lastUsedProvider?: 'local' | 'ollama' | 'claude' | 'openai';
   lastUsedModel?: string;
 }
 

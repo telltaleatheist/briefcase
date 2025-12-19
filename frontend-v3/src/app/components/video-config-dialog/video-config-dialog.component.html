@@ -121,7 +121,13 @@
                     <option *ngIf="loadingModels" value="">Loading models...</option>
                     <option *ngIf="!loadingModels && aiModels.length === 0" value="">No models available</option>
 
-                    <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama (Local)">
+                    <optgroup *ngIf="hasModelsForProvider('local')" label="Local AI (Bundled)">
+                      <option *ngFor="let model of getModelsByProvider('local')" [value]="model.value">
+                        {{ model.label }}
+                      </option>
+                    </optgroup>
+
+                    <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama">
                       <option *ngFor="let model of getModelsByProvider('ollama')" [value]="model.value">
                         {{ model.label }}
                       </option>
