@@ -1645,7 +1645,6 @@ Tip: Right-click on the timeline for additional options.
 
     // Define specific colors for known categories
     const categoryColors: { [key: string]: string } = {
-      'routine': '#a855f7',      // Purple
       'extremism': '#ef4444',    // Red
       'hate': '#f97316',         // Orange
       'violence': '#dc2626',     // Dark red

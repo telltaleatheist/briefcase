@@ -31,7 +31,6 @@ export interface ExportDialogData {
 const CATEGORY_COLORS: Record<string, string> = {
   'export changes': '#22c55e',      // Green
   'current selection': '#ff6b35',   // Orange
-  'routine': '#3b82f6',             // Blue
   'shocking': '#f59e0b',            // Amber
   'political-violence': '#b91c1c',  // Dark Red
   'hate': '#dc2626',                // Red
@@ -217,7 +216,6 @@ export class ExportDialogComponent implements OnInit {
       'misinformation': '❌',
       'conspiracy': '🔮',
       'marker': '📍',
-      'routine': '📋',
       'shocking': '⚡'
     };
     return icons[category.toLowerCase()] || '📍';

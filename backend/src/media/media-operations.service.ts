@@ -518,7 +518,6 @@ export class MediaOperationsService {
       apiKey?: string;
       ollamaEndpoint?: string;
       customInstructions?: string;
-      analysisQuality?: 'fast' | 'thorough';
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
@@ -607,7 +606,6 @@ export class MediaOperationsService {
         categories,
         apiKey,
         ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
-        analysisQuality: options.analysisQuality,
         onProgress: (progress) => {
           this.eventService.emitTaskProgress(jobId || '', 'analyze', progress.progress, progress.message);
         },
@@ -718,7 +716,7 @@ export class MediaOperationsService {
             startSeconds,
             endSeconds,
             title: chapter.title,
-            description: chapter.description,
+            description: chapter.summary || '',
             source: 'ai',
           });
         }

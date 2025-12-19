@@ -152,41 +152,10 @@
                   </button>
                 </div>
                 <div class="form-group">
-                  <label>Analysis Quality</label>
-                  <div class="quality-selector">
-                    <label class="quality-option" [class.selected]="settings.analysisQuality === 'fast'">
-                      <input
-                        type="radio"
-                        name="analysisQuality"
-                        value="fast"
-                        [checked]="settings.analysisQuality === 'fast'"
-                        (change)="settings.analysisQuality = 'fast'"
-                      />
-                      <span class="quality-label">
-                        <span class="quality-title">⚡ Single Pass</span>
-                        <span class="quality-desc">One API call, lower cost</span>
-                      </span>
-                    </label>
-                    <label class="quality-option" [class.selected]="settings.analysisQuality === 'thorough'">
-                      <input
-                        type="radio"
-                        name="analysisQuality"
-                        value="thorough"
-                        [checked]="settings.analysisQuality === 'thorough'"
-                        (change)="settings.analysisQuality = 'thorough'"
-                      />
-                      <span class="quality-label">
-                        <span class="quality-title">🔍 Multi Pass</span>
-                        <span class="quality-desc">Multiple API calls, better quotes</span>
-                      </span>
-                    </label>
-                  </div>
-                </div>
-                <div class="form-group">
                   <label>Custom Instructions (optional)</label>
                   <textarea
                     rows="3"
-                    placeholder="Add specific instructions for the AI analysis..."
+                    placeholder="Be specific for best results. Example: 'This is [person], a [context]. Watch for [specific things] such as [examples]...'"
                     [(ngModel)]="settings.customInstructions"
                   ></textarea>
                 </div>

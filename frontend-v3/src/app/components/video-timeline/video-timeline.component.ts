@@ -1072,7 +1072,6 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
     // Define standard category labels and colors
     const categoryInfo: { [key: string]: { label: string; color: string } } = {
-      'routine': { label: 'Routine', color: '#a855f7' },
       'extremism': { label: 'Extremism', color: '#ef4444' },
       'hate': { label: 'Hate', color: '#f97316' },
       'violence': { label: 'Violence', color: '#dc2626' },

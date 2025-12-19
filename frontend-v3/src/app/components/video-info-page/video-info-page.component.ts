@@ -228,14 +228,15 @@ export class VideoInfoPageComponent implements OnInit {
         }
       }
 
-      // Only add individual sections as highlights (not the raw summary)
-      if (sections.length > 0) {
-        const highlights = sections.map(section => ({
+      // Only add sections that have valid categories as highlights
+      const categorizedSections = sections.filter(section => section.category);
+      if (categorizedSections.length > 0) {
+        const highlights = categorizedSections.map(section => ({
           text: section.description || section.content,
           timestamp: section.start_seconds || section.start_time || 0,
           duration: (section.end_seconds || section.end_time || 0) - (section.start_seconds || section.start_time || 0),
           importance: 'medium' as const,
-          category: (section.category || section.title || 'routine').toLowerCase()
+          category: section.category.toLowerCase()
         }));
 
         aiAnalyses.push({

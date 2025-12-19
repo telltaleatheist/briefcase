@@ -40,7 +40,6 @@ export enum EditorTool {
 
 // Category colors for different analysis types
 const CATEGORY_COLORS: Record<string, string> = {
-  'routine': '#3b82f6',           // Blue
   'shocking': '#f59e0b',          // Amber
   'political-violence': '#b91c1c', // Dark Red
   'hate': '#dc2626',              // Red

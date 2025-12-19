@@ -1116,17 +1116,20 @@ export class AnalysisService implements OnModuleInit {
               }
             }
 
-            this.databaseService.insertAnalysisSection({
-              id: require('uuid').v4(),
-              videoId,
-              startSeconds,
-              endSeconds: startSeconds + 10, // Default 10 second duration
-              timestampText: section.start_time,
-              title: section.description ? section.description.substring(0, 100) : undefined,
-              description: section.description,
-              category: section.category || 'routine',
-              source: 'ai',
-            });
+            // Only insert sections that have a valid category (skip uncategorized)
+            if (section.category) {
+              this.databaseService.insertAnalysisSection({
+                id: require('uuid').v4(),
+                videoId,
+                startSeconds,
+                endSeconds: startSeconds + 10, // Default 10 second duration
+                timestampText: section.start_time,
+                title: section.description ? section.description.substring(0, 100) : undefined,
+                description: section.description,
+                category: section.category,
+                source: 'ai',
+              });
+            }
           }
 
           this.logger.log(`Successfully saved ${analysisResult.sections.length} sections for video ${videoId}`);

@@ -1,23 +1,24 @@
 /**
- * AI Analysis Service for ClipChimp Video Analysis
+ * AI Analysis Service - Two-Pass Chapter-Centric Analysis
  *
- * Ported from Python video_analysis_service.py as part of the Python removal migration.
- * Handles transcript analysis using AI (Ollama, OpenAI, Claude).
+ * This service implements a two-pass approach to video analysis:
+ *   Pass 1: Detect chapter boundaries (chunked, lightweight)
+ *   Pass 2: Analyze each chapter with full context (title, summary, category flags)
+ *
+ * Metadata (description, tags, title) is generated from chapter summaries.
  */
-
 import { Injectable, Logger } from '@nestjs/common';
 import { AIProviderService, AIProviderConfig } from './ai-provider.service';
 import { OllamaService } from './ollama.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  buildSectionIdentificationPrompt,
-  buildChapterDetectionPrompt,
+  buildBoundaryDetectionPrompt,
+  buildChapterAnalysisPrompt,
   interpolatePrompt,
-  VIDEO_SUMMARY_PROMPT,
-  TAG_EXTRACTION_PROMPT,
-  QUOTE_EXTRACTION_PROMPT,
-  SUGGESTED_TITLE_PROMPT,
+  DESCRIPTION_FROM_CHAPTERS_PROMPT,
+  TAGS_FROM_CHAPTERS_PROMPT,
+  TITLE_FROM_CHAPTERS_PROMPT,
   DEFAULT_PROMPTS,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
@@ -40,7 +41,7 @@ export interface Segment {
   text: string;
 }
 
-export interface Chunk {
+interface Chunk {
   number: number;
   startTime: number;
   endTime: number;
@@ -51,15 +52,7 @@ export interface Chunk {
 export interface Quote {
   timestamp: string;
   text: string;
-  significance: string;
-}
-
-export interface Section {
-  start_phrase?: string;
-  end_phrase?: string;
-  category: string;
-  description: string;
-  quote?: string;
+  significance?: string;
 }
 
 export interface AnalyzedSection {
@@ -75,7 +68,27 @@ export interface Chapter {
   start_time: string;
   end_time: string;
   title: string;
-  description?: string;
+  summary?: string;
+}
+
+// Interface for category flags detected within chapters
+export interface ChapterFlag {
+  category: string;
+  description: string;
+  quote: string;
+}
+
+// Interface for boundary detection response
+interface BoundaryDetectionResult {
+  boundaries: string[];
+  end_topic: string;
+}
+
+// Interface for chapter analysis response
+interface ChapterAnalysisResult {
+  title: string;
+  summary: string;
+  flags?: ChapterFlag[];
 }
 
 export interface Tags {
@@ -89,8 +102,6 @@ export interface AnalysisProgress {
   message: string;
 }
 
-export type AnalysisQuality = 'fast' | 'thorough';
-
 export interface AnalysisOptions {
   provider: 'ollama' | 'openai' | 'claude';
   model: string;
@@ -102,7 +113,6 @@ export interface AnalysisOptions {
   categories?: AnalysisCategory[];
   apiKey?: string;
   ollamaEndpoint?: string;
-  analysisQuality?: AnalysisQuality; // 'fast' = single-pass, 'thorough' = multi-pass (default for Ollama)
   onProgress?: (progress: AnalysisProgress) => void;
 }
 
@@ -128,21 +138,55 @@ export interface AnalysisResult {
 // CONSTANTS
 // =============================================================================
 
-const REFUSAL_INDICATORS = [
-  'I cannot',
-  "I can't",
-  "I'm not able to",
-  "I don't feel comfortable",
-  'I apologize, but',
-  'against my guidelines',
-  'content policy',
-  "I'm designed to",
-  "I shouldn't",
-];
-
 const MAX_RETRIES = 3;
-const CHUNK_MINUTES_FAST = 15; // Larger chunks for fast mode (fewer API calls)
-const CHUNK_MINUTES_THOROUGH = 5; // Smaller chunks for thorough mode (better detail)
+
+// Model size limits - conservative estimates based on typical context windows
+// These ensure chunks fit comfortably with room for prompts and output
+interface ModelLimits {
+  maxChunkChars: number;    // Max chars per chunk for boundary detection
+  maxChapterChars: number;  // Max chars per chapter for analysis
+  chunkMinutes: number;     // Target chunk duration
+}
+
+function getModelLimits(modelName: string): ModelLimits {
+  // Extract parameter count from model name (e.g., "qwen2.5:7b" -> 7)
+  const match = modelName.toLowerCase().match(/(\d+(?:\.\d+)?)\s*b/);
+  const paramBillions = match ? parseFloat(match[1]) : 7; // Default to 7b if unknown
+
+  // Small models (≤3b): Very conservative - may have 4K-8K context
+  if (paramBillions <= 3) {
+    return {
+      maxChunkChars: 12000,   // ~3K tokens
+      maxChapterChars: 16000, // ~4K tokens
+      chunkMinutes: 5,
+    };
+  }
+
+  // Medium models (≤7b): Conservative - typically 8K-32K context
+  if (paramBillions <= 7) {
+    return {
+      maxChunkChars: 24000,   // ~6K tokens
+      maxChapterChars: 32000, // ~8K tokens
+      chunkMinutes: 10,
+    };
+  }
+
+  // Large models (≤14b): Moderate - typically 32K+ context
+  if (paramBillions <= 14) {
+    return {
+      maxChunkChars: 40000,   // ~10K tokens
+      maxChapterChars: 48000, // ~12K tokens
+      chunkMinutes: 15,
+    };
+  }
+
+  // Very large models (>14b): Full capacity - typically 32K-128K context
+  return {
+    maxChunkChars: 60000,   // ~15K tokens
+    maxChapterChars: 80000, // ~20K tokens
+    chunkMinutes: 20,
+  };
+}
 
 // =============================================================================
 // SERVICE
@@ -151,9 +195,11 @@ const CHUNK_MINUTES_THOROUGH = 5; // Smaller chunks for thorough mode (better de
 @Injectable()
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
+
+  // Custom prompts cache
   private customPromptsCache: CustomPrompts | null = null;
-  private customPromptsCacheTime = 0;
-  private readonly PROMPTS_CACHE_TTL = 30000; // 30 seconds
+  private customPromptsCacheTime: number = 0;
+  private readonly CACHE_TTL = 30000; // 30 seconds
 
   constructor(
     private readonly aiProviderService: AIProviderService,
@@ -162,30 +208,30 @@ export class AIAnalysisService {
 
   /**
    * Load custom prompts from config file
-   * Caches for 30 seconds to avoid reading file on every call
    */
   private loadCustomPrompts(): CustomPrompts {
     const now = Date.now();
-
-    // Check cache validity
-    const cacheValid = this.customPromptsCache !== null &&
-                       now - this.customPromptsCacheTime < this.PROMPTS_CACHE_TTL;
-    if (cacheValid && this.customPromptsCache) {
+    if (
+      this.customPromptsCache &&
+      now - this.customPromptsCacheTime < this.CACHE_TTL
+    ) {
       return this.customPromptsCache;
     }
 
     let prompts: CustomPrompts = {};
-
     try {
-      const userDataPath = process.env.APPDATA ||
-        (process.platform === 'darwin' ?
-          path.join(process.env.HOME || '', 'Library', 'Application Support') :
-          path.join(process.env.HOME || '', '.config'));
-      const promptsPath = path.join(userDataPath, 'ClipChimp', 'analysis-prompts.json');
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      const configPath = path.join(
+        homeDir,
+        'Library',
+        'Application Support',
+        'clippy',
+        'prompts.json',
+      );
 
-      if (fs.existsSync(promptsPath)) {
-        const data = fs.readFileSync(promptsPath, 'utf8');
-        const parsed = JSON.parse(data);
+      if (fs.existsSync(configPath)) {
+        const content = fs.readFileSync(configPath, 'utf-8');
+        const parsed = JSON.parse(content);
         prompts = parsed.prompts || {};
       }
     } catch (error) {
@@ -205,44 +251,40 @@ export class AIAnalysisService {
     if (customPrompts[promptKey]) {
       return customPrompts[promptKey]!;
     }
-    // Return default
     return DEFAULT_PROMPTS[promptKey];
   }
 
   /**
    * Main entry point: Analyze transcript using AI
+   * Uses two-pass chapter-centric analysis:
+   *   Pass 1: Detect chapter boundaries (chunked, lightweight)
+   *   Pass 2: Analyze each chapter with full context (title, summary, flags)
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
-    console.log('=== AIAnalysisService.analyzeTranscript CALLED ===');
-    console.log(`Provider: ${options.provider}, Model: ${options.model}, Quality: ${options.analysisQuality || 'fast'}`);
+    console.log('=== AIAnalysisService.analyzeTranscript CALLED (Two-Pass) ===');
+    console.log(`Provider: ${options.provider}, Model: ${options.model}`);
     console.log(`[analyzeTranscript] SEGMENTS RECEIVED: ${options.segments?.length || 0}`);
     if (options.segments && options.segments.length > 0) {
       console.log(`[analyzeTranscript] First segment: start=${options.segments[0].start}, end=${options.segments[0].end}, text="${options.segments[0].text?.substring(0, 50)}"`);
-      console.log(`[analyzeTranscript] Last segment: start=${options.segments[options.segments.length-1].start}, end=${options.segments[options.segments.length-1].end}`);
+      console.log(`[analyzeTranscript] Last segment: start=${options.segments[options.segments.length - 1].start}, end=${options.segments[options.segments.length - 1].end}`);
     } else {
       console.log(`[analyzeTranscript] WARNING: No segments or empty segments array!`);
     }
-    this.logger.log('=== AIAnalysisService.analyzeTranscript CALLED ===');
-    this.logger.log(`Provider: ${options.provider}, Model: ${options.model}, Quality: ${options.analysisQuality || 'fast'}`);
+    this.logger.log('=== AIAnalysisService.analyzeTranscript CALLED (Two-Pass) ===');
+    this.logger.log(`Provider: ${options.provider}, Model: ${options.model}`);
 
     const {
       provider,
       model,
-      transcript,
       segments,
       outputFile,
-      customInstructions = '',
       videoTitle = '',
       categories,
+      customInstructions,
       apiKey,
       ollamaEndpoint,
-      analysisQuality = 'fast', // Default to fast (cheaper) mode
       onProgress,
     } = options;
-
-    // Determine chunk size based on quality mode
-    const chunkMinutes = analysisQuality === 'thorough' ? CHUNK_MINUTES_THOROUGH : CHUNK_MINUTES_FAST;
-    const isFastMode = analysisQuality === 'fast';
 
     const sendProgress = (phase: string, progress: number, message: string) => {
       console.log(`[AI Analysis] ${progress}% - ${message}`);
@@ -271,7 +313,7 @@ export class AIAnalysisService {
     };
 
     try {
-      sendProgress('analysis', 0, `Starting AI analysis with ${model} (${analysisQuality} mode)...`);
+      sendProgress('analysis', 0, `Starting AI analysis with ${model}...`);
 
       // Check model availability (only for Ollama)
       if (provider === 'ollama') {
@@ -297,24 +339,6 @@ export class AIAnalysisService {
         'utf-8',
       );
 
-      // Chunk transcript into time-based segments
-      const chunks = this.chunkTranscript(segments, chunkMinutes);
-      const totalChunks = chunks.length;
-
-      if (totalChunks === 1) {
-        sendProgress('analysis', -1, 'Analyzing video...');
-      } else {
-        sendProgress(
-          'analysis',
-          0,
-          `Starting analysis of ${totalChunks} chunks...`,
-        );
-      }
-
-      const analyzedSections: AnalyzedSection[] = [];
-      const failedChunks: number[] = [];
-      let completedChunks = 0;
-
       const aiConfig: AIProviderConfig = {
         provider,
         model,
@@ -322,209 +346,81 @@ export class AIAnalysisService {
         ollamaEndpoint,
       };
 
-      // Process each chunk
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        const chunkNum = i + 1;
+      // Get model-specific limits
+      const modelLimits = getModelLimits(model);
+      this.logger.log(
+        `[Model Limits] ${model}: chunkMinutes=${modelLimits.chunkMinutes}, ` +
+        `maxChunkChars=${modelLimits.maxChunkChars}, maxChapterChars=${modelLimits.maxChapterChars}`,
+      );
 
-        try {
-          const interestingSections = await this.identifyInterestingSections(
-            aiConfig,
-            chunk.text,
-            chunkNum,
-            customInstructions,
-            videoTitle,
-            categories || null,
-            trackTokens,
-          );
-
-          if (interestingSections && interestingSections.length > 0) {
-            for (const section of interestingSections) {
-              // In fast mode OR for routine sections: use quote from initial analysis (single-pass)
-              // In thorough mode for non-routine sections: do detailed analysis (two-pass)
-              if (isFastMode || section.category === 'routine') {
-                // Single-pass: use the quote from initial analysis
-                const startPhrase = section.start_phrase || '';
-                const startTime = this.findPhraseTimestamp(
-                  startPhrase,
-                  chunk.segments,
-                );
-
-                if (startTime !== null) {
-                  const quoteText = section.quote || '';
-                  const quotes: Quote[] = [];
-                  if (quoteText) {
-                    quotes.push({
-                      timestamp: this.formatDisplayTime(startTime),
-                      text: quoteText,
-                      significance: section.description,
-                    });
-                  }
-
-                  // For non-routine sections, try to find end time
-                  let endTime: string | null = null;
-                  if (section.category !== 'routine' && section.end_phrase) {
-                    const endTimestamp = this.findPhraseTimestamp(
-                      section.end_phrase,
-                      chunk.segments,
-                    );
-                    if (endTimestamp !== null && endTimestamp > startTime) {
-                      endTime = this.formatDisplayTime(endTimestamp);
-                    }
-                  }
-
-                  const analyzedSection: AnalyzedSection = {
-                    category: section.category,
-                    description: section.description,
-                    start_time: this.formatDisplayTime(startTime),
-                    end_time: endTime,
-                    quotes,
-                  };
-
-                  analyzedSections.push(analyzedSection);
-                  this.writeSectionToFile(outputFile, analyzedSection);
-                }
-              } else {
-                // Thorough mode: do detailed analysis for better quotes
-                const detailedAnalysis = await this.analyzeSectionDetail(
-                  aiConfig,
-                  section,
-                  chunk.segments,
-                  trackTokens,
-                );
-
-                if (detailedAnalysis) {
-                  analyzedSections.push(detailedAnalysis);
-                  this.writeSectionToFile(outputFile, detailedAnalysis);
-                }
-              }
-            }
-          }
-        } catch (error) {
-          this.logger.warn(
-            `Chunk ${chunkNum} failed after retries: ${(error as Error).message}`,
-          );
-          this.logger.warn(
-            `Skipping chunk ${chunkNum} and continuing with remaining chunks...`,
-          );
-          failedChunks.push(chunkNum);
-        }
-
-        completedChunks++;
-        if (totalChunks > 1) {
-          const chunkProgress = Math.round((completedChunks / totalChunks) * 100);
-          sendProgress(
-            'analysis',
-            chunkProgress,
-            `Completed chunk ${chunkNum}/${totalChunks}`,
-          );
-        }
-      }
-
-      // Report completion
-      if (failedChunks.length > 0) {
-        sendProgress(
-          'analysis',
-          100,
-          `Analysis complete with ${failedChunks.length} failed chunks. Found ${analyzedSections.length} sections.`,
-        );
-        this.logger.warn(
-          `Analysis completed but ${failedChunks.length} chunks failed: ${failedChunks.join(', ')}`,
-        );
-      } else {
-        sendProgress(
-          'analysis',
-          100,
-          `Analysis complete. Found ${analyzedSections.length} sections.`,
-        );
-      }
-
-      // Handle empty results
-      if (analyzedSections.length === 0) {
-        this.logger.warn(
-          'Analysis produced zero sections! Creating default routine section.',
-        );
-
-        const videoDuration = segments.length > 0 ? segments[segments.length - 1].end : 0;
-        const transcriptLength = transcript.trim().length;
-
-        let description: string;
-        if (transcriptLength === 0) {
-          description =
-            'No speech or dialogue detected in this video. The video may contain only music, sound effects, or be silent.';
-        } else if (transcriptLength < 50) {
-          description =
-            'Very brief or minimal audio content detected. The video appears to have little to no meaningful dialogue.';
-        } else if (
-          transcript.toLowerCase().includes('music') ||
-          transcript.toLowerCase().includes('[music]')
-        ) {
-          description =
-            'Video primarily contains music or ambient audio with minimal speech content.';
-        } else {
-          description =
-            'Analysis could not identify specific notable sections. The content appears to be general discussion or routine material.';
-        }
-
-        const defaultSection: AnalyzedSection = {
-          category: 'routine',
-          description,
-          start_time: '0:00',
-          end_time: videoDuration > 0 ? this.formatDisplayTime(videoDuration) : null,
-          quotes: [],
-        };
-
-        analyzedSections.push(defaultSection);
-        this.writeSectionToFile(outputFile, defaultSection);
-      }
-
-      // Generate chapters (detects topic changes across the video)
-      sendProgress('analysis', 88, 'Detecting chapters...');
-      const chapters = await this.generateChapters(
+      // =========================================================================
+      // PASS 1: Detect chapter boundaries
+      // =========================================================================
+      sendProgress('analysis', 5, 'Detecting chapter boundaries...');
+      const boundaries = await this.detectChapterBoundaries(
         aiConfig,
-        transcript,
         segments,
+        videoTitle,
+        modelLimits,
+        trackTokens,
+      );
+      sendProgress('analysis', 25, `Found ${boundaries.length} chapters`);
+
+      // =========================================================================
+      // PASS 2: Analyze each chapter (title, summary, category flags)
+      // =========================================================================
+      sendProgress('analysis', 30, 'Analyzing chapters...');
+      const { chapters, flags } = await this.analyzeChaptersPass2(
+        aiConfig,
+        segments,
+        boundaries,
+        videoTitle,
+        categories || [],
+        modelLimits,
+        customInstructions,
+        trackTokens,
+      );
+      sendProgress('analysis', 70, `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
+
+      // Write chapter flags to file
+      for (const flag of flags) {
+        this.writeSectionToFile(outputFile, flag);
+      }
+
+      // =========================================================================
+      // Generate metadata FROM chapters
+      // =========================================================================
+      sendProgress('analysis', 75, 'Generating description...');
+      const description = await this.generateDescriptionFromChapters(
+        aiConfig,
+        chapters,
         videoTitle,
         trackTokens,
       );
 
-      // Extract tags (uses section descriptions + quotes, not raw transcript)
-      sendProgress('analysis', 92, 'Extracting tags (people, topics)...');
-      const tags = await this.extractTags(
+      sendProgress('analysis', 85, 'Extracting tags...');
+      const tags = await this.generateTagsFromChapters(
         aiConfig,
-        analyzedSections,
+        chapters,
         trackTokens,
       );
 
-      // Generate video summary (uses section descriptions only)
-      sendProgress('analysis', 95, 'Generating video summary...');
-      const summary = await this.generateSummary(
+      sendProgress('analysis', 92, 'Generating suggested title...');
+      const suggestedTitle = await this.generateTitleFromChapters(
         aiConfig,
-        analyzedSections,
+        chapters,
         videoTitle,
         trackTokens,
       );
 
       // Prepend summary to file
-      this.prependSummaryToFile(outputFile, summary);
+      this.prependSummaryToFile(outputFile, description);
 
-      // Generate suggested title (uses quotes, not raw transcript)
-      sendProgress('analysis', 98, 'Generating suggested title...');
-      const suggestedTitle = await this.generateSuggestedTitle(
-        aiConfig,
-        videoTitle,
-        summary,
-        tags,
-        analyzedSections,
-        trackTokens,
-      );
-
-      // Log token usage summary (use console.log for visibility in Electron)
+      // Log token usage summary
       console.log('');
       console.log('='.repeat(60));
-      console.log('AI ANALYSIS TOKEN USAGE SUMMARY');
+      console.log('AI ANALYSIS TOKEN USAGE SUMMARY (Two-Pass)');
       console.log('='.repeat(60));
-      console.log(`Mode: ${analysisQuality}`);
       console.log(`Provider: ${provider}`);
       console.log(`Model: ${model}`);
       console.log(`API Calls: ${tokenStats.apiCalls}`);
@@ -534,7 +430,6 @@ export class AIAnalysisService {
       console.log('='.repeat(60));
       console.log('');
 
-      // Also log via logger for NestJS logs
       this.logger.log('AI ANALYSIS TOKEN SUMMARY: ' +
         `apiCalls=${tokenStats.apiCalls}, ` +
         `inputTokens=${tokenStats.inputTokens}, ` +
@@ -545,17 +440,17 @@ export class AIAnalysisService {
       sendProgress('analysis', 100, 'Analysis complete!');
 
       // Debug: Log what we're returning
-      console.log(`[analyzeTranscript] RETURNING: sections=${analyzedSections.length}, chapters=${chapters?.length || 0}, tags=${JSON.stringify(tags)}`);
-      if (chapters && chapters.length > 0) {
+      console.log(`[analyzeTranscript] RETURNING: sections=${flags.length}, chapters=${chapters.length}, tags=${JSON.stringify(tags)}`);
+      if (chapters.length > 0) {
         console.log(`[analyzeTranscript] Chapters being returned: ${JSON.stringify(chapters)}`);
       }
 
       return {
-        sections_count: analyzedSections.length,
-        sections: analyzedSections,
-        chapters,
+        sections_count: flags.length,
+        sections: flags,           // Category flags from chapter analysis
+        chapters: chapters,        // Chapter list with titles/summaries
         tags,
-        description: summary,
+        description,
         suggested_title: suggestedTitle || undefined,
         tokenStats: tokenStats.apiCalls > 0 ? tokenStats : undefined,
       };
@@ -616,391 +511,484 @@ export class AIAnalysisService {
   }
 
   /**
-   * Use AI to identify interesting sections in a chunk - with retry logic
-   */
-  private async identifyInterestingSections(
-    config: AIProviderConfig,
-    chunkText: string,
-    chunkNum: number,
-    customInstructions: string,
-    videoTitle: string,
-    categories: AnalysisCategory[] | null,
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<Section[]> {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        this.logger.log(
-          `[AI] Analyzing chunk ${chunkNum}, attempt ${attempt}/${MAX_RETRIES}`,
-        );
-
-        // Build title context section if provided
-        let titleContext = '';
-        if (videoTitle && videoTitle.trim()) {
-          titleContext = `
-**VIDEO CONTEXT:**
-Video title/filename: ${videoTitle.trim()}
-
-Use the video title as additional context to understand who is speaking and what the subject matter is.
-
-`;
-        }
-
-        // Build custom instructions section if provided
-        let customSection = '';
-        if (customInstructions && customInstructions.trim()) {
-          customSection = `
-**CUSTOM USER INSTRUCTIONS:**
-${customInstructions.trim()}
-
-Pay special attention to the custom instructions above when analyzing the content.
-
-`;
-        }
-
-        // Build prompt dynamically with user's categories
-        const prompt = buildSectionIdentificationPrompt(
-          titleContext,
-          customSection,
-          chunkNum,
-          chunkText.substring(0, 8000), // Limit to ~8k chars
-          categories,
-        );
-
-        const response = await this.aiProviderService.generateText(prompt, config);
-        onTokens?.(response); // Track tokens
-
-        if (!response || !response.text) {
-          this.logger.warn(
-            `AI returned empty response for chunk ${chunkNum} on attempt ${attempt}`,
-          );
-          if (attempt < MAX_RETRIES) continue;
-          throw new Error(`Failed to get AI response after ${MAX_RETRIES} attempts`);
-        }
-
-        // Check for content policy refusals
-        if (this.isRefusal(response.text)) {
-          this.logger.warn(
-            `AI may have refused to analyze chunk ${chunkNum}. Response starts with: ${response.text.substring(0, 200)}`,
-          );
-          if (attempt < MAX_RETRIES) continue;
-          throw new Error(
-            `AI refused to analyze chunk ${chunkNum} after ${MAX_RETRIES} attempts`,
-          );
-        }
-
-        // Parse the response
-        const sections = this.parseSectionResponse(response.text);
-
-        if (sections && sections.length > 0) {
-          // Validate categories - only allow categories that exist in user's settings
-          const validCategoryNames = new Set(
-            (categories || []).map(c => c.name.toLowerCase())
-          );
-
-          const validatedSections = sections.filter(section => {
-            const categoryLower = section.category.toLowerCase();
-            if (validCategoryNames.has(categoryLower)) {
-              // Normalize category name to match config exactly
-              const matchedCategory = (categories || []).find(
-                c => c.name.toLowerCase() === categoryLower
-              );
-              if (matchedCategory) {
-                section.category = matchedCategory.name;
-              }
-              return true;
-            } else {
-              this.logger.warn(
-                `Rejected invalid category "${section.category}" - not in user's configured categories`
-              );
-              return false;
-            }
-          });
-
-          if (validatedSections.length > 0) {
-            this.logger.debug(
-              `Chunk ${chunkNum} analyzed successfully on attempt ${attempt} (${validatedSections.length}/${sections.length} sections valid)`,
-            );
-            return validatedSections;
-          }
-
-          this.logger.warn(
-            `All ${sections.length} sections from chunk ${chunkNum} had invalid categories`
-          );
-        }
-
-        this.logger.warn(
-          `Failed to parse any sections from AI response for chunk ${chunkNum} on attempt ${attempt}`,
-        );
-        if (attempt < MAX_RETRIES) continue;
-        throw new Error(
-          `Failed to parse sections from AI response after ${MAX_RETRIES} attempts`,
-        );
-      } catch (error) {
-        if (attempt < MAX_RETRIES) {
-          this.logger.error(
-            `Error on attempt ${attempt} for chunk ${chunkNum}: ${(error as Error).message}`,
-          );
-          continue;
-        }
-        throw new Error(`Chunk ${chunkNum} failed after ${MAX_RETRIES} attempts`);
-      }
-    }
-
-    throw new Error(`Chunk ${chunkNum} failed unexpectedly`);
-  }
-
-  /**
-   * Perform detailed analysis on a specific section
-   */
-  private async analyzeSectionDetail(
-    config: AIProviderConfig,
-    section: Section,
-    allSegments: Segment[],
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<AnalyzedSection | null> {
-    try {
-      this.logger.debug(
-        `Analyzing section: ${section.category} - ${section.description}`,
-      );
-
-      // Find timestamps for start and end phrases
-      const startPhrase = section.start_phrase || '';
-      const endPhrase = section.end_phrase || '';
-
-      const startTime = this.findPhraseTimestamp(startPhrase, allSegments);
-      const endTime = this.findPhraseTimestamp(endPhrase, allSegments);
-
-      if (startTime === null || endTime === null) {
-        this.logger.debug(
-          'Could not correlate timestamps for section, skipping',
-        );
-        return null;
-      }
-
-      // Ensure end_time is after start_time
-      let adjustedEndTime = endTime;
-      if (endTime <= startTime) {
-        this.logger.debug(
-          `End time (${endTime}) not after start time (${startTime}), adjusting`,
-        );
-        adjustedEndTime = startTime + 30;
-      }
-
-      // Extract segments in this time range
-      let sectionSegments = this.extractSegmentRange(
-        allSegments,
-        startTime,
-        adjustedEndTime,
-      );
-
-      if (sectionSegments.length === 0) {
-        // Try with a broader range
-        sectionSegments = this.extractSegmentRange(
-          allSegments,
-          startTime - 5,
-          adjustedEndTime + 5,
-        );
-      }
-
-      if (sectionSegments.length === 0) {
-        this.logger.debug('No segments found, skipping section');
-        return null;
-      }
-
-      // Build timestamped transcript for this specific section
-      const timestampedText = this.buildTimestampedTranscript(sectionSegments);
-
-      // Ask AI to extract quotes (use custom prompt if configured)
-      const prompt = interpolatePrompt(this.getPrompt('quotes'), {
-        category: section.category,
-        description: section.description,
-        timestampedText: timestampedText.substring(0, 6000),
-      });
-
-      const response = await this.aiProviderService.generateText(prompt, config);
-      onTokens?.(response); // Track tokens
-
-      if (!response || !response.text) {
-        this.logger.debug('No response from AI for detailed analysis');
-        return null;
-      }
-
-      const quotes = this.parseQuotesResponse(response.text);
-
-      if (quotes && quotes.length > 0) {
-        this.logger.debug(
-          `Successfully extracted ${quotes.length} quotes from section`,
-        );
-        return {
-          category: section.category,
-          description: section.description,
-          start_time: this.formatDisplayTime(startTime),
-          end_time: this.formatDisplayTime(adjustedEndTime),
-          quotes,
-        };
-      }
-
-      this.logger.debug('No quotes parsed from response');
-      return null;
-    } catch (error) {
-      this.logger.error(`Error in detailed analysis: ${(error as Error).message}`);
-      return null;
-    }
-  }
-
-  /**
    * Find the timestamp for a specific phrase in the transcript segments
-   * Uses substring matching on the full transcript, then maps back to segment timestamps
+   * Uses the first ~40 chars of the phrase to avoid cross-segment matching issues
    */
   private findPhraseTimestamp(
     phrase: string,
     segments: Segment[],
-    threshold: number = 0.5,
   ): number | null {
     if (!phrase || !segments || segments.length === 0) {
       return null;
     }
 
-    const searchPhrase = phrase.toLowerCase().trim();
-    if (searchPhrase.length === 0) {
+    const normalizedPhrase = phrase.toLowerCase().trim();
+    if (normalizedPhrase.length < 3) {
       return null;
     }
 
-    // Build full transcript with character position to timestamp mapping
-    let fullText = '';
-    const charToTimestamp: { pos: number; timestamp: number }[] = [];
+    // Use first ~40 chars for matching (long quotes may span multiple segments)
+    const searchPhrase = normalizedPhrase.substring(0, 40);
+
+    // Strategy 1: Direct substring match using first part of phrase
+    for (const segment of segments) {
+      const normalizedText = segment.text.toLowerCase();
+      if (normalizedText.includes(searchPhrase)) {
+        return segment.start;
+      }
+    }
+
+    // Strategy 1b: Try even shorter prefix (first 20 chars) if long match failed
+    if (searchPhrase.length > 20) {
+      const shortSearchPhrase = normalizedPhrase.substring(0, 20);
+      for (const segment of segments) {
+        const normalizedText = segment.text.toLowerCase();
+        if (normalizedText.includes(shortSearchPhrase)) {
+          return segment.start;
+        }
+      }
+    }
+
+    // Strategy 2: Word-based fuzzy match
+    const phraseWords = normalizedPhrase.split(/\s+/).filter((w) => w.length > 2);
+    if (phraseWords.length === 0) {
+      return null;
+    }
+
+    let bestMatch: { segment: Segment; score: number } | null = null;
 
     for (const segment of segments) {
-      const segmentText = (segment.text || '').trim();
-      if (segmentText.length > 0) {
-        charToTimestamp.push({ pos: fullText.length, timestamp: segment.start });
-        fullText += segmentText + ' ';
-      }
-    }
+      const segmentWords = segment.text.toLowerCase().split(/\s+/);
+      let matchedWords = 0;
 
-    const fullTextLower = fullText.toLowerCase();
-
-    // Try exact substring match first
-    let matchPos = fullTextLower.indexOf(searchPhrase);
-
-    // If no exact match, try matching with normalized whitespace
-    if (matchPos === -1) {
-      const normalizedSearch = searchPhrase.replace(/\s+/g, ' ');
-      const normalizedText = fullTextLower.replace(/\s+/g, ' ');
-      matchPos = normalizedText.indexOf(normalizedSearch);
-    }
-
-    // If still no match, try word-based fuzzy matching
-    if (matchPos === -1) {
-      const phraseWords = searchPhrase.split(/\s+/).filter(w => w.length > 2);
-
-      if (phraseWords.length > 0) {
-        let bestPos = -1;
-        let bestWordCount = 0;
-
-        for (let i = 0; i < fullTextLower.length - 20; i += 10) {
-          const window = fullTextLower.substring(i, i + searchPhrase.length + 50);
-          let wordCount = 0;
-          for (const word of phraseWords) {
-            if (window.includes(word)) wordCount++;
-          }
-          if (wordCount > bestWordCount) {
-            bestWordCount = wordCount;
-            bestPos = i;
-          }
-        }
-
-        if (bestWordCount >= phraseWords.length * threshold) {
-          matchPos = bestPos;
+      for (const phraseWord of phraseWords) {
+        if (
+          segmentWords.some(
+            (sw) => sw.includes(phraseWord) || phraseWord.includes(sw),
+          )
+        ) {
+          matchedWords++;
         }
       }
-    }
 
-    if (matchPos === -1) {
-      return null;
-    }
-
-    // Find the timestamp for this character position
-    let timestamp = segments[0].start;
-    for (const entry of charToTimestamp) {
-      if (entry.pos <= matchPos) {
-        timestamp = entry.timestamp;
-      } else {
-        break;
+      const score = matchedWords / phraseWords.length;
+      if (score > 0.5 && (!bestMatch || score > bestMatch.score)) {
+        bestMatch = { segment, score };
       }
     }
 
-    return timestamp;
-  }
-
-  /**
-   * Extract segments within a specific time range
-   */
-  private extractSegmentRange(
-    segments: Segment[],
-    startTime: number,
-    endTime: number,
-  ): Segment[] {
-    return segments.filter(
-      (seg) => seg.start >= startTime && seg.end <= endTime,
-    );
-  }
-
-  /**
-   * Build timestamped transcript for AI analysis
-   */
-  private buildTimestampedTranscript(segments: Segment[]): string {
-    const lines: string[] = [];
-    const limitedSegments = segments.slice(0, 200);
-
-    for (const seg of limitedSegments) {
-      const timestamp = this.formatDisplayTime(seg.start);
-      lines.push(`[${timestamp}] ${seg.text.trim()}`);
+    if (bestMatch) {
+      return bestMatch.segment.start;
     }
 
-    return lines.join('\n');
-  }
-
-  /**
-   * Build a summary of quotes from analyzed sections (for use in metadata extraction)
-   * This allows us to skip sending raw transcript for tags/title generation
-   */
-  private buildQuotesSummary(analyzedSections: AnalyzedSection[]): string {
-    const quotes: string[] = [];
-    for (const section of analyzedSections.slice(0, 15)) {
-      if (section.quotes && section.quotes.length > 0) {
-        for (const quote of section.quotes.slice(0, 2)) {
-          quotes.push(`"${quote.text}"`);
-        }
+    // Strategy 3: Check across segment boundaries
+    for (let i = 0; i < segments.length - 1; i++) {
+      const combinedText = (
+        segments[i].text +
+        ' ' +
+        segments[i + 1].text
+      ).toLowerCase();
+      if (combinedText.includes(normalizedPhrase)) {
+        return segments[i].start;
       }
     }
-    return quotes.join(' ').substring(0, 2000); // Limit to ~2k chars
+
+    return null;
   }
 
-  private async extractTags(
+  // =============================================================================
+  // TWO-PASS CHAPTER ANALYSIS METHODS
+  // =============================================================================
+
+  /**
+   * PASS 1: Detect chapter boundaries using chunked processing
+   * Processes transcript in time-based chunks to find topic change points
+   */
+  private async detectChapterBoundaries(
     config: AIProviderConfig,
-    analyzedSections: AnalyzedSection[],
+    segments: Segment[],
+    videoTitle: string,
+    limits: ModelLimits,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<Tags> {
+  ): Promise<number[]> {
+    const boundaries: number[] = [0]; // First chapter always starts at 0
+    let previousTopic = '';
+
+    if (!segments || segments.length === 0) {
+      this.logger.warn('No segments available for boundary detection');
+      return boundaries;
+    }
+
+    const chunks = this.chunkTranscript(segments, limits.chunkMinutes);
+    this.logger.log(`[Pass 1] Detecting boundaries in ${chunks.length} chunks (${limits.chunkMinutes} min each)`);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const isFirst = i === 0;
+
+      try {
+        const prompt = buildBoundaryDetectionPrompt(
+          videoTitle,
+          chunk.text.substring(0, limits.maxChunkChars),
+          previousTopic,
+          isFirst,
+        );
+
+        const response = await this.aiProviderService.generateText(prompt, config);
+        onTokens?.(response);
+
+        if (!response || !response.text) {
+          this.logger.warn(`[Pass 1] No response for chunk ${i + 1}`);
+          continue;
+        }
+
+        const result = this.parseBoundaryResponse(response.text);
+
+        // Map phrases to timestamps
+        for (const phrase of result.boundaries) {
+          const time = this.findPhraseTimestamp(phrase, chunk.segments);
+          if (time !== null && !boundaries.includes(time)) {
+            boundaries.push(time);
+            this.logger.debug(`[Pass 1] Found boundary at ${this.formatDisplayTime(time)}: "${phrase.substring(0, 30)}..."`);
+          }
+        }
+
+        previousTopic = result.end_topic;
+        this.logger.debug(`[Pass 1] Chunk ${i + 1} end topic: "${previousTopic}"`);
+      } catch (error) {
+        this.logger.warn(`[Pass 1] Error processing chunk ${i + 1}: ${(error as Error).message}`);
+      }
+    }
+
+    // Sort boundaries by time
+    boundaries.sort((a, b) => a - b);
+    this.logger.log(`[Pass 1] Found ${boundaries.length} chapter boundaries`);
+
+    return boundaries;
+  }
+
+  /**
+   * Parse boundary detection response
+   */
+  private parseBoundaryResponse(response: string): BoundaryDetectionResult {
     try {
-      // Build context from section descriptions and quotes (no raw transcript needed)
-      const sectionDescriptions = analyzedSections
-        .map((s) => s.description)
-        .filter((d) => d)
-        .slice(0, 15);
-      const sectionsContext = sectionDescriptions.join('. ');
+      // Clean up response and extract JSON
+      let cleanResponse = response.trim();
 
-      // Use quotes as excerpt instead of raw transcript
-      const excerpt = this.buildQuotesSummary(analyzedSections);
+      // Remove markdown code blocks
+      if (cleanResponse.startsWith('```')) {
+        const lines = cleanResponse.split('\n');
+        cleanResponse = lines.filter((l) => !l.startsWith('```')).join('\n');
+      }
 
-      // Use custom tags prompt if configured
-      const prompt = interpolatePrompt(this.getPrompt('tags'), {
-        sectionsContext,
-        excerpt: excerpt || sectionsContext, // Fallback to descriptions if no quotes
+      // Extract JSON object
+      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        this.logger.warn('[Pass 1] No JSON found in boundary response');
+        return { boundaries: [], end_topic: '' };
+      }
+
+      const data = JSON.parse(jsonMatch[0]);
+      return {
+        boundaries: Array.isArray(data.boundaries) ? data.boundaries : [],
+        end_topic: data.end_topic || '',
+      };
+    } catch (error) {
+      this.logger.warn(`[Pass 1] Failed to parse boundary response: ${(error as Error).message}`);
+      return { boundaries: [], end_topic: '' };
+    }
+  }
+
+  /**
+   * PASS 2: Analyze each chapter with full context
+   * Generates title, summary, and category flags for each chapter
+   */
+  private async analyzeChaptersPass2(
+    config: AIProviderConfig,
+    segments: Segment[],
+    boundaries: number[],
+    videoTitle: string,
+    categories: AnalysisCategory[],
+    limits: ModelLimits,
+    customInstructions?: string,
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
+  ): Promise<{ chapters: Chapter[]; flags: AnalyzedSection[] }> {
+    const chapters: Chapter[] = [];
+    const allFlags: AnalyzedSection[] = [];
+
+    if (!segments || segments.length === 0) {
+      this.logger.warn('[Pass 2] No segments available for chapter analysis');
+      return { chapters, flags: allFlags };
+    }
+
+    const videoDuration = segments[segments.length - 1].end;
+    let previousChapterSummary = '';
+
+    this.logger.log(`[Pass 2] Analyzing ${boundaries.length} chapters (max ${limits.maxChapterChars} chars each)`);
+
+    for (let i = 0; i < boundaries.length; i++) {
+      const startTime = boundaries[i];
+      const endTime = i < boundaries.length - 1 ? boundaries[i + 1] : videoDuration;
+
+      // Extract chapter transcript
+      const chapterSegments = segments.filter(
+        (s) => s.start >= startTime && s.start < endTime,
+      );
+
+      if (chapterSegments.length === 0) {
+        this.logger.debug(`[Pass 2] No segments for chapter ${i + 1}, skipping`);
+        continue;
+      }
+
+      const chapterText = chapterSegments.map((s) => s.text).join(' ');
+
+      // Truncate very long chapters based on model limits
+      const truncatedText = chapterText.substring(0, limits.maxChapterChars);
+      if (chapterText.length > limits.maxChapterChars) {
+        this.logger.warn(`[Pass 2] Chapter ${i + 1} truncated from ${chapterText.length} to ${limits.maxChapterChars} chars`);
+      }
+
+      try {
+        const prompt = buildChapterAnalysisPrompt(
+          videoTitle,
+          truncatedText,
+          categories,
+          i + 1,
+          previousChapterSummary,
+          customInstructions,
+        );
+
+        const response = await this.aiProviderService.generateText(prompt, config);
+        onTokens?.(response);
+
+        if (!response || !response.text) {
+          this.logger.warn(`[Pass 2] No response for chapter ${i + 1}`);
+          continue;
+        }
+
+        const result = this.parseChapterAnalysisResponse(response.text);
+
+        // Create chapter entry
+        chapters.push({
+          sequence: i + 1,
+          start_time: this.formatDisplayTime(startTime),
+          end_time: this.formatDisplayTime(endTime),
+          title: result.title,
+          summary: result.summary,
+        });
+
+        // Save summary for next chapter's context
+        previousChapterSummary = result.summary;
+
+        // Convert flags to AnalyzedSection format - pass through without filtering
+        if (result.flags && result.flags.length > 0) {
+          for (const flag of result.flags) {
+            // Try to find the actual timestamp of the quote in the transcript
+            let flagStartTime = startTime;
+            let foundQuote = false;
+            if (flag.quote) {
+              const foundTime = this.findPhraseTimestamp(flag.quote, chapterSegments);
+              if (foundTime !== null) {
+                flagStartTime = foundTime;
+                foundQuote = true;
+              } else {
+                // Quote not found - log for debugging
+                this.logger.debug(`[Pass 2] Quote not found in transcript: "${flag.quote.substring(0, 80)}..."`);
+              }
+            } else {
+              this.logger.debug(`[Pass 2] Flag has no quote field: ${JSON.stringify(flag)}`);
+            }
+
+            // Build description: prefer quote (verbatim text), fall back to description
+            // If both exist, show quote first with reason after
+            let displayDescription = flag.description || '';
+            if (flag.quote) {
+              if (flag.description) {
+                displayDescription = `"${flag.quote}" — ${flag.description}`;
+              } else {
+                displayDescription = `"${flag.quote}"`;
+              }
+            }
+
+            allFlags.push({
+              category: flag.category,
+              description: displayDescription,
+              start_time: this.formatDisplayTime(flagStartTime),
+              end_time: this.formatDisplayTime(Math.min(flagStartTime + 30, endTime)), // ~30 sec duration
+              quotes: flag.quote
+                ? [
+                    {
+                      timestamp: this.formatDisplayTime(flagStartTime),
+                      text: flag.quote,
+                      significance: flag.description,
+                    },
+                  ]
+                : [],
+            });
+          }
+        }
+
+        this.logger.debug(`[Pass 2] Chapter ${i + 1}: "${result.title.substring(0, 50)}..." (${result.flags?.length || 0} flags)`);
+      } catch (error) {
+        this.logger.warn(`[Pass 2] Error analyzing chapter ${i + 1}: ${(error as Error).message}`);
+      }
+    }
+
+    // Deduplicate flags with the same or very close timestamps (within 5 seconds)
+    // This handles cases where less capable models create multiple flags for the same content
+    const deduplicatedFlags: AnalyzedSection[] = [];
+    for (const flag of allFlags) {
+      // Check if we already have a flag at a similar time
+      const existingIndex = deduplicatedFlags.findIndex((f) => {
+        const startA = this.parseDisplayTime(f.start_time);
+        const startB = this.parseDisplayTime(flag.start_time);
+        return Math.abs(startA - startB) < 5; // Within 5 seconds
+      });
+
+      if (existingIndex === -1) {
+        // No duplicate, add it
+        deduplicatedFlags.push(flag);
+      } else {
+        // Duplicate found - log it but don't add
+        this.logger.debug(
+          `[Pass 2] Skipping duplicate flag at ${flag.start_time} (category: ${flag.category}) - similar to existing flag at ${deduplicatedFlags[existingIndex].start_time}`,
+        );
+      }
+    }
+
+    if (deduplicatedFlags.length < allFlags.length) {
+      this.logger.log(
+        `[Pass 2] Deduplicated flags: ${allFlags.length} -> ${deduplicatedFlags.length}`,
+      );
+    }
+
+    this.logger.log(`[Pass 2] Analyzed ${chapters.length} chapters, found ${deduplicatedFlags.length} category flags`);
+    return { chapters, flags: deduplicatedFlags };
+  }
+
+  /**
+   * Parse chapter analysis response
+   */
+  private parseChapterAnalysisResponse(response: string): ChapterAnalysisResult {
+    try {
+      // Clean up response and extract JSON
+      let cleanResponse = response.trim();
+
+      // Remove markdown code blocks
+      if (cleanResponse.startsWith('```')) {
+        const lines = cleanResponse.split('\n');
+        cleanResponse = lines.filter((l) => !l.startsWith('```')).join('\n');
+      }
+
+      // Extract JSON object
+      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        this.logger.warn('[Pass 2] No JSON found in chapter analysis response');
+        return { title: 'Unknown', summary: '', flags: [] };
+      }
+
+      const data = JSON.parse(jsonMatch[0]);
+      const flags = Array.isArray(data.flags) ? data.flags : [];
+
+      // Debug: Log what the AI returned for flags
+      if (flags.length > 0) {
+        this.logger.debug(`[Pass 2] Raw flags from AI: ${JSON.stringify(flags, null, 2)}`);
+      }
+
+      return {
+        title: data.title || 'Unknown',
+        summary: data.summary || '',
+        flags,
+      };
+    } catch (error) {
+      this.logger.warn(`[Pass 2] Failed to parse chapter analysis response: ${(error as Error).message}`);
+      return { title: 'Unknown', summary: '', flags: [] };
+    }
+  }
+
+  /**
+   * Generate video description from chapter summaries
+   */
+  private async generateDescriptionFromChapters(
+    config: AIProviderConfig,
+    chapters: Chapter[],
+    videoTitle: string,
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
+  ): Promise<string> {
+    try {
+      if (!chapters || chapters.length === 0) {
+        return 'No content could be analyzed in this video.';
+      }
+
+      // Build chapters list
+      const chaptersList = chapters
+        .map((ch) => `${ch.sequence}. [${ch.start_time}] ${ch.title}${ch.summary ? ` - ${ch.summary}` : ''}`)
+        .join('\n');
+
+      const prompt = interpolatePrompt(DESCRIPTION_FROM_CHAPTERS_PROMPT, {
+        videoTitle: videoTitle || 'Untitled',
+        chaptersList: chaptersList.substring(0, 4000),
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
-      onTokens?.(response); // Track tokens
+      onTokens?.(response);
+
+      if (response && response.text) {
+        const description = response.text.trim();
+
+        // Reject AI refusals
+        const invalidPatterns = [
+          /^i apologize/i,
+          /^i'm sorry/i,
+          /^i cannot/i,
+          /^unfortunately/i,
+          /^as an ai/i,
+        ];
+
+        for (const pattern of invalidPatterns) {
+          if (pattern.test(description)) {
+            this.logger.warn(`Rejected AI refusal in description: "${description.substring(0, 50)}..."`);
+            break;
+          }
+        }
+
+        if (!invalidPatterns.some((p) => p.test(description))) {
+          return description;
+        }
+      }
+
+      // Fallback
+      return `Video with ${chapters.length} chapter(s) covering: ${chapters.slice(0, 3).map((c) => c.title).join('; ')}.`;
+    } catch (error) {
+      this.logger.warn(`Description generation failed: ${(error as Error).message}`);
+      return 'Description could not be generated for this video.';
+    }
+  }
+
+  /**
+   * Extract tags from chapter content
+   */
+  private async generateTagsFromChapters(
+    config: AIProviderConfig,
+    chapters: Chapter[],
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
+  ): Promise<Tags> {
+    try {
+      if (!chapters || chapters.length === 0) {
+        return { people: [], topics: [] };
+      }
+
+      // Build chapters list
+      const chaptersList = chapters
+        .map((ch) => `${ch.title}${ch.summary ? `: ${ch.summary}` : ''}`)
+        .join('\n');
+
+      const prompt = interpolatePrompt(TAGS_FROM_CHAPTERS_PROMPT, {
+        chaptersList: chaptersList.substring(0, 4000),
+      });
+
+      const response = await this.aiProviderService.generateText(prompt, config);
+      onTokens?.(response);
 
       if (response && response.text) {
         try {
@@ -1009,315 +997,65 @@ Pay special attention to the custom instructions above when analyzing the conten
           // Remove markdown code blocks
           if (cleanResponse.startsWith('```')) {
             const lines = cleanResponse.split('\n');
-            cleanResponse = lines
-              .filter((l) => !l.startsWith('```'))
-              .join('\n');
+            cleanResponse = lines.filter((l) => !l.startsWith('```')).join('\n');
           }
 
-          // Extract JSON object from response (handles extra text before/after)
+          // Extract JSON object
           const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
           if (!jsonMatch) {
-            this.logger.warn('No JSON object found in tag extraction response');
+            this.logger.warn('No JSON object found in tags response');
             return { people: [], topics: [] };
           }
-          cleanResponse = jsonMatch[0];
 
-          const tagsData = JSON.parse(cleanResponse);
-
-          if (tagsData.people && tagsData.topics) {
-            return {
-              people: (tagsData.people as string[]).slice(0, 20),
-              topics: (tagsData.topics as string[]).slice(0, 15),
-            };
-          }
-        } catch (parseError) {
-          this.logger.warn(
-            `Failed to parse tag extraction JSON: ${(parseError as Error).message}`,
-          );
-        }
-      }
-
-      return { people: [], topics: [] };
-    } catch (error) {
-      this.logger.warn(`Tag extraction failed: ${(error as Error).message}`);
-      return { people: [], topics: [] };
-    }
-  }
-
-  /**
-   * Generate chapters by detecting topic changes in the transcript
-   */
-  private async generateChapters(
-    config: AIProviderConfig,
-    transcript: string,
-    segments: Segment[],
-    videoTitle: string,
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<Chapter[]> {
-    try {
-      if (!transcript || !segments || segments.length === 0) {
-        this.logger.warn('No transcript or segments available for chapter generation');
-        return [];
-      }
-
-      const titleContext = videoTitle
-        ? `Video title: ${videoTitle}\n`
-        : '';
-
-      // Build timestamped transcript for chapter detection
-      // Use a condensed format to fit in context
-      const timestampedLines: string[] = [];
-      let currentMinute = -1;
-
-      for (const segment of segments) {
-        const minute = Math.floor(segment.start / 60);
-        // Add timestamp every minute
-        if (minute > currentMinute) {
-          currentMinute = minute;
-          const timeStr = this.formatDisplayTime(segment.start);
-          timestampedLines.push(`\n[${timeStr}]`);
-        }
-        timestampedLines.push(segment.text);
-      }
-
-      const chunkText = timestampedLines.join(' ').substring(0, 30000); // Limit to ~30k chars
-
-      const prompt = buildChapterDetectionPrompt(titleContext, chunkText);
-
-      const response = await this.aiProviderService.generateText(prompt, config);
-      onTokens?.(response);
-
-      if (!response || !response.text) {
-        this.logger.warn('No response from AI for chapter generation');
-        return [];
-      }
-
-      // Parse the response
-      let cleanResponse = response.text.trim();
-
-      // Remove markdown code blocks
-      if (cleanResponse.startsWith('```')) {
-        const lines = cleanResponse.split('\n');
-        cleanResponse = lines
-          .filter((l) => !l.startsWith('```'))
-          .join('\n');
-      }
-
-      // Extract JSON object
-      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        this.logger.warn('No JSON object found in chapter detection response');
-        return [];
-      }
-      cleanResponse = jsonMatch[0];
-
-      const chaptersData = JSON.parse(cleanResponse);
-
-      if (!chaptersData.chapters || !Array.isArray(chaptersData.chapters)) {
-        this.logger.warn('Invalid chapters data in response');
-        return [];
-      }
-
-      // Convert raw chapters to Chapter interface with timestamps
-      const chapters: Chapter[] = [];
-      const videoDuration = segments[segments.length - 1].end;
-
-      console.log(`[generateChapters] AI returned ${chaptersData.chapters.length} raw chapters, video duration: ${videoDuration}s`);
-
-      for (let i = 0; i < chaptersData.chapters.length; i++) {
-        const rawChapter = chaptersData.chapters[i];
-        const startPhrase = rawChapter.start_phrase || '';
-        const title = rawChapter.title || `Chapter ${i + 1}`;
-
-        console.log(`[generateChapters] Processing chapter ${i + 1}: title="${title}", start_phrase="${startPhrase.substring(0, 40)}..."`);
-
-        // Find the timestamp for this chapter's start phrase
-        const startTime = this.findPhraseTimestamp(startPhrase, segments);
-
-        if (startTime !== null) {
-          // Calculate end time (next chapter's start or video end)
-          let endTime = videoDuration;
-
-          if (i < chaptersData.chapters.length - 1) {
-            const nextPhrase = chaptersData.chapters[i + 1].start_phrase || '';
-            const nextStart = this.findPhraseTimestamp(nextPhrase, segments);
-            if (nextStart !== null) {
-              endTime = nextStart;
-            }
-          }
-
-          const chapter = {
-            sequence: i + 1,
-            start_time: this.formatDisplayTime(startTime),
-            end_time: this.formatDisplayTime(endTime),
-            title,
+          const tagsData = JSON.parse(jsonMatch[0]);
+          return {
+            people: Array.isArray(tagsData.people) ? tagsData.people.slice(0, 20) : [],
+            topics: Array.isArray(tagsData.topics) ? tagsData.topics.slice(0, 15) : [],
           };
-          console.log(`[generateChapters] Created chapter: ${JSON.stringify(chapter)}`);
-          chapters.push(chapter);
-        } else {
-          console.log(`[generateChapters] Could not find timestamp for chapter phrase: "${startPhrase.substring(0, 50)}..."`);
-          this.logger.debug(`Could not find timestamp for chapter phrase: "${startPhrase.substring(0, 50)}..."`);
+        } catch (parseError) {
+          this.logger.warn(`Failed to parse tags JSON: ${(parseError as Error).message}`);
         }
       }
 
-      // If we couldn't find any chapters, create a default one
-      if (chapters.length === 0 && videoDuration > 0) {
-        console.log(`[generateChapters] No chapters found from phrases, creating default chapter`);
-        chapters.push({
-          sequence: 1,
-          start_time: '0:00',
-          end_time: this.formatDisplayTime(videoDuration),
-          title: 'Full Video',
-        });
-      }
-
-      console.log(`[generateChapters] Final chapters count: ${chapters.length}`);
-      this.logger.log(`Generated ${chapters.length} chapters`);
-      return chapters;
+      return { people: [], topics: [] };
     } catch (error) {
-      this.logger.warn(`Chapter generation failed: ${(error as Error).message}`);
-      return [];
+      this.logger.warn(`Tags extraction failed: ${(error as Error).message}`);
+      return { people: [], topics: [] };
     }
   }
 
   /**
-   * Generate a video summary based on analyzed sections
+   * Generate suggested title from chapter content
    */
-  private async generateSummary(
+  private async generateTitleFromChapters(
     config: AIProviderConfig,
-    analyzedSections: AnalyzedSection[],
-    videoTitle: string,
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<string> {
-    try {
-      if (!analyzedSections || analyzedSections.length === 0) {
-        return 'No content could be analyzed in this video.';
-      }
-
-      const sectionsList: string[] = [];
-      const sectionsToProcess = analyzedSections.slice(0, 20);
-
-      for (let i = 0; i < sectionsToProcess.length; i++) {
-        const section = sectionsToProcess[i];
-        const category = section.category || 'unknown';
-        const description = section.description || 'No description';
-        const startTime = section.start_time || '?';
-        sectionsList.push(
-          `${i + 1}. [${startTime}] ${description} [${category}]`,
-        );
-      }
-
-      const sectionsSummary = sectionsList.join('\n');
-      const titleContext = videoTitle
-        ? `\nVideo title/filename: ${videoTitle}\n`
-        : '';
-
-      // Use custom description prompt if configured
-      const prompt = interpolatePrompt(this.getPrompt('description'), {
-        titleContext,
-        sectionsSummary,
-      });
-
-      const response = await this.aiProviderService.generateText(prompt, config);
-      onTokens?.(response); // Track tokens
-
-      if (response && response.text) {
-        const summary = response.text.trim();
-
-        // Reject AI refusals/meta-commentary
-        const invalidPatterns = [
-          /^i apologize/i,
-          /^i'm sorry/i,
-          /^i cannot/i,
-          /^i don't have access/i,
-          /^i do not have access/i,
-          /^unfortunately/i,
-          /^as an ai/i,
-          /^i'm unable/i,
-          /^without being able/i,
-          /^based on the filename/i,
-        ];
-        for (const pattern of invalidPatterns) {
-          if (pattern.test(summary)) {
-            this.logger.warn(`Rejected AI refusal response: "${summary.substring(0, 100)}..."`);
-            break; // Fall through to fallback summary
-          }
-        }
-
-        // If summary looks valid, return it
-        if (!invalidPatterns.some(p => p.test(summary))) {
-          return summary;
-        }
-      }
-
-      // Fallback summary
-      const routineCount = analyzedSections.filter(
-        (s) => s.category === 'routine',
-      ).length;
-      const interestingCount = analyzedSections.length - routineCount;
-
-      if (interestingCount === 0) {
-        return 'This video contains routine content with no particularly notable sections identified.';
-      } else {
-        const categories = [
-          ...new Set(
-            analyzedSections
-              .filter((s) => s.category !== 'routine')
-              .map((s) => s.category),
-          ),
-        ];
-        return `This video contains ${interestingCount} notable section(s) including: ${categories.join(', ')}.`;
-      }
-    } catch (error) {
-      this.logger.error(`Summary generation failed: ${(error as Error).message}`);
-      return 'Summary could not be generated for this video.';
-    }
-  }
-
-  /**
-   * Generate a suggested filename based on analysis results
-   */
-  private async generateSuggestedTitle(
-    config: AIProviderConfig,
+    chapters: Chapter[],
     currentTitle: string,
-    description: string,
-    tags: Tags,
-    analyzedSections: AnalyzedSection[],
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<string | null> {
     try {
-      const peopleTags =
-        tags.people && tags.people.length > 0
-          ? tags.people.slice(0, 5).join(', ')
-          : 'None';
-      const topicTags =
-        tags.topics && tags.topics.length > 0
-          ? tags.topics.slice(0, 5).join(', ')
-          : 'None';
+      if (!chapters || chapters.length === 0) {
+        return null;
+      }
 
-      // Use quotes summary instead of raw transcript
-      const transcriptExcerpt = this.buildQuotesSummary(analyzedSections) || description;
+      // Build chapters list
+      const chaptersList = chapters
+        .map((ch) => `${ch.title}${ch.summary ? `: ${ch.summary}` : ''}`)
+        .join('\n');
 
-      // Use custom title prompt if configured
-      const prompt = interpolatePrompt(this.getPrompt('title'), {
-        currentTitle,
-        description: description.substring(0, 500),
-        peopleTags,
-        topicTags,
-        transcriptExcerpt,
+      const prompt = interpolatePrompt(TITLE_FROM_CHAPTERS_PROMPT, {
+        currentTitle: currentTitle || 'untitled',
+        chaptersList: chaptersList.substring(0, 4000),
       });
 
       const response = await this.aiProviderService.generateText(prompt, config);
-      onTokens?.(response); // Track tokens
+      onTokens?.(response);
 
       if (response && response.text) {
         let suggestedTitle = response.text.trim();
 
         // Remove quotes
-        if (
-          suggestedTitle.startsWith('"') &&
-          suggestedTitle.endsWith('"')
-        ) {
+        if (suggestedTitle.startsWith('"') && suggestedTitle.endsWith('"')) {
           suggestedTitle = suggestedTitle.slice(1, -1);
         }
 
@@ -1327,10 +1065,7 @@ Pay special attention to the custom instructions above when analyzing the conten
         }
 
         // Remove date prefix
-        suggestedTitle = suggestedTitle.replace(
-          /^\d{4}-\d{2}-\d{2}[-\s]*/,
-          '',
-        );
+        suggestedTitle = suggestedTitle.replace(/^\d{4}-\d{2}-\d{2}[-\s]*/, '');
 
         // Lowercase and clean
         suggestedTitle = suggestedTitle.toLowerCase().trim();
@@ -1345,7 +1080,7 @@ Pay special attention to the custom instructions above when analyzing the conten
         // Clean up multiple spaces
         suggestedTitle = suggestedTitle.replace(/\s+/g, ' ').trim();
 
-        // Reject AI meta-commentary (not actual titles)
+        // Reject AI meta-commentary
         const invalidPatterns = [
           /^based on/i,
           /^the transcript/i,
@@ -1354,10 +1089,8 @@ Pay special attention to the custom instructions above when analyzing the conten
           /^i suggest/i,
           /^here is/i,
           /^the suggested/i,
-          /^a suggested/i,
-          /^filename:/i,
-          /^title:/i,
         ];
+
         for (const pattern of invalidPatterns) {
           if (pattern.test(suggestedTitle)) {
             this.logger.warn(`Rejected invalid AI title: "${suggestedTitle}"`);
@@ -1368,238 +1101,22 @@ Pay special attention to the custom instructions above when analyzing the conten
         // Length limit
         if (suggestedTitle.length > 200) {
           suggestedTitle = suggestedTitle.substring(0, 200).split(',').slice(0, -1).join(',');
-          if (suggestedTitle.length > 200) {
-            suggestedTitle = suggestedTitle.substring(0, 200).split(' ').slice(0, -1).join(' ');
-          }
         }
 
-        // Reject if too short (likely garbage)
+        // Reject if too short
         if (suggestedTitle.length < 10) {
           this.logger.warn(`Rejected too-short AI title: "${suggestedTitle}"`);
           return null;
         }
 
-        this.logger.debug(`Generated suggested title: ${suggestedTitle}`);
         return suggestedTitle || null;
       }
 
       return null;
     } catch (error) {
-      this.logger.warn(
-        `Suggested title generation failed: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Title generation failed: ${(error as Error).message}`);
       return null;
     }
-  }
-
-  /**
-   * Check if response indicates content policy refusal
-   */
-  private isRefusal(response: string): boolean {
-    const start = response.substring(0, 200).toLowerCase();
-    return REFUSAL_INDICATORS.some((indicator) =>
-      start.includes(indicator.toLowerCase()),
-    );
-  }
-
-  /**
-   * Parse AI response to extract sections - supports both JSON and legacy text format
-   */
-  private parseSectionResponse(response: string): Section[] {
-    const sections: Section[] = [];
-
-    try {
-      console.log(`[parseSectionResponse] Raw AI response (first 500 chars): ${response.substring(0, 500)}`);
-      this.logger.debug(`Parsing section response, length: ${response.length}`);
-
-      // Try JSON parsing first
-      const jsonMatch = response.match(/\{[\s\S]*"sections"[\s\S]*\}/);
-      console.log(`[parseSectionResponse] JSON match found: ${!!jsonMatch}`);
-      if (jsonMatch) {
-        console.log(`[parseSectionResponse] JSON matched: ${jsonMatch[0].substring(0, 300)}...`);
-        try {
-          const data = JSON.parse(jsonMatch[0]);
-          console.log(`[parseSectionResponse] Parsed JSON, sections array length: ${data.sections?.length}`);
-          if (data.sections && Array.isArray(data.sections)) {
-            for (const section of data.sections) {
-              console.log(`[parseSectionResponse] Section: start_phrase="${section.start_phrase}", end_phrase="${section.end_phrase}", category="${section.category}", description="${section.description?.substring(0, 50)}"`);
-              if (
-                section.start_phrase &&
-                section.end_phrase &&
-                section.category &&
-                section.description
-              ) {
-                // Safety net: if AI combined categories with comma, split them into separate sections
-                const categoryStr = section.category as string;
-                if (categoryStr.includes(',')) {
-                  const individualCategories = categoryStr.split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0);
-                  console.log(`[parseSectionResponse] Splitting combined category "${categoryStr}" into ${individualCategories.length} separate sections`);
-                  for (const cat of individualCategories) {
-                    sections.push({
-                      ...section,
-                      category: cat,
-                    });
-                  }
-                } else {
-                  sections.push(section);
-                }
-              } else {
-                console.log(`[parseSectionResponse] SKIPPED section - missing fields. Has: start_phrase=${!!section.start_phrase}, end_phrase=${!!section.end_phrase}, category=${!!section.category}, description=${!!section.description}`);
-              }
-            }
-            this.logger.debug(
-              `Parsed ${sections.length} sections from JSON`,
-            );
-            return sections;
-          }
-        } catch (jsonError) {
-          console.log(`[parseSectionResponse] JSON parse error: ${(jsonError as Error).message}`);
-          this.logger.warn(
-            `JSON parsing failed: ${(jsonError as Error).message}`,
-          );
-        }
-      }
-
-      // Legacy text-based parsing fallback
-      if (
-        !response.includes('Section ') &&
-        !response.includes('section ')
-      ) {
-        this.logger.debug('No section markers found in response');
-        return [];
-      }
-
-      let parts: string[] = [];
-      for (const pattern of ['Section ', 'section ']) {
-        if (response.includes(pattern)) {
-          parts = response.split(pattern).slice(1);
-          break;
-        }
-      }
-
-      for (const part of parts) {
-        const lines = part.trim().split('\n');
-        const sectionData: Partial<Section> = {};
-
-        for (const line of lines) {
-          const lineLower = line.toLowerCase().trim();
-          if (lineLower.startsWith('start:')) {
-            sectionData.start_phrase = line.split(':', 2)[1]?.trim().replace(/^["']|["']$/g, '');
-          } else if (lineLower.startsWith('end:')) {
-            sectionData.end_phrase = line.split(':', 2)[1]?.trim().replace(/^["']|["']$/g, '');
-          } else if (lineLower.startsWith('category:')) {
-            sectionData.category = line.split(':', 2)[1]?.trim();
-          } else if (lineLower.startsWith('description:')) {
-            sectionData.description = line.split(':', 2)[1]?.trim();
-          }
-        }
-
-        if (
-          sectionData.start_phrase &&
-          sectionData.end_phrase &&
-          sectionData.category &&
-          sectionData.description
-        ) {
-          sections.push(sectionData as Section);
-        }
-      }
-
-      this.logger.debug(
-        `Parsed ${sections.length} sections from legacy format`,
-      );
-    } catch (error) {
-      this.logger.error(`Error parsing sections: ${(error as Error).message}`);
-    }
-
-    return sections;
-  }
-
-  /**
-   * Parse AI response to extract quotes - supports both JSON and legacy text format
-   */
-  private parseQuotesResponse(response: string): Quote[] {
-    const quotes: Quote[] = [];
-
-    try {
-      this.logger.debug(`Parsing quotes response, length: ${response.length}`);
-
-      // Try JSON parsing first
-      const jsonMatch = response.match(/\{[\s\S]*"quotes"[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          const data = JSON.parse(jsonMatch[0]);
-          if (data.quotes && Array.isArray(data.quotes)) {
-            for (const quote of data.quotes) {
-              if (quote.timestamp && quote.text && quote.significance) {
-                quotes.push(quote);
-              }
-            }
-            this.logger.debug(`Parsed ${quotes.length} quotes from JSON`);
-            return quotes;
-          }
-        } catch (jsonError) {
-          this.logger.warn(
-            `JSON parsing failed: ${(jsonError as Error).message}`,
-          );
-        }
-      }
-
-      // Legacy text-based parsing fallback
-      let textToParse = response;
-      for (const marker of ['Key quotes:', 'Key Quotes:', 'QUOTES:']) {
-        if (response.includes(marker)) {
-          textToParse = response.split(marker)[1]?.trim() || '';
-          break;
-        }
-      }
-
-      if (!textToParse) return [];
-
-      let currentQuote: Partial<Quote> = {};
-
-      for (let line of textToParse.split('\n')) {
-        line = line.trim();
-
-        // Remove leading numbers
-        if (line.match(/^\d+[\.\)\s]/)) {
-          line = line.replace(/^\d+[\.\)\s]+/, '');
-        }
-
-        const lineLower = line.toLowerCase();
-        if (lineLower.includes('timestamp:')) {
-          if (currentQuote.timestamp) {
-            if (
-              currentQuote.text &&
-              currentQuote.significance
-            ) {
-              quotes.push(currentQuote as Quote);
-            }
-          }
-          currentQuote = {};
-          const ts = line.split(/timestamp:/i)[1]?.trim().replace(/[\[\]()]/g, '');
-          currentQuote.timestamp = ts;
-        } else if (lineLower.includes('quote:')) {
-          currentQuote.text = line.split(/quote:/i)[1]?.trim().replace(/^["']|["']$/g, '');
-        } else if (lineLower.includes('significance:')) {
-          currentQuote.significance = line.split(/significance:/i)[1]?.trim();
-        }
-      }
-
-      // Add last quote
-      if (
-        currentQuote.timestamp &&
-        currentQuote.text &&
-        currentQuote.significance
-      ) {
-        quotes.push(currentQuote as Quote);
-      }
-
-      this.logger.debug(`Parsed ${quotes.length} quotes from legacy format`);
-    } catch (error) {
-      this.logger.error(`Error parsing quotes: ${(error as Error).message}`);
-    }
-
-    return quotes;
   }
 
   /**
@@ -1612,23 +1129,19 @@ Pay special attention to the custom instructions above when analyzing the conten
     try {
       let content = '';
 
-      if (section.category === 'routine') {
-        content = `**${section.start_time} - ${section.description} [routine]**\n\n`;
+      const endTime = section.end_time ? section.end_time : '';
+      if (endTime) {
+        content = `**${section.start_time} - ${endTime} - ${section.description} [${section.category}]**\n\n`;
       } else {
-        const endTime = section.end_time ? section.end_time : '';
-        if (endTime) {
-          content = `**${section.start_time} - ${endTime} - ${section.description} [${section.category}]**\n\n`;
-        } else {
-          content = `**${section.start_time} - ${section.description} [${section.category}]**\n\n`;
-        }
+        content = `**${section.start_time} - ${section.description} [${section.category}]**\n\n`;
+      }
 
-        for (const quote of section.quotes || []) {
-          content += `${quote.timestamp} - "${quote.text}"\n`;
-          if (quote.significance) {
-            content += `   → ${quote.significance}\n`;
-          }
-          content += '\n';
+      for (const quote of section.quotes || []) {
+        content += `${quote.timestamp} - "${quote.text}"\n`;
+        if (quote.significance) {
+          content += `   → ${quote.significance}\n`;
         }
+        content += '\n';
       }
 
       content += '-'.repeat(80) + '\n\n';
@@ -1681,17 +1194,26 @@ Pay special attention to the custom instructions above when analyzing the conten
   }
 
   /**
-   * Format time for display (MM:SS or H:MM:SS)
+   * Format time for display (HH:MM:SS)
    */
   private formatDisplayTime(seconds: number): string {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
 
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    } else {
-      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * Parse display time (HH:MM:SS) back to seconds
+   */
+  private parseDisplayTime(timeStr: string): number {
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    } else if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
     }
+    return 0;
   }
 }

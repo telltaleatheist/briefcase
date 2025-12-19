@@ -81,7 +81,7 @@ export class SettingsPageComponent implements OnInit {
     enabled: true
   };
 
-  // Default categories (routine is now a built-in category, not user-editable)
+  // Default categories for flagging problematic content
   private defaultCategories: AnalysisCategory[] = [
     { id: 'hate', name: 'hate', description: 'Dehumanizing language, slurs, calls for discrimination against groups', color: '#dc2626', enabled: true },
     { id: 'conspiracy', name: 'conspiracy', description: 'Unfounded conspiracy theories presented as fact', color: '#a855f7', enabled: true },

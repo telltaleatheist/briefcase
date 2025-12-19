@@ -208,6 +208,22 @@ export class AIProviderService {
   ): Promise<AIResponse> {
     const ollamaEndpoint = config.ollamaEndpoint || 'http://localhost:11434';
 
+    // Dynamically calculate num_ctx based on prompt size
+    // Rough estimate: 1 token ≈ 4 characters for English text
+    // Add buffer for output (4096 tokens) and round up to nearest 4K
+    const estimatedInputTokens = Math.ceil(prompt.length / 4);
+    const outputBuffer = 4096;
+    const rawContextNeeded = estimatedInputTokens + outputBuffer;
+    // Round up to nearest 4K and cap at 131072 (128K - most models' max)
+    const numCtx = Math.min(
+      Math.ceil(rawContextNeeded / 4096) * 4096,
+      131072,
+    );
+
+    this.logger.debug(
+      `Ollama context: prompt ~${estimatedInputTokens} tokens, requesting num_ctx=${numCtx}`,
+    );
+
     try {
       const response = await fetch(`${ollamaEndpoint}/api/generate`, {
         method: 'POST',
@@ -218,6 +234,9 @@ export class AIProviderService {
           model: config.model,
           prompt: prompt,
           stream: false,
+          options: {
+            num_ctx: numCtx,
+          },
         }),
       });
 

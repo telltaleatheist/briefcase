@@ -183,7 +183,7 @@ export function extractCategories(metadata: ParsedAnalysisMetadata): string[] {
   const categories = new Set<string>();
 
   for (const section of metadata.sections) {
-    if (section.category && section.category !== 'routine') {
+    if (section.category) {
       categories.add(section.category);
     }
   }

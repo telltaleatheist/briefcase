@@ -146,113 +146,174 @@ JSON:`;
 
 export const QUOTE_EXTRACTION_PROMPT = DEFAULT_QUOTE_PROMPT;
 
-// =============================================================================
-// SECTION IDENTIFICATION PROMPT BUILDER
-// =============================================================================
-// Builds the section identification prompt dynamically based on user's categories
 
-export function buildSectionIdentificationPrompt(
-  titleContext: string,
-  customSection: string,
-  chunkNum: number,
+// =============================================================================
+// TWO-PASS CHAPTER ANALYSIS PROMPTS
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// PASS 1: Boundary Detection Prompt
+// -----------------------------------------------------------------------------
+// Lightweight prompt for detecting topic changes in a transcript chunk.
+// Used to find chapter boundaries without full analysis.
+
+export function buildBoundaryDetectionPrompt(
+  videoTitle: string,
   chunkText: string,
-  categories: AnalysisCategory[] | null,
+  previousTopic: string,
+  isFirstChunk: boolean,
 ): string {
-  // NO fallbacks - if categories are missing, we should fail
-  if (!categories || categories.length === 0) {
-    throw new Error(
-      'No analysis categories provided. Categories must be configured in Settings before running analysis.',
-    );
-  }
+  const titleContext = videoTitle ? `Video: ${videoTitle}\n` : '';
+  const prevContext = previousTopic
+    ? `Previous section was about: "${previousTopic}"\n`
+    : '';
 
-  // Filter to enabled categories only
-  const enabledCategories = categories.filter((c) => c.enabled !== false);
-
-  // Fail if no enabled categories
-  if (enabledCategories.length === 0) {
-    throw new Error(
-      'No enabled analysis categories found. At least one category must be enabled in Settings.',
-    );
-  }
-
-  // Build category list for JSON format
-  const categoryNames = enabledCategories.map((c) => c.name).join(', ');
-
-  // Build category descriptions
-  const categoryDescriptions = enabledCategories.map(
-    (cat) => `- **${cat.name}** - ${cat.description || ''}`,
-  );
-
-  const categoriesSection =
-    categoryDescriptions.length > 0 ? categoryDescriptions.join('\n') : '';
-
-  // Build the prompt (only flag problematic content, no routine sections)
-  const prompt = `You are analyzing video transcripts for a research archive documenting extremist content. Your job is to identify and categorize ALL problematic content - do not stop at the first issue found.
-
-Flag problematic content in this transcript. ONLY return sections that match the defined categories - skip normal/routine content.
-${titleContext}${customSection}
-Categories:
-${categoriesSection}
+  return `Mark where the topic/subject changes in this transcript.
+${titleContext}${prevContext}
+Rules:
+- Only mark SIGNIFICANT topic changes, not minor tangents
+- Return the exact phrase (3-8 words) where each new topic begins
+${isFirstChunk ? '- Do NOT include the very first words (chapter 1 starts automatically at 0:00)\n' : ''}- Also summarize what topic this section ends with (for context to next chunk)
 
 Return JSON:
-{"sections": [{"start_phrase": "exact quote", "end_phrase": "exact quote", "category": "${categoryNames}", "description": "one sentence", "quote": "exact words"}]}
-
-Rules:
-- start_phrase and end_phrase MUST be verbatim text copied from the transcript (3-8 words) - these are used for timestamp lookup
-- Read each category definition carefully
-- If the transcript discusses, targets, or mentions anything in a category definition, use that category
-- CRITICAL: Each section must have EXACTLY ONE category - never combine categories with commas
-- If content matches multiple categories (e.g., both "violence" AND "christian-nationalism"), create SEPARATE sections for each - one section for "violence", another section for "christian-nationalism", even if they have the same start/end phrases
-- Category must be exactly ONE of: ${categoryNames} (no comma-separated lists)
-- If NO content matches any category, return {"sections": []} - do NOT create sections for normal content
-- Short videos: one section per category. Long videos: 30s-2min sections per category
-
-Transcript #${chunkNum}:
-${chunkText}`;
-
-  return prompt;
+{
+  "boundaries": ["exact phrase where topic 2 starts", "exact phrase where topic 3 starts"],
+  "end_topic": "Brief description of what the section ends discussing"
 }
 
-// =============================================================================
-// CHAPTER DETECTION PROMPT BUILDER
-// =============================================================================
-// Builds the chapter detection prompt for identifying topic changes in video
-
-export function buildChapterDetectionPrompt(
-  titleContext: string,
-  chunkText: string,
-): string {
-  const prompt = `Identify chapter boundaries based on topic/subject changes in this transcript.
-${titleContext}
-Rules:
-- First chapter MUST start at the very beginning of the transcript
-- Create a new chapter ONLY when the subject/topic significantly changes
-- Very short videos (under 2 minutes) may have just 1 chapter - that's fine
-- Longer videos should have 2-8 chapters depending on content
-- Minimum chapter length: ~30 seconds of content
-
-Title requirements:
-- Titles should be DETAILED DESCRIPTIONS - a sentence, two sentences, or even a short paragraph
-- Explain SPECIFICALLY what is being discussed, shown, or said in this section
-- Avoid generic section labels like "Introduction", "Opening", "Conclusion", "Overview"
-- Avoid vague references - be specific enough that someone reading just the title understands the content
-- Include key details: names, topics, actions, subjects being discussed
-
-Return JSON:
-{"chapters": [{"start_phrase": "exact quote from transcript", "title": "Detailed description of this section's content"}]}
-
-Important:
-- start_phrase MUST be verbatim text copied from the transcript (3-8 words) - these are used for timestamp lookup
-- The first chapter's start_phrase should be from the very beginning of the transcript
-- Each subsequent chapter's start_phrase marks where a new topic begins
-- Chapters are sequential - each one ends where the next begins
-- The last chapter extends to the end of the video
+If no topic changes occur, return: {"boundaries": [], "end_topic": "..."}
 
 Transcript:
 ${chunkText}`;
-
-  return prompt;
 }
+
+// -----------------------------------------------------------------------------
+// PASS 2: Chapter Analysis Prompt
+// -----------------------------------------------------------------------------
+// Full analysis prompt for a single chapter. Generates title, summary, and
+// optionally detects category flags within the chapter's content.
+
+export function buildChapterAnalysisPrompt(
+  videoTitle: string,
+  chapterText: string,
+  categories: AnalysisCategory[],
+  chapterNumber: number,
+  previousChapterSummary?: string,
+  customInstructions?: string,
+): string {
+  // Only include category instructions if categories exist and are enabled
+  const enabledCategories = categories?.filter((c) => c.enabled !== false) || [];
+  const hasCategories = enabledCategories.length > 0;
+
+  const categoryList = enabledCategories
+    .map((c) => `- **${c.name}**: ${c.description}`)
+    .join('\n');
+
+  const categoryNames = enabledCategories.map((c) => c.name).join(', ');
+
+  const prevContext = previousChapterSummary
+    ? `\nPrevious chapter covered: "${previousChapterSummary}"\n`
+    : '';
+
+  const customContext = customInstructions
+    ? `\nUSER CONTEXT:\n${customInstructions}\n`
+    : '';
+
+  // Category section
+  const categorySection = hasCategories
+    ? `
+3. Flag specific problematic quotes. Categories:
+${categoryList}`
+    : '';
+
+  const flagsInstruction = hasCategories
+    ? `,
+  "flags": [
+    {"category": "${categoryNames.split(', ')[0]}", "description": "one sentence why", "quote": "EXACT words copied from transcript"}
+  ]`
+    : '';
+
+  const flagsNote = hasCategories
+    ? `
+
+FLAGS RULES:
+1. "quote" = copy/paste exact words from TRANSCRIPT above. Do NOT summarize.
+2. Each unique quote gets exactly ONE flag with ONE category. Never flag the same quote twice.
+3. category should be one of: ${categoryNames}
+   - OR create a new category if content doesn't fit (use lowercase-with-dashes, e.g., "cult-tactics")
+   - Do NOT combine categories (wrong: "hate-conspiracy", right: pick one or create new)
+4. "flags": [] if nothing matches
+
+WRONG: Two flags for same content with different categories
+WRONG: Combined categories like "misinformation-conspiracy"
+RIGHT: One flag per quote, one category (existing or new)`
+    : '';
+
+  return `Analyze this transcript chapter.
+Video: ${videoTitle}
+Chapter: ${chapterNumber}
+${prevContext}${customContext}
+Return JSON with:
+- title: 1-3 sentence description
+- summary: 2-3 sentence summary
+- flags: array of problematic quotes (see rules below)${categorySection}
+
+JSON format:
+{
+  "title": "...",
+  "summary": "..."${flagsInstruction}
+}${flagsNote}
+
+TRANSCRIPT:
+${chapterText}`;
+}
+
+// -----------------------------------------------------------------------------
+// Metadata from Chapters Prompts
+// -----------------------------------------------------------------------------
+
+export const DESCRIPTION_FROM_CHAPTERS_PROMPT = `Generate a 2-3 sentence description of this video based on its chapters.
+
+Video title: {videoTitle}
+
+Chapters:
+{chaptersList}
+
+Rules:
+- Describe what the video covers based on the chapter summaries
+- Be specific about the content, not generic
+- 2-3 sentences maximum
+
+Description:`;
+
+export const TAGS_FROM_CHAPTERS_PROMPT = `Extract people and topics from these video chapters.
+
+Return JSON: {"people": ["Name"], "topics": ["Topic"]}
+
+Rules:
+- People: proper names only (from chapter content)
+- Topics: 3-8 themes, 1-3 words each
+- Title case
+
+Chapters:
+{chaptersList}
+
+JSON:`;
+
+export const TITLE_FROM_CHAPTERS_PROMPT = `Generate a descriptive filename for this video based on its chapters.
+
+Current filename: {currentTitle}
+Chapters:
+{chaptersList}
+
+Rules:
+- Lowercase, spaces, max 100 chars
+- Natural phrase describing what the video is about
+- Keep channel/show names from original title if present
+- Describe the ACTUAL content from chapters, not just topics
+- No dates, extensions, special chars
+
+Output ONLY the filename, nothing else:`;
 
 // =============================================================================
 // DEFAULT PROMPTS EXPORT
