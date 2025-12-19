@@ -330,3 +330,10 @@
     (close)="onExportDialogClose()">
   </app-export-dialog>
 }
+
+<!-- Keyboard Shortcuts Dialog -->
+@if (showKeyboardShortcuts()) {
+  <app-keyboard-shortcuts-dialog
+    (close)="showKeyboardShortcuts.set(false)">
+  </app-keyboard-shortcuts-dialog>
+}

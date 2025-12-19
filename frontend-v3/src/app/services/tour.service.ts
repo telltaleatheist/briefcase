@@ -413,6 +413,195 @@ export class TourService {
         },
       ],
     });
+
+    // Video Info Page tour
+    this.tours.set('video-info', {
+      id: 'video-info',
+      name: 'Video Info Tour',
+      steps: [
+        {
+          element: '.video-player-container',
+          title: 'Video Preview',
+          description: 'Watch your video right here. Use standard video controls to play, pause, and seek.',
+          side: 'bottom',
+        },
+        {
+          element: '.tab-navigation',
+          title: 'Information Tabs',
+          description: 'Switch between Overview (tags, description), Metadata (technical details), AI Analysis (insights), and Transcription (speech-to-text).',
+          side: 'bottom',
+        },
+        {
+          element: '.section-card:first-child',
+          title: 'Tags Section',
+          description: 'Add custom tags to organize your videos. Click "Add Tag" to create new ones, or use AI-suggested tags from analysis.',
+          side: 'right',
+        },
+        {
+          element: '.insights-grid',
+          title: 'Quick Insights',
+          description: 'At-a-glance stats: duration, transcript segments, AI analyses, and tag count.',
+          side: 'top',
+        },
+      ],
+    });
+
+    // Context Menu tour (for video right-click menu)
+    this.tours.set('context-menu', {
+      id: 'context-menu',
+      name: 'Context Menu Tour',
+      steps: [
+        {
+          title: 'Right-Click Menu',
+          description: 'Right-click any video to see these options. The menu changes based on what you\'ve selected.',
+          side: 'bottom',
+        },
+        {
+          title: 'Open & Edit',
+          description: '▶️ Open - Preview the video. 🎬 Open in Editor - Full video editor with timeline. ℹ️ View More - Detailed info page.',
+          side: 'bottom',
+        },
+        {
+          title: 'File Operations',
+          description: '✏️ Rename - Change the filename. 📋 Copy Filename - Copy to clipboard. 📁 Open File Location - Show in file explorer.',
+          side: 'bottom',
+        },
+        {
+          title: 'Organization',
+          description: '📑 Add to Tab - Organize videos into custom collections. 📦 Move to... - Move to a different library folder.',
+          side: 'bottom',
+        },
+        {
+          title: 'AI Features',
+          description: '🧠 Run Analysis - Analyze video content with AI to generate descriptions, tags, and timestamps.',
+          side: 'bottom',
+        },
+        {
+          title: 'Multi-Select',
+          description: 'Hold Ctrl/Cmd while clicking to select multiple videos. The count shows in menu items. Shift+click for range selection.',
+          side: 'bottom',
+        },
+      ],
+    });
+
+    // Video Config Dialog tour (Download from URL / Configure tasks)
+    this.tours.set('video-config', {
+      id: 'video-config',
+      name: 'Video Config Tour',
+      steps: [
+        {
+          element: '.url-section',
+          title: 'Video URLs',
+          description: 'Paste one or more video URLs here, one per line. Supports YouTube, Vimeo, Twitter, and 1000+ sites via yt-dlp.',
+          side: 'bottom',
+        },
+        {
+          element: '.tasks-section',
+          title: 'Processing Tasks',
+          description: 'Choose what to do with the videos. Download & Import is always included. Enable additional tasks as needed.',
+          side: 'top',
+        },
+        {
+          element: '.task-item:nth-child(2)',
+          title: 'Fix Aspect Ratio',
+          description: 'Corrects videos with incorrect aspect ratios (common with phone recordings or certain encodings).',
+          side: 'right',
+        },
+        {
+          element: '.task-item:nth-child(3)',
+          title: 'Normalize Audio',
+          description: 'Levels out audio volume to a consistent standard. Great for videos with varying loudness.',
+          side: 'right',
+        },
+        {
+          element: '.task-item:nth-child(4)',
+          title: 'Transcribe',
+          description: 'Uses Whisper AI to convert speech to text. Choose model size: Tiny (fast) or Base (more accurate).',
+          side: 'right',
+        },
+        {
+          element: '.task-item:nth-child(5)',
+          title: 'AI Analyze',
+          description: 'Runs AI analysis on the video to generate descriptions, identify topics, extract quotes, and suggest titles.',
+          side: 'right',
+        },
+      ],
+    });
+
+    // Export Dialog tour
+    this.tours.set('export-dialog', {
+      id: 'export-dialog',
+      name: 'Export Dialog Tour',
+      steps: [
+        {
+          element: '.output-location',
+          title: 'Output Location',
+          description: 'Choose where to save exported clips. Default creates weekly folders based on the video date.',
+          side: 'bottom',
+        },
+        {
+          element: '.categories-container',
+          title: 'Select Clips',
+          description: 'Check the clips you want to export. Clips are organized by category (markers, chapters, etc.).',
+          side: 'top',
+        },
+        {
+          element: '.export-options',
+          title: 'Export Options',
+          description: 'Overwrite Original: Replace the source file. Re-encode: Slower but ensures compatibility.',
+          side: 'top',
+        },
+        {
+          element: '.export-btn',
+          title: 'Export Button',
+          description: 'Shows clip count and total duration. Click to start exporting selected clips.',
+          side: 'left',
+        },
+      ],
+    });
+
+    // Enhanced Video Editor tour with ripple cut info
+    this.tours.set('video-editor-advanced', {
+      id: 'video-editor-advanced',
+      name: 'Advanced Editor Tour',
+      steps: [
+        {
+          element: '.tool-buttons',
+          title: 'Editor Tools',
+          description: 'Cursor Tool (A): Click to seek. Range Tool (R): Click and drag to select a portion of the timeline.',
+          side: 'bottom',
+        },
+        {
+          element: '.timeline-tracks',
+          title: 'Timeline Editing',
+          description: 'With a range selected: Press I to set in point, O for out point. The selection shows what will be exported.',
+          side: 'top',
+        },
+        {
+          element: '.timeline-toolbar',
+          title: 'Ripple Cut',
+          description: 'Select a range and press X to ripple cut - removes the selection and closes the gap. Perfect for removing unwanted sections.',
+          side: 'bottom',
+        },
+        {
+          element: '.speed-selector',
+          title: 'Playback Speed',
+          description: 'Use J/K/L keys for playback control: K pauses, L plays forward, J plays backward. Tap multiple times to speed up.',
+          side: 'bottom',
+        },
+        {
+          element: '.resize-handle',
+          title: 'Resize Timeline',
+          description: 'Drag this handle to adjust the timeline height. Make more room for the video or the timeline as needed.',
+          side: 'top',
+        },
+        {
+          title: 'Keyboard Shortcuts',
+          description: 'Ripple Cut has many keyboard shortcuts to speed up your workflow. Press ? anytime to see the full list of available shortcuts.',
+          side: 'bottom',
+        },
+      ],
+    });
   }
 
   // Track the current tour ID for completion callback
@@ -567,8 +756,30 @@ export class TourService {
     if (route.includes('/settings')) {
       return this.tours.get('settings') || null;
     }
+    if (route.includes('/video-info/')) {
+      return this.tours.get('video-info') || null;
+    }
     if (route.includes('/video/')) {
       return this.tours.get('video-editor') || null;
+    }
+    return null;
+  }
+
+  /**
+   * Get tour ID for current route
+   */
+  getTourIdForRoute(route: string): string | null {
+    if (route.includes('/library') || route === '/') {
+      return 'library';
+    }
+    if (route.includes('/settings')) {
+      return 'settings';
+    }
+    if (route.includes('/video-info/')) {
+      return 'video-info';
+    }
+    if (route.includes('/video/')) {
+      return 'video-editor';
     }
     return null;
   }

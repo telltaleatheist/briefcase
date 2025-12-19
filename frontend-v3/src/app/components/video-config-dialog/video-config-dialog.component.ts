@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { VideoJobSettings } from '../../models/video-processing.model';
 import { AiSetupService } from '../../services/ai-setup.service';
+import { TourService } from '../../services/tour.service';
 
 interface AIModelOption {
   value: string;
@@ -22,6 +23,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
+  private tourService = inject(TourService);
   private readonly API_BASE = 'http://localhost:3000/api';
 
   @Input() isOpen = false;
@@ -57,6 +59,11 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
       console.log('Modal opened, reloading AI models and library default...');
       this.loadAIModels();
+
+      // Start the video config tour
+      setTimeout(() => {
+        this.tourService.tryAutoStartTour('video-config', 500);
+      }, 300);
     }
   }
 

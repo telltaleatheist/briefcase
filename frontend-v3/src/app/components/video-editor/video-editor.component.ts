@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { ExportDialogComponent, ExportDialogData } from '../export-dialog/export-dialog.component';
 import { NavigationService } from '../../services/navigation.service';
 import { LibraryService, LibraryAnalysis, AnalysisSection as LibAnalysisSection } from '../../services/library.service';
+import { TourService } from '../../services/tour.service';
 import {
   VideoEditorState,
   VideoClip,
@@ -31,6 +32,7 @@ import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track
 import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
 import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
 import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
+import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
 
 // Tool types for editor
 export enum EditorTool {
@@ -98,7 +100,8 @@ const CATEGORY_COLORS: Record<string, string> = {
     TimelineZoomBarComponent,
     ContextMenuComponent,
     MarkerDialogComponent,
-    ExportDialogComponent
+    ExportDialogComponent,
+    KeyboardShortcutsDialogComponent
   ],
   templateUrl: './video-editor.component.html',
   styleUrls: ['./video-editor.component.scss']
@@ -109,6 +112,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   private navService = inject(NavigationService);
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
+  private tourService = inject(TourService);
 
   private readonly API_BASE = 'http://localhost:3000/api';
 
@@ -203,12 +207,21 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
     // Escape to close dialogs
     if (event.key === 'Escape') {
+      if (this.showKeyboardShortcuts()) {
+        this.showKeyboardShortcuts.set(false);
+      }
       if (this.showContextMenu$()) {
         this.showContextMenu$.set(false);
       }
       if (this.showMarkerDialog()) {
         this.showMarkerDialog.set(false);
       }
+    }
+
+    // ? to show keyboard shortcuts (Shift+/)
+    if (event.key === '?' || (event.shiftKey && event.code === 'Slash')) {
+      event.preventDefault();
+      this.showKeyboardShortcuts.update(v => !v);
     }
   }
 
@@ -386,6 +399,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   // Export dialog
   showExportDialog = signal(false);
   exportDialogData = signal<ExportDialogData | null>(null);
+
+  // Keyboard shortcuts dialog
+  showKeyboardShortcuts = signal(false);
 
   // Video URL
   videoUrl = signal<string | undefined>(undefined);
@@ -574,6 +590,17 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       this.errorMessage.set('No video data provided. Please select a video from the library.');
       this.hasAnalysis.set(false);
     }
+
+    // Try to start the video editor tour (basic tour first, then advanced)
+    setTimeout(() => {
+      if (this.tourService.tryAutoStartTour('video-editor', 1000)) {
+        // Queue the advanced tour to run after basic tour completes
+        this.tourService.queueTour('video-editor-advanced');
+      } else if (!this.tourService.isTourCompleted('video-editor-advanced')) {
+        // If basic tour was already completed, try the advanced tour
+        this.tourService.tryAutoStartTour('video-editor-advanced', 1000);
+      }
+    }, 1500);
   }
 
   private async loadVideoData(videoId: string) {

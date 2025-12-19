@@ -14,6 +14,7 @@ import {
 } from '../../models/video-info.model';
 import { VideoItem, VideoWeek } from '../../models/video.model';
 import { LibraryService } from '../../services/library.service';
+import { TourService } from '../../services/tour.service';
 import { CascadeComponent } from '../cascade/cascade.component';
 
 @Component({
@@ -29,6 +30,7 @@ export class VideoInfoPageComponent implements OnInit {
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
+  private tourService = inject(TourService);
 
   @Input() videoId?: string;
 
@@ -111,6 +113,11 @@ export class VideoInfoPageComponent implements OnInit {
     }
 
     this.loadVideoInfo(id);
+
+    // Try to start the video info tour after content loads
+    setTimeout(() => {
+      this.tourService.tryAutoStartTour('video-info', 500);
+    }, 1000);
   }
 
   goBack(): void {

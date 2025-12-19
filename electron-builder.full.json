@@ -178,9 +178,11 @@
           "whisper.dll",
           "llama-server.exe",
           "llama.dll",
-          "ggml-llama.dll",
-          "ggml-base-llama.dll",
-          "ggml-cpu-llama.dll"
+          "libcurl-x64.dll",
+          "libomp140.x86_64.dll",
+          "ggml-vulkan.dll",
+          "ggml-rpc.dll",
+          "ggml-cpu-*.dll"
         ]
       }
     ]

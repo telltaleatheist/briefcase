@@ -1,10 +1,11 @@
-import { Component, Input, Output, EventEmitter, OnInit, signal, computed } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
 import { BackendUrlService } from '../../services/backend-url.service';
+import { TourService } from '../../services/tour.service';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
 
@@ -86,6 +87,8 @@ export class ExportDialogComponent implements OnInit {
   // Map section IDs to ExportSection for lookup
   private sectionMap = new Map<string, ExportSection>();
 
+  private tourService = inject(TourService);
+
   constructor(
     private http: HttpClient,
     private notificationService: NotificationService,
@@ -145,6 +148,11 @@ export class ExportDialogComponent implements OnInit {
 
     // Build cascadeWeeks by grouping sections by category
     this.buildCascadeWeeks(cascadeSections);
+
+    // Start the export dialog tour
+    setTimeout(() => {
+      this.tourService.tryAutoStartTour('export-dialog', 500);
+    }, 300);
   }
 
   /**

@@ -313,10 +313,22 @@ export class WhisperBridge extends EventEmitter {
 
       this.logger.log(`[${processId}] Starting: whisper-cli ${args.join(' ')} (GPU: ${useGpu})`);
 
-      // Set up environment for dylib loading
+      // Set up environment for dylib loading and GPU control
       const env = { ...process.env };
       if (this.config.libraryPath) {
         env.DYLD_LIBRARY_PATH = `${this.config.libraryPath}:${env.DYLD_LIBRARY_PATH || ''}`;
+      }
+
+      // If not using GPU, try to disable CUDA/GPU via environment variables
+      if (!useGpu) {
+        // Disable CUDA
+        env.CUDA_VISIBLE_DEVICES = '';
+        env.GGML_CUDA_NO_PINNED = '1';
+        // Force CPU backend in ggml
+        env.GGML_SCHED_DISABLE_GPU = '1';
+        // Disable OpenCL
+        env.GGML_OPENCL_DISABLE = '1';
+        this.logger.log(`[${processId}] GPU disabled via environment variables`);
       }
 
       const proc = spawn(this.config.binaryPath, args, {
