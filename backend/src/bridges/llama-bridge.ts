@@ -188,13 +188,23 @@ export class LlamaBridge extends EventEmitter {
       env.DYLD_LIBRARY_PATH = `${this.config.libraryPath}:${env.DYLD_LIBRARY_PATH || ''}`;
     }
 
+    // On Windows, set cwd to the binary directory so DLLs can be found
+    const binaryDir = path.dirname(this.config.binaryPath);
+    const spawnOptions: any = {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    };
+
+    // Windows needs cwd set to find DLLs in the same directory as the exe
+    if (process.platform === 'win32') {
+      spawnOptions.cwd = binaryDir;
+      this.logger.log(`Setting cwd for Windows DLL loading: ${binaryDir}`);
+    }
+
     this.logger.log(`Starting llama-server: ${this.config.binaryPath}`);
     this.logger.log(`Args: ${args.join(' ')}`);
 
-    const proc = spawn(this.config.binaryPath, args, {
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const proc = spawn(this.config.binaryPath, args, spawnOptions);
     this.serverProcess = proc;
 
     this.startTime = Date.now();

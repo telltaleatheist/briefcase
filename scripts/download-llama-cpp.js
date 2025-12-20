@@ -72,12 +72,17 @@ const MACOS_GGML_DYLIBS = [
   'libmtmd.dylib',  // metal tensor lib
 ];
 
-// Windows DLLs to copy
-const WINDOWS_DLLS = [
-  'llama.dll',
-  'ggml.dll',
-  'ggml-base.dll',
-  'ggml-cpu.dll',
+// Windows DLLs to copy - we copy ALL DLLs from the release to ensure everything works
+// The llama.cpp release includes many CPU-specific variants and required runtime libraries
+// Note: We copy ALL *.dll files dynamically instead of maintaining a static list
+
+// Visual C++ Runtime DLLs required for Windows builds
+// These are redistributable by Microsoft and needed for the binaries to run on clean systems
+const VCRUNTIME_DLLS = [
+  'MSVCP140.dll',
+  'MSVCP140_CODECVT_IDS.dll',
+  'VCRUNTIME140.dll',
+  'VCRUNTIME140_1.dll',
 ];
 
 /**
@@ -422,22 +427,54 @@ async function downloadWindowsBinary() {
   console.log(`📋 Installing ${binaryName}...`);
   fs.copyFileSync(serverBinary, destPath);
 
-  // Copy required DLLs
+  // Copy ALL DLLs from the release - llama.cpp has many required dependencies
   const binaryDir = path.dirname(serverBinary);
   console.log('   Copying DLLs...');
-  for (const dll of WINDOWS_DLLS) {
-    const dllPath = path.join(binaryDir, dll);
-    if (fs.existsSync(dllPath)) {
-      const destDllPath = path.join(BIN_DIR, dll);
-      fs.copyFileSync(dllPath, destDllPath);
-      console.log(`   ✓ ${dll}`);
-    } else {
-      console.log(`   ⚠ ${dll} not found (may not be required)`);
-    }
+
+  // Get all DLL files in the binary directory
+  const dllFiles = fs.readdirSync(binaryDir).filter(f => f.toLowerCase().endsWith('.dll'));
+  console.log(`   Found ${dllFiles.length} DLLs to copy`);
+
+  for (const dll of dllFiles) {
+    const srcPath = path.join(binaryDir, dll);
+    const destPath = path.join(BIN_DIR, dll);
+    fs.copyFileSync(srcPath, destPath);
+    const sizeMB = (fs.statSync(destPath).size / 1024 / 1024).toFixed(1);
+    console.log(`   ✓ ${dll} (${sizeMB} MB)`);
   }
 
   console.log(`✅ Installed ${binaryName}`);
   return destPath;
+}
+
+/**
+ * Ensure Visual C++ Runtime DLLs are present for Windows
+ * These are required for the binaries to run on systems without Visual Studio
+ */
+function ensureVCRuntime() {
+  if (process.platform !== 'win32') return;
+
+  console.log('📋 Checking Visual C++ Runtime DLLs...');
+
+  let allPresent = true;
+  for (const dll of VCRUNTIME_DLLS) {
+    const destPath = path.join(BIN_DIR, dll);
+    if (!fs.existsSync(destPath)) {
+      allPresent = false;
+      // Try to copy from System32
+      const systemPath = path.join(process.env.WINDIR || 'C:\\Windows', 'System32', dll);
+      if (fs.existsSync(systemPath)) {
+        fs.copyFileSync(systemPath, destPath);
+        console.log(`   ✓ Copied ${dll} from system`);
+      } else {
+        console.log(`   ⚠ ${dll} not found - may need to install Visual C++ Redistributable`);
+      }
+    }
+  }
+
+  if (allPresent) {
+    console.log('   ✓ All VC++ Runtime DLLs already present');
+  }
 }
 
 /**
@@ -529,7 +566,17 @@ function isEverythingCached() {
     const x64Path = path.join(BIN_DIR, BINARY_NAMES['darwin-x64']);
     return isValidBinary(arm64Path) && isValidBinary(x64Path);
   } else if (platform === 'win32') {
-    return isValidBinary(path.join(BIN_DIR, BINARY_NAMES['win32-x64']));
+    // Check main binary
+    if (!isValidBinary(path.join(BIN_DIR, BINARY_NAMES['win32-x64']))) {
+      return false;
+    }
+    // Check VC++ Runtime DLLs
+    for (const dll of VCRUNTIME_DLLS) {
+      if (!fs.existsSync(path.join(BIN_DIR, dll))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   return false;
@@ -569,6 +616,8 @@ async function main() {
       await setupMacOS();
     } else if (platform === 'win32') {
       await downloadWindowsBinary();
+      // Ensure VC++ Runtime DLLs are present for clean systems
+      ensureVCRuntime();
     } else {
       console.log('⚠️  Linux not yet supported in this version');
     }

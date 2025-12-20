@@ -155,10 +155,16 @@
         "to": "utilities/bin",
         "filter": [
           "whisper-cli.exe",
+          "whisper.dll",
           "ggml.dll",
           "ggml-base.dll",
           "ggml-cpu.dll",
-          "whisper.dll"
+          "ggml-cpu-*.dll",
+          "libomp140.x86_64.dll",
+          "MSVCP140.dll",
+          "MSVCP140_CODECVT_IDS.dll",
+          "VCRUNTIME140.dll",
+          "VCRUNTIME140_1.dll"
         ]
       }
     ]

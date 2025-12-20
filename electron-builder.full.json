@@ -75,7 +75,7 @@
     "gatekeeperAssess": false,
     "entitlements": "assets/entitlements.mac.plist",
     "entitlementsInherit": "assets/entitlements.mac.plist",
-    "artifactName": "${productName}-Full-${version}-${arch}.${ext}",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "extraResources": [
       {
         "from": "node_modules/@ffmpeg-installer/darwin-arm64",
@@ -149,11 +149,11 @@
     "icon": "assets/icon.ico",
     "target": [
       {
-        "target": "dir",
+        "target": "nsis",
         "arch": ["x64"]
       }
     ],
-    "artifactName": "${productName}-Full-${version}.${ext}",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "extraResources": [
       {
         "from": "node_modules/@ffmpeg-installer/win32-x64",
@@ -172,17 +172,22 @@
         "to": "utilities/bin",
         "filter": [
           "whisper-cli.exe",
-          "ggml.dll",
-          "ggml-base.dll",
-          "ggml-cpu.dll",
           "whisper.dll",
           "llama-server.exe",
           "llama.dll",
+          "mtmd.dll",
+          "ggml.dll",
+          "ggml-base.dll",
+          "ggml-cpu.dll",
+          "ggml-cpu-*.dll",
+          "ggml-rpc.dll",
+          "ggml-vulkan.dll",
           "libcurl-x64.dll",
           "libomp140.x86_64.dll",
-          "ggml-vulkan.dll",
-          "ggml-rpc.dll",
-          "ggml-cpu-*.dll"
+          "MSVCP140.dll",
+          "MSVCP140_CODECVT_IDS.dll",
+          "VCRUNTIME140.dll",
+          "VCRUNTIME140_1.dll"
         ]
       }
     ]
@@ -197,7 +202,7 @@
     "deleteAppDataOnUninstall": false,
     "runAfterFinish": true,
     "displayLanguageSelector": false,
-    "artifactName": "${productName}-Full-${version}.${ext}",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "include": "assets/installer.nsh",
     "warningsAsErrors": false,
     "packElevateHelper": true,
@@ -207,7 +212,7 @@
     "icon": "assets/icon.png",
     "target": ["AppImage", "deb"],
     "category": "Utility",
-    "artifactName": "${productName}-Full-${version}.${ext}",
+    "artifactName": "${productName}-${version}.${ext}",
     "extraResources": [
       {
         "from": "node_modules/@ffmpeg-installer/linux-x64",

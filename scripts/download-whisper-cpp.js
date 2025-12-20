@@ -2,7 +2,8 @@
  * Download whisper.cpp pre-built binaries and models for all platforms
  *
  * whisper.cpp is a standalone C++ implementation of Whisper that:
- * - Has NO dependencies (no Python, no VC++ runtime on Windows)
+ * - Has minimal dependencies (no Python required)
+ * - Requires Visual C++ Runtime on Windows (bundled by this script)
  * - Is faster than Python Whisper
  * - Works out of the box on all platforms
  *
@@ -55,6 +56,14 @@ const MACOS_DYLIBS = [
   'libggml-cpu.dylib',
   'libggml-blas.dylib',
   'libggml-metal.dylib',
+];
+
+// Visual C++ Runtime DLLs required for Windows builds
+const VCRUNTIME_DLLS = [
+  'MSVCP140.dll',
+  'MSVCP140_CODECVT_IDS.dll',
+  'VCRUNTIME140.dll',
+  'VCRUNTIME140_1.dll',
 ];
 
 /**
@@ -468,20 +477,47 @@ async function downloadWindowsBinary() {
   fs.copyFileSync(foundBinary, destPath);
   console.log(`✅ Windows binary installed: ${binaryName}`);
 
-  // Copy required DLLs
-  const requiredDlls = ['ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll', 'whisper.dll'];
+  // Copy ALL DLLs from the release to ensure everything works
   const binaryDir = path.dirname(foundBinary);
+  const dllFiles = fs.readdirSync(binaryDir).filter(f => f.toLowerCase().endsWith('.dll'));
+  console.log(`   Found ${dllFiles.length} DLLs to copy`);
 
-  for (const dll of requiredDlls) {
-    const dllPath = path.join(binaryDir, dll);
-    if (fs.existsSync(dllPath)) {
-      const destDllPath = path.join(BIN_DIR, dll);
-      fs.copyFileSync(dllPath, destDllPath);
-      console.log(`   ✓ ${dll}`);
-    }
+  for (const dll of dllFiles) {
+    const srcPath = path.join(binaryDir, dll);
+    const destDllPath = path.join(BIN_DIR, dll);
+    fs.copyFileSync(srcPath, destDllPath);
+    console.log(`   ✓ ${dll}`);
   }
 
   return destPath;
+}
+
+/**
+ * Ensure Visual C++ Runtime DLLs are present for Windows
+ */
+function ensureVCRuntime() {
+  if (process.platform !== 'win32') return;
+
+  console.log('📋 Checking Visual C++ Runtime DLLs...');
+
+  let allPresent = true;
+  for (const dll of VCRUNTIME_DLLS) {
+    const destPath = path.join(BIN_DIR, dll);
+    if (!fs.existsSync(destPath)) {
+      allPresent = false;
+      const systemPath = path.join(process.env.WINDIR || 'C:\\Windows', 'System32', dll);
+      if (fs.existsSync(systemPath)) {
+        fs.copyFileSync(systemPath, destPath);
+        console.log(`   ✓ Copied ${dll} from system`);
+      } else {
+        console.log(`   ⚠ ${dll} not found`);
+      }
+    }
+  }
+
+  if (allPresent) {
+    console.log('   ✓ All VC++ Runtime DLLs already present');
+  }
 }
 
 /**
@@ -544,7 +580,17 @@ function isEverythingCached() {
     const x64Path = path.join(BIN_DIR, BINARY_NAMES['darwin-x64']);
     return isValidBinary(arm64Path) && isValidBinary(x64Path);
   } else if (platform === 'win32') {
-    return isValidBinary(path.join(BIN_DIR, BINARY_NAMES['win32-x64']));
+    // Check main binary
+    if (!isValidBinary(path.join(BIN_DIR, BINARY_NAMES['win32-x64']))) {
+      return false;
+    }
+    // Check VC++ Runtime DLLs
+    for (const dll of VCRUNTIME_DLLS) {
+      if (!fs.existsSync(path.join(BIN_DIR, dll))) {
+        return false;
+      }
+    }
+    return true;
   } else {
     return isValidBinary(path.join(BIN_DIR, BINARY_NAMES['linux-x64']));
   }
@@ -584,6 +630,8 @@ async function main() {
       await setupMacOS();
     } else if (platform === 'win32') {
       await downloadWindowsBinary();
+      // Ensure VC++ Runtime DLLs are present for clean systems
+      ensureVCRuntime();
     } else {
       // Linux - use Windows download approach with Linux binary
       console.log('⚠️  Linux not yet supported in this version');

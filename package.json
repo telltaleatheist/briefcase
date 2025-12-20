@@ -159,13 +159,6 @@
           "ggml-tiny.bin",
           "ggml-base.bin"
         ]
-      },
-      {
-        "from": "utilities/models/llama",
-        "to": "utilities/models/llama",
-        "filter": [
-          "cogito-8b-q6_k.gguf"
-        ]
       }
     ],
     "files": [
@@ -319,12 +312,22 @@
           "to": "utilities/bin",
           "filter": [
             "whisper-cli.exe",
+            "whisper.dll",
+            "llama-server.exe",
+            "llama.dll",
+            "mtmd.dll",
             "ggml.dll",
             "ggml-base.dll",
             "ggml-cpu.dll",
-            "whisper.dll",
-            "llama-server.exe",
-            "llama.dll"
+            "ggml-cpu-*.dll",
+            "ggml-rpc.dll",
+            "ggml-vulkan.dll",
+            "libcurl-x64.dll",
+            "libomp140.x86_64.dll",
+            "MSVCP140.dll",
+            "MSVCP140_CODECVT_IDS.dll",
+            "VCRUNTIME140.dll",
+            "VCRUNTIME140_1.dll"
           ]
         }
       ]
