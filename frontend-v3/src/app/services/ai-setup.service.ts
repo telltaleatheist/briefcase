@@ -6,7 +6,8 @@ import { map, catchError } from 'rxjs/operators';
 export interface AIAvailability {
   hasLocal: boolean;
   localReady: boolean;
-  hasOllama: boolean;
+  hasOllama: boolean;           // true if Ollama has models ready to use
+  ollamaConnected: boolean;     // true if Ollama is running (even without models)
   hasClaudeKey: boolean;
   hasOpenAIKey: boolean;
   ollamaModels: string[];
@@ -62,6 +63,7 @@ export class AiSetupService {
     hasLocal: false,
     localReady: false,
     hasOllama: false,
+    ollamaConnected: false,
     hasClaudeKey: false,
     hasOpenAIKey: false,
     ollamaModels: [],
@@ -97,11 +99,15 @@ export class AiSetupService {
         ollamaResult = await this.checkOllama().toPromise() || { available: false, models: [] };
       }
 
+      const ollamaConnected = ollamaResult?.available || false;
+      const ollamaModels = ollamaResult?.models || [];
+
       const newAvailability: AIAvailability = {
         hasLocal: localResult?.available || false,
         localReady: localResult?.ready || false,
-        hasOllama: ollamaResult?.available || false,
-        ollamaModels: ollamaResult?.models || [],
+        hasOllama: ollamaConnected && ollamaModels.length > 0,  // Only true if has models
+        ollamaConnected,  // True if Ollama is running (even without models)
+        ollamaModels,
         hasClaudeKey: keysResult?.hasClaudeKey || false,
         hasOpenAIKey: keysResult?.hasOpenAIKey || false,
         isChecking: false,

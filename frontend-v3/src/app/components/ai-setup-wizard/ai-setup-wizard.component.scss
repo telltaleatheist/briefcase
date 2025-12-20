@@ -289,6 +289,10 @@
   &.success {
     background: #22c55e;
   }
+
+  &.warning {
+    background: #f59e0b;
+  }
 }
 
 .card-header {
@@ -825,6 +829,22 @@
 
     span {
       color: var(--success);
+    }
+  }
+
+  &.warning {
+    color: #f59e0b;
+
+    span {
+      color: #f59e0b;
+    }
+  }
+
+  &.error {
+    color: var(--error);
+
+    span {
+      color: var(--error);
     }
   }
 }

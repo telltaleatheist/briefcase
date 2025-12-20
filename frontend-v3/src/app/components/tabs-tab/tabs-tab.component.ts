@@ -6,6 +6,7 @@ import { NewTabDialogComponent } from '../new-tab-dialog/new-tab-dialog.componen
 import { VideoWeek, VideoItem } from '../../models/video.model';
 import { TabsService } from '../../services/tabs.service';
 import { NotificationService } from '../../services/notification.service';
+import { LibraryService } from '../../services/library.service';
 
 @Component({
   selector: 'app-tabs-tab',
@@ -17,6 +18,7 @@ import { NotificationService } from '../../services/notification.service';
 export class TabsTabComponent {
   private tabsService = inject(TabsService);
   private notificationService = inject(NotificationService);
+  private libraryService = inject(LibraryService);
 
   // Input: callbacks for parent coordination
   onSelectionChanged = input<(event: { count: number; ids: Set<string> }) => void>();
@@ -46,7 +48,17 @@ export class TabsTabComponent {
    * Initialize and load tabs data
    */
   async ngOnInit() {
-    await this.loadTabsData();
+    // Only load tabs if a library is active
+    try {
+      const response = await firstValueFrom(this.libraryService.getCurrentLibrary());
+      if (response.success && response.data) {
+        await this.loadTabsData();
+      } else {
+        console.log('No active library, skipping tabs load');
+      }
+    } catch (error) {
+      console.log('No active library available, skipping tabs load');
+    }
   }
 
   /**
@@ -89,8 +101,14 @@ export class TabsTabComponent {
         }
       }
       this.tabVideosMap.set(videosMap);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load tabs:', error);
+      // Don't show error notification if it's a database not initialized error (expected on first run)
+      if (error?.error?.message?.includes('Database not initialized') ||
+          error?.message?.includes('Database not initialized')) {
+        console.log('Database not initialized yet, skipping tabs notification');
+        return;
+      }
       this.notificationService.error('Failed to Load Tabs', 'An error occurred while loading tabs');
     }
   }

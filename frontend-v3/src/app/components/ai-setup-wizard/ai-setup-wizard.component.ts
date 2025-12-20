@@ -48,7 +48,8 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
   // Availability status
   localAvailable = signal(false);
   localReady = signal(false);
-  ollamaAvailable = signal(false);
+  ollamaAvailable = signal(false);    // Has models ready
+  ollamaConnected = signal(false);    // Running but may not have models
   ollamaModels = signal<string[]>([]);
   claudeKeySet = signal(false);
   openaiKeySet = signal(false);
@@ -127,6 +128,7 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
     this.localAvailable.set(availability.hasLocal);
     this.localReady.set(availability.localReady);
     this.ollamaAvailable.set(availability.hasOllama);
+    this.ollamaConnected.set(availability.ollamaConnected);
     this.ollamaModels.set(availability.ollamaModels);
     this.claudeKeySet.set(availability.hasClaudeKey);
     this.openaiKeySet.set(availability.hasOpenAIKey);

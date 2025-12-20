@@ -76,8 +76,8 @@ const COGITO_MODELS: Omit<ModelInfo, 'downloaded' | 'isDefault'>[] = [
   {
     id: 'cogito-14b',
     name: 'Cogito 14B',
-    filename: 'cogito-v1-preview-qwen-14B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-qwen-14B-GGUF/resolve/main/cogito-v1-preview-qwen-14B-Q4_K_M.gguf',
+    filename: 'deepcogito_cogito-v1-preview-qwen-14B-Q4_K_M.gguf',
+    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-qwen-14B-GGUF/resolve/main/deepcogito_cogito-v1-preview-qwen-14B-Q4_K_M.gguf',
     sizeGB: 8.99,
     minRAM: 10, // ~10GB VRAM/RAM needed
     description: 'Higher quality results. Runs on 10GB+ GPU or 16GB+ RAM.',
@@ -85,8 +85,8 @@ const COGITO_MODELS: Omit<ModelInfo, 'downloaded' | 'isDefault'>[] = [
   {
     id: 'cogito-32b',
     name: 'Cogito 32B',
-    filename: 'cogito-v1-preview-qwen-32B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-qwen-32B-GGUF/resolve/main/cogito-v1-preview-qwen-32B-Q4_K_M.gguf',
+    filename: 'deepcogito_cogito-v1-preview-qwen-32B-Q4_K_M.gguf',
+    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-qwen-32B-GGUF/resolve/main/deepcogito_cogito-v1-preview-qwen-32B-Q4_K_M.gguf',
     sizeGB: 19.85,
     minRAM: 24, // ~24GB VRAM/RAM needed
     description: 'Best quality for most systems. Needs 24GB+ GPU or Mac with 32GB+ unified memory.',

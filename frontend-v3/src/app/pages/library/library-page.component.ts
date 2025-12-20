@@ -511,7 +511,27 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Check for first-time setup (AI config and library)
   private async checkFirstTimeSetup() {
-    // Check AI availability
+    // First check if any libraries exist - this must happen before anything else
+    try {
+      const librariesResponse = await firstValueFrom(this.libraryService.getLibraries());
+      if (librariesResponse.success) {
+        this.libraries.set(librariesResponse.data);
+
+        if (librariesResponse.data.length === 0) {
+          // No libraries exist - show library manager first, skip AI wizard for now
+          console.log('No libraries found, opening library manager');
+          this.libraryManagerOpen.set(true);
+          return; // Don't proceed with AI setup or loading - need library first
+        }
+      }
+    } catch (error) {
+      console.error('Error checking libraries:', error);
+      // If we can't check libraries, open the manager to let user create one
+      this.libraryManagerOpen.set(true);
+      return;
+    }
+
+    // Libraries exist - now check AI availability
     const availability = await this.aiSetupService.checkAIAvailability();
     const setupStatus = this.aiSetupService.getSetupStatus();
 
@@ -519,9 +539,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // AI not configured - show wizard
       this.aiWizardOpen.set(true);
     } else {
-      // AI is configured - load libraries
+      // AI is configured and libraries exist - load them
       this.loadCurrentLibrary();
-      this.loadLibraries();
     }
   }
 

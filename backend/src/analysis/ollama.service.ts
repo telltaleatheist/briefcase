@@ -23,6 +23,7 @@ export class OllamaService {
 
   /**
    * Check if Ollama is running and accessible
+   * On Windows, localhost may not resolve properly, so we try 127.0.0.1 as fallback
    */
   async checkConnection(endpoint?: string): Promise<boolean> {
     const url = endpoint || this.defaultEndpoint;
@@ -31,6 +32,24 @@ export class OllamaService {
       return response.status === 200;
     } catch (error: any) {
       this.logger.warn(`Cannot connect to Ollama at ${url}: ${(error as Error).message || 'Unknown error'}`);
+
+      // On Windows, try 127.0.0.1 if localhost fails
+      if (!endpoint && url.includes('localhost')) {
+        const fallbackUrl = url.replace('localhost', '127.0.0.1');
+        try {
+          this.logger.log(`Trying fallback: ${fallbackUrl}`);
+          const fallbackResponse = await axios.get(`${fallbackUrl}/api/tags`, { timeout: 5000 });
+          if (fallbackResponse.status === 200) {
+            // Update default endpoint to use 127.0.0.1
+            this.defaultEndpoint = fallbackUrl;
+            this.logger.log(`Ollama responding at ${fallbackUrl}, updated default endpoint`);
+            return true;
+          }
+        } catch (fallbackError: any) {
+          this.logger.warn(`Fallback also failed: ${(fallbackError as Error).message || 'Unknown error'}`);
+        }
+      }
+
       return false;
     }
   }

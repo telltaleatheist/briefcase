@@ -75,28 +75,46 @@
           </div>
 
           <!-- Ollama Card -->
-          <div class="provider-card" [class.has-status]="ollamaAvailable()" (click)="selectProvider('ollama')">
-            @if (ollamaAvailable() && ollamaModels().length > 0) {
-              <div class="card-badge success">Detected</div>
+          <div class="provider-card" [class.has-status]="ollamaConnected()" (click)="selectProvider('ollama')">
+            @if (ollamaAvailable()) {
+              <div class="card-badge success">Ready</div>
+            } @else if (ollamaConnected()) {
+              <div class="card-badge warning">No Models</div>
             }
             <div class="card-header">
               <span class="card-icon">💻</span>
               <div class="card-titles">
                 <h4>Ollama</h4>
-                <span class="card-tagline">{{ ollamaAvailable() ? 'Running on your machine' : 'Free & Private' }}</span>
+                @if (ollamaAvailable()) {
+                  <span class="card-tagline">{{ ollamaModels().length }} model(s) ready</span>
+                } @else if (ollamaConnected()) {
+                  <span class="card-tagline">Running - needs a model</span>
+                } @else {
+                  <span class="card-tagline">Free & Private</span>
+                }
               </div>
             </div>
             <ul class="card-features">
               <li class="pro"><span>✓</span> No API costs ever</li>
               <li class="pro"><span>✓</span> Data stays on your machine</li>
               <li class="pro"><span>✓</span> Works offline</li>
-              @if (!ollamaAvailable()) {
+              @if (!ollamaConnected()) {
                 <li class="con"><span>✗</span> Requires separate install</li>
+              } @else if (ollamaModels().length === 0) {
+                <li class="con"><span>✗</span> No models installed yet</li>
               } @else {
                 <li class="pro"><span>✓</span> {{ ollamaModels().length }} model(s) ready</li>
               }
             </ul>
-            <button class="card-btn" [class.primary]="ollamaAvailable()">{{ ollamaAvailable() ? 'Use Ollama' : 'Configure Ollama' }}</button>
+            <button class="card-btn" [class.primary]="ollamaConnected()">
+              @if (ollamaAvailable()) {
+                Use Ollama
+              } @else if (ollamaConnected()) {
+                Download a Model
+              } @else {
+                Configure Ollama
+              }
+            </button>
           </div>
 
           <!-- Claude Card -->
@@ -384,6 +402,14 @@
           @if (ollamaAvailable()) {
             <div class="status-result success">
               <span>✓</span> Ollama is running with {{ ollamaModels().length }} model(s)
+            </div>
+          } @else if (ollamaConnected()) {
+            <div class="status-result warning">
+              <span>⚠️</span> Ollama is running but no models installed - download one above
+            </div>
+          } @else {
+            <div class="status-result error">
+              <span>✗</span> Ollama not detected - make sure it's running
             </div>
           }
         </div>
