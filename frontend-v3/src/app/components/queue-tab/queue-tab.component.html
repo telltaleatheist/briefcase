@@ -4,10 +4,18 @@
     <div class="toolbar-section">
       <h2 class="section-title">Processing Queue</h2>
       <p class="section-subtitle">
-        {{ stagingQueue.length }} staging · {{ processingQueue.length }} processing
+        {{ stagingQueue.length }} staging · {{ processingQueue.length }} processing · {{ completedQueue.length }} completed
       </p>
     </div>
     <div class="toolbar-actions">
+      <!-- Clear completed button (when completed items exist) -->
+      @if (completedQueue.length > 0) {
+        <button class="btn btn-secondary" (click)="clearCompleted.emit()">
+          <span class="btn-icon">🧹</span>
+          <span>Clear Completed</span>
+        </button>
+      }
+
       <!-- Show buttons when staging items exist -->
       @if (stagingQueue.length > 0) {
         <!-- Configure button (only when items selected) -->
@@ -49,7 +57,7 @@
 
   <!-- Queue Content -->
   <div class="queue-content">
-    <!-- Single Cascade showing both Staging and Processing -->
+    <!-- Single Cascade showing Staging, Processing, and Completed -->
     <app-cascade
       *ngIf="allQueueWeeks().length > 0"
       [weeks]="allQueueWeeks()"

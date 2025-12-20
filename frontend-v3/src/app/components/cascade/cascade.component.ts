@@ -386,8 +386,8 @@ export class CascadeComponent {
 
     // Single video actions
     if (count <= 1) {
-      actions.push({ label: 'Open in Editor', icon: '🎬', action: 'openInEditor' });
-      actions.push({ label: 'View More', icon: 'ℹ️', action: 'viewMore' });
+      actions.push({ label: 'More Info', icon: '🎬', action: 'openInEditor' });
+      actions.push({ label: 'Details', icon: 'ℹ️', action: 'viewMore' });
       actions.push({ label: 'Rename', icon: '✏️', action: 'rename' });
       actions.push({ label: 'Copy Filename', icon: '📋', action: 'copyFilename' });
       actions.push({ label: 'Open File Location', icon: '📁', action: 'openLocation' });
@@ -874,6 +874,14 @@ export class CascadeComponent {
   onEditClick(video: VideoItem, event: Event) {
     event.stopPropagation();
     this.videoAction.emit({ action: 'edit', videos: [video] });
+  }
+
+  /**
+   * Handle quick action button clicks (reveal, openInEditor, process)
+   */
+  onQuickAction(video: VideoItem, action: string, event: Event) {
+    event.stopPropagation();
+    this.videoAction.emit({ action, videos: [video] });
   }
 
   /**

@@ -146,6 +146,31 @@
               @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00' && !item.video.isGhost) {
                 <span class="video-duration">{{ item.video.duration }}</span>
               }
+
+              <!-- Quick Action Buttons (always visible for library items) -->
+              @if (!item.video.isGhost && !isStagingItem(item.video) && !isProcessingItem(item.video) && !isQueueItem(item.video)) {
+                <div class="quick-actions">
+                  <button
+                    class="action-btn open-btn"
+                    (click)="onQuickAction(item.video, 'open', $event)"
+                    title="Open video file">
+                    Open
+                  </button>
+                  <button
+                    class="action-btn ripplecut-btn"
+                    (click)="onQuickAction(item.video, 'openInEditor', $event)"
+                    title="View analysis, transcript & more">
+                    More...
+                  </button>
+                  <button
+                    class="action-btn process-btn"
+                    (click)="onQuickAction(item.video, 'process', $event)"
+                    title="Run AI analysis">
+                    Process
+                  </button>
+                </div>
+              }
+
               @if (showEditButton && !item.video.isGhost) {
                 <button
                   class="edit-btn"

@@ -136,6 +136,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0; // Allow shrinking
   background: var(--bg-card);
   border-radius: 12px;
   overflow: hidden;
@@ -553,9 +554,24 @@
   }
 }
 
+@media (max-width: 900px) {
+  .library-page {
+    padding: 12px;
+    gap: 8px;
+  }
+
+  .tabs-section {
+    .tab {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+  }
+}
+
 @media (max-width: 768px) {
   .library-page {
-    padding: 16px;
+    padding: 8px;
+    gap: 6px;
   }
 
   .page-header {
@@ -584,7 +600,7 @@
   }
 
   .library-section {
-    padding: 16px;
+    padding: 8px;
   }
 
   .empty-state {
@@ -600,6 +616,26 @@
 
     .empty-description {
       font-size: 14px;
+    }
+  }
+}
+
+@media (max-width: 600px) {
+  .library-page {
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .tabs-section {
+    .tab {
+      padding: 4px 8px;
+      font-size: 12px;
+
+      .tab-badge {
+        min-width: 16px;
+        height: 16px;
+        font-size: 10px;
+      }
     }
   }
 }

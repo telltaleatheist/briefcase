@@ -58,7 +58,7 @@ export class TourService {
         {
           element: '.header-actions',
           title: 'Action Buttons',
-          description: 'Download videos from URLs, import local files, open the video editor, or view details about selected videos.',
+          description: 'Download videos from URLs, import local files, open RippleCut (video editor), or view details about selected videos.',
           side: 'bottom',
         },
         {
@@ -84,8 +84,13 @@ export class TourService {
         {
           element: 'app-cascade',
           title: 'Video Grid',
-          description: 'Your videos are organized by date. Click to select, double-click to preview, or right-click for options like analyze, rename, or delete.',
+          description: 'Your videos are organized by date. Click to select, double-click to preview. Try right-clicking a video to see all available actions!',
           side: 'top',
+        },
+        {
+          title: 'Right-Click Context Menu',
+          description: 'Right-click any video to access: Open in RippleCut (analyze & edit), Run Analysis (AI processing), Add to Tab (organize), and more. This is where most actions live!',
+          side: 'bottom',
         },
       ],
     });
@@ -148,10 +153,10 @@ export class TourService {
       ],
     });
 
-    // Video editor tour
+    // RippleCut (video editor) tour
     this.tours.set('video-editor', {
       id: 'video-editor',
-      name: 'Video Editor Tour',
+      name: 'RippleCut Tour',
       steps: [
         {
           element: '.video-player-area',
@@ -174,13 +179,13 @@ export class TourService {
         {
           element: '.analysis-panel',
           title: 'Analysis Panel',
-          description: 'View AI-detected sections, transcript, and your custom markers. Click any item to jump to that point in the video.',
+          description: 'View AI-generated analysis, transcript, and your custom markers. Click any item to jump to that point in the video.',
           side: 'left',
         },
         {
           element: '.editor-header',
-          title: 'Editor Controls',
-          description: 'Access quick actions like fullscreen mode, close editor, and see the current video title.',
+          title: 'RippleCut Controls',
+          description: 'Access quick actions like fullscreen mode, close RippleCut, and see the current video title.',
           side: 'bottom',
         },
       ],
@@ -458,7 +463,7 @@ export class TourService {
         },
         {
           title: 'Open & Edit',
-          description: '▶️ Open - Preview the video. 🎬 Open in Editor - Full video editor with timeline. ℹ️ View More - Detailed info page.',
+          description: '▶️ Open - Preview the video. 🎬 Open in RippleCut - Full video editor with timeline and AI analysis. ℹ️ View More - Detailed info page.',
           side: 'bottom',
         },
         {
@@ -560,14 +565,14 @@ export class TourService {
       ],
     });
 
-    // Enhanced Video Editor tour with ripple cut info
+    // Advanced RippleCut tour
     this.tours.set('video-editor-advanced', {
       id: 'video-editor-advanced',
-      name: 'Advanced Editor Tour',
+      name: 'Advanced RippleCut Tour',
       steps: [
         {
           element: '.tool-buttons',
-          title: 'Editor Tools',
+          title: 'RippleCut Tools',
           description: 'Cursor Tool (A): Click to seek. Range Tool (R): Click and drag to select a portion of the timeline.',
           side: 'bottom',
         },

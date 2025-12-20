@@ -1773,6 +1773,8 @@
       .segment-text {
         line-height: $line-height-relaxed;
         color: var(--text-primary);
+        white-space: pre-wrap; // Preserve line breaks (Windows \r\n and Unix \n)
+        word-wrap: break-word;
       }
     }
   }

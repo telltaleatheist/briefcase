@@ -1508,6 +1508,10 @@
   height: 100%;
   transform-origin: center center;
   transition: transform 0.1s ease-out;
+  // Improve rendering quality during scaling
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 // Orange 16:9 border overlay - shows export frame boundary

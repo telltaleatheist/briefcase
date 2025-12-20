@@ -188,6 +188,17 @@
       color: var(--text-secondary);
     }
   }
+
+  // Tip variant - more subtle styling
+  &.tip {
+    background: rgba(100, 149, 237, 0.08);
+    border-color: rgba(100, 149, 237, 0.2);
+    margin-bottom: $spacing-lg;
+
+    .banner-content strong {
+      color: #6495ED;
+    }
+  }
 }
 
 // ==================== FEATURE PREVIEW ====================
@@ -344,6 +355,10 @@
 
     &.con span {
       color: var(--text-tertiary);
+    }
+
+    &.neutral span {
+      color: #6495ED;
     }
   }
 }

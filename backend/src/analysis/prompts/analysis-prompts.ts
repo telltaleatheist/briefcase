@@ -193,6 +193,39 @@ ${chunkText}`;
 // Full analysis prompt for a single chapter. Generates title, summary, and
 // optionally detects category flags within the chapter's content.
 
+/**
+ * Get granularity-based flagging instructions
+ * @param granularity - 1 (very strict) to 10 (very aggressive)
+ */
+function getGranularityInstructions(granularity: number): { approach: string; rule: string } {
+  if (granularity <= 2) {
+    return {
+      approach: 'BE VERY STRICT - only flag content that CLEARLY and DEFINITIVELY matches categories. Require strong, unambiguous evidence.',
+      rule: 'ONLY flag if you are highly confident the content matches. When in doubt, do NOT flag. Prefer false negatives over false positives.',
+    };
+  } else if (granularity <= 4) {
+    return {
+      approach: 'BE STRICT - flag content with HIGH confidence matches only. Require clear evidence.',
+      rule: 'Flag when you have strong confidence the content matches a category. Skip borderline or ambiguous cases.',
+    };
+  } else if (granularity <= 6) {
+    return {
+      approach: 'BE BALANCED - flag content with reasonable confidence. Include clear matches and likely matches.',
+      rule: 'Flag content that reasonably matches categories. Include likely matches but skip very weak associations.',
+    };
+  } else if (granularity <= 8) {
+    return {
+      approach: 'BE BROAD - flag content liberally. Include edge cases and possible matches.',
+      rule: 'FLAG GENEROUSLY - if content MIGHT qualify for a category, flag it. Include edge cases and possible matches.',
+    };
+  } else {
+    return {
+      approach: 'BE VERY AGGRESSIVE - flag ALL possible matches including weak associations. Better to over-flag than miss anything.',
+      rule: 'FLAG EVERYTHING that could possibly relate to any category. Missing a potential flag is unacceptable. Include even weak or tangential associations.',
+    };
+  }
+}
+
 export function buildChapterAnalysisPrompt(
   videoTitle: string,
   chapterText: string,
@@ -200,6 +233,7 @@ export function buildChapterAnalysisPrompt(
   chapterNumber: number,
   previousChapterSummary?: string,
   customInstructions?: string,
+  analysisGranularity?: number,
 ): string {
   // Only include category instructions if categories exist and are enabled
   const enabledCategories = categories?.filter((c) => c.enabled !== false) || [];
@@ -219,6 +253,10 @@ export function buildChapterAnalysisPrompt(
     ? `\nUSER CONTEXT:\n${customInstructions}\n`
     : '';
 
+  // Get granularity-based instructions (default to 5 - balanced)
+  const granularity = analysisGranularity ?? 5;
+  const granularityInstr = getGranularityInstructions(granularity);
+
   // Category section
   const categorySection = hasCategories
     ? `
@@ -236,8 +274,10 @@ ${categoryList}`
   const flagsNote = hasCategories
     ? `
 
+DETECTION SENSITIVITY: ${granularity}/10 - ${granularityInstr.approach}
+
 FLAGS RULES:
-1. FLAG GENEROUSLY - if content MIGHT qualify for a category, flag it. Missing a flag is worse than a false positive.
+1. ${granularityInstr.rule}
 2. "quote" = copy/paste exact words from TRANSCRIPT above. Do NOT paraphrase or summarize.
 3. Each unique quote gets exactly ONE flag with ONE category. Never flag the same quote twice.
 4. category should be one of: ${categoryNames}
@@ -254,14 +294,14 @@ WRONG: Paraphrasing the quote instead of copying exact words
 RIGHT: One flag per quote, one category (existing or new), exact transcript words`
     : '';
 
-  return `Analyze this transcript chapter. Be thorough - flag any potentially problematic content.
+  return `Analyze this transcript chapter. ${granularityInstr.approach}
 Video: ${videoTitle}
 Chapter: ${chapterNumber}
 ${prevContext}${customContext}
 Return JSON with:
 - title: 1-3 sentence description
 - summary: 2-3 sentence summary
-- flags: array of problematic quotes - ERR ON THE SIDE OF FLAGGING${categorySection}
+- flags: array of problematic quotes${categorySection}
 
 JSON format:
 {

@@ -649,6 +649,7 @@ export class LibraryService {
             aiModel,
             aiProvider,
             customInstructions: config?.customInstructions || '',
+            analysisGranularity: config?.analysisGranularity ?? 5,
             analysisQuality: config?.analysisQuality || 'fast'
           }
         }];
@@ -1168,6 +1169,41 @@ export class LibraryService {
     return this.http.post<{ success: boolean; message: string; defaultAI: { provider: string; model: string } }>(
       `${this.API_BASE}/config/default-ai`,
       { provider, model }
+    );
+  }
+
+  // =====================================================
+  // CUSTOM INSTRUCTIONS HISTORY
+  // =====================================================
+
+  /**
+   * Get custom instructions history (last 25)
+   * GET /api/database/custom-instructions-history
+   */
+  getCustomInstructionsHistory(): Observable<{ success: boolean; history: Array<{ id: number; instruction_text: string; used_at: string; use_count: number }> }> {
+    return this.http.get<{ success: boolean; history: any[] }>(
+      `${this.API_BASE}/database/custom-instructions-history`
+    );
+  }
+
+  /**
+   * Save custom instruction to history
+   * POST /api/database/custom-instructions-history
+   */
+  saveCustomInstruction(instruction: string): Observable<{ success: boolean; message: string }> {
+    return this.http.post<{ success: boolean; message: string }>(
+      `${this.API_BASE}/database/custom-instructions-history`,
+      { instruction }
+    );
+  }
+
+  /**
+   * Clear custom instructions history
+   * DELETE /api/database/custom-instructions-history
+   */
+  clearCustomInstructionsHistory(): Observable<{ success: boolean; message: string }> {
+    return this.http.delete<{ success: boolean; message: string }>(
+      `${this.API_BASE}/database/custom-instructions-history`
     );
   }
 }

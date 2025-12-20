@@ -583,14 +583,39 @@ export class VideoProcessingService {
   /**
    * Process all queued jobs by sending them to the backend
    * Returns an Observable that emits a map of frontend job ID -> backend job ID
+   * Throws an error if no library is configured
    */
   processQueue(): Observable<Map<string, string>> {
     const queuedJobs = this.jobs$.value.filter(j => j.status === 'queued');
     if (queuedJobs.length === 0) return of(new Map());
 
-    // Get current library ID
+    // Get current library ID - REQUIRED for processing
     const currentLibrary = this.libraryService.currentLibrary();
-    const libraryId = currentLibrary?.id;
+    if (!currentLibrary?.id) {
+      const error = new Error('No library configured. Please create a library first in Settings > Library Manager.');
+      console.error('[VideoProcessingService] Cannot process queue:', error.message);
+
+      // Mark all queued jobs as failed with the error message
+      const jobs = this.jobs$.value;
+      queuedJobs.forEach(qj => {
+        const job = jobs.find(j => j.id === qj.id);
+        if (job) {
+          job.status = 'failed';
+          job.tasks.forEach(task => {
+            task.status = 'failed';
+            task.error = 'No library configured';
+          });
+        }
+      });
+      this.jobs$.next([...jobs]);
+      this.updateStats();
+
+      // Return observable that throws the error
+      return new Observable(subscriber => {
+        subscriber.error(error);
+      });
+    }
+    const libraryId = currentLibrary.id;
 
     // Convert jobs to backend format
     const backendJobs: BackendJobRequest[] = queuedJobs.map(job => {
@@ -745,13 +770,14 @@ export class VideoProcessingService {
         }
       }
 
-      console.log('Sending to backend - provider:', aiProvider, 'model:', aiModel, 'quality:', settings.analysisQuality);
+      console.log('Sending to backend - provider:', aiProvider, 'model:', aiModel, 'quality:', settings.analysisQuality, 'granularity:', settings.analysisGranularity);
       tasks.push({
         type: 'analyze',
         options: {
           aiModel,
           aiProvider,
           customInstructions: settings.customInstructions,
+          analysisGranularity: settings.analysisGranularity ?? 5,
           analysisQuality: settings.analysisQuality || 'fast'
         }
       });

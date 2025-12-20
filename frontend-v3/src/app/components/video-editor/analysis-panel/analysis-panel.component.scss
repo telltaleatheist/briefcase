@@ -566,6 +566,8 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-primary, #212529);
+  white-space: pre-wrap; // Preserve line breaks (Windows \r\n and Unix \n)
+  word-wrap: break-word;
 }
 
 // Chapters Tab

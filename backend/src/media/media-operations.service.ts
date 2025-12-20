@@ -518,6 +518,7 @@ export class MediaOperationsService {
       apiKey?: string;
       ollamaEndpoint?: string;
       customInstructions?: string;
+      analysisGranularity?: number;
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
@@ -602,6 +603,7 @@ export class MediaOperationsService {
         segments,
         outputFile: analysisOutputPath,
         customInstructions: options.customInstructions,
+        analysisGranularity: options.analysisGranularity,
         videoTitle,
         categories,
         apiKey,

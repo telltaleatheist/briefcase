@@ -2213,6 +2213,27 @@ export class DatabaseController {
   }
 
   /**
+   * POST /api/database/populate-resolution
+   * Populate missing video resolution (width, height, fps) for existing videos
+   * Useful for migrating videos that were imported before resolution extraction was implemented
+   */
+  @Post('populate-resolution')
+  async populateMissingResolution() {
+    this.logger.log('Populating missing video resolution');
+    const result = await this.fileScannerService.populateMissingResolution();
+    return {
+      success: true,
+      total: result.total,
+      updated: result.updated,
+      failed: result.failed,
+      errors: result.errors,
+      message: result.total === 0
+        ? 'All videos already have resolution information'
+        : `Populated resolution for ${result.updated} of ${result.total} videos${result.failed > 0 ? ` (${result.failed} failed)` : ''}`
+    };
+  }
+
+  /**
    * POST /api/database/prune-selected
    * Delete selected orphaned videos from the database
    * Stores deleted entries for undo functionality
@@ -3957,5 +3978,42 @@ export class DatabaseController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  // =====================================================
+  // CUSTOM INSTRUCTIONS HISTORY
+  // =====================================================
+
+  /**
+   * GET /api/database/custom-instructions-history
+   * Get recent custom instructions (last 25)
+   */
+  @Get('custom-instructions-history')
+  getCustomInstructionsHistory() {
+    const history = this.databaseService.getCustomInstructionsHistory();
+    return { success: true, history };
+  }
+
+  /**
+   * POST /api/database/custom-instructions-history
+   * Save a custom instruction to history
+   */
+  @Post('custom-instructions-history')
+  saveCustomInstruction(@Body() body: { instruction: string }) {
+    if (!body.instruction) {
+      throw new HttpException('Instruction text is required', HttpStatus.BAD_REQUEST);
+    }
+    this.databaseService.saveCustomInstruction(body.instruction);
+    return { success: true, message: 'Instruction saved to history' };
+  }
+
+  /**
+   * DELETE /api/database/custom-instructions-history
+   * Clear custom instructions history
+   */
+  @Delete('custom-instructions-history')
+  clearCustomInstructionsHistory() {
+    this.databaseService.clearCustomInstructionsHistory();
+    return { success: true, message: 'Custom instructions history cleared' };
   }
 }

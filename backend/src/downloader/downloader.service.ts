@@ -53,32 +53,26 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
-   * Calculate the closest Sunday to a given date
+   * Calculate the upcoming Sunday for a given date (week folder name)
+   * Videos downloaded on any day go into a folder named after the upcoming Sunday.
+   * If today is Sunday, use today.
    * Returns the date in YYYY-MM-DD format
    */
-  private getClosestSunday(date: Date = new Date()): string {
-    const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+  private getUpcomingSunday(date: Date = new Date()): string {
+    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 
-    // If today is Sunday (0), use today
-    // If Monday-Wednesday (1-3), use previous Sunday
-    // If Thursday-Saturday (4-6), use next Sunday
-    let daysToAdd: number;
+    // Calculate days until next Sunday (0 if today is Sunday)
+    const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
 
-    if (dayOfWeek === 0) {
-      daysToAdd = 0; // Today is Sunday
-    } else if (dayOfWeek <= 3) {
-      daysToAdd = -dayOfWeek; // Go back to previous Sunday
-    } else {
-      daysToAdd = 7 - dayOfWeek; // Go forward to next Sunday
-    }
-
-    const closestSunday = new Date(date);
-    closestSunday.setDate(date.getDate() + daysToAdd);
+    const upcomingSunday = new Date(date);
+    upcomingSunday.setDate(date.getDate() + daysUntilSunday);
 
     // Format as YYYY-MM-DD
-    const year = closestSunday.getFullYear();
-    const month = String(closestSunday.getMonth() + 1).padStart(2, '0');
-    const day = String(closestSunday.getDate()).padStart(2, '0');
+    const year = upcomingSunday.getFullYear();
+    const month = String(upcomingSunday.getMonth() + 1).padStart(2, '0');
+    const day = String(upcomingSunday.getDate()).padStart(2, '0');
+
+    this.logger.log(`Week folder: Today is ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dayOfWeek]}, using Sunday ${year}-${month}-${day}`);
 
     return `${year}-${month}-${day}`;
   }
@@ -227,8 +221,8 @@ export class DownloaderService implements OnModuleInit {
       // Get the base download folder
       const baseDownloadFolder = this.pathService.getSafePath(options.outputDir);
 
-      // Add date-based subfolder (closest Sunday)
-      const dateFolderName = this.getClosestSunday();
+      // Add date-based subfolder (upcoming Sunday = week folder)
+      const dateFolderName = this.getUpcomingSunday();
       const downloadFolder = path.join(baseDownloadFolder, dateFolderName);
 
       this.logger.log(`Using download directory: ${downloadFolder} (base: ${baseDownloadFolder}, date: ${dateFolderName})`);

@@ -48,7 +48,16 @@
           </div>
         </div>
 
-        <h3 class="section-title">Choose a Provider</h3>
+        <h3 class="section-title">Choose a Local Provider</h3>
+
+        <div class="info-banner tip">
+          <span class="banner-icon">💡</span>
+          <div class="banner-content">
+            <strong>Pick one: Local AI or Ollama</strong>
+            <p><strong>Local AI</strong> is simpler - one-click setup, works only in this app.<br>
+            <strong>Ollama</strong> is more advanced - requires separate install, but models can be used with other apps too.</p>
+          </div>
+        </div>
 
         <div class="provider-cards">
           <!-- Local AI Card - Always show -->
@@ -62,14 +71,14 @@
               <span class="card-icon">🏠</span>
               <div class="card-titles">
                 <h4>Local AI</h4>
-                <span class="card-tagline">{{ localAvailable() ? 'Ready to Use' : 'Download & Run Locally' }}</span>
+                <span class="card-tagline">{{ localAvailable() ? 'Ready to Use' : 'Simple - Just Works' }}</span>
               </div>
             </div>
             <ul class="card-features">
               <li class="pro"><span>✓</span> {{ localAvailable() ? 'No setup required' : 'One-click download' }}</li>
               <li class="pro"><span>✓</span> Works offline</li>
               <li class="pro"><span>✓</span> No API costs ever</li>
-              <li class="con"><span>✗</span> Requires 4-8GB+ RAM</li>
+              <li class="neutral"><span>ℹ</span> Models only work in this app</li>
             </ul>
             <button class="card-btn primary">{{ localAvailable() ? 'Use Local AI' : 'Download Local AI' }}</button>
           </div>
@@ -90,14 +99,14 @@
                 } @else if (ollamaConnected()) {
                   <span class="card-tagline">Running - needs a model</span>
                 } @else {
-                  <span class="card-tagline">Free & Private</span>
+                  <span class="card-tagline">Advanced - More Flexibility</span>
                 }
               </div>
             </div>
             <ul class="card-features">
+              <li class="pro"><span>✓</span> Use models in other apps too</li>
+              <li class="pro"><span>✓</span> Larger model selection</li>
               <li class="pro"><span>✓</span> No API costs ever</li>
-              <li class="pro"><span>✓</span> Data stays on your machine</li>
-              <li class="pro"><span>✓</span> Works offline</li>
               @if (!ollamaConnected()) {
                 <li class="con"><span>✗</span> Requires separate install</li>
               } @else if (ollamaModels().length === 0) {

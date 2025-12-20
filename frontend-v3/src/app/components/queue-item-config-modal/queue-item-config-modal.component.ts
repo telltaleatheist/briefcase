@@ -59,6 +59,10 @@ export class QueueItemConfigModalComponent implements OnInit {
   defaultAIModel = ''; // No fallback - user must have saved a default or select one
   savedAsDefault = signal(false);
 
+  // Custom instructions history
+  instructionsHistory = signal<{ id: number; instruction_text: string; used_at: string }[]>([]);
+  showInstructionsDropdown = signal(false);
+
   constructor() {
     // When modal opens, reload default AI and then initialize tasks
     effect(() => {
@@ -75,6 +79,48 @@ export class QueueItemConfigModalComponent implements OnInit {
 
   ngOnInit() {
     this.loadAIModels();
+    this.loadInstructionsHistory();
+  }
+
+  private async loadInstructionsHistory() {
+    try {
+      const response = await firstValueFrom(this.libraryService.getCustomInstructionsHistory());
+      if (response.success && response.history) {
+        this.instructionsHistory.set(response.history);
+      }
+    } catch (error) {
+      console.warn('Failed to load instructions history:', error);
+    }
+  }
+
+  toggleInstructionsDropdown() {
+    this.showInstructionsDropdown.update(v => !v);
+  }
+
+  selectHistoryItem(item: { instruction_text: string }) {
+    this.updateTaskConfig('ai-analyze', { customInstructions: item.instruction_text });
+    this.showInstructionsDropdown.set(false);
+  }
+
+  truncateInstruction(text: string, maxLength: number = 60): string {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  }
+
+  getGranularityLabel(value: number): string {
+    if (value <= 2) return 'Very Strict';
+    if (value <= 4) return 'Strict';
+    if (value <= 6) return 'Balanced';
+    if (value <= 8) return 'Broad';
+    return 'Very Aggressive';
+  }
+
+  getGranularityDescription(value: number): string {
+    if (value <= 2) return 'Only flag content that clearly and definitively matches categories';
+    if (value <= 4) return 'Flag content with high confidence matches';
+    if (value <= 6) return 'Flag content with reasonable confidence';
+    if (value <= 8) return 'Flag content including edge cases and possible matches';
+    return 'Flag all possible matches, including weak associations';
   }
 
   /**
@@ -362,6 +408,7 @@ export class QueueItemConfigModalComponent implements OnInit {
       case 'ai-analyze':
         return {
           aiModel: this.defaultAIModel,
+          analysisGranularity: 5,
         } as AIAnalyzeConfig;
       case 'fix-aspect-ratio':
         return { targetRatio: '16:9', cropMode: 'smart' } as FixAspectRatioConfig;

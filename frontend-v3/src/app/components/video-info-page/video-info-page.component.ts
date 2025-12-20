@@ -70,7 +70,7 @@ export class VideoInfoPageComponent implements OnInit {
   transcriptionSearchResults: TranscriptionSearchResult[] = [];
   highlightedSegmentId: string | null = null;
   showTimestamps = true;
-  transcriptionView: 'continuous' | 'segments' = 'continuous';
+  transcriptionView: 'continuous' | 'segments' = 'segments';
   playbackPosition = 0; // Current video position in seconds
 
   // Children Management
@@ -293,6 +293,13 @@ export class VideoInfoPageComponent implements OnInit {
     // Get file extension/format
     const format = video.file_extension || video.fileExtension || '';
 
+    // Get video dimensions and fps
+    const width = video.width || 0;
+    const height = video.height || 0;
+    const fps = video.fps || 0;
+    const resolution = width && height ? `${width}x${height}` : 'N/A';
+    const aspectRatio = width && height ? this.calculateAspectRatio(width, height) : (video.aspect_ratio_fixed ? 'Fixed' : 'Original');
+
     return {
       id: video.id,
       title: video.name || video.filename || 'Untitled',
@@ -301,12 +308,12 @@ export class VideoInfoPageComponent implements OnInit {
       metadata: {
         duration: durationSeconds,
         fileSize: fileSize,
-        resolution: 'N/A', // Not stored in database
-        frameRate: 0,
+        resolution: resolution,
+        frameRate: fps,
         bitrate: 0,
         codec: 'N/A',
         format: format,
-        aspectRatio: video.aspect_ratio_fixed ? 'Fixed' : 'Original',
+        aspectRatio: aspectRatio,
         audioChannels: 0,
         audioBitrate: 0,
         audioCodec: 'N/A',
@@ -914,6 +921,12 @@ export class VideoInfoPageComponent implements OnInit {
     } else {
       return `${secs}s`;
     }
+  }
+
+  calculateAspectRatio(width: number, height: number): string {
+    const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+    const divisor = gcd(width, height);
+    return `${width / divisor}:${height / divisor}`;
   }
 
   formatTime(seconds: number): string {

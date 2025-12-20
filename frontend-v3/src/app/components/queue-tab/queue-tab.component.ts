@@ -19,6 +19,7 @@ export class QueueTabComponent {
   // Use signals for reactive inputs
   private _stagingQueue = signal<ProcessingQueueItem[]>([]);
   private _processingQueue = signal<ProcessingQueueItem[]>([]);
+  private _completedQueue = signal<ProcessingQueueItem[]>([]);
 
   @Input() set stagingQueue(value: ProcessingQueueItem[]) {
     console.log('[QueueTab] Staging queue INPUT setter called with:', value?.length, 'items');
@@ -36,6 +37,14 @@ export class QueueTabComponent {
     return this._processingQueue();
   }
 
+  @Input() set completedQueue(value: ProcessingQueueItem[]) {
+    console.log('[QueueTab] Completed queue INPUT setter called with:', value?.length, 'items');
+    this._completedQueue.set(value);
+  }
+  get completedQueue(): ProcessingQueueItem[] {
+    return this._completedQueue();
+  }
+
   @Input() progressMapper?: (video: VideoItem) => ItemProgress | null;
   @Input() childrenConfig?: ChildrenConfig;
   @Input() aiProcessingVideoId?: string | null;
@@ -48,11 +57,13 @@ export class QueueTabComponent {
   @Output() viewInLibrary = new EventEmitter<string>();
   @Output() configureItem = new EventEmitter<VideoItem>();
   @Output() previewRequested = new EventEmitter<VideoItem>();
+  @Output() viewAnalysis = new EventEmitter<string>();
+  @Output() clearCompleted = new EventEmitter<void>();
 
   selectedStagingIds = signal<Set<string>>(new Set());
   selectedProcessingIds = signal<Set<string>>(new Set());
 
-  // Combine staging and processing queues into a single weeks array for cascade
+  // Combine staging, processing, and completed queues into a single weeks array for cascade
   allQueueWeeks = computed(() => {
     const weeks: VideoWeek[] = [];
 
@@ -103,6 +114,33 @@ export class QueueTabComponent {
       });
     }
 
+    // Add completed section if there are items
+    const completedQueue = this._completedQueue();
+    console.log('[QueueTab] Completed queue length:', completedQueue.length);
+    if (completedQueue.length > 0) {
+      const completedVideos: VideoItem[] = completedQueue.map(item => {
+        // Determine if any task failed
+        const hasFailed = item.tasks?.some(t => t.status === 'failed');
+        const failedTask = item.tasks?.find(t => t.status === 'failed' && t.errorMessage);
+        const errorMessage = failedTask?.errorMessage;
+
+        return {
+          id: `completed-${item.id}`,
+          name: item.title,
+          duration: item.duration,
+          thumbnailUrl: item.thumbnail,
+          sourceUrl: item.url,
+          tags: [`completed:${item.id}`, hasFailed ? 'status:failed' : 'status:completed'],
+          errorMessage: errorMessage
+        };
+      });
+
+      weeks.push({
+        weekLabel: '✅ Completed',
+        videos: completedVideos
+      });
+    }
+
     console.log('[QueueTab] All queue weeks:', weeks);
     console.log('[QueueTab] Total weeks count:', weeks.length);
     return weeks;
@@ -121,13 +159,14 @@ export class QueueTabComponent {
 
     const { action, videos } = event;
 
-    // Extract IDs from video items
+    // Extract IDs from video items, handling staging, processing, and completed prefixes
     const videoIds = videos.map((v: VideoItem) => {
-      // Handle both staging and processing items
       if (v.id.startsWith('staging-')) {
         return v.id.replace('staging-', '');
       } else if (v.id.startsWith('processing-')) {
         return v.id.replace('processing-', '');
+      } else if (v.id.startsWith('completed-')) {
+        return v.id.replace('completed-', '');
       }
       return v.id;
     });
@@ -148,6 +187,16 @@ export class QueueTabComponent {
       case 'view-in-library':
         if (videoIds.length === 1) {
           this.viewInLibrary.emit(videoIds[0]);
+        }
+        break;
+      case 'view-analysis':
+      case 'openInEditor':
+        // For completed items, open in RippleCut (video editor)
+        const completedIds = videos
+          .filter((v: VideoItem) => v.id.startsWith('completed-'))
+          .map((v: VideoItem) => v.id.replace('completed-', ''));
+        if (completedIds.length === 1) {
+          this.viewAnalysis.emit(completedIds[0]);
         }
         break;
       case 'delete':

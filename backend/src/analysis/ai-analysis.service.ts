@@ -109,6 +109,7 @@ export interface AnalysisOptions {
   segments: Segment[];
   outputFile: string;
   customInstructions?: string;
+  analysisGranularity?: number; // 1-10: 1 = strict, 10 = aggressive
   videoTitle?: string;
   categories?: AnalysisCategory[];
   apiKey?: string;
@@ -346,6 +347,7 @@ export class AIAnalysisService {
       videoTitle = '',
       categories,
       customInstructions,
+      analysisGranularity,
       apiKey,
       ollamaEndpoint,
       onProgress,
@@ -458,6 +460,7 @@ export class AIAnalysisService {
         categories || [],
         modelLimits,
         customInstructions,
+        analysisGranularity,
         trackTokens,
       );
       sendProgress('analysis', 70, `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
@@ -874,6 +877,7 @@ export class AIAnalysisService {
     categories: AnalysisCategory[],
     limits: ModelLimits,
     customInstructions?: string,
+    analysisGranularity?: number,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<{ chapters: Chapter[]; flags: AnalyzedSection[] }> {
     const chapters: Chapter[] = [];
@@ -919,6 +923,7 @@ export class AIAnalysisService {
           i + 1,
           previousChapterSummary,
           customInstructions,
+          analysisGranularity,
         );
 
         const response = await this.aiProviderService.generateText(prompt, config);

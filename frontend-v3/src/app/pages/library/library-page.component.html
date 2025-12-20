@@ -157,11 +157,12 @@
         />
       }
 
-      <!-- Queue Tab: Staging and Processing queues -->
+      <!-- Queue Tab: Staging, Processing, and Completed queues -->
       <app-queue-tab
         *ngIf="activeTab() === 'queue'"
         [stagingQueue]="stagingQueue()"
         [processingQueue]="processingQueue()"
+        [completedQueue]="completedQueue()"
         [progressMapper]="queueProgressMapper"
         [childrenConfig]="processingChildrenConfig"
         [aiProcessingVideoId]="aiProcessingQueueItemId()"
@@ -173,6 +174,8 @@
         (viewInLibrary)="onViewInLibrary($event)"
         (configureItem)="onConfigureItem($event)"
         (previewRequested)="onPreviewRequested($event)"
+        (viewAnalysis)="onViewAnalysis($event)"
+        (clearCompleted)="onClearCompleted()"
       />
 
       <!-- Tabs Tab: User-created tabs with videos -->

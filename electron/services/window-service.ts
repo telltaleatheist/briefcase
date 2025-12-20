@@ -30,9 +30,9 @@ export class WindowService {
     const iconPath = path.join(AppConfig.appPath, 'assets', 'icon.png');
 
     this.mainWindow = new BrowserWindow({
-      width: 1600,  // Doubled from 800
+      width: 1600,
       height: 1000,
-      minWidth: 1200,  // Increased minimum width for sidebar layout
+      minWidth: 1200,
       minHeight: 600,
       autoHideMenuBar: true,
       icon: iconPath,
@@ -101,7 +101,7 @@ export class WindowService {
       minHeight: 600,
       autoHideMenuBar: true,
       icon: iconPath,
-      title: videoData.videoTitle || 'Video Editor',
+      title: videoData.videoTitle || 'RippleCut',
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,

@@ -16,6 +16,7 @@
   flex-direction: column;
   flex: 1 1 0;
   min-height: 0;
+  min-width: 0; // Allow shrinking below content size
   height: 0; // Force flex to calculate height
   overflow: hidden;
   position: relative;
@@ -181,8 +182,8 @@ cdk-virtual-scroll-viewport.library-content {
 .video-item {
   display: flex;
   align-items: center;
-  gap: $spacing-md;
-  padding: 0 $spacing-lg;
+  gap: $spacing-sm;
+  padding: 0 $spacing-md;
   height: 60px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
@@ -191,6 +192,7 @@ cdk-virtual-scroll-viewport.library-content {
   position: relative;
   user-select: none;
   box-sizing: border-box;
+  min-width: 0; // Allow shrinking below content size
 
   &:hover {
     background: var(--bg-secondary);
@@ -545,8 +547,10 @@ cdk-virtual-scroll-viewport.library-content {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: $spacing-lg;
-  flex-shrink: 0;
+  gap: $spacing-sm;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .video-duration {
@@ -554,8 +558,8 @@ cdk-virtual-scroll-viewport.library-content {
   font-weight: $font-weight-semibold;
   font-family: monospace;
   color: var(--text-secondary);
-  min-width: 50px;
   text-align: right;
+  flex-shrink: 0;
 }
 
 .edit-btn,
@@ -606,6 +610,72 @@ cdk-virtual-scroll-viewport.library-content {
 
 .video-item.selected .delete-btn {
   opacity: 0.7;
+}
+
+// Quick Action Buttons (compact, allow shrinking)
+.quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.action-btn {
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--primary-orange);
+  border: 1px solid var(--primary-orange);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all $transition-fast;
+  @include flex-center;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--dark-orange);
+    border-color: var(--dark-orange);
+    box-shadow: 0 2px 6px rgba(255, 107, 53, 0.3);
+  }
+
+  &:active {
+    box-shadow: 0 1px 3px rgba(255, 107, 53, 0.2);
+  }
+
+  // Open button - primary action
+  &.open-btn {
+    background: var(--primary-orange);
+    border-color: var(--primary-orange);
+  }
+
+  // More/RippleCut button - slightly different shade
+  &.ripplecut-btn {
+    background: #e85d2a;
+    border-color: #e85d2a;
+
+    &:hover {
+      background: #d54d1a;
+      border-color: #d54d1a;
+    }
+  }
+
+  // Process button - outline style
+  &.process-btn {
+    background: transparent;
+    border: 1px solid var(--primary-orange);
+    color: var(--primary-orange);
+
+    &:hover {
+      background: rgba(255, 107, 53, 0.12);
+      color: var(--dark-orange);
+      border-color: var(--dark-orange);
+    }
+  }
 }
 
 // Empty State
@@ -712,6 +782,7 @@ cdk-virtual-scroll-viewport.library-content {
 .video-item-wrapper {
   display: flex;
   flex-direction: column;
+  min-width: 0; // Allow shrinking below content size
 }
 
 // Expand/Collapse Button
@@ -1180,25 +1251,65 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
-// Responsive
+// Responsive - hide action buttons on narrow screens, show on hover
+@media (max-width: 900px) {
+  .quick-actions {
+    display: none;
+  }
+
+  .video-item:hover .quick-actions {
+    display: flex;
+  }
+
+  .video-duration {
+    display: none;
+  }
+}
+
 @media (max-width: 768px) {
   .video-item {
-    grid-template-columns: 8px 32px 1fr;
-    gap: $spacing-sm;
+    gap: $spacing-xs;
+    padding: 0 $spacing-sm;
   }
 
   .video-actions {
-    grid-column: 3;
-    justify-content: space-between;
-    margin-top: $spacing-xs;
+    gap: $spacing-xs;
   }
 
   .meta-filename {
-    max-width: 200px;
+    max-width: 150px;
   }
 
   .delete-btn {
     opacity: 1;
+  }
+
+  .video-icon {
+    width: 24px;
+    font-size: $font-size-base;
+  }
+}
+
+@media (max-width: 600px) {
+  .video-item {
+    padding: 0 $spacing-xs;
+  }
+
+  .video-content {
+    gap: 2px;
+  }
+
+  .video-title {
+    font-size: 12px;
+  }
+
+  .video-meta {
+    font-size: 10px;
+  }
+
+  .selection-indicator {
+    width: 6px;
+    height: 6px;
   }
 }
 

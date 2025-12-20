@@ -461,12 +461,19 @@ export class FileScannerService {
         const metadata = await this.ffmpegService.getVideoMetadata(video.current_path);
 
         if (metadata.duration) {
-          // Update database
-          db.prepare('UPDATE videos SET duration_seconds = ? WHERE id = ?')
-            .run(metadata.duration, video.id);
+          // Update database with duration and video metadata
+          db.prepare('UPDATE videos SET duration_seconds = ?, width = ?, height = ?, fps = ? WHERE id = ?')
+            .run(
+              metadata.duration,
+              metadata.width || null,
+              metadata.height || null,
+              metadata.fps || null,
+              video.id
+            );
 
           result.updated++;
-          this.logger.log(`Updated duration for ${video.filename}: ${metadata.duration}s`);
+          const resolution = metadata.width && metadata.height ? ` (${metadata.width}x${metadata.height})` : '';
+          this.logger.log(`Updated metadata for ${video.filename}: ${metadata.duration}s${resolution}`);
         } else {
           result.failed++;
           result.errors.push(`${video.filename}: No duration in metadata`);
@@ -481,6 +488,81 @@ export class FileScannerService {
     this.databaseService.saveDatabaseToDisk();
 
     this.logger.log(`Duration population complete: ${result.updated} updated, ${result.failed} failed`);
+    return result;
+  }
+
+  /**
+   * Populate missing resolution (width, height, fps) for videos that have duration but missing resolution
+   * This is for backward compatibility with existing database entries
+   */
+  async populateMissingResolution(): Promise<{
+    total: number;
+    updated: number;
+    failed: number;
+    errors: string[];
+  }> {
+    this.logger.log('Starting to populate missing video resolution...');
+    const db = this.databaseService.getDatabase();
+
+    // Find all video files that have duration but missing resolution
+    const stmt = db.prepare(`
+      SELECT id, filename, current_path, media_type
+      FROM videos
+      WHERE (width IS NULL OR height IS NULL)
+        AND media_type = 'video'
+        AND is_linked = 1
+    `);
+
+    const videosToUpdate = stmt.all() as Array<{ id: string; filename: string; current_path: string; media_type: string }>;
+
+    const result = {
+      total: videosToUpdate.length,
+      updated: 0,
+      failed: 0,
+      errors: [] as string[]
+    };
+
+    this.logger.log(`Found ${result.total} videos without resolution data`);
+
+    for (const video of videosToUpdate) {
+      try {
+        // Check if file exists
+        if (!fs.existsSync(video.current_path)) {
+          this.logger.warn(`File not found: ${video.current_path}`);
+          result.failed++;
+          result.errors.push(`${video.filename}: File not found`);
+          continue;
+        }
+
+        // Extract metadata using ffprobe
+        const metadata = await this.ffmpegService.getVideoMetadata(video.current_path);
+
+        if (metadata.width && metadata.height) {
+          // Update database with resolution info
+          db.prepare('UPDATE videos SET width = ?, height = ?, fps = ? WHERE id = ?')
+            .run(
+              metadata.width,
+              metadata.height,
+              metadata.fps || null,
+              video.id
+            );
+
+          result.updated++;
+          this.logger.log(`Updated resolution for ${video.filename}: ${metadata.width}x${metadata.height}`);
+        } else {
+          result.failed++;
+          result.errors.push(`${video.filename}: No resolution in metadata`);
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to extract resolution for ${video.filename}: ${error.message}`);
+        result.failed++;
+        result.errors.push(`${video.filename}: ${error.message}`);
+      }
+    }
+
+    this.databaseService.saveDatabaseToDisk();
+
+    this.logger.log(`Resolution population complete: ${result.updated} updated, ${result.failed} failed`);
     return result;
   }
 
@@ -682,8 +764,11 @@ export class FileScannerService {
         // Create new video entry
         const videoId = uuidv4();
 
-        // Extract duration for video/audio files using ffprobe (fast metadata read)
+        // Extract metadata for video/audio files using ffprobe (fast metadata read)
         let durationSeconds: number | undefined = undefined;
+        let width: number | undefined = undefined;
+        let height: number | undefined = undefined;
+        let fps: number | undefined = undefined;
         const fileExt = path.extname(filename).toLowerCase();
         const isVideoOrAudio = [...this.VIDEO_EXTENSIONS, ...this.AUDIO_EXTENSIONS].includes(fileExt);
 
@@ -691,10 +776,14 @@ export class FileScannerService {
           try {
             const metadata = await this.ffmpegService.getVideoMetadata(destinationPath);
             durationSeconds = metadata.duration;
-            this.logger.log(`Extracted duration: ${durationSeconds}s for ${filename}`);
+            width = metadata.width;
+            height = metadata.height;
+            fps = metadata.fps;
+            const resolution = width && height ? ` ${width}x${height}` : '';
+            this.logger.log(`Extracted metadata: ${durationSeconds}s${resolution} for ${filename}`);
           } catch (error: any) {
-            this.logger.warn(`Could not extract duration for ${filename}: ${error.message}`);
-            // Continue with undefined duration - not critical for import
+            this.logger.warn(`Could not extract metadata for ${filename}: ${error.message}`);
+            // Continue with undefined values - not critical for import
           }
         }
 
@@ -710,6 +799,9 @@ export class FileScannerService {
           downloadDate, // File creation timestamp (when you downloaded it)
           durationSeconds,
           fileSizeBytes: stats.size,
+          width,
+          height,
+          fps,
         });
 
         // Link to parent video if specified

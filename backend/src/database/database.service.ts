@@ -30,6 +30,10 @@ export interface VideoRecord {
   suggested_title?: string | null;
   date_folder?: string | null;
   title?: string | null;
+  // Video metadata
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
 }
 
 export interface VideoRecordWithFlags extends VideoRecord {
@@ -449,6 +453,9 @@ export class DatabaseService {
         aspect_ratio_fixed INTEGER DEFAULT 0,
         audio_normalized INTEGER DEFAULT 0,
         last_processed_date TEXT,
+        width INTEGER,
+        height INTEGER,
+        fps REAL,
         FOREIGN KEY (parent_id) REFERENCES videos(id) ON DELETE CASCADE,
         CHECK (is_linked IN (0, 1)),
         CHECK (aspect_ratio_fixed IN (0, 1)),
@@ -1235,6 +1242,52 @@ export class DatabaseService {
       this.logger.error(`Error checking video_tab_items schema: ${error?.message}`);
     }
 
+    // Migration 20: Add width, height, fps columns to videos table
+    try {
+      db.exec("SELECT width FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: width')) {
+        this.logger.log('Running migration: Adding video metadata columns (width, height, fps) to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN width INTEGER;
+            ALTER TABLE videos ADD COLUMN height INTEGER;
+            ALTER TABLE videos ADD COLUMN fps REAL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: width, height, fps columns added');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
+    // Migration 21: Create custom_instructions_history table
+    try {
+      db.exec("SELECT 1 FROM custom_instructions_history LIMIT 1");
+      // Table exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such table')) {
+        this.logger.log('Running migration: Creating custom_instructions_history table');
+        try {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS custom_instructions_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              instruction_text TEXT NOT NULL,
+              used_at TEXT NOT NULL,
+              use_count INTEGER DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_instructions_used_at ON custom_instructions_history(used_at DESC);
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: custom_instructions_history table created');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
   }
 
   /**
@@ -1768,6 +1821,9 @@ export class DatabaseService {
     mediaType?: string;
     fileExtension?: string;
     downloadDate?: string; // File's creation timestamp (when you downloaded it)
+    width?: number;
+    height?: number;
+    fps?: number;
   }): { inserted: boolean; existingId?: string } {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
@@ -1815,8 +1871,8 @@ export class DatabaseService {
       `INSERT OR REPLACE INTO videos (
         id, filename, file_hash, current_path, upload_date,
         duration_seconds, file_size_bytes, source_url, media_type, file_extension,
-        download_date, last_verified, added_at, is_linked
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+        download_date, last_verified, added_at, is_linked, width, height, fps
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
     ).run(
       video.id,
       video.filename,
@@ -1831,6 +1887,9 @@ export class DatabaseService {
       downloadDate, // File's creation timestamp (when you downloaded it)
       now, // last_verified
       now, // added_at (when database entry was created)
+      video.width || null,
+      video.height || null,
+      video.fps || null
     );
 
     // Insert/update FTS5 table for video search
@@ -4205,6 +4264,74 @@ export class DatabaseService {
       ORDER BY vt.name ASC
     `);
     return stmt.all(videoId) as any[];
+  }
+
+  // =====================================================
+  // CUSTOM INSTRUCTIONS HISTORY
+  // =====================================================
+
+  /**
+   * Save custom instruction to history (upsert - update if exists, insert if new)
+   */
+  saveCustomInstruction(instructionText: string): void {
+    if (!instructionText || instructionText.trim().length === 0) {
+      return;
+    }
+
+    const db = this.ensureInitialized();
+    const trimmedText = instructionText.trim();
+    const now = new Date().toISOString();
+
+    // Check if this instruction already exists
+    const existing = db.prepare(
+      'SELECT id, use_count FROM custom_instructions_history WHERE instruction_text = ?'
+    ).get(trimmedText) as { id: number; use_count: number } | undefined;
+
+    if (existing) {
+      // Update existing entry
+      db.prepare(
+        'UPDATE custom_instructions_history SET used_at = ?, use_count = ? WHERE id = ?'
+      ).run(now, existing.use_count + 1, existing.id);
+    } else {
+      // Insert new entry
+      db.prepare(
+        'INSERT INTO custom_instructions_history (instruction_text, used_at, use_count) VALUES (?, ?, 1)'
+      ).run(trimmedText, now);
+
+      // Keep only the most recent 25 entries
+      db.prepare(`
+        DELETE FROM custom_instructions_history
+        WHERE id NOT IN (
+          SELECT id FROM custom_instructions_history
+          ORDER BY used_at DESC
+          LIMIT 25
+        )
+      `).run();
+    }
+
+    this.saveDatabase();
+  }
+
+  /**
+   * Get recent custom instructions (last 25, most recent first)
+   */
+  getCustomInstructionsHistory(): Array<{ id: number; instruction_text: string; used_at: string; use_count: number }> {
+    const db = this.ensureInitialized();
+    return db.prepare(`
+      SELECT id, instruction_text, used_at, use_count
+      FROM custom_instructions_history
+      ORDER BY used_at DESC
+      LIMIT 25
+    `).all() as any[];
+  }
+
+  /**
+   * Clear custom instructions history
+   */
+  clearCustomInstructionsHistory(): void {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM custom_instructions_history').run();
+    this.saveDatabase();
   }
 
   /**

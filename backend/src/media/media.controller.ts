@@ -294,6 +294,7 @@ export class MediaController {
       apiKey?: string;
       ollamaEndpoint?: string;
       customInstructions?: string;
+      analysisGranularity?: number;
     },
   ) {
     if (!body.videoId) {
@@ -310,6 +311,7 @@ export class MediaController {
       apiKey: body.apiKey,
       ollamaEndpoint: body.ollamaEndpoint,
       customInstructions: body.customInstructions,
+      analysisGranularity: body.analysisGranularity,
     });
 
     if (!result.success) {

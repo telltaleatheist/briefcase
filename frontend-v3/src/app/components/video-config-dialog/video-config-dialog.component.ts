@@ -5,6 +5,14 @@ import { HttpClient } from '@angular/common/http';
 import { VideoJobSettings } from '../../models/video-processing.model';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { TourService } from '../../services/tour.service';
+import { LibraryService } from '../../services/library.service';
+
+interface CustomInstructionHistoryItem {
+  id: number;
+  instruction_text: string;
+  used_at: string;
+  use_count: number;
+}
 
 interface AIModelOption {
   value: string;
@@ -24,6 +32,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
+  private libraryService = inject(LibraryService);
   private readonly API_BASE = 'http://localhost:3000/api';
 
   @Input() isOpen = false;
@@ -36,6 +45,10 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   aiModels: AIModelOption[] = [];
   whisperModels: { id: string; name: string; description: string }[] = [];
 
+  // Custom instructions history
+  instructionsHistory: CustomInstructionHistoryItem[] = [];
+  showInstructionsDropdown = false;
+
   settings: VideoJobSettings = {
     fixAspectRatio: false,
     normalizeAudio: false,
@@ -46,12 +59,62 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     aiAnalysis: false,
     aiModel: '',
     customInstructions: '',
+    analysisGranularity: 5, // Default to middle (balanced)
     outputFormat: 'mp4',
     outputQuality: 'high'
   };
 
   ngOnInit() {
     this.loadAIModels();
+    this.loadInstructionsHistory();
+  }
+
+  private loadInstructionsHistory() {
+    this.libraryService.getCustomInstructionsHistory().subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.instructionsHistory = response.history;
+        }
+      },
+      error: (error) => {
+        console.error('Failed to load instructions history:', error);
+      }
+    });
+  }
+
+  toggleInstructionsDropdown() {
+    this.showInstructionsDropdown = !this.showInstructionsDropdown;
+    if (this.showInstructionsDropdown) {
+      this.loadInstructionsHistory();
+    }
+  }
+
+  selectHistoryItem(item: CustomInstructionHistoryItem) {
+    this.settings.customInstructions = item.instruction_text;
+    this.showInstructionsDropdown = false;
+  }
+
+  truncateInstruction(text: string, maxLength: number = 60): string {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  }
+
+  getGranularityLabel(): string {
+    const value = this.settings.analysisGranularity || 5;
+    if (value <= 2) return 'Very Strict';
+    if (value <= 4) return 'Strict';
+    if (value <= 6) return 'Balanced';
+    if (value <= 8) return 'Broad';
+    return 'Very Aggressive';
+  }
+
+  getGranularityDescription(): string {
+    const value = this.settings.analysisGranularity || 5;
+    if (value <= 2) return 'Only flag content that clearly and definitively matches categories';
+    if (value <= 4) return 'Flag content with high confidence matches';
+    if (value <= 6) return 'Flag content with reasonable confidence';
+    if (value <= 8) return 'Flag content including edge cases and possible matches';
+    return 'Flag all possible matches, including weak associations';
   }
 
   ngOnChanges(changes: SimpleChanges) {
@@ -303,6 +366,13 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     const urls = this.getUrls();
     if (urls.length === 0) return;
 
+    // Save custom instructions to history if provided
+    if (this.settings.customInstructions && this.settings.customInstructions.trim()) {
+      this.libraryService.saveCustomInstruction(this.settings.customInstructions.trim()).subscribe({
+        error: (error) => console.error('Failed to save instruction to history:', error)
+      });
+    }
+
     const configs = urls.map(url => ({
       url,
       name: this.extractNameFromUrl(url),
@@ -331,6 +401,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
       aiAnalysis: false,
       aiModel: '', // Will be set from saved default when dialog reopens
       customInstructions: '',
+      analysisGranularity: 5, // Default to middle (balanced)
       outputFormat: 'mp4',
       outputQuality: 'high'
     };

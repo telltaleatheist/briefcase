@@ -157,13 +157,75 @@
                     <ng-container *ngIf="!savedAsDefault">💾 Save as Default</ng-container>
                   </button>
                 </div>
-                <div class="form-group">
-                  <label>Custom Instructions (optional)</label>
-                  <textarea
-                    rows="3"
-                    placeholder="Be specific for best results. Example: 'This is [person], a [context]. Watch for [specific things] such as [examples]...'"
-                    [(ngModel)]="settings.customInstructions"
-                  ></textarea>
+
+                <!-- Analysis Granularity Slider -->
+                <div class="form-group granularity-group">
+                  <div class="label-row">
+                    <label>Detection Sensitivity</label>
+                    <span class="granularity-value">{{ getGranularityLabel() }}</span>
+                  </div>
+                  <div class="slider-container">
+                    <span class="slider-label-left">Strict</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      [(ngModel)]="settings.analysisGranularity"
+                      class="granularity-slider"
+                    />
+                    <span class="slider-label-right">Aggressive</span>
+                  </div>
+                  <div class="granularity-description">
+                    {{ getGranularityDescription() }}
+                  </div>
+                </div>
+
+                <!-- Custom Instructions Info Box -->
+                <div class="info-box">
+                  <div class="info-icon">💡</div>
+                  <div class="info-content">
+                    <strong>Custom instructions are optional.</strong>
+                    The AI uses your <strong>Categories</strong> (configured in Settings) to analyze videos.
+                    Only use custom instructions for one-time, specific guidance that doesn't fit your categories.
+                  </div>
+                </div>
+
+                <div class="form-group custom-instructions-group">
+                  <div class="label-row">
+                    <label>Custom Instructions (optional)</label>
+                    <button
+                      type="button"
+                      class="history-btn"
+                      [class.disabled]="instructionsHistory.length === 0"
+                      (click)="instructionsHistory.length > 0 && toggleInstructionsDropdown()"
+                      [title]="instructionsHistory.length > 0 ? 'View previous instructions' : 'No history yet'">
+                      History ({{ instructionsHistory.length }})
+                    </button>
+                  </div>
+                  <div class="instructions-wrapper">
+                    <textarea
+                      rows="3"
+                      placeholder="Example: 'This is a tech conference talk. Focus on product announcements and pricing details.'"
+                      [(ngModel)]="settings.customInstructions"
+                    ></textarea>
+                    <div class="instructions-dropdown" *ngIf="showInstructionsDropdown && instructionsHistory.length > 0">
+                      <div class="dropdown-header">
+                        <span>Recent Instructions</span>
+                        <button type="button" class="close-dropdown" (click)="showInstructionsDropdown = false">×</button>
+                      </div>
+                      <div class="dropdown-list">
+                        <button
+                          *ngFor="let item of instructionsHistory"
+                          type="button"
+                          class="dropdown-item"
+                          (click)="selectHistoryItem(item)"
+                          [title]="item.instruction_text">
+                          {{ truncateInstruction(item.instruction_text) }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

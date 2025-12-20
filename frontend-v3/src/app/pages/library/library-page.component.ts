@@ -115,9 +115,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
 
-  // Queue state - split into staging (not yet sent to backend) and processing (actively being processed)
+  // Queue state - split into staging (not yet sent to backend), processing (actively being processed), and completed
   stagingQueue = signal<ProcessingQueueItem[]>([]);  // Items waiting to be processed
   processingQueue = signal<ProcessingQueueItem[]>([]); // Items actively being processed by backend
+  completedQueue = signal<ProcessingQueueItem[]>([]); // Items that have completed processing
 
   // Queue UI state
   queueExpanded = signal(true);
@@ -288,7 +289,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Auto-remove completed/failed items from processing queue
+    // Move completed/failed items from processing queue to completed queue
     effect(() => {
       const queue = this.processingQueue();
 
@@ -299,11 +300,22 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           !item.tasks.some(t => t.status === 'pending' || t.status === 'running');
       });
 
-      // Remove done items after a brief delay to show final state
+      // Move done items to completed queue after a brief delay to show final state
       if (doneItems.length > 0) {
-        console.log('Found', doneItems.length, 'done items to remove:', doneItems.map(i => i.title));
+        console.log('Found', doneItems.length, 'done items to move to completed:', doneItems.map(i => i.title));
         setTimeout(() => {
           const currentQueue = this.processingQueue();
+          const currentCompleted = this.completedQueue();
+
+          // Find items that are done and not already in completed queue
+          const itemsToMove = currentQueue.filter(item => {
+            const isDone = item.tasks.length > 0 &&
+              item.tasks.every(t => t.status === 'completed' || t.status === 'failed') &&
+              !item.tasks.some(t => t.status === 'pending' || t.status === 'running');
+            const alreadyInCompleted = currentCompleted.some(c => c.id === item.id);
+            return isDone && !alreadyInCompleted;
+          });
+
           const remainingQueue = currentQueue.filter(item => {
             const isDone = item.tasks.length > 0 &&
               item.tasks.every(t => t.status === 'completed' || t.status === 'failed') &&
@@ -311,8 +323,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             return !isDone;
           });
 
-          if (remainingQueue.length !== currentQueue.length) {
-            console.log('Removing', currentQueue.length - remainingQueue.length, 'done items from queue');
+          if (itemsToMove.length > 0) {
+            console.log('Moving', itemsToMove.length, 'done items to completed queue');
+            // Add to completed queue (newest first)
+            this.completedQueue.set([...itemsToMove, ...currentCompleted]);
             this.processingQueue.set(remainingQueue);
             this.loadLibrary(); // Refresh library to show newly completed items
           }
@@ -2231,6 +2245,30 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.openInEditor(videosToProcess[0]);
         break;
 
+      case 'reveal':
+        // Reveal file in Finder/Explorer
+        if (videosToProcess[0]?.filePath) {
+          this.electronService.showInFolder(videosToProcess[0].filePath);
+        }
+        break;
+
+      case 'open':
+        // Open video file in default video player
+        if (videosToProcess[0]?.filePath) {
+          this.electronService.openFile(videosToProcess[0].filePath);
+        }
+        break;
+
+      case 'configure':
+        // Open the processing configuration modal for this video
+        this.analyzeVideos(videosToProcess);
+        break;
+
+      case 'process':
+        // Add to processing queue with AI analysis
+        this.analyzeVideos(videosToProcess);
+        break;
+
       default:
         // Check for delete:mode pattern
         if (action.startsWith('delete:')) {
@@ -3263,6 +3301,73 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.cascadeComponent.highlightAndScrollToVideoId(processingItem.videoId!);
       }
     }, 100);
+  }
+
+  /**
+   * Open RippleCut (video editor) to view analysis for a completed item
+   */
+  onViewAnalysis(itemId: string) {
+    // Find the item in the completed queue
+    const completedItem = this.completedQueue().find(item => item.id === itemId);
+    if (!completedItem?.videoId) {
+      this.notificationService.warning(
+        'Not Available',
+        'This item does not have an associated video'
+      );
+      return;
+    }
+
+    // Find the video in the library to get full details
+    const allVideos = this.videoWeeks().flatMap(w => w.videos);
+    const video = allVideos.find(v => v.id === completedItem.videoId);
+
+    if (!video) {
+      // Try to open with just the videoId - the editor can load data by ID
+      if (this.electronService.isElectron) {
+        this.electronService.openEditorWindow({
+          videoId: completedItem.videoId,
+          videoPath: undefined,
+          videoTitle: completedItem.title
+        });
+      } else {
+        this.router.navigate(['/editor'], {
+          state: {
+            videoEditorData: {
+              videoId: completedItem.videoId,
+              videoPath: undefined,
+              videoTitle: completedItem.title
+            }
+          }
+        });
+      }
+      return;
+    }
+
+    // Open editor with full video details
+    if (this.electronService.isElectron) {
+      this.electronService.openEditorWindow({
+        videoId: video.id,
+        videoPath: video.filePath,
+        videoTitle: video.name
+      });
+    } else {
+      this.router.navigate(['/editor'], {
+        state: {
+          videoEditorData: {
+            videoId: video.id,
+            videoPath: video.filePath,
+            videoTitle: video.name
+          }
+        }
+      });
+    }
+  }
+
+  /**
+   * Clear all items from the completed queue
+   */
+  onClearCompleted() {
+    this.completedQueue.set([]);
   }
 
   // ========================================
