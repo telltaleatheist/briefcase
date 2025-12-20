@@ -58,8 +58,8 @@ const COGITO_MODELS: Omit<ModelInfo, 'downloaded' | 'isDefault'>[] = [
   {
     id: 'cogito-3b',
     name: 'Cogito 3B',
-    filename: 'cogito-v1-preview-llama-3B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-llama-3B-GGUF/resolve/main/cogito-v1-preview-llama-3B-Q4_K_M.gguf',
+    filename: 'deepcogito_cogito-v1-preview-llama-3B-Q4_K_M.gguf',
+    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-llama-3B-GGUF/resolve/main/deepcogito_cogito-v1-preview-llama-3B-Q4_K_M.gguf',
     sizeGB: 2.24,
     minRAM: 4, // ~3GB VRAM/RAM needed
     description: 'Lightweight and fast. Works on most GPUs (4GB+ VRAM) or CPU.',
@@ -67,8 +67,8 @@ const COGITO_MODELS: Omit<ModelInfo, 'downloaded' | 'isDefault'>[] = [
   {
     id: 'cogito-8b',
     name: 'Cogito 8B',
-    filename: 'cogito-v1-preview-llama-8B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-llama-8B-GGUF/resolve/main/cogito-v1-preview-llama-8B-Q4_K_M.gguf',
+    filename: 'deepcogito_cogito-v1-preview-llama-8B-Q4_K_M.gguf',
+    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-llama-8B-GGUF/resolve/main/deepcogito_cogito-v1-preview-llama-8B-Q4_K_M.gguf',
     sizeGB: 4.92,
     minRAM: 6, // ~5.5GB VRAM/RAM needed
     description: 'Good balance of quality and speed. Runs great on 6GB+ GPU.',
