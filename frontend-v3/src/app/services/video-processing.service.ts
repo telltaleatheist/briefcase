@@ -789,7 +789,7 @@ export class VideoProcessingService {
       if (modelValue.includes(':')) {
         const firstColon = modelValue.indexOf(':');
         const possibleProvider = modelValue.substring(0, firstColon);
-        if (['ollama', 'claude', 'openai'].includes(possibleProvider)) {
+        if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
           aiProvider = possibleProvider;
           aiModel = modelValue.substring(firstColon + 1);
         }

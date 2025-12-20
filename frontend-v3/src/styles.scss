@@ -163,6 +163,16 @@ app-root {
     font-size: 13px !important;
     font-weight: 500 !important;
     transition: all 0.2s ease !important;
+    // Fix for text overlap - ensure single text display
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-shadow: none !important;
+
+    // Hide any duplicate spans that might cause overlap
+    span:not(:first-child) {
+      display: none !important;
+    }
   }
 
   .driver-popover-prev-btn {
@@ -184,6 +194,17 @@ app-root {
     &:hover {
       background: var(--primary-orange-hover, #ff8c5a) !important;
       transform: translateY(-1px) !important;
+    }
+  }
+
+  // Ensure button text is clean and not duplicated
+  .driver-popover-navigation-btns {
+    display: flex !important;
+    gap: 8px !important;
+
+    button {
+      position: relative !important;
+      overflow: hidden !important;
     }
   }
 

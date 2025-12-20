@@ -1,0 +1,281 @@
+<div class="onboarding-container">
+  <!-- Welcome Step -->
+  @if (currentStep() === 'welcome') {
+    <div class="onboarding-card welcome-card">
+      <div class="logo-section">
+        <div class="app-logo">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="48" height="48" rx="12" fill="var(--accent-primary)"/>
+            <path d="M14 16L14 32L20 32L20 26L28 26L28 32L34 32L34 16L28 16L28 22L20 22L20 16L14 16Z" fill="white"/>
+          </svg>
+        </div>
+        <h1 class="app-title">ClipChimp</h1>
+      </div>
+
+      <div class="welcome-content">
+        <h2>Welcome to ClipChimp</h2>
+        <p class="welcome-description">
+          Your AI-powered media library manager. Organize, transcribe, and analyze your video collection with ease.
+        </p>
+
+        <div class="features-list">
+          <div class="feature-item">
+            <span class="feature-icon">📚</span>
+            <span>Organize videos into libraries</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🎙️</span>
+            <span>Automatic transcription</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🤖</span>
+            <span>AI-powered content analysis</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">✂️</span>
+            <span>Built-in video editor</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="welcome-actions">
+        <button class="btn-primary btn-large" (click)="goToLibraryStep()">
+          Get Started
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Library Setup Step -->
+  @if (currentStep() === 'library') {
+    <div class="onboarding-card library-card">
+      <div class="card-header">
+        <h2>Set Up Your Library</h2>
+        <p class="card-description">
+          A library is where your videos and metadata are stored. You need at least one library to get started.
+        </p>
+      </div>
+
+      <!-- Mode selector tabs -->
+      <div class="mode-tabs">
+        @if (hasExistingLibraries()) {
+          <button
+            class="mode-tab"
+            [class.active]="libraryMode() === 'select'"
+            (click)="setLibraryMode('select')">
+            Use Existing
+          </button>
+        }
+        <button
+          class="mode-tab"
+          [class.active]="libraryMode() === 'create'"
+          (click)="setLibraryMode('create')">
+          Create New
+        </button>
+        <button
+          class="mode-tab"
+          [class.active]="libraryMode() === 'open'"
+          (click)="setLibraryMode('open')">
+          Link Existing Folder
+        </button>
+      </div>
+
+      <div class="mode-content">
+        <!-- Select existing library -->
+        @if (libraryMode() === 'select' && hasExistingLibraries()) {
+          <div class="library-list">
+            @for (library of existingLibraries(); track library.id) {
+              <div
+                class="library-item"
+                [class.selected]="selectedLibrary()?.id === library.id"
+                (click)="selectLibrary(library)">
+                <div class="library-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                  </svg>
+                </div>
+                <div class="library-info">
+                  <span class="library-name">{{ library.name }}</span>
+                  <span class="library-path">{{ library.path }}</span>
+                </div>
+                @if (selectedLibrary()?.id === library.id) {
+                  <div class="check-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="20,6 9,17 4,12"/>
+                    </svg>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+          <div class="form-actions">
+            <button
+              class="btn-primary"
+              [disabled]="!selectedLibrary() || isLoading()"
+              (click)="useSelectedLibrary()">
+              @if (isLoading()) {
+                <span class="spinner"></span>
+              } @else {
+                Continue with Selected Library
+              }
+            </button>
+          </div>
+        }
+
+        <!-- Create new library -->
+        @if (libraryMode() === 'create') {
+          <div class="form-group">
+            <label for="libraryName">Library Name</label>
+            <input
+              id="libraryName"
+              type="text"
+              class="form-input"
+              placeholder="My Video Library"
+              [ngModel]="newLibraryName()"
+              (ngModelChange)="newLibraryName.set($event)">
+          </div>
+          <div class="form-group">
+            <label for="libraryPath">Library Location</label>
+            <div class="path-input-group">
+              <input
+                id="libraryPath"
+                type="text"
+                class="form-input"
+                placeholder="Choose a folder for your library"
+                [ngModel]="newLibraryPath()"
+                (ngModelChange)="newLibraryPath.set($event)"
+                readonly>
+              <button class="btn-secondary" (click)="browseForFolder()">
+                Browse
+              </button>
+            </div>
+            <p class="form-hint">This is where your library database and metadata will be stored.</p>
+          </div>
+          <div class="form-actions">
+            <button
+              class="btn-primary"
+              [disabled]="!newLibraryName() || !newLibraryPath() || isLoading()"
+              (click)="createLibrary()">
+              @if (isLoading()) {
+                <span class="spinner"></span>
+              } @else {
+                Create Library
+              }
+            </button>
+          </div>
+        }
+
+        <!-- Open existing library folder -->
+        @if (libraryMode() === 'open') {
+          <div class="mode-description">
+            <p>If you have an existing ClipChimp library folder, you can link it here.</p>
+          </div>
+          <div class="form-group">
+            <label for="openPath">Library Folder</label>
+            <div class="path-input-group">
+              <input
+                id="openPath"
+                type="text"
+                class="form-input"
+                placeholder="Select your existing library folder"
+                [ngModel]="openLibraryPath()"
+                (ngModelChange)="openLibraryPath.set($event)"
+                readonly>
+              <button class="btn-secondary" (click)="browseForFolder()">
+                Browse
+              </button>
+            </div>
+            <p class="form-hint">Select a folder containing a library.db file.</p>
+          </div>
+          <div class="form-actions">
+            <button
+              class="btn-primary"
+              [disabled]="!openLibraryPath() || isLoading()"
+              (click)="openExistingLibrary()">
+              @if (isLoading()) {
+                <span class="spinner"></span>
+              } @else {
+                Link Library
+              }
+            </button>
+          </div>
+        }
+      </div>
+
+      @if (error()) {
+        <div class="error-message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          {{ error() }}
+        </div>
+      }
+    </div>
+  }
+
+  <!-- AI Setup Step -->
+  @if (currentStep() === 'ai-setup') {
+    <div class="onboarding-card ai-card">
+      <div class="card-header">
+        <h2>Set Up AI Analysis</h2>
+        <p class="card-description">
+          ClipChimp can use AI to automatically analyze and categorize your videos.
+          You can set this up now or skip and configure it later.
+        </p>
+      </div>
+
+      <div class="ai-options">
+        <div class="ai-option" (click)="goToAiStep()">
+          <div class="option-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a3 3 0 0 0-3 3v1a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10a7 7 0 1 0-14 0"/>
+              <path d="M12 10v8"/>
+              <path d="M8 18h8"/>
+            </svg>
+          </div>
+          <div class="option-content">
+            <h3>Configure AI Now</h3>
+            <p>Set up Ollama, Claude, or OpenAI for intelligent video analysis</p>
+          </div>
+          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+        </div>
+
+        <div class="ai-option skip-option" (click)="skipAiSetup()">
+          <div class="option-icon secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 6v6l4 2"/>
+            </svg>
+          </div>
+          <div class="option-content">
+            <h3>Skip for Now</h3>
+            <p>You can configure AI analysis later in Settings</p>
+          </div>
+          <svg class="arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- AI Setup Wizard Overlay -->
+@if (showAiWizard()) {
+  <div class="wizard-overlay">
+    <div class="wizard-container">
+      <app-ai-setup-wizard
+        (closed)="onAiWizardClosed()"
+        (completed)="onAiWizardCompleted()">
+      </app-ai-setup-wizard>
+    </div>
+  </div>
+}
