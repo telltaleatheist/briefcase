@@ -78,6 +78,14 @@ cdk-virtual-scroll-viewport.library-content {
   min-height: 0;
   height: 0; // Force flex to calculate height
   max-height: 100%;
+  overflow-x: hidden !important; // Prevent horizontal scroll
+
+  // Force the internal CDK wrapper to respect viewport width
+  ::ng-deep .cdk-virtual-scroll-content-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
 }
 
 // Week Header (Accordion) - Fixed height for virtual scroll
@@ -87,6 +95,7 @@ cdk-virtual-scroll-viewport.library-content {
   gap: $spacing-xs;
   padding: 0 $spacing-lg;
   height: 36px;
+  width: 100%;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
@@ -185,6 +194,7 @@ cdk-virtual-scroll-viewport.library-content {
   gap: $spacing-sm;
   padding: 0 $spacing-md;
   height: 60px;
+  width: 100%; // Fill available width
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
@@ -419,6 +429,7 @@ cdk-virtual-scroll-viewport.library-content {
   gap: $spacing-xs;
   min-width: 0;
   flex: 1;
+  overflow: hidden; // Constrain children width
 }
 
 .video-title {
@@ -430,8 +441,15 @@ cdk-virtual-scroll-viewport.library-content {
   color: var(--text-primary);
   line-height: $line-height-tight;
   transition: color $transition-fast;
-  // Prevent text overflow
-  min-width: 0;
+  min-width: 0; // Allow shrinking in flex container
+  overflow: hidden;
+}
+
+.title-text {
+  display: block;
+  flex: 1 1 0; // Grow and shrink
+  min-width: 0; // Allow shrinking below content size
+  width: 0; // Force shrinking
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -548,9 +566,7 @@ cdk-virtual-scroll-viewport.library-content {
   align-items: center;
   justify-content: flex-end;
   gap: $spacing-sm;
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
+  flex-shrink: 0; // Don't shrink - let video-content/title truncate instead
 }
 
 .video-duration {
@@ -612,14 +628,12 @@ cdk-virtual-scroll-viewport.library-content {
   opacity: 0.7;
 }
 
-// Quick Action Buttons (compact, allow shrinking)
+// Quick Action Buttons (compact, don't shrink)
 .quick-actions {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
+  flex-shrink: 0; // Don't shrink - let filename truncate instead
 }
 
 .action-btn {
@@ -782,6 +796,7 @@ cdk-virtual-scroll-viewport.library-content {
 .video-item-wrapper {
   display: flex;
   flex-direction: column;
+  width: 100%; // Fill available width
   min-width: 0; // Allow shrinking below content size
 }
 
