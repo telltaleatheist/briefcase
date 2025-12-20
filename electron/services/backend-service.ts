@@ -200,7 +200,8 @@ export class BackendService {
   }
 
   /**
-   * Check if backend is running on the actual port being used
+   * Check if backend is running and library is ready
+   * Waits for both the HTTP server AND the library database to be initialized
    */
   private async checkBackendRunning(): Promise<boolean> {
     return new Promise((resolve) => {
@@ -211,8 +212,26 @@ export class BackendService {
         method: 'GET',
         timeout: 5000
       }, (res) => {
-        // Silently check status - don't log every attempt
-        resolve(res.statusCode === 200);
+        if (res.statusCode !== 200) {
+          resolve(false);
+          return;
+        }
+
+        // Parse response to check library readiness
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const health = JSON.parse(data);
+            // Backend is ready when HTTP responds AND library is ready (or no library exists)
+            // If no active library, libraryReady will be false but that's okay for first run
+            const isReady = health.status === 'ok' && (health.libraryReady || health.activeLibrary === null);
+            resolve(isReady);
+          } catch {
+            // If we can't parse, just check HTTP status
+            resolve(true);
+          }
+        });
       });
 
       req.on('error', () => {

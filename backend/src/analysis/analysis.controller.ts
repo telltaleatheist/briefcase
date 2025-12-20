@@ -493,8 +493,8 @@ export class AnalysisController {
 
       // Get config defaults - NO HARDCODED FALLBACK for AI model
       const config = await this.configService.getConfig();
-      const aiModel = body.aiModel || config.aiModel;
-      const aiProvider = body.aiProvider;
+      let aiModel = body.aiModel || config.aiModel;
+      let aiProvider = body.aiProvider || 'ollama'; // Default to ollama if not specified
       const whisperModel = body.whisperModel || 'base';
       const forceReanalyze = body.forceReanalyze || false;
       const forceRetranscribe = body.forceRetranscribe || false;
@@ -506,11 +506,16 @@ export class AnalysisController {
           HttpStatus.BAD_REQUEST,
         );
       }
-      if (!aiProvider) {
-        throw new HttpException(
-          'AI analysis requires an AI provider to be configured. Please select a provider in settings.',
-          HttpStatus.BAD_REQUEST,
-        );
+
+      // Extract provider from model name if present (e.g., "ollama:cogito:14b" -> provider="ollama", model="cogito:14b")
+      const knownProviders = ['ollama', 'openai', 'claude', 'local'] as const;
+      const colonIndex = aiModel.indexOf(':');
+      if (colonIndex > 0) {
+        const possibleProvider = aiModel.substring(0, colonIndex);
+        if (knownProviders.includes(possibleProvider as typeof knownProviders[number])) {
+          aiProvider = possibleProvider as 'ollama' | 'openai' | 'claude';
+          aiModel = aiModel.substring(colonIndex + 1);
+        }
       }
 
       // Start batch analysis for this single video

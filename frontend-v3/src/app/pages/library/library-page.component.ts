@@ -281,6 +281,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private isLoadingQueue = true;
 
   constructor() {
+    // Watch for library manager requests from child components
+    effect(() => {
+      const requestCount = this.libraryService.libraryManagerRequested();
+      if (requestCount > 0) {
+        this.openLibraryManager();
+      }
+    });
+
     // Auto-save processing queue to localStorage when it changes
     effect(() => {
       const queue = this.processingQueue();
@@ -2758,9 +2766,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // ========================================
 
   /**
+   * Check if a library is selected, if not open the library manager
+   * Returns true if a library is available, false if library manager was opened
+   */
+  private requireLibrary(): boolean {
+    if (!this.currentLibrary()) {
+      this.notificationService.info(
+        'Library Required',
+        'Please create or select a library first'
+      );
+      this.openLibraryManager();
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Open download dialog for adding videos from URLs
    */
   openDownloadDialog() {
+    if (!this.requireLibrary()) return;
     this.downloadDialogOpen.set(true);
   }
 
@@ -2969,6 +2994,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Open file picker dialog for importing media files using Electron IPC
    */
   async openImportDialog() {
+    if (!this.requireLibrary()) return;
     const filePaths = await this.fileImportService.openFileDialog();
     if (filePaths && filePaths.length > 0) {
       await this.fileImportService.importFilesByPath(filePaths, () => this.loadLibrary());
@@ -2982,6 +3008,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
     this.isDraggingOver.set(false);
+
+    if (!this.requireLibrary()) return;
 
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;

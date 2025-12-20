@@ -617,26 +617,51 @@ export class VideoProcessingService {
     }
     const libraryId = currentLibrary.id;
 
-    // Convert jobs to backend format
-    const backendJobs: BackendJobRequest[] = queuedJobs.map(job => {
-      const tasks = this.convertSettingsToBackendTasksWithOptions(job.settings, !!job.videoUrl);
+    // Convert jobs to backend format - wrapped in try-catch for synchronous errors
+    let backendJobs: BackendJobRequest[];
+    try {
+      backendJobs = queuedJobs.map(job => {
+        const tasks = this.convertSettingsToBackendTasksWithOptions(job.settings, !!job.videoUrl);
 
-      if (job.videoUrl) {
-        return {
-          url: job.videoUrl,
-          displayName: job.videoName,
-          libraryId, // Pass library ID for downloads
-          tasks
-        };
-      } else {
-        return {
-          videoId: job.videoId || job.id, // Use actual video ID from library
-          displayName: job.videoName,
-          libraryId,
-          tasks
-        };
-      }
-    });
+        if (job.videoUrl) {
+          return {
+            url: job.videoUrl,
+            displayName: job.videoName,
+            libraryId, // Pass library ID for downloads
+            tasks
+          };
+        } else {
+          return {
+            videoId: job.videoId || job.id, // Use actual video ID from library
+            displayName: job.videoName,
+            libraryId,
+            tasks
+          };
+        }
+      });
+    } catch (error: any) {
+      console.error('[VideoProcessingService] Error converting jobs:', error.message);
+
+      // Mark all queued jobs as failed with the error message
+      const jobs = this.jobs$.value;
+      queuedJobs.forEach(qj => {
+        const job = jobs.find(j => j.id === qj.id);
+        if (job) {
+          job.status = 'failed';
+          job.tasks.forEach(task => {
+            task.status = 'failed';
+            task.error = error.message || 'Configuration error';
+          });
+        }
+      });
+      this.jobs$.next([...jobs]);
+      this.updateStats();
+
+      // Return observable that throws the error
+      return new Observable(subscriber => {
+        subscriber.error(error);
+      });
+    }
 
     // Submit to backend and return the job ID mapping
     return this.libraryService.createBulkJobs(backendJobs).pipe(

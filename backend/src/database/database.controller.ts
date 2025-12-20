@@ -60,10 +60,26 @@ export class DatabaseController {
   /**
    * GET /api/database/stats
    * Get database statistics (video counts, etc.)
+   * Returns empty stats if no library/database exists yet (first run)
    */
   @Get('stats')
   getStats() {
-    return this.databaseService.getStats();
+    try {
+      return this.databaseService.getStats();
+    } catch (error) {
+      // On first run, no database exists yet - return empty stats
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return {
+          totalVideos: 0,
+          linkedVideos: 0,
+          withTranscripts: 0,
+          withAnalyses: 0,
+          totalDuration: 0,
+          totalSize: 0,
+        };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -403,6 +419,7 @@ export class DatabaseController {
   /**
    * GET /api/database/videos
    * Get all videos with optional filters
+   * Returns empty array if no library/database exists yet (first run)
    */
   @Get('videos')
   getVideos(
@@ -413,68 +430,77 @@ export class DatabaseController {
     @Query('hierarchical') hierarchical?: string,
     @Query('includeRelationships') includeRelationships?: string
   ) {
-    // Default to linked only unless explicitly set to false
-    const shouldFilterLinked = linkedOnly === 'false' ? false : true;
+    try {
+      // Default to linked only unless explicitly set to false
+      const shouldFilterLinked = linkedOnly === 'false' ? false : true;
 
-    // If hierarchical mode is requested, use getAllVideosHierarchical
-    let videos: any[];
-    if (hierarchical === 'true') {
-      videos = this.databaseService.getAllVideosHierarchical({
-        linkedOnly: shouldFilterLinked,
-      });
-      this.logger.debug(`[getVideos] Hierarchical query returned ${videos.length} videos`);
-    } else {
-      videos = this.databaseService.getAllVideos({
-        linkedOnly: shouldFilterLinked,
-      });
-      this.logger.debug(`[getVideos] getAllVideos returned ${videos.length} videos`);
-    }
-
-    // Enrich with parent/child relationship data if requested
-    if (includeRelationships === 'true') {
-      videos = videos.map(video => {
-        const children = this.databaseService.getChildVideos(video.id as string);
-        const parents = this.databaseService.getParentVideos(video.id as string);
-
-        return {
-          ...video,
-          child_ids: children.map(c => c.id),
-          parent_ids: parents.map(p => p.id),
-          children: children,
-          parents: parents
-        };
-      });
-    }
-
-    // Filter by tags if specified
-    if (tags) {
-      const tagNames = tags.split(',').filter(Boolean);
-      if (tagNames.length > 0) {
-        // Get video IDs that have these tags
-        const videoIds = this.databaseService.getVideoIdsByTags(tagNames);
-        videos = videos.filter((v: any) => videoIds.includes(v.id));
+      // If hierarchical mode is requested, use getAllVideosHierarchical
+      let videos: any[];
+      if (hierarchical === 'true') {
+        videos = this.databaseService.getAllVideosHierarchical({
+          linkedOnly: shouldFilterLinked,
+        });
+        this.logger.debug(`[getVideos] Hierarchical query returned ${videos.length} videos`);
+      } else {
+        videos = this.databaseService.getAllVideos({
+          linkedOnly: shouldFilterLinked,
+        });
+        this.logger.debug(`[getVideos] getAllVideos returned ${videos.length} videos`);
       }
+
+      // Enrich with parent/child relationship data if requested
+      if (includeRelationships === 'true') {
+        videos = videos.map(video => {
+          const children = this.databaseService.getChildVideos(video.id as string);
+          const parents = this.databaseService.getParentVideos(video.id as string);
+
+          return {
+            ...video,
+            child_ids: children.map(c => c.id),
+            parent_ids: parents.map(p => p.id),
+            children: children,
+            parents: parents
+          };
+        });
+      }
+
+      // Filter by tags if specified
+      if (tags) {
+        const tagNames = tags.split(',').filter(Boolean);
+        if (tagNames.length > 0) {
+          // Get video IDs that have these tags
+          const videoIds = this.databaseService.getVideoIdsByTags(tagNames);
+          videos = videos.filter((v: any) => videoIds.includes(v.id));
+        }
+      }
+
+      const totalCount = videos.length;
+
+      // Apply pagination if limit/offset provided
+      const limitNum = limit ? parseInt(limit, 10) : undefined;
+      const offsetNum = offset ? parseInt(offset, 10) : 0;
+
+      if (limitNum !== undefined && limitNum > 0) {
+        videos = videos.slice(offsetNum, offsetNum + limitNum);
+      }
+
+      return {
+        videos,
+        count: totalCount, // Return total count, not paginated count
+      };
+    } catch (error) {
+      // On first run, no database exists yet - return empty videos
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return { videos: [], count: 0 };
+      }
+      throw error;
     }
-
-    const totalCount = videos.length;
-
-    // Apply pagination if limit/offset provided
-    const limitNum = limit ? parseInt(limit, 10) : undefined;
-    const offsetNum = offset ? parseInt(offset, 10) : 0;
-
-    if (limitNum !== undefined && limitNum > 0) {
-      videos = videos.slice(offsetNum, offsetNum + limitNum);
-    }
-
-    return {
-      videos,
-      count: totalCount, // Return total count, not paginated count
-    };
   }
 
   /**
    * GET /api/database/search
    * Search videos across filename, AI description, transcripts, analyses, and tags
+   * Returns empty results if no library/database exists yet (first run)
    */
   @Get('search')
   searchVideos(
@@ -489,38 +515,55 @@ export class DatabaseController {
       };
     }
 
-    const limitNum = limit ? parseInt(limit, 10) : 1000;
+    try {
+      const limitNum = limit ? parseInt(limit, 10) : 1000;
 
-    // Use FTS5 search for efficient full-text searching
-    const searchResults = this.databaseService.searchFTS(query, limitNum);
+      // Use FTS5 search for efficient full-text searching
+      const searchResults = this.databaseService.searchFTS(query, limitNum);
 
-    // Get full video details for each result
-    const videos = searchResults.map(result => {
-      const video = this.databaseService.getVideoById(result.videoId);
-      if (!video) {
-        return null;
-      }
+      // Get full video details for each result
+      const videos = searchResults.map(result => {
+        const video = this.databaseService.getVideoById(result.videoId);
+        if (!video) {
+          return null;
+        }
+        return {
+          ...video,
+          searchScore: result.score,
+          matchTypes: result.matches, // Array of match sources (filename, transcript, etc.)
+        };
+      }).filter((v): v is NonNullable<typeof v> => v !== null); // Filter out any null results
+
       return {
-        ...video,
-        searchScore: result.score,
-        matchTypes: result.matches, // Array of match sources (filename, transcript, etc.)
+        results: videos,
+        count: videos.length,
+        query,
       };
-    }).filter((v): v is NonNullable<typeof v> => v !== null); // Filter out any null results
-
-    return {
-      results: videos,
-      count: videos.length,
-      query,
-    };
+    } catch (error) {
+      // On first run, no database exists yet - return empty results
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return { results: [], count: 0, query };
+      }
+      throw error;
+    }
   }
 
   /**
    * GET /api/database/tags
    * Get all tags with counts (grouped by type)
+   * Returns empty object if no library/database exists yet (first run)
    */
   @Get('tags')
   getTags() {
-    return this.databaseService.getAllTagsWithCounts();
+    try {
+      return this.databaseService.getAllTagsWithCounts();
+    } catch (error) {
+      // On first run, no database exists yet - return empty tags
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return {};
+      }
+      throw error;
+    }
   }
 
   /**
@@ -3987,11 +4030,20 @@ export class DatabaseController {
   /**
    * GET /api/database/custom-instructions-history
    * Get recent custom instructions (last 25)
+   * Returns empty array if no library/database exists yet (first run)
    */
   @Get('custom-instructions-history')
   getCustomInstructionsHistory() {
-    const history = this.databaseService.getCustomInstructionsHistory();
-    return { success: true, history };
+    try {
+      const history = this.databaseService.getCustomInstructionsHistory();
+      return { success: true, history };
+    } catch (error) {
+      // On first run, no database exists yet - return empty history gracefully
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return { success: true, history: [] };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -4003,8 +4055,16 @@ export class DatabaseController {
     if (!body.instruction) {
       throw new HttpException('Instruction text is required', HttpStatus.BAD_REQUEST);
     }
-    this.databaseService.saveCustomInstruction(body.instruction);
-    return { success: true, message: 'Instruction saved to history' };
+    try {
+      this.databaseService.saveCustomInstruction(body.instruction);
+      return { success: true, message: 'Instruction saved to history' };
+    } catch (error) {
+      // On first run, no database exists yet - silently ignore
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return { success: true, message: 'No library yet - instruction not saved' };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -4013,7 +4073,15 @@ export class DatabaseController {
    */
   @Delete('custom-instructions-history')
   clearCustomInstructionsHistory() {
-    this.databaseService.clearCustomInstructionsHistory();
-    return { success: true, message: 'Custom instructions history cleared' };
+    try {
+      this.databaseService.clearCustomInstructionsHistory();
+      return { success: true, message: 'Custom instructions history cleared' };
+    } catch (error) {
+      // On first run, no database exists yet - nothing to clear
+      if (error instanceof Error && error.message.includes('Database not initialized')) {
+        return { success: true, message: 'No library yet - nothing to clear' };
+      }
+      throw error;
+    }
   }
 }

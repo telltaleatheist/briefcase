@@ -282,7 +282,8 @@ export class SaveForLaterTabComponent implements OnInit, OnDestroy {
 
     const currentLibrary = this.libraryService.currentLibrary();
     if (!currentLibrary) {
-      this.notificationService.error('Error', 'No library selected');
+      this.notificationService.info('Library Required', 'Please create or select a library first');
+      this.libraryService.requestLibraryManager();
       return;
     }
 

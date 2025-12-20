@@ -133,8 +133,19 @@ export class LibraryService {
   currentLibrary = signal<Library | null>(null);
   libraries = signal<Library[]>([]);
 
+  // Library manager request - increment to trigger opening the library manager
+  libraryManagerRequested = signal<number>(0);
+
   constructor(private http: HttpClient) {
     // Don't load here - let components control when to load
+  }
+
+  /**
+   * Request to open the library manager (for use by child components)
+   * Parent components should watch libraryManagerRequested signal and respond
+   */
+  requestLibraryManager(): void {
+    this.libraryManagerRequested.update(n => n + 1);
   }
 
   /**
