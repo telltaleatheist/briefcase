@@ -33,6 +33,11 @@ export class TabsTabComponent {
   newTabDialogOpen = signal(false);
   pendingTabVideos = signal<string[]>([]);
 
+  // Rename tab dialog
+  tabDialogMode = signal<'create' | 'rename'>('create');
+  renamingTabName = signal<string>('');
+  renamingTabId = signal<string>('');
+
   // Computed property for tab weeks
   tabWeeks = computed<VideoWeek[]>(() => {
     const tabs = this.allTabs();
@@ -134,7 +139,7 @@ export class TabsTabComponent {
   }
 
   /**
-   * Handle tab header context menu actions (e.g., delete tab)
+   * Handle tab header context menu actions (e.g., delete tab, rename tab)
    */
   handleHeaderAction(event: { action: string; weekLabel: string }) {
     const { action, weekLabel } = event;
@@ -143,8 +148,65 @@ export class TabsTabComponent {
       case 'deleteTab':
         this.deleteTabByName(weekLabel);
         break;
+      case 'renameTab':
+        this.openRenameDialog(weekLabel);
+        break;
       default:
         console.warn('Unknown tab header action:', action);
+    }
+  }
+
+  /**
+   * Open rename dialog for a tab
+   */
+  openRenameDialog(tabName: string) {
+    const tab = this.allTabs().find(t => t.name === tabName);
+    if (!tab) {
+      this.notificationService.error('Tab Not Found', `Could not find tab "${tabName}"`);
+      return;
+    }
+
+    this.tabDialogMode.set('rename');
+    this.renamingTabName.set(tabName);
+    this.renamingTabId.set(tab.id);
+    this.newTabDialogOpen.set(true);
+  }
+
+  /**
+   * Handle tab renamed
+   */
+  async onTabRenamed(newName: string) {
+    try {
+      const tabId = this.renamingTabId();
+      const oldName = this.renamingTabName();
+
+      if (!tabId) {
+        this.notificationService.error('Error', 'No tab selected for renaming');
+        return;
+      }
+
+      // Call the service to rename the tab
+      await firstValueFrom(this.tabsService.updateTab(tabId, newName));
+
+      // Clear local state immediately for UI reactivity
+      this.allTabs.set([]);
+      this.tabVideosMap.set(new Map());
+
+      // Force fresh reload from backend
+      await this.loadTabsData();
+
+      this.notificationService.success('Tab Renamed', `Renamed "${oldName}" to "${newName}"`);
+    } catch (error: any) {
+      console.error('Failed to rename tab:', error);
+      this.notificationService.error(
+        'Failed to Rename Tab',
+        error?.message || 'An error occurred while renaming the tab'
+      );
+    } finally {
+      // Reset rename state
+      this.tabDialogMode.set('create');
+      this.renamingTabName.set('');
+      this.renamingTabId.set('');
     }
   }
 
@@ -316,6 +378,9 @@ export class TabsTabComponent {
    * Open new tab dialog with pending videos
    */
   openNewTabDialog(videoIds: string[]) {
+    this.tabDialogMode.set('create');
+    this.renamingTabName.set('');
+    this.renamingTabId.set('');
     this.pendingTabVideos.set(videoIds);
     this.newTabDialogOpen.set(true);
   }

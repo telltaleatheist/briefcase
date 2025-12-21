@@ -279,6 +279,7 @@ export class CascadeComponent {
     if (header) {
       // Header-specific actions
       return [
+        { label: 'Rename Tab', icon: '✏️', action: 'renameTab' },
         { label: 'Delete Tab', icon: '🗑️', action: 'deleteTab' }
       ];
     }

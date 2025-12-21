@@ -35,9 +35,12 @@
   </div>
 </div>
 
-<!-- New Tab Dialog -->
+<!-- New/Rename Tab Dialog -->
 <app-new-tab-dialog
   [show]="newTabDialogOpen()"
+  [mode]="tabDialogMode()"
+  [initialName]="renamingTabName()"
   (created)="onTabCreated($event)"
-  (closed)="newTabDialogOpen.set(false)"
+  (renamed)="onTabRenamed($event)"
+  (closed)="newTabDialogOpen.set(false); tabDialogMode.set('create'); renamingTabName.set(''); renamingTabId.set('')"
 />

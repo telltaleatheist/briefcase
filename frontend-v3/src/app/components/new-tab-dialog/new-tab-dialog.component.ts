@@ -12,7 +12,7 @@ import { ButtonComponent } from '../button/button.component';
       <div class="modal-overlay" (click)="onOverlayClick($event)">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h3 class="modal-title">Create New Tab</h3>
+            <h3 class="modal-title">{{ mode === 'rename' ? 'Rename Tab' : 'Create New Tab' }}</h3>
             <button class="modal-close" (click)="close()">×</button>
           </div>
 
@@ -26,12 +26,12 @@ import { ButtonComponent } from '../button/button.component';
                 [(ngModel)]="tabName"
                 [maxlength]="maxLength"
                 (keydown.escape)="close()"
-                (keydown.enter)="create()"
+                (keydown.enter)="submit()"
                 placeholder="Enter tab name..."
                 autocomplete="off"
               />
               <div class="form-meta">
-                <span class="form-hint">Press Enter to create, Esc to cancel</span>
+                <span class="form-hint">Press Enter to {{ mode === 'rename' ? 'rename' : 'create' }}, Esc to cancel</span>
                 <span class="char-count" [class.near-limit]="tabName.length > maxLength - 10">
                   {{ tabName.length }}/{{ maxLength }}
                 </span>
@@ -45,10 +45,10 @@ import { ButtonComponent } from '../button/button.component';
             </app-button>
             <app-button
               variant="gradient"
-              icon="📑"
-              (click)="create()"
-              [disabled]="!tabName.trim()">
-              Create Tab
+              [icon]="mode === 'rename' ? '✏️' : '📑'"
+              (click)="submit()"
+              [disabled]="!tabName.trim() || (mode === 'rename' && tabName.trim() === initialName)">
+              {{ mode === 'rename' ? 'Rename Tab' : 'Create Tab' }}
             </app-button>
           </div>
         </div>
@@ -211,7 +211,11 @@ export class NewTabDialogComponent {
     this.visible.set(value);
   }
 
+  @Input() mode: 'create' | 'rename' = 'create';
+  @Input() initialName = '';
+
   @Output() created = new EventEmitter<string>();
+  @Output() renamed = new EventEmitter<string>();
   @Output() closed = new EventEmitter<void>();
 
   @ViewChild('nameInput') nameInput?: ElementRef<HTMLInputElement>;
@@ -226,8 +230,16 @@ export class NewTabDialogComponent {
     effect(() => {
       // Auto-focus input when modal opens
       if (this.visible()) {
+        // Set initial name for rename mode
+        if (this.mode === 'rename' && this.initialName) {
+          this.tabName = this.initialName;
+        }
         setTimeout(() => {
           this.nameInput?.nativeElement.focus();
+          // Select all text for easy replacement when renaming
+          if (this.mode === 'rename') {
+            this.nameInput?.nativeElement.select();
+          }
         }, 100);
       } else {
         // Reset form when closing
@@ -236,15 +248,29 @@ export class NewTabDialogComponent {
     });
   }
 
-  create() {
+  submit() {
     if (this.tabName.trim()) {
-      this.created.emit(this.tabName.trim());
+      if (this.mode === 'rename') {
+        // Only emit if name actually changed
+        if (this.tabName.trim() !== this.initialName) {
+          this.renamed.emit(this.tabName.trim());
+        }
+      } else {
+        this.created.emit(this.tabName.trim());
+      }
       this.close();
     }
   }
 
+  // Keep create() for backward compatibility
+  create() {
+    this.submit();
+  }
+
   close() {
     this.visible.set(false);
+    this.mode = 'create';
+    this.initialName = '';
     this.closed.emit();
   }
 
