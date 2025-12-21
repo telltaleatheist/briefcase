@@ -125,7 +125,8 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     if (value <= 4) return 'Strict';
     if (value <= 6) return 'Balanced';
     if (value <= 8) return 'Broad';
-    return 'Very Aggressive';
+    if (value === 9) return 'Very Aggressive';
+    return 'Maximum';
   }
 
   getGranularityDescription(value: number): string {
@@ -133,7 +134,8 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     if (value <= 4) return 'Flag content with high confidence matches';
     if (value <= 6) return 'Flag content with reasonable confidence';
     if (value <= 8) return 'Flag content including edge cases and possible matches';
-    return 'Flag all possible matches, including weak associations';
+    if (value === 9) return 'Flag all possible matches, including weak associations';
+    return 'Flag EVERYTHING remotely related - metaphors, implications, tangential references';
   }
 
   // Default granularity value (loaded from backend)

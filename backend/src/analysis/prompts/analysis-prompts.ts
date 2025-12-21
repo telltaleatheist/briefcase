@@ -203,7 +203,7 @@ ${chunkText}`;
 
 /**
  * Get granularity-based flagging instructions
- * @param granularity - 1 (very strict) to 10 (very aggressive)
+ * @param granularity - 1 (very strict) to 10 (extremely aggressive)
  */
 function getGranularityInstructions(granularity: number): { approach: string; rule: string } {
   if (granularity <= 2) {
@@ -226,10 +226,16 @@ function getGranularityInstructions(granularity: number): { approach: string; ru
       approach: 'BE BROAD - flag content liberally. Include edge cases and possible matches.',
       rule: 'FLAG GENEROUSLY - if content MIGHT qualify for a category, flag it. Include edge cases and possible matches.',
     };
-  } else {
+  } else if (granularity === 9) {
     return {
       approach: 'BE VERY AGGRESSIVE - flag ALL possible matches including weak associations. Better to over-flag than miss anything.',
       rule: 'FLAG EVERYTHING that could possibly relate to any category. Missing a potential flag is unacceptable. Include even weak or tangential associations.',
+    };
+  } else {
+    // Level 10: MAXIMUM AGGRESSION
+    return {
+      approach: 'MAXIMUM DETECTION MODE - Flag ANYTHING that could CONCEIVABLY, REMOTELY, or TANGENTIALLY relate to ANY category. Cast the widest possible net. When in doubt, FLAG IT. You are being paid to find matches - find them all, no matter how tenuous.',
+      rule: 'FLAG AGGRESSIVELY AND LIBERALLY. If a word, phrase, tone, implication, or subtext could POSSIBLY be interpreted as relating to a category - even through multiple degrees of separation - FLAG IT. This includes: indirect references, metaphors, analogies, dog whistles, coded language, implications, things that REMIND you of a category, adjacent topics, things that could lead to category topics, and anything that makes you even slightly think of a category. Your job is to surface EVERY POSSIBLE match. False positives are acceptable and expected. Missing a potential match is a FAILURE. When uncertain, ALWAYS flag. Create new categories freely if existing ones don\'t fit. Err on the side of maximum coverage. The user wants to catch EVERYTHING.',
     };
   }
 }
@@ -308,14 +314,15 @@ WRONG: Paraphrasing the quote instead of copying exact words
 RIGHT: One flag per quote, one category (existing or new), exact transcript words`
     : '';
 
-  return `Analyze this transcript chapter. ${granularityInstr.approach}
+  const flagsListItem = hasCategories ? '\n- flags: array of problematic quotes' : '';
+
+  return `Analyze this transcript chapter.${hasCategories ? ' ' + granularityInstr.approach : ''}
 Video: ${videoTitle}
 Chapter: ${chapterNumber}
 ${prevContext}${customContext}
 Return JSON with:
 - title: 1-3 sentence description
-- summary: 2-3 sentence summary
-- flags: array of problematic quotes${categorySection}
+- summary: 2-3 sentence summary${flagsListItem}${categorySection}
 
 JSON format:
 {

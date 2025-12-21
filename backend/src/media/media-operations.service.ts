@@ -869,11 +869,9 @@ export class MediaOperationsService {
     const categoriesPath = path.join(userDataPath, 'ClipChimp', 'analysis-categories.json');
 
     if (!fs.existsSync(categoriesPath)) {
-      throw new Error(
-        'Analysis categories not initialized. ' +
-        'The categories file should be created automatically when the app starts. ' +
-        'Try opening Settings or restart the app.'
-      );
+      // Categories file doesn't exist - return empty array, analysis will still run but skip flagging
+      this.logger.log('Analysis categories file not found - analysis will run without category flagging');
+      return [];
     }
 
     const data = fs.readFileSync(categoriesPath, 'utf8');
@@ -883,10 +881,9 @@ export class MediaOperationsService {
     const categories = Array.isArray(parsed) ? parsed : parsed.categories;
 
     if (!categories || categories.length === 0) {
-      throw new Error(
-        'No analysis categories found in config file. ' +
-        'Please configure categories in Settings > Analysis Categories.'
-      );
+      // No categories configured - return empty array, analysis will still run but skip flagging
+      this.logger.log('No analysis categories configured - analysis will run without category flagging');
+      return [];
     }
 
     return categories;

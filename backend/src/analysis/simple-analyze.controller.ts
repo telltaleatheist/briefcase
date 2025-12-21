@@ -53,20 +53,24 @@ export class SimpleAnalyzeController {
 
       const fsSync = require('fs');
       if (!fsSync.existsSync(categoriesPath)) {
-        throw new Error('Analysis categories not configured. Please configure categories in Settings before running analysis.');
+        // Categories file doesn't exist - return empty array, analysis will still run but skip flagging
+        this.logger.log('Analysis categories file not found - analysis will run without category flagging');
+        return [];
       }
 
       const data = fsSync.readFileSync(categoriesPath, 'utf8');
       const parsed = JSON.parse(data);
 
       if (!parsed.categories || parsed.categories.length === 0) {
-        throw new Error('No analysis categories found in config. Please configure at least one category in Settings.');
+        // No categories configured - return empty array, analysis will still run but skip flagging
+        this.logger.log('No analysis categories configured - analysis will run without category flagging');
+        return [];
       }
 
       return parsed.categories;
     } catch (error) {
-      this.logger.error(`Failed to load categories: ${(error as Error).message}`);
-      throw error; // Re-throw instead of returning undefined
+      this.logger.warn(`Failed to load categories: ${(error as Error).message} - continuing without category flagging`);
+      return []; // Return empty array instead of throwing
     }
   }
 

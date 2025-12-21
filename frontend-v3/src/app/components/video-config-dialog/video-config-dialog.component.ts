@@ -72,9 +72,10 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     this.loadDefaultGranularity();
 
     // Subscribe to model changes from other components (e.g., AI wizard)
-    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(() => {
+    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(async () => {
       console.log('Models changed event received, reloading AI models...');
-      this.loadAIModels();
+      await this.loadAIModels();
+      this.cdr.detectChanges();
     });
   }
 
@@ -118,7 +119,8 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     if (value <= 4) return 'Strict';
     if (value <= 6) return 'Balanced';
     if (value <= 8) return 'Broad';
-    return 'Very Aggressive';
+    if (value === 9) return 'Very Aggressive';
+    return 'Maximum';
   }
 
   getGranularityDescription(): string {
@@ -127,7 +129,8 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     if (value <= 4) return 'Flag content with high confidence matches';
     if (value <= 6) return 'Flag content with reasonable confidence';
     if (value <= 8) return 'Flag content including edge cases and possible matches';
-    return 'Flag all possible matches, including weak associations';
+    if (value === 9) return 'Flag all possible matches, including weak associations';
+    return 'Flag EVERYTHING remotely related - metaphors, implications, tangential references';
   }
 
   private loadDefaultGranularity() {
@@ -260,6 +263,8 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
       }
 
       this.aiModels = models;
+      // Force change detection to update the dropdown
+      this.cdr.detectChanges();
 
       // Try to get library's default AI model first
       let defaultModel: string | null = null;
