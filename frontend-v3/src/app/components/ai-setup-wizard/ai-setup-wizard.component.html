@@ -254,25 +254,17 @@
 
                 <div class="model-actions">
                   @if (model.downloaded) {
-                    <!-- Downloaded model actions -->
-                    @if (!model.isDefault) {
-                      <button class="action-btn" (click)="setDefaultModel(model.id)">
-                        Use This
-                      </button>
-                    } @else {
-                      <button class="action-btn active" disabled>
-                        <span>✓</span> Active
-                      </button>
-                    }
+                    <!-- Downloaded model - show ready status and delete -->
+                    <span class="downloaded-badge">✓ Downloaded</span>
                     <button
                       class="delete-btn"
                       (click)="deleteLocalModel(model.id)"
                       [disabled]="deletingModel() === model.id"
                     >
                       @if (deletingModel() === model.id) {
-                        <span class="spinner"></span>
+                        <span class="spinner"></span> Deleting...
                       } @else {
-                        🗑️
+                        🗑️ Delete
                       }
                     </button>
                   } @else {

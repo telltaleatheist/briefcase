@@ -158,23 +158,21 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
 
-      // Add downloaded Local AI models first (fetched dynamically)
-      if (availability.hasLocal) {
-        try {
-          const localModelsResult = await this.aiSetupService.getLocalModels().toPromise();
-          if (localModelsResult?.models) {
-            const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
-            downloadedModels.forEach(model => {
-              models.push({
-                value: `local:${model.id}`,
-                label: `${model.name} (Local)`,
-                provider: 'local'
-              });
+      // Always try to fetch downloaded Local AI models (don't rely on hasLocal flag which may be stale)
+      try {
+        const localModelsResult = await this.aiSetupService.getLocalModels().toPromise();
+        if (localModelsResult?.models) {
+          const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
+          downloadedModels.forEach(model => {
+            models.push({
+              value: `local:${model.id}`,
+              label: `${model.name} (Local)`,
+              provider: 'local'
             });
-          }
-        } catch (error) {
-          console.error('Failed to fetch local models:', error);
+          });
         }
+      } catch (error) {
+        console.error('Failed to fetch local models:', error);
       }
 
       // Add Ollama models (fetched dynamically by aiSetupService)

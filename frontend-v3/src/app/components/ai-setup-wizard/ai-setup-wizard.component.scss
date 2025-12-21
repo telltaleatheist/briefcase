@@ -677,20 +677,33 @@
   }
 }
 
+.downloaded-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: 500;
+}
+
 .delete-btn {
   @include flex-center;
-  width: 36px;
-  height: 36px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
   border-radius: $radius-md;
-  font-size: $font-size-base;
+  font-size: $font-size-sm;
+  color: #f44336;
   cursor: pointer;
   transition: all $transition-fast;
 
   &:hover:not(:disabled) {
-    background: var(--error);
-    border-color: var(--error);
+    background: #f44336;
+    border-color: #f44336;
     color: white;
   }
 
