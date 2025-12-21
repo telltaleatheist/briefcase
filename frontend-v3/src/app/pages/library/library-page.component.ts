@@ -297,6 +297,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
+    // Auto-save completed queue to sessionStorage when it changes (temporary, clears on app restart)
+    effect(() => {
+      const completed = this.completedQueue();
+      if (!this.isLoadingQueue) {
+        this.saveCompletedQueueToStorage(completed);
+      }
+    });
+
     // Move completed/failed items from processing queue to completed queue
     effect(() => {
       const queue = this.processingQueue();
@@ -340,12 +348,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           }
         }, 1500);
       }
-    });
+    }, { allowSignalWrites: true });
   }
 
   async ngOnInit() {
     // Load processing queue from localStorage first
     this.loadProcessingQueueFromStorage();
+    // Load completed queue from sessionStorage (persists within session only)
+    this.loadCompletedQueueFromStorage();
     this.isLoadingQueue = false;
 
     this.loadDefaultTaskSettings();
@@ -779,6 +789,32 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     } catch (e) {
       console.error('Failed to load processing queue:', e);
       localStorage.removeItem('clipchimp-processing-queue');
+    }
+  }
+
+  // Save completed queue to sessionStorage (temporary, clears when app restarts)
+  private saveCompletedQueueToStorage(queue: ProcessingQueueItem[]) {
+    try {
+      sessionStorage.setItem('clipchimp-completed-queue', JSON.stringify(queue));
+    } catch (e) {
+      console.error('Failed to save completed queue:', e);
+    }
+  }
+
+  // Load completed queue from sessionStorage (for navigation within session)
+  private loadCompletedQueueFromStorage() {
+    try {
+      const saved = sessionStorage.getItem('clipchimp-completed-queue');
+      if (saved) {
+        const queue: ProcessingQueueItem[] = JSON.parse(saved);
+        if (Array.isArray(queue) && queue.length > 0) {
+          this.completedQueue.set(queue);
+          console.log(`Restored ${queue.length} items from completed queue`);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load completed queue:', e);
+      sessionStorage.removeItem('clipchimp-completed-queue');
     }
   }
 

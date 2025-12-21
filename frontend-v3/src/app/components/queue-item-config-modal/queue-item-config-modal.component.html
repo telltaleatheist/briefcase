@@ -139,6 +139,7 @@
                     step="1"
                     [value]="getTaskConfig(task.type).analysisGranularity || 5"
                     (input)="updateTaskConfig(task.type, { analysisGranularity: +$any($event.target).value })"
+                    (change)="onGranularityChange(+$any($event.target).value)"
                     class="granularity-slider"
                   />
                   <span class="slider-label-right">Aggressive</span>

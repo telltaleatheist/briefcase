@@ -1183,6 +1183,27 @@ export class LibraryService {
     );
   }
 
+  /**
+   * Get default analysis granularity setting
+   * GET /api/config/default-granularity
+   */
+  getDefaultGranularity(): Observable<{ success: boolean; granularity: number }> {
+    return this.http.get<{ success: boolean; granularity: number }>(
+      `${this.API_BASE}/config/default-granularity`
+    );
+  }
+
+  /**
+   * Save default analysis granularity setting
+   * POST /api/config/default-granularity
+   */
+  saveDefaultGranularity(granularity: number): Observable<{ success: boolean; message: string; granularity: number }> {
+    return this.http.post<{ success: boolean; message: string; granularity: number }>(
+      `${this.API_BASE}/config/default-granularity`,
+      { granularity }
+    );
+  }
+
   // =====================================================
   // CUSTOM INSTRUCTIONS HISTORY
   // =====================================================

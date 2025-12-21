@@ -172,6 +172,7 @@
                       max="10"
                       step="1"
                       [(ngModel)]="settings.analysisGranularity"
+                      (change)="onGranularityChange()"
                       class="granularity-slider"
                     />
                     <span class="slider-label-right">Aggressive</span>

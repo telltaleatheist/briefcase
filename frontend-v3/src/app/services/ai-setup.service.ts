@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { Observable, of, Subject } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 
 export interface AIAvailability {
@@ -70,7 +70,19 @@ export class AiSetupService {
     isChecking: false
   });
 
+  // Subject to notify when models change (downloaded, deleted, etc.)
+  private modelsChangedSubject = new Subject<void>();
+  public modelsChanged$ = this.modelsChangedSubject.asObservable();
+
   constructor(private http: HttpClient) {}
+
+  /**
+   * Notify subscribers that the model list has changed
+   * Call this after downloading, deleting, or modifying models
+   */
+  notifyModelsChanged(): void {
+    this.modelsChangedSubject.next();
+  }
 
   /**
    * Check all AI providers and update availability status

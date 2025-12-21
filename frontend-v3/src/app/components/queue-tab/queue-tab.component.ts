@@ -82,7 +82,7 @@ export class QueueTabComponent {
       }));
 
       weeks.push({
-        weekLabel: '⏸️ Staging',
+        weekLabel: '⏸️ Pending',
         videos: stagingVideos
       });
     }

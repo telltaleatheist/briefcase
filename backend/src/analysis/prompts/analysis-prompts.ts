@@ -105,7 +105,7 @@ export const TAG_EXTRACTION_PROMPT = DEFAULT_TAG_PROMPT;
 // =============================================================================
 // Used to generate a suggested filename based on analysis results
 
-export const DEFAULT_TITLE_PROMPT = `Generate a descriptive filename for this video.
+export const DEFAULT_TITLE_PROMPT = `Generate a concise, descriptive filename for this video.
 
 Current filename: {currentTitle}
 Summary: {description}
@@ -116,12 +116,20 @@ Transcript excerpt:
 {transcriptExcerpt}
 
 Rules:
-- Lowercase, spaces, max 100 chars
-- Natural phrase describing what the video is about
-- Keep channel/show names from original title if present
-- Describe the ACTUAL content from transcript, not just topics
+- Lowercase, spaces allowed, max 80 chars
+- Format: "[speaker name] - [key quote or action]" or "[speaker] on [topic] - [notable statement]"
+- Lead with the main speaker's name if identifiable
+- Include the most notable/quotable phrase in the title
+- Add source/show name at end in parentheses if known (e.g., "howard stern", "fox news")
+- Be specific about what was SAID, not just the topic
 - No dates, extensions, special chars
 - Don't invent content not in transcript
+
+Good examples:
+- "mario murillo - voting democrat is devilish and spitting on apostles graves"
+- "trump on howard stern - i walk into changing rooms because im the owner"
+- "lauren witzke - god must destroy civilization over trans healthcare"
+- "nick fuentes on mtg at afpac - from praise to criticism"
 
 Output ONLY the filename, nothing else:`;
 
@@ -351,18 +359,25 @@ Chapters:
 
 JSON:`;
 
-export const TITLE_FROM_CHAPTERS_PROMPT = `Generate a descriptive filename for this video based on its chapters.
+export const TITLE_FROM_CHAPTERS_PROMPT = `Generate a concise, descriptive filename for this video based on its chapters.
 
 Current filename: {currentTitle}
 Chapters:
 {chaptersList}
 
 Rules:
-- Lowercase, spaces, max 100 chars
-- Natural phrase describing what the video is about
-- Keep channel/show names from original title if present
-- Describe the ACTUAL content from chapters, not just topics
+- Lowercase, spaces allowed, max 80 chars
+- Format: "[speaker name] - [key quote or action]" or "[speaker] on [topic] - [notable statement]"
+- Lead with the main speaker's name if identifiable
+- Include the most notable/quotable phrase in the title
+- Add source/show name at end in parentheses if known
+- Be specific about what was SAID, not just the topic
 - No dates, extensions, special chars
+
+Good examples:
+- "mario murillo - voting democrat is devilish and spitting on apostles graves"
+- "trump on howard stern - i walk into changing rooms because im the owner"
+- "lauren witzke - god must destroy civilization over trans healthcare"
 
 Output ONLY the filename, nothing else:`;
 

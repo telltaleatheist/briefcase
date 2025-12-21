@@ -323,6 +323,75 @@ export class ConfigController implements OnModuleInit {
     }
   }
 
+  /**
+   * Save default analysis granularity setting
+   */
+  @Post('default-granularity')
+  async saveDefaultGranularity(@Body() body: { granularity: number }) {
+    try {
+      // Ensure config directory exists
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      // Read existing config or create new one
+      let config: any = {};
+      if (fs.existsSync(this.configPath)) {
+        const configData = fs.readFileSync(this.configPath, 'utf8');
+        config = JSON.parse(configData);
+      }
+
+      // Update default granularity (clamp to 1-10)
+      const granularity = Math.max(1, Math.min(10, body.granularity));
+      config.defaultGranularity = granularity;
+      config.lastUpdated = new Date().toISOString();
+
+      // Save config
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
+
+      return {
+        success: true,
+        message: 'Default granularity saved',
+        granularity: config.defaultGranularity
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to save default granularity: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Get default analysis granularity setting
+   */
+  @Get('default-granularity')
+  async getDefaultGranularity() {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        const configData = fs.readFileSync(this.configPath, 'utf8');
+        const config = JSON.parse(configData);
+
+        return {
+          success: true,
+          granularity: config.defaultGranularity ?? 5 // Default to 5 (balanced) if not set
+        };
+      }
+
+      return {
+        success: true,
+        granularity: 5 // Default to balanced
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to get default granularity: ${(error as Error).message}`,
+        granularity: 5
+      };
+    }
+  }
+
 
   /**
    * Fetch available models from OpenAI API

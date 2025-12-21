@@ -1,4 +1,5 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, OnDestroy, SimpleChanges, inject, ChangeDetectorRef } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -27,13 +28,14 @@ interface AIModelOption {
   templateUrl: './video-config-dialog.component.html',
   styleUrls: ['./video-config-dialog.component.scss']
 })
-export class VideoConfigDialogComponent implements OnInit, OnChanges {
+export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
   private libraryService = inject(LibraryService);
   private readonly API_BASE = 'http://localhost:3000/api';
+  private modelsChangedSub?: Subscription;
 
   @Input() isOpen = false;
   @Output() closeDialog = new EventEmitter<void>();
@@ -67,6 +69,17 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   ngOnInit() {
     this.loadAIModels();
     this.loadInstructionsHistory();
+    this.loadDefaultGranularity();
+
+    // Subscribe to model changes from other components (e.g., AI wizard)
+    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(() => {
+      console.log('Models changed event received, reloading AI models...');
+      this.loadAIModels();
+    });
+  }
+
+  ngOnDestroy() {
+    this.modelsChangedSub?.unsubscribe();
   }
 
   private loadInstructionsHistory() {
@@ -115,6 +128,34 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     if (value <= 6) return 'Flag content with reasonable confidence';
     if (value <= 8) return 'Flag content including edge cases and possible matches';
     return 'Flag all possible matches, including weak associations';
+  }
+
+  private loadDefaultGranularity() {
+    this.libraryService.getDefaultGranularity().subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.settings.analysisGranularity = response.granularity;
+          console.log('Loaded default granularity:', response.granularity);
+        }
+      },
+      error: (error) => {
+        console.error('Failed to load default granularity:', error);
+      }
+    });
+  }
+
+  onGranularityChange() {
+    // Auto-save granularity when it changes
+    this.libraryService.saveDefaultGranularity(this.settings.analysisGranularity || 5).subscribe({
+      next: (response) => {
+        if (response.success) {
+          console.log('Saved default granularity:', response.granularity);
+        }
+      },
+      error: (error) => {
+        console.error('Failed to save default granularity:', error);
+      }
+    });
   }
 
   ngOnChanges(changes: SimpleChanges) {

@@ -1,4 +1,5 @@
-import { Component, signal, input, output, inject, OnInit, effect } from '@angular/core';
+import { Component, signal, input, output, inject, OnInit, OnDestroy, effect } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -30,11 +31,12 @@ interface AIModelOption {
   templateUrl: './queue-item-config-modal.component.html',
   styleUrls: ['./queue-item-config-modal.component.scss']
 })
-export class QueueItemConfigModalComponent implements OnInit {
+export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
   private readonly API_BASE = 'http://localhost:3000/api';
+  private modelsChangedSub?: Subscription;
 
   // Inputs
   isOpen = input<boolean>(false);
@@ -80,6 +82,17 @@ export class QueueItemConfigModalComponent implements OnInit {
   ngOnInit() {
     this.loadAIModels();
     this.loadInstructionsHistory();
+    this.loadDefaultGranularity();
+
+    // Subscribe to model changes from other components (e.g., AI wizard)
+    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(() => {
+      console.log('Models changed event received, reloading AI models...');
+      this.loadAIModels();
+    });
+  }
+
+  ngOnDestroy() {
+    this.modelsChangedSub?.unsubscribe();
   }
 
   private async loadInstructionsHistory() {
@@ -121,6 +134,36 @@ export class QueueItemConfigModalComponent implements OnInit {
     if (value <= 6) return 'Flag content with reasonable confidence';
     if (value <= 8) return 'Flag content including edge cases and possible matches';
     return 'Flag all possible matches, including weak associations';
+  }
+
+  // Default granularity value (loaded from backend)
+  private defaultGranularity = 5;
+
+  private async loadDefaultGranularity() {
+    try {
+      const response = await firstValueFrom(this.libraryService.getDefaultGranularity());
+      if (response.success) {
+        this.defaultGranularity = response.granularity;
+        console.log('Loaded default granularity:', response.granularity);
+      }
+    } catch (error) {
+      console.warn('Failed to load default granularity:', error);
+    }
+  }
+
+  onGranularityChange(value: number) {
+    // Auto-save granularity when it changes
+    this.libraryService.saveDefaultGranularity(value).subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.defaultGranularity = response.granularity;
+          console.log('Saved default granularity:', response.granularity);
+        }
+      },
+      error: (error) => {
+        console.error('Failed to save default granularity:', error);
+      }
+    });
   }
 
   /**
@@ -416,7 +459,7 @@ export class QueueItemConfigModalComponent implements OnInit {
       case 'ai-analyze':
         return {
           aiModel: this.defaultAIModel,
-          analysisGranularity: 5,
+          analysisGranularity: this.defaultGranularity,
         } as AIAnalyzeConfig;
       case 'fix-aspect-ratio':
         return { targetRatio: '16:9', cropMode: 'smart' } as FixAspectRatioConfig;

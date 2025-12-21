@@ -102,6 +102,8 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
       this.downloadEta.set(null);
       await this.loadLocalModels();
       await this.refreshAvailability();
+      // Notify other components that models have changed
+      this.aiSetupService.notifyModelsChanged();
     });
     this.wsUnsubscribers.push(unsubComplete);
 
@@ -289,6 +291,8 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
       await this.aiSetupService.deleteLocalModel(modelId).toPromise();
       await this.loadLocalModels();
       await this.refreshAvailability();
+      // Notify other components that models have changed
+      this.aiSetupService.notifyModelsChanged();
     } catch (error: any) {
       alert(`Failed to delete model: ${error.message || error}`);
     } finally {
