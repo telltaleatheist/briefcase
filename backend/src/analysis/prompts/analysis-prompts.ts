@@ -31,7 +31,7 @@ export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
   },
   {
     name: 'conspiracy',
-    description: 'Political conspiracy theories (election fraud, deep state, QAnon, globalists, voter fraud, "stolen election", New World Order, Illuminati, Freemasons, Soros conspiracies, etc.)',
+    description: 'Content that PROMOTES conspiracy theories as true (election fraud, deep state, QAnon, globalists, voter fraud, "stolen election", New World Order, Illuminati, Freemasons, Soros conspiracies, alien/UFO claims presented as fact). NOTE: Do NOT flag content that REPORTS ON, ANALYZES, or DEBUNKS conspiracy theories - only flag content that promotes them as true.',
   },
   {
     name: 'false-prophecy',
@@ -39,7 +39,7 @@ export const DEFAULT_CATEGORIES: AnalysisCategory[] = [
   },
   {
     name: 'misinformation',
-    description: 'Factually incorrect claims about science, medicine, history, language, or current events. Fabricated biblical scholarship, made-up Greek/Hebrew translations (e.g., claiming words mean something they don\'t), invented etymology used to attack groups. Vaccine conspiracies, COVID denialism, climate denial.',
+    description: 'Factually incorrect claims PROMOTED as true about science, medicine, history, language, or current events. Fabricated biblical scholarship, made-up Greek/Hebrew translations, invented etymology. Vaccine conspiracies, COVID denialism, climate denial. NOTE: Do NOT flag skeptical statements that QUESTION or DEBUNK false claims - only flag content that PROMOTES misinformation.',
   },
   {
     name: 'violence',
@@ -284,6 +284,12 @@ FLAGS RULES:
    - OR create a new category if content doesn't fit (use lowercase-with-dashes, e.g., "cult-tactics")
    - Do NOT combine categories (wrong: "hate-conspiracy", right: pick one or create new)
 5. "flags": [] ONLY if absolutely nothing matches any category
+
+CRITICAL - DEBUNKING vs PROMOTING:
+- Do NOT flag someone DEBUNKING or expressing SKEPTICISM about conspiracy theories, pseudoscience, or misinformation
+- Saying "this is fake", "this is a hoax", or "I don't know how they came to that conclusion" about unverified/extraordinary claims is HEALTHY SKEPTICISM, not misinformation
+- Only flag content that PROMOTES false claims, not content that QUESTIONS them
+- If the speaker is clearly analyzing, critiquing, or debunking dubious claims, their skeptical statements should NOT be flagged
 
 EXAMPLE FLAG:
 {"category": "hate", "description": "dehumanizing language toward immigrants", "quote": "these people are like animals invading our country"}
