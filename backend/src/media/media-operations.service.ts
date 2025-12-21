@@ -555,17 +555,17 @@ export class MediaOperationsService {
       // Extract provider from model name prefix if not explicitly set
       // Model format: "provider:model" (e.g., "openai:gpt-4o", "ollama:qwen2.5:7b", "claude:claude-3-5-sonnet-latest")
       let cleanModelName = options.aiModel;
-      let provider = options.aiProvider || 'ollama';
+      let provider: 'ollama' | 'openai' | 'claude' | 'local' = (options.aiProvider || 'ollama') as 'ollama' | 'openai' | 'claude' | 'local';
 
       // Check if model name has a provider prefix
-      const knownProviders = ['ollama', 'openai', 'claude'];
+      const knownProviders = ['ollama', 'openai', 'claude', 'local'];
       const colonIndex = cleanModelName.indexOf(':');
       if (colonIndex > 0) {
         const possibleProvider = cleanModelName.substring(0, colonIndex);
         if (knownProviders.includes(possibleProvider)) {
           // Extract provider from model name if not explicitly set or if it matches
           if (!options.aiProvider || possibleProvider === options.aiProvider) {
-            provider = possibleProvider as 'ollama' | 'openai' | 'claude';
+            provider = possibleProvider as 'ollama' | 'openai' | 'claude' | 'local';
             cleanModelName = cleanModelName.substring(colonIndex + 1);
             this.logger.log(`[${jobId || 'standalone'}] Extracted provider '${provider}' from model name: ${options.aiModel} -> ${cleanModelName}`);
           }
@@ -574,7 +574,7 @@ export class MediaOperationsService {
 
       // Get API key from options or from stored config
       let apiKey = options.apiKey;
-      if (!apiKey && provider !== 'ollama') {
+      if (!apiKey && provider !== 'ollama' && provider !== 'local') {
         // Get API key from the API keys service
         if (provider === 'openai') {
           apiKey = this.apiKeysService.getOpenAiApiKey();
