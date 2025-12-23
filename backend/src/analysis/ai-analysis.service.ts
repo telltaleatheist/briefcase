@@ -100,6 +100,8 @@ export interface AnalysisProgress {
   phase: string;
   progress: number;
   message: string;
+  eta?: number;           // Estimated seconds remaining
+  elapsedMs?: number;     // Milliseconds elapsed since start
 }
 
 export interface AnalysisOptions {
@@ -140,6 +142,226 @@ export interface AnalysisResult {
 // =============================================================================
 
 const MAX_RETRIES = 3;
+const JSON_PARSE_RETRIES = 2;
+
+// =============================================================================
+// JSON EXTRACTION AND VALIDATION HELPERS
+// =============================================================================
+
+/**
+ * Extract JSON from AI response text, handling various formats
+ * Tries multiple strategies to find valid JSON in the response
+ */
+function extractJsonFromResponse(response: string): string | null {
+  if (!response || typeof response !== 'string') {
+    return null;
+  }
+
+  let text = response.trim();
+
+  // Strategy 1: Remove markdown code blocks
+  if (text.includes('```')) {
+    // Try to extract content between ```json and ``` or just ``` and ```
+    const jsonBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonBlockMatch) {
+      text = jsonBlockMatch[1].trim();
+    } else {
+      // Fallback: remove all ``` lines
+      text = text.split('\n').filter(l => !l.trim().startsWith('```')).join('\n').trim();
+    }
+  }
+
+  // Strategy 2: Find JSON object with balanced braces
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    // Extract the portion that looks like JSON
+    let jsonCandidate = text.substring(firstBrace, lastBrace + 1);
+
+    // Try to balance braces if needed
+    let braceCount = 0;
+    let endIndex = -1;
+    for (let i = 0; i < jsonCandidate.length; i++) {
+      if (jsonCandidate[i] === '{') braceCount++;
+      if (jsonCandidate[i] === '}') braceCount--;
+      if (braceCount === 0) {
+        endIndex = i;
+        break;
+      }
+    }
+
+    if (endIndex !== -1) {
+      jsonCandidate = jsonCandidate.substring(0, endIndex + 1);
+    }
+
+    return jsonCandidate;
+  }
+
+  return null;
+}
+
+/**
+ * Attempt to fix common JSON issues from AI responses
+ */
+function attemptJsonRepair(jsonStr: string): string {
+  let fixed = jsonStr;
+
+  // Fix trailing commas before closing braces/brackets
+  fixed = fixed.replace(/,\s*([\]}])/g, '$1');
+
+  // Fix unquoted keys (simple cases)
+  fixed = fixed.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+
+  // Fix single quotes to double quotes (careful with apostrophes in text)
+  // Only do this for key-value patterns
+  fixed = fixed.replace(/'(\w+)'(\s*:)/g, '"$1"$2');
+
+  // Remove control characters that break JSON
+  fixed = fixed.replace(/[\x00-\x1F\x7F]/g, (match) => {
+    if (match === '\n' || match === '\r' || match === '\t') {
+      return match; // Keep these
+    }
+    return ''; // Remove others
+  });
+
+  // Fix truncated strings - if we have an unclosed quote, try to close it
+  const quoteCount = (fixed.match(/(?<!\\)"/g) || []).length;
+  if (quoteCount % 2 !== 0) {
+    // Odd number of quotes - likely truncated
+    // Try to close the last open string and the object
+    if (!fixed.endsWith('"')) {
+      fixed = fixed + '"';
+    }
+    // Count braces
+    const openBraces = (fixed.match(/{/g) || []).length;
+    const closeBraces = (fixed.match(/}/g) || []).length;
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      fixed = fixed + '}';
+    }
+  }
+
+  return fixed;
+}
+
+/**
+ * Safely parse JSON with multiple fallback strategies
+ * Returns parsed object or null if all strategies fail
+ */
+function safeJsonParse<T>(response: string, logger?: Logger): T | null {
+  if (!response) {
+    return null;
+  }
+
+  // Step 1: Extract JSON from response
+  const jsonStr = extractJsonFromResponse(response);
+  if (!jsonStr) {
+    logger?.warn('[JSON Parse] No JSON object found in response');
+    return null;
+  }
+
+  // Step 2: Try direct parse
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch (e) {
+    logger?.debug(`[JSON Parse] Direct parse failed: ${(e as Error).message}`);
+  }
+
+  // Step 3: Try with repairs
+  try {
+    const repaired = attemptJsonRepair(jsonStr);
+    return JSON.parse(repaired) as T;
+  } catch (e) {
+    logger?.debug(`[JSON Parse] Repaired parse failed: ${(e as Error).message}`);
+  }
+
+  // Step 4: Try extracting just the essential fields with regex
+  // This is a last resort for severely malformed JSON
+  try {
+    const titleMatch = jsonStr.match(/"title"\s*:\s*"([^"]+)"/);
+    const summaryMatch = jsonStr.match(/"summary"\s*:\s*"([^"]+)"/);
+
+    if (titleMatch || summaryMatch) {
+      logger?.debug('[JSON Parse] Extracted fields via regex fallback');
+      return {
+        title: titleMatch ? titleMatch[1] : 'Unknown',
+        summary: summaryMatch ? summaryMatch[1] : '',
+        flags: [],
+      } as T;
+    }
+  } catch (e) {
+    logger?.debug(`[JSON Parse] Regex extraction failed: ${(e as Error).message}`);
+  }
+
+  logger?.warn(`[JSON Parse] All parse strategies failed for: ${jsonStr.substring(0, 200)}...`);
+  return null;
+}
+
+/**
+ * Validate chapter analysis result has required fields
+ */
+function validateChapterAnalysisResult(data: unknown): ChapterAnalysisResult | null {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const obj = data as Record<string, unknown>;
+
+  // Must have a title (string)
+  if (typeof obj.title !== 'string' || obj.title.trim() === '') {
+    return null;
+  }
+
+  // Summary should be string (can be empty)
+  const summary = typeof obj.summary === 'string' ? obj.summary : '';
+
+  // Flags should be array if present
+  let flags: ChapterFlag[] = [];
+  if (Array.isArray(obj.flags)) {
+    flags = obj.flags.filter((f): f is ChapterFlag => {
+      return (
+        f &&
+        typeof f === 'object' &&
+        typeof (f as ChapterFlag).category === 'string' &&
+        (typeof (f as ChapterFlag).description === 'string' ||
+          typeof (f as ChapterFlag).quote === 'string')
+      );
+    });
+  }
+
+  return {
+    title: obj.title.trim(),
+    summary: summary.trim(),
+    flags,
+  };
+}
+
+/**
+ * Validate boundary detection result has required fields
+ */
+function validateBoundaryResult(data: unknown): BoundaryDetectionResult | null {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const obj = data as Record<string, unknown>;
+
+  // Boundaries should be array of strings
+  let boundaries: string[] = [];
+  if (Array.isArray(obj.boundaries)) {
+    boundaries = obj.boundaries.filter(
+      (b): b is string => typeof b === 'string' && b.trim().length > 0,
+    );
+  }
+
+  // end_topic should be string
+  const endTopic = typeof obj.end_topic === 'string' ? obj.end_topic : '';
+
+  return {
+    boundaries,
+    end_topic: endTopic,
+  };
+}
 
 // =============================================================================
 // FUZZY STRING MATCHING
@@ -209,9 +431,10 @@ function normalizeForComparison(text: string): string {
 // Model size limits - conservative estimates based on typical context windows
 // These ensure chunks fit comfortably with room for prompts and output
 interface ModelLimits {
-  maxChunkChars: number;    // Max chars per chunk for boundary detection
-  maxChapterChars: number;  // Max chars per chapter for analysis
-  chunkMinutes: number;     // Target chunk duration
+  maxChunkChars: number;       // Max chars per chunk for boundary detection
+  maxChapterChars: number;     // Max chars per chapter for analysis
+  chunkMinutes: number;        // Target chunk duration for boundary detection
+  maxChapterSeconds: number;   // Max chapter duration before splitting
 }
 
 function getModelLimits(modelName: string): ModelLimits {
@@ -220,37 +443,52 @@ function getModelLimits(modelName: string): ModelLimits {
   const paramBillions = match ? parseFloat(match[1]) : 7; // Default to 7b if unknown
 
   // Small models (≤3b): Very conservative - may have 4K-8K context
+  // These models need very short chapters to avoid truncation
   if (paramBillions <= 3) {
     return {
-      maxChunkChars: 12000,   // ~3K tokens
-      maxChapterChars: 16000, // ~4K tokens
-      chunkMinutes: 5,
+      maxChunkChars: 8000,      // ~2K tokens - very conservative
+      maxChapterChars: 10000,   // ~2.5K tokens
+      chunkMinutes: 3,          // Short chunks for boundary detection
+      maxChapterSeconds: 180,   // 3 min max per chapter
     };
   }
 
-  // Medium models (≤7b): Conservative - typically 8K-32K context
+  // Medium-small models (≤7b): Conservative - typically 8K-32K context
   if (paramBillions <= 7) {
     return {
-      maxChunkChars: 24000,   // ~6K tokens
-      maxChapterChars: 32000, // ~8K tokens
-      chunkMinutes: 10,
+      maxChunkChars: 20000,     // ~5K tokens
+      maxChapterChars: 24000,   // ~6K tokens
+      chunkMinutes: 7,
+      maxChapterSeconds: 360,   // 6 min max per chapter
     };
   }
 
-  // Large models (≤14b): Moderate - typically 32K+ context
+  // Medium-large models (≤14b): Moderate - typically 32K+ context
   if (paramBillions <= 14) {
     return {
-      maxChunkChars: 40000,   // ~10K tokens
-      maxChapterChars: 48000, // ~12K tokens
-      chunkMinutes: 15,
+      maxChunkChars: 36000,     // ~9K tokens
+      maxChapterChars: 44000,   // ~11K tokens
+      chunkMinutes: 12,
+      maxChapterSeconds: 540,   // 9 min max per chapter
     };
   }
 
-  // Very large models (>14b): Full capacity - typically 32K-128K context
+  // Large models (≤32b): Good capacity
+  if (paramBillions <= 32) {
+    return {
+      maxChunkChars: 50000,     // ~12.5K tokens
+      maxChapterChars: 60000,   // ~15K tokens
+      chunkMinutes: 15,
+      maxChapterSeconds: 600,   // 10 min max per chapter
+    };
+  }
+
+  // Very large models (>32b): Full capacity - typically 32K-128K context
   return {
-    maxChunkChars: 60000,   // ~15K tokens
-    maxChapterChars: 80000, // ~20K tokens
+    maxChunkChars: 60000,       // ~15K tokens
+    maxChapterChars: 80000,     // ~20K tokens
     chunkMinutes: 20,
+    maxChapterSeconds: 720,     // 12 min max per chapter
   };
 }
 
@@ -368,10 +606,28 @@ export class AIAnalysisService {
       }
     }
 
+    // Track timing for ETA calculation
+    const analysisStartTime = Date.now();
+    let pass2StartTime = 0;  // Set after Pass 1 completes
+    let totalApiCalls = 0;   // Will be set after Pass 1
+    let completedApiCalls = 0;
+
     const sendProgress = (phase: string, progress: number, message: string) => {
-      console.log(`[AI Analysis] ${progress}% - ${message}`);
+      const elapsedMs = Date.now() - analysisStartTime;
+      let eta: number | undefined;
+
+      // Calculate ETA based on Pass 2 timing only (excludes slower Pass 1)
+      if (completedApiCalls > 0 && totalApiCalls > 0 && pass2StartTime > 0) {
+        const pass2ElapsedMs = Date.now() - pass2StartTime;
+        const avgCallTimeMs = pass2ElapsedMs / completedApiCalls;
+        const remainingCalls = totalApiCalls - completedApiCalls;
+        eta = Math.round((remainingCalls * avgCallTimeMs) / 1000);
+      }
+
+      console.log(`[AI Analysis] ${progress}% - ${message} (ETA: ${eta !== undefined ? eta + 's' : 'calculating...'})`);
+
       if (onProgress) {
-        onProgress({ phase, progress, message });
+        onProgress({ phase, progress, message, eta, elapsedMs });
       }
     };
 
@@ -448,10 +704,22 @@ export class AIAnalysisService {
       );
       sendProgress('analysis', 25, `Found ${boundaries.length} chapters`);
 
+      // Calculate total API calls for accurate progress reporting
+      // Pass 2 = 1 call per chapter, plus 3 more for description, tags, title
+      totalApiCalls = boundaries.length + 3;
+      completedApiCalls = 0;
+      pass2StartTime = Date.now();  // Start timing from Pass 2 for accurate ETA
+
+      // Progress callback that calculates percentage based on API calls
+      // Range: 25% to 95% (70% total for all API calls)
+      const calculateProgress = () => {
+        return Math.round(25 + (completedApiCalls / totalApiCalls) * 70);
+      };
+
       // =========================================================================
       // PASS 2: Analyze each chapter (title, summary, category flags)
       // =========================================================================
-      sendProgress('analysis', 30, 'Analyzing chapters...');
+      sendProgress('analysis', 26, `Analyzing ${boundaries.length} chapters (0/${totalApiCalls} API calls)...`);
       const { chapters, flags } = await this.analyzeChaptersPass2(
         aiConfig,
         segments,
@@ -462,8 +730,13 @@ export class AIAnalysisService {
         customInstructions,
         analysisGranularity,
         trackTokens,
+        (current, total) => {
+          completedApiCalls = current;
+          const progress = calculateProgress();
+          sendProgress('analysis', progress, `Analyzing chapter ${current}/${total} (${completedApiCalls}/${totalApiCalls} API calls)...`);
+        },
       );
-      sendProgress('analysis', 70, `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
+      sendProgress('analysis', calculateProgress(), `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
 
       // Write chapter flags to file
       for (const flag of flags) {
@@ -473,7 +746,8 @@ export class AIAnalysisService {
       // =========================================================================
       // Generate metadata FROM chapters
       // =========================================================================
-      sendProgress('analysis', 75, 'Generating description...');
+      completedApiCalls++;
+      sendProgress('analysis', calculateProgress(), `Generating description (${completedApiCalls}/${totalApiCalls} API calls)...`);
       const description = await this.generateDescriptionFromChapters(
         aiConfig,
         chapters,
@@ -481,14 +755,16 @@ export class AIAnalysisService {
         trackTokens,
       );
 
-      sendProgress('analysis', 85, 'Extracting tags...');
+      completedApiCalls++;
+      sendProgress('analysis', calculateProgress(), `Extracting tags (${completedApiCalls}/${totalApiCalls} API calls)...`);
       const tags = await this.generateTagsFromChapters(
         aiConfig,
         chapters,
         trackTokens,
       );
 
-      sendProgress('analysis', 92, 'Generating suggested title...');
+      completedApiCalls++;
+      sendProgress('analysis', calculateProgress(), `Generating title (${completedApiCalls}/${totalApiCalls} API calls)...`);
       const suggestedTitle = await this.generateTitleFromChapters(
         aiConfig,
         chapters,
@@ -834,35 +1110,149 @@ export class AIAnalysisService {
   }
 
   /**
-   * Parse boundary detection response
+   * Parse boundary detection response with robust JSON handling
    */
   private parseBoundaryResponse(response: string): BoundaryDetectionResult {
-    try {
-      // Clean up response and extract JSON
-      let cleanResponse = response.trim();
+    // Use safe JSON parsing with multiple fallback strategies
+    const parsed = safeJsonParse<Record<string, unknown>>(response, this.logger);
 
-      // Remove markdown code blocks
-      if (cleanResponse.startsWith('```')) {
-        const lines = cleanResponse.split('\n');
-        cleanResponse = lines.filter((l) => !l.startsWith('```')).join('\n');
-      }
-
-      // Extract JSON object
-      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        this.logger.warn('[Pass 1] No JSON found in boundary response');
-        return { boundaries: [], end_topic: '' };
-      }
-
-      const data = JSON.parse(jsonMatch[0]);
-      return {
-        boundaries: Array.isArray(data.boundaries) ? data.boundaries : [],
-        end_topic: data.end_topic || '',
-      };
-    } catch (error) {
-      this.logger.warn(`[Pass 1] Failed to parse boundary response: ${(error as Error).message}`);
+    if (!parsed) {
+      this.logger.warn('[Pass 1] Failed to parse boundary response - all strategies failed');
+      this.logger.debug(`[Pass 1] Raw response was: ${response.substring(0, 500)}...`);
       return { boundaries: [], end_topic: '' };
     }
+
+    // Validate the parsed result
+    const validated = validateBoundaryResult(parsed);
+
+    if (!validated) {
+      this.logger.warn('[Pass 1] Boundary response failed validation');
+      return { boundaries: [], end_topic: '' };
+    }
+
+    return validated;
+  }
+
+  /**
+   * Split boundaries to ensure no chapter exceeds the model's max chapter duration
+   * This prevents very long chapters that might cause truncation or model issues
+   */
+  private splitLongChapters(
+    boundaries: number[],
+    videoDuration: number,
+    limits: ModelLimits,
+  ): number[] {
+    const result: number[] = [];
+    const maxDuration = limits.maxChapterSeconds;
+
+    this.logger.log(
+      `[Pass 2] Max chapter duration for this model: ${maxDuration}s (${Math.round(maxDuration / 60)} min)`,
+    );
+
+    for (let i = 0; i < boundaries.length; i++) {
+      const startTime = boundaries[i];
+      const endTime = i < boundaries.length - 1 ? boundaries[i + 1] : videoDuration;
+      const duration = endTime - startTime;
+
+      result.push(startTime);
+
+      // If chapter is too long, split it into smaller chunks
+      if (duration > maxDuration) {
+        const numSplits = Math.ceil(duration / maxDuration);
+        const splitDuration = duration / numSplits;
+
+        this.logger.log(
+          `[Pass 2] Splitting long chapter (${Math.round(duration)}s) at ${this.formatDisplayTime(startTime)} into ${numSplits} parts (max ${maxDuration}s each)`,
+        );
+
+        for (let j = 1; j < numSplits; j++) {
+          const splitTime = startTime + j * splitDuration;
+          result.push(splitTime);
+        }
+      }
+    }
+
+    // Sort and deduplicate
+    return Array.from(new Set(result)).sort((a, b) => a - b);
+  }
+
+  /**
+   * Analyze a single chapter with retry logic
+   * Returns the analysis result or a fallback on failure
+   */
+  private async analyzeChapterWithRetry(
+    config: AIProviderConfig,
+    chapterText: string,
+    videoTitle: string,
+    categories: AnalysisCategory[],
+    chapterNumber: number,
+    previousChapterSummary: string,
+    customInstructions: string | undefined,
+    analysisGranularity: number | undefined,
+    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
+  ): Promise<ChapterAnalysisResult> {
+    const maxRetries = JSON_PARSE_RETRIES;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const prompt = buildChapterAnalysisPrompt(
+          videoTitle,
+          chapterText,
+          categories,
+          chapterNumber,
+          previousChapterSummary,
+          customInstructions,
+          analysisGranularity,
+        );
+
+        const response = await this.aiProviderService.generateText(prompt, config);
+        onTokens?.(response);
+
+        if (!response || !response.text) {
+          this.logger.warn(`[Pass 2] No response for chapter ${chapterNumber} (attempt ${attempt + 1})`);
+          if (attempt < maxRetries) {
+            await this.delay(1000 * (attempt + 1)); // Exponential backoff
+            continue;
+          }
+          break;
+        }
+
+        const result = this.parseChapterAnalysisResponse(response.text);
+
+        // Check if we got a valid result (not just defaults)
+        if (result.title !== 'Unknown' || result.summary !== '') {
+          return result;
+        }
+
+        // Got default/empty result - retry if we have attempts left
+        if (attempt < maxRetries) {
+          this.logger.warn(`[Pass 2] Chapter ${chapterNumber} got empty result, retrying (attempt ${attempt + 1})`);
+          await this.delay(1000 * (attempt + 1));
+          continue;
+        }
+      } catch (error) {
+        this.logger.warn(`[Pass 2] Error analyzing chapter ${chapterNumber} (attempt ${attempt + 1}): ${(error as Error).message}`);
+        if (attempt < maxRetries) {
+          await this.delay(1000 * (attempt + 1));
+          continue;
+        }
+      }
+    }
+
+    // All retries exhausted - return a descriptive fallback
+    this.logger.error(`[Pass 2] Chapter ${chapterNumber} analysis failed after ${maxRetries + 1} attempts`);
+    return {
+      title: `Chapter ${chapterNumber} (analysis failed)`,
+      summary: 'AI analysis could not process this section. The content may be too long or complex.',
+      flags: [],
+    };
+  }
+
+  /**
+   * Simple delay helper for retry backoff
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -879,6 +1269,7 @@ export class AIAnalysisService {
     customInstructions?: string,
     analysisGranularity?: number,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
+    onChapterProgress?: (current: number, total: number) => void,
   ): Promise<{ chapters: Chapter[]; flags: AnalyzedSection[] }> {
     const chapters: Chapter[] = [];
     const allFlags: AnalyzedSection[] = [];
@@ -889,13 +1280,22 @@ export class AIAnalysisService {
     }
 
     const videoDuration = segments[segments.length - 1].end;
+
+    // Split any chapters that are too long to prevent truncation issues
+    const adjustedBoundaries = this.splitLongChapters(boundaries, videoDuration, limits);
+    if (adjustedBoundaries.length > boundaries.length) {
+      this.logger.log(
+        `[Pass 2] Split long chapters: ${boundaries.length} -> ${adjustedBoundaries.length} chapters`,
+      );
+    }
+
     let previousChapterSummary = '';
 
-    this.logger.log(`[Pass 2] Analyzing ${boundaries.length} chapters (max ${limits.maxChapterChars} chars each)`);
+    this.logger.log(`[Pass 2] Analyzing ${adjustedBoundaries.length} chapters (max ${limits.maxChapterChars} chars each)`);
 
-    for (let i = 0; i < boundaries.length; i++) {
-      const startTime = boundaries[i];
-      const endTime = i < boundaries.length - 1 ? boundaries[i + 1] : videoDuration;
+    for (let i = 0; i < adjustedBoundaries.length; i++) {
+      const startTime = adjustedBoundaries[i];
+      const endTime = i < adjustedBoundaries.length - 1 ? adjustedBoundaries[i + 1] : videoDuration;
 
       // Extract chapter transcript
       const chapterSegments = segments.filter(
@@ -908,98 +1308,96 @@ export class AIAnalysisService {
       }
 
       const chapterText = chapterSegments.map((s) => s.text).join(' ');
+      const chapterDuration = endTime - startTime;
 
-      // Truncate very long chapters based on model limits
-      const truncatedText = chapterText.substring(0, limits.maxChapterChars);
+      // Log if we're still truncating (shouldn't happen often after splitting)
       if (chapterText.length > limits.maxChapterChars) {
-        this.logger.warn(`[Pass 2] Chapter ${i + 1} truncated from ${chapterText.length} to ${limits.maxChapterChars} chars`);
-      }
-
-      try {
-        const prompt = buildChapterAnalysisPrompt(
-          videoTitle,
-          truncatedText,
-          categories,
-          i + 1,
-          previousChapterSummary,
-          customInstructions,
-          analysisGranularity,
+        this.logger.warn(
+          `[Pass 2] Chapter ${i + 1} (${Math.round(chapterDuration)}s) still exceeds limit: ` +
+          `${chapterText.length} chars -> truncating to ${limits.maxChapterChars}`,
         );
-
-        const response = await this.aiProviderService.generateText(prompt, config);
-        onTokens?.(response);
-
-        if (!response || !response.text) {
-          this.logger.warn(`[Pass 2] No response for chapter ${i + 1}`);
-          continue;
-        }
-
-        const result = this.parseChapterAnalysisResponse(response.text);
-
-        // Create chapter entry
-        chapters.push({
-          sequence: i + 1,
-          start_time: this.formatDisplayTime(startTime),
-          end_time: this.formatDisplayTime(endTime),
-          title: result.title,
-          summary: result.summary,
-        });
-
-        // Save summary for next chapter's context
-        previousChapterSummary = result.summary;
-
-        // Convert flags to AnalyzedSection format - pass through without filtering
-        if (result.flags && result.flags.length > 0) {
-          for (const flag of result.flags) {
-            // Try to find the actual timestamp of the quote in the transcript
-            let flagStartTime = startTime;
-            let foundQuote = false;
-            if (flag.quote) {
-              const foundTime = this.findPhraseTimestamp(flag.quote, chapterSegments);
-              if (foundTime !== null) {
-                flagStartTime = foundTime;
-                foundQuote = true;
-              } else {
-                // Quote not found - log for debugging
-                this.logger.debug(`[Pass 2] Quote not found in transcript: "${flag.quote.substring(0, 80)}..."`);
-              }
-            } else {
-              this.logger.debug(`[Pass 2] Flag has no quote field: ${JSON.stringify(flag)}`);
-            }
-
-            // Build description: prefer quote (verbatim text), fall back to description
-            // If both exist, show quote first with reason after
-            let displayDescription = flag.description || '';
-            if (flag.quote) {
-              if (flag.description) {
-                displayDescription = `"${flag.quote}" — ${flag.description}`;
-              } else {
-                displayDescription = `"${flag.quote}"`;
-              }
-            }
-
-            allFlags.push({
-              category: flag.category,
-              description: displayDescription,
-              start_time: this.formatDisplayTime(flagStartTime),
-              end_time: this.formatDisplayTime(Math.min(flagStartTime + 30, endTime)), // ~30 sec duration
-              quotes: flag.quote
-                ? [
-                    {
-                      timestamp: this.formatDisplayTime(flagStartTime),
-                      text: flag.quote,
-                      significance: flag.description,
-                    },
-                  ]
-                : [],
-            });
-          }
-        }
-
-        this.logger.debug(`[Pass 2] Chapter ${i + 1}: "${result.title.substring(0, 50)}..." (${result.flags?.length || 0} flags)`);
-      } catch (error) {
-        this.logger.warn(`[Pass 2] Error analyzing chapter ${i + 1}: ${(error as Error).message}`);
       }
+
+      // Truncate if needed
+      const truncatedText = chapterText.substring(0, limits.maxChapterChars);
+
+      // Use retry-enabled analysis
+      const result = await this.analyzeChapterWithRetry(
+        config,
+        truncatedText,
+        videoTitle,
+        categories,
+        i + 1,
+        previousChapterSummary,
+        customInstructions,
+        analysisGranularity,
+        onTokens,
+      );
+
+      // Create chapter entry
+      chapters.push({
+        sequence: i + 1,
+        start_time: this.formatDisplayTime(startTime),
+        end_time: this.formatDisplayTime(endTime),
+        title: result.title,
+        summary: result.summary,
+      });
+
+      // Report progress after each chapter
+      if (onChapterProgress) {
+        onChapterProgress(i + 1, adjustedBoundaries.length);
+      }
+
+      // Save summary for next chapter's context
+      previousChapterSummary = result.summary;
+
+      // Convert flags to AnalyzedSection format - pass through without filtering
+      if (result.flags && result.flags.length > 0) {
+        for (const flag of result.flags) {
+          // Try to find the actual timestamp of the quote in the transcript
+          let flagStartTime = startTime;
+          if (flag.quote) {
+            const foundTime = this.findPhraseTimestamp(flag.quote, chapterSegments);
+            if (foundTime !== null) {
+              flagStartTime = foundTime;
+            } else {
+              // Quote not found - log for debugging
+              this.logger.debug(`[Pass 2] Quote not found in transcript: "${flag.quote.substring(0, 80)}..."`);
+            }
+          } else {
+            this.logger.debug(`[Pass 2] Flag has no quote field: ${JSON.stringify(flag)}`);
+          }
+
+          // Build description: prefer quote (verbatim text), fall back to description
+          // If both exist, show quote first with reason after
+          let displayDescription = flag.description || '';
+          if (flag.quote) {
+            if (flag.description) {
+              displayDescription = `"${flag.quote}" — ${flag.description}`;
+            } else {
+              displayDescription = `"${flag.quote}"`;
+            }
+          }
+
+          allFlags.push({
+            category: flag.category,
+            description: displayDescription,
+            start_time: this.formatDisplayTime(flagStartTime),
+            end_time: this.formatDisplayTime(Math.min(flagStartTime + 30, endTime)), // ~30 sec duration
+            quotes: flag.quote
+              ? [
+                  {
+                    timestamp: this.formatDisplayTime(flagStartTime),
+                    text: flag.quote,
+                    significance: flag.description,
+                  },
+                ]
+              : [],
+          });
+        }
+      }
+
+      this.logger.debug(`[Pass 2] Chapter ${i + 1}: "${result.title.substring(0, 50)}..." (${result.flags?.length || 0} flags)`);
     }
 
     // Deduplicate flags with the same or very close timestamps (within 5 seconds)
@@ -1035,43 +1433,38 @@ export class AIAnalysisService {
   }
 
   /**
-   * Parse chapter analysis response
+   * Parse chapter analysis response with robust JSON handling
    */
   private parseChapterAnalysisResponse(response: string): ChapterAnalysisResult {
-    try {
-      // Clean up response and extract JSON
-      let cleanResponse = response.trim();
+    // Use safe JSON parsing with multiple fallback strategies
+    const parsed = safeJsonParse<Record<string, unknown>>(response, this.logger);
 
-      // Remove markdown code blocks
-      if (cleanResponse.startsWith('```')) {
-        const lines = cleanResponse.split('\n');
-        cleanResponse = lines.filter((l) => !l.startsWith('```')).join('\n');
-      }
-
-      // Extract JSON object
-      const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        this.logger.warn('[Pass 2] No JSON found in chapter analysis response');
-        return { title: 'Unknown', summary: '', flags: [] };
-      }
-
-      const data = JSON.parse(jsonMatch[0]);
-      const flags = Array.isArray(data.flags) ? data.flags : [];
-
-      // Debug: Log what the AI returned for flags
-      if (flags.length > 0) {
-        this.logger.debug(`[Pass 2] Raw flags from AI: ${JSON.stringify(flags, null, 2)}`);
-      }
-
-      return {
-        title: data.title || 'Unknown',
-        summary: data.summary || '',
-        flags,
-      };
-    } catch (error) {
-      this.logger.warn(`[Pass 2] Failed to parse chapter analysis response: ${(error as Error).message}`);
+    if (!parsed) {
+      this.logger.warn('[Pass 2] Failed to parse chapter analysis response - all strategies failed');
+      this.logger.debug(`[Pass 2] Raw response was: ${response.substring(0, 500)}...`);
       return { title: 'Unknown', summary: '', flags: [] };
     }
+
+    // Validate the parsed result
+    const validated = validateChapterAnalysisResult(parsed);
+
+    if (!validated) {
+      this.logger.warn('[Pass 2] Chapter analysis response failed validation');
+      this.logger.debug(`[Pass 2] Parsed data was: ${JSON.stringify(parsed).substring(0, 500)}`);
+      // Try to salvage what we can
+      return {
+        title: typeof parsed.title === 'string' ? parsed.title : 'Unknown',
+        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        flags: [],
+      };
+    }
+
+    // Debug: Log what the AI returned for flags
+    if (validated.flags && validated.flags.length > 0) {
+      this.logger.debug(`[Pass 2] Raw flags from AI: ${JSON.stringify(validated.flags, null, 2)}`);
+    }
+
+    return validated;
   }
 
   /**
@@ -1240,6 +1633,9 @@ export class AIAnalysisService {
 
         // Remove invalid filesystem characters
         suggestedTitle = suggestedTitle.replace(/[/\\:*?"<>|]/g, '');
+
+        // Remove parentheses and their contents at the end (e.g., "(source name)")
+        suggestedTitle = suggestedTitle.replace(/\s*\([^)]*\)\s*$/, '');
 
         // Remove periods
         suggestedTitle = suggestedTitle.replace(/\.(?!\s|$)/g, '');

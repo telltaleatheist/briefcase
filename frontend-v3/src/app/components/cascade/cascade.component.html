@@ -180,7 +180,7 @@
                   ✏️
                 </button>
               }
-              @if (showDeleteButton && (isStagingItem(item.video) || isProcessingItem(item.video) || isQueueItem(item.video)) && !item.video.isGhost) {
+              @if (showDeleteButton && (isStagingItem(item.video) || isProcessingItem(item.video) || isCompletedItem(item.video) || isQueueItem(item.video)) && !item.video.isGhost) {
                 <button
                   class="delete-btn"
                   [class.cancel-btn]="isProcessingItem(item.video)"
@@ -192,8 +192,18 @@
               }
             </div>
 
-            <!-- Progress Bar -->
+            <!-- Progress Label & Bar -->
             @if (getProgress(item.video); as progress) {
+              @if (progress.taskLabel || progress.etaLabel) {
+                <div class="progress-label">
+                  @if (progress.taskLabel) {
+                    <span class="task-name">{{ progress.taskLabel }}</span>
+                  }
+                  @if (progress.etaLabel) {
+                    <span class="eta">{{ progress.etaLabel }}</span>
+                  }
+                </div>
+              }
               <div class="item-progress-bar"
                    [attr.aria-label]="progress.label || 'Progress: ' + progress.value + '%'"
                    role="progressbar"

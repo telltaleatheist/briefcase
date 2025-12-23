@@ -187,6 +187,35 @@ export class QueueController {
   }
 
   /**
+   * Cancel multiple jobs at once
+   * POST /queue/cancel-all
+   * Body: { jobIds: string[] }
+   */
+  @Post('cancel-all')
+  async cancelAllJobs(@Body() body: { jobIds: string[] }) {
+    if (!body.jobIds || body.jobIds.length === 0) {
+      throw new HttpException(
+        'At least one job ID is required',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    let cancelledCount = 0;
+    for (const jobId of body.jobIds) {
+      const cancelled = this.queueManager.cancelJob(jobId);
+      if (cancelled) {
+        cancelledCount++;
+      }
+    }
+
+    return {
+      success: true,
+      cancelledCount,
+      message: `${cancelledCount} of ${body.jobIds.length} jobs cancelled`,
+    };
+  }
+
+  /**
    * Clear completed/failed jobs from unified queue
    * DELETE /queue/jobs/completed
    */

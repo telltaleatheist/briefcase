@@ -311,7 +311,7 @@ export class FilenameDateUtil {
     sanitized = sanitized
       .replace(/[\x00-\x1F\x7F]/g, '')          // Control characters
       .replace(/[#%&{}$!'@+`=]/g, '-')          // Shell-problematic chars
-      .replace(/[\[\]()]/g, '-')                // Brackets (can cause issues)
+      .replace(/[\[\]]/g, '-')                  // Square brackets (can cause issues)
       .replace(/[;^~]/g, '-');                  // More problematic chars
 
     // 4. Handle Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)

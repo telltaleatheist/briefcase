@@ -23,7 +23,6 @@ import { QueueItemTask } from '../../models/queue.model';
 import { TaskType, AVAILABLE_TASKS } from '../../models/task.model';
 import { LibraryService } from '../../services/library.service';
 import { WebsocketService, TaskStarted, TaskCompleted, TaskProgress, TaskFailed, AnalysisCompleted } from '../../services/websocket.service';
-import { VideoProcessingService } from '../../services/video-processing.service';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { VideoJobSettings } from '../../models/video-processing.model';
 import { NotificationService } from '../../services/notification.service';
@@ -31,6 +30,8 @@ import { TabsService } from '../../services/tabs.service';
 import { FileImportService } from '../../services/file-import.service';
 import { ElectronService } from '../../services/electron.service';
 import { TourService } from '../../services/tour.service';
+import { QueueService } from '../../services/queue.service';
+import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -53,6 +54,8 @@ export interface ProcessingTask {
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
   errorMessage?: string; // Error message when task fails
+  eta?: number;          // Estimated seconds remaining
+  taskLabel?: string;    // Human-readable task name (e.g., "Transcribing...")
 }
 
 @Component({
@@ -84,13 +87,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);
-  private videoProcessingService = inject(VideoProcessingService);
   private aiSetupService = inject(AiSetupService);
   private notificationService = inject(NotificationService);
   private tabsService = inject(TabsService);
   private fileImportService = inject(FileImportService);
   private electronService = inject(ElectronService);
   private tourService = inject(TourService);
+  private queueService = inject(QueueService);
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
@@ -115,10 +118,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
 
-  // Queue state - split into staging (not yet sent to backend), processing (actively being processed), and completed
-  stagingQueue = signal<ProcessingQueueItem[]>([]);  // Items waiting to be processed
-  processingQueue = signal<ProcessingQueueItem[]>([]); // Items actively being processed by backend
-  completedQueue = signal<ProcessingQueueItem[]>([]); // Items that have completed processing
+  // Queue state - writable signals synced from QueueService (source of truth)
+  // These are writable for backward compatibility, synced via effect in constructor
+  stagingQueue = signal<ProcessingQueueItem[]>([]);  // Pending jobs not yet submitted
+  processingQueue = signal<ProcessingQueueItem[]>([]); // Jobs actively being processed
+  completedQueue = signal<ProcessingQueueItem[]>([]); // Jobs that have finished
 
   // Queue UI state
   queueExpanded = signal(true);
@@ -193,6 +197,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   };
 
   // Progress mapper for queue items
+  // Reads directly from QueueService to avoid effect timing issues
   queueProgressMapper = (video: VideoItem): ItemProgress | null => {
     // Handle staging, queue, and processing tags
     const queueTag = video.tags?.find(t => t.startsWith('queue:') || t.startsWith('processing:') || t.startsWith('staging:'));
@@ -200,38 +205,59 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     const queueId = queueTag.replace(/^(queue:|processing:|staging:)/, '');
 
-    // Look in both staging and processing queues
-    let queueItem = this.processingQueue().find(q => q.id === queueId);
-    if (!queueItem) {
-      queueItem = this.stagingQueue().find(q => q.id === queueId);
+    // Look directly in QueueService for most up-to-date data
+    let job = this.queueService.processingJobs().find(j => j.id === queueId);
+    if (!job) {
+      job = this.queueService.pendingJobs().find(j => j.id === queueId);
     }
-    if (!queueItem) return null;
+    if (!job) return null;
 
     // Calculate overall progress
-    if (queueItem.tasks.length === 0) return null;
+    if (job.tasks.length === 0) return null;
 
-    const totalProgress = queueItem.tasks.reduce((sum, task) => sum + task.progress, 0);
-    const overallProgress = Math.round(totalProgress / queueItem.tasks.length);
+    const totalProgress = job.tasks.reduce((sum, task) => sum + task.progress, 0);
+    const overallProgress = Math.round(totalProgress / job.tasks.length);
 
     // Only show progress bar when processing
-    if (queueItem.status === 'pending') {
+    if (job.state === 'pending') {
       return null;
     }
 
+    // Find the currently running task for ETA and label
+    const runningTask = job.tasks.find(t => t.state === 'running');
+    const taskLabel = runningTask?.taskLabel;
+    const etaLabel = runningTask?.eta !== undefined ? this.formatEta(runningTask.eta) : undefined;
+
     // Determine color based on status
     let color = 'var(--primary-orange)';
-    if (queueItem.status === 'completed') {
+    if (job.state === 'completed') {
       color = 'var(--status-complete)';
-    } else if (queueItem.status === 'failed') {
+    } else if (job.state === 'failed') {
       color = 'var(--status-error)';
     }
 
     return {
       value: overallProgress,
       color,
-      indeterminate: queueItem.status === 'loading'
+      indeterminate: false,
+      taskLabel,
+      etaLabel
     };
   };
+
+  /**
+   * Format ETA seconds into human-readable string
+   */
+  private formatEta(seconds: number): string {
+    if (seconds <= 0 || !isFinite(seconds)) return '';
+    if (seconds < 60) return `~${Math.round(seconds)}s remaining`;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    if (mins < 60) return `~${mins}:${secs.toString().padStart(2, '0')} remaining`;
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return `~${hours}h ${remainingMins}m remaining`;
+  }
 
   // Config modal state
   configModalOpen = signal(false);
@@ -289,109 +315,32 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Auto-save processing queue to localStorage when it changes
+    // Sync queue signals from QueueService (source of truth)
+    // This allows existing code to work while we gradually migrate to using QueueService directly
     effect(() => {
-      const queue = this.processingQueue();
-      if (!this.isLoadingQueue) {
-        this.saveProcessingQueueToStorage(queue);
-      }
-    });
+      const pending = this.queueService.pendingJobs();
+      this.stagingQueue.set(pending.map(job => this.convertQueueJobToProcessingItem(job)));
+    }, { allowSignalWrites: true });
 
-    // Auto-save completed queue to sessionStorage when it changes (temporary, clears on app restart)
     effect(() => {
-      const completed = this.completedQueue();
-      if (!this.isLoadingQueue) {
-        this.saveCompletedQueueToStorage(completed);
-      }
-    });
+      const processing = this.queueService.processingJobs();
+      this.processingQueue.set(processing.map(job => this.convertQueueJobToProcessingItem(job)));
+    }, { allowSignalWrites: true });
 
-    // Move completed/failed items from processing queue to completed queue
     effect(() => {
-      const queue = this.processingQueue();
-
-      // Find items where all tasks are done (completed or failed)
-      const doneItems = queue.filter(item => {
-        return item.tasks.length > 0 &&
-          item.tasks.every(t => t.status === 'completed' || t.status === 'failed') &&
-          !item.tasks.some(t => t.status === 'pending' || t.status === 'running');
-      });
-
-      // Move done items to completed queue after a brief delay to show final state
-      if (doneItems.length > 0) {
-        console.log('Found', doneItems.length, 'done items to move to completed:', doneItems.map(i => i.title));
-        setTimeout(() => {
-          const currentQueue = this.processingQueue();
-          const currentCompleted = this.completedQueue();
-
-          // Find items that are done and not already in completed queue
-          const itemsToMove = currentQueue.filter(item => {
-            const isDone = item.tasks.length > 0 &&
-              item.tasks.every(t => t.status === 'completed' || t.status === 'failed') &&
-              !item.tasks.some(t => t.status === 'pending' || t.status === 'running');
-            const alreadyInCompleted = currentCompleted.some(c => c.id === item.id);
-            return isDone && !alreadyInCompleted;
-          });
-
-          const remainingQueue = currentQueue.filter(item => {
-            const isDone = item.tasks.length > 0 &&
-              item.tasks.every(t => t.status === 'completed' || t.status === 'failed') &&
-              !item.tasks.some(t => t.status === 'pending' || t.status === 'running');
-            return !isDone;
-          });
-
-          if (itemsToMove.length > 0) {
-            console.log('Moving', itemsToMove.length, 'done items to completed queue');
-            // Add to completed queue (newest first)
-            this.completedQueue.set([...itemsToMove, ...currentCompleted]);
-            this.processingQueue.set(remainingQueue);
-            this.loadLibrary(); // Refresh library to show newly completed items
-          }
-        }, 1500);
-      }
+      const completed = this.queueService.completedJobs();
+      this.completedQueue.set(completed.map(job => this.convertQueueJobToProcessingItem(job)));
     }, { allowSignalWrites: true });
   }
 
   async ngOnInit() {
-    // Load processing queue from localStorage first
-    this.loadProcessingQueueFromStorage();
-    // Load completed queue from sessionStorage (persists within session only)
-    this.loadCompletedQueueFromStorage();
-    this.isLoadingQueue = false;
+    // Note: Queue state is managed by QueueService (single source of truth)
+    // No need to load from localStorage here - QueueService handles persistence
 
     this.loadDefaultTaskSettings();
 
-    // Subscribe to websocket events
+    // Subscribe to websocket events (for library refresh only - queue updates handled by QueueService)
     this.websocketService.connect();
-
-    // Subscribe to VideoProcessingService to restore queue from backend
-    this.videoProcessingService.getJobs().subscribe(jobs => {
-      console.log('[LibraryPage] Received jobs from VideoProcessingService:', jobs);
-      console.log('[LibraryPage] Jobs count:', jobs.length);
-
-      // Filter out completed and failed jobs - they should not be in the processing queue
-      const activeJobs = jobs.filter(job =>
-        job.status !== 'completed' && job.status !== 'failed'
-      );
-      console.log('[LibraryPage] Active jobs (filtered):', activeJobs.length);
-
-      // Convert VideoJob[] to ProcessingQueueItem[] format
-      const queueItems: ProcessingQueueItem[] = activeJobs.map(job => ({
-        id: job.id,
-        jobId: job.id,
-        backendJobId: job.id,
-        videoId: job.videoId,
-        url: job.videoUrl,
-        title: job.videoName,
-        status: job.status === 'queued' ? 'pending' as const :
-                job.status === 'processing' ? 'processing' as const :
-                job.status === 'completed' ? 'completed' as const : 'failed' as const,
-        tasks: this.combineJobTasks(job.tasks)
-      }));
-      console.log('[LibraryPage] Converted to queue items:', queueItems);
-      console.log('[LibraryPage] Setting processingQueue with', queueItems.length, 'items');
-      this.processingQueue.set(queueItems);
-      console.log('[LibraryPage] After set, processingQueue():', this.processingQueue());
-    });
 
     // Check for first-time setup with error handling
     try {
@@ -402,20 +351,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       this.loadCurrentLibrary();
     }
 
-    // Task completion - refresh library and update queue
+    // Task completion - refresh library (queue updates handled by QueueService)
     this.websocketService.onTaskCompleted((event: TaskCompleted) => {
       console.log('Task completed:', event);
-
-      // Translate backend job ID to frontend job ID
-      const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
-
-      // Update queue item task status first
-      this.updateQueueTaskStatus(frontendJobId, event.type, 'completed', 100);
-
-      // Store videoId in queue item if available (download/import tasks)
-      if (event.videoId) {
-        this.storeVideoIdInQueueItem(frontendJobId, event.jobId, event.videoId);
-      }
 
       // Refresh library when a task completes
       // Skip if there's a pending rename for this video to avoid race conditions
@@ -427,46 +365,24 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           this.loadCurrentLibrary();
         }
       }
-
-      // Note: Completed items are automatically removed by the effect in constructor
     });
 
-    // Task started - mark task as running (important for AI tracker)
+    // Task started - logged for debugging (queue updates handled by QueueService)
     this.websocketService.onTaskStarted((event: TaskStarted) => {
       console.log('Task started:', event);
-
-      // Translate backend job ID to frontend job ID
-      const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
-
-      // Mark the task as running (only for AI tasks, this triggers the green dot)
-      this.updateQueueTaskStatus(frontendJobId, event.type, 'running', 0);
     });
 
-    // Task progress - update queue item progress
+    // Task progress - logged for debugging (queue updates handled by QueueService)
     this.websocketService.onTaskProgress((event: TaskProgress) => {
       console.log('Task progress:', event);
-      if (event.type) {
-        // Translate backend job ID to frontend job ID
-        const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
-        // Update progress only, don't change status (task.started handles that)
-        this.updateQueueTaskProgressOnly(frontendJobId, event.type, event.progress);
-      }
     });
 
-    // Task failed - show notification and mark as failed
+    // Task failed - show notification (queue updates handled by QueueService)
     this.websocketService.onTaskFailed((event: TaskFailed) => {
       console.log('Task failed:', event);
 
-      // Translate backend job ID to frontend job ID
-      const frontendJobId = this.videoProcessingService.getFrontendJobId(event.jobId) || event.jobId;
-
       // Get error message
       const errorMessage = event.error?.message || 'Unknown error';
-
-      // Update queue item task status to failed with error message
-      if (event.type) {
-        this.updateQueueTaskStatus(frontendJobId, event.type, 'failed', 0, errorMessage);
-      }
 
       // Show notification to user
       this.notificationService.error(
@@ -474,8 +390,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         errorMessage,
         true  // showToast
       );
-
-      // Note: Failed items are automatically removed by the effect in constructor
     });
 
     // Video renamed - update video list (including upload date)
@@ -1114,223 +1028,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.processingQueue.set(newQueue);
   }
 
-  // Update queue task progress ONLY (don't change status - let task.started handle that)
-  // This prevents AI tasks from being marked as 'running' prematurely from progress events
+  // DEPRECATED: Queue task progress updates are now handled by QueueService via WebSocket
   private updateQueueTaskProgressOnly(jobId: string, taskType: string, progress: number) {
-    const queue = this.processingQueue();
-
-    // Find the queue item
-    let itemIndex = queue.findIndex(q => q.jobId === jobId);
-    if (itemIndex === -1) {
-      itemIndex = queue.findIndex(q => q.backendJobId === jobId);
-    }
-    if (itemIndex === -1) {
-      try {
-        const mapping = localStorage.getItem('clipchimp-job-id-mapping');
-        if (mapping) {
-          const jobIdMap: Record<string, string> = JSON.parse(mapping);
-          const frontendJobId = jobIdMap[jobId];
-          if (frontendJobId) {
-            itemIndex = queue.findIndex(q => q.jobId === frontendJobId);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to load job ID mapping:', e);
-      }
-    }
-    if (itemIndex === -1) return;
-
-    const item = queue[itemIndex];
-
-    // Handle process-video task which updates both fix-aspect-ratio and normalize-audio
-    if (taskType === 'process-video') {
-      const updatedTasks = [...item.tasks];
-      const aspectIndex = updatedTasks.findIndex(t => t.type === 'fix-aspect-ratio');
-      const audioIndex = updatedTasks.findIndex(t => t.type === 'normalize-audio');
-
-      let anyUpdated = false;
-      if (aspectIndex !== -1 && updatedTasks[aspectIndex].status !== 'completed' && updatedTasks[aspectIndex].status !== 'failed') {
-        updatedTasks[aspectIndex] = { ...updatedTasks[aspectIndex], progress };
-        anyUpdated = true;
-      }
-      if (audioIndex !== -1 && updatedTasks[audioIndex].status !== 'completed' && updatedTasks[audioIndex].status !== 'failed') {
-        updatedTasks[audioIndex] = { ...updatedTasks[audioIndex], progress };
-        anyUpdated = true;
-      }
-
-      if (anyUpdated) {
-        const updatedItem: ProcessingQueueItem = {
-          ...item,
-          tasks: updatedTasks,
-          status: 'processing'
-        };
-        const newQueue = [...queue];
-        newQueue[itemIndex] = updatedItem;
-        this.processingQueue.set(newQueue);
-      }
-      return;
-    }
-
-    const mappedType = this.mapBackendTaskType(taskType);
-    const taskIndex = item.tasks.findIndex(t => t.type === mappedType);
-    if (taskIndex === -1) return;
-
-    const currentTask = item.tasks[taskIndex];
-
-    // Don't update if task is already completed or failed
-    if (currentTask.status === 'completed' || currentTask.status === 'failed') {
-      return;
-    }
-
-    // Only update progress, preserve current status
-    const updatedTask = {
-      ...currentTask,
-      progress
-    };
-    const updatedTasks = [...item.tasks];
-    updatedTasks[taskIndex] = updatedTask;
-
-    const updatedItem: ProcessingQueueItem = {
-      ...item,
-      tasks: updatedTasks
-    };
-
-    const newQueue = [...queue];
-    newQueue[itemIndex] = updatedItem;
-    this.processingQueue.set(newQueue);
+    // No-op: QueueService handles all queue state updates
+    console.log('[DEPRECATED] updateQueueTaskProgressOnly called - QueueService handles this');
   }
 
   // Track which backend sub-tasks have completed for combined frontend tasks
   private completedSubTasks = new Map<string, Set<string>>();
 
-  // Update queue task status from websocket events
+  // DEPRECATED: Queue task status updates are now handled by QueueService via WebSocket
   private updateQueueTaskStatus(jobId: string, taskType: string, status: 'pending' | 'running' | 'completed' | 'failed', progress: number, errorMessage?: string) {
-    const queue = this.processingQueue();
-
-    // First try to find by frontend jobId
-    let itemIndex = queue.findIndex(q => q.jobId === jobId);
-
-    // If not found, try to find by backendJobId
-    if (itemIndex === -1) {
-      itemIndex = queue.findIndex(q => q.backendJobId === jobId);
-    }
-
-    // If still not found, check localStorage mapping
-    if (itemIndex === -1) {
-      try {
-        const mapping = localStorage.getItem('clipchimp-job-id-mapping');
-        if (mapping) {
-          const jobIdMap: Record<string, string> = JSON.parse(mapping);
-          const frontendJobId = jobIdMap[jobId];
-          if (frontendJobId) {
-            itemIndex = queue.findIndex(q => q.jobId === frontendJobId);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to load job ID mapping:', e);
-      }
-    }
-
-    if (itemIndex === -1) {
-      console.log('Queue item not found for jobId:', jobId, '- available jobIds:', queue.map(q => q.jobId).join(', '));
-      return;
-    }
-
-    const item = queue[itemIndex];
-
-    // Map backend task type to frontend task type
-    const mappedType = this.mapBackendTaskType(taskType);
-    const taskIndex = item.tasks.findIndex(t => t.type === mappedType);
-    if (taskIndex === -1) {
-      console.log('Task not found for type:', taskType, 'mapped to:', mappedType,
-        '- available tasks:', item.tasks.map(t => t.type).join(', '));
-      return;
-    }
-
-    // Handle combined tasks (download-import combines download, import, get-info)
-    const combinedTaskKey = `${jobId}:${mappedType}`;
-    if (mappedType === 'download-import') {
-      // Track which sub-tasks have completed
-      if (status === 'completed') {
-        if (!this.completedSubTasks.has(combinedTaskKey)) {
-          this.completedSubTasks.set(combinedTaskKey, new Set());
-        }
-        this.completedSubTasks.get(combinedTaskKey)!.add(taskType);
-
-        // Only mark as completed when import is done (the final step)
-        if (taskType !== 'import') {
-          // download or get-info completed, but import hasn't yet - keep as running
-          status = 'running';
-          progress = taskType === 'download' ? 80 : 50; // Show progress
-        }
-      }
-    }
-
-    // Handle process-video task which combines fix-aspect-ratio and normalize-audio
-    if (taskType === 'process-video' && status === 'completed') {
-      // Mark both fix-aspect-ratio and normalize-audio as completed
-      const updatedTasks = [...item.tasks];
-      const aspectIndex = updatedTasks.findIndex(t => t.type === 'fix-aspect-ratio');
-      const audioIndex = updatedTasks.findIndex(t => t.type === 'normalize-audio');
-
-      if (aspectIndex !== -1) {
-        updatedTasks[aspectIndex] = { ...updatedTasks[aspectIndex], status: 'completed', progress: 100 };
-      }
-      if (audioIndex !== -1) {
-        updatedTasks[audioIndex] = { ...updatedTasks[audioIndex], status: 'completed', progress: 100 };
-      }
-
-      // Determine new item status
-      let newStatus = item.status;
-      if (updatedTasks.every(t => t.status === 'completed')) {
-        newStatus = 'completed';
-      } else if (updatedTasks.some(t => t.status === 'running')) {
-        newStatus = 'processing';
-      }
-
-      const updatedItem: ProcessingQueueItem = {
-        ...item,
-        tasks: updatedTasks,
-        status: newStatus
-      };
-
-      const newQueue = [...queue];
-      newQueue[itemIndex] = updatedItem;
-      console.log('Updating queue item (process-video completed):', updatedItem.title, 'status:', newStatus);
-      this.processingQueue.set(newQueue);
-      return;
-    }
-
-    // Create new task object to trigger change detection
-    const updatedTask = { ...item.tasks[taskIndex], status, progress, errorMessage: errorMessage || item.tasks[taskIndex].errorMessage };
-    const updatedTasks = [...item.tasks];
-    updatedTasks[taskIndex] = updatedTask;
-
-    // Determine new item status
-    let newStatus = item.status;
-    if (updatedTasks.every(t => t.status === 'completed')) {
-      newStatus = 'completed';
-    } else if (updatedTasks.some(t => t.status === 'failed')) {
-      newStatus = 'failed';
-    } else if (updatedTasks.some(t => t.status === 'running')) {
-      newStatus = 'processing';
-    }
-
-    // Create new item object
-    const updatedItem: ProcessingQueueItem = {
-      ...item,
-      tasks: updatedTasks,
-      status: newStatus
-    };
-
-    // Create new queue array
-    const newQueue = [...queue];
-    newQueue[itemIndex] = updatedItem;
-
-    console.log('Updating queue item:', updatedItem.title, 'task:', taskType, '→', mappedType, 'status:', status, 'progress:', progress, '%');
-
-    // Trigger update with new array
-    this.processingQueue.set(newQueue);
+    // No-op: QueueService handles all queue state updates via WebSocket events
+    console.log('[DEPRECATED] updateQueueTaskStatus called - QueueService handles this');
   }
 
   // Map backend task types to frontend types
@@ -1366,7 +1076,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   /**
    * Combine backend job tasks into frontend ProcessingTask format
    * Combines download + import + get-info into a single "Download" task
-   * Note: VideoProcessingService already combines these into a single 'download' task,
+   * Note: QueueService already combines these into a single 'download-import' task,
    * so we also need to check for that case
    */
   private combineJobTasks(tasks: any[]): ProcessingTask[] {
@@ -1393,7 +1103,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         status = 'completed';
         progress = 100;
       } else if (downloadTask?.status === 'completed' && !importTask) {
-        // VideoProcessingService combines download+import into single 'download' task
+        // QueueService combines download+import into single 'download-import' task
         // If it's completed and there's no separate import task, the whole download is done
         status = 'completed';
         progress = 100;
@@ -1433,6 +1143,37 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
 
     return result;
+  }
+
+  /**
+   * Convert QueueJob (from QueueService) to ProcessingQueueItem (for queue-tab)
+   */
+  private convertQueueJobToProcessingItem(job: QueueJob): ProcessingQueueItem {
+    return {
+      id: job.id,
+      url: job.url,
+      videoId: job.videoId,
+      title: job.title,
+      duration: job.duration,
+      thumbnail: job.thumbnail,
+      status: job.state === 'pending' ? 'pending' :
+              job.state === 'processing' ? 'processing' :
+              job.state === 'completed' ? 'completed' : 'failed',
+      tasks: job.tasks.map(task => ({
+        type: task.type,
+        options: task.options,
+        status: task.state === 'pending' ? 'pending' :
+                task.state === 'running' ? 'running' :
+                task.state === 'completed' ? 'completed' : 'failed',
+        progress: task.progress,
+        errorMessage: task.errorMessage,
+        eta: task.eta,
+        taskLabel: task.taskLabel
+      })),
+      jobId: job.id,
+      backendJobId: job.backendJobId,
+      titleResolved: job.titleResolved
+    };
   }
 
   // Store videoId in queue item when download/import completes
@@ -1501,192 +1242,39 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  // Handle URLs added from input
+  // Handle URLs added from input - uses QueueService as single source of truth
   onUrlsAdded(entries: UrlEntry[]) {
-    // Items should go to stagingQueue first, then move to processingQueue when user clicks "Start"
-    const staging = [...this.stagingQueue()];
-    const processing = [...this.processingQueue()];
+    let addedNew = false;
 
     for (const entry of entries) {
       if (entry.loading) {
-        // New URL - add to STAGING queue with default tasks
-        const id = `url-${++this.queueIdCounter}`;
-        const tasks = this.defaultTaskSettings.map(t => ({
-          type: t.type,
-          options: t.config || {},
-          status: 'pending' as const,
-          progress: 0
-        }));
+        // New URL - add via QueueService with default tasks
+        const tasks: QueueTask[] = this.defaultTaskSettings.map(t =>
+          createQueueTask(t.type, t.config || {})
+        );
 
-        staging.push({
-          id,
+        this.queueService.addJob({
           url: entry.url,
           title: entry.title,
-          status: 'pending',
-          tasks,
-          titleResolved: false // Title is still being fetched
+          titleResolved: false, // Title is still being fetched
+          tasks
         });
+        addedNew = true;
       } else {
-        // Metadata update - find and update existing item in EITHER queue
-        let itemIndex = staging.findIndex(q => q.url === entry.url);
-        if (itemIndex !== -1) {
-          const item = staging[itemIndex];
-          // Update all metadata fields
-          staging[itemIndex] = {
-            ...item,
-            title: entry.title,
-            duration: entry.duration || item.duration,
-            thumbnail: entry.thumbnail || item.thumbnail,
-            titleResolved: true // Title has been fetched
-          };
-        } else {
-          // Also check processing queue (item might have been moved there already)
-          itemIndex = processing.findIndex(q => q.url === entry.url);
-          if (itemIndex !== -1) {
-            const item = processing[itemIndex];
-            // Update all metadata fields
-            processing[itemIndex] = {
-              ...item,
-              title: entry.title,
-              duration: entry.duration || item.duration,
-              thumbnail: entry.thumbnail || item.thumbnail,
-              titleResolved: true // Title has been fetched
-            };
-
-            // If download already completed (videoId exists), rename the file
-            if (item.videoId && entry.title !== item.title) {
-              console.log('Title updated after download - renaming file:', item.videoId, 'to:', entry.title);
-              this.renameDownloadedVideo(item.videoId, entry.title);
-            }
-          }
-        }
+        // Metadata update - update via QueueService
+        this.queueService.updateJobByUrl(entry.url, {
+          title: entry.title,
+          duration: entry.duration,
+          thumbnail: entry.thumbnail,
+          titleResolved: true
+        });
       }
     }
-
-    this.stagingQueue.set(staging);
-    this.processingQueue.set(processing);
 
     // Switch to Queue tab to show newly added items
-    if (entries.some(e => e.loading)) {
+    if (addedNew) {
       this.setActiveTab('queue');
     }
-  }
-
-  // Remove item from queue
-  removeFromQueue(id: string) {
-    const queue = this.processingQueue().filter(q => q.id !== id);
-    this.processingQueue.set(queue);
-  }
-
-  // Start processing the queue
-  startProcessing() {
-    const queue = this.processingQueue();
-    const pendingItems = queue.filter(q => q.status === 'pending');
-
-    if (pendingItems.length === 0) return;
-
-    console.log('Starting processing for', pendingItems.length, 'items');
-
-    // Create new queue with updated items
-    const newQueue = queue.map(item => {
-      if (item.status !== 'pending') return item;
-
-      const settings: VideoJobSettings = this.convertTasksToSettings(item.tasks);
-      let jobId: string | undefined;
-
-      if (item.url) {
-        // URL download job
-        const job = this.videoProcessingService.addJob(item.url, item.title, settings);
-        jobId = job.id;
-        console.log('Added URL job:', item.title, 'jobId:', jobId);
-      } else if (item.videoId) {
-        // Library video job
-        const job = this.videoProcessingService.addJob('', item.title, settings, item.videoId);
-        jobId = job.id;
-        console.log('Added library job:', item.title, 'jobId:', jobId);
-      }
-
-      // Return new item object with updated status
-      return {
-        ...item,
-        jobId,
-        status: 'processing' as const
-      };
-    });
-
-    this.processingQueue.set(newQueue);
-
-    // Start processing and capture backend job IDs
-    this.videoProcessingService.processQueue().subscribe({
-      next: (frontendToBackend) => {
-        if (frontendToBackend.size > 0) {
-          // Update queue items with backend job IDs
-          const updatedQueue = this.processingQueue().map(item => {
-            if (item.jobId && frontendToBackend.has(item.jobId)) {
-              return {
-                ...item,
-                backendJobId: frontendToBackend.get(item.jobId)
-              };
-            }
-            return item;
-          });
-          this.processingQueue.set(updatedQueue);
-          console.log('Updated queue items with backend job IDs');
-        }
-      },
-      error: (error) => {
-        console.error('Failed to start processing:', error);
-      }
-    });
-
-    console.log('Queue processing started');
-  }
-
-  // Convert frontend tasks to backend settings
-  private convertTasksToSettings(tasks: ProcessingTask[]): VideoJobSettings {
-    const settings: VideoJobSettings = {
-      fixAspectRatio: false,
-      normalizeAudio: false,
-      transcribe: false,
-      whisperModel: 'base',
-      aiAnalysis: false,
-      outputFormat: 'mp4',
-      outputQuality: 'high'
-    };
-
-    for (const task of tasks) {
-      switch (task.type) {
-        case 'fix-aspect-ratio':
-          settings.fixAspectRatio = true;
-          break;
-        case 'normalize-audio':
-          settings.normalizeAudio = true;
-          if (task.options?.targetLevel) {
-            settings.audioLevel = task.options.targetLevel;
-          }
-          break;
-        case 'transcribe':
-          settings.transcribe = true;
-          if (task.options?.model) {
-            settings.whisperModel = task.options.model;
-          }
-          break;
-        case 'ai-analyze':
-          settings.aiAnalysis = true;
-          if (task.options?.aiModel) {
-            settings.aiModel = task.options.aiModel;
-          }
-          if (task.options?.customInstructions) {
-            settings.customInstructions = task.options.customInstructions;
-          }
-          if (task.options?.analysisQuality) {
-            settings.analysisQuality = task.options.analysisQuality;
-          }
-          break;
-      }
-    }
-
-    return settings;
   }
 
   // Open config modal for selected items
@@ -1723,36 +1311,27 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.pendingConfigVideos.set([]);
   }
 
-  // Handle config save
+  // Handle config save - uses QueueService as single source of truth
   onConfigSave(tasks: QueueItemTask[]) {
     const pendingVideos = this.pendingConfigVideos();
     const itemIds = this.configItemIds();
 
     if (pendingVideos.length > 0) {
-      // Adding new videos from analyzeVideos - add to STAGING queue
-      const staging = [...this.stagingQueue()];
-
+      // Adding new videos from analyzeVideos - add via QueueService
       for (const video of pendingVideos) {
-        const id = `lib-${++this.queueIdCounter}`;
+        const queueTasks: QueueTask[] = tasks.map(t =>
+          createQueueTask(t.type, t.config || {})
+        );
 
-        staging.push({
-          id,
+        this.queueService.addJob({
           videoId: video.id,
           title: video.name,
           duration: video.duration,
           thumbnail: video.thumbnailUrl,
-          status: 'pending',
-          tasks: tasks.map(t => ({
-            type: t.type,
-            options: t.config || {},
-            status: 'pending' as const,
-            progress: 0
-          })),
+          tasks: queueTasks,
           titleResolved: true // Library videos already have resolved titles
         });
       }
-
-      this.stagingQueue.set(staging);
 
       // Clear pending videos
       this.pendingConfigVideos.set([]);
@@ -1760,23 +1339,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // Switch to Queue tab to show staging items
       this.setActiveTab('queue');
     } else {
-      // Updating existing staging items - create new objects to ensure change detection
-      const staging = this.stagingQueue().map(item => {
-        if (itemIds.includes(item.id)) {
-          // Create new item object with updated tasks
-          return {
-            ...item,
-            tasks: tasks.map(t => ({
-              type: t.type,
-              options: t.config || {},
-              status: 'pending' as const,
-              progress: 0
-            }))
-          };
-        }
-        return item;
+      // Updating existing jobs - update via QueueService
+      itemIds.forEach(itemId => {
+        const queueTasks: QueueTask[] = tasks.map(t =>
+          createQueueTask(t.type, t.config || {})
+        );
+        this.queueService.updateJobTasks(itemId, queueTasks);
       });
-      this.stagingQueue.set(staging);
     }
 
     // Save as defaults
@@ -2208,42 +1777,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onVideoAction(event: { action: string; videos: VideoItem[] }) {
     const { action, videos } = event;
 
-    // Check if these are queue items
-    const queueVideos = videos.filter(v => v.id.startsWith('queue-'));
-    const libraryVideos = videos.filter(v => !v.id.startsWith('queue-'));
-
-    // Handle queue items differently
-    if (queueVideos.length > 0) {
-      switch (action) {
-        case 'processing':
-        case 'analyze':
-          // Open config modal for queue items
-          const queueIds = queueVideos.map(v => v.id);
-          this.openConfigModal(queueIds);
-          return;
-
-        case 'delete':
-        case 'removeFromQueue':
-          // Remove from queue
-          queueVideos.forEach(v => {
-            const queueTag = v.tags?.find(t => t.startsWith('queue:'));
-            if (queueTag) {
-              const queueId = queueTag.replace('queue:', '');
-              this.removeFromQueue(queueId);
-            }
-          });
-          // If there are also library videos, continue to delete them
-          if (libraryVideos.length === 0) return;
-          break;
-
-        default:
-          // For other actions on queue items, just return (not supported)
-          if (libraryVideos.length === 0) return;
-      }
-    }
-
-    // Handle library items
-    const videosToProcess = libraryVideos.length > 0 ? libraryVideos : videos;
+    // Note: Queue items are now handled by queue-tab.component.ts directly
+    // This method only handles library items
+    const videosToProcess = videos;
 
     switch (action) {
       case 'viewDetails':
@@ -2568,38 +2104,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     if (uniqueVideoIds.size === 0) return;
 
-    // Add to staging queue with default tasks
-    const staging = [...this.stagingQueue()];
-
+    // Add jobs to QueueService (single source of truth)
     uniqueVideoIds.forEach(videoId => {
       const video = allVideos.find(v => v.id === videoId);
       if (video) {
-        const id = `lib-${++this.queueIdCounter}`;
-        const tasks = this.defaultTaskSettings
+        const tasks: QueueTask[] = this.defaultTaskSettings
           .filter(t => t.type !== 'download-import') // Library items don't need download
-          .map(t => ({
-            type: t.type,
-            options: t.config || {},
-            status: 'pending' as const,
-            progress: 0
-          }));
+          .map(t => createQueueTask(t.type, t.config || {}));
 
-        staging.push({
-          id,
-          videoId: video.id,
+        this.queueService.addJob({
           title: video.name,
+          videoId: video.id,
           duration: video.duration,
           thumbnail: video.thumbnailUrl,
-          status: 'pending',
           tasks,
           titleResolved: true // Library videos already have resolved titles
         });
       }
     });
 
-    console.log('[ADD TO QUEUE] New staging queue:', staging);
-    this.stagingQueue.set(staging);
-    console.log('[ADD TO QUEUE] Staging queue after set:', this.stagingQueue());
+    console.log('[ADD TO QUEUE] Jobs added to QueueService');
 
     // Switch to Queue tab using the proper method
     console.log('[ADD TO QUEUE] Current tab before switch:', this.activeTab());
@@ -2827,33 +2351,28 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   /**
    * Handle download dialog submission - add to staging instantly, then fetch video info asynchronously
+   * Now uses QueueService as single source of truth
    */
   async onDownloadSubmit(items: { url: string; name: string; settings: VideoJobSettings }[]) {
     this.downloadDialogOpen.set(false);
 
-    const staging = [...this.stagingQueue()];
-    const queueIds: string[] = [];
+    const addedJobs: QueueJob[] = [];
 
-    // Add all items to staging IMMEDIATELY with placeholder titles
+    // Add all items to QueueService IMMEDIATELY with placeholder titles
     for (const item of items) {
-      const queueId = `staging-${++this.queueIdCounter}`;
-      queueIds.push(queueId);
+      // Convert settings to QueueTask array
+      const tasks = this.convertSettingsToQueueTasks(item.settings);
 
-      // Convert settings to tasks
-      const tasks = this.convertSettingsToTasks(item.settings);
-
-      // Add to staging queue with placeholder (title will be resolved asynchronously)
-      staging.push({
-        id: queueId,
+      // Add job to QueueService
+      const job = this.queueService.addJob({
         url: item.url,
         title: item.name || 'Building title...',
-        status: 'loading',
-        tasks,
-        titleResolved: false
+        titleResolved: false,
+        tasks
       });
-    }
 
-    this.stagingQueue.set(staging);
+      addedJobs.push(job);
+    }
 
     // Show notification and switch to queue tab IMMEDIATELY
     this.notificationService.success(
@@ -2865,144 +2384,81 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.setActiveTab('queue');
 
     // Now fetch video info asynchronously in the background for each item
-    let successCount = 0;
-    let failCount = 0;
-
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const queueId = queueIds[i];
+      const job = addedJobs[i];
 
-      console.log(`[FETCH INFO] Starting fetch for ${queueId}: ${item.url}`);
+      console.log(`[FETCH INFO] Starting fetch for job ${job.id}: ${item.url}`);
 
       // Fetch in background (don't await - let them all run in parallel)
       this.http.get<any>(`http://localhost:3000/api/downloader/info?url=${encodeURIComponent(item.url)}`)
         .subscribe({
           next: (response) => {
-            console.log(`[FETCH INFO] Response for ${queueId}:`, response);
+            console.log(`[FETCH INFO] Response for job ${job.id}:`, response);
 
             if (response && response.title) {
-              // Update the staging item with real title
-              const currentStaging = this.stagingQueue();
-              const itemIndex = currentStaging.findIndex(s => s.id === queueId);
+              // Update job via QueueService
+              this.queueService.updateJobByUrl(item.url, {
+                title: response.title,
+                duration: this.formatDurationFromSeconds(response.duration),
+                thumbnail: response.thumbnail,
+                titleResolved: true
+              });
 
-              console.log(`[TITLE UPDATE] Current staging:`, currentStaging);
-              console.log(`[TITLE UPDATE] Found item at index ${itemIndex} for queueId ${queueId}`);
-
-              if (itemIndex !== -1) {
-                const updatedItem = {
-                  ...currentStaging[itemIndex],
-                  title: response.title, // Always use fetched title from API
-                  duration: this.formatDurationFromSeconds(response.duration),
-                  thumbnail: response.thumbnail,
-                  status: 'pending' as const,
-                  titleResolved: true
-                };
-
-                console.log(`[TITLE UPDATE] Updated item:`, updatedItem);
-
-                const updatedStaging = [...currentStaging];
-                updatedStaging[itemIndex] = updatedItem;
-                this.stagingQueue.set(updatedStaging);
-
-                console.log(`[TITLE UPDATE] Staging queue after update:`, this.stagingQueue());
-
-                successCount++;
-                console.log(`[TITLE RESOLVED] ${queueId}: ${updatedItem.title}`);
-              } else {
-                console.error(`[TITLE UPDATE] Could not find item with queueId ${queueId} in staging`);
-              }
+              console.log(`[TITLE RESOLVED] job ${job.id}: ${response.title}`);
             } else {
               console.error('[FETCH INFO] No title in response for:', item.url, response);
-              this.updateStagingItemWithError(queueId, 'Failed to fetch video info');
-              failCount++;
+              this.queueService.updateJobByUrl(item.url, {
+                title: 'Failed to load',
+                titleResolved: false
+              });
             }
           },
           error: (error) => {
             console.error('[FETCH INFO] Failed to fetch video info for:', item.url, error);
-            this.updateStagingItemWithError(queueId, 'Failed to fetch video info');
-            failCount++;
+            this.queueService.updateJobByUrl(item.url, {
+              title: 'Failed to load',
+              titleResolved: false
+            });
           }
         });
     }
   }
 
   /**
-   * Update a staging item to show an error state
+   * Convert VideoJobSettings to QueueTask array for URL downloads
    */
-  private updateStagingItemWithError(queueId: string, _errorMessage: string) {
-    const currentStaging = this.stagingQueue();
-    const itemIndex = currentStaging.findIndex(s => s.id === queueId);
+  private convertSettingsToQueueTasks(settings: VideoJobSettings): QueueTask[] {
+    const tasks: QueueTask[] = [];
 
-    if (itemIndex !== -1) {
-      const updatedItem = {
-        ...currentStaging[itemIndex],
-        title: currentStaging[itemIndex].title === 'Building title...'
-          ? 'Failed to load'
-          : currentStaging[itemIndex].title,
-        status: 'failed' as const,
-        titleResolved: false
-      };
+    // Always add download-import task first for URL downloads
+    tasks.push(createQueueTask('download-import', {}));
 
-      const updatedStaging = [...currentStaging];
-      updatedStaging[itemIndex] = updatedItem;
-      this.stagingQueue.set(updatedStaging);
-    }
-  }
-
-  /**
-   * Convert VideoJobSettings to ProcessingTask array
-   */
-  private convertSettingsToTasks(settings: VideoJobSettings): ProcessingTask[] {
-    const tasks: ProcessingTask[] = [];
-
-    // Always add download task first
-    tasks.push({
-      type: 'download-import',
-      options: {},
-      status: 'pending',
-      progress: 0
-    });
-
-    // Add fix aspect ratio task
     if (settings.fixAspectRatio) {
-      tasks.push({
-        type: 'fix-aspect-ratio',
-        options: { aspectRatio: settings.aspectRatio || '16:9' },
-        status: 'pending',
-        progress: 0
-      });
+      tasks.push(createQueueTask('fix-aspect-ratio', {
+        targetRatio: settings.aspectRatio || '16:9'
+      }));
     }
 
-    // Add normalize audio task
     if (settings.normalizeAudio) {
-      tasks.push({
-        type: 'normalize-audio',
-        options: { targetLevel: settings.audioLevel || -16 },
-        status: 'pending',
-        progress: 0
-      });
+      tasks.push(createQueueTask('normalize-audio', {
+        targetLevel: settings.audioLevel || -16
+      }));
     }
 
     if (settings.transcribe) {
-      tasks.push({
-        type: 'transcribe',
-        options: {},
-        status: 'pending',
-        progress: 0
-      });
+      tasks.push(createQueueTask('transcribe', {
+        model: settings.whisperModel || 'base',
+        language: settings.whisperLanguage
+      }));
     }
 
     if (settings.aiAnalysis) {
-      tasks.push({
-        type: 'ai-analyze',
-        options: {
-          aiModel: settings.aiModel,  // Use correct key name, no fallback
-          customInstructions: settings.customInstructions,
-          analysisQuality: settings.analysisQuality
-        },
-        status: 'pending',
-        progress: 0
-      });
+      tasks.push(createQueueTask('ai-analyze', {
+        aiModel: settings.aiModel,
+        customInstructions: settings.customInstructions,
+        analysisQuality: settings.analysisQuality
+      }));
     }
 
     return tasks;
@@ -3160,8 +2616,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
       // Check one final time
       const finalStaging = this.stagingQueue();
-      const finalItemsToProcess = finalStaging.filter(item => itemIds.includes(item.id));
-      const finalUnresolved = finalItemsToProcess.filter(item => !item.titleResolved);
+      const finalUnresolved = finalStaging
+        .filter(item => itemIds.includes(item.id))
+        .filter(item => !item.titleResolved);
 
       if (finalUnresolved.length > 0) {
         this.notificationService.error(
@@ -3170,99 +2627,29 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         );
         return;
       }
-
-      // Update itemsToProcess with the latest data
-      const processing = [...this.processingQueue()];
-
-      // Add jobs to video processing service and collect job IDs
-      for (const item of finalItemsToProcess) {
-        if (item.url) {
-          // URL-based item
-          const settings = this.convertTasksToSettings(item.tasks);
-          this.videoProcessingService.addJob(item.url, item.title, settings);
-        } else if (item.videoId) {
-          // Library video item
-          const settings = this.convertTasksToSettings(item.tasks);
-          this.videoProcessingService.addJob('', item.title, settings, item.videoId);
-        }
-
-        // Add to processing queue
-        processing.push({
-          ...item,
-          status: 'processing'
-        });
-      }
-
-      // Send all queued jobs to backend
-      this.videoProcessingService.processQueue().subscribe({
-        next: () => {
-          console.log('Processing started for', finalItemsToProcess.length, 'items');
-        },
-        error: (error) => {
-          console.error('Failed to start processing:', error);
-          this.notificationService.error(
-            'Processing Failed',
-            'Failed to start processing. Please try again.'
-          );
-        }
-      });
-
-      // Remove from staging
-      const remainingStaging = finalStaging.filter(item => !itemIds.includes(item.id));
-      this.stagingQueue.set(remainingStaging);
-      this.processingQueue.set(processing);
-
-      this.notificationService.success(
-        'Processing Started',
-        `Started processing ${finalItemsToProcess.length} ${finalItemsToProcess.length === 1 ? 'item' : 'items'}`
-      );
-    } else {
-      // All titles already resolved, proceed immediately
-      const processing = [...this.processingQueue()];
-
-      // Add jobs to video processing service and collect job IDs
-      for (const item of itemsToProcess) {
-        if (item.url) {
-          // URL-based item
-          const settings = this.convertTasksToSettings(item.tasks);
-          this.videoProcessingService.addJob(item.url, item.title, settings);
-        } else if (item.videoId) {
-          // Library video item
-          const settings = this.convertTasksToSettings(item.tasks);
-          this.videoProcessingService.addJob('', item.title, settings, item.videoId);
-        }
-
-        // Add to processing queue
-        processing.push({
-          ...item,
-          status: 'processing'
-        });
-      }
-
-      // Send all queued jobs to backend
-      this.videoProcessingService.processQueue().subscribe({
-        next: () => {
-          console.log('Processing started for', itemsToProcess.length, 'items');
-        },
-        error: (error) => {
-          console.error('Failed to start processing:', error);
-          this.notificationService.error(
-            'Processing Failed',
-            'Failed to start processing. Please try again.'
-          );
-        }
-      });
-
-      // Remove from staging
-      const remainingStaging = staging.filter(item => !itemIds.includes(item.id));
-      this.stagingQueue.set(remainingStaging);
-      this.processingQueue.set(processing);
-
-      this.notificationService.success(
-        'Processing Started',
-        `Started processing ${itemsToProcess.length} ${itemsToProcess.length === 1 ? 'item' : 'items'}`
-      );
     }
+
+    // Submit pending jobs to backend via QueueService
+    // QueueService handles state transitions and WebSocket updates
+    this.queueService.submitPendingJobs().subscribe({
+      next: (jobIdMap) => {
+        const count = jobIdMap.size;
+        console.log('[ProcessStagingItems] Processing started for', count, 'items');
+        if (count > 0) {
+          this.notificationService.success(
+            'Processing Started',
+            `Started processing ${count} ${count === 1 ? 'item' : 'items'}`
+          );
+        }
+      },
+      error: (error) => {
+        console.error('[ProcessStagingItems] Failed to start processing:', error);
+        this.notificationService.error(
+          'Processing Failed',
+          error.message || 'Failed to start processing. Please try again.'
+        );
+      }
+    });
   }
 
   /**
@@ -3298,9 +2685,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Remove selected staging items
    */
   onQueueRemoveSelected(itemIds: string[]) {
-    const staging = this.stagingQueue();
-    const remaining = staging.filter(item => !itemIds.includes(item.id));
-    this.stagingQueue.set(remaining);
+    // Remove each item via QueueService
+    itemIds.forEach(id => this.queueService.removeJob(id));
 
     this.notificationService.success(
       'Items Removed',
@@ -3431,7 +2817,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Clear all items from the completed queue
    */
   onClearCompleted() {
-    this.completedQueue.set([]);
+    this.queueService.clearCompleted();
   }
 
   // ========================================

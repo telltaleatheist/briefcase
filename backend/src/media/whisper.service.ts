@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import { WhisperManager } from './whisper-manager';
 import {
   FfmpegBridge,
+  FfprobeBridge,
   getRuntimePaths,
   verifyBinary,
 } from '../bridges';
@@ -14,6 +15,7 @@ import {
 export class WhisperService {
   private readonly logger = new Logger(WhisperService.name);
   private ffmpeg: FfmpegBridge;
+  private ffprobe: FfprobeBridge;
 
   constructor(
     private readonly eventService: MediaEventService,
@@ -21,9 +23,12 @@ export class WhisperService {
     // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
     const paths = getRuntimePaths();
     const ffmpegPath = paths.ffmpeg;
+    const ffprobePath = paths.ffprobe;
 
     verifyBinary(ffmpegPath, 'FFmpeg');
+    verifyBinary(ffprobePath, 'FFprobe');
     this.ffmpeg = new FfmpegBridge(ffmpegPath);
+    this.ffprobe = new FfprobeBridge(ffprobePath);
     this.logger.log(`WhisperService initialized with FFmpeg: ${ffmpegPath}`);
   }
 
@@ -59,32 +64,58 @@ export class WhisperService {
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 5, 'Extracting audio...');
       audioFile = await this.extractAudio(videoFile, outputDir, jobId || 'standalone');
       this.logger.log(`Audio extracted to: ${audioFile}`);
+
+      // Get audio duration for progress estimation
+      let audioDurationSeconds: number | undefined;
+      try {
+        audioDurationSeconds = await this.ffprobe.getDuration(audioFile);
+        this.logger.log(`Audio duration: ${audioDurationSeconds} seconds`);
+      } catch (err) {
+        this.logger.warn(`Could not determine audio duration: ${err}`);
+      }
+
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 15, 'Starting transcription...');
 
       const whisperManager = new WhisperManager();
 
+      // Track start time for ETA calculation
+      const transcriptionStartTime = Date.now();
+
       // Set up progress tracking
       whisperManager.on('progress', (progress) => {
         this.logger.log(`Transcription progress: ${progress.percent}% - ${progress.task}`);
+
+        // Calculate ETA based on elapsed time and progress
+        const elapsedMs = Date.now() - transcriptionStartTime;
+        let eta: number | undefined;
+        if (progress.percent > 0 && progress.percent < 100) {
+          // ETA = elapsed * ((100 - progress) / progress)
+          eta = Math.round((elapsedMs * ((100 - progress.percent) / progress.percent)) / 1000);
+        }
+
         // Emit old event for backward compatibility
         this.eventService.emitTranscriptionProgress(
           progress.percent,
           progress.task,
           jobId
         );
-        // Emit new task-progress event for queue system
+        // Emit new task-progress event for queue system with ETA
         if (jobId) {
-          this.eventService.emitTaskProgress(jobId, 'transcribe', progress.percent, progress.task);
+          this.eventService.emitTaskProgress(jobId, 'transcribe', progress.percent, progress.task, {
+            eta,
+            elapsedMs,
+          });
         }
 
-        console.log(`Progress event: ${JSON.stringify(progress)}`);
+        console.log(`Progress event: ${JSON.stringify(progress)}, ETA: ${eta}s`);
       });
 
       this.logger.log(`Starting transcription for ${audioFile}`);
       this.eventService.emitTranscriptionStarted(videoFile, jobId);
 
       // Start transcription on the extracted audio file
-      const srtFile = await whisperManager.transcribe(audioFile, outputDir, model);
+      // Pass audio duration for time-based progress estimation
+      const srtFile = await whisperManager.transcribe(audioFile, outputDir, model, audioDurationSeconds);
 
       if (srtFile && fs.existsSync(srtFile)) {
         this.logger.log(`Transcription completed: ${srtFile}`);

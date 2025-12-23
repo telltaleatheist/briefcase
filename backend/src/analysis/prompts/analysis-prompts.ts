@@ -377,9 +377,8 @@ Rules:
 - Format: "[speaker name] - [key quote or action]" or "[speaker] on [topic] - [notable statement]"
 - Lead with the main speaker's name if identifiable
 - Include the most notable/quotable phrase in the title
-- Add source/show name at end in parentheses if known
 - Be specific about what was SAID, not just the topic
-- No dates, extensions, special chars
+- No dates, extensions, special chars, or parentheses
 
 Good examples:
 - "mario murillo - voting democrat is devilish and spitting on apostles graves"

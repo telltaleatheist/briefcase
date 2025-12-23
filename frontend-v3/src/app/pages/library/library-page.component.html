@@ -158,11 +158,9 @@
       }
 
       <!-- Queue Tab: Staging, Processing, and Completed queues -->
+      <!-- Queue data now comes directly from QueueService -->
       <app-queue-tab
         *ngIf="activeTab() === 'queue'"
-        [stagingQueue]="stagingQueue()"
-        [processingQueue]="processingQueue()"
-        [completedQueue]="completedQueue()"
         [progressMapper]="queueProgressMapper"
         [childrenConfig]="processingChildrenConfig"
         [aiProcessingVideoId]="aiProcessingQueueItemId()"

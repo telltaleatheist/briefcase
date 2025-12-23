@@ -196,6 +196,9 @@ export class FfmpegService {
 
       this.logger.log(`FFmpeg re-encoding command: ${this.ffmpeg.path} ${args.join(' ')}`);
 
+      // Track start time for ETA calculation
+      const processingStartTime = Date.now();
+
       // Set up progress listener
       const progressHandler = (progress: FfmpegProgress) => {
         if (progress.processId !== processId) return;
@@ -207,8 +210,19 @@ export class FfmpegService {
         if (boundedPercent > lastProgress) {
           this.lastReportedProgress.set(progressKey, boundedPercent);
           const message = `Re-encoding video ${progress.speed ? `(Speed: ${progress.speed}x)` : ''}`;
+
+          // Calculate ETA based on elapsed time and progress
+          const elapsedMs = Date.now() - processingStartTime;
+          let eta: number | undefined;
+          if (progress.percent > 0 && progress.percent < 100) {
+            eta = Math.round((elapsedMs * ((100 - progress.percent) / progress.percent)) / 1000);
+          }
+
           if (taskType && jobId) {
-            this.eventService.emitTaskProgress(jobId, taskType, boundedPercent, message);
+            this.eventService.emitTaskProgress(jobId, taskType, boundedPercent, message, {
+              eta,
+              elapsedMs,
+            });
           }
         }
       };
@@ -682,13 +696,27 @@ export class FfmpegService {
 
       this.logger.log(`Audio normalization: ${this.ffmpeg.path} ${args.join(' ')}`);
 
+      // Track start time for ETA calculation
+      const normalizationStartTime = Date.now();
+
       // Set up progress listener
       const progressHandler = (progress: FfmpegProgress) => {
         if (progress.processId !== processId) return;
         // Reserve 5-85% for FFmpeg processing, 85-100% for verification and copy-back
         const boundedPercent = Math.max(5, Math.min(Math.round(progress.percent * 0.8) + 5, 85));
+
+        // Calculate ETA based on elapsed time and progress
+        const elapsedMs = Date.now() - normalizationStartTime;
+        let eta: number | undefined;
+        if (progress.percent > 0 && progress.percent < 100) {
+          eta = Math.round((elapsedMs * ((100 - progress.percent) / progress.percent)) / 1000);
+        }
+
         if (jobId) {
-          this.eventService.emitTaskProgress(jobId, 'normalize-audio', boundedPercent, `Normalizing audio: ${progress.percent}%`);
+          this.eventService.emitTaskProgress(jobId, 'normalize-audio', boundedPercent, `Normalizing audio: ${progress.percent}%`, {
+            eta,
+            elapsedMs,
+          });
         }
       };
 

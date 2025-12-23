@@ -717,6 +717,31 @@ cdk-virtual-scroll-viewport.library-content {
   margin: 0;
 }
 
+// Progress Label (above progress bar)
+.progress-label {
+  position: absolute;
+  bottom: 5px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 0 8px;
+  pointer-events: none;
+
+  .task-name {
+    font-weight: 500;
+    opacity: 0.9;
+  }
+
+  .eta {
+    opacity: 0.7;
+    font-style: italic;
+  }
+}
+
 // Progress Bar
 .item-progress-bar {
   position: absolute;

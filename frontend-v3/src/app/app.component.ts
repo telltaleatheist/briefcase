@@ -4,7 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import { NavigationComponent } from './core/navigation/navigation.component';
 import { ThemeService } from './services/theme.service';
 import { NavigationService } from './services/navigation.service';
-import { VideoProcessingService } from './services/video-processing.service';
+import { QueueService } from './services/queue.service';
 import { LibraryService } from './services/library.service';
 import { OnboardingComponent } from './components/onboarding/onboarding.component';
 
@@ -56,8 +56,8 @@ export class AppComponent implements OnInit {
   themeService = inject(ThemeService);
   navService = inject(NavigationService);
   private libraryService = inject(LibraryService);
-  // Inject VideoProcessingService to ensure it initializes eagerly and restores queue
-  private videoProcessingService = inject(VideoProcessingService);
+  // Inject QueueService to ensure it initializes eagerly and restores queue
+  private queueService = inject(QueueService);
 
   // Onboarding state
   showOnboarding = signal(false);

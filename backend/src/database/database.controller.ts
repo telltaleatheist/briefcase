@@ -3370,14 +3370,20 @@ export class DatabaseController {
             // Determine media type
             const mediaType = this.getMediaTypeFromExtension(fileExtension);
 
-            // Get duration for media files
-            let duration = null;
+            // Get metadata for media files
+            let duration: number | undefined;
+            let width: number | undefined;
+            let height: number | undefined;
+            let fps: number | undefined;
             if (mediaType === 'video' || mediaType === 'audio') {
               try {
                 const metadata = await this.ffmpegService.getVideoMetadata(filePath);
                 duration = metadata.duration;
+                width = metadata.width;
+                height = metadata.height;
+                fps = metadata.fps;
               } catch (e) {
-                this.logger.warn(`Could not get duration for ${filename}`);
+                this.logger.warn(`Could not get metadata for ${filename}`);
               }
             }
 
@@ -3391,11 +3397,14 @@ export class DatabaseController {
               filename,
               fileHash,
               currentPath: filePath,
-              durationSeconds: duration || undefined,
+              durationSeconds: duration,
               fileSizeBytes: stats.size,
               mediaType,
               fileExtension,
-              downloadDate: stats.birthtime.toISOString()
+              downloadDate: stats.birthtime.toISOString(),
+              width,
+              height,
+              fps,
             });
 
             video = this.databaseService.getVideoById(videoId);
@@ -3869,6 +3878,21 @@ export class DatabaseController {
           // NOT when the content was originally uploaded to the internet.
           // If filename has no date, uploadDate should remain undefined.
 
+          // Extract video metadata using ffprobe
+          let durationSeconds: number | undefined;
+          let width: number | undefined;
+          let height: number | undefined;
+          let fps: number | undefined;
+          try {
+            const metadata = await this.ffmpegService.getVideoMetadata(filePath);
+            durationSeconds = metadata.duration;
+            width = metadata.width;
+            height = metadata.height;
+            fps = metadata.fps;
+          } catch (metadataError: any) {
+            this.logger.warn(`Could not extract metadata for ${result.filename}: ${metadataError.message}`);
+          }
+
           this.databaseService.insertVideo({
             id: videoId,
             filename: result.filename,
@@ -3877,6 +3901,10 @@ export class DatabaseController {
             uploadDate: uploadDate,
             downloadDate: fileCreationDate.toISOString(),
             fileSizeBytes: stats.size,
+            durationSeconds,
+            width,
+            height,
+            fps,
           });
 
           this.logger.log(`Added new video: ${result.filename} (${videoId})`);

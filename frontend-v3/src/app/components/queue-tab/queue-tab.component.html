@@ -4,20 +4,28 @@
     <div class="toolbar-section">
       <h2 class="section-title">Processing Queue</h2>
       <p class="section-subtitle">
-        {{ stagingQueue.length }} pending · {{ processingQueue.length }} processing · {{ completedQueue.length }} completed
+        {{ pendingCount() }} pending · {{ processingCount() }} processing · {{ completedCount() }} completed
       </p>
     </div>
     <div class="toolbar-actions">
       <!-- Clear completed button (when completed items exist) -->
-      @if (completedQueue.length > 0) {
-        <button class="btn btn-secondary" (click)="clearCompleted.emit()">
+      @if (completedCount() > 0) {
+        <button class="btn btn-secondary" (click)="onClearCompleted()">
           <span class="btn-icon">🧹</span>
           <span>Clear Completed</span>
         </button>
       }
 
+      <!-- Stop processing button (when processing items exist) -->
+      @if (processingCount() > 0) {
+        <button class="btn btn-danger" (click)="onStopProcessing()">
+          <span class="btn-icon">⏹</span>
+          <span>Stop Processing</span>
+        </button>
+      }
+
       <!-- Show buttons when staging items exist -->
-      @if (stagingQueue.length > 0) {
+      @if (pendingCount() > 0) {
         <!-- Configure button (only when items selected) -->
         @if (selectedStagingIds().size > 0) {
           <button class="btn btn-secondary" (click)="onConfigureSelected()">
@@ -45,11 +53,17 @@
           </button>
         }
 
+        <!-- Clear All button (always show when pending items exist) -->
+        <button class="btn btn-secondary" (click)="onClearPending()">
+          <span class="btn-icon">🗑️</span>
+          <span>Clear All</span>
+        </button>
+
         <!-- Process All button (always show when staging items exist) -->
         <button class="btn btn-primary" (click)="onProcessAll()">
           <span class="btn-icon">▶▶</span>
           <span>Process All</span>
-          <span class="badge">{{ stagingQueue.length }}</span>
+          <span class="badge">{{ pendingCount() }}</span>
         </button>
       }
     </div>

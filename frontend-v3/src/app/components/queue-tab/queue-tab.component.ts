@@ -2,7 +2,8 @@ import { Component, Input, Output, EventEmitter, inject, signal, computed } from
 import { CommonModule } from '@angular/common';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem, ItemProgress, ChildrenConfig } from '../../models/video.model';
-import { ProcessingQueueItem } from '../../pages/library/library-page.component';
+import { QueueService } from '../../services/queue.service';
+import { QueueJob } from '../../models/queue-job.model';
 
 @Component({
   selector: 'app-queue-tab',
@@ -12,39 +13,10 @@ import { ProcessingQueueItem } from '../../pages/library/library-page.component'
   styleUrls: ['./queue-tab.component.scss']
 })
 export class QueueTabComponent {
-  constructor() {
-    console.log('[QueueTab] Component created');
-  }
+  private queueService = inject(QueueService);
 
-  // Use signals for reactive inputs
-  private _stagingQueue = signal<ProcessingQueueItem[]>([]);
-  private _processingQueue = signal<ProcessingQueueItem[]>([]);
-  private _completedQueue = signal<ProcessingQueueItem[]>([]);
-
-  @Input() set stagingQueue(value: ProcessingQueueItem[]) {
-    console.log('[QueueTab] Staging queue INPUT setter called with:', value?.length, 'items');
-    this._stagingQueue.set(value);
-  }
-  get stagingQueue(): ProcessingQueueItem[] {
-    return this._stagingQueue();
-  }
-
-  @Input() set processingQueue(value: ProcessingQueueItem[]) {
-    console.log('[QueueTab] Processing queue INPUT setter called with:', value?.length, 'items');
-    this._processingQueue.set(value);
-  }
-  get processingQueue(): ProcessingQueueItem[] {
-    return this._processingQueue();
-  }
-
-  @Input() set completedQueue(value: ProcessingQueueItem[]) {
-    console.log('[QueueTab] Completed queue INPUT setter called with:', value?.length, 'items');
-    this._completedQueue.set(value);
-  }
-  get completedQueue(): ProcessingQueueItem[] {
-    return this._completedQueue();
-  }
-
+  // Keep inputs for backward compatibility during migration
+  // These are now optional - if not provided, we use QueueService directly
   @Input() progressMapper?: (video: VideoItem) => ItemProgress | null;
   @Input() childrenConfig?: ChildrenConfig;
   @Input() aiProcessingVideoId?: string | null;
@@ -63,22 +35,31 @@ export class QueueTabComponent {
   selectedStagingIds = signal<Set<string>>(new Set());
   selectedProcessingIds = signal<Set<string>>(new Set());
 
+  // Computed counts for template
+  pendingCount = computed(() => this.queueService.pendingJobs().length);
+  processingCount = computed(() => this.queueService.processingJobs().length);
+  completedCount = computed(() => this.queueService.completedJobs().length);
+
   // Combine staging, processing, and completed queues into a single weeks array for cascade
+  // Now uses QueueService directly as source of truth
   allQueueWeeks = computed(() => {
     const weeks: VideoWeek[] = [];
 
-    // Add staging section if there are items
-    const stagingQueue = this._stagingQueue();
-    console.log('[QueueTab] Staging queue length:', stagingQueue.length);
-    if (stagingQueue.length > 0) {
-      const stagingVideos: VideoItem[] = stagingQueue.map(item => ({
-        id: `staging-${item.id}`,
-        name: item.title,
-        duration: item.duration,
-        thumbnailUrl: item.thumbnail,
-        sourceUrl: item.url,
-        tags: [`staging:${item.id}`],
-        titleLoading: item.titleResolved === false // Show spinner if title not yet resolved
+    // Add staging section (pending jobs)
+    const allJobs = this.queueService.allJobs();
+    const pendingJobs = this.queueService.pendingJobs();
+    console.log('[QueueTab] allQueueWeeks computed:');
+    console.log('  - All jobs:', allJobs.length, allJobs.map(j => ({ id: j.id, state: j.state, title: j.title })));
+    console.log('  - Pending jobs:', pendingJobs.length);
+    if (pendingJobs.length > 0) {
+      const stagingVideos: VideoItem[] = pendingJobs.map(job => ({
+        id: `staging-${job.id}`,
+        name: job.title,
+        duration: job.duration,
+        thumbnailUrl: job.thumbnail,
+        sourceUrl: job.url,
+        tags: [`staging:${job.id}`],
+        titleLoading: job.titleResolved === false
       }));
 
       weeks.push({
@@ -87,23 +68,21 @@ export class QueueTabComponent {
       });
     }
 
-    // Add processing section if there are items
-    const processingQueue = this._processingQueue();
-    console.log('[QueueTab] Processing queue length:', processingQueue.length);
-    if (processingQueue.length > 0) {
-      const processingVideos: VideoItem[] = processingQueue.map(item => {
-        // Get error message from any failed task
-        const failedTask = item.tasks?.find(t => t.status === 'failed' && t.errorMessage);
+    // Add processing section
+    const processingJobs = this.queueService.processingJobs();
+    if (processingJobs.length > 0) {
+      const processingVideos: VideoItem[] = processingJobs.map(job => {
+        const failedTask = job.tasks?.find(t => t.state === 'failed' && t.errorMessage);
         const errorMessage = failedTask?.errorMessage;
 
         return {
-          id: `processing-${item.id}`,
-          name: item.title,
-          duration: item.duration,
-          thumbnailUrl: item.thumbnail,
-          sourceUrl: item.url,
-          tags: [`processing:${item.id}`, `status:${item.status}`],
-          titleLoading: item.titleResolved === false, // Show spinner if title not yet resolved
+          id: `processing-${job.id}`,
+          name: job.title,
+          duration: job.duration,
+          thumbnailUrl: job.thumbnail,
+          sourceUrl: job.url,
+          tags: [`processing:${job.id}`, `status:${job.state}`],
+          titleLoading: job.titleResolved === false,
           errorMessage: errorMessage
         };
       });
@@ -114,24 +93,30 @@ export class QueueTabComponent {
       });
     }
 
-    // Add completed section if there are items
-    const completedQueue = this._completedQueue();
-    console.log('[QueueTab] Completed queue length:', completedQueue.length);
-    if (completedQueue.length > 0) {
-      const completedVideos: VideoItem[] = completedQueue.map(item => {
-        // Determine if any task failed
-        const hasFailed = item.tasks?.some(t => t.status === 'failed');
-        const failedTask = item.tasks?.find(t => t.status === 'failed' && t.errorMessage);
+    // Add completed section
+    const completedJobs = this.queueService.completedJobs();
+    if (completedJobs.length > 0) {
+      const completedVideos: VideoItem[] = completedJobs.map(job => {
+        const hasFailed = job.tasks?.some(t => t.state === 'failed');
+        const failedTask = job.tasks?.find(t => t.state === 'failed' && t.errorMessage);
         const errorMessage = failedTask?.errorMessage;
 
+        // Derive hasTranscript/hasAnalysis from completed tasks
+        const hasTranscript = job.tasks?.some(t => t.type === 'transcribe' && t.state === 'completed');
+        const hasAnalysis = job.tasks?.some(t => t.type === 'ai-analyze' && t.state === 'completed');
+
         return {
-          id: `completed-${item.id}`,
-          name: item.title,
-          duration: item.duration,
-          thumbnailUrl: item.thumbnail,
-          sourceUrl: item.url,
-          tags: [`completed:${item.id}`, hasFailed ? 'status:failed' : 'status:completed'],
-          errorMessage: errorMessage
+          id: `completed-${job.id}`,
+          name: job.title,
+          duration: job.duration,
+          thumbnailUrl: job.thumbnail,
+          sourceUrl: job.url,
+          tags: [`completed:${job.id}`, hasFailed ? 'status:failed' : 'status:completed'],
+          errorMessage: errorMessage,
+          hasTranscript,
+          hasAnalysis,
+          // Store actual video ID for navigation to video info page
+          videoId: job.videoId
         };
       });
 
@@ -141,9 +126,20 @@ export class QueueTabComponent {
       });
     }
 
-    console.log('[QueueTab] All queue weeks:', weeks);
-    console.log('[QueueTab] Total weeks count:', weeks.length);
     return weeks;
+  });
+
+  // Computed property for AI processing queue item ID
+  aiProcessingQueueItemId = computed(() => {
+    const processingJobs = this.queueService.processingJobs();
+    const processingItem = processingJobs.find(job => {
+      if (job.state !== 'processing') return false;
+      return job.tasks.some(task =>
+        (task.type === 'transcribe' || task.type === 'ai-analyze') &&
+        task.state === 'running'
+      );
+    });
+    return processingItem ? `processing-${processingItem.id}` : null;
   });
 
   onStagingSelectionChanged(event: { count: number; ids: Set<string> }) {
@@ -202,12 +198,21 @@ export class QueueTabComponent {
       case 'delete':
       case 'remove':
       case 'removeFromQueue':
-        // For staging items, remove them
+        // For staging items, remove them directly via QueueService
         const stagingIds = videos
           .filter((v: VideoItem) => v.id.startsWith('staging-'))
           .map((v: VideoItem) => v.id.replace('staging-', ''));
         if (stagingIds.length > 0) {
+          // Can remove directly via QueueService, or emit for parent to handle
           this.removeSelected.emit(stagingIds);
+        }
+
+        // For completed items, remove them from the queue
+        const completedIdsToRemove = videos
+          .filter((v: VideoItem) => v.id.startsWith('completed-'))
+          .map((v: VideoItem) => v.id.replace('completed-', ''));
+        for (const id of completedIdsToRemove) {
+          this.queueService.removeJob(id);
         }
         break;
     }
@@ -218,7 +223,6 @@ export class QueueTabComponent {
   }
 
   onProcessSelected() {
-    // Extract staging item IDs from selected IDs (format: "staging-{id}")
     const stagingIds = Array.from(this.selectedStagingIds()).map(id => {
       return id.replace(/^.*staging-/, '');
     });
@@ -237,5 +241,30 @@ export class QueueTabComponent {
       return id.replace(/^.*staging-/, '');
     });
     this.removeSelected.emit(stagingIds);
+  }
+
+  onClearCompleted() {
+    // Can clear directly via QueueService
+    this.queueService.clearCompleted();
+    this.clearCompleted.emit();
+  }
+
+  onClearPending() {
+    // Clear all pending jobs directly via QueueService
+    this.queueService.clearPending();
+    // Clear any selection
+    this.selectedStagingIds.set(new Set());
+  }
+
+  onStopProcessing() {
+    // Stop all processing and move jobs back to pending
+    this.queueService.stopProcessing().subscribe({
+      next: () => {
+        console.log('[QueueTab] Processing stopped');
+      },
+      error: (err) => {
+        console.error('[QueueTab] Failed to stop processing:', err);
+      }
+    });
   }
 }

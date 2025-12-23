@@ -808,6 +808,29 @@
           color: #6b7280;
         }
       }
+
+      &.cost-value {
+        color: #22c55e;
+        font-family: 'SF Mono', Monaco, monospace;
+      }
+    }
+  }
+
+  .config-stats {
+    margin-top: $spacing-md;
+    padding-top: $spacing-md;
+    border-top: 1px solid var(--border-color);
+
+    .stats-header {
+      margin-bottom: $spacing-sm;
+
+      .config-title {
+        font-size: $font-size-sm;
+      }
+    }
+
+    .stats-grid {
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     }
   }
 

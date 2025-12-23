@@ -722,6 +722,24 @@
     }
   }
 
+  .selection-duration {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--primary-orange);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'Monaco', monospace;
+    font-weight: 600;
+    color: white;
+    height: 28px;
+
+    svg {
+      opacity: 0.9;
+    }
+  }
+
   .speed-selector {
     select {
       padding: 4px 8px;

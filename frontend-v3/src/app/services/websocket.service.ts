@@ -7,6 +7,9 @@ export interface TaskProgress {
   progress: number;
   message?: string;
   type?: string;
+  eta?: number;           // Estimated seconds remaining
+  elapsedMs?: number;     // Milliseconds elapsed since task started
+  taskLabel?: string;     // Human-readable task name (e.g., "Transcribing...")
 }
 
 export interface TaskStarted {
@@ -190,13 +193,15 @@ export class WebsocketService implements OnDestroy {
 
     // Also listen for legacy 'task-progress' event (with hyphen)
     this.socket.on('task-progress', (event: any) => {
-      console.log('WS task-progress received:', event);
       const progress: TaskProgress = {
         taskId: event.taskId || '',
         jobId: event.jobId,
         progress: event.progress,
         message: event.message,
-        type: event.taskType || event.type
+        type: event.taskType || event.type,
+        eta: event.eta,
+        elapsedMs: event.elapsedMs,
+        taskLabel: event.taskLabel
       };
       this.taskProgressCallbacks.forEach(cb => cb(progress));
     });

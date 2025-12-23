@@ -254,6 +254,10 @@ export class LibraryService {
       // Media type info
       mediaType: video.media_type,
       fileExtension: video.file_extension,
+      // Video metadata from ffprobe
+      width: video.width,
+      height: video.height,
+      fps: video.fps,
       // Parent-child relationships
       parentIds: video.parent_ids || [],
       childIds: video.child_ids || [],

@@ -579,6 +579,37 @@
             <span class="config-value">{{ formatAnalysisTime(analysisConfig.analysisTime) }}</span>
           </div>
         </div>
+
+        <!-- Token Usage Stats -->
+        <div class="config-stats" *ngIf="analysisConfig.totalTokens || analysisConfig.apiCalls">
+          <div class="config-header stats-header">
+            <span class="config-icon">📊</span>
+            <span class="config-title">Usage Statistics</span>
+          </div>
+          <div class="config-grid stats-grid">
+            <div class="config-item" *ngIf="analysisConfig.apiCalls">
+              <span class="config-label">API Calls</span>
+              <span class="config-value">{{ analysisConfig.apiCalls }}</span>
+            </div>
+            <div class="config-item" *ngIf="analysisConfig.inputTokens">
+              <span class="config-label">Input Tokens</span>
+              <span class="config-value">{{ analysisConfig.inputTokens | number }}</span>
+            </div>
+            <div class="config-item" *ngIf="analysisConfig.outputTokens">
+              <span class="config-label">Output Tokens</span>
+              <span class="config-value">{{ analysisConfig.outputTokens | number }}</span>
+            </div>
+            <div class="config-item" *ngIf="analysisConfig.totalTokens">
+              <span class="config-label">Total Tokens</span>
+              <span class="config-value">{{ analysisConfig.totalTokens | number }}</span>
+            </div>
+            <div class="config-item" *ngIf="analysisConfig.estimatedCost">
+              <span class="config-label">Estimated Cost</span>
+              <span class="config-value cost-value">${{ analysisConfig.estimatedCost | number:'1.4-4' }}</span>
+            </div>
+          </div>
+        </div>
+
         <div class="config-categories" *ngIf="analysisConfig.detectedCategories && analysisConfig.detectedCategories.length > 0">
           <span class="config-label">Categories Detected</span>
           <div class="category-badges">

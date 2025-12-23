@@ -106,8 +106,12 @@ export class WhisperManager extends EventEmitter {
 
   /**
    * Transcribe an audio file
+   * @param audioFile - Path to the audio file
+   * @param outputDir - Directory for output files
+   * @param modelName - Whisper model to use (optional)
+   * @param audioDurationSeconds - Duration of audio in seconds for progress estimation (optional)
    */
-  async transcribe(audioFile: string, outputDir: string, modelName?: string): Promise<string> {
+  async transcribe(audioFile: string, outputDir: string, modelName?: string, audioDurationSeconds?: number): Promise<string> {
     this.logger.log('='.repeat(60));
     this.logger.log('STARTING TRANSCRIPTION');
     this.logger.log('='.repeat(60));
@@ -146,6 +150,7 @@ export class WhisperManager extends EventEmitter {
       const result = await this.whisper.transcribe(audioFile, outputDir, {
         model: modelName,
         processId,
+        audioDurationSeconds,
       });
 
       this.currentProcessId = null;

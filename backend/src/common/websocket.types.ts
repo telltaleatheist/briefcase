@@ -50,6 +50,10 @@ export interface TaskProgressPayload {
   progress: number;
   message?: string;
   timestamp: string;
+  // Time estimation fields
+  eta?: number;           // Estimated seconds remaining
+  elapsedMs?: number;     // Milliseconds elapsed since task started
+  taskLabel?: string;     // Human-readable task name (e.g., "Transcribing...")
 }
 
 export interface TaskCompletedPayload {

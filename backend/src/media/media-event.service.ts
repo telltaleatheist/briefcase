@@ -2,6 +2,31 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WebSocketService } from '../common/websocket.service';
 
+/**
+ * Human-readable task labels for progress display
+ */
+export const TASK_LABELS: Record<string, string> = {
+  'get-info': 'Fetching info...',
+  'download': 'Downloading...',
+  'import': 'Importing...',
+  'fix-aspect-ratio': 'Fixing aspect ratio...',
+  'fix-aspect': 'Fixing aspect ratio...',
+  'normalize-audio': 'Normalizing audio...',
+  'normalize': 'Normalizing audio...',
+  'process-video': 'Processing video...',
+  'transcribe': 'Transcribing...',
+  'analyze': 'Analyzing...',
+};
+
+/**
+ * Options for time estimation in progress events
+ */
+export interface ProgressTimeOptions {
+  eta?: number;           // Estimated seconds remaining
+  elapsedMs?: number;     // Milliseconds elapsed since task started
+  taskLabel?: string;     // Override the default task label
+}
+
 @Injectable()
 export class MediaEventService {
   private readonly logger = new Logger(MediaEventService.name);
@@ -96,8 +121,9 @@ export class MediaEventService {
     });
   }
   
-  emitDownloadProgress(progress: number, task: string, jobId?: string, additionalInfo?: any): void {
+  emitDownloadProgress(progress: number, task: string, jobId?: string, additionalInfo?: { eta?: number; elapsedMs?: number; [key: string]: any }): void {
     const normalizedProgress = this.normalizeProgress(progress);
+    const taskLabel = TASK_LABELS['download'];
 
     // Emit legacy download-progress event
     this.emitEvent('download-progress', {
@@ -114,7 +140,10 @@ export class MediaEventService {
         taskType: 'download',
         progress: normalizedProgress,
         message: task,
-        timestamp: this.getTimestamp()
+        timestamp: this.getTimestamp(),
+        eta: additionalInfo?.eta,
+        elapsedMs: additionalInfo?.elapsedMs,
+        taskLabel,
       });
     }
   }
@@ -352,13 +381,18 @@ export class MediaEventService {
   /**
    * Task progress event (for queue system)
    */
-  emitTaskProgress(jobId: string, taskType: string, progress: number, message: string): void {
+  emitTaskProgress(jobId: string, taskType: string, progress: number, message: string, timeOptions?: ProgressTimeOptions): void {
+    const taskLabel = timeOptions?.taskLabel || TASK_LABELS[taskType] || 'Processing...';
+
     this.emitEvent('task-progress', {
       jobId,
       taskType,
       progress: this.normalizeProgress(progress),
       message,
-      timestamp: this.getTimestamp()
+      timestamp: this.getTimestamp(),
+      eta: timeOptions?.eta,
+      elapsedMs: timeOptions?.elapsedMs,
+      taskLabel,
     });
   }
 
@@ -402,7 +436,17 @@ export class MediaEventService {
   /**
    * Emit task progress event
    */
-  emitTaskProgressUpdate(taskId: string, jobId: string, videoId: string | undefined, type: string, progress: number, message?: string): void {
+  emitTaskProgressUpdate(
+    taskId: string,
+    jobId: string,
+    videoId: string | undefined,
+    type: string,
+    progress: number,
+    message?: string,
+    timeOptions?: ProgressTimeOptions
+  ): void {
+    const taskLabel = timeOptions?.taskLabel || TASK_LABELS[type] || 'Processing...';
+
     this.emitEvent('task.progress', {
       taskId,
       jobId,
@@ -410,7 +454,10 @@ export class MediaEventService {
       type,
       progress: this.normalizeProgress(progress),
       message,
-      timestamp: this.getTimestamp()
+      timestamp: this.getTimestamp(),
+      eta: timeOptions?.eta,
+      elapsedMs: timeOptions?.elapsedMs,
+      taskLabel,
     });
   }
 

@@ -407,6 +407,7 @@ export class DownloaderService implements OnModuleInit {
       
       // Set up progress tracking
       ytDlpManager.on('progress', (progress) => {
+        const elapsedMs = Date.now() - downloadStartTime;
         this.eventService.emitDownloadProgress(
           progress.percent,
           'Downloading',
@@ -414,6 +415,7 @@ export class DownloaderService implements OnModuleInit {
           {
             speed: progress.downloadSpeed,
             eta: progress.eta,
+            elapsedMs,
             totalSize: progress.totalSize,
             downloadedBytes: progress.downloadedBytes
           }
@@ -459,6 +461,7 @@ export class DownloaderService implements OnModuleInit {
 
               // Set up progress tracking
               newYtDlpManager.on('progress', (progress) => {
+                const elapsedMs = Date.now() - downloadStartTime;
                 this.eventService.emitDownloadProgress(
                   progress.percent,
                   `Downloading (${clientType} client)`,
@@ -466,6 +469,7 @@ export class DownloaderService implements OnModuleInit {
                   {
                     speed: progress.downloadSpeed,
                     eta: progress.eta,
+                    elapsedMs,
                     totalSize: progress.totalSize,
                     downloadedBytes: progress.downloadedBytes
                   }

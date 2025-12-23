@@ -209,6 +209,21 @@ export class FileScannerService {
             // Convert to relative path for cross-platform compatibility
             const relativePath = this.databaseService.toRelativePath(file.fullPath, clipsRoot);
 
+            // Extract video metadata using ffprobe
+            let durationSeconds: number | undefined;
+            let width: number | undefined;
+            let height: number | undefined;
+            let fps: number | undefined;
+            try {
+              const metadata = await this.ffmpegService.getVideoMetadata(file.fullPath);
+              durationSeconds = metadata.duration;
+              width = metadata.width;
+              height = metadata.height;
+              fps = metadata.fps;
+            } catch (metadataError: any) {
+              this.logger.warn(`Could not extract metadata for ${file.filename}: ${metadataError.message}`);
+            }
+
             this.databaseService.insertVideo({
               id: videoId,
               filename: file.filename,
@@ -217,7 +232,10 @@ export class FileScannerService {
               uploadDate: file.uploadDate,
               downloadDate: fileCreationDate.toISOString(),
               fileSizeBytes: stats.size,
-              // Duration will be populated later when analyzing
+              durationSeconds,
+              width,
+              height,
+              fps,
             });
 
             result.newVideos++;

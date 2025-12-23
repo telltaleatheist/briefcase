@@ -22,6 +22,10 @@ export interface VideoItem {
   // Media type info
   mediaType?: string;
   fileExtension?: string;
+  // Video metadata from ffprobe
+  width?: number;
+  height?: number;
+  fps?: number;
   // Parent-child relationships
   parentIds?: string[]; // Array of parent video IDs (many-to-many)
   childIds?: string[]; // Array of child video IDs (many-to-many)
@@ -32,6 +36,7 @@ export interface VideoItem {
   ghostRelatedName?: string; // Name of the related video (parent or child)
   // Queue-specific fields
   titleLoading?: boolean; // True when title/filename is being fetched
+  videoId?: string; // Actual database video ID (for queue items where id has a prefix)
 }
 
 export interface VideoWeek {
@@ -63,6 +68,8 @@ export interface ItemProgress {
   color?: string; // Optional custom color (defaults to accent color)
   label?: string; // Optional label for accessibility
   indeterminate?: boolean; // Show spinner/indeterminate progress instead of bar
+  taskLabel?: string;     // Human-readable task name (e.g., "Transcribing...")
+  etaLabel?: string;      // Formatted ETA (e.g., "~2:30 remaining")
 }
 
 /**

@@ -582,7 +582,9 @@ export class CascadeComponent {
 
       case 'viewMore':
         // Navigate to video info page
-        this.router.navigate(['/video', video.id]);
+        // Use videoId if available (for queue items), otherwise use id
+        const detailsId = video.videoId || video.id;
+        this.router.navigate(['/video', detailsId]);
         break;
 
       case 'openInEditor':
@@ -904,6 +906,13 @@ export class CascadeComponent {
    */
   isProcessingItem(video: VideoItem): boolean {
     return video.id.startsWith('processing-') || video.tags?.some(t => t.startsWith('processing:')) || false;
+  }
+
+  /**
+   * Check if a video is a completed queue item
+   */
+  isCompletedItem(video: VideoItem): boolean {
+    return video.id.startsWith('completed-') || video.tags?.some(t => t.startsWith('completed:')) || false;
   }
 
   /**

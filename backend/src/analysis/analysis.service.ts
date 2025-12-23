@@ -1057,6 +1057,22 @@ export class AnalysisService implements OnModuleInit {
           const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
           const downloadDate = fileCreationDate.toISOString();
 
+          // Extract video metadata using ffprobe
+          let durationSeconds: number | undefined;
+          let width: number | undefined;
+          let height: number | undefined;
+          let fps: number | undefined;
+          try {
+            const metadata = await this.ffmpeg.getVideoMetadata(request.videoPath);
+            durationSeconds = metadata.duration;
+            width = metadata.width;
+            height = metadata.height;
+            fps = metadata.fps;
+            this.logger.log(`Extracted metadata for ${filename}: ${durationSeconds}s, ${width}x${height}, ${fps}fps`);
+          } catch (metadataError: any) {
+            this.logger.warn(`Could not extract metadata for ${filename}: ${metadataError.message}`);
+          }
+
           // Insert video record
           this.databaseService.insertVideo({
             id: newVideoId,
@@ -1066,6 +1082,10 @@ export class AnalysisService implements OnModuleInit {
             uploadDate,
             downloadDate,
             fileSizeBytes: stats.size,
+            durationSeconds,
+            width,
+            height,
+            fps,
           });
 
           this.logger.log(`Created new video record with ID: ${newVideoId} for ${filename}`);
@@ -1103,12 +1123,18 @@ export class AnalysisService implements OnModuleInit {
 
 
       if (mode !== 'transcribe-only' && (request as any).analysisText) {
+        const tokenStats = analysisResult?.tokenStats;
         this.databaseService.insertAnalysis({
           videoId,
           aiAnalysis: (request as any).analysisText,
           sectionsCount: analysisResult?.sections_count || 0,
           aiModel: request.aiModel,
           aiProvider: request.aiProvider || 'ollama',
+          inputTokens: tokenStats?.inputTokens,
+          outputTokens: tokenStats?.outputTokens,
+          totalTokens: tokenStats?.totalTokens,
+          estimatedCost: tokenStats?.estimatedCost,
+          apiCalls: tokenStats?.apiCalls,
         });
 
         // Save analysis sections to database

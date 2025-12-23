@@ -1,5 +1,7 @@
 import { Component, EventEmitter, Input, Output, signal, ViewChild, ElementRef, HostListener, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { PlyrModule } from '@atom-platform/ngx-plyr';
+import Plyr from 'plyr';
 
 export interface PreviewItem {
   id: string;
@@ -11,7 +13,7 @@ export interface PreviewItem {
 @Component({
   selector: 'app-video-preview-modal',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PlyrModule],
   template: `
     @if (visible() && currentItem()) {
       <div class="floating-window"
@@ -42,23 +44,12 @@ export interface PreviewItem {
                 <div class="error-details">{{ currentItem().name }}</div>
               </div>
             } @else if (isVideo()) {
-              <video
-                #videoPlayer
-                [src]="mediaSrc()"
-                [attr.data-video-id]="currentItem().id"
-                (loadedmetadata)="onVideoLoaded()"
-                (loadeddata)="onVideoLoadedData()"
-                (canplay)="onCanPlay()"
-                (playing)="onPlaying()"
-                (timeupdate)="onTimeUpdate()"
-                (ended)="onVideoEnded()"
-                (error)="onMediaError($event)"
-                (click)="togglePlay()"
-                preload="auto"
-                autoplay
-              >
-                Your browser does not support the video tag.
-              </video>
+              <plyr
+                #plyrPlayer
+                [plyrSources]="videoSources()"
+                [plyrOptions]="plyrOptions"
+                (plyrInit)="onPlyrInit($event)"
+              ></plyr>
             } @else {
               <img
                 #imageElement
@@ -215,8 +206,25 @@ export interface PreviewItem {
         object-fit: contain;
       }
 
-      video {
-        cursor: pointer;
+      // Plyr player styling
+      plyr {
+        width: 100%;
+        height: 100%;
+
+        .plyr {
+          width: 100%;
+          height: 100%;
+        }
+
+        .plyr__video-wrapper {
+          height: 100%;
+        }
+
+        video {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
       }
     }
 
@@ -448,7 +456,6 @@ export interface PreviewItem {
   `]
 })
 export class VideoPreviewModalComponent implements AfterViewChecked {
-  @ViewChild('videoPlayer') videoPlayer!: ElementRef<HTMLVideoElement>;
   @ViewChild('imageElement') imageElement!: ElementRef<HTMLImageElement>;
   @ViewChild('floatingWindow') floatingWindow!: ElementRef<HTMLDivElement>;
 
@@ -477,8 +484,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       });
     } else if (!value) {
       // Modal closing - pause video if playing
-      if (this.videoPlayer?.nativeElement) {
-        this.videoPlayer.nativeElement.pause();
+      if (this.plyrPlayer) {
+        this.plyrPlayer.pause();
       }
       this.isPlaying.set(false);
     }
@@ -539,6 +546,76 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   playbackRate = signal(1.0); // Playback speed
   mediaError = signal<string | null>(null); // Track media loading errors
   hasError = signal(false); // Track if current media has an error
+
+  // Plyr configuration
+  plyrOptions: Plyr.Options = {
+    controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen'],
+    clickToPlay: true,
+    keyboard: { focused: true, global: false },
+    hideControls: true,
+    resetOnEnd: false,
+    ratio: '16:9'
+  };
+
+  private plyrPlayer: Plyr | null = null;
+
+  /**
+   * Video sources for Plyr player
+   */
+  videoSources = (): Plyr.Source[] => {
+    return [{
+      src: this.mediaSrc(),
+      type: 'video/mp4'
+    }];
+  };
+
+  /**
+   * Initialize Plyr player and wire up events
+   */
+  onPlyrInit(player: Plyr): void {
+    this.plyrPlayer = player;
+
+    player.on('play', () => {
+      this.isPlaying.set(true);
+      this.pendingAutoplay = false;
+    });
+
+    player.on('pause', () => {
+      this.isPlaying.set(false);
+    });
+
+    player.on('timeupdate', () => {
+      this.currentTime.set(player.currentTime);
+      const duration = player.duration || 0;
+      if (duration > 0) {
+        this.progress.set((player.currentTime / duration) * 100);
+      }
+    });
+
+    player.on('loadedmetadata', () => {
+      this.duration.set(player.duration);
+      // Attempt autoplay if pending
+      if (this.pendingAutoplay) {
+        this.pendingAutoplay = false;
+        const playPromise = player.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {
+            // Autoplay may be blocked by browser policy
+          });
+        }
+      }
+    });
+
+    player.on('ended', () => {
+      this.isPlaying.set(false);
+    });
+
+    player.on('error', (event: Plyr.PlyrEvent) => {
+      console.error('Plyr error:', event);
+      this.hasError.set(true);
+      this.mediaError.set('Failed to load video');
+    });
+  }
 
   private isDragging = false;
   private dragOffset = { x: 0, y: 0 };
@@ -646,20 +723,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       pendingAutoplay: this.pendingAutoplay
     });
 
-    // Angular's binding will automatically update the src attribute
-    // We just need to ensure the video element reloads when it appears
-    if (this.isVideo()) {
-      // Wait for Angular to render the video element
-      setTimeout(() => {
-        if (this.videoPlayer?.nativeElement) {
-          const video = this.videoPlayer.nativeElement;
-          console.log('Video element found, loading...', { pendingAutoplay: this.pendingAutoplay });
-          video.load();
-        } else {
-          console.warn('Video element not found in DOM after timeout');
-        }
-      }, 50);
-    }
+    // Plyr will automatically handle loading when sources change via videoSources()
+    // The onPlyrInit handler will fire when the player is ready
   }
 
   /**
@@ -894,143 +959,52 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   togglePlay() {
-    if (!this.isVideo() || !this.videoPlayer?.nativeElement) return;
-
-    const video = this.videoPlayer.nativeElement;
-    if (video.paused) {
-      video.play().then(() => {
-        this.isPlaying.set(true);
-      }).catch(err => {
-        console.error('Failed to play video:', err);
-      });
-    } else {
-      video.pause();
-      this.isPlaying.set(false);
-    }
+    if (!this.isVideo() || !this.plyrPlayer) return;
+    this.plyrPlayer.togglePlay();
   }
 
   skipTime(seconds: number) {
-    if (!this.videoPlayer?.nativeElement) return;
-    const video = this.videoPlayer.nativeElement;
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+    if (!this.plyrPlayer) return;
+    const duration = this.plyrPlayer.duration || 0;
+    this.plyrPlayer.currentTime = Math.max(0, Math.min(duration, this.plyrPlayer.currentTime + seconds));
   }
 
   toggleMute() {
-    if (!this.videoPlayer?.nativeElement) return;
-    const video = this.videoPlayer.nativeElement;
-    video.muted = !video.muted;
-    this.isMuted.set(video.muted);
+    if (!this.plyrPlayer) return;
+    this.plyrPlayer.muted = !this.plyrPlayer.muted;
+    this.isMuted.set(this.plyrPlayer.muted);
   }
 
   frameStep(direction: number) {
-    if (!this.videoPlayer?.nativeElement) return;
-    const video = this.videoPlayer.nativeElement;
-    video.pause();
+    if (!this.plyrPlayer) return;
+    this.plyrPlayer.pause();
     this.isPlaying.set(false);
     // Assuming 30fps, 1 frame = 1/30 second
-    video.currentTime += (direction / 30);
+    this.plyrPlayer.currentTime += (direction / 30);
   }
 
   setVolume(value: number) {
-    if (!this.videoPlayer?.nativeElement) return;
-    const video = this.videoPlayer.nativeElement;
+    if (!this.plyrPlayer) return;
     const clampedValue = Math.max(0, Math.min(1, value));
-    video.volume = clampedValue;
+    this.plyrPlayer.volume = clampedValue;
     this.volume.set(clampedValue);
     // If setting volume above 0, unmute
-    if (clampedValue > 0 && video.muted) {
-      video.muted = false;
+    if (clampedValue > 0 && this.plyrPlayer.muted) {
+      this.plyrPlayer.muted = false;
       this.isMuted.set(false);
     }
   }
 
   setPlaybackRate(rate: number) {
-    if (!this.videoPlayer?.nativeElement) return;
-    const video = this.videoPlayer.nativeElement;
-    video.playbackRate = rate;
+    if (!this.plyrPlayer) return;
+    this.plyrPlayer.speed = rate;
     this.playbackRate.set(rate);
   }
 
-  onVideoLoaded() {
-    if (this.videoPlayer?.nativeElement) {
-      const video = this.videoPlayer.nativeElement;
-      this.duration.set(video.duration);
-
-      // Initialize video properties from signals
-      video.volume = this.volume();
-      video.muted = this.isMuted();
-      video.playbackRate = this.playbackRate();
-
-      console.log('Video metadata loaded, duration:', video.duration);
-    }
-  }
 
   onImageLoaded() {
     // Image loaded successfully - nothing special to do
     this.pendingAutoplay = false;
-  }
-
-  /**
-   * Called when video has loaded enough data to render first frame
-   */
-  onVideoLoadedData() {
-    console.log('Video data loaded', { pendingAutoplay: this.pendingAutoplay });
-    this.tryAutoplay();
-  }
-
-  /**
-   * Called when video has enough data to start playing
-   */
-  onCanPlay() {
-    console.log('Video can play', { pendingAutoplay: this.pendingAutoplay });
-    this.tryAutoplay();
-  }
-
-  /**
-   * Attempt to autoplay the video if autoplay is pending
-   */
-  private tryAutoplay() {
-    if (this.pendingAutoplay && this.isVideo() && this.videoPlayer?.nativeElement) {
-      this.pendingAutoplay = false;
-      const video = this.videoPlayer.nativeElement;
-      console.log('Attempting autoplay...');
-      video.play().then(() => {
-        this.isPlaying.set(true);
-        console.log('Autoplay successful');
-      }).catch(err => {
-        console.warn('Autoplay failed (browser may have blocked it):', err);
-        // Autoplay might be blocked by browser, that's ok - user can click play
-      });
-    }
-  }
-
-  /**
-   * Called when video starts playing
-   */
-  onPlaying() {
-    console.log('Video playing event fired');
-    this.isPlaying.set(true);
-    this.pendingAutoplay = false;
-  }
-
-  onTimeUpdate() {
-    if (this.videoPlayer?.nativeElement) {
-      const video = this.videoPlayer.nativeElement;
-      this.currentTime.set(video.currentTime);
-
-      // Calculate progress, handling edge cases
-      const duration = video.duration;
-      if (duration && !isNaN(duration) && duration > 0) {
-        const progressValue = (video.currentTime / duration) * 100;
-        this.progress.set(progressValue);
-      } else {
-        this.progress.set(0);
-      }
-    }
-  }
-
-  onVideoEnded() {
-    this.isPlaying.set(false);
   }
 
   onMediaError(event: Event) {
@@ -1088,12 +1062,12 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   seek(event: MouseEvent) {
-    if (!this.isVideo() || !this.videoPlayer?.nativeElement) return;
+    if (!this.isVideo() || !this.plyrPlayer) return;
 
     const container = event.currentTarget as HTMLElement;
     const rect = container.getBoundingClientRect();
     const percent = (event.clientX - rect.left) / rect.width;
-    this.videoPlayer.nativeElement.currentTime = percent * this.videoPlayer.nativeElement.duration;
+    this.plyrPlayer.currentTime = percent * (this.plyrPlayer.duration || 0);
   }
 
   formatTime(seconds: number): string {
@@ -1106,8 +1080,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   close() {
-    if (this.videoPlayer?.nativeElement) {
-      this.videoPlayer.nativeElement.pause();
+    if (this.plyrPlayer) {
+      this.plyrPlayer.pause();
     }
     this.visible.set(false);
     this.isPlaying.set(false);

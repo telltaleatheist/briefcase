@@ -249,7 +249,7 @@ export class AnalysisController {
         videoTitle = path.basename(body.input, path.extname(body.input));
       }
 
-      const sanitizedTitle = videoTitle.replace(/[^a-zA-Z0-9\s\-_]/g, '').trim();
+      const sanitizedTitle = videoTitle.replace(/[^a-zA-Z0-9\s\-_()]/g, '').trim();
       const expectedReportPath = path.join(reportsPath, `${sanitizedTitle}.txt`);
 
       // Check if file exists

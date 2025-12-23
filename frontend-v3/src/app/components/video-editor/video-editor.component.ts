@@ -461,6 +461,21 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     return (state.currentTime / state.duration) * 100;
   });
 
+  // Selection duration formatted as HH:MM:SS
+  formattedSelectionDuration = computed(() => {
+    const selection = this.highlightSelection();
+    if (!selection) return null;
+
+    const durationSeconds = selection.endTime - selection.startTime;
+    if (durationSeconds < 0.1) return null; // Too small to display
+
+    const hrs = Math.floor(durationSeconds / 3600);
+    const mins = Math.floor((durationSeconds % 3600) / 60);
+    const secs = Math.floor(durationSeconds % 60);
+
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  });
+
   // Filtered sections based on category filters
   filteredSections = computed(() => {
     const filters = this.categoryFilters();

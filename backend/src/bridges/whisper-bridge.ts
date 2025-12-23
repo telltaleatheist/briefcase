@@ -24,6 +24,9 @@ export interface WhisperProcessInfo {
   startTime: number;
   aborted: boolean;
   lastReportedPercent: number;
+  audioDurationSeconds?: number;
+  progressTimer?: NodeJS.Timeout;
+  inferenceStartTime?: number;
 }
 
 export interface WhisperResult {
@@ -209,6 +212,7 @@ export class WhisperBridge extends EventEmitter {
       processId?: string;
       language?: string;
       translate?: boolean;
+      audioDurationSeconds?: number;  // For time-based progress estimation
     }
   ): Promise<WhisperResult> {
     const processId = options?.processId || crypto.randomBytes(8).toString('hex');
@@ -278,6 +282,7 @@ export class WhisperBridge extends EventEmitter {
       model?: string;
       language?: string;
       translate?: boolean;
+      audioDurationSeconds?: number;
     }
   ): Promise<WhisperResult> {
     const modelPath = this.getModelPath(options?.model);
@@ -346,9 +351,16 @@ export class WhisperBridge extends EventEmitter {
         startTime,
         aborted: false,
         lastReportedPercent: 0,
+        audioDurationSeconds: options?.audioDurationSeconds,
       };
 
       this.activeProcesses.set(processId, processInfo);
+
+      // Start time-based progress estimation if we know the audio duration
+      // This provides progress updates during the inference phase (35%-95%)
+      if (options?.audioDurationSeconds && options.audioDurationSeconds > 0) {
+        this.startProgressEstimation(processId, options.audioDurationSeconds, useGpu);
+      }
 
       let stdoutBuffer = '';
       let stderrBuffer = '';
@@ -367,6 +379,7 @@ export class WhisperBridge extends EventEmitter {
 
       proc.on('close', (code) => {
         const duration = Date.now() - startTime;
+        this.stopProgressEstimation(processId);
         this.activeProcesses.delete(processId);
 
         if (processInfo.aborted) {
@@ -418,6 +431,7 @@ export class WhisperBridge extends EventEmitter {
 
       proc.on('error', (err) => {
         const duration = Date.now() - startTime;
+        this.stopProgressEstimation(processId);
         this.activeProcesses.delete(processId);
 
         this.logger.error(`[${processId}] Spawn error: ${err.message}`);
@@ -445,6 +459,7 @@ export class WhisperBridge extends EventEmitter {
 
     this.logger.log(`[${processId}] Aborting transcription`);
     processInfo.aborted = true;
+    this.stopProgressEstimation(processId);
 
     if (process.platform === 'win32') {
       try {
@@ -551,5 +566,88 @@ export class WhisperBridge extends EventEmitter {
     if (percent < 80) return 'Generating transcript';
     if (percent < 95) return 'Processing segments';
     return 'Finalizing transcript';
+  }
+
+  /**
+   * Start time-based progress estimation during transcription
+   * Whisper.cpp doesn't emit granular progress during inference,
+   * so we estimate based on audio duration and elapsed time.
+   */
+  private startProgressEstimation(processId: string, audioDurationSeconds: number, useGpu: boolean): void {
+    const processInfo = this.activeProcesses.get(processId);
+    if (!processInfo) return;
+
+    // Estimate transcription time based on audio duration
+    // These are rough estimates: GPU is typically 0.3-0.5x realtime, CPU is 1-3x realtime
+    const speedMultiplier = useGpu ? 0.4 : 2.0;
+    const estimatedTranscriptionMs = audioDurationSeconds * 1000 * speedMultiplier;
+
+    // We'll emit progress updates every 2 seconds
+    const PROGRESS_INTERVAL_MS = 2000;
+
+    // Start the progress timer once we reach the inference phase (after 35%)
+    // We delay start slightly to allow whisper to initialize
+    const startDelay = 3000; // 3 seconds after process start
+
+    setTimeout(() => {
+      const currentProcessInfo = this.activeProcesses.get(processId);
+      if (!currentProcessInfo || currentProcessInfo.aborted) return;
+
+      // Record when inference estimation starts
+      currentProcessInfo.inferenceStartTime = Date.now();
+
+      this.logger.log(`[${processId}] Starting progress estimation: audio=${audioDurationSeconds}s, estimated=${Math.round(estimatedTranscriptionMs / 1000)}s`);
+
+      currentProcessInfo.progressTimer = setInterval(() => {
+        const pi = this.activeProcesses.get(processId);
+        if (!pi || pi.aborted || !pi.inferenceStartTime) {
+          this.stopProgressEstimation(processId);
+          return;
+        }
+
+        // Don't emit if we already completed (process closed)
+        if (pi.lastReportedPercent >= 95) {
+          this.stopProgressEstimation(processId);
+          return;
+        }
+
+        const elapsed = Date.now() - pi.inferenceStartTime;
+        const progress = Math.min(elapsed / estimatedTranscriptionMs, 1.0);
+
+        // Map progress to 35%-95% range
+        // 35% = inference start, 95% = inference end (before finalization)
+        const percent = Math.round(35 + (progress * 60));
+
+        // Only emit if we've made progress and haven't exceeded 94%
+        if (percent > pi.lastReportedPercent && percent <= 94) {
+          pi.lastReportedPercent = percent;
+
+          this.emit('progress', {
+            processId,
+            percent,
+            message: this.getProgressMessage(percent),
+          } as WhisperProgress);
+        }
+
+        // Stop the timer if we've exceeded our estimate (inference taking longer than expected)
+        if (progress >= 1.0) {
+          this.logger.log(`[${processId}] Progress estimation reached 100%, waiting for completion`);
+          this.stopProgressEstimation(processId);
+        }
+      }, PROGRESS_INTERVAL_MS);
+
+    }, startDelay);
+  }
+
+  /**
+   * Stop the progress estimation timer for a process
+   */
+  private stopProgressEstimation(processId: string): void {
+    const processInfo = this.activeProcesses.get(processId);
+    if (processInfo?.progressTimer) {
+      clearInterval(processInfo.progressTimer);
+      processInfo.progressTimer = undefined;
+      this.logger.log(`[${processId}] Stopped progress estimation timer`);
+    }
   }
 }

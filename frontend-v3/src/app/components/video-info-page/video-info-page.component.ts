@@ -63,6 +63,11 @@ export class VideoInfoPageComponent implements OnInit {
     analyzedAt?: Date;
     analysisTime?: number; // in seconds
     detectedCategories?: string[];
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    estimatedCost?: number;
+    apiCalls?: number;
   } | null = null;
 
   // Transcription
@@ -171,7 +176,12 @@ export class VideoInfoPageComponent implements OnInit {
             provider: analysis.ai_provider || analysis.provider,
             analyzedAt: analysis.analyzed_at ? new Date(analysis.analyzed_at) : undefined,
             analysisTime: analysis.analysis_time_seconds,
-            detectedCategories: uniqueCategories.length > 0 ? uniqueCategories : undefined
+            detectedCategories: uniqueCategories.length > 0 ? uniqueCategories : undefined,
+            inputTokens: analysis.input_tokens,
+            outputTokens: analysis.output_tokens,
+            totalTokens: analysis.total_tokens,
+            estimatedCost: analysis.estimated_cost,
+            apiCalls: analysis.api_calls,
           };
         } else {
           this.analysisConfig = null;

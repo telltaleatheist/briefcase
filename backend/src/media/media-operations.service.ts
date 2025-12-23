@@ -534,6 +534,9 @@ export class MediaOperationsService {
         throw new Error('Video not found');
       }
 
+      // Verify and update video metadata using ffprobe
+      await this.verifyVideoMetadata(videoId, video.current_path, video, jobId);
+
       const transcript = this.databaseService.getTranscript(videoId);
       if (!transcript) {
         throw new Error('Transcript not found - transcribe video first');
@@ -609,7 +612,10 @@ export class MediaOperationsService {
         apiKey,
         ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
         onProgress: (progress) => {
-          this.eventService.emitTaskProgress(jobId || '', 'analyze', progress.progress, progress.message);
+          this.eventService.emitTaskProgress(jobId || '', 'analyze', progress.progress, progress.message, {
+            eta: progress.eta,
+            elapsedMs: progress.elapsedMs,
+          });
         },
       });
 
@@ -757,6 +763,76 @@ export class MediaOperationsService {
         success: false,
         error: error instanceof Error ? error.message : 'Analysis failed',
       };
+    }
+  }
+
+  /**
+   * Verify and update video metadata using ffprobe
+   * Called during analysis to ensure metadata is accurate
+   */
+  private async verifyVideoMetadata(
+    videoId: string,
+    videoPath: string,
+    currentVideo: { duration_seconds: number | null; width?: number | null; height?: number | null; fps?: number | null },
+    jobId?: string
+  ): Promise<void> {
+    try {
+      this.logger.log(`[${jobId || 'standalone'}] Verifying video metadata for: ${videoPath}`);
+
+      const metadata = await this.ffmpegService.getVideoMetadata(videoPath);
+
+      // Check if any metadata needs updating
+      const updates: { durationSeconds?: number; width?: number; height?: number; fps?: number } = {};
+      let needsUpdate = false;
+
+      // Check duration (allow small tolerance of 0.5 seconds)
+      if (metadata.duration !== undefined && metadata.duration > 0) {
+        const currentDuration = currentVideo.duration_seconds || 0;
+        if (Math.abs(currentDuration - metadata.duration) > 0.5) {
+          updates.durationSeconds = metadata.duration;
+          needsUpdate = true;
+          this.logger.log(`[${jobId || 'standalone'}] Duration mismatch: stored=${currentDuration}s, actual=${metadata.duration}s`);
+        }
+      }
+
+      // Check width
+      if (metadata.width !== undefined && metadata.width > 0) {
+        if (currentVideo.width !== metadata.width) {
+          updates.width = metadata.width;
+          needsUpdate = true;
+          this.logger.log(`[${jobId || 'standalone'}] Width mismatch: stored=${currentVideo.width}, actual=${metadata.width}`);
+        }
+      }
+
+      // Check height
+      if (metadata.height !== undefined && metadata.height > 0) {
+        if (currentVideo.height !== metadata.height) {
+          updates.height = metadata.height;
+          needsUpdate = true;
+          this.logger.log(`[${jobId || 'standalone'}] Height mismatch: stored=${currentVideo.height}, actual=${metadata.height}`);
+        }
+      }
+
+      // Check fps (allow small tolerance)
+      if (metadata.fps !== undefined && metadata.fps > 0) {
+        const currentFps = currentVideo.fps || 0;
+        if (Math.abs(currentFps - metadata.fps) > 0.1) {
+          updates.fps = metadata.fps;
+          needsUpdate = true;
+          this.logger.log(`[${jobId || 'standalone'}] FPS mismatch: stored=${currentFps}, actual=${metadata.fps}`);
+        }
+      }
+
+      // Update database if needed
+      if (needsUpdate) {
+        this.databaseService.updateVideoTechnicalMetadata(videoId, updates);
+        this.logger.log(`[${jobId || 'standalone'}] Video metadata updated: ${JSON.stringify(updates)}`);
+      } else {
+        this.logger.log(`[${jobId || 'standalone'}] Video metadata verified - no updates needed`);
+      }
+    } catch (error: any) {
+      // Log but don't fail the analysis if metadata verification fails
+      this.logger.warn(`[${jobId || 'standalone'}] Failed to verify video metadata: ${error.message}`);
     }
   }
 

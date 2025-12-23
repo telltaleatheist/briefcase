@@ -61,6 +61,11 @@ export interface AnalysisRecord {
   ai_provider: string | null;
   analyzed_at: string;
   analysis_time_seconds: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  estimated_cost: number | null;
+  api_calls: number | null;
 }
 
 export interface AnalysisSectionRecord {
@@ -1288,6 +1293,29 @@ export class DatabaseService {
       }
     }
 
+    // Migration 22: Add token stats columns to analyses table
+    try {
+      db.exec("SELECT input_tokens FROM analyses LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: input_tokens')) {
+        this.logger.log('Running migration: Adding token stats columns to analyses table');
+        try {
+          db.exec(`
+            ALTER TABLE analyses ADD COLUMN input_tokens INTEGER;
+            ALTER TABLE analyses ADD COLUMN output_tokens INTEGER;
+            ALTER TABLE analyses ADD COLUMN total_tokens INTEGER;
+            ALTER TABLE analyses ADD COLUMN estimated_cost REAL;
+            ALTER TABLE analyses ADD COLUMN api_calls INTEGER;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: token stats columns added to analyses table');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    }
+
   }
 
   /**
@@ -2041,6 +2069,49 @@ export class DatabaseService {
   }
 
   /**
+   * Update video technical metadata (duration, width, height, fps)
+   * Used to verify/correct metadata during analysis
+   */
+  updateVideoTechnicalMetadata(
+    id: string,
+    metadata: {
+      durationSeconds?: number;
+      width?: number;
+      height?: number;
+      fps?: number;
+    }
+  ) {
+    const db = this.ensureInitialized();
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (metadata.durationSeconds !== undefined) {
+      updates.push('duration_seconds = ?');
+      values.push(metadata.durationSeconds);
+    }
+    if (metadata.width !== undefined) {
+      updates.push('width = ?');
+      values.push(metadata.width);
+    }
+    if (metadata.height !== undefined) {
+      updates.push('height = ?');
+      values.push(metadata.height);
+    }
+    if (metadata.fps !== undefined) {
+      updates.push('fps = ?');
+      values.push(metadata.fps);
+    }
+
+    if (updates.length > 0) {
+      values.push(id);
+      db.prepare(`UPDATE videos SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      this.saveDatabase();
+      this.logger.log(`[Technical Metadata] Updated video ${id}: ${JSON.stringify(metadata)}`);
+    }
+  }
+
+  /**
    * Update video's source URL
    */
   updateVideoSourceUrl(id: string, sourceUrl: string | null) {
@@ -2536,13 +2607,19 @@ export class DatabaseService {
     aiModel: string;
     aiProvider?: string;
     analysisTimeSeconds?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    estimatedCost?: number;
+    apiCalls?: number;
   }) {
     const db = this.ensureInitialized();
 
     db.prepare(
       `INSERT OR REPLACE INTO analyses (
-        video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at, analysis_time_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at, analysis_time_seconds,
+        input_tokens, output_tokens, total_tokens, estimated_cost, api_calls
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       analysis.videoId,
       analysis.aiAnalysis,
@@ -2552,6 +2629,11 @@ export class DatabaseService {
       analysis.aiProvider || null,
       new Date().toISOString(),
       analysis.analysisTimeSeconds || null,
+      analysis.inputTokens || null,
+      analysis.outputTokens || null,
+      analysis.totalTokens || null,
+      analysis.estimatedCost || null,
+      analysis.apiCalls || null,
     );
 
     // Update FTS5 table for analysis search
