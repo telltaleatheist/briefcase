@@ -6,6 +6,7 @@ export interface VideoItem {
   size?: number;
   uploadDate?: Date; // When content was filmed/created
   downloadDate?: Date; // When you downloaded the file
+  addedAt?: Date; // When video was added to the database/library
   lastProcessedDate?: Date; // When any task was last run on this video
   thumbnailUrl?: string;
   selected?: boolean;

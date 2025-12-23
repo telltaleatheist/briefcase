@@ -170,17 +170,34 @@ export function buildBoundaryDetectionPrompt(
   chunkText: string,
   previousTopic: string,
   isFirstChunk: boolean,
+  videoDurationSeconds?: number,
 ): string {
   const titleContext = videoTitle ? `Video: ${videoTitle}\n` : '';
   const prevContext = previousTopic
     ? `Previous section was about: "${previousTopic}"\n`
     : '';
 
+  // Format duration for display
+  let durationContext = '';
+  let shortVideoGuidance = '';
+  if (videoDurationSeconds !== undefined) {
+    const minutes = Math.floor(videoDurationSeconds / 60);
+    const seconds = Math.floor(videoDurationSeconds % 60);
+    const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+    durationContext = `Duration: ${durationStr}\n`;
+
+    // Add guidance for short videos (under 3 minutes)
+    if (videoDurationSeconds < 180) {
+      shortVideoGuidance = `- SHORT VIDEO: Most clips under 3 minutes cover a single topic. Only mark a boundary if there is a COMPLETELY DIFFERENT subject (not just a subtopic or different angle on the same subject).
+`;
+    }
+  }
+
   return `Mark where the topic/subject changes in this transcript.
-${titleContext}${prevContext}
+${titleContext}${durationContext}${prevContext}
 Rules:
 - Only mark SIGNIFICANT topic changes, not minor tangents
-- Return the exact phrase (3-8 words) where each new topic begins
+${shortVideoGuidance}- Return the exact phrase (3-8 words) where each new topic begins
 ${isFirstChunk ? '- Do NOT include the very first words (chapter 1 starts automatically at 0:00)\n' : ''}- Also summarize what topic this section ends with (for context to next chunk)
 
 Return JSON:

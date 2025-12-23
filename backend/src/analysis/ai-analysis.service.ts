@@ -1061,8 +1061,12 @@ export class AIAnalysisService {
       return boundaries;
     }
 
+    // Calculate total video duration from segments
+    const lastSegment = segments[segments.length - 1];
+    const videoDurationSeconds = lastSegment?.end || lastSegment?.start || 0;
+
     const chunks = this.chunkTranscript(segments, limits.chunkMinutes);
-    this.logger.log(`[Pass 1] Detecting boundaries in ${chunks.length} chunks (${limits.chunkMinutes} min each)`);
+    this.logger.log(`[Pass 1] Detecting boundaries in ${chunks.length} chunks (${limits.chunkMinutes} min each), video duration: ${Math.round(videoDurationSeconds)}s`);
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
@@ -1074,6 +1078,7 @@ export class AIAnalysisService {
           chunk.text.substring(0, limits.maxChunkChars),
           previousTopic,
           isFirst,
+          videoDurationSeconds,
         );
 
         const response = await this.aiProviderService.generateText(prompt, config);

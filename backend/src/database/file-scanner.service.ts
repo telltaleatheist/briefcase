@@ -381,8 +381,8 @@ export class FileScannerService {
   }
 
   /**
-   * Get videos that need analysis (have no transcript or analysis)
-   * Only returns video files (not audio, documents, images, or webpages)
+   * Get videos/audio that need analysis (have no transcript or analysis)
+   * Returns video and audio files (not documents, images, or webpages)
    */
   getNeedsAnalysis(): NeedsAnalysisVideo[] {
     const db = this.databaseService.getDatabase();
@@ -402,7 +402,7 @@ export class FileScannerService {
       LEFT JOIN transcripts t ON v.id = t.video_id
       LEFT JOIN analyses a ON v.id = a.video_id
       WHERE v.is_linked = 1
-        AND v.media_type = 'video'
+        AND v.media_type IN ('video', 'audio')
         AND (t.video_id IS NULL OR a.video_id IS NULL)
       ORDER BY v.download_date DESC
     `);
@@ -412,8 +412,8 @@ export class FileScannerService {
   }
 
   /**
-   * Get count of videos needing analysis
-   * Only counts video files (not audio, documents, images, or webpages)
+   * Get count of videos/audio needing analysis
+   * Counts video and audio files (not documents, images, or webpages)
    */
   getNeedsAnalysisCount(): number {
     const db = this.databaseService.getDatabase();
@@ -424,7 +424,7 @@ export class FileScannerService {
       LEFT JOIN transcripts t ON v.id = t.video_id
       LEFT JOIN analyses a ON v.id = a.video_id
       WHERE v.is_linked = 1
-        AND v.media_type = 'video'
+        AND v.media_type IN ('video', 'audio')
         AND (t.video_id IS NULL OR a.video_id IS NULL)
     `);
 

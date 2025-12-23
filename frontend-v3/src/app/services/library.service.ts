@@ -240,6 +240,7 @@ export class LibraryService {
       size: video.file_size || video.file_size_bytes,
       uploadDate: video.upload_date ? this.parseLocalDate(video.upload_date) : undefined,
       downloadDate: video.download_date ? this.parseLocalDate(video.download_date) : undefined,
+      addedAt: video.added_at ? this.parseLocalDate(video.added_at) : undefined,
       lastProcessedDate: video.last_processed_date ? this.parseLocalDate(video.last_processed_date) : undefined,
       thumbnailUrl: video.id ? `${this.API_BASE}/database/videos/${video.id}/thumbnail` : undefined,
       // Additional fields for context menu actions
@@ -328,18 +329,24 @@ export class LibraryService {
         continue;
       }
 
-      // Use lastProcessedDate for "New" section, fall back to downloadDate
-      const activityDate = video.lastProcessedDate || video.downloadDate;
-      const videoDate = new Date(activityDate);
-      const hoursDiff = (now.getTime() - videoDate.getTime()) / (1000 * 60 * 60);
-
-      // Check if within past 24 hours (based on recent activity)
-      // Exclude if:
-      // 1. Video is in the processing queue
-      // 2. Video hasn't completed any tasks yet (no lastProcessedDate)
+      // Check if video should be in "New" section based on:
+      // 1. Recently processed (lastProcessedDate within 24 hours), OR
+      // 2. Recently added to library (addedAt within 24 hours)
       const isInProcessingQueue = processingQueueIds.includes(video.id);
-      const hasCompletedTasks = !!video.lastProcessedDate;
-      const isInNewSection = hoursDiff <= 24 && !isInProcessingQueue && hasCompletedTasks;
+
+      // Check if recently processed
+      const processedDate = video.lastProcessedDate ? new Date(video.lastProcessedDate) : null;
+      const processedHoursDiff = processedDate ? (now.getTime() - processedDate.getTime()) / (1000 * 60 * 60) : Infinity;
+      const recentlyProcessed = processedHoursDiff <= 24;
+
+      // Check if recently added to library (addedAt is when video was inserted into database)
+      // This is more accurate than downloadDate for saved links imports
+      const addedDate = video.addedAt ? new Date(video.addedAt) : null;
+      const addedHoursDiff = addedDate ? (now.getTime() - addedDate.getTime()) / (1000 * 60 * 60) : Infinity;
+      const recentlyAdded = addedHoursDiff <= 24;
+
+      // Video is in "New" section if recently processed OR recently added (and not in queue)
+      const isInNewSection = !isInProcessingQueue && (recentlyProcessed || recentlyAdded);
 
       if (isInNewSection) {
         past24Hours.push(video);

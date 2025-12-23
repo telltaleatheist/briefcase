@@ -1,7 +1,5 @@
 import { Component, EventEmitter, Input, Output, signal, ViewChild, ElementRef, HostListener, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PlyrModule } from '@atom-platform/ngx-plyr';
-import Plyr from 'plyr';
 
 export interface PreviewItem {
   id: string;
@@ -13,7 +11,7 @@ export interface PreviewItem {
 @Component({
   selector: 'app-video-preview-modal',
   standalone: true,
-  imports: [CommonModule, PlyrModule],
+  imports: [CommonModule],
   template: `
     @if (visible() && currentItem()) {
       <div class="floating-window"
@@ -44,12 +42,19 @@ export interface PreviewItem {
                 <div class="error-details">{{ currentItem().name }}</div>
               </div>
             } @else if (isVideo()) {
-              <plyr
-                #plyrPlayer
-                [plyrSources]="videoSources()"
-                [plyrOptions]="plyrOptions"
-                (plyrInit)="onPlyrInit($event)"
-              ></plyr>
+              <video
+                #videoPlayer
+                [src]="mediaSrc()"
+                (loadedmetadata)="onVideoLoaded()"
+                (loadeddata)="onVideoLoadedData()"
+                (canplay)="onCanPlay()"
+                (canplaythrough)="onCanPlayThrough()"
+                (playing)="onPlaying()"
+                (timeupdate)="onTimeUpdate()"
+                (ended)="onVideoEnded()"
+                (error)="onMediaError($event)"
+                playsinline
+              ></video>
             } @else {
               <img
                 #imageElement
@@ -75,7 +80,9 @@ export interface PreviewItem {
 
           @if (isVideo()) {
             <div class="controls">
-              <div class="progress-container" (click)="seek($event)" title="Click to seek">
+              <div class="progress-container"
+                   (mousedown)="onProgressMouseDown($event)"
+                   title="Click or drag to seek">
                 <div class="progress-bar">
                   <div class="progress-fill" [style.width.%]="progress()"></div>
                   <div class="progress-handle" [style.left.%]="progress()"></div>
@@ -206,27 +213,8 @@ export interface PreviewItem {
         object-fit: contain;
       }
 
-      // Plyr player styling
-      plyr {
-        width: 100%;
-        height: 100%;
-
-        .plyr {
-          width: 100%;
-          height: 100%;
-        }
-
-        .plyr__video-wrapper {
-          height: 100%;
-        }
-
-        video {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-      }
     }
+
 
     .error-overlay {
       @include flex-center;
@@ -456,6 +444,7 @@ export interface PreviewItem {
   `]
 })
 export class VideoPreviewModalComponent implements AfterViewChecked {
+  @ViewChild('videoPlayer') videoPlayer!: ElementRef<HTMLVideoElement>;
   @ViewChild('imageElement') imageElement!: ElementRef<HTMLImageElement>;
   @ViewChild('floatingWindow') floatingWindow!: ElementRef<HTMLDivElement>;
 
@@ -484,8 +473,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       });
     } else if (!value) {
       // Modal closing - pause video if playing
-      if (this.plyrPlayer) {
-        this.plyrPlayer.pause();
+      if (this.videoPlayer?.nativeElement) {
+        this.videoPlayer.nativeElement.pause();
       }
       this.isPlaying.set(false);
     }
@@ -547,75 +536,12 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   mediaError = signal<string | null>(null); // Track media loading errors
   hasError = signal(false); // Track if current media has an error
 
-  // Plyr configuration
-  plyrOptions: Plyr.Options = {
-    controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen'],
-    clickToPlay: true,
-    keyboard: { focused: true, global: false },
-    hideControls: true,
-    resetOnEnd: false,
-    ratio: '16:9'
-  };
-
-  private plyrPlayer: Plyr | null = null;
-
-  /**
-   * Video sources for Plyr player
-   */
-  videoSources = (): Plyr.Source[] => {
-    return [{
-      src: this.mediaSrc(),
-      type: 'video/mp4'
-    }];
-  };
-
-  /**
-   * Initialize Plyr player and wire up events
-   */
-  onPlyrInit(player: Plyr): void {
-    this.plyrPlayer = player;
-
-    player.on('play', () => {
-      this.isPlaying.set(true);
-      this.pendingAutoplay = false;
-    });
-
-    player.on('pause', () => {
-      this.isPlaying.set(false);
-    });
-
-    player.on('timeupdate', () => {
-      this.currentTime.set(player.currentTime);
-      const duration = player.duration || 0;
-      if (duration > 0) {
-        this.progress.set((player.currentTime / duration) * 100);
-      }
-    });
-
-    player.on('loadedmetadata', () => {
-      this.duration.set(player.duration);
-      // Attempt autoplay if pending
-      if (this.pendingAutoplay) {
-        this.pendingAutoplay = false;
-        const playPromise = player.play();
-        if (playPromise && typeof playPromise.catch === 'function') {
-          playPromise.catch(() => {
-            // Autoplay may be blocked by browser policy
-          });
-        }
-      }
-    });
-
-    player.on('ended', () => {
-      this.isPlaying.set(false);
-    });
-
-    player.on('error', (event: Plyr.PlyrEvent) => {
-      console.error('Plyr error:', event);
-      this.hasError.set(true);
-      this.mediaError.set('Failed to load video');
-    });
-  }
+  // Progress bar scrubbing state
+  private isScrubbingProgress = false;
+  private scrubProgressContainer: HTMLElement | null = null;
+  private wasPlayingBeforeScrub = false;
+  private scrubAnimationFrame: number | null = null;
+  private pendingSeekPercent: number | null = null;
 
   private isDragging = false;
   private dragOffset = { x: 0, y: 0 };
@@ -723,8 +649,9 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       pendingAutoplay: this.pendingAutoplay
     });
 
-    // Plyr will automatically handle loading when sources change via videoSources()
-    // The onPlyrInit handler will fire when the player is ready
+    // For videos, Angular's [src] binding handles loading automatically
+    // We just need to ensure autoplay happens once the video is ready
+    // No need to call video.load() which can cause race conditions
   }
 
   /**
@@ -959,45 +886,60 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   togglePlay() {
-    if (!this.isVideo() || !this.plyrPlayer) return;
-    this.plyrPlayer.togglePlay();
+    if (!this.isVideo() || !this.videoPlayer?.nativeElement) return;
+
+    const video = this.videoPlayer.nativeElement;
+    if (video.paused) {
+      video.play().then(() => {
+        this.isPlaying.set(true);
+      }).catch(err => {
+        console.error('Failed to play video:', err);
+      });
+    } else {
+      video.pause();
+      this.isPlaying.set(false);
+    }
   }
 
   skipTime(seconds: number) {
-    if (!this.plyrPlayer) return;
-    const duration = this.plyrPlayer.duration || 0;
-    this.plyrPlayer.currentTime = Math.max(0, Math.min(duration, this.plyrPlayer.currentTime + seconds));
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
   }
 
   toggleMute() {
-    if (!this.plyrPlayer) return;
-    this.plyrPlayer.muted = !this.plyrPlayer.muted;
-    this.isMuted.set(this.plyrPlayer.muted);
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.muted = !video.muted;
+    this.isMuted.set(video.muted);
   }
 
   frameStep(direction: number) {
-    if (!this.plyrPlayer) return;
-    this.plyrPlayer.pause();
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.pause();
     this.isPlaying.set(false);
     // Assuming 30fps, 1 frame = 1/30 second
-    this.plyrPlayer.currentTime += (direction / 30);
+    video.currentTime += (direction / 30);
   }
 
   setVolume(value: number) {
-    if (!this.plyrPlayer) return;
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
     const clampedValue = Math.max(0, Math.min(1, value));
-    this.plyrPlayer.volume = clampedValue;
+    video.volume = clampedValue;
     this.volume.set(clampedValue);
     // If setting volume above 0, unmute
-    if (clampedValue > 0 && this.plyrPlayer.muted) {
-      this.plyrPlayer.muted = false;
+    if (clampedValue > 0 && video.muted) {
+      video.muted = false;
       this.isMuted.set(false);
     }
   }
 
   setPlaybackRate(rate: number) {
-    if (!this.plyrPlayer) return;
-    this.plyrPlayer.speed = rate;
+    if (!this.videoPlayer?.nativeElement) return;
+    const video = this.videoPlayer.nativeElement;
+    video.playbackRate = rate;
     this.playbackRate.set(rate);
   }
 
@@ -1005,6 +947,186 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   onImageLoaded() {
     // Image loaded successfully - nothing special to do
     this.pendingAutoplay = false;
+  }
+
+  onVideoLoaded() {
+    if (this.videoPlayer?.nativeElement) {
+      const video = this.videoPlayer.nativeElement;
+      this.duration.set(video.duration);
+
+      // Initialize video properties from signals
+      video.volume = this.volume();
+      video.muted = this.isMuted();
+      video.playbackRate = this.playbackRate();
+
+      // Try autoplay as soon as metadata is loaded
+      this.tryAutoplay();
+    }
+  }
+
+  onVideoLoadedData() {
+    this.tryAutoplay();
+  }
+
+  onCanPlay() {
+    this.tryAutoplay();
+  }
+
+  onCanPlayThrough() {
+    // This fires when enough data is buffered to play to the end
+    this.tryAutoplay();
+  }
+
+  private tryAutoplay() {
+    if (!this.pendingAutoplay || !this.isVideo() || !this.videoPlayer?.nativeElement) {
+      return;
+    }
+
+    const video = this.videoPlayer.nativeElement;
+
+    // Check if video is ready enough to play
+    // readyState: 0=HAVE_NOTHING, 1=HAVE_METADATA, 2=HAVE_CURRENT_DATA, 3=HAVE_FUTURE_DATA, 4=HAVE_ENOUGH_DATA
+    if (video.readyState < 2) {
+      console.log('Video not ready yet, readyState:', video.readyState);
+      return; // Wait for more data
+    }
+
+    console.log('Attempting autoplay, readyState:', video.readyState);
+
+    // Electron has no autoplay restrictions - just play
+    video.play().then(() => {
+      console.log('Autoplay succeeded');
+      this.pendingAutoplay = false;
+      this.isPlaying.set(true);
+    }).catch(err => {
+      console.error('Autoplay failed:', err);
+      // Don't clear pendingAutoplay on failure - we might retry
+    });
+  }
+
+  onPlaying() {
+    this.isPlaying.set(true);
+    this.pendingAutoplay = false;
+  }
+
+  onTimeUpdate() {
+    if (this.videoPlayer?.nativeElement) {
+      const video = this.videoPlayer.nativeElement;
+      this.currentTime.set(video.currentTime);
+
+      const duration = video.duration;
+      if (duration && !isNaN(duration) && duration > 0) {
+        this.progress.set((video.currentTime / duration) * 100);
+      } else {
+        this.progress.set(0);
+      }
+    }
+  }
+
+  onVideoEnded() {
+    this.isPlaying.set(false);
+  }
+
+  /**
+   * Handle progress bar mousedown - start scrubbing with drag support
+   */
+  onProgressMouseDown(event: MouseEvent) {
+    if (event.button !== 0) return; // Only left click
+    if (!this.videoPlayer?.nativeElement) return;
+
+    event.preventDefault();
+
+    const video = this.videoPlayer.nativeElement;
+    const container = event.currentTarget as HTMLElement;
+
+    this.isScrubbingProgress = true;
+    this.scrubProgressContainer = container;
+    this.wasPlayingBeforeScrub = !video.paused;
+
+    // Pause while scrubbing for smoother experience
+    if (this.wasPlayingBeforeScrub) {
+      video.pause();
+    }
+
+    // Seek to clicked position immediately
+    this.seekToPositionImmediate(event.clientX, container);
+
+    // Set up document listeners for drag
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isScrubbingProgress || !this.scrubProgressContainer) return;
+      this.queueSeek(e.clientX, this.scrubProgressContainer);
+    };
+
+    const onMouseUp = () => {
+      this.isScrubbingProgress = false;
+      this.scrubProgressContainer = null;
+
+      // Cancel any pending animation frame
+      if (this.scrubAnimationFrame) {
+        cancelAnimationFrame(this.scrubAnimationFrame);
+        this.scrubAnimationFrame = null;
+      }
+
+      // Apply any pending seek
+      if (this.pendingSeekPercent !== null && this.videoPlayer?.nativeElement) {
+        const video = this.videoPlayer.nativeElement;
+        video.currentTime = this.pendingSeekPercent * video.duration;
+        this.pendingSeekPercent = null;
+      }
+
+      // Resume playback if was playing before scrub
+      if (this.wasPlayingBeforeScrub && this.videoPlayer?.nativeElement) {
+        this.videoPlayer.nativeElement.play().catch(() => {});
+        this.isPlaying.set(true);
+      }
+
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  /**
+   * Queue a seek operation using requestAnimationFrame for smooth scrubbing
+   */
+  private queueSeek(clientX: number, container: HTMLElement) {
+    const rect = container.getBoundingClientRect();
+    const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+
+    // Store the pending seek percent
+    this.pendingSeekPercent = percent;
+
+    // Update the visual progress immediately for responsiveness
+    this.progress.set(percent * 100);
+
+    // Only schedule a new animation frame if one isn't already pending
+    if (!this.scrubAnimationFrame) {
+      this.scrubAnimationFrame = requestAnimationFrame(() => {
+        this.scrubAnimationFrame = null;
+
+        if (this.pendingSeekPercent !== null && this.videoPlayer?.nativeElement) {
+          const video = this.videoPlayer.nativeElement;
+          video.currentTime = this.pendingSeekPercent * video.duration;
+          this.currentTime.set(video.currentTime);
+        }
+      });
+    }
+  }
+
+  /**
+   * Seek immediately (for initial click)
+   */
+  private seekToPositionImmediate(clientX: number, container: HTMLElement) {
+    if (!this.videoPlayer?.nativeElement) return;
+
+    const video = this.videoPlayer.nativeElement;
+    const rect = container.getBoundingClientRect();
+    const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    video.currentTime = percent * video.duration;
+    this.progress.set(percent * 100);
+    this.currentTime.set(video.currentTime);
   }
 
   onMediaError(event: Event) {
@@ -1061,15 +1183,6 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     this.mediaError.set(errorMessage);
   }
 
-  seek(event: MouseEvent) {
-    if (!this.isVideo() || !this.plyrPlayer) return;
-
-    const container = event.currentTarget as HTMLElement;
-    const rect = container.getBoundingClientRect();
-    const percent = (event.clientX - rect.left) / rect.width;
-    this.plyrPlayer.currentTime = percent * (this.plyrPlayer.duration || 0);
-  }
-
   formatTime(seconds: number): string {
     if (!seconds || isNaN(seconds)) return '00:00:00';
 
@@ -1080,8 +1193,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   close() {
-    if (this.plyrPlayer) {
-      this.plyrPlayer.pause();
+    if (this.videoPlayer?.nativeElement) {
+      this.videoPlayer.nativeElement.pause();
     }
     this.visible.set(false);
     this.isPlaying.set(false);
