@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 export interface LibraryFilters {
   searchQuery: string;
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
+  mediaType: 'all' | 'video' | 'audio' | 'image' | 'document' | 'webpage';
   hasTranscript: boolean | null;
   hasAnalysis: boolean | null;
   hasSuggestions: boolean | null;
@@ -27,6 +28,7 @@ export class LibrarySearchFiltersComponent {
   filters: LibraryFilters = {
     searchQuery: '',
     dateRange: 'all',
+    mediaType: 'all',
     hasTranscript: null,
     hasAnalysis: null,
     hasSuggestions: null,
@@ -55,6 +57,7 @@ export class LibrarySearchFiltersComponent {
     this.filters = {
       searchQuery: '',
       dateRange: 'all',
+      mediaType: 'all',
       hasTranscript: null,
       hasAnalysis: null,
       hasSuggestions: null,

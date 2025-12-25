@@ -265,6 +265,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   configBulkMode = signal(false);
   configItemSource = signal<'url' | 'library'>('url');
   configExistingTasks = signal<QueueItemTask[]>([]);
+  configHasTranscript = signal(false); // Whether the video(s) already have transcript
 
   // Pending videos waiting for config (not yet added to queue)
   pendingConfigVideos = signal<VideoItem[]>([]);
@@ -1296,10 +1297,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       config: t.options
     }));
 
+    // Check if items have transcripts (for library items)
+    // URL items don't have transcripts yet
+    // For library items, look up the video data
+    let hasTranscript = false;
+    if (!firstItem.url && firstItem.videoId) {
+      const allVideos = this.videoWeeks().flatMap(week => week.videos);
+      const videosInQueue = queueItems
+        .filter(q => q.videoId)
+        .map(q => allVideos.find(v => v.id === q.videoId))
+        .filter((v): v is VideoItem => v !== undefined);
+
+      // Only true if ALL videos have transcripts
+      hasTranscript = videosInQueue.length > 0 && videosInQueue.every(v => v.hasTranscript === true);
+    }
+
     this.configItemIds.set(queueItems.map(q => q.id));
     this.configBulkMode.set(queueItems.length > 1);
     this.configItemSource.set(firstItem.url ? 'url' : 'library');
     this.configExistingTasks.set(existingTasks);
+    this.configHasTranscript.set(hasTranscript);
     this.configModalOpen.set(true);
   }
 
@@ -1633,6 +1650,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         videos: week.videos.filter(video =>
           wantsAnalysis ? video.hasAnalysis : !video.hasAnalysis
         )
+      })).filter(week => week.videos.length > 0);
+    }
+
+    // Apply mediaType filter
+    if (this.currentFilters.mediaType && this.currentFilters.mediaType !== 'all') {
+      const targetType = this.currentFilters.mediaType;
+      weeks = weeks.map(week => ({
+        weekLabel: week.weekLabel,
+        videos: week.videos.filter(video => {
+          const videoMediaType = video.mediaType?.toLowerCase() || 'video';
+          return videoMediaType === targetType;
+        })
       })).filter(week => week.videos.length > 0);
     }
 
@@ -2017,13 +2046,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       this.cascadeComponent.clearSelection();
     }
 
+    // Check if all videos already have transcripts
+    // For bulk mode, only set hasTranscript to true if ALL videos have transcripts
+    const allHaveTranscripts = videoOnlyItems.every(v => v.hasTranscript === true);
+
     // Open config modal with default tasks (transcribe + ai-analyze)
+    // Note: transcribe will be auto-added on save if AI analysis is selected but no transcript exists
     const defaultTasks: QueueItemTask[] = [
       {
         type: 'transcribe',
         status: 'pending',
         progress: 0,
-        config: { model: 'base' }
+        config: { model: 'base', language: 'en' }
       },
       {
         type: 'ai-analyze',
@@ -2037,6 +2071,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.configBulkMode.set(videos.length > 1);
     this.configItemSource.set('library');
     this.configExistingTasks.set(defaultTasks);
+    this.configHasTranscript.set(allHaveTranscripts);
     this.configModalOpen.set(true);
   }
 
@@ -2209,7 +2244,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }));
 
     this.previewItems.set(previewItems);
-    this.previewSelectedId.set(video.id);
+    // Use videoId for completed queue items (which have prefixed display IDs like "completed-xxx")
+    // but store the actual video ID for lookup
+    this.previewSelectedId.set(video.videoId || video.id);
     this.previewModalOpen.set(true);
   }
 
@@ -2674,10 +2711,25 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       config: t.options
     })) || [];
 
+    // Check if items have transcripts (for library items)
+    // URL items don't have transcripts yet
+    let hasTranscript = false;
+    if (!firstItem.url && firstItem.videoId) {
+      const allVideos = this.videoWeeks().flatMap(week => week.videos);
+      const videosInStaging = stagingItems
+        .filter(item => item.videoId)
+        .map(item => allVideos.find(v => v.id === item.videoId))
+        .filter((v): v is VideoItem => v !== undefined);
+
+      // Only true if ALL videos have transcripts
+      hasTranscript = videosInStaging.length > 0 && videosInStaging.every(v => v.hasTranscript === true);
+    }
+
     this.configItemIds.set(stagingItems.map(item => item.id));
     this.configBulkMode.set(stagingItems.length > 1);
     this.configItemSource.set(firstItem.url ? 'url' : 'library');
     this.configExistingTasks.set(existingTasks);
+    this.configHasTranscript.set(hasTranscript);
     this.configModalOpen.set(true);
   }
 

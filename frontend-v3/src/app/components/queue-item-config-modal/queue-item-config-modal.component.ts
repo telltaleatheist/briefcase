@@ -44,6 +44,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   existingTasks = input<QueueItemTask[]>([]);
   bulkMode = input<boolean>(false);
   itemCount = input<number>(0);
+  hasTranscript = input<boolean>(false); // Whether video already has a transcript
 
   // Outputs
   close = output<void>();
@@ -412,10 +413,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
 
     if (currentTasks.has(task.type)) {
       currentTasks.delete(task.type);
-      // If removing transcribe, also remove ai-analyze since it depends on transcribe
-      if (task.type === 'transcribe' && currentTasks.has('ai-analyze')) {
-        currentTasks.delete('ai-analyze');
-      }
+      // No dependency enforcement - allow independent selection
     } else {
       currentTasks.set(task.type, {
         type: task.type,
@@ -423,15 +421,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
         progress: 0,
         config: this.getDefaultConfig(task.type)
       });
-      // If adding ai-analyze, also add transcribe if not already selected
-      if (task.type === 'ai-analyze' && !currentTasks.has('transcribe')) {
-        currentTasks.set('transcribe', {
-          type: 'transcribe',
-          status: 'pending',
-          progress: 0,
-          config: this.getDefaultConfig('transcribe')
-        });
-      }
+      // No dependency enforcement - allow independent selection
     }
 
     this.tasks.set(currentTasks);
@@ -457,7 +447,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
       case 'download-import':
         return { quality: 'best', format: 'mp4' } as DownloadImportConfig;
       case 'transcribe':
-        return { model: 'base', translate: false } as TranscribeConfig;
+        return { model: 'base', language: 'en', translate: false } as TranscribeConfig;
       case 'ai-analyze':
         return {
           aiModel: this.defaultAIModel,
@@ -494,6 +484,19 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
 
   onSave() {
     const currentTasks = new Map(this.tasks());
+
+    // If AI analysis is selected but there's no transcript and transcribe wasn't selected,
+    // automatically add transcribe task
+    if (currentTasks.has('ai-analyze') && !currentTasks.has('transcribe') && !this.hasTranscript()) {
+      currentTasks.set('transcribe', {
+        type: 'transcribe',
+        status: 'pending',
+        progress: 0,
+        config: this.getDefaultConfig('transcribe')
+      });
+      console.log('[onSave] Auto-added transcribe task for AI analysis (no existing transcript)');
+    }
+
     const tasksArray = Array.from(currentTasks.values());
     console.log('[onSave] Emitting tasks:', JSON.stringify(tasksArray, null, 2));
     if (this.bulkMode()) {

@@ -47,6 +47,7 @@ export interface PreviewItem {
                 [src]="mediaSrc()"
                 (loadedmetadata)="onVideoLoaded()"
                 (loadeddata)="onVideoLoadedData()"
+                (durationchange)="onDurationChange()"
                 (canplay)="onCanPlay()"
                 (canplaythrough)="onCanPlayThrough()"
                 (playing)="onPlaying()"
@@ -952,7 +953,11 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   onVideoLoaded() {
     if (this.videoPlayer?.nativeElement) {
       const video = this.videoPlayer.nativeElement;
-      this.duration.set(video.duration);
+
+      // Only set duration if it's a valid number
+      if (!isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
+        this.duration.set(video.duration);
+      }
 
       // Initialize video properties from signals
       video.volume = this.volume();
@@ -961,6 +966,16 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
 
       // Try autoplay as soon as metadata is loaded
       this.tryAutoplay();
+    }
+  }
+
+  onDurationChange() {
+    if (this.videoPlayer?.nativeElement) {
+      const video = this.videoPlayer.nativeElement;
+      // Duration may become available after initial metadata load (common with streaming)
+      if (!isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
+        this.duration.set(video.duration);
+      }
     }
   }
 

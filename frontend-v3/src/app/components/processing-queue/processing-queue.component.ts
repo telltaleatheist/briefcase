@@ -47,6 +47,7 @@ export class ProcessingQueueComponent {
   configModalSource = signal<'url' | 'library'>('url');
   configModalTasks = signal<QueueItemTask[]>([]);
   configModalBulkMode = signal(false);
+  configModalHasTranscript = signal(false);
 
   onUrlInputPaste(event: ClipboardEvent): void {
     event.preventDefault();
@@ -135,6 +136,9 @@ export class ProcessingQueueComponent {
     this.configModalSource.set(item.source);
     this.configModalTasks.set([...item.tasks]);
     this.configModalBulkMode.set(false);
+    // Check if video has transcript (library items only)
+    const hasTranscript = item.source === 'library' && item.video?.hasTranscript === true;
+    this.configModalHasTranscript.set(hasTranscript);
     this.configModalOpen.set(true);
   }
 
@@ -147,10 +151,18 @@ export class ProcessingQueueComponent {
     // Library items have more task options available
     const source = hasLibraryItems ? 'library' : 'url';
 
+    // For bulk mode, only set hasTranscript if ALL library items have transcripts
+    // URL items don't have transcripts yet
+    const libraryItems = this.items.filter(item => item.source === 'library' && item.video);
+    const allHaveTranscripts = libraryItems.length > 0 &&
+      libraryItems.every(item => item.video?.hasTranscript === true) &&
+      !hasUrlItems; // If any URL items, they don't have transcripts
+
     this.configModalItemId.set(null);
     this.configModalSource.set(source);
     this.configModalTasks.set([]);
     this.configModalBulkMode.set(true);
+    this.configModalHasTranscript.set(allHaveTranscripts);
     this.configModalOpen.set(true);
   }
 

@@ -167,6 +167,7 @@
   [existingTasks]="configModalTasks()"
   [bulkMode]="configModalBulkMode()"
   [itemCount]="items.length"
+  [hasTranscript]="configModalHasTranscript()"
   (close)="closeConfigModal()"
   (save)="saveConfigModal($event)"
   (bulkSave)="saveBulkConfigModal($event)"

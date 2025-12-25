@@ -46,6 +46,23 @@
         </select>
       </div>
 
+      <!-- Media Type -->
+      <div class="filter-group">
+        <label>File Type</label>
+        <select
+          [(ngModel)]="filters.mediaType"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option value="all">All Types</option>
+          <option value="video">Video</option>
+          <option value="audio">Audio</option>
+          <option value="image">Image</option>
+          <option value="document">Document (PDF)</option>
+          <option value="webpage">Webpage (MHTML)</option>
+        </select>
+      </div>
+
       <!-- Has Transcript -->
       <div class="filter-group">
         <label>Transcript</label>

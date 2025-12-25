@@ -1,4 +1,4 @@
-<div class="cascade" (click)="clearSelection()">
+<div class="cascade" (click)="clearSelection()" (mousedown)="onDragSelectStart($event)">
   <!-- Empty State (outside virtual scroll) -->
   @if (virtualItems().length === 0) {
     <div class="library-content empty">
@@ -37,6 +37,7 @@
           <div class="video-item-wrapper">
             <div
               class="video-item"
+              [attr.data-item-id]="item.itemId"
               [class.selected]="isSelected(item.itemId)"
               [class.highlighted]="isHighlighted(item.itemId)"
               [class.ai-processing]="isProcessingAi(item.video)"
@@ -398,5 +399,16 @@
         </div>
       </div>
     </div>
+  }
+
+  <!-- Drag Selection Rectangle -->
+  @if (isDragSelecting() && selectionRect(); as rect) {
+    <div
+      class="selection-rectangle"
+      [style.left.px]="rect.left"
+      [style.top.px]="rect.top"
+      [style.width.px]="rect.width"
+      [style.height.px]="rect.height"
+    ></div>
   }
 </div>

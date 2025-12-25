@@ -215,6 +215,7 @@
   [bulkMode]="configBulkMode()"
   [existingTasks]="configExistingTasks()"
   [itemCount]="configItemIds().length"
+  [hasTranscript]="configHasTranscript()"
   (close)="closeConfigModal()"
   (save)="onConfigSave($event)"
   (bulkSave)="onConfigSave($event)"

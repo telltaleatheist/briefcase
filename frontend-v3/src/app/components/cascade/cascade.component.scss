@@ -1552,3 +1552,14 @@ cdk-virtual-scroll-viewport.library-content {
     }
   }
 }
+
+
+// Selection Rectangle (Marquee) for drag-to-select
+.selection-rectangle {
+  position: absolute;
+  border: 2px solid $primary-orange;
+  background: rgba(255, 107, 53, 0.15);
+  pointer-events: none;
+  z-index: 1000;
+  border-radius: $radius-sm;
+}

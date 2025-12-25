@@ -129,6 +129,8 @@ export class CascadeComponent {
   videoWeeks = signal<ExpandableVideoWeek[]>([]);
   selectedVideos = signal<Set<string>>(new Set());
   highlightedItemId = signal<string | null>(null);
+  // Selection anchor for range selections (the last clicked item that starts a potential range)
+  selectionAnchorId = signal<string | null>(null);
   contextMenuVisible = signal(false);
   contextMenuPosition = signal<ContextMenuPosition>({ x: 0, y: 0 });
   contextMenuVideo = signal<VideoItem | null>(null);
@@ -148,7 +150,27 @@ export class CascadeComponent {
   deletingVideos = signal<VideoItem[]>([]);
   selectedDeleteMode = signal<DeleteMode | null>(null);
 
+  // Drag selection (marquee) state
+  isDragSelecting = signal(false);
+  dragStartPoint = signal<{ x: number; y: number } | null>(null);
+  dragCurrentPoint = signal<{ x: number; y: number } | null>(null);
+  private dragSelectionInitialSelected = new Set<string>();
+
   selectedCount = computed(() => this.selectedVideos().size);
+
+  // Computed selection rectangle style
+  selectionRect = computed(() => {
+    const start = this.dragStartPoint();
+    const current = this.dragCurrentPoint();
+    if (!start || !current) return null;
+
+    const left = Math.min(start.x, current.x);
+    const top = Math.min(start.y, current.y);
+    const width = Math.abs(current.x - start.x);
+    const height = Math.abs(current.y - start.y);
+
+    return { left, top, width, height };
+  });
 
   /**
    * Check if item is highlighted (keyboard navigation cursor)
@@ -291,6 +313,11 @@ export class CascadeComponent {
     const isStaging = video ? this.isStagingItem(video) : false;
     const isProcessing = video ? this.isProcessingItem(video) : false;
 
+    // Check if any selected videos have suggestions (for multi-select discard)
+    const selectedVideos = this.getSelectedVideos();
+    const selectedWithSuggestions = selectedVideos.filter(v => v.suggestedTitle && v.suggestedTitle !== v.name);
+    const hasAnySuggestions = selectedWithSuggestions.length > 0;
+
     const actions: VideoContextMenuAction[] = [];
     const countSuffix = count > 1 ? ` (${count})` : '';
 
@@ -432,6 +459,13 @@ export class CascadeComponent {
     // Another divider
     actions.push({ label: '', icon: '', action: '', divider: true });
 
+    // Discard Suggestions (for videos with AI suggestions)
+    if (hasAnySuggestions) {
+      const suggestionCount = selectedWithSuggestions.length;
+      const suggestionSuffix = suggestionCount > 1 ? ` (${suggestionCount})` : '';
+      actions.push({ label: `Discard Suggestions${suggestionSuffix}`, icon: '✨', action: 'discardSuggestions' });
+    }
+
     // Processing actions
     actions.push({ label: `Run Analysis${countSuffix}`, icon: '🧠', action: 'analyze' });
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
@@ -460,52 +494,77 @@ export class CascadeComponent {
     event.stopPropagation();
     this.closeContextMenu();
 
-    if (event.ctrlKey || event.metaKey) {
-      // Multi-select
+    const hasModifier = event.ctrlKey || event.metaKey;
+    const hasShift = event.shiftKey;
+
+    if (hasModifier && hasShift) {
+      // Cmd/Ctrl+Shift+click: Add range to existing selection
+      // Range from anchor to clicked item, keeping existing selection
+      this.rangeSelect(itemId, true);
+      // Update anchor for next potential range
+      this.selectionAnchorId.set(itemId);
+    } else if (hasModifier) {
+      // Cmd/Ctrl+click: Toggle single item in selection
       const selected = new Set(this.selectedVideos());
-      if (selected.has(itemId)) {
+      const isDeselecting = selected.has(itemId);
+
+      if (isDeselecting) {
         selected.delete(itemId);
-        // Clear highlight if deselecting the highlighted item
-        if (this.highlightedItemId() === itemId) {
-          this.highlightedItemId.set(null);
-        }
       } else {
         selected.add(itemId);
       }
       this.selectedVideos.set(selected);
-    } else if (event.shiftKey && this.selectedVideos().size > 0) {
-      // Range select (optional enhancement)
-      this.rangeSelect(itemId);
+
+      // Only update anchor and highlight when adding, not when removing
+      if (!isDeselecting) {
+        this.selectionAnchorId.set(itemId);
+        this.highlightedItemId.set(itemId);
+      }
+    } else if (hasShift && (this.selectionAnchorId() || this.selectedVideos().size > 0)) {
+      // Shift+click: Range select from anchor, replace selection
+      this.rangeSelect(itemId, false);
     } else {
-      // Single select
+      // Single click: Select only this item
       this.selectedVideos.set(new Set([itemId]));
-      // Set highlighted to clicked item
       this.highlightedItemId.set(itemId);
+      // Set anchor for potential range select
+      this.selectionAnchorId.set(itemId);
     }
   }
 
-  rangeSelect(endItemId: string) {
+  /**
+   * Select a range of items from the anchor to the target
+   * @param endItemId The item to extend selection to
+   * @param addToExisting If true, add to existing selection; if false, replace selection
+   */
+  rangeSelect(endItemId: string, addToExisting: boolean = false) {
     // Get all items from virtual list
     const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
 
-    // Find the first selected item and the clicked item
-    const selectedArray = Array.from(this.selectedVideos());
-    const firstSelectedId = selectedArray[0];
-    const firstIndex = allItems.findIndex(item => item.itemId === firstSelectedId);
+    // Use anchor if set, otherwise use first selected item
+    const anchorId = this.selectionAnchorId();
+    const startId = anchorId || Array.from(this.selectedVideos())[0];
+
+    if (!startId) return;
+
+    const startIndex = allItems.findIndex(item => item.itemId === startId);
     const endIndex = allItems.findIndex(item => item.itemId === endItemId);
 
-    if (firstIndex === -1 || endIndex === -1) return;
+    if (startIndex === -1 || endIndex === -1) return;
 
-    // Select all items in range
-    const start = Math.min(firstIndex, endIndex);
-    const end = Math.max(firstIndex, endIndex);
-    const selected = new Set<string>();
+    // Calculate range
+    const rangeStart = Math.min(startIndex, endIndex);
+    const rangeEnd = Math.max(startIndex, endIndex);
 
-    for (let i = start; i <= end; i++) {
+    // Build new selection
+    const selected = addToExisting ? new Set(this.selectedVideos()) : new Set<string>();
+
+    for (let i = rangeStart; i <= rangeEnd; i++) {
       selected.add(allItems[i].itemId);
     }
 
     this.selectedVideos.set(selected);
+    this.highlightedItemId.set(endItemId);
   }
 
   isSelected(itemId: string): boolean {
@@ -607,6 +666,11 @@ export class CascadeComponent {
 
       case 'editSuggestedTitle':
         this.openSuggestedTitleModal(video);
+        break;
+
+      case 'discardSuggestions':
+        // Discard suggestions for all selected videos that have them
+        this.discardSuggestionsForVideos(videos);
         break;
 
       case 'addToTab':
@@ -851,6 +915,78 @@ export class CascadeComponent {
   }
 
   /**
+   * Discard suggested titles for multiple videos
+   */
+  discardSuggestionsForVideos(videos: VideoItem[]) {
+    // Filter to only videos with suggestions
+    const videosWithSuggestions = videos.filter(v => v.suggestedTitle && v.suggestedTitle !== v.name);
+
+    if (videosWithSuggestions.length === 0) return;
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Track video IDs to update local state after all requests complete
+    const videoIdsToUpdate = new Set<string>();
+
+    videosWithSuggestions.forEach(video => {
+      this.libraryService.clearSuggestedTitle(video.id).subscribe({
+        next: (response: any) => {
+          if (response.success) {
+            videoIdsToUpdate.add(video.id);
+            successCount++;
+          } else {
+            errorCount++;
+          }
+
+          // Check if all requests are done
+          if (successCount + errorCount === videosWithSuggestions.length) {
+            this.finishDiscardSuggestions(videoIdsToUpdate, successCount, errorCount);
+          }
+        },
+        error: () => {
+          errorCount++;
+
+          // Check if all requests are done
+          if (successCount + errorCount === videosWithSuggestions.length) {
+            this.finishDiscardSuggestions(videoIdsToUpdate, successCount, errorCount);
+          }
+        }
+      });
+    });
+  }
+
+  private finishDiscardSuggestions(videoIds: Set<string>, successCount: number, errorCount: number) {
+    if (videoIds.size > 0) {
+      // Update local state - clear suggested titles
+      const updatedWeeks = this.videoWeeks().map(week => ({
+        ...week,
+        videos: week.videos.map(v =>
+          videoIds.has(v.id)
+            ? { ...v, suggestedTitle: undefined }
+            : v
+        )
+      }));
+      this.videoWeeks.set(updatedWeeks);
+    }
+
+    // Show notification
+    if (errorCount === 0) {
+      this.notificationService.success(
+        'Suggestions Discarded',
+        `Discarded ${successCount} AI suggestion${successCount > 1 ? 's' : ''}`
+      );
+    } else if (successCount > 0) {
+      this.notificationService.success(
+        'Partially Discarded',
+        `Discarded ${successCount} suggestion${successCount > 1 ? 's' : ''}, ${errorCount} failed`
+      );
+    } else {
+      this.notificationService.error('Discard Failed', 'Failed to discard suggestions');
+    }
+  }
+
+  /**
    * Handle inline delete button click
    */
   onDeleteClick(video: VideoItem, event: Event) {
@@ -981,6 +1117,116 @@ export class CascadeComponent {
       }
       return;
     }
+
+    // Cmd+A / Ctrl+A to select all
+    if (event.key === 'a' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      this.handleSelectAll();
+      return;
+    }
+  }
+
+  // Track if last select-all was for a section (to know if next should be all)
+  private lastSelectAllWasSection = false;
+
+  /**
+   * Handle Cmd+A / Ctrl+A select all
+   * First press: select all in current section(s)
+   * Second press: select all in library
+   */
+  private handleSelectAll(): void {
+    const allItems = this.virtualItems();
+    const videoItems = allItems.filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
+
+    if (videoItems.length === 0) return;
+
+    // Get all video itemIds for "select all"
+    const allVideoIds = new Set(videoItems.map(item => item.itemId));
+
+    // Check if all videos are already selected (then this is already "select all")
+    const currentSelection = this.selectedVideos();
+    const allSelected = allVideoIds.size === currentSelection.size &&
+      [...allVideoIds].every(id => currentSelection.has(id));
+
+    if (allSelected) {
+      // Already have everything selected, nothing more to do
+      return;
+    }
+
+    // Check if we should select all (second press) or select section (first press)
+    if (this.lastSelectAllWasSection && currentSelection.size > 0) {
+      // Second press - select all videos
+      this.selectedVideos.set(allVideoIds);
+      this.lastSelectAllWasSection = false;
+      return;
+    }
+
+    // First press - select section
+    let targetWeekLabels: Set<string>;
+
+    if (currentSelection.size > 0) {
+      // Get week labels of currently selected videos
+      targetWeekLabels = new Set<string>();
+      for (const item of videoItems) {
+        if (currentSelection.has(item.itemId)) {
+          targetWeekLabels.add(item.weekLabel);
+        }
+      }
+    } else {
+      // No selection - find section at top of viewport
+      targetWeekLabels = new Set<string>();
+      const topWeekLabel = this.getWeekLabelAtViewportTop();
+      if (topWeekLabel) {
+        targetWeekLabels.add(topWeekLabel);
+      }
+    }
+
+    // Select all videos in target sections
+    if (targetWeekLabels.size > 0) {
+      const sectionSelection = new Set<string>();
+      for (const item of videoItems) {
+        if (targetWeekLabels.has(item.weekLabel)) {
+          sectionSelection.add(item.itemId);
+        }
+      }
+      this.selectedVideos.set(sectionSelection);
+      this.lastSelectAllWasSection = true;
+    }
+  }
+
+  /**
+   * Get the week label of the section at the top of the viewport
+   */
+  private getWeekLabelAtViewportTop(): string | null {
+    if (!this.viewport) return null;
+
+    const scrollOffset = this.viewport.measureScrollOffset('top');
+    const itemSize = 56;
+    const topIndex = Math.floor(scrollOffset / itemSize);
+
+    const allItems = this.virtualItems();
+    if (topIndex >= allItems.length) return null;
+
+    // Find the week label for the item at/near the top
+    // Walk backwards from topIndex to find the most recent header
+    for (let i = Math.min(topIndex, allItems.length - 1); i >= 0; i--) {
+      const item = allItems[i];
+      if (item.type === 'header') {
+        return item.week.weekLabel;
+      }
+      if (item.type === 'video') {
+        return item.weekLabel;
+      }
+    }
+
+    // Fallback: use first video's week label
+    for (const item of allItems) {
+      if (item.type === 'video') {
+        return item.weekLabel;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -1132,9 +1378,260 @@ export class CascadeComponent {
   }
 
   clearSelection() {
+    // Don't clear if we just finished a drag selection
+    if (this.justFinishedDrag) {
+      return;
+    }
     this.selectedVideos.set(new Set());
     this.highlightedItemId.set(null);
+    this.selectionAnchorId.set(null);
+    this.lastSelectAllWasSection = false;
     this.closeContextMenu();
+  }
+
+  // ========================================
+  // Drag Selection (Marquee) Methods
+  // ========================================
+
+  private dragMinDistance = 5; // Minimum pixels to move before showing selection rectangle
+  private dragHasMoved = false;
+  private dragStartClientX = 0;
+  private dragStartClientY = 0;
+  private justFinishedDrag = false; // Prevent click after drag
+  private autoScrollInterval: ReturnType<typeof setInterval> | null = null;
+  private autoScrollSpeed = 0; // Pixels per frame (negative = up, positive = down)
+  private readonly AUTO_SCROLL_ZONE = 50; // Pixels from edge to trigger auto-scroll
+  private readonly AUTO_SCROLL_MAX_SPEED = 15; // Max pixels per frame
+  // Track selection bounds in absolute list coordinates for virtual scroll compatibility
+  private dragMinY = 0; // Minimum Y in list-space
+  private dragMaxY = 0; // Maximum Y in list-space
+
+  /**
+   * Start drag selection on mousedown
+   */
+  onDragSelectStart(event: MouseEvent): void {
+    // Only start drag on left click
+    if (event.button !== 0) return;
+
+    // Don't start drag on buttons or interactive elements
+    const target = event.target as HTMLElement;
+    if (target.closest('button') || target.closest('.week-header')) {
+      return;
+    }
+
+    // Store client coordinates to calculate drag distance
+    this.dragStartClientX = event.clientX;
+    this.dragStartClientY = event.clientY;
+    this.dragHasMoved = false;
+
+    // Store initial selection if shift/cmd is held, otherwise we'll clear on actual drag
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      this.dragSelectionInitialSelected = new Set(this.selectedVideos());
+    } else {
+      this.dragSelectionInitialSelected = new Set();
+    }
+
+    const container = event.currentTarget as HTMLElement;
+    const rect = container.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // Initialize scroll-space Y bounds
+    // Use the viewport's rendered content wrapper to get accurate position
+    const contentWrapper = container.querySelector('.cdk-virtual-scroll-content-wrapper');
+    if (contentWrapper && this.viewport) {
+      const contentRect = contentWrapper.getBoundingClientRect();
+      const renderedRange = this.viewport.getRenderedRange();
+      const itemSize = 56;
+      // Calculate absolute Y position in the full list
+      // contentRect.top is where rendered items start visually
+      // renderedRange.start * itemSize is the offset of rendered items from list start
+      const scrollSpaceY = (event.clientY - contentRect.top) + (renderedRange.start * itemSize);
+      this.dragMinY = scrollSpaceY;
+      this.dragMaxY = scrollSpaceY;
+    }
+
+    this.dragStartPoint.set({ x, y });
+    this.dragCurrentPoint.set({ x, y });
+
+    // Add document listeners for drag
+    document.addEventListener('mousemove', this.onDragSelectMove);
+    document.addEventListener('mouseup', this.onDragSelectEnd);
+  }
+
+  /**
+   * Update drag selection on mousemove
+   */
+  private onDragSelectMove = (event: MouseEvent): void => {
+    const start = this.dragStartPoint();
+    if (!start) return;
+
+    // Calculate distance moved
+    const dx = event.clientX - this.dragStartClientX;
+    const dy = event.clientY - this.dragStartClientY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Only start actual drag selection after minimum distance
+    if (!this.dragHasMoved && distance >= this.dragMinDistance) {
+      this.dragHasMoved = true;
+      this.isDragSelecting.set(true);
+
+      // Clear selection when starting drag (unless modifier held)
+      if (this.dragSelectionInitialSelected.size === 0) {
+        this.selectedVideos.set(new Set());
+      }
+
+      // Start auto-scroll interval
+      this.startAutoScroll();
+    }
+
+    if (!this.dragHasMoved) return;
+
+    const container = document.querySelector('.cascade') as HTMLElement;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    this.dragCurrentPoint.set({ x, y });
+
+    // Calculate auto-scroll speed and update scroll-space Y bounds
+    const viewportEl = container.querySelector('cdk-virtual-scroll-viewport');
+    const contentWrapper = container.querySelector('.cdk-virtual-scroll-content-wrapper');
+    if (viewportEl && contentWrapper && this.viewport) {
+      const viewportRect = viewportEl.getBoundingClientRect();
+      const contentRect = contentWrapper.getBoundingClientRect();
+      const renderedRange = this.viewport.getRenderedRange();
+      const itemSize = 56;
+      const mouseY = event.clientY;
+
+      // Update scroll-space Y bounds (expand to include current mouse position)
+      // Calculate absolute Y in full list coordinates
+      const scrollSpaceY = (mouseY - contentRect.top) + (renderedRange.start * itemSize);
+      this.dragMinY = Math.min(this.dragMinY, scrollSpaceY);
+      this.dragMaxY = Math.max(this.dragMaxY, scrollSpaceY);
+
+      if (mouseY < viewportRect.top + this.AUTO_SCROLL_ZONE) {
+        // Near top - scroll up
+        const distanceFromEdge = viewportRect.top + this.AUTO_SCROLL_ZONE - mouseY;
+        this.autoScrollSpeed = -Math.min(distanceFromEdge / 2, this.AUTO_SCROLL_MAX_SPEED);
+      } else if (mouseY > viewportRect.bottom - this.AUTO_SCROLL_ZONE) {
+        // Near bottom - scroll down
+        const distanceFromEdge = mouseY - (viewportRect.bottom - this.AUTO_SCROLL_ZONE);
+        this.autoScrollSpeed = Math.min(distanceFromEdge / 2, this.AUTO_SCROLL_MAX_SPEED);
+      } else {
+        // Not near edge - stop scrolling
+        this.autoScrollSpeed = 0;
+      }
+    }
+
+    this.updateDragSelection();
+  };
+
+  /**
+   * Start auto-scroll interval for drag selection
+   */
+  private startAutoScroll(): void {
+    if (this.autoScrollInterval) return;
+
+    this.autoScrollInterval = setInterval(() => {
+      if (this.autoScrollSpeed === 0 || !this.viewport) return;
+
+      const currentScroll = this.viewport.measureScrollOffset('top');
+      const newScroll = currentScroll + this.autoScrollSpeed;
+      this.viewport.scrollTo({ top: Math.max(0, newScroll) });
+
+      // Expand scroll-space bounds as we scroll
+      if (this.autoScrollSpeed > 0) {
+        // Scrolling down - expand max Y
+        this.dragMaxY += this.autoScrollSpeed;
+      } else {
+        // Scrolling up - expand min Y
+        this.dragMinY += this.autoScrollSpeed;
+      }
+
+      // Update the drag point to account for scroll (keep rectangle extending visually)
+      const current = this.dragCurrentPoint();
+      if (current) {
+        this.dragCurrentPoint.set({ x: current.x, y: current.y + this.autoScrollSpeed });
+        this.updateDragSelection();
+      }
+    }, 16); // ~60fps
+  }
+
+  /**
+   * Stop auto-scroll interval
+   */
+  private stopAutoScroll(): void {
+    if (this.autoScrollInterval) {
+      clearInterval(this.autoScrollInterval);
+      this.autoScrollInterval = null;
+    }
+    this.autoScrollSpeed = 0;
+  }
+
+  /**
+   * End drag selection on mouseup
+   */
+  private onDragSelectEnd = (): void => {
+    const wasDragging = this.dragHasMoved;
+
+    // Stop auto-scrolling
+    this.stopAutoScroll();
+
+    this.isDragSelecting.set(false);
+    this.dragStartPoint.set(null);
+    this.dragCurrentPoint.set(null);
+    this.dragSelectionInitialSelected = new Set();
+    this.dragHasMoved = false;
+
+    // Prevent click handler from firing after drag
+    if (wasDragging) {
+      this.justFinishedDrag = true;
+      setTimeout(() => {
+        this.justFinishedDrag = false;
+      }, 0);
+    }
+
+    document.removeEventListener('mousemove', this.onDragSelectMove);
+    document.removeEventListener('mouseup', this.onDragSelectEnd);
+  };
+
+  /**
+   * Update selection based on current drag rectangle
+   * Uses scroll-space coordinates to handle virtual scrolling correctly
+   * Toggles items that were already selected before drag started
+   */
+  private updateDragSelection(): void {
+    if (!this.isDragSelecting()) return;
+
+    const itemSize = 56; // Must match itemSize in template
+    const allItems = this.virtualItems();
+    const newSelection = new Set(this.dragSelectionInitialSelected);
+
+    // Calculate which items fall within the scroll-space Y bounds
+    let currentY = 0;
+    for (const item of allItems) {
+      if (item.type === 'video') {
+        const itemTop = currentY;
+        const itemBottom = currentY + itemSize;
+
+        // Check if item intersects with selection bounds
+        if (itemBottom > this.dragMinY && itemTop < this.dragMaxY) {
+          // Toggle: if it was already selected before drag, deselect it; otherwise select it
+          if (this.dragSelectionInitialSelected.has(item.itemId)) {
+            newSelection.delete(item.itemId);
+          } else {
+            newSelection.add(item.itemId);
+          }
+        }
+      }
+      // Both headers and videos take up space
+      currentY += itemSize;
+    }
+
+    this.selectedVideos.set(newSelection);
   }
 
   formatDownloadDate(date?: Date): string {
@@ -1389,6 +1886,12 @@ export class CascadeComponent {
    * Handle video click (select for normal items, prevent for ghost items)
    */
   handleVideoClick(itemId: string, video: VideoItem, event: MouseEvent): void {
+    // Skip if we just finished a drag selection
+    if (this.justFinishedDrag) {
+      event.stopPropagation();
+      return;
+    }
+
     if (video.isGhost) {
       // Ghost items are not selectable
       event.stopPropagation();
