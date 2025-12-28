@@ -1513,115 +1513,61 @@ export class DatabaseService {
       return [];
     }
 
-    // this.logger.log(`[FTS Search] Query: "${trimmedQuery}" -> Tokens: ${JSON.stringify(tokens)}`);
+    // For each token, find matching videos across all FTS tables
+    // Then intersect results to find videos matching ALL tokens (AND logic)
+    const tokenMatches: Map<string, { score: number; matches: Set<string> }>[] = [];
 
-    try {
-      // For each token, find matching videos across all FTS tables
-      // Then intersect results to find videos matching ALL tokens (AND logic)
-      const tokenMatches: Map<string, { score: number; matches: Set<string> }>[] = [];
-
-      for (const token of tokens) {
-        const tokenResults = this.searchSingleToken(db, token, limit * 3, searchIn);
-        tokenMatches.push(tokenResults);
-      }
-
-      // Intersect results: video must match ALL tokens
-      let finalResults: Map<string, { score: number; matches: Set<string> }>;
-
-      if (tokenMatches.length === 1) {
-        finalResults = tokenMatches[0];
-      } else {
-        // Start with first token's results
-        finalResults = new Map(tokenMatches[0]);
-
-        // Intersect with each subsequent token
-        for (let i = 1; i < tokenMatches.length; i++) {
-          const currentToken = tokenMatches[i];
-          const newResults = new Map<string, { score: number; matches: Set<string> }>();
-
-          // Only keep videos that exist in both sets
-          for (const [videoId, data] of finalResults) {
-            if (currentToken.has(videoId)) {
-              const otherData = currentToken.get(videoId)!;
-              // Combine scores and matches
-              newResults.set(videoId, {
-                score: data.score + otherData.score,
-                matches: new Set([...data.matches, ...otherData.matches])
-              });
-            }
-          }
-
-          finalResults = newResults;
-
-          // Early exit if no matches
-          if (finalResults.size === 0) {
-            break;
-          }
-        }
-      }
-
-      // Also do LIKE-based substring search for better partial matching
-      // This catches cases like "video" matching "MyVideo-final.mp4"
-      // Only do this when filename is included in search
-      const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
-      const includesFilename = !searchIn || searchInFields.length === 0 || searchInFields.includes('filename');
-      if (includesFilename) {
-        try {
-          // Build LIKE pattern that requires all words
-          const words = trimmedQuery.match(/"[^"]+"|[^\s]+/g) || [];
-          const cleanWords = words.map(w => w.replace(/^"|"$/g, '').replace(/[*?]/g, ''));
-
-          if (cleanWords.length > 0 && cleanWords.every(w => w.length > 0)) {
-            // Each word must appear somewhere in filename or path
-            // Only search filename and path - NOT ai_description (that's analysis data, not filename)
-            const conditions = cleanWords.map(() =>
-              '(filename LIKE ? COLLATE NOCASE OR current_path LIKE ? COLLATE NOCASE)'
-            ).join(' AND ');
-
-            const params: string[] = [];
-            for (const word of cleanWords) {
-              const pattern = `%${word}%`;
-              params.push(pattern, pattern);
-            }
-            params.push(String(limit * 2));
-
-            const likeResults = db.prepare(`
-              SELECT id as video_id
-              FROM videos
-              WHERE ${conditions}
-              LIMIT ?
-            `).all(...params) as any[];
-
-            for (const row of likeResults) {
-              if (!finalResults.has(row.video_id)) {
-                finalResults.set(row.video_id, { score: 0, matches: new Set() });
-              }
-              const entry = finalResults.get(row.video_id)!;
-              entry.score += 15; // High score for direct match
-              entry.matches.add('filename');
-            }
-          }
-        } catch (e) {
-          this.logger.warn('Error in LIKE filename search:', e);
-        }
-      }
-
-      // Convert to array and sort by score
-      const sortedResults = Array.from(finalResults.entries())
-        .map(([videoId, data]) => ({
-          videoId,
-          score: data.score,
-          matches: Array.from(data.matches)
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
-
-      // this.logger.log(`[FTS Search] Found ${sortedResults.length} results for "${trimmedQuery}"`);
-      return sortedResults;
-    } catch (error: any) {
-      this.logger.error(`[FTS Search] Search failed: ${error?.message || 'Unknown error'}`);
-      return [];
+    for (const token of tokens) {
+      const tokenResults = this.searchSingleToken(db, token, limit * 3, searchIn);
+      tokenMatches.push(tokenResults);
     }
+
+    // Intersect results: video must match ALL tokens
+    let finalResults: Map<string, { score: number; matches: Set<string> }>;
+
+    if (tokenMatches.length === 1) {
+      finalResults = tokenMatches[0];
+    } else {
+      // Start with first token's results
+      finalResults = new Map(tokenMatches[0]);
+
+      // Intersect with each subsequent token
+      for (let i = 1; i < tokenMatches.length; i++) {
+        const currentToken = tokenMatches[i];
+        const newResults = new Map<string, { score: number; matches: Set<string> }>();
+
+        // Only keep videos that exist in both sets
+        for (const [videoId, data] of finalResults) {
+          if (currentToken.has(videoId)) {
+            const otherData = currentToken.get(videoId)!;
+            // Combine scores and matches
+            newResults.set(videoId, {
+              score: data.score + otherData.score,
+              matches: new Set([...data.matches, ...otherData.matches])
+            });
+          }
+        }
+
+        finalResults = newResults;
+
+        // Early exit if no matches
+        if (finalResults.size === 0) {
+          break;
+        }
+      }
+    }
+
+    // Convert to array and sort by score
+    const sortedResults = Array.from(finalResults.entries())
+      .map(([videoId, data]) => ({
+        videoId,
+        score: data.score,
+        matches: Array.from(data.matches)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    return sortedResults;
   }
 
   /**
@@ -1712,80 +1658,68 @@ export class DatabaseService {
           entry.matches.add('filename');
         }
       } catch (e) {
-        // FTS5 query syntax error - try escaping
-        this.logger.debug(`FTS5 videos search error for "${videoFtsQuery}":`, e);
+        this.logger.error(`FTS5 videos search error for "${videoFtsQuery}":`, e);
+        throw e;
       }
     }
 
     // Search transcripts_fts
     if (searchTranscript) {
-      try {
-        const transcriptResults = db.prepare(`
-          SELECT video_id, rank
-          FROM transcripts_fts
-          WHERE transcripts_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit) as any[];
+      const transcriptResults = db.prepare(`
+        SELECT video_id, rank
+        FROM transcripts_fts
+        WHERE transcripts_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
 
-        for (const row of transcriptResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank);
-          entry.matches.add('transcript');
+      for (const row of transcriptResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
         }
-      } catch (e) {
-        this.logger.debug(`FTS5 transcript search error for "${ftsQuery}":`, e);
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank);
+        entry.matches.add('transcript');
       }
     }
 
     // Search analyses_fts
     if (searchAnalysis) {
-      try {
-        const analysesResults = db.prepare(`
-          SELECT video_id, rank
-          FROM analyses_fts
-          WHERE analyses_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit) as any[];
+      const analysesResults = db.prepare(`
+        SELECT video_id, rank
+        FROM analyses_fts
+        WHERE analyses_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
 
-        for (const row of analysesResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
-          entry.matches.add('analysis');
+      for (const row of analysesResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
         }
-      } catch (e) {
-        this.logger.debug(`FTS5 analysis search error for "${ftsQuery}":`, e);
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
+        entry.matches.add('analysis');
       }
     }
 
     // Search tags_fts (only when searching all fields)
     if (searchAll) {
-      try {
-        const tagsResults = db.prepare(`
-          SELECT video_id, rank
-          FROM tags_fts
-          WHERE tags_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(ftsQuery, limit) as any[];
+      const tagsResults = db.prepare(`
+        SELECT video_id, rank
+        FROM tags_fts
+        WHERE tags_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `).all(ftsQuery, limit) as any[];
 
-        for (const row of tagsResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
-          entry.matches.add('tags');
+      for (const row of tagsResults) {
+        if (!results.has(row.video_id)) {
+          results.set(row.video_id, { score: 0, matches: new Set() });
         }
-      } catch (e) {
-        this.logger.debug(`FTS5 tags search error for "${ftsQuery}":`, e);
+        const entry = results.get(row.video_id)!;
+        entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
+        entry.matches.add('tags');
       }
     }
 
@@ -3441,109 +3375,73 @@ export class DatabaseService {
           addResult(row.video_id, score, 'filename');
         }
       } catch (error) {
-        this.logger.warn('Error searching videos FTS5 table:', error);
-      }
-
-      // Also do LIKE-based substring search on filename for better partial matching
-      // This catches cases like "video" matching "MyVideo-final.mp4"
-      try {
-        const likePattern = `%${query.trim().replace(/\s+/g, '%')}%`;
-        const stmt = db.prepare(`
-          SELECT id as video_id
-          FROM videos
-          WHERE filename LIKE ? COLLATE NOCASE
-             OR current_path LIKE ? COLLATE NOCASE
-          LIMIT ?
-        `);
-        const rows = stmt.all(likePattern, likePattern, limit) as Array<{ video_id: string }>;
-
-        for (const row of rows) {
-          // Give LIKE matches high priority (95) since they're direct filename matches
-          addResult(row.video_id, 95, 'filename');
-        }
-      } catch (error) {
-        this.logger.warn('Error in LIKE filename search:', error);
+        this.logger.error('Error searching videos FTS5 table:', error);
+        throw error;
       }
     }
 
     // 2. Search in transcripts using FTS5 (high priority)
     if (searchFilters.transcript) {
-      try {
-        const stmt = db.prepare(`
-          SELECT video_id, bm25(transcripts_fts) as score
-          FROM transcripts_fts
-          WHERE transcripts_fts MATCH ?
-          ORDER BY bm25(transcripts_fts)
-          LIMIT ?
-        `);
-        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+      const stmt = db.prepare(`
+        SELECT video_id, bm25(transcripts_fts) as score
+        FROM transcripts_fts
+        WHERE transcripts_fts MATCH ?
+        ORDER BY bm25(transcripts_fts)
+        LIMIT ?
+      `);
+      const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        for (const row of rows) {
-          const score = 80 + Math.min(0, row.score);
-          addResult(row.video_id, score, 'transcript');
-        }
-      } catch (error) {
-        this.logger.warn('Error searching transcripts FTS5:', error);
+      for (const row of rows) {
+        const score = 80 + Math.min(0, row.score);
+        addResult(row.video_id, score, 'transcript');
       }
     }
 
     // 3. Search in analyses using FTS5 (medium priority)
     if (searchFilters.analysis) {
-      try {
-        const stmt = db.prepare(`
-          SELECT video_id, bm25(analyses_fts) as score
-          FROM analyses_fts
-          WHERE analyses_fts MATCH ?
-          ORDER BY bm25(analyses_fts)
-          LIMIT ?
-        `);
-        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+      const stmt = db.prepare(`
+        SELECT video_id, bm25(analyses_fts) as score
+        FROM analyses_fts
+        WHERE analyses_fts MATCH ?
+        ORDER BY bm25(analyses_fts)
+        LIMIT ?
+      `);
+      const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        for (const row of rows) {
-          const score = 70 + Math.min(0, row.score);
-          addResult(row.video_id, score, 'analysis');
-        }
-      } catch (error) {
-        this.logger.warn('Error searching analyses FTS5:', error);
+      for (const row of rows) {
+        const score = 70 + Math.min(0, row.score);
+        addResult(row.video_id, score, 'analysis');
       }
 
-      // Also search in analysis sections (still using LIKE since no FTS5 table for sections)
-      try {
-        const searchLike = `%${query.toLowerCase().trim()}%`;
-        const stmt = db.prepare(`
-          SELECT DISTINCT video_id
-          FROM analysis_sections
-          WHERE lower(title) LIKE ? OR lower(description) LIKE ?
-          LIMIT ?
-        `);
-        const rows = stmt.all(searchLike, searchLike, limit) as Array<{ video_id: string }>;
+      // Also search in analysis sections (no FTS5 table for sections, LIKE is required here)
+      const searchLike = `%${query.toLowerCase().trim()}%`;
+      const sectionsStmt = db.prepare(`
+        SELECT DISTINCT video_id
+        FROM analysis_sections
+        WHERE lower(title) LIKE ? OR lower(description) LIKE ?
+        LIMIT ?
+      `);
+      const sectionRows = sectionsStmt.all(searchLike, searchLike, limit) as Array<{ video_id: string }>;
 
-        for (const row of rows) {
-          addResult(row.video_id, 65, 'section');
-        }
-      } catch (error) {
-        this.logger.warn('Error searching analysis sections:', error);
+      for (const row of sectionRows) {
+        addResult(row.video_id, 65, 'section');
       }
     }
 
     // 4. Search in tags using FTS5 (lower priority)
     if (searchFilters.tags) {
-      try {
-        const stmt = db.prepare(`
-          SELECT video_id, bm25(tags_fts) as score
-          FROM tags_fts
-          WHERE tags_fts MATCH ?
-          ORDER BY bm25(tags_fts)
-          LIMIT ?
-        `);
-        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+      const stmt = db.prepare(`
+        SELECT video_id, bm25(tags_fts) as score
+        FROM tags_fts
+        WHERE tags_fts MATCH ?
+        ORDER BY bm25(tags_fts)
+        LIMIT ?
+      `);
+      const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
 
-        for (const row of rows) {
-          const score = 60 + Math.min(0, row.score);
-          addResult(row.video_id, score, 'tag');
-        }
-      } catch (error) {
-        this.logger.warn('Error searching tags FTS5:', error);
+      for (const row of rows) {
+        const score = 60 + Math.min(0, row.score);
+        addResult(row.video_id, score, 'tag');
       }
     }
 
