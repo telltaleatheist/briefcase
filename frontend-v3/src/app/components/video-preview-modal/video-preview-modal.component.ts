@@ -42,9 +42,21 @@ export interface PreviewItem {
                 <div class="error-details">{{ currentItem().name }}</div>
               </div>
             } @else if (isVideo()) {
+              @if (isAudio()) {
+                <div class="audio-visualization">
+                  <div class="audio-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M9 18V5l12-2v13"/>
+                      <circle cx="6" cy="18" r="3"/>
+                      <circle cx="18" cy="16" r="3"/>
+                    </svg>
+                  </div>
+                </div>
+              }
               <video
                 #videoPlayer
                 [src]="mediaSrc()"
+                [class.audio-only]="isAudio()"
                 (loadedmetadata)="onVideoLoaded()"
                 (loadeddata)="onVideoLoadedData()"
                 (durationchange)="onDurationChange()"
@@ -73,6 +85,9 @@ export interface PreviewItem {
             @if (isVideo()) {
               <div class="time-display">
                 {{ formatTime(currentTime()) }} / {{ formatTime(duration()) }}
+                @if (isAudio()) {
+                  <span class="media-type-badge">Audio</span>
+                }
               </div>
             } @else {
               <div class="time-display">Image</div>
@@ -214,6 +229,28 @@ export interface PreviewItem {
         object-fit: contain;
       }
 
+      video.audio-only {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+    }
+
+    .audio-visualization {
+      position: absolute;
+      inset: 0;
+      @include flex-center;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    }
+
+    .audio-icon {
+      color: $primary-orange;
+      opacity: 0.8;
+
+      svg {
+        width: 80px;
+        height: 80px;
+      }
     }
 
 
@@ -269,6 +306,20 @@ export interface PreviewItem {
       font-size: $font-size-xs;
       color: var(--text-secondary);
       font-family: 'Monaco', monospace;
+      display: flex;
+      align-items: center;
+      gap: $spacing-sm;
+    }
+
+    .media-type-badge {
+      padding: 2px 6px;
+      font-size: 9px;
+      font-weight: $font-weight-semibold;
+      background: rgba(255, 107, 53, 0.15);
+      color: $primary-orange;
+      border-radius: $radius-sm;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
 
     .controls {
@@ -455,6 +506,9 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   // Image extensions for detection
   private readonly imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'];
 
+  // Audio extensions for detection
+  private readonly audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'];
+
   @Input() set show(value: boolean) {
     const wasVisible = this.visible();
     this.visible.set(value);
@@ -557,25 +611,46 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   currentItem = () => this.items()[this.currentIndex()];
 
   /**
-   * Check if the current item is a video (not an image)
+   * Check if the current item is playable media (video or audio, not an image)
    */
   isVideo = (): boolean => {
     const item = this.currentItem();
     if (!item) {
-      return true; // Default to video
+      return true; // Default to video/audio player
     }
 
     // Check mediaType first
     if (item.mediaType) {
-      // Handle both "video/mp4" and "video" formats
-      const result = item.mediaType.startsWith('video/') || item.mediaType === 'video';
-      return result;
+      // Handle video and audio types
+      const isVideoType = item.mediaType.startsWith('video/') || item.mediaType === 'video';
+      const isAudioType = item.mediaType.startsWith('audio/') || item.mediaType === 'audio';
+      return isVideoType || isAudioType;
     }
 
     // Fall back to checking file extension
     const name = item.name.toLowerCase();
     const hasImageExt = this.imageExtensions.some(ext => name.endsWith(ext));
-    return !hasImageExt;
+    const hasAudioExt = this.audioExtensions.some(ext => name.endsWith(ext));
+    // If it's audio, treat as playable (use video element)
+    // If it's image, don't use video element
+    return !hasImageExt || hasAudioExt;
+  };
+
+  /**
+   * Check if the current item is audio-only (for display purposes)
+   */
+  isAudio = (): boolean => {
+    const item = this.currentItem();
+    if (!item) return false;
+
+    // Check mediaType first
+    if (item.mediaType) {
+      return item.mediaType.startsWith('audio/') || item.mediaType === 'audio';
+    }
+
+    // Fall back to checking file extension
+    const name = item.name.toLowerCase();
+    return this.audioExtensions.some(ext => name.endsWith(ext));
   };
 
   mediaSrc = () => {
