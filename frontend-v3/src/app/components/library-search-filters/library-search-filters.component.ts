@@ -2,8 +2,15 @@ import { Component, EventEmitter, Output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
+export interface SearchInFields {
+  filename: boolean;
+  transcript: boolean;
+  analysis: boolean;
+}
+
 export interface LibraryFilters {
   searchQuery: string;
+  searchIn: SearchInFields;
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
   mediaType: 'all' | 'video' | 'audio' | 'image' | 'document' | 'webpage';
   hasTranscript: boolean | null;
@@ -27,6 +34,7 @@ export class LibrarySearchFiltersComponent {
 
   filters: LibraryFilters = {
     searchQuery: '',
+    searchIn: { filename: true, transcript: true, analysis: true },
     dateRange: 'all',
     mediaType: 'all',
     hasTranscript: null,
@@ -56,6 +64,7 @@ export class LibrarySearchFiltersComponent {
   clearFilters() {
     this.filters = {
       searchQuery: '',
+      searchIn: { filename: true, transcript: true, analysis: true },
       dateRange: 'all',
       mediaType: 'all',
       hasTranscript: null,

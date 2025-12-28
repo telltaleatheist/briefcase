@@ -86,22 +86,27 @@
         </div>
       }
 
-      <!-- Category Filters -->
+      <!-- Category Filters (Accordion) -->
       @if (categoryFilters.length > 0) {
-        <div class="filters-section">
-          <h4 class="section-title">Filter</h4>
-          <div class="filter-chips">
-            @for (filter of categoryFilters; track filter.category) {
-              <button
-                class="filter-chip"
-                [class.active]="filter.enabled"
-                [style.--chip-color]="filter.color"
-                (click)="onFilterToggle(filter.category)">
-                <span class="chip-dot" [style.backgroundColor]="filter.color"></span>
-                {{ filter.label }}
-                <span class="chip-count">{{ getSectionsForCategory(filter.category).length }}</span>
-              </button>
-            }
+        <div class="filters-section" [class.collapsed]="!filtersExpanded()">
+          <button class="section-header" (click)="toggleFilters()">
+            <h4 class="section-title">Filter</h4>
+            <span class="accordion-icon">{{ filtersExpanded() ? '▲' : '▼' }}</span>
+          </button>
+          <div class="filter-chips-container" [class.expanded]="filtersExpanded()">
+            <div class="filter-chips">
+              @for (filter of categoryFilters; track filter.category) {
+                <button
+                  class="filter-chip"
+                  [class.active]="filter.enabled"
+                  [style.--chip-color]="filter.color"
+                  (click)="onFilterToggle(filter.category)">
+                  <span class="chip-dot" [style.backgroundColor]="filter.color"></span>
+                  {{ filter.label }}
+                  <span class="chip-count">{{ getSectionsForCategory(filter.category).length }}</span>
+                </button>
+              }
+            </div>
           </div>
         </div>
       }

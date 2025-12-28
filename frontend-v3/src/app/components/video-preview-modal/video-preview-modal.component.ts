@@ -1029,9 +1029,13 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       const video = this.videoPlayer.nativeElement;
       this.currentTime.set(video.currentTime);
 
-      const duration = video.duration;
-      if (duration && !isNaN(duration) && duration > 0) {
-        this.progress.set((video.currentTime / duration) * 100);
+      const videoDuration = video.duration;
+      if (videoDuration && !isNaN(videoDuration) && isFinite(videoDuration) && videoDuration > 0) {
+        // Update duration if not already set (can become available during playback)
+        if (this.duration() === 0) {
+          this.duration.set(videoDuration);
+        }
+        this.progress.set((video.currentTime / videoDuration) * 100);
       } else {
         this.progress.set(0);
       }
@@ -1199,7 +1203,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   }
 
   formatTime(seconds: number): string {
-    if (!seconds || isNaN(seconds)) return '00:00:00';
+    // Only return placeholder for truly invalid values (NaN, Infinity, negative)
+    if (isNaN(seconds) || !isFinite(seconds) || seconds < 0) return '00:00:00';
 
     const hours = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);

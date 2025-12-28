@@ -1561,8 +1561,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const query = this.currentFilters.searchQuery.trim();
 
       if (query) {
-        // Call backend FTS search
-        this.libraryService.searchVideos(query).subscribe({
+        // Call backend FTS search with searchIn filter
+        this.libraryService.searchVideos(query, this.currentFilters.searchIn).subscribe({
           next: (response) => {
             if (response.success && response.data) {
               // Group search results by week

@@ -36,6 +36,9 @@ export class AnalysisPanelComponent {
   // Analysis sub-view: categories (sections) or chapters
   analysisView = signal<'categories' | 'chapters'>('categories');
 
+  // Filter accordion state
+  filtersExpanded = signal(true);
+
   // Transcript sub-view: segments (timestamped) or plain (continuous text)
   transcriptView = signal<'segments' | 'plain'>('segments');
 
@@ -95,6 +98,10 @@ export class AnalysisPanelComponent {
 
   setAnalysisView(view: 'categories' | 'chapters'): void {
     this.analysisView.set(view);
+  }
+
+  toggleFilters(): void {
+    this.filtersExpanded.set(!this.filtersExpanded());
   }
 
   setTranscriptView(view: 'segments' | 'plain'): void {

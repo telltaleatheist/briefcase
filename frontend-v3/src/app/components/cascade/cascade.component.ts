@@ -510,16 +510,16 @@ export class CascadeComponent {
 
       if (isDeselecting) {
         selected.delete(itemId);
+        // Clear highlight if deselecting the highlighted item
+        if (this.highlightedItemId() === itemId) {
+          this.highlightedItemId.set(null);
+        }
       } else {
         selected.add(itemId);
-      }
-      this.selectedVideos.set(selected);
-
-      // Only update anchor and highlight when adding, not when removing
-      if (!isDeselecting) {
         this.selectionAnchorId.set(itemId);
         this.highlightedItemId.set(itemId);
       }
+      this.selectedVideos.set(selected);
     } else if (hasShift && (this.selectionAnchorId() || this.selectedVideos().size > 0)) {
       // Shift+click: Range select from anchor, replace selection
       this.rangeSelect(itemId, false);

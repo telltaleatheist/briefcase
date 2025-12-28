@@ -1494,9 +1494,10 @@ export class DatabaseService {
    *
    * @param query - Search query
    * @param limit - Maximum results to return
+   * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
    * @returns Array of video IDs with match info, sorted by relevance
    */
-  searchFTS(query: string, limit: number = 100): { videoId: string; score: number; matches: string[] }[] {
+  searchFTS(query: string, limit: number = 100, searchIn?: string): { videoId: string; score: number; matches: string[] }[] {
     const db = this.ensureInitialized();
 
     if (!query || query.trim().length === 0) {
@@ -1520,7 +1521,7 @@ export class DatabaseService {
       const tokenMatches: Map<string, { score: number; matches: Set<string> }>[] = [];
 
       for (const token of tokens) {
-        const tokenResults = this.searchSingleToken(db, token, limit * 3);
+        const tokenResults = this.searchSingleToken(db, token, limit * 3, searchIn);
         tokenMatches.push(tokenResults);
       }
 
@@ -1561,42 +1562,48 @@ export class DatabaseService {
 
       // Also do LIKE-based substring search for better partial matching
       // This catches cases like "video" matching "MyVideo-final.mp4"
-      try {
-        // Build LIKE pattern that requires all words
-        const words = trimmedQuery.match(/"[^"]+"|[^\s]+/g) || [];
-        const cleanWords = words.map(w => w.replace(/^"|"$/g, '').replace(/[*?]/g, ''));
+      // Only do this when filename is included in search
+      const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
+      const includesFilename = !searchIn || searchInFields.length === 0 || searchInFields.includes('filename');
+      if (includesFilename) {
+        try {
+          // Build LIKE pattern that requires all words
+          const words = trimmedQuery.match(/"[^"]+"|[^\s]+/g) || [];
+          const cleanWords = words.map(w => w.replace(/^"|"$/g, '').replace(/[*?]/g, ''));
 
-        if (cleanWords.length > 0 && cleanWords.every(w => w.length > 0)) {
-          // Each word must appear somewhere in filename or path
-          const conditions = cleanWords.map(() =>
-            '(filename LIKE ? COLLATE NOCASE OR current_path LIKE ? COLLATE NOCASE OR ai_description LIKE ? COLLATE NOCASE)'
-          ).join(' AND ');
+          if (cleanWords.length > 0 && cleanWords.every(w => w.length > 0)) {
+            // Each word must appear somewhere in filename or path
+            // Only search filename and path - NOT ai_description (that's analysis data, not filename)
+            const conditions = cleanWords.map(() =>
+              '(filename LIKE ? COLLATE NOCASE OR current_path LIKE ? COLLATE NOCASE)'
+            ).join(' AND ');
 
-          const params: string[] = [];
-          for (const word of cleanWords) {
-            const pattern = `%${word}%`;
-            params.push(pattern, pattern, pattern);
-          }
-          params.push(String(limit * 2));
-
-          const likeResults = db.prepare(`
-            SELECT id as video_id
-            FROM videos
-            WHERE ${conditions}
-            LIMIT ?
-          `).all(...params) as any[];
-
-          for (const row of likeResults) {
-            if (!finalResults.has(row.video_id)) {
-              finalResults.set(row.video_id, { score: 0, matches: new Set() });
+            const params: string[] = [];
+            for (const word of cleanWords) {
+              const pattern = `%${word}%`;
+              params.push(pattern, pattern);
             }
-            const entry = finalResults.get(row.video_id)!;
-            entry.score += 15; // High score for direct match
-            entry.matches.add('filename');
+            params.push(String(limit * 2));
+
+            const likeResults = db.prepare(`
+              SELECT id as video_id
+              FROM videos
+              WHERE ${conditions}
+              LIMIT ?
+            `).all(...params) as any[];
+
+            for (const row of likeResults) {
+              if (!finalResults.has(row.video_id)) {
+                finalResults.set(row.video_id, { score: 0, matches: new Set() });
+              }
+              const entry = finalResults.get(row.video_id)!;
+              entry.score += 15; // High score for direct match
+              entry.matches.add('filename');
+            }
           }
+        } catch (e) {
+          this.logger.warn('Error in LIKE filename search:', e);
         }
-      } catch (e) {
-        this.logger.warn('Error in LIKE filename search:', e);
       }
 
       // Convert to array and sort by score
@@ -1650,12 +1657,14 @@ export class DatabaseService {
   }
 
   /**
-   * Search for a single token across all FTS tables
+   * Search for a single token across FTS tables
+   * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
    */
   private searchSingleToken(
     db: any,
     token: string,
-    limit: number
+    limit: number,
+    searchIn?: string
   ): Map<string, { score: number; matches: Set<string> }> {
     const results = new Map<string, { score: number; matches: Set<string> }>();
 
@@ -1666,93 +1675,118 @@ export class DatabaseService {
     // Convert token to FTS5 query
     let ftsQuery = this.tokenToFTS5Query(cleanToken);
 
-    // Search videos_fts (filename, path, description)
-    try {
-      const videosResults = db.prepare(`
-        SELECT video_id, rank
-        FROM videos_fts
-        WHERE videos_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
+    // Determine which tables to search based on searchIn filter
+    // searchIn can be comma-separated like "filename,transcript" or a single value
+    const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
+    const searchAll = !searchIn || searchInFields.length === 0;
+    const searchFilename = searchAll || searchInFields.includes('filename');
+    const searchTranscript = searchAll || searchInFields.includes('transcript');
+    const searchAnalysis = searchAll || searchInFields.includes('analysis');
 
-      for (const row of videosResults) {
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
-        }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank) * 2; // Videos weighted higher
-        entry.matches.add('filename');
+    // Search videos_fts (filename, path, and optionally ai_description)
+    if (searchFilename) {
+      // When searching filename only, restrict to filename and path columns
+      // ai_description is analysis data, not filename data
+      // FTS5 column filter syntax: {column1 column2}: term
+      let videoFtsQuery = ftsQuery;
+      if (!searchAll && !searchAnalysis) {
+        // Only search filename and path, not ai_description
+        videoFtsQuery = `{filename current_path}: ${ftsQuery}`;
       }
-    } catch (e) {
-      // FTS5 query syntax error - try escaping
-      this.logger.debug(`FTS5 videos search error for "${ftsQuery}":`, e);
+
+      try {
+        const videosResults = db.prepare(`
+          SELECT video_id, rank
+          FROM videos_fts
+          WHERE videos_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(videoFtsQuery, limit) as any[];
+
+        for (const row of videosResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank) * 2; // Videos weighted higher
+          entry.matches.add('filename');
+        }
+      } catch (e) {
+        // FTS5 query syntax error - try escaping
+        this.logger.debug(`FTS5 videos search error for "${videoFtsQuery}":`, e);
+      }
     }
 
     // Search transcripts_fts
-    try {
-      const transcriptResults = db.prepare(`
-        SELECT video_id, rank
-        FROM transcripts_fts
-        WHERE transcripts_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
+    if (searchTranscript) {
+      try {
+        const transcriptResults = db.prepare(`
+          SELECT video_id, rank
+          FROM transcripts_fts
+          WHERE transcripts_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit) as any[];
 
-      for (const row of transcriptResults) {
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
+        for (const row of transcriptResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank);
+          entry.matches.add('transcript');
         }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank);
-        entry.matches.add('transcript');
+      } catch (e) {
+        this.logger.debug(`FTS5 transcript search error for "${ftsQuery}":`, e);
       }
-    } catch (e) {
-      this.logger.debug(`FTS5 transcript search error for "${ftsQuery}":`, e);
     }
 
     // Search analyses_fts
-    try {
-      const analysesResults = db.prepare(`
-        SELECT video_id, rank
-        FROM analyses_fts
-        WHERE analyses_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
+    if (searchAnalysis) {
+      try {
+        const analysesResults = db.prepare(`
+          SELECT video_id, rank
+          FROM analyses_fts
+          WHERE analyses_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit) as any[];
 
-      for (const row of analysesResults) {
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
+        for (const row of analysesResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
+          entry.matches.add('analysis');
         }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
-        entry.matches.add('analysis');
+      } catch (e) {
+        this.logger.debug(`FTS5 analysis search error for "${ftsQuery}":`, e);
       }
-    } catch (e) {
-      this.logger.debug(`FTS5 analysis search error for "${ftsQuery}":`, e);
     }
 
-    // Search tags_fts
-    try {
-      const tagsResults = db.prepare(`
-        SELECT video_id, rank
-        FROM tags_fts
-        WHERE tags_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
+    // Search tags_fts (only when searching all fields)
+    if (searchAll) {
+      try {
+        const tagsResults = db.prepare(`
+          SELECT video_id, rank
+          FROM tags_fts
+          WHERE tags_fts MATCH ?
+          ORDER BY rank
+          LIMIT ?
+        `).all(ftsQuery, limit) as any[];
 
-      for (const row of tagsResults) {
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
+        for (const row of tagsResults) {
+          if (!results.has(row.video_id)) {
+            results.set(row.video_id, { score: 0, matches: new Set() });
+          }
+          const entry = results.get(row.video_id)!;
+          entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
+          entry.matches.add('tags');
         }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
-        entry.matches.add('tags');
+      } catch (e) {
+        this.logger.debug(`FTS5 tags search error for "${ftsQuery}":`, e);
       }
-    } catch (e) {
-      this.logger.debug(`FTS5 tags search error for "${ftsQuery}":`, e);
     }
 
     return results;

@@ -491,10 +491,10 @@ export class AnalysisController {
         );
       }
 
-      // Get config defaults - NO HARDCODED FALLBACK for AI model
+      // Get config defaults - NO HARDCODED FALLBACKS
       const config = await this.configService.getConfig();
       let aiModel = body.aiModel || config.aiModel;
-      let aiProvider = body.aiProvider || 'ollama'; // Default to ollama if not specified
+      let aiProvider = body.aiProvider; // No fallback - must be explicitly provided
       const whisperModel = body.whisperModel || 'base';
       const forceReanalyze = body.forceReanalyze || false;
       const forceRetranscribe = body.forceRetranscribe || false;
@@ -503,6 +503,14 @@ export class AnalysisController {
       if (!aiModel) {
         throw new HttpException(
           'AI analysis requires an AI model to be configured. Please select a model in settings.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Validate AI provider is configured - no fallbacks
+      if (!aiProvider) {
+        throw new HttpException(
+          'AI analysis requires an AI provider to be specified.',
           HttpStatus.BAD_REQUEST,
         );
       }

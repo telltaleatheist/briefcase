@@ -240,7 +240,7 @@ export class SimpleProcessController implements OnModuleInit {
       this.logger.log(`Starting audio normalization for ${videoId}`);
       this.mediaEventService.emitProcessingProgress(5, 'Starting audio normalization...', jobId);
 
-      const outputFile = await this.ffmpegService.normalizeAudio(filePath, -20, jobId);
+      const outputFile = await this.ffmpegService.normalizeAudio(filePath, -14, jobId);
 
       if (!outputFile) {
         throw new Error('Normalization failed - no output file');

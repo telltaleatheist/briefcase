@@ -501,11 +501,13 @@ export class DatabaseController {
    * GET /api/database/search
    * Search videos across filename, AI description, transcripts, analyses, and tags
    * Returns empty results if no library/database exists yet (first run)
+   * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
    */
   @Get('search')
   searchVideos(
     @Query('q') query: string,
     @Query('limit') limit?: string,
+    @Query('searchIn') searchIn?: string,
   ) {
     if (!query || query.trim() === '') {
       return {
@@ -519,7 +521,7 @@ export class DatabaseController {
       const limitNum = limit ? parseInt(limit, 10) : 1000;
 
       // Use FTS5 search for efficient full-text searching
-      const searchResults = this.databaseService.searchFTS(query, limitNum);
+      const searchResults = this.databaseService.searchFTS(query, limitNum, searchIn);
 
       // Get full video details for each result
       const videos = searchResults.map(result => {

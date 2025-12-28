@@ -86,19 +86,53 @@
   }
 }
 
-.filters-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+// Section with label (for Search In checkboxes)
+.filter-section {
+  display: flex;
+  align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 70px;
+}
+
+.filter-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 12px 0;
+  opacity: 0.5;
+}
+
+// Filter row - horizontal flex with wrapping
+.filter-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filter-row-sort {
+  .filter-group-grow {
+    flex: 1;
+    min-width: 150px;
+  }
 }
 
 .filter-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-width: 100px;
 
-  label {
-    font-size: 12px;
+  > label {
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -106,15 +140,41 @@
   }
 }
 
+.checkbox-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+
+  input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary-orange);
+  }
+}
+
 .filter-select {
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
+  min-width: 90px;
 
   &:focus {
     outline: none;
@@ -128,15 +188,15 @@
 }
 
 .clear-filters-btn {
-  width: 100%;
-  padding: 8px 12px;
+  padding: 6px 12px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 
   &:hover {
     background: var(--primary-orange);
@@ -145,14 +205,88 @@
   }
 }
 
-@media (max-width: 768px) {
-  .filters-grid {
-    grid-template-columns: 1fr;
+// Responsive breakpoints
+@media (max-width: 900px) {
+  .filter-row {
+    gap: 10px;
+  }
+
+  .filter-group {
+    min-width: 85px;
+  }
+
+  .filter-select {
+    min-width: 80px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 700px) {
+  .filter-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .filter-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .filter-row-sort {
+    grid-template-columns: 1fr auto auto;
+
+    .filter-group-grow {
+      grid-column: 1;
+    }
+  }
+
+  .filter-group {
+    min-width: unset;
+  }
+
+  .filter-select {
+    width: 100%;
+    min-width: unset;
+  }
+}
+
+@media (max-width: 500px) {
+  .search-filters {
+    padding: 12px;
+  }
+
+  .filter-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .filter-row-sort {
+    grid-template-columns: 1fr 1fr;
+
+    .filter-group:last-child {
+      grid-column: span 2;
+
+      .clear-filters-btn {
+        width: 100%;
+      }
+    }
   }
 
   .accordion-toggle {
+    padding: 10px 12px;
+
     span:not(.toggle-icon) {
       display: none;
     }
+  }
+
+  .checkbox-row {
+    gap: 12px;
+  }
+
+  .checkbox-label {
+    font-size: 13px;
   }
 }

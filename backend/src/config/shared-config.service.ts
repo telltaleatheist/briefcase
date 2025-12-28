@@ -81,7 +81,7 @@ export class SharedConfigService {
       ytDlpPath: this.getYtDlpPath(),
       whisperPath: this.getWhisperPath(),
       whisperModelPath: this.getWhisperModelPath(),
-      aiModel: process.env.AI_MODEL || 'qwen2.5:7b',
+      aiModel: process.env.AI_MODEL || '', // No fallback - user must configure
       ollamaEndpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
     };
   }

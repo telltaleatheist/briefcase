@@ -29,10 +29,43 @@
 
   <!-- Advanced Filters (Accordion Content) -->
   <div class="accordion-content" [class.expanded]="expanded()">
-    <div class="filters-grid">
-      <!-- Date Range -->
+    <!-- Search In Checkboxes -->
+    <div class="filter-section">
+      <label class="section-label">Search In</label>
+      <div class="checkbox-row">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            [(ngModel)]="filters.searchIn.filename"
+            (ngModelChange)="onFilterChange()"
+          />
+          Filename
+        </label>
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            [(ngModel)]="filters.searchIn.transcript"
+            (ngModelChange)="onFilterChange()"
+          />
+          Transcript
+        </label>
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            [(ngModel)]="filters.searchIn.analysis"
+            (ngModelChange)="onFilterChange()"
+          />
+          AI Analysis
+        </label>
+      </div>
+    </div>
+
+    <div class="filter-divider"></div>
+
+    <!-- Filter Row: Date, Type, Status -->
+    <div class="filter-row">
       <div class="filter-group">
-        <label>Date Range</label>
+        <label>Date</label>
         <select
           [(ngModel)]="filters.dateRange"
           (ngModelChange)="onFilterChange()"
@@ -46,9 +79,8 @@
         </select>
       </div>
 
-      <!-- Media Type -->
       <div class="filter-group">
-        <label>File Type</label>
+        <label>Type</label>
         <select
           [(ngModel)]="filters.mediaType"
           (ngModelChange)="onFilterChange()"
@@ -58,12 +90,11 @@
           <option value="video">Video</option>
           <option value="audio">Audio</option>
           <option value="image">Image</option>
-          <option value="document">Document (PDF)</option>
-          <option value="webpage">Webpage (MHTML)</option>
+          <option value="document">PDF</option>
+          <option value="webpage">MHTML</option>
         </select>
       </div>
 
-      <!-- Has Transcript -->
       <div class="filter-group">
         <label>Transcript</label>
         <select
@@ -72,12 +103,11 @@
           class="filter-select"
         >
           <option [ngValue]="null">Any</option>
-          <option [ngValue]="true">Has Transcript</option>
-          <option [ngValue]="false">No Transcript</option>
+          <option [ngValue]="true">Has</option>
+          <option [ngValue]="false">Missing</option>
         </select>
       </div>
 
-      <!-- Has Analysis -->
       <div class="filter-group">
         <label>Analysis</label>
         <select
@@ -86,27 +116,30 @@
           class="filter-select"
         >
           <option [ngValue]="null">Any</option>
-          <option [ngValue]="true">Has Analysis</option>
-          <option [ngValue]="false">No Analysis</option>
+          <option [ngValue]="true">Has</option>
+          <option [ngValue]="false">Missing</option>
         </select>
       </div>
 
-      <!-- Has Name Suggestions -->
       <div class="filter-group">
-        <label>Name Suggestions</label>
+        <label>Suggestions</label>
         <select
           [(ngModel)]="filters.hasSuggestions"
           (ngModelChange)="onFilterChange()"
           class="filter-select"
         >
           <option [ngValue]="null">Any</option>
-          <option [ngValue]="true">Has Suggestions</option>
-          <option [ngValue]="false">No Suggestions</option>
+          <option [ngValue]="true">Has</option>
+          <option [ngValue]="false">None</option>
         </select>
       </div>
+    </div>
 
-      <!-- Sort By -->
-      <div class="filter-group">
+    <div class="filter-divider"></div>
+
+    <!-- Sort Row -->
+    <div class="filter-row filter-row-sort">
+      <div class="filter-group filter-group-grow">
         <label>Sort By</label>
         <select
           [(ngModel)]="filters.sortBy"
@@ -122,7 +155,6 @@
         </select>
       </div>
 
-      <!-- Sort Order -->
       <div class="filter-group">
         <label>Order</label>
         <select
@@ -130,12 +162,11 @@
           (ngModelChange)="onFilterChange()"
           class="filter-select"
         >
-          <option value="desc">Descending</option>
-          <option value="asc">Ascending</option>
+          <option value="desc">Desc</option>
+          <option value="asc">Asc</option>
         </select>
       </div>
 
-      <!-- Clear Filters Button -->
       <div class="filter-group">
         <label>&nbsp;</label>
         <button

@@ -119,9 +119,10 @@ export class BatchAnalysisService implements OnModuleInit {
     let aiProvider: 'ollama' | 'claude' | 'openai';
 
     if (transcribeOnly) {
-      // Placeholder values - won't be used for transcribe-only
-      aiModel = options?.aiModel || config.aiModel || '';
-      aiProvider = options?.aiProvider || 'ollama';
+      // For transcribe-only, AI settings are not used - set to empty/undefined
+      // No fallbacks - these won't be used anyway
+      aiModel = '';
+      aiProvider = 'ollama'; // Type placeholder only - not actually used in transcribe-only mode
     } else {
       // Full analysis - require AI configuration
       aiModel = options?.aiModel || config.aiModel || '';

@@ -185,12 +185,27 @@ export class LibraryService {
 
   /**
    * Search videos
-   * GET /api/database/search?q=query
+   * GET /api/database/search?q=query&searchIn=filename,transcript,analysis
    */
-  searchVideos(query: string): Observable<ApiResponse<VideoItem[]>> {
+  searchVideos(query: string, searchIn?: { filename: boolean; transcript: boolean; analysis: boolean }): Observable<ApiResponse<VideoItem[]>> {
+    const params: any = { q: query };
+
+    // Build comma-separated list of selected fields
+    if (searchIn) {
+      const fields: string[] = [];
+      if (searchIn.filename) fields.push('filename');
+      if (searchIn.transcript) fields.push('transcript');
+      if (searchIn.analysis) fields.push('analysis');
+
+      // Only pass searchIn if not all fields are selected
+      if (fields.length > 0 && fields.length < 3) {
+        params.searchIn = fields.join(',');
+      }
+    }
+
     return this.http.get<any>(
       `${this.API_BASE}/database/search`,
-      { params: { q: query } }
+      { params }
     ).pipe(
       map(response => ({
         success: true,

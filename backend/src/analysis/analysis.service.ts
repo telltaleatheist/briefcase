@@ -750,8 +750,11 @@ export class AnalysisService implements OnModuleInit {
     // Parse SRT to get segments
     const segments = this.parseSrtToSegments(request.transcriptSrt);
 
-    // Determine provider and get API key if needed
-    const provider = request.aiProvider || 'ollama';
+    // Determine provider and get API key if needed - no fallbacks
+    if (!request.aiProvider) {
+      throw new Error('AI provider is required for analysis');
+    }
+    const provider = request.aiProvider;
     let apiKey = request.apiKey;
 
     // Fetch API key from stored config if not provided and not using Ollama or local
@@ -940,8 +943,8 @@ export class AnalysisService implements OnModuleInit {
     this.logger.log(`Normalizing audio for job ${jobId}: ${videoPath}`);
 
     try {
-      // Normalize audio using EBU R128 standard (default target: -20dB)
-      const normalizedPath = await this.ffmpeg.normalizeAudio(videoPath, -20, jobId);
+      // Normalize audio using EBU R128 standard (target: -14 LUFS, YouTube standard)
+      const normalizedPath = await this.ffmpeg.normalizeAudio(videoPath, -14, jobId);
 
       if (normalizedPath) {
         this.updateJob(jobId, {
@@ -1123,13 +1126,16 @@ export class AnalysisService implements OnModuleInit {
 
 
       if (mode !== 'transcribe-only' && (request as any).analysisText) {
+        if (!request.aiProvider) {
+          throw new Error('AI provider is required when saving analysis');
+        }
         const tokenStats = analysisResult?.tokenStats;
         this.databaseService.insertAnalysis({
           videoId,
           aiAnalysis: (request as any).analysisText,
           sectionsCount: analysisResult?.sections_count || 0,
           aiModel: request.aiModel,
-          aiProvider: request.aiProvider || 'ollama',
+          aiProvider: request.aiProvider,
           inputTokens: tokenStats?.inputTokens,
           outputTokens: tokenStats?.outputTokens,
           totalTokens: tokenStats?.totalTokens,

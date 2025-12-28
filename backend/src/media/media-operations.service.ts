@@ -317,7 +317,7 @@ export class MediaOperationsService {
 
       // Use loudnorm filter for proper audio normalization (EBU R128 standard)
       // This normalizes to target integrated loudness (LUFS) so all videos have consistent perceived volume
-      const targetLoudness = options.level || -16;  // Default to -16 LUFS (typical for web content)
+      const targetLoudness = options.level || -14;  // Default to -14 LUFS (YouTube standard)
       const normalizedPath = await this.ffmpegService.normalizeAudio(videoPath, targetLoudness, jobId);
 
       if (!normalizedPath) {
@@ -558,7 +558,7 @@ export class MediaOperationsService {
       // Extract provider from model name prefix if not explicitly set
       // Model format: "provider:model" (e.g., "openai:gpt-4o", "ollama:qwen2.5:7b", "claude:claude-3-5-sonnet-latest")
       let cleanModelName = options.aiModel;
-      let provider: 'ollama' | 'openai' | 'claude' | 'local' = (options.aiProvider || 'ollama') as 'ollama' | 'openai' | 'claude' | 'local';
+      let provider: 'ollama' | 'openai' | 'claude' | 'local' | undefined = options.aiProvider as 'ollama' | 'openai' | 'claude' | 'local' | undefined;
 
       // Check if model name has a provider prefix
       const knownProviders = ['ollama', 'openai', 'claude', 'local'];
@@ -573,6 +573,11 @@ export class MediaOperationsService {
             this.logger.log(`[${jobId || 'standalone'}] Extracted provider '${provider}' from model name: ${options.aiModel} -> ${cleanModelName}`);
           }
         }
+      }
+
+      // Require explicit provider - no fallbacks
+      if (!provider) {
+        throw new Error('AI provider is required for analysis. No provider specified and none could be extracted from model name.');
       }
 
       // Get API key from options or from stored config

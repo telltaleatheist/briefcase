@@ -245,7 +245,7 @@ export class QueueController {
       // Post-processing options (run after import)
       fixAspectRatio?: boolean;
       normalizeAudio?: boolean;
-      audioLevel?: number; // Target audio level in LUFS (default -16)
+      audioLevel?: number; // Target audio level in LUFS (default -14, YouTube standard)
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
@@ -273,7 +273,7 @@ export class QueueController {
         options: {
           fixAspectRatio: true,
           normalizeAudio: true,
-          level: body.audioLevel || -16,
+          level: body.audioLevel || -14,
         },
       });
     } else if (body.fixAspectRatio) {
@@ -281,7 +281,7 @@ export class QueueController {
     } else if (body.normalizeAudio) {
       tasks.push({
         type: 'normalize-audio',
-        options: { level: body.audioLevel || -16 },
+        options: { level: body.audioLevel || -14 },
       });
     }
 
@@ -292,10 +292,16 @@ export class QueueController {
 
     // Add AI analysis (requires transcript)
     if (body.includeAnalysis) {
+      if (!body.aiModel) {
+        throw new Error('AI model is required when includeAnalysis is true');
+      }
+      if (!body.aiProvider) {
+        throw new Error('AI provider is required when includeAnalysis is true');
+      }
       tasks.push({
         type: 'analyze',
         options: {
-          aiModel: body.aiModel || 'claude-3.5-sonnet',
+          aiModel: body.aiModel,
           aiProvider: body.aiProvider,
         },
       });

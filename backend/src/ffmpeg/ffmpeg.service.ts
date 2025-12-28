@@ -629,7 +629,7 @@ export class FfmpegService {
     return b === 0 ? a : this.calculateGCD(b, a % b);
   }
 
-  async normalizeAudio(filePath: string, targetVolume: number = -20, jobId?: string): Promise<string | null> {
+  async normalizeAudio(filePath: string, targetVolume: number = -14, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(filePath)) {
       this.logger.error(`File doesn't exist: ${filePath}`);
       if (jobId) {
