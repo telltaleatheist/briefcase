@@ -1355,9 +1355,29 @@
   z-index: 9999;
   background: #000;
 
-  // Hide header completely in fullscreen
+  // Header with transitions for hide/show
   .editor-header {
-    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    z-index: 11;
+  }
+
+  // Tab bar with transitions for hide/show
+  app-tab-bar,
+  .tab-bar {
+    position: absolute;
+    top: 52px; // Below header
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    z-index: 11;
   }
 
   .editor-main {
@@ -1391,6 +1411,19 @@
 }
 
 .video-editor.timeline-hidden {
+  .editor-header {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  app-tab-bar,
+  .tab-bar {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
   .timeline-area {
     transform: translateY(100%);
     opacity: 0;

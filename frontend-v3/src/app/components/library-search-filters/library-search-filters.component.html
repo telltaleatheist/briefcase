@@ -8,11 +8,13 @@
         [(ngModel)]="filters.searchQuery"
         (ngModelChange)="onSearchChange()"
         (focus)="onSearchFocus()"
-        placeholder="Search: multiple words, &quot;exact phrase&quot;, wild*"
+        placeholder="Search: words, &quot;phrase&quot;, -exclude, wild*"
         title="Search tips:
-• Multiple words: all must match (in any field)
-• Wildcards: test* matches testing, tests
+• Multiple words: all must match
 • Exact phrase: &quot;hello world&quot;
+• Exclude: -unwanted (removes results with that word)
+• Wildcards: test* matches testing, tests
+• OR operator: word1 OR word2
 • Searches: filename, transcript, analysis, tags"
         class="search-input"
       />
@@ -92,6 +94,19 @@
           <option value="image">Image</option>
           <option value="document">PDF</option>
           <option value="webpage">MHTML</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label>Duration</label>
+        <select
+          [(ngModel)]="filters.duration"
+          (ngModelChange)="onFilterChange()"
+          class="filter-select"
+        >
+          <option value="all">Any</option>
+          <option value="under10">Under 10 min</option>
+          <option value="over10">Over 10 min</option>
         </select>
       </div>
 

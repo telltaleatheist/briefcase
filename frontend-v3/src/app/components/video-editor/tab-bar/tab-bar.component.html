@@ -1,0 +1,106 @@
+<div class="tab-bar" (click)="closeContextMenu()">
+  <div class="tabs-container">
+    @for (tab of tabs; track tab.id) {
+      <div
+        class="tab"
+        [class.active]="tab.id === activeTabId"
+        [class.loading]="!tab.isLoaded"
+        [title]="tab.videoTitle"
+        (mousedown)="onTabClick(tab.id, $event)"
+        (contextmenu)="onTabContextMenu(tab.id, $event)"
+        (auxclick)="onTabClick(tab.id, $event)">
+        <span class="tab-title">{{ getTruncatedTitle(tab.videoTitle) }}</span>
+        <button
+          class="tab-close"
+          (click)="onTabClose(tab.id, $event)"
+          title="Close tab">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    }
+  </div>
+
+  @if (isAtMaxTabs) {
+    <div class="max-tabs-warning" title="Maximum tabs reached (15)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 8v4M12 16h.01"/>
+      </svg>
+    </div>
+  }
+</div>
+
+<!-- Context Menu -->
+@if (contextMenuTabId()) {
+  <div
+    class="context-menu-backdrop"
+    (click)="closeContextMenu()">
+  </div>
+  <div
+    class="context-menu"
+    [style.left.px]="contextMenuPosition().x"
+    [style.top.px]="contextMenuPosition().y">
+    <button class="context-menu-item" (click)="onCloseTab(contextMenuTabId()!)">
+      Close Tab
+    </button>
+    <button class="context-menu-item" (click)="onCloseOtherTabs(contextMenuTabId()!)">
+      Close Other Tabs
+    </button>
+    <button class="context-menu-item" (click)="onCloseAllTabs()">
+      Close All Tabs
+    </button>
+
+    <div class="context-menu-divider"></div>
+
+    <button class="context-menu-item" (click)="onRenameTab(contextMenuTabId()!)">
+      Rename Tab
+    </button>
+
+    <div class="context-menu-divider"></div>
+
+    <!-- Move to Group submenu -->
+    <div class="context-menu-item-with-submenu">
+      <button class="context-menu-item has-submenu" (click)="toggleGroupSubmenu($event)">
+        Move to Group
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/>
+        </svg>
+      </button>
+
+      @if (showGroupSubmenu()) {
+        <div class="submenu">
+          <!-- Other existing groups -->
+          @for (group of otherGroups; track group.groupNumber) {
+            <button
+              class="context-menu-item"
+              (click)="onMoveToGroup(contextMenuTabId()!, group.groupNumber)">
+              Group {{ group.groupNumber }}
+            </button>
+          }
+
+          @if (hasOtherGroups) {
+            <div class="context-menu-divider"></div>
+          }
+
+          <!-- Create new group -->
+          <button
+            class="context-menu-item"
+            (click)="onMoveToNewGroup(contextMenuTabId()!)">
+            New Group
+          </button>
+
+          @if (hasOtherGroups) {
+            <div class="context-menu-divider"></div>
+            <button
+              class="context-menu-item"
+              (click)="onConsolidateGroups()">
+              Consolidate All Groups
+            </button>
+          }
+        </div>
+      }
+    </div>
+  </div>
+}

@@ -2,6 +2,13 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import * as path from 'path';
 
+// Define types for group info
+interface EditorGroupInfo {
+  groupNumber: number;
+  windowId: string;
+  isCurrent: boolean;
+}
+
 // Define types for our exposed API
 interface ElectronAPI {
   openDirectoryPicker: () => Promise<{ canceled: boolean; filePaths: string[] }>;
@@ -51,6 +58,12 @@ interface ElectronAPI {
   onSetupProgress?: (callback: (event: any, data: any) => void) => void;
   // Console logging
   saveConsoleLogs: (filename: string, content: string) => Promise<void>;
+  // Editor group management
+  getEditorGroups: () => Promise<{ groups: EditorGroupInfo[]; currentGroupNumber: number | null }>;
+  getCurrentGroupNumber: () => Promise<number | null>;
+  moveTabToGroup: (tabData: any, targetGroupNumber: number) => Promise<boolean>;
+  createGroupWithTab: (tabData: any) => Promise<number>;
+  consolidateGroups: () => Promise<{ success: boolean }>;
 }
 
 // Get resource path information
@@ -125,7 +138,13 @@ contextBridge.exposeInMainWorld('electron', {
   clearSettings: () => ipcRenderer.invoke('clear-settings'),
   getSettingsPath: () => ipcRenderer.invoke('get-settings-path'),
   // Console logging
-  saveConsoleLogs: (filename: string, content: string) => ipcRenderer.invoke('save-console-logs', filename, content)
+  saveConsoleLogs: (filename: string, content: string) => ipcRenderer.invoke('save-console-logs', filename, content),
+  // Editor group management
+  getEditorGroups: () => ipcRenderer.invoke('get-editor-groups'),
+  getCurrentGroupNumber: () => ipcRenderer.invoke('get-current-group-number'),
+  moveTabToGroup: (tabData: any, targetGroupNumber: number) => ipcRenderer.invoke('move-tab-to-group', tabData, targetGroupNumber),
+  createGroupWithTab: (tabData: any) => ipcRenderer.invoke('create-group-with-tab', tabData),
+  consolidateGroups: () => ipcRenderer.invoke('consolidate-groups')
 } as ElectronAPI);
 
 // Expose setup progress listener to window.electronAPI
@@ -143,6 +162,26 @@ ipcRenderer.on('update-available', () => {
 
 ipcRenderer.on('update-downloaded', () => {
   window.dispatchEvent(new CustomEvent('electron-update-downloaded'));
+});
+
+// Listen for add-editor-tab events from main process (when opening videos in existing editor)
+ipcRenderer.on('add-editor-tab', (_, videoData: { videoId: string; videoPath?: string; videoTitle: string }) => {
+  window.dispatchEvent(new CustomEvent('electron-add-editor-tab', { detail: videoData }));
+});
+
+// Listen for receive-tab events (when a tab is moved from another window)
+ipcRenderer.on('receive-tab', (_, tabData: any) => {
+  window.dispatchEvent(new CustomEvent('electron-receive-tab', { detail: tabData }));
+});
+
+// Listen for request-all-tabs events (for consolidation - other windows request our tabs)
+ipcRenderer.on('request-all-tabs', (_, targetGroupNumber: number) => {
+  window.dispatchEvent(new CustomEvent('electron-request-all-tabs', { detail: { targetGroupNumber } }));
+});
+
+// Listen for restore-tab-state events (when a new window is created with existing tab data)
+ipcRenderer.on('restore-tab-state', (_, tabData: any) => {
+  window.dispatchEvent(new CustomEvent('electron-restore-tab-state', { detail: tabData }));
 });
 
 // For TypeScript - declare the API on the window object

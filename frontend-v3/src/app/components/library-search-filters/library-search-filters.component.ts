@@ -1,24 +1,10 @@
-import { Component, EventEmitter, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Output, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { LibraryFilterService, LibraryFilters, SearchInFields } from '../../services/library-filter.service';
 
-export interface SearchInFields {
-  filename: boolean;
-  transcript: boolean;
-  analysis: boolean;
-}
-
-export interface LibraryFilters {
-  searchQuery: string;
-  searchIn: SearchInFields;
-  dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
-  mediaType: 'all' | 'video' | 'audio' | 'image' | 'document' | 'webpage';
-  hasTranscript: boolean | null;
-  hasAnalysis: boolean | null;
-  hasSuggestions: boolean | null;
-  sortBy: 'date' | 'name' | 'duration' | 'suggestions' | 'no-analysis' | 'no-transcript';
-  sortOrder: 'asc' | 'desc';
-}
+// Re-export for backward compatibility
+export { LibraryFilters, SearchInFields } from '../../services/library-filter.service';
 
 @Component({
   selector: 'app-library-search-filters',
@@ -28,21 +14,13 @@ export interface LibraryFilters {
   styleUrls: ['./library-search-filters.component.scss']
 })
 export class LibrarySearchFiltersComponent {
+  private filterService = inject(LibraryFilterService);
+
   @Output() filtersChanged = new EventEmitter<LibraryFilters>();
 
   expanded = signal(false);
 
-  filters: LibraryFilters = {
-    searchQuery: '',
-    searchIn: { filename: true, transcript: true, analysis: true },
-    dateRange: 'all',
-    mediaType: 'all',
-    hasTranscript: null,
-    hasAnalysis: null,
-    hasSuggestions: null,
-    sortBy: 'date',
-    sortOrder: 'desc'
-  };
+  filters: LibraryFilters = this.filterService.getDefaultFilters();
 
   toggleAccordion() {
     this.expanded.set(!this.expanded());
@@ -62,17 +40,7 @@ export class LibrarySearchFiltersComponent {
   }
 
   clearFilters() {
-    this.filters = {
-      searchQuery: '',
-      searchIn: { filename: true, transcript: true, analysis: true },
-      dateRange: 'all',
-      mediaType: 'all',
-      hasTranscript: null,
-      hasAnalysis: null,
-      hasSuggestions: null,
-      sortBy: 'date',
-      sortOrder: 'desc'
-    };
+    this.filters = this.filterService.getDefaultFilters();
     this.emitFilters();
   }
 

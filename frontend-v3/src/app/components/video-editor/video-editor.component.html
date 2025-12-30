@@ -45,6 +45,24 @@
     </div>
   </div>
 
+  <!-- Tab Bar -->
+  @if (tabs().length > 0) {
+    <app-tab-bar
+      [tabs]="tabs()"
+      [activeTabId]="activeTabId()"
+      [maxTabs]="15"
+      [currentGroupNumber]="currentGroupNumber()"
+      (tabSelect)="onTabSelect($event)"
+      (tabClose)="onTabClose($event)"
+      (tabCloseOthers)="onTabCloseOthers($event)"
+      (tabCloseAll)="onTabCloseAll()"
+      (tabRename)="onTabRename($event)"
+      (moveTabToGroup)="onMoveTabToGroup($event)"
+      (moveTabToNewGroup)="onMoveTabToNewGroup($event)"
+      (consolidateGroups)="onConsolidateGroups()">
+    </app-tab-bar>
+  }
+
   <!-- Main editor area -->
   <div class="editor-main">
     <!-- Center Content Area -->

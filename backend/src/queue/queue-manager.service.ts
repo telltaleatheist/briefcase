@@ -33,6 +33,9 @@ export class QueueManagerService implements OnModuleDestroy {
   // Unified job queue (no more separate batch/analysis queues)
   private jobQueue = new Map<string, QueueJob>();
 
+  // Track cancelled job IDs for in-flight task cancellation
+  private cancelledJobs = new Set<string>();
+
   // Task pools - tracks actively running tasks
   private mainPool = new Map<string, ActiveTask>();  // Max 5 concurrent
   private aiPool: ActiveTask | null = null;           // Max 1 concurrent
@@ -189,12 +192,36 @@ export class QueueManagerService implements OnModuleDestroy {
       return false;
     }
 
+    // Add to cancelled set so running tasks can check
+    this.cancelledJobs.add(jobId);
+
     job.status = 'cancelled';
     job.error = 'Cancelled by user';
     job.completedAt = new Date();
 
+    // Remove from pools if active
+    this.mainPool.delete(jobId);
+    if (this.aiPool?.jobId === jobId) {
+      this.aiPool = null;
+    }
+
     this.logger.log(`Cancelled job ${jobId}`);
+
+    // Emit cancellation event
+    this.eventService.emit('job.cancelled', {
+      jobId,
+      videoId: job.videoId,
+      timestamp: new Date().toISOString(),
+    });
+
     return true;
+  }
+
+  /**
+   * Check if a job has been cancelled
+   */
+  isJobCancelled(jobId: string): boolean {
+    return this.cancelledJobs.has(jobId);
   }
 
   /**
@@ -383,6 +410,15 @@ export class QueueManagerService implements OnModuleDestroy {
     { task, job }: { task: Task; job: QueueJob },
     pool: 'main' | 'ai',
   ): Promise<void> {
+    // Check if job was cancelled before starting
+    if (this.isJobCancelled(job.id)) {
+      this.logger.log(`Job ${job.id} was cancelled, skipping task ${task.type}`);
+      // Clean up cancelled job from set after acknowledging
+      this.cancelledJobs.delete(job.id);
+      setImmediate(() => this.processQueue());
+      return;
+    }
+
     // Use job.id for progress tracking so frontend can map it correctly
     const taskId = job.id;
     const activeTask: ActiveTask = {
@@ -428,6 +464,14 @@ export class QueueManagerService implements OnModuleDestroy {
     try {
       // Execute the task
       const result = await this.executeTaskLogic(job, task, taskId);
+
+      // Check if job was cancelled during execution
+      if (this.isJobCancelled(job.id)) {
+        this.logger.log(`Job ${job.id} was cancelled during ${task.type} execution`);
+        this.cancelledJobs.delete(job.id);
+        // Don't process results - just clean up and return
+        return;
+      }
 
       if (!result.success) {
         throw new Error(result.error || 'Task failed');

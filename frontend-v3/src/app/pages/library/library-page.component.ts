@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, ChangeDetectorRef, computed, ViewChild, effect } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, ChangeDetectorRef, computed, ViewChild, effect, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
@@ -17,6 +17,7 @@ import { NewTabDialogComponent } from '../../components/new-tab-dialog/new-tab-d
 import { QueueTabComponent } from '../../components/queue-tab/queue-tab.component';
 import { SaveForLaterTabComponent } from '../../components/save-for-later-tab/save-for-later-tab.component';
 import { SettingsPageComponent } from '../settings/settings-page.component';
+import { LibraryShortcutsDialogComponent } from '../../components/library-shortcuts-dialog/library-shortcuts-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
 import { QueueItemTask } from '../../models/queue.model';
@@ -31,6 +32,7 @@ import { FileImportService } from '../../services/file-import.service';
 import { ElectronService } from '../../services/electron.service';
 import { TourService } from '../../services/tour.service';
 import { QueueService } from '../../services/queue.service';
+import { LibraryFilterService } from '../../services/library-filter.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
 
 // Local queue item for the processing section
@@ -94,6 +96,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private electronService = inject(ElectronService);
   private tourService = inject(TourService);
   private queueService = inject(QueueService);
+  private filterService = inject(LibraryFilterService);
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
@@ -1428,7 +1431,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         if (response.success) {
           console.log('Setting video weeks:', response.data.length, 'weeks');
           this.videoWeeks.set(response.data);
-          this.filteredWeeks.set(response.data);
+          // Re-apply current filters to preserve user's filter selections
+          this.applyFilters();
         } else {
           console.warn('Response not successful:', response);
         }
@@ -1589,7 +1593,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
               });
 
               // Convert map to VideoWeek array
-              const filtered: VideoWeek[] = [];
+              let filtered: VideoWeek[] = [];
               weekMap.forEach((videos, weekLabel) => {
                 filtered.push({ weekLabel, videos });
               });
@@ -1597,8 +1601,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
               // Sort by week label (most recent first)
               filtered.sort((a, b) => b.weekLabel.localeCompare(a.weekLabel));
 
-              // Apply sorting to videos within each week
-              this.sortFilteredWeeks(filtered);
+              // Apply non-search filters to search results too
+              filtered = this.filterService.applyFilters(filtered, this.currentFilters!);
+
+              // Apply sorting
+              this.filterService.sortVideos(filtered, this.currentFilters!);
               this.filteredWeeks.set(filtered);
             } else {
               this.filteredWeeks.set([]);
@@ -1620,172 +1627,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       videos: [...week.videos]
     }));
 
-    // Apply hasSuggestions filter
-    if (this.currentFilters.hasSuggestions !== null) {
-      const wantsSuggestions = this.currentFilters.hasSuggestions;
-      weeks = weeks.map(week => ({
-        weekLabel: week.weekLabel,
-        videos: week.videos.filter(video =>
-          wantsSuggestions ? !!video.suggestedTitle : !video.suggestedTitle
-        )
-      })).filter(week => week.videos.length > 0);
-    }
+    // Apply all filters via service
+    weeks = this.filterService.applyFilters(weeks, this.currentFilters);
 
-    // Apply hasTranscript filter
-    if (this.currentFilters.hasTranscript !== null) {
-      const wantsTranscript = this.currentFilters.hasTranscript;
-      weeks = weeks.map(week => ({
-        weekLabel: week.weekLabel,
-        videos: week.videos.filter(video =>
-          wantsTranscript ? video.hasTranscript : !video.hasTranscript
-        )
-      })).filter(week => week.videos.length > 0);
-    }
-
-    // Apply hasAnalysis filter
-    if (this.currentFilters.hasAnalysis !== null) {
-      const wantsAnalysis = this.currentFilters.hasAnalysis;
-      weeks = weeks.map(week => ({
-        weekLabel: week.weekLabel,
-        videos: week.videos.filter(video =>
-          wantsAnalysis ? video.hasAnalysis : !video.hasAnalysis
-        )
-      })).filter(week => week.videos.length > 0);
-    }
-
-    // Apply mediaType filter
-    if (this.currentFilters.mediaType && this.currentFilters.mediaType !== 'all') {
-      const targetType = this.currentFilters.mediaType;
-      weeks = weeks.map(week => ({
-        weekLabel: week.weekLabel,
-        videos: week.videos.filter(video => {
-          const videoMediaType = video.mediaType?.toLowerCase() || 'video';
-          return videoMediaType === targetType;
-        })
-      })).filter(week => week.videos.length > 0);
-    }
-
-    this.sortFilteredWeeks(weeks);
+    // Apply sorting via service
+    this.filterService.sortVideos(weeks, this.currentFilters);
     this.filteredWeeks.set(weeks);
-  }
-
-  /**
-   * Sort videos based on current filter settings
-   * For date sorting: reorders sections
-   * For other sorts: flattens into single group and sorts all videos
-   */
-  private sortFilteredWeeks(weeks: VideoWeek[]): void {
-    if (!this.currentFilters) return;
-
-    const { sortBy, sortOrder } = this.currentFilters;
-    const ascending = sortOrder === 'asc';
-
-    // For date sorting, reorder the sections themselves
-    if (sortBy === 'date') {
-      // Sort sections by their date (weekLabel is in format YYYY-MM-DD)
-      weeks.sort((a, b) => {
-        // Handle special labels
-        if (a.weekLabel === 'New') return ascending ? 1 : -1;
-        if (b.weekLabel === 'New') return ascending ? -1 : 1;
-        if (a.weekLabel === 'Unknown') return 1;
-        if (b.weekLabel === 'Unknown') return -1;
-
-        const comparison = a.weekLabel.localeCompare(b.weekLabel);
-        return ascending ? comparison : -comparison;
-      });
-
-      // Also sort videos within each section by date
-      for (const week of weeks) {
-        week.videos.sort((a, b) => {
-          const dateA = a.downloadDate ? new Date(a.downloadDate).getTime() : 0;
-          const dateB = b.downloadDate ? new Date(b.downloadDate).getTime() : 0;
-          return ascending ? dateA - dateB : dateB - dateA;
-        });
-      }
-      return;
-    }
-
-    // For other sort criteria, flatten all videos into a single group
-    const allVideos: VideoItem[] = [];
-    for (const week of weeks) {
-      allVideos.push(...week.videos);
-    }
-
-    // Sort all videos
-    allVideos.sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortBy) {
-        case 'name':
-          comparison = (a.name || '').localeCompare(b.name || '');
-          break;
-
-        case 'duration':
-          const durA = this.parseDuration(a.duration);
-          const durB = this.parseDuration(b.duration);
-          comparison = durA - durB;
-          break;
-
-        case 'suggestions':
-          // Sort by whether video has a suggested title
-          const hasSugA = a.suggestedTitle ? 1 : 0;
-          const hasSugB = b.suggestedTitle ? 1 : 0;
-          comparison = hasSugA - hasSugB;
-          break;
-
-        case 'no-analysis':
-          // Sort by whether video is MISSING analysis (no analysis = 1, has analysis = 0)
-          const missingAnalysisA = a.hasAnalysis ? 0 : 1;
-          const missingAnalysisB = b.hasAnalysis ? 0 : 1;
-          comparison = missingAnalysisA - missingAnalysisB;
-          break;
-
-        case 'no-transcript':
-          // Sort by whether video is MISSING transcript
-          const missingTranscriptA = a.hasTranscript ? 0 : 1;
-          const missingTranscriptB = b.hasTranscript ? 0 : 1;
-          comparison = missingTranscriptA - missingTranscriptB;
-          break;
-      }
-
-      // Apply sort order
-      return ascending ? comparison : -comparison;
-    });
-
-    // Replace weeks array content with single flattened group
-    weeks.length = 0;
-    weeks.push({
-      weekLabel: `Sorted by ${this.getSortLabel(sortBy)}`,
-      videos: allVideos
-    });
-  }
-
-  /**
-   * Get human-readable label for sort type
-   */
-  private getSortLabel(sortBy: string): string {
-    switch (sortBy) {
-      case 'name': return 'Name';
-      case 'duration': return 'Duration';
-      case 'suggestions': return 'AI Suggestions';
-      case 'no-analysis': return 'Missing Analysis';
-      case 'no-transcript': return 'Missing Transcript';
-      default: return sortBy;
-    }
-  }
-
-  /**
-   * Parse duration string (e.g., "1:23:45" or "23:45") to seconds
-   */
-  private parseDuration(duration?: string): number {
-    if (!duration) return 0;
-    const parts = duration.split(':').map(Number);
-    if (parts.length === 3) {
-      return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    } else if (parts.length === 2) {
-      return parts[0] * 60 + parts[1];
-    }
-    return 0;
   }
 
   onSelectionChanged(event: { count: number; ids: Set<string> }) {

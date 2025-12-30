@@ -1,3 +1,5 @@
+import { TranscriptionSegment } from './video-info.model';
+
 export interface VideoEditorState {
   currentTime: number; // seconds
   duration: number; // seconds
@@ -139,4 +141,73 @@ export interface TimelineZoom {
 export interface PlayheadPosition {
   time: number;
   pixelPosition: number;
+}
+
+/**
+ * Represents a single tab in the video editor.
+ * Each tab maintains its own isolated state for a video.
+ */
+export interface EditorTab {
+  id: string;                           // Unique tab identifier
+  videoId: string;                      // Database video ID
+  videoPath: string | null;             // Path to video file
+  videoTitle: string;                   // Display title for tab
+  videoUrl: string | undefined;         // Streaming URL
+
+  // Editor state
+  editorState: VideoEditorState;
+
+  // Data loaded from backend
+  sections: TimelineSection[];
+  chapters: TimelineChapter[];
+  customMarkers: CustomMarker[];
+  waveformData: WaveformData;
+  transcript: TranscriptionSegment[];
+  analysisData: AnalysisData | null;
+
+  // UI state
+  highlightSelection: TimelineSelection | null;
+  categoryFilters: CategoryFilter[];
+  hasAnalysis: boolean;
+  isLoaded: boolean;                    // Whether data has been loaded from backend
+}
+
+/**
+ * Helper to create a new EditorTab with default values
+ */
+export function createEditorTab(
+  videoId: string,
+  videoPath: string | null,
+  videoTitle: string,
+  videoUrl: string | undefined
+): EditorTab {
+  return {
+    id: `tab-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    videoId,
+    videoPath,
+    videoTitle,
+    videoUrl,
+    editorState: {
+      currentTime: 0,
+      duration: 120,
+      isPlaying: false,
+      volume: 1,
+      playbackRate: 1,
+      zoomState: { level: 1, offset: 0 }
+    },
+    sections: [],
+    chapters: [],
+    customMarkers: [],
+    waveformData: {
+      samples: [],
+      sampleRate: 44100,
+      duration: 0
+    },
+    transcript: [],
+    analysisData: null,
+    highlightSelection: null,
+    categoryFilters: [],
+    hasAnalysis: false,
+    isLoaded: false
+  };
 }

@@ -509,6 +509,7 @@ export class DatabaseController {
     @Query('limit') limit?: string,
     @Query('searchIn') searchIn?: string,
   ) {
+    console.log(`[SEARCH ENDPOINT] query="${query}", searchIn="${searchIn}"`);
     if (!query || query.trim() === '') {
       return {
         results: [],

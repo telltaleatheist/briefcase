@@ -478,4 +478,39 @@ function setupWindowHandlers(): void {
       return { success: false, error: error.message };
     }
   });
+
+  // Get all editor groups
+  ipcMain.handle('get-editor-groups', (event) => {
+    const groups = windowServiceRef.getEditorGroups();
+    const currentGroupNumber = windowServiceRef.getGroupNumberForWindow(event.sender.id);
+    return {
+      groups: groups.map(g => ({
+        groupNumber: g.groupNumber,
+        windowId: g.windowId,
+        isCurrent: g.window.webContents.id === event.sender.id
+      })),
+      currentGroupNumber
+    };
+  });
+
+  // Get current window's group number
+  ipcMain.handle('get-current-group-number', (event) => {
+    return windowServiceRef.getGroupNumberForWindow(event.sender.id);
+  });
+
+  // Move tab to another group
+  ipcMain.handle('move-tab-to-group', (event, tabData: any, targetGroupNumber: number) => {
+    return windowServiceRef.moveTabToGroup(tabData, targetGroupNumber, event.sender.id);
+  });
+
+  // Create new group with tab
+  ipcMain.handle('create-group-with-tab', (_, tabData: any) => {
+    return windowServiceRef.createGroupWithTab(tabData);
+  });
+
+  // Consolidate all groups
+  ipcMain.handle('consolidate-groups', () => {
+    windowServiceRef.consolidateGroups();
+    return { success: true };
+  });
 }

@@ -6,12 +6,42 @@ import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 
 /**
+ * Editor group info for tracking window groups
+ */
+export interface EditorGroup {
+  groupNumber: number;
+  windowId: string;
+  window: BrowserWindow;
+}
+
+/**
+ * Tab data for moving between groups
+ */
+export interface TabMoveData {
+  videoId: string;
+  videoPath: string | null;
+  videoTitle: string;
+  videoUrl: string | undefined;
+  editorState: any;
+  sections: any[];
+  chapters: any[];
+  waveformData: any;
+  transcript: any[];
+  analysisData: any;
+  highlightSelection: any;
+  categoryFilters: any[];
+  hasAnalysis: boolean;
+}
+
+/**
  * Window management service
  * Handles creation and management of all application windows
  */
 export class WindowService {
   private mainWindow: BrowserWindow | null = null;
   private editorWindows: Map<string, BrowserWindow> = new Map();
+  private editorGroups: Map<string, number> = new Map(); // windowId -> groupNumber
+  private nextGroupNumber: number = 1;
   private frontendPort: number = 8080;
   private isQuitting: boolean = false;
 
@@ -85,10 +115,41 @@ export class WindowService {
   }
 
   /**
+   * Get the first available editor window (for adding tabs)
+   */
+  getFirstEditorWindow(): BrowserWindow | null {
+    const entries = Array.from(this.editorWindows.entries());
+    if (entries.length > 0) {
+      return entries[0][1];
+    }
+    return null;
+  }
+
+  /**
+   * Add a video as a new tab to an existing editor window
+   */
+  addTabToEditorWindow(editorWindow: BrowserWindow, videoData: { videoId: string; videoPath?: string; videoTitle: string }): void {
+    log.info('Adding video as new tab:', videoData.videoId);
+    editorWindow.webContents.send('add-editor-tab', videoData);
+    // Focus the window
+    if (editorWindow.isMinimized()) {
+      editorWindow.restore();
+    }
+    editorWindow.focus();
+  }
+
+  /**
    * Create a new editor window for video editing
-   * Opens the editor in a separate window with the given video data
+   * If an editor window already exists, adds the video as a new tab instead
    */
   createEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string }): BrowserWindow {
+    // Check if an editor window already exists - add as tab instead
+    const existingEditor = this.getFirstEditorWindow();
+    if (existingEditor && !existingEditor.isDestroyed()) {
+      this.addTabToEditorWindow(existingEditor, videoData);
+      return existingEditor;
+    }
+
     const windowId = `editor-${videoData.videoId}-${Date.now()}`;
 
     // Get icon path
@@ -124,12 +185,16 @@ export class WindowService {
     log.info(`Opening editor window: ${editorUrl}`);
     editorWindow.loadURL(editorUrl);
 
-    // Store reference
+    // Store reference and assign group number
     this.editorWindows.set(windowId, editorWindow);
+    const groupNumber = this.nextGroupNumber++;
+    this.editorGroups.set(windowId, groupNumber);
+    log.info(`Created editor window ${windowId} as Group ${groupNumber}`);
 
     // Clean up on close
     editorWindow.on('closed', () => {
       this.editorWindows.delete(windowId);
+      this.editorGroups.delete(windowId);
       log.info(`Editor window closed: ${windowId}`);
     });
 
@@ -267,6 +332,162 @@ export class WindowService {
    */
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
+  }
+
+  /**
+   * Get all editor groups
+   */
+  getEditorGroups(): EditorGroup[] {
+    const groups: EditorGroup[] = [];
+    for (const [windowId, window] of this.editorWindows.entries()) {
+      if (!window.isDestroyed()) {
+        const groupNumber = this.editorGroups.get(windowId) || 0;
+        groups.push({ groupNumber, windowId, window });
+      }
+    }
+    // Sort by group number
+    return groups.sort((a, b) => a.groupNumber - b.groupNumber);
+  }
+
+  /**
+   * Get group number for a specific window by webContents ID
+   */
+  getGroupNumberForWindow(webContentsId: number): number | null {
+    for (const [windowId, window] of this.editorWindows.entries()) {
+      if (!window.isDestroyed() && window.webContents.id === webContentsId) {
+        return this.editorGroups.get(windowId) || null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get editor window by group number
+   */
+  getEditorWindowByGroup(groupNumber: number): BrowserWindow | null {
+    for (const [windowId, window] of this.editorWindows.entries()) {
+      if (!window.isDestroyed() && this.editorGroups.get(windowId) === groupNumber) {
+        return window;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Move a tab to a different group (window)
+   */
+  moveTabToGroup(tabData: TabMoveData, targetGroupNumber: number, sourceWebContentsId: number): boolean {
+    const targetWindow = this.getEditorWindowByGroup(targetGroupNumber);
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      log.error(`Target group ${targetGroupNumber} not found`);
+      return false;
+    }
+
+    // Send the tab data to the target window
+    targetWindow.webContents.send('receive-tab', tabData);
+
+    // Focus the target window
+    if (targetWindow.isMinimized()) {
+      targetWindow.restore();
+    }
+    targetWindow.focus();
+
+    log.info(`Moved tab ${tabData.videoId} to Group ${targetGroupNumber}`);
+    return true;
+  }
+
+  /**
+   * Create a new group (window) with a tab
+   */
+  createGroupWithTab(tabData: TabMoveData): number {
+    const windowId = `editor-${tabData.videoId}-${Date.now()}`;
+    const iconPath = path.join(AppConfig.appPath, 'assets', 'icon.png');
+
+    const editorWindow = new BrowserWindow({
+      width: 1400,
+      height: 900,
+      minWidth: 1000,
+      minHeight: 600,
+      autoHideMenuBar: true,
+      icon: iconPath,
+      title: tabData.videoTitle || 'RippleCut',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        preload: AppConfig.preloadPath,
+      },
+    });
+
+    // Build the editor URL with query params
+    const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
+    const params = new URLSearchParams({
+      videoId: tabData.videoId,
+      videoTitle: tabData.videoTitle || '',
+      ...(tabData.videoPath && { videoPath: tabData.videoPath }),
+      popout: 'true'
+    });
+    const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
+
+    editorWindow.loadURL(editorUrl);
+
+    // Store reference and assign group number
+    this.editorWindows.set(windowId, editorWindow);
+    const groupNumber = this.nextGroupNumber++;
+    this.editorGroups.set(windowId, groupNumber);
+
+    // Once loaded, send the full tab data to restore state
+    editorWindow.webContents.once('did-finish-load', () => {
+      // Small delay to ensure Angular is ready
+      setTimeout(() => {
+        editorWindow.webContents.send('restore-tab-state', tabData);
+      }, 500);
+    });
+
+    // Clean up on close
+    editorWindow.on('closed', () => {
+      this.editorWindows.delete(windowId);
+      this.editorGroups.delete(windowId);
+      log.info(`Editor window closed: ${windowId}`);
+    });
+
+    // Set up keyboard shortcuts
+    editorWindow.webContents.on('before-input-event', (event, input) => {
+      if ((input.meta || input.control) && input.key.toLowerCase() === 'r' && !input.shift) {
+        event.preventDefault();
+        editorWindow.reload();
+      }
+      if ((input.meta || input.control) && input.shift && input.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        editorWindow.webContents.reloadIgnoringCache();
+      }
+    });
+
+    log.info(`Created new Group ${groupNumber} with tab ${tabData.videoId}`);
+    return groupNumber;
+  }
+
+  /**
+   * Consolidate all groups into the lowest-numbered group
+   */
+  consolidateGroups(): void {
+    const groups = this.getEditorGroups();
+    if (groups.length <= 1) {
+      log.info('Only one or no groups, nothing to consolidate');
+      return;
+    }
+
+    // Find the lowest group number (target)
+    const targetGroup = groups[0];
+    const otherGroups = groups.slice(1);
+
+    log.info(`Consolidating ${otherGroups.length} groups into Group ${targetGroup.groupNumber}`);
+
+    // Request tabs from all other windows
+    for (const group of otherGroups) {
+      group.window.webContents.send('request-all-tabs', targetGroup.groupNumber);
+    }
   }
 
   /**

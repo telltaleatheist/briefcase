@@ -19,7 +19,9 @@ import {
   AnalysisData,
   WaveformData,
   TimelineSelection,
-  CustomMarker
+  CustomMarker,
+  EditorTab,
+  createEditorTab
 } from '../../models/video-editor.model';
 import { TranscriptionSegment } from '../../models/video-info.model';
 
@@ -33,6 +35,7 @@ import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-
 import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
 import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
 import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
+import { TabBarComponent } from './tab-bar/tab-bar.component';
 
 // Tool types for editor
 export enum EditorTool {
@@ -101,7 +104,8 @@ const CATEGORY_COLORS: Record<string, string> = {
     ContextMenuComponent,
     MarkerDialogComponent,
     ExportDialogComponent,
-    KeyboardShortcutsDialogComponent
+    KeyboardShortcutsDialogComponent,
+    TabBarComponent
   ],
   templateUrl: './video-editor.component.html',
   styleUrls: ['./video-editor.component.scss']
@@ -115,6 +119,19 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   private tourService = inject(TourService);
 
   private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly MAX_TABS = 15;
+
+  // Tab management
+  tabs = signal<EditorTab[]>([]);
+  activeTabId = signal<string | null>(null);
+  currentGroupNumber = signal<number | null>(null);
+
+  // Computed active tab - derives current state from tabs array
+  activeTab = computed(() => {
+    const tabId = this.activeTabId();
+    if (!tabId) return null;
+    return this.tabs().find(t => t.id === tabId) || null;
+  });
 
   @ViewChild(VideoPlayerComponent) videoPlayer?: VideoPlayerComponent;
   @ViewChild('videoPlayerArea', { static: false }) videoPlayerArea?: ElementRef<HTMLDivElement>;
@@ -151,6 +168,7 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
     // Zoom in/out with Cmd+Plus/Minus (or Ctrl on Windows)
     // Cmd+E for export dialog
+    // Tab shortcuts
     if (event.metaKey || event.ctrlKey) {
       if (event.key === '=' || event.key === '+') {
         event.preventDefault();
@@ -165,6 +183,29 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
         event.preventDefault();
         console.log('Cmd+E pressed, opening export dialog');
         this.openExportDialog();
+      } else if (event.key === 'w' || event.key === 'W') {
+        // Cmd+W: Close current tab
+        event.preventDefault();
+        const tabId = this.activeTabId();
+        if (tabId) {
+          this.closeTab(tabId);
+        }
+      } else if (event.shiftKey && event.key === '[') {
+        // Cmd+Shift+[: Previous tab
+        event.preventDefault();
+        this.switchToPreviousTab();
+      } else if (event.shiftKey && event.key === ']') {
+        // Cmd+Shift+]: Next tab
+        event.preventDefault();
+        this.switchToNextTab();
+      } else if (event.key >= '1' && event.key <= '9') {
+        // Cmd+1-9: Switch to tab by number
+        event.preventDefault();
+        const tabIndex = parseInt(event.key) - 1;
+        const tabs = this.tabs();
+        if (tabIndex < tabs.length) {
+          this.switchTab(tabs[tabIndex].id);
+        }
       }
     }
 
@@ -528,16 +569,17 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
           this.wasPlaying = isPlaying;
           if (isPlaying) {
             this.startPlayback();
-            // Hide timeline in fullscreen when playing
+            // Hide timeline immediately in fullscreen when playing starts
             if (this.isFullscreen()) {
-              this.hideTimelineAfterDelay();
+              this.clearFullscreenTimeout();
+              this.showTimelineInFullscreen.set(false);
             }
           } else {
             this.stopPlayback();
-            // Show timeline in fullscreen when paused
+            // Show timeline briefly when paused, then hide after delay
             if (this.isFullscreen()) {
               this.showTimelineInFullscreen.set(true);
-              this.clearFullscreenTimeout();
+              this.hideTimelineAfterDelay();
             }
           }
         }
@@ -583,23 +625,12 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     }
 
     if (videoEditorData) {
-      this.videoId.set(videoEditorData.videoId);
-      this.videoPath.set(videoEditorData.videoPath || null);
-      this.videoTitle.set(videoEditorData.videoTitle || 'Untitled Video');
-
-      // Set video URL for streaming
-      if (videoEditorData.videoId) {
-        this.videoUrl.set(`${this.API_BASE}/database/videos/${videoEditorData.videoId}/stream`);
-      }
-
-      // Update metadata filename
-      this.metadata.update(m => ({
-        ...m,
-        filename: videoEditorData.videoTitle || 'Untitled Video'
-      }));
-
-      // Load video details and analysis
-      this.loadVideoData(videoEditorData.videoId);
+      // Open video in a new tab
+      this.openTab(
+        videoEditorData.videoId,
+        videoEditorData.videoPath || null,
+        videoEditorData.videoTitle || 'Untitled Video'
+      );
     } else {
       this.isLoading.set(false);
       this.errorMessage.set('No video data provided. Please select a video from the library.');
@@ -616,7 +647,68 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
         this.tourService.tryAutoStartTour('video-editor-advanced', 1000);
       }
     }, 1500);
+
+    // Listen for IPC events to add new tabs (when opening videos from library while editor is already open)
+    window.addEventListener('electron-add-editor-tab', this.handleAddEditorTabEvent);
+
+    // Listen for IPC events for group operations
+    window.addEventListener('electron-receive-tab', this.handleReceiveTabEvent);
+    window.addEventListener('electron-request-all-tabs', this.handleRequestAllTabsEvent);
+    window.addEventListener('electron-restore-tab-state', this.handleRestoreTabStateEvent);
+
+    // Fetch current group number
+    this.fetchCurrentGroupNumber();
   }
+
+  private async fetchCurrentGroupNumber(): Promise<void> {
+    try {
+      if ((window as any).electron?.getCurrentGroupNumber) {
+        const groupNumber = await (window as any).electron.getCurrentGroupNumber();
+        this.currentGroupNumber.set(groupNumber);
+        console.log('Current group number:', groupNumber);
+      }
+    } catch (error) {
+      console.error('Error fetching current group number:', error);
+    }
+  }
+
+  // Handler for add-editor-tab events from Electron
+  private handleAddEditorTabEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<{ videoId: string; videoPath?: string; videoTitle: string }>;
+    const videoData = customEvent.detail;
+    if (videoData) {
+      console.log('Received add-editor-tab event:', videoData);
+      this.openTab(videoData.videoId, videoData.videoPath || null, videoData.videoTitle || 'Untitled Video');
+    }
+  };
+
+  // Handler for receive-tab events (when a tab is moved from another window)
+  private handleReceiveTabEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<any>;
+    const tabData = customEvent.detail;
+    if (tabData) {
+      console.log('Received tab from another window:', tabData.videoId);
+      this.receiveTabFromOtherWindow(tabData);
+    }
+  };
+
+  // Handler for request-all-tabs events (for consolidation)
+  private handleRequestAllTabsEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<{ targetGroupNumber: number }>;
+    const { targetGroupNumber } = customEvent.detail;
+    console.log('Request to send all tabs to group:', targetGroupNumber);
+    this.sendAllTabsToGroup(targetGroupNumber);
+  };
+
+  // Handler for restore-tab-state events (when a new window receives full tab state)
+  private handleRestoreTabStateEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<any>;
+    const tabData = customEvent.detail;
+    if (tabData) {
+      console.log('Restoring tab state:', tabData.videoId);
+      this.restoreIncomingTabState(tabData);
+    }
+  };
 
   private async loadVideoData(videoId: string) {
     try {
@@ -658,6 +750,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
             if (!video.hasAnalysis) {
               this.hasAnalysis.set(false);
             }
+
+            // Mark tab as loaded and save state
+            this.markTabLoaded();
           } else {
             this.hasAnalysis.set(false);
           }
@@ -985,6 +1080,10 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
     // Remove event listeners
     window.removeEventListener('wheel', this.wheelHandler);
+    window.removeEventListener('electron-add-editor-tab', this.handleAddEditorTabEvent);
+    window.removeEventListener('electron-receive-tab', this.handleReceiveTabEvent);
+    window.removeEventListener('electron-request-all-tabs', this.handleRequestAllTabsEvent);
+    window.removeEventListener('electron-restore-tab-state', this.handleRestoreTabStateEvent);
     document.removeEventListener('fullscreenchange', this.onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange);
     document.removeEventListener('mousemove', this.onMouseMoveInFullscreen);
@@ -1770,10 +1869,9 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
     this.isFullscreen.set(isFs);
 
     if (isFs) {
-      // In fullscreen, hide timeline when playing
-      if (this.editorState().isPlaying) {
-        this.hideTimelineAfterDelay();
-      }
+      // In fullscreen, show controls initially then hide after delay
+      this.showTimelineInFullscreen.set(true);
+      this.hideTimelineAfterDelay();
     } else {
       // Exiting fullscreen, always show timeline
       this.showTimelineInFullscreen.set(true);
@@ -1787,16 +1885,15 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
     this.showTimelineInFullscreen.set(true);
 
-    // Hide after delay if playing
-    if (this.editorState().isPlaying) {
-      this.hideTimelineAfterDelay();
-    }
+    // Always hide after delay in fullscreen (whether playing or paused)
+    this.hideTimelineAfterDelay();
   };
 
   private hideTimelineAfterDelay() {
     this.clearFullscreenTimeout();
     this.fullscreenTimeout = setTimeout(() => {
-      if (this.isFullscreen() && this.editorState().isPlaying) {
+      // Hide controls in fullscreen after mouse is idle (regardless of play state)
+      if (this.isFullscreen()) {
         this.showTimelineInFullscreen.set(false);
       }
     }, 2000);
@@ -2193,5 +2290,440 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
         videoName: this.metadata().filename
       }
     });
+  }
+
+  // ========== TAB MANAGEMENT ==========
+
+  /**
+   * Open a video in a new tab or focus existing tab
+   */
+  openTab(videoId: string, videoPath: string | null, videoTitle: string): void {
+    // Check if video is already open in a tab
+    const existingTab = this.tabs().find(t => t.videoId === videoId);
+    if (existingTab) {
+      this.switchTab(existingTab.id);
+      return;
+    }
+
+    // Check tab limit
+    if (this.tabs().length >= this.MAX_TABS) {
+      console.warn(`Maximum tabs (${this.MAX_TABS}) reached`);
+      return;
+    }
+
+    // Save current tab state before opening new one
+    this.saveCurrentTabState();
+
+    // Create new tab
+    const videoUrl = `${this.API_BASE}/database/videos/${videoId}/stream`;
+    const newTab = createEditorTab(videoId, videoPath, videoTitle, videoUrl);
+
+    // Add tab and make it active
+    this.tabs.update(tabs => [...tabs, newTab]);
+    this.activeTabId.set(newTab.id);
+
+    // Restore new tab state to signals
+    this.restoreTabState(newTab);
+
+    // Load video data for the new tab
+    this.loadVideoData(videoId);
+  }
+
+  /**
+   * Switch to a different tab
+   */
+  switchTab(tabId: string): void {
+    if (this.activeTabId() === tabId) return;
+
+    const tab = this.tabs().find(t => t.id === tabId);
+    if (!tab) return;
+
+    // Pause playback before switching
+    if (this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    // Save current tab state
+    this.saveCurrentTabState();
+
+    // Switch to new tab
+    this.activeTabId.set(tabId);
+
+    // Restore new tab's state
+    this.restoreTabState(tab);
+
+    // If tab data isn't loaded yet, load it
+    if (!tab.isLoaded) {
+      this.loadVideoData(tab.videoId);
+    }
+  }
+
+  /**
+   * Close a tab
+   */
+  closeTab(tabId: string): void {
+    const tabs = this.tabs();
+    const tabIndex = tabs.findIndex(t => t.id === tabId);
+    if (tabIndex === -1) return;
+
+    // Pause playback if closing active tab
+    if (this.activeTabId() === tabId && this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    // Remove the tab
+    this.tabs.update(tabs => tabs.filter(t => t.id !== tabId));
+
+    // If we closed the active tab, switch to another
+    if (this.activeTabId() === tabId) {
+      const remainingTabs = this.tabs();
+      if (remainingTabs.length > 0) {
+        // Switch to adjacent tab (prefer right, then left)
+        const newIndex = Math.min(tabIndex, remainingTabs.length - 1);
+        this.switchTab(remainingTabs[newIndex].id);
+      } else {
+        // No tabs left, go back to library
+        this.activeTabId.set(null);
+        this.goBack();
+      }
+    }
+  }
+
+  /**
+   * Close all tabs except the specified one
+   */
+  closeOtherTabs(keepTabId: string): void {
+    const tabToKeep = this.tabs().find(t => t.id === keepTabId);
+    if (!tabToKeep) return;
+
+    // Pause playback if needed
+    if (this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    this.tabs.set([tabToKeep]);
+    this.switchTab(keepTabId);
+  }
+
+  /**
+   * Close all tabs
+   */
+  closeAllTabs(): void {
+    // Pause playback if needed
+    if (this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    this.tabs.set([]);
+    this.activeTabId.set(null);
+    this.goBack();
+  }
+
+  /**
+   * Switch to the previous tab
+   */
+  switchToPreviousTab(): void {
+    const tabs = this.tabs();
+    if (tabs.length <= 1) return;
+
+    const currentIndex = tabs.findIndex(t => t.id === this.activeTabId());
+    if (currentIndex === -1) return;
+
+    const previousIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
+    this.switchTab(tabs[previousIndex].id);
+  }
+
+  /**
+   * Switch to the next tab
+   */
+  switchToNextTab(): void {
+    const tabs = this.tabs();
+    if (tabs.length <= 1) return;
+
+    const currentIndex = tabs.findIndex(t => t.id === this.activeTabId());
+    if (currentIndex === -1) return;
+
+    const nextIndex = currentIndex === tabs.length - 1 ? 0 : currentIndex + 1;
+    this.switchTab(tabs[nextIndex].id);
+  }
+
+  /**
+   * Save current signal state to the active tab
+   */
+  private saveCurrentTabState(): void {
+    const tabId = this.activeTabId();
+    if (!tabId) return;
+
+    this.tabs.update(tabs => tabs.map(tab => {
+      if (tab.id !== tabId) return tab;
+
+      return {
+        ...tab,
+        editorState: this.editorState(),
+        sections: this.sections(),
+        chapters: this.chapters(),
+        transcript: this.transcript(),
+        analysisData: this.analysisData() || null,
+        waveformData: this.waveformData(),
+        categoryFilters: this.categoryFilters(),
+        highlightSelection: this.highlightSelection(),
+        hasAnalysis: this.hasAnalysis()
+      };
+    }));
+  }
+
+  /**
+   * Restore a tab's state to the component signals
+   */
+  private restoreTabState(tab: EditorTab): void {
+    this.videoId.set(tab.videoId);
+    this.videoPath.set(tab.videoPath);
+    this.videoTitle.set(tab.videoTitle);
+    this.videoUrl.set(tab.videoUrl);
+    this.editorState.set(tab.editorState);
+    this.sections.set(tab.sections);
+    this.chapters.set(tab.chapters);
+    this.transcript.set(tab.transcript);
+    this.analysisData.set(tab.analysisData || undefined);
+    this.waveformData.set(tab.waveformData);
+    this.categoryFilters.set(tab.categoryFilters);
+    this.highlightSelection.set(tab.highlightSelection);
+    this.hasAnalysis.set(tab.hasAnalysis);
+
+    // Update metadata
+    this.metadata.update(m => ({
+      ...m,
+      filename: tab.videoTitle
+    }));
+  }
+
+  /**
+   * Mark the current tab as loaded and save its state
+   */
+  private markTabLoaded(): void {
+    const tabId = this.activeTabId();
+    if (!tabId) return;
+
+    this.tabs.update(tabs => tabs.map(tab => {
+      if (tab.id !== tabId) return tab;
+      return { ...tab, isLoaded: true };
+    }));
+
+    this.saveCurrentTabState();
+  }
+
+  /**
+   * Handle tab selection from tab bar
+   */
+  onTabSelect(tabId: string): void {
+    this.switchTab(tabId);
+  }
+
+  /**
+   * Handle tab close from tab bar
+   */
+  onTabClose(tabId: string): void {
+    this.closeTab(tabId);
+  }
+
+  /**
+   * Handle close other tabs from tab bar
+   */
+  onTabCloseOthers(tabId: string): void {
+    this.closeOtherTabs(tabId);
+  }
+
+  /**
+   * Handle close all tabs from tab bar
+   */
+  onTabCloseAll(): void {
+    this.closeAllTabs();
+  }
+
+  // ===== Group Management Methods =====
+
+  /**
+   * Handle moving a tab to another group
+   */
+  async onMoveTabToGroup(event: { tabId: string; targetGroupNumber: number }): Promise<void> {
+    const tab = this.tabs().find(t => t.id === event.tabId);
+    if (!tab) return;
+
+    // Prepare tab data for transfer
+    const tabData = this.prepareTabDataForTransfer(tab);
+
+    try {
+      // Send to target group
+      const success = await (window as any).electron.moveTabToGroup(tabData, event.targetGroupNumber);
+      if (success) {
+        // Remove from this window
+        this.closeTab(event.tabId);
+        console.log(`Moved tab ${tab.videoTitle} to Group ${event.targetGroupNumber}`);
+      }
+    } catch (error) {
+      console.error('Error moving tab to group:', error);
+    }
+  }
+
+  /**
+   * Handle moving a tab to a new group (new window)
+   */
+  async onMoveTabToNewGroup(tabId: string): Promise<void> {
+    const tab = this.tabs().find(t => t.id === tabId);
+    if (!tab) return;
+
+    // Prepare tab data for transfer
+    const tabData = this.prepareTabDataForTransfer(tab);
+
+    try {
+      // Create new group with this tab
+      const newGroupNumber = await (window as any).electron.createGroupWithTab(tabData);
+      if (newGroupNumber) {
+        // Remove from this window
+        this.closeTab(tabId);
+        console.log(`Moved tab ${tab.videoTitle} to new Group ${newGroupNumber}`);
+      }
+    } catch (error) {
+      console.error('Error creating new group with tab:', error);
+    }
+  }
+
+  /**
+   * Handle consolidating all groups
+   */
+  async onConsolidateGroups(): Promise<void> {
+    try {
+      await (window as any).electron.consolidateGroups();
+      console.log('Consolidate groups request sent');
+    } catch (error) {
+      console.error('Error consolidating groups:', error);
+    }
+  }
+
+  /**
+   * Handle renaming a tab
+   */
+  onTabRename(tabId: string): void {
+    const tab = this.tabs().find(t => t.id === tabId);
+    if (!tab) return;
+
+    const newTitle = prompt('Enter new tab title:', tab.videoTitle);
+    if (newTitle && newTitle.trim() !== '') {
+      this.tabs.update(tabs => tabs.map(t => {
+        if (t.id !== tabId) return t;
+        return { ...t, videoTitle: newTitle.trim() };
+      }));
+    }
+  }
+
+  /**
+   * Prepare tab data for transfer to another window
+   */
+  private prepareTabDataForTransfer(tab: EditorTab): any {
+    return {
+      videoId: tab.videoId,
+      videoPath: tab.videoPath,
+      videoTitle: tab.videoTitle,
+      videoUrl: tab.videoUrl,
+      editorState: tab.editorState,
+      sections: tab.sections,
+      chapters: tab.chapters,
+      waveformData: tab.waveformData,
+      transcript: tab.transcript,
+      analysisData: tab.analysisData,
+      highlightSelection: tab.highlightSelection,
+      categoryFilters: tab.categoryFilters,
+      hasAnalysis: tab.hasAnalysis
+    };
+  }
+
+  /**
+   * Receive a tab from another window
+   */
+  private receiveTabFromOtherWindow(tabData: any): void {
+    // Check if we already have this video open
+    const existingTab = this.tabs().find(t => t.videoId === tabData.videoId);
+    if (existingTab) {
+      // Just switch to the existing tab
+      this.switchTab(existingTab.id);
+      return;
+    }
+
+    // Check max tabs
+    if (this.tabs().length >= this.MAX_TABS) {
+      console.warn('Cannot receive tab: at max tabs limit');
+      return;
+    }
+
+    // Create new tab with the transferred data
+    const newTab = createEditorTab(
+      tabData.videoId,
+      tabData.videoPath,
+      tabData.videoTitle,
+      tabData.videoUrl
+    );
+
+    // Restore the full state
+    const restoredTab: EditorTab = {
+      ...newTab,
+      editorState: tabData.editorState || newTab.editorState,
+      sections: tabData.sections || [],
+      chapters: tabData.chapters || [],
+      waveformData: tabData.waveformData || newTab.waveformData,
+      transcript: tabData.transcript || [],
+      analysisData: tabData.analysisData,
+      highlightSelection: tabData.highlightSelection,
+      categoryFilters: tabData.categoryFilters || [],
+      hasAnalysis: tabData.hasAnalysis || false,
+      isLoaded: true // Mark as loaded since we already have the data
+    };
+
+    this.tabs.update(tabs => [...tabs, restoredTab]);
+    this.activeTabId.set(restoredTab.id);
+  }
+
+  /**
+   * Send all tabs to another group (for consolidation)
+   */
+  private async sendAllTabsToGroup(targetGroupNumber: number): Promise<void> {
+    const allTabs = this.tabs();
+
+    for (const tab of allTabs) {
+      const tabData = this.prepareTabDataForTransfer(tab);
+      try {
+        await (window as any).electron.moveTabToGroup(tabData, targetGroupNumber);
+      } catch (error) {
+        console.error('Error sending tab to group:', error);
+      }
+    }
+
+    // Close this window after sending all tabs
+    window.close();
+  }
+
+  /**
+   * Restore incoming tab state (when window is created with tab data from another window)
+   */
+  private restoreIncomingTabState(tabData: any): void {
+    const currentTab = this.tabs().find(t => t.videoId === tabData.videoId);
+    if (currentTab) {
+      // Update the existing tab with the full state
+      this.tabs.update(tabs => tabs.map(t => {
+        if (t.videoId !== tabData.videoId) return t;
+        return {
+          ...t,
+          editorState: tabData.editorState || t.editorState,
+          sections: tabData.sections || t.sections,
+          chapters: tabData.chapters || t.chapters,
+          waveformData: tabData.waveformData || t.waveformData,
+          transcript: tabData.transcript || t.transcript,
+          analysisData: tabData.analysisData ?? t.analysisData,
+          highlightSelection: tabData.highlightSelection ?? t.highlightSelection,
+          categoryFilters: tabData.categoryFilters || t.categoryFilters,
+          hasAnalysis: tabData.hasAnalysis ?? t.hasAnalysis,
+          isLoaded: true
+        };
+      }));
+    }
   }
 }
