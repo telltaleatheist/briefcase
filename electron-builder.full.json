@@ -32,7 +32,7 @@
     {
       "from": "utilities/models",
       "to": "utilities/models",
-      "filter": ["ggml-tiny.bin", "ggml-base.bin"]
+      "filter": ["ggml-tiny.bin", "ggml-base.bin", "ggml-small.bin"]
     }
   ],
   "files": [
