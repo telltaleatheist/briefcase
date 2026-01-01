@@ -12,6 +12,7 @@ import {
   TranscriptionSegment,
   TranscriptionSearchResult
 } from '../../models/video-info.model';
+import { TranscriptSearchService, TranscriptSearchOptions } from '../../services/transcript-search.service';
 import { VideoItem, VideoWeek } from '../../models/video.model';
 import { LibraryService } from '../../services/library.service';
 import { TourService } from '../../services/tour.service';
@@ -31,6 +32,7 @@ export class VideoInfoPageComponent implements OnInit {
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
+  private transcriptSearchService = inject(TranscriptSearchService);
 
   @Input() videoId?: string;
 
@@ -77,6 +79,10 @@ export class VideoInfoPageComponent implements OnInit {
   showTimestamps = true;
   transcriptionView: 'continuous' | 'segments' = 'segments';
   playbackPosition = 0; // Current video position in seconds
+  transcriptSearchOptions: TranscriptSearchOptions = {
+    useSoundex: false,
+    usePhraseSearch: false
+  };
 
   // Children Management
   childVideos: any[] = [];
@@ -581,22 +587,29 @@ export class VideoInfoPageComponent implements OnInit {
       return;
     }
 
-    const query = this.transcriptionSearchQuery.toLowerCase();
+    const query = this.transcriptionSearchQuery.trim();
     const results: TranscriptionSearchResult[] = [];
 
     this.videoInfo.transcription.forEach((segment, index) => {
-      const text = segment.text.toLowerCase();
-      if (text.includes(query)) {
-        const matchIndex = text.indexOf(query);
-        const before = segment.text.substring(Math.max(0, matchIndex - 50), matchIndex);
+      // Use the transcript search service with options
+      if (this.transcriptSearchService.matchesQuery(query, segment.text, this.transcriptSearchOptions)) {
+        const text = segment.text.toLowerCase();
+        const queryLower = query.toLowerCase();
+        const matchIndex = text.indexOf(queryLower);
+        const actualMatchIndex = matchIndex >= 0 ? matchIndex : 0;
+
+        const before = segment.text.substring(Math.max(0, actualMatchIndex - 50), actualMatchIndex);
+        const matchedText = matchIndex >= 0
+          ? segment.text.substring(actualMatchIndex, actualMatchIndex + query.length)
+          : segment.text.substring(0, Math.min(20, segment.text.length));
         const after = segment.text.substring(
-          matchIndex + query.length,
-          Math.min(segment.text.length, matchIndex + query.length + 50)
+          actualMatchIndex + matchedText.length,
+          Math.min(segment.text.length, actualMatchIndex + matchedText.length + 50)
         );
 
         results.push({
           segment,
-          matchedText: segment.text.substring(matchIndex, matchIndex + query.length),
+          matchedText,
           context: { before, after }
         });
       }

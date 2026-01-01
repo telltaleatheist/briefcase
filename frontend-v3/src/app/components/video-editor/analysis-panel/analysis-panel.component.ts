@@ -1,8 +1,9 @@
-import { Component, Input, Output, EventEmitter, signal, computed } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TimelineSection, TimelineChapter, CategoryFilter, AnalysisData } from '../../../models/video-editor.model';
 import { TranscriptionSegment } from '../../../models/video-info.model';
+import { TranscriptSearchService, TranscriptSearchOptions } from '../../../services/transcript-search.service';
 
 @Component({
   selector: 'app-analysis-panel',
@@ -12,6 +13,7 @@ import { TranscriptionSegment } from '../../../models/video-info.model';
   styleUrls: ['./analysis-panel.component.scss']
 })
 export class AnalysisPanelComponent {
+  private transcriptSearchService = inject(TranscriptSearchService);
   @Input() sections: TimelineSection[] = [];
   @Input() chapters: TimelineChapter[] = [];
   @Input() categoryFilters: CategoryFilter[] = [];
@@ -27,6 +29,9 @@ export class AnalysisPanelComponent {
   @Output() chapterClick = new EventEmitter<TimelineChapter>();
   @Output() chapterDelete = new EventEmitter<string>(); // chapter id
   @Output() filterToggle = new EventEmitter<string>();
+  @Output() filterSelectAll = new EventEmitter<void>();
+  @Output() filterDeselectAll = new EventEmitter<void>();
+  @Output() filterSelectMarkers = new EventEmitter<void>();
   @Output() generateAnalysis = new EventEmitter<string>();
   @Output() transcriptSeek = new EventEmitter<number>();
 
@@ -44,6 +49,12 @@ export class AnalysisPanelComponent {
 
   // Transcript search
   transcriptSearch = signal('');
+
+  // Transcript search options
+  searchOptions: TranscriptSearchOptions = {
+    useSoundex: false,
+    usePhraseSearch: false
+  };
 
   // Computed plain text transcript
   plainTranscript = computed(() => {
@@ -67,11 +78,11 @@ export class AnalysisPanelComponent {
   }
 
   get filteredTranscript(): TranscriptionSegment[] {
-    const query = this.transcriptSearch().toLowerCase().trim();
+    const query = this.transcriptSearch().trim();
     if (!query) return this.transcript;
 
     return this.transcript.filter(segment =>
-      segment.text.toLowerCase().includes(query)
+      this.transcriptSearchService.matchesQuery(query, segment.text, this.searchOptions)
     );
   }
 
@@ -197,6 +208,18 @@ export class AnalysisPanelComponent {
 
   onFilterToggle(category: string): void {
     this.filterToggle.emit(category);
+  }
+
+  onSelectAllFilters(): void {
+    this.filterSelectAll.emit();
+  }
+
+  onDeselectAllFilters(): void {
+    this.filterDeselectAll.emit();
+  }
+
+  onSelectMarkersFilters(): void {
+    this.filterSelectMarkers.emit();
   }
 
   onSectionDelete(section: TimelineSection): void {

@@ -185,9 +185,13 @@ export class LibraryService {
 
   /**
    * Search videos
-   * GET /api/database/search?q=query&searchIn=filename,transcript,analysis
+   * GET /api/database/search?q=query&searchIn=filename,transcript,analysis&useSoundex=true&usePhraseSearch=true
    */
-  searchVideos(query: string, searchIn?: { filename: boolean; transcript: boolean; analysis: boolean }): Observable<ApiResponse<VideoItem[]>> {
+  searchVideos(
+    query: string,
+    searchIn?: { filename: boolean; transcript: boolean; analysis: boolean },
+    searchOptions?: { useSoundex: boolean; usePhraseSearch: boolean }
+  ): Observable<ApiResponse<VideoItem[]>> {
     const params: any = { q: query };
 
     // Build comma-separated list of selected fields
@@ -197,11 +201,27 @@ export class LibraryService {
       if (searchIn.transcript) fields.push('transcript');
       if (searchIn.analysis) fields.push('analysis');
 
+      console.log('[searchVideos] searchIn received:', searchIn, 'fields:', fields);
+
       // Only pass searchIn if not all fields are selected
       if (fields.length > 0 && fields.length < 3) {
         params.searchIn = fields.join(',');
       }
+    } else {
+      console.log('[searchVideos] searchIn is undefined, searching all fields');
     }
+
+    // Add search options
+    if (searchOptions) {
+      if (searchOptions.useSoundex) {
+        params.useSoundex = 'true';
+      }
+      if (searchOptions.usePhraseSearch) {
+        params.usePhraseSearch = 'true';
+      }
+    }
+
+    console.log('[searchVideos] Final params:', params);
 
     return this.http.get<any>(
       `${this.API_BASE}/database/search`,

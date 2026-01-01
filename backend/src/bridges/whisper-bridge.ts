@@ -54,10 +54,11 @@ export class WhisperBridge extends EventEmitter {
   private gpuFailedOnce = false;  // Track if GPU failed, for auto mode fallback
 
   // All known whisper models (for display names)
-  // Only tiny and base are bundled with the app
+  // tiny, base, and small are bundled with the app
   static readonly MODEL_INFO: Record<string, { name: string; description: string }> = {
+    'base': { name: 'Base', description: 'Fast, good for clean audio' },
+    'small': { name: 'Small', description: 'Better accuracy, handles music/complex audio' },
     'tiny': { name: 'Tiny', description: 'Fastest, lower accuracy' },
-    'base': { name: 'Base', description: 'Good balance of speed and accuracy' },
   };
   static readonly DEFAULT_MODEL = 'base';
 
@@ -169,8 +170,8 @@ export class WhisperBridge extends EventEmitter {
         }
       }
 
-      // Sort by model size (tiny < base < small < medium < large)
-      const sizeOrder = ['tiny', 'base', 'small', 'medium', 'large'];
+      // Sort with 'base' first (default), then 'small' (for complex audio), then others
+      const sizeOrder = ['base', 'small', 'tiny', 'medium', 'large'];
       models.sort((a, b) => {
         const aIndex = sizeOrder.indexOf(a);
         const bIndex = sizeOrder.indexOf(b);

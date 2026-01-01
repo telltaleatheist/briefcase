@@ -1539,6 +1539,33 @@
         color: var(--text-secondary);
       }
     }
+
+    .search-options {
+      display: flex;
+      gap: 12px;
+      margin-top: $spacing-sm;
+
+      .search-option {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        user-select: none;
+
+        input[type="checkbox"] {
+          width: 14px;
+          height: 14px;
+          accent-color: $primary-orange;
+          cursor: pointer;
+        }
+
+        &:hover {
+          color: var(--text-primary);
+        }
+      }
+    }
   }
 
   .transcription-controls {

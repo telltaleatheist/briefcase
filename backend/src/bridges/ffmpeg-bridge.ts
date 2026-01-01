@@ -250,22 +250,151 @@ export class FfmpegBridge extends EventEmitter {
       format?: string;
       processId?: string;
       duration?: number;
+      normalize?: boolean;  // Normalize audio levels for better transcription
+      startOffset?: number; // Skip first N seconds of the input
     }
   ): Promise<FfmpegResult> {
-    const args = [
-      '-y',
-      '-i', inputPath,
-      '-vn',
+    const args = ['-y'];
+
+    // Add start offset if specified (must come before -i)
+    if (options?.startOffset && options.startOffset > 0) {
+      args.push('-ss', String(options.startOffset));
+    }
+
+    args.push('-i', inputPath, '-vn');
+
+    // Add normalization filter if requested
+    // This helps with videos that have very quiet audio at the start
+    if (options?.normalize) {
+      args.push('-af', 'loudnorm=I=-16:TP=-1.5:LRA=11');
+    }
+
+    args.push(
       '-acodec', 'pcm_s16le',
       '-ar', String(options?.sampleRate || 16000),
       '-ac', String(options?.channels || 1),
       '-f', options?.format || 'wav',
       outputPath,
-    ];
+    );
 
     return this.run(args, {
       processId: options?.processId,
       duration: options?.duration,
+    });
+  }
+
+  /**
+   * Quick volume check on a portion of a file
+   * Returns mean and max volume in dB
+   */
+  async getVolumeLevel(
+    inputPath: string,
+    startSeconds: number = 0,
+    durationSeconds: number = 10
+  ): Promise<{ mean: number; max: number }> {
+    return new Promise((resolve) => {
+      const args = [
+        '-ss', String(startSeconds),
+        '-t', String(durationSeconds),
+        '-i', inputPath,
+        '-af', 'volumedetect',
+        '-f', 'null',
+        '-',
+      ];
+
+      const proc = spawn(this.binaryPath, args);
+      let stderrBuffer = '';
+
+      proc.stderr?.on('data', (data: Buffer) => {
+        stderrBuffer += data.toString();
+      });
+
+      proc.on('close', () => {
+        // Parse: mean_volume: -41.1 dB, max_volume: -15.9 dB
+        const meanMatch = stderrBuffer.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+        const maxMatch = stderrBuffer.match(/max_volume:\s*([-\d.]+)\s*dB/);
+
+        const mean = meanMatch ? parseFloat(meanMatch[1]) : -100;
+        const max = maxMatch ? parseFloat(maxMatch[1]) : -100;
+
+        resolve({ mean, max });
+      });
+
+      proc.on('error', () => {
+        resolve({ mean: -100, max: -100 });
+      });
+    });
+  }
+
+  /**
+   * Detect when meaningful audio starts in a file
+   * Uses silencedetect filter to find the end of initial silence
+   * Returns the timestamp in seconds where audio becomes audible, or 0 if no silence detected
+   */
+  async detectAudioStart(
+    inputPath: string,
+    options?: {
+      silenceThreshold?: number;  // dB threshold (default -45)
+      minSilenceDuration?: number; // Minimum silence duration in seconds (default 1)
+      maxSearchDuration?: number;  // How far into the file to search (default 600 = 10 min)
+    }
+  ): Promise<number> {
+    const threshold = options?.silenceThreshold ?? -45;
+    const minDuration = options?.minSilenceDuration ?? 1;
+    const maxSearch = options?.maxSearchDuration ?? 600;
+
+    return new Promise((resolve) => {
+      const args = [
+        '-i', inputPath,
+        '-t', String(maxSearch),
+        '-af', `silencedetect=noise=${threshold}dB:d=${minDuration}`,
+        '-f', 'null',
+        '-',
+      ];
+
+      const proc = spawn(this.binaryPath, args);
+      let stderrBuffer = '';
+
+      proc.stderr?.on('data', (data: Buffer) => {
+        stderrBuffer += data.toString();
+      });
+
+      proc.on('close', () => {
+        // Look for silence_end markers in the output
+        // Format: [silencedetect @ ...] silence_end: 607.123 | silence_duration: 607.123
+        // We want the LAST silence_end with a significant duration
+        const silenceMatches = [...stderrBuffer.matchAll(/silence_end:\s*([\d.]+)\s*\|\s*silence_duration:\s*([\d.]+)/g)];
+
+        if (silenceMatches.length > 0) {
+          // Find the silence with the longest duration (usually the one at the start)
+          let bestMatch = { end: 0, duration: 0 };
+          for (const match of silenceMatches) {
+            const silenceEnd = parseFloat(match[1]);
+            const silenceDuration = parseFloat(match[2]);
+            // Only consider silences that last at least 30 seconds and are within our search window
+            if (silenceDuration > 30 && silenceDuration > bestMatch.duration) {
+              bestMatch = { end: silenceEnd, duration: silenceDuration };
+            }
+          }
+
+          if (bestMatch.end > 0) {
+            this.logger.log(`Detected ${bestMatch.duration.toFixed(1)}s of silence ending at ${bestMatch.end.toFixed(1)}s`);
+            resolve(bestMatch.end);
+          } else {
+            this.logger.log(`No significant silence detected at start`);
+            resolve(0);
+          }
+        } else {
+          // No silence detected at the start, audio starts immediately
+          this.logger.log(`No significant silence detected at start`);
+          resolve(0);
+        }
+      });
+
+      proc.on('error', (err) => {
+        this.logger.warn(`Silence detection failed: ${err.message}`);
+        resolve(0);
+      });
     });
   }
 

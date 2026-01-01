@@ -231,9 +231,18 @@ export class ExportDialogComponent implements OnInit {
 
   /**
    * Handle selection changes from cascade component
+   * Note: Cascade uses composite itemIds like "weekLabel|videoId", we need to extract just the videoId
    */
   onCascadeSelectionChanged(event: { count: number; ids: Set<string> }) {
-    this.selectedSectionIds = event.ids;
+    // Extract the actual section IDs from the composite itemIds
+    const extractedIds = new Set<string>();
+    event.ids.forEach(itemId => {
+      // itemId format is "weekLabel|sectionId" - extract the sectionId part
+      const parts = itemId.split('|');
+      const sectionId = parts.length > 1 ? parts[parts.length - 1] : itemId;
+      extractedIds.add(sectionId);
+    });
+    this.selectedSectionIds = extractedIds;
   }
 
   /**

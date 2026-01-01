@@ -7,9 +7,15 @@ export interface SearchInFields {
   analysis: boolean;
 }
 
+export interface SearchOptions {
+  useSoundex: boolean;       // Phonetic matching (catches transcription errors like "Somalies" vs "Somalis")
+  usePhraseSearch: boolean;  // Phrase search (consecutive words) vs word search (OR logic) - default is word search
+}
+
 export interface LibraryFilters {
   searchQuery: string;
   searchIn: SearchInFields;
+  searchOptions: SearchOptions;
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
   mediaType: 'all' | 'video' | 'audio' | 'image' | 'document' | 'webpage';
   duration: 'all' | 'under10' | 'over10';
@@ -446,6 +452,7 @@ export class LibraryFilterService {
     return {
       searchQuery: '',
       searchIn: { filename: true, transcript: true, analysis: true },
+      searchOptions: { useSoundex: false, usePhraseSearch: false },
       dateRange: 'all',
       mediaType: 'all',
       duration: 'all',

@@ -409,13 +409,13 @@ export class CascadeComponent {
     }
 
     // Library item actions
-    // "Open" action - available for both single and multi-select
-    actions.push({ label: `Open${countSuffix}`, icon: '▶️', action: 'open' });
+    // "Open" action - opens in video editor
+    actions.push({ label: `Open${countSuffix}`, icon: '🎬', action: 'openInEditor' });
 
     // Single video actions
     if (count <= 1) {
-      actions.push({ label: 'More Info', icon: '🎬', action: 'openInEditor' });
-      actions.push({ label: 'Details', icon: 'ℹ️', action: 'viewMore' });
+      actions.push({ label: 'More Info', icon: 'ℹ️', action: 'viewMore' });
+      actions.push({ label: 'Open in Media Player', icon: '▶️', action: 'openInMediaPlayer' });
       actions.push({ label: 'Rename', icon: '✏️', action: 'rename' });
       actions.push({ label: 'Copy Filename', icon: '📋', action: 'copyFilename' });
       actions.push({ label: 'Open File Location', icon: '📁', action: 'openLocation' });
@@ -619,8 +619,15 @@ export class CascadeComponent {
 
     switch (action) {
       case 'open':
-        // Open all selected files in their default application
-        // If multiple files, use batch method to open as tabs (if supported)
+      case 'openInEditor':
+        // Open in video editor - emit for all selected videos
+        videos.forEach(v => {
+          this.videoAction.emit({ action: 'openInEditor', videos: [v] });
+        });
+        break;
+
+      case 'openInMediaPlayer':
+        // Open in system default media player
         const filePaths = videos
           .filter(v => v.filePath)
           .map(v => v.filePath!);
@@ -644,10 +651,6 @@ export class CascadeComponent {
         // Use videoId if available (for queue items), otherwise use id
         const detailsId = video.videoId || video.id;
         this.router.navigate(['/video', detailsId]);
-        break;
-
-      case 'openInEditor':
-        this.videoAction.emit({ action: 'openInEditor', videos: [video] });
         break;
 
       case 'copyFilename':
@@ -1052,6 +1055,24 @@ export class CascadeComponent {
   }
 
   /**
+   * Check if a video can be previewed
+   * Allows preview for:
+   * - Regular library videos
+   * - Queue items that have a valid videoId (video has been downloaded)
+   */
+  canPreviewVideo(video: VideoItem): boolean {
+    const isQueueType = this.isQueueItem(video) || this.isStagingItem(video) || this.isProcessingItem(video) || this.isCompletedItem(video);
+
+    if (!isQueueType) {
+      // Regular library video - always allow preview
+      return true;
+    }
+
+    // Queue item - only allow preview if it has a videoId (meaning the video file exists)
+    return !!video.videoId;
+  }
+
+  /**
    * Handle configure button click for queue items
    */
   onConfigureClick(video: VideoItem, event: Event) {
@@ -1095,9 +1116,10 @@ export class CascadeComponent {
       if (highlightedId) {
         event.preventDefault();
         const video = this.getVideoByItemId(highlightedId);
-        // Don't allow preview for queue, staging, or processing items
-        if (video && !this.isQueueItem(video) && !this.isStagingItem(video) && !this.isProcessingItem(video)) {
-          // Emit null to signal toggle (parent handles open/close logic)
+        // Allow preview if video exists and either:
+        // 1. Not a queue item (regular library video), OR
+        // 2. Queue item with a valid videoId (video has been downloaded)
+        if (video && this.canPreviewVideo(video)) {
           this.previewRequested.emit(video);
         }
       }

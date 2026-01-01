@@ -26,7 +26,7 @@ export interface NotificationAction {
   providedIn: 'root'
 })
 export class NotificationService {
-  private readonly MAX_NOTIFICATIONS = 100;
+  private readonly MAX_NOTIFICATIONS = 99;
   private notifications: Notification[] = [];
   private notificationsSubject = new BehaviorSubject<Notification[]>([]);
   private currentModalSubject = new BehaviorSubject<Notification | null>(null);

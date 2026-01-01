@@ -94,6 +94,11 @@
             <span class="accordion-icon">{{ filtersExpanded() ? '▲' : '▼' }}</span>
           </button>
           <div class="filter-chips-container" [class.expanded]="filtersExpanded()">
+            <div class="filter-actions">
+              <button class="filter-action-btn" (click)="onSelectAllFilters()" title="Select all filters">All</button>
+              <button class="filter-action-btn" (click)="onDeselectAllFilters()" title="Deselect all filters">None</button>
+              <button class="filter-action-btn" (click)="onSelectMarkersFilters()" title="Select only markers">Markers</button>
+            </div>
             <div class="filter-chips">
               @for (filter of categoryFilters; track filter.category) {
                 <button
@@ -233,6 +238,21 @@
       @if (transcriptSearch()) {
         <span class="search-results">{{ transcriptResultCount }} {{ transcriptView() === 'plain' ? 'matches' : 'segments' }}</span>
       }
+    </div>
+    <!-- Search Options -->
+    <div class="search-options">
+      <label class="search-option" title="Match words consecutively as a phrase">
+        <input
+          type="checkbox"
+          [(ngModel)]="searchOptions.usePhraseSearch">
+        Phrase
+      </label>
+      <label class="search-option" title="Match similar-sounding words">
+        <input
+          type="checkbox"
+          [(ngModel)]="searchOptions.useSoundex">
+        Phonetic
+      </label>
     </div>
 
     <!-- View Toggle: Segments / Plain Text -->

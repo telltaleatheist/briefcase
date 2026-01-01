@@ -1601,12 +1601,17 @@ export class DatabaseService {
    * @param query - Search query
    * @param limit - Maximum results to return
    * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
+   * @param options - Search options: useSoundex (phonetic matching), usePhraseSearch (AND logic for consecutive words)
    * @returns Array of video IDs with match info, sorted by relevance
    */
-  searchFTS(query: string, limit: number = 100, searchIn?: string): { videoId: string; score: number; matches: string[] }[] {
+  searchFTS(
+    query: string,
+    limit: number = 100,
+    searchIn?: string,
+    options?: { useSoundex?: boolean; usePhraseSearch?: boolean }
+  ): { videoId: string; score: number; matches: string[] }[] {
     const db = this.ensureInitialized();
 
-    console.log(`[SEARCH SERVICE] searchFTS called: query="${query}", searchIn="${searchIn}"`);
 
     if (!query || query.trim().length === 0) {
       return [];
@@ -1614,9 +1619,22 @@ export class DatabaseService {
 
     const trimmedQuery = query.trim();
 
+    // Check if transcript/analysis search needs phrase matching
+    // Transcript uses phonetic phrase matching (catches transcription errors)
+    // Analysis uses exact phrase matching (AI-written text is accurate)
+    const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
+    const searchAll = !searchIn || searchInFields.length === 0;
+    const searchingTranscript = searchAll || searchInFields.includes('transcript');
+    const searchingAnalysis = searchAll || searchInFields.includes('analysis');
+    const hasQuotes = trimmedQuery.includes('"');
+    const hasBooleanOps = /\s+(AND|OR|NOT)\s+/i.test(trimmedQuery);
+    const usePhoneticMatching = searchingTranscript && !hasQuotes && !hasBooleanOps;
+    const useAnalysisPhraseMatching = searchingAnalysis && !hasQuotes && !hasBooleanOps;
+
+    this.logger.log(`[searchFTS] query="${trimmedQuery}", searchIn="${searchIn}", searchingTranscript=${searchingTranscript}, usePhoneticMatching=${usePhoneticMatching}`);
+
     // Parse the query into tokens (words, phrases, operators)
     const tokens = this.parseSearchQuery(trimmedQuery);
-    this.logger.debug(`Parsed tokens: ${JSON.stringify(tokens)}`);
 
     if (tokens.length === 0) {
       return [];
@@ -1635,7 +1653,6 @@ export class DatabaseService {
       }
     }
 
-    this.logger.debug(`Positive tokens: ${JSON.stringify(positiveTokens)}, Exclusion tokens: ${JSON.stringify(exclusionTokens)}`);
 
     // If there are only exclusion tokens, return empty results
     // (FTS5 can't search for "everything except X" without a positive term)
@@ -1675,7 +1692,6 @@ export class DatabaseService {
       tokenGroups.push(currentGroup);
     }
 
-    this.logger.debug(`Token groups: ${JSON.stringify(tokenGroups)}`);
 
     // For each group, search and UNION results within group
     // Then INTERSECT across groups
@@ -1686,7 +1702,7 @@ export class DatabaseService {
       const groupMap = new Map<string, { score: number; matches: Set<string> }>();
 
       for (const token of group) {
-        const tokenResults = this.searchSingleToken(db, token, limit * 3, searchIn);
+        const tokenResults = this.searchSingleToken(db, token, limit * 3, searchIn, options);
 
         // Union: add all results, combining scores if already present
         for (const [videoId, data] of tokenResults) {
@@ -1708,14 +1724,16 @@ export class DatabaseService {
       groupResults.push(groupMap);
     }
 
-    // Intersect across groups: video must match at least one token from each group
+    // Combine group results: UNION (OR) by default, INTERSECT (AND) if usePhraseSearch is enabled
     let finalResults: Map<string, { score: number; matches: Set<string> }>;
+    const usePhraseSearch = options?.usePhraseSearch ?? false;
 
     if (groupResults.length === 0) {
       finalResults = new Map();
     } else if (groupResults.length === 1) {
       finalResults = groupResults[0];
-    } else {
+    } else if (usePhraseSearch) {
+      // INTERSECT: all words must match (AND logic - phrase search)
       // Start with first group's results
       finalResults = new Map(groupResults[0]);
 
@@ -1743,6 +1761,25 @@ export class DatabaseService {
           break;
         }
       }
+    } else {
+      // UNION: any word matches (OR logic - default word search)
+      finalResults = new Map();
+      for (const groupMap of groupResults) {
+        for (const [videoId, data] of groupMap) {
+          if (finalResults.has(videoId)) {
+            const existing = finalResults.get(videoId)!;
+            existing.score += data.score;
+            for (const m of data.matches) {
+              existing.matches.add(m);
+            }
+          } else {
+            finalResults.set(videoId, {
+              score: data.score,
+              matches: new Set(data.matches)
+            });
+          }
+        }
+      }
     }
 
     // Apply exclusion filtering - remove videos that match any exclusion term
@@ -1758,6 +1795,105 @@ export class DatabaseService {
       }
     }
 
+    // For searches that include transcript, apply phonetic phrase matching
+    // This filters out false positive transcript matches where words appear separately
+    if (usePhoneticMatching && finalResults.size > 0) {
+      this.logger.log(`[searchFTS] Applying phonetic matching to ${finalResults.size} results`);
+      const videosToRemove: string[] = [];
+
+      for (const [videoId, data] of finalResults.entries()) {
+        // Only check videos that matched on transcript
+        if (!data.matches.has('transcript')) {
+          continue;
+        }
+
+        // Fetch the actual transcript text
+        try {
+          const transcriptRow = db.prepare(
+            'SELECT plain_text FROM transcripts WHERE video_id = ?'
+          ).get(videoId) as { plain_text: string } | undefined;
+
+          let passesPhoneticMatch = false;
+          if (transcriptRow && transcriptRow.plain_text) {
+            passesPhoneticMatch = this.matchesPhonetically(trimmedQuery, transcriptRow.plain_text);
+          }
+
+          if (!passesPhoneticMatch) {
+            // Remove 'transcript' from match types since it's a false positive
+            data.matches.delete('transcript');
+
+            // If no other match types remain, remove the video entirely
+            if (data.matches.size === 0) {
+              videosToRemove.push(videoId);
+            }
+          }
+        } catch (error) {
+          this.logger.error(`Error fetching transcript for video ${videoId}:`, error);
+          // On error, remove transcript match type but keep video if other matches exist
+          data.matches.delete('transcript');
+          if (data.matches.size === 0) {
+            videosToRemove.push(videoId);
+          }
+        }
+      }
+
+      // Remove videos that have no remaining match types
+      this.logger.log(`[searchFTS] Removing ${videosToRemove.length} videos with no valid matches`);
+      for (const videoId of videosToRemove) {
+        finalResults.delete(videoId);
+      }
+    }
+
+    // For searches that include analysis, apply exact phrase matching
+    // This filters out false positive analysis matches where words appear separately
+    if (useAnalysisPhraseMatching && finalResults.size > 0) {
+      this.logger.log(`[searchFTS] Applying analysis phrase matching to ${finalResults.size} results`);
+      const videosToRemove: string[] = [];
+      const phraseToMatch = trimmedQuery.toLowerCase();
+
+      for (const [videoId, data] of finalResults.entries()) {
+        // Only check videos that matched on analysis
+        if (!data.matches.has('analysis')) {
+          continue;
+        }
+
+        // Fetch the actual analysis text
+        try {
+          const analysisRow = db.prepare(
+            'SELECT ai_analysis, summary FROM analyses WHERE video_id = ?'
+          ).get(videoId) as { ai_analysis: string; summary: string } | undefined;
+
+          let passesExactPhraseMatch = false;
+          if (analysisRow) {
+            const analysisText = ((analysisRow.ai_analysis || '') + ' ' + (analysisRow.summary || '')).toLowerCase();
+            passesExactPhraseMatch = analysisText.includes(phraseToMatch);
+          }
+
+          if (!passesExactPhraseMatch) {
+            // Remove 'analysis' from match types since it's a false positive
+            data.matches.delete('analysis');
+
+            // If no other match types remain, remove the video entirely
+            if (data.matches.size === 0) {
+              videosToRemove.push(videoId);
+            }
+          }
+        } catch (error) {
+          this.logger.error(`Error fetching analysis for video ${videoId}:`, error);
+          data.matches.delete('analysis');
+          if (data.matches.size === 0) {
+            videosToRemove.push(videoId);
+          }
+        }
+      }
+
+      // Remove videos that have no remaining match types
+      this.logger.log(`[searchFTS] Removing ${videosToRemove.length} videos with no valid analysis matches`);
+      for (const videoId of videosToRemove) {
+        finalResults.delete(videoId);
+      }
+    }
+
     // Convert to array and sort by score
     const sortedResults = Array.from(finalResults.entries())
       .map(([videoId, data]) => ({
@@ -1768,7 +1904,6 @@ export class DatabaseService {
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
 
-    console.log(`[SEARCH SERVICE] returning ${sortedResults.length} results`);
     return sortedResults;
   }
 
@@ -1807,12 +1942,14 @@ export class DatabaseService {
   /**
    * Search for a single token across FTS tables
    * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
+   * @param options - Search options: useSoundex (phonetic matching), usePhraseSearch (AND logic)
    */
   private searchSingleToken(
     db: any,
     token: string,
     limit: number,
-    searchIn?: string
+    searchIn?: string,
+    options?: { useSoundex?: boolean; usePhraseSearch?: boolean }
   ): Map<string, { score: number; matches: Set<string> }> {
     const results = new Map<string, { score: number; matches: Set<string> }>();
 
@@ -1844,7 +1981,6 @@ export class DatabaseService {
     const searchTranscript = searchAll || searchInFields.includes('transcript');
     const searchAnalysis = searchAll || searchInFields.includes('analysis');
 
-    this.logger.debug(`searchSingleToken: ftsQuery="${ftsQuery}", searchIn="${searchIn}", searchAll=${searchAll}, filename=${searchFilename}, transcript=${searchTranscript}, analysis=${searchAnalysis}`);
 
     // Search videos_fts (filename, path, and optionally ai_description)
     if (searchFilename) {
@@ -1866,7 +2002,6 @@ export class DatabaseService {
           LIMIT ?
         `).all(videoFtsQuery, limit) as any[];
 
-        this.logger.debug(`videos_fts matched ${videosResults.length} results`);
         for (const row of videosResults) {
           if (!results.has(row.video_id)) {
             results.set(row.video_id, { score: 0, matches: new Set() });
@@ -1883,6 +2018,9 @@ export class DatabaseService {
 
     // Search transcripts_fts
     if (searchTranscript) {
+      // Track which videos matched via exact FTS
+      const exactFtsMatches = new Set<string>();
+
       const transcriptResults = db.prepare(`
         SELECT video_id, rank
         FROM transcripts_fts
@@ -1891,14 +2029,51 @@ export class DatabaseService {
         LIMIT ?
       `).all(ftsQuery, limit) as any[];
 
-      this.logger.debug(`transcripts_fts matched ${transcriptResults.length} results`);
       for (const row of transcriptResults) {
+        exactFtsMatches.add(row.video_id);
         if (!results.has(row.video_id)) {
           results.set(row.video_id, { score: 0, matches: new Set() });
         }
         const entry = results.get(row.video_id)!;
         entry.score += Math.abs(row.rank);
         entry.matches.add('transcript');
+      }
+
+      // Soundex (phonetic) search - only enabled when user opts in
+      // This catches transcription errors like "Somalies" vs "Somalis"
+      // but can also match unrelated words that share a soundex code (e.g., "hovind" matches "haven't")
+      if (options?.useSoundex) {
+        try {
+          const cleanWord = cleanToken.replace(/\*/g, '');
+          const soundexCode = this.soundex(cleanWord);
+
+          if (soundexCode && soundexCode !== '0000') {
+            const soundexResults = db.prepare(`
+              SELECT video_id, rank
+              FROM transcripts_soundex_fts
+              WHERE transcripts_soundex_fts MATCH ?
+              ORDER BY rank
+              LIMIT ?
+            `).all(soundexCode, limit) as any[];
+
+            for (const row of soundexResults) {
+              // Skip if this video already matched via exact FTS
+              if (exactFtsMatches.has(row.video_id)) {
+                continue;
+              }
+
+              if (!results.has(row.video_id)) {
+                results.set(row.video_id, { score: 0, matches: new Set() });
+              }
+              const entry = results.get(row.video_id)!;
+              // Lower score for phonetic matches (0.5x)
+              entry.score += Math.abs(row.rank) * 0.5;
+              entry.matches.add('transcript-phonetic');
+            }
+          }
+        } catch (e) {
+          // Soundex table might not exist yet, ignore
+        }
       }
     }
 
@@ -1912,7 +2087,6 @@ export class DatabaseService {
         LIMIT ?
       `).all(ftsQuery, limit) as any[];
 
-      this.logger.debug(`analyses_fts matched ${analysesResults.length} results`);
       for (const row of analysesResults) {
         if (!results.has(row.video_id)) {
           results.set(row.video_id, { score: 0, matches: new Set() });
@@ -1933,7 +2107,6 @@ export class DatabaseService {
         LIMIT ?
       `).all(ftsQuery, limit) as any[];
 
-      this.logger.debug(`tags_fts matched ${tagsResults.length} results`);
       for (const row of tagsResults) {
         if (!results.has(row.video_id)) {
           results.set(row.video_id, { score: 0, matches: new Set() });
@@ -1944,7 +2117,6 @@ export class DatabaseService {
       }
     }
 
-    this.logger.debug(`searchSingleToken returning ${results.size} unique videos`);
     return results;
   }
 
@@ -3618,6 +3790,110 @@ export class DatabaseService {
   }
 
   /**
+   * Levenshtein distance - minimum edits to transform one string to another
+   */
+  private levenshteinDistance(str1: string, str2: string): number {
+    const m = str1.length;
+    const n = str2.length;
+
+    if (m === 0) return n;
+    if (n === 0) return m;
+
+    let prevRow = Array(n + 1).fill(0).map((_, i) => i);
+    let currRow = Array(n + 1).fill(0);
+
+    for (let i = 1; i <= m; i++) {
+      currRow[0] = i;
+
+      for (let j = 1; j <= n; j++) {
+        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        currRow[j] = Math.min(
+          prevRow[j] + 1,      // deletion
+          currRow[j - 1] + 1,  // insertion
+          prevRow[j - 1] + cost // substitution
+        );
+      }
+
+      [prevRow, currRow] = [currRow, prevRow];
+    }
+
+    return prevRow[n];
+  }
+
+  /**
+   * Check if two words match phonetically
+   */
+  private wordsMatchPhonetically(search: string, text: string): boolean {
+    // Exact match
+    if (text === search) return true;
+
+    // Very short words (1-2 chars) - require exact match only
+    if (search.length <= 2) {
+      return text === search;
+    }
+
+    // Substring match (only if search is 3+ chars to avoid false positives)
+    if (search.length >= 3 && (text.includes(search) || search.includes(text))) return true;
+
+    // Soundex match (only for 3+ char words)
+    if (search.length >= 3) {
+      const searchSoundex = this.soundex(search);
+      const textSoundex = this.soundex(text);
+      if (searchSoundex && textSoundex && searchSoundex === textSoundex && searchSoundex !== '0000') return true;
+    }
+
+    // Levenshtein distance scaled by word length
+    const maxDistance = Math.max(1, Math.floor(search.length / 3));
+    if (this.levenshteinDistance(search, text) <= maxDistance) return true;
+
+    return false;
+  }
+
+  /**
+   * Phonetic phrase matching - words must appear consecutively in order
+   * - Unquoted: phonetic phrase match (each word matched phonetically)
+   * - Double quotes: exact phrase match
+   */
+  private matchesPhonetically(query: string, text: string): boolean {
+    const textLower = text.toLowerCase();
+    const textWords = textLower.split(/\s+/).filter(w => w.length > 0);
+
+    // Check for exact phrase (double quotes)
+    const exactPhraseMatch = query.match(/^"([^"]+)"$/);
+    if (exactPhraseMatch) {
+      return textLower.includes(exactPhraseMatch[1].toLowerCase());
+    }
+
+    // Unquoted: phonetic phrase match - find words in order
+    const searchWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+    if (searchWords.length === 0) return false;
+
+    // Find starting positions where all search words match consecutively
+    for (let startIdx = 0; startIdx <= textWords.length - searchWords.length; startIdx++) {
+      let allMatch = true;
+      let textIdx = startIdx;
+
+      for (const searchWord of searchWords) {
+        if (textIdx >= textWords.length) {
+          allMatch = false;
+          break;
+        }
+
+        const textWord = textWords[textIdx];
+        if (!this.wordsMatchPhonetically(searchWord, textWord)) {
+          allMatch = false;
+          break;
+        }
+        textIdx++;
+      }
+
+      if (allMatch) return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Build FTS5 query from user input with improved search logic
    *
    * Features:
@@ -3635,8 +3911,10 @@ export class DatabaseService {
    * - "dad* vax*" → dad* AND vax* (prefix matching)
    * - "dad OR vax" → dad OR vax (explicit OR)
    * - "vax -full -complete" → vax AND NOT full AND NOT complete
+   *
+   * @param useOrLogic - If true, use OR between terms (for filename search). Default is AND.
    */
-  private buildFTS5Query(query: string): string {
+  private buildFTS5Query(query: string, useOrLogic: boolean = false): string {
     query = query.trim();
 
     // Handle quoted phrases first (preserve them)
@@ -3709,9 +3987,9 @@ export class DatabaseService {
     // Build the query
     let result = '';
 
-    if (hasExplicitOr) {
-      // User explicitly used OR, join positive terms as-is
-      result = positiveTerms.join(' ');
+    if (hasExplicitOr || useOrLogic) {
+      // Use OR between terms (explicit OR or filename search)
+      result = positiveTerms.join(' OR ');
     } else {
       // Default to implicit AND (space-separated)
       result = positiveTerms.join(' ');
@@ -3792,8 +4070,9 @@ export class DatabaseService {
       return [];
     }
 
-    // Prepare FTS5 query with improved search logic
-    const searchTerm = this.buildFTS5Query(query);
+    // Prepare FTS5 queries - OR logic for filename (word search), AND for others (phrase search)
+    const filenameSearchTerm = this.buildFTS5Query(query, true);  // OR logic for filenames
+    const transcriptSearchTerm = this.buildFTS5Query(query, false); // AND logic for transcripts
     const results = new Map<string, { id: string; score: number; matchType: string }>();
 
     // Default all filters to true if not specified
@@ -3814,6 +4093,7 @@ export class DatabaseService {
     };
 
     // 1. Search in video filename and AI description using FTS5 (highest priority)
+    // Uses OR logic - any word match counts (more intuitive for filename search)
     if (searchFilters.filename || searchFilters.aiDescription) {
       try {
         const stmt = db.prepare(`
@@ -3823,7 +4103,7 @@ export class DatabaseService {
           ORDER BY bm25(videos_fts)
           LIMIT ?
         `);
-        const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+        const rows = stmt.all(filenameSearchTerm, limit) as Array<{ video_id: string; score: number }>;
 
         for (const row of rows) {
           // FTS5 bm25 scores are negative, more negative = better match
@@ -3838,6 +4118,7 @@ export class DatabaseService {
     }
 
     // 2. Search in transcripts using FTS5 (high priority)
+    // Uses AND logic - all words must be present (phrase search)
     if (searchFilters.transcript) {
       const stmt = db.prepare(`
         SELECT video_id, bm25(transcripts_fts) as score
@@ -3846,7 +4127,7 @@ export class DatabaseService {
         ORDER BY bm25(transcripts_fts)
         LIMIT ?
       `);
-      const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+      const rows = stmt.all(transcriptSearchTerm, limit) as Array<{ video_id: string; score: number }>;
 
       for (const row of rows) {
         const score = 80 + Math.min(0, row.score);
@@ -3880,6 +4161,7 @@ export class DatabaseService {
     }
 
     // 3. Search in analyses using FTS5 (medium priority)
+    // Uses AND logic - all words must be present (phrase search)
     if (searchFilters.analysis) {
       const stmt = db.prepare(`
         SELECT video_id, bm25(analyses_fts) as score
@@ -3888,7 +4170,7 @@ export class DatabaseService {
         ORDER BY bm25(analyses_fts)
         LIMIT ?
       `);
-      const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+      const rows = stmt.all(transcriptSearchTerm, limit) as Array<{ video_id: string; score: number }>;
 
       for (const row of rows) {
         const score = 70 + Math.min(0, row.score);
@@ -3911,6 +4193,7 @@ export class DatabaseService {
     }
 
     // 4. Search in tags using FTS5 (lower priority)
+    // Uses OR logic - any word match counts (tags are short like filenames)
     if (searchFilters.tags) {
       const stmt = db.prepare(`
         SELECT video_id, bm25(tags_fts) as score
@@ -3919,7 +4202,7 @@ export class DatabaseService {
         ORDER BY bm25(tags_fts)
         LIMIT ?
       `);
-      const rows = stmt.all(searchTerm, limit) as Array<{ video_id: string; score: number }>;
+      const rows = stmt.all(filenameSearchTerm, limit) as Array<{ video_id: string; score: number }>;
 
       for (const row of rows) {
         const score = 60 + Math.min(0, row.score);

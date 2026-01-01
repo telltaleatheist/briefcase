@@ -125,6 +125,8 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
   tabs = signal<EditorTab[]>([]);
   activeTabId = signal<string | null>(null);
   currentGroupNumber = signal<number | null>(null);
+  private isRestoringTab = false; // Flag to ignore time updates during tab restore
+  private pendingSeekTime: number | null = null; // Time to seek to after video loads
 
   // Computed active tab - derives current state from tabs array
   activeTab = computed(() => {
@@ -1708,8 +1710,8 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       console.warn('videoPath is null, export dialog may need to fetch it');
     }
 
-    // Prepare sections for export
-    const sections = this.filteredSections().map(section => ({
+    // Prepare AI analysis sections for export
+    const aiSections = this.filteredSections().map(section => ({
       id: section.id,
       category: section.category,
       description: section.description,
@@ -1717,6 +1719,21 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       endSeconds: section.endTime,
       timeRange: `${this.formatTime(section.startTime)} - ${this.formatTime(section.endTime)}`
     }));
+
+    // Include custom markers as exportable sections
+    const customMarkerSections = this.customMarkers()
+      .filter(marker => marker.endTime !== undefined && marker.endTime > marker.startTime)
+      .map(marker => ({
+        id: marker.id,
+        category: marker.category || 'Marker',
+        description: marker.message,
+        startSeconds: marker.startTime,
+        endSeconds: marker.endTime!,
+        timeRange: `${this.formatTime(marker.startTime)} - ${this.formatTime(marker.endTime!)}`
+      }));
+
+    // Combine AI sections and custom markers
+    const sections = [...aiSections, ...customMarkerSections];
 
     // Get current selection if any
     const selection = this.highlightSelection();
@@ -1828,6 +1845,27 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
           ? { ...f, enabled: !f.enabled }
           : f
       )
+    );
+  }
+
+  // Select all category filters
+  onFilterSelectAll() {
+    this.categoryFilters.update(filters =>
+      filters.map(f => ({ ...f, enabled: true }))
+    );
+  }
+
+  // Deselect all category filters
+  onFilterDeselectAll() {
+    this.categoryFilters.update(filters =>
+      filters.map(f => ({ ...f, enabled: false }))
+    );
+  }
+
+  // Select only marker category filters
+  onFilterSelectMarkers() {
+    this.categoryFilters.update(filters =>
+      filters.map(f => ({ ...f, enabled: f.category.toLowerCase() === 'marker' }))
     );
   }
 
@@ -2044,6 +2082,10 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
 
   // Video player events
   onVideoTimeUpdate(time: number) {
+    // Ignore time updates during tab restoration (video resets to 0 when source changes)
+    if (this.isRestoringTab) {
+      return;
+    }
     this.updateCurrentTime(time);
   }
 
@@ -2059,6 +2101,18 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       ...m,
       duration
     }));
+
+    // If we were restoring a tab, seek to the saved position now that video is loaded
+    if (this.isRestoringTab && this.pendingSeekTime !== null) {
+      // Use setTimeout to ensure video element is ready
+      setTimeout(() => {
+        if (this.videoPlayer && this.pendingSeekTime !== null) {
+          this.videoPlayer.seekTo(this.pendingSeekTime);
+        }
+        this.isRestoringTab = false;
+        this.pendingSeekTime = null;
+      }, 50);
+    }
 
     // Phase 1: Show demo waveform immediately for instant feedback
     this.waveformData.set({
@@ -2476,6 +2530,15 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
    * Restore a tab's state to the component signals
    */
   private restoreTabState(tab: EditorTab): void {
+    const currentUrl = this.videoUrl();
+    const isVideoChanging = currentUrl !== tab.videoUrl;
+
+    // If video URL is changing, set up restoration to preserve playhead position
+    if (isVideoChanging && tab.editorState.currentTime > 0) {
+      this.isRestoringTab = true;
+      this.pendingSeekTime = tab.editorState.currentTime;
+    }
+
     this.videoId.set(tab.videoId);
     this.videoPath.set(tab.videoPath);
     this.videoTitle.set(tab.videoTitle);
@@ -2495,6 +2558,11 @@ export class VideoEditorComponent implements OnInit, OnDestroy {
       ...m,
       filename: tab.videoTitle
     }));
+
+    // If video URL didn't change but position did, seek directly
+    if (!isVideoChanging && tab.editorState.currentTime > 0 && this.videoPlayer) {
+      this.videoPlayer.seekTo(tab.editorState.currentTime);
+    }
   }
 
   /**

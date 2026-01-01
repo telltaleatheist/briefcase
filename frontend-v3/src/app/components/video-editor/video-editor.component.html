@@ -321,6 +321,9 @@
           (chapterClick)="onChapterClick($event)"
           (chapterDelete)="onChapterDelete($event)"
           (filterToggle)="onFilterToggle($event)"
+          (filterSelectAll)="onFilterSelectAll()"
+          (filterDeselectAll)="onFilterDeselectAll()"
+          (filterSelectMarkers)="onFilterSelectMarkers()"
           (generateAnalysis)="onGenerateAnalysis($event)"
           (transcriptSeek)="seekTo($event)">
         </app-analysis-panel>

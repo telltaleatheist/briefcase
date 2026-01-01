@@ -1565,27 +1565,44 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const query = this.currentFilters.searchQuery.trim();
 
       if (query) {
-        // Call backend FTS search with searchIn filter
-        this.libraryService.searchVideos(query, this.currentFilters.searchIn).subscribe({
+        // Call backend FTS search with searchIn filter and search options
+        this.libraryService.searchVideos(query, this.currentFilters.searchIn, this.currentFilters.searchOptions).subscribe({
           next: (response) => {
             if (response.success && response.data) {
-              // Group search results by week
+              // Group search results by date (same as library grouping)
               const searchResults = response.data;
               const weekMap = new Map<string, VideoItem[]>();
+              const now = new Date();
 
-              // Get week labels from original data for grouping
-              const originalWeeks = this.videoWeeks();
-              const videoWeekMap = new Map<string, string>();
+              // Helper to get date key in YYYY-MM-DD format
+              const getDateKey = (date: Date): string => {
+                const year = date.getFullYear();
+                const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                const day = date.getDate().toString().padStart(2, '0');
+                return `${year}-${month}-${day}`;
+              };
 
-              originalWeeks.forEach(week => {
-                week.videos.forEach(video => {
-                  videoWeekMap.set(video.id, week.weekLabel);
-                });
-              });
-
-              // Group search results by week
+              // Group search results by their date
               searchResults.forEach(video => {
-                const weekLabel = videoWeekMap.get(video.id) || 'Search Results';
+                let weekLabel: string;
+
+                // Check if video should be in "New" section (recently processed or added)
+                const processedDate = video.lastProcessedDate ? new Date(video.lastProcessedDate) : null;
+                const processedHoursDiff = processedDate ? (now.getTime() - processedDate.getTime()) / (1000 * 60 * 60) : Infinity;
+                const recentlyProcessed = processedHoursDiff <= 24;
+
+                const addedDate = video.addedAt ? new Date(video.addedAt) : null;
+                const addedHoursDiff = addedDate ? (now.getTime() - addedDate.getTime()) / (1000 * 60 * 60) : Infinity;
+                const recentlyAdded = addedHoursDiff <= 24;
+
+                if (recentlyProcessed || recentlyAdded) {
+                  weekLabel = 'New';
+                } else if (video.downloadDate) {
+                  weekLabel = getDateKey(new Date(video.downloadDate));
+                } else {
+                  weekLabel = 'Unknown';
+                }
+
                 if (!weekMap.has(weekLabel)) {
                   weekMap.set(weekLabel, []);
                 }
@@ -1598,8 +1615,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
                 filtered.push({ weekLabel, videos });
               });
 
-              // Sort by week label (most recent first)
-              filtered.sort((a, b) => b.weekLabel.localeCompare(a.weekLabel));
+              // Sort by week label (New first, Unknown last, dates descending)
+              filtered.sort((a, b) => {
+                if (a.weekLabel === 'New') return -1;
+                if (b.weekLabel === 'New') return 1;
+                if (a.weekLabel === 'Unknown') return 1;
+                if (b.weekLabel === 'Unknown') return -1;
+                return b.weekLabel.localeCompare(a.weekLabel);
+              });
 
               // Apply non-search filters to search results too
               filtered = this.filterService.applyFilters(filtered, this.currentFilters!);
@@ -2067,6 +2090,30 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // If modal is already open, close it
     if (this.previewModalOpen()) {
       this.previewModalOpen.set(false);
+      return;
+    }
+
+    // Check if this is a queue item with a videoId
+    const isQueueItem = video.id.startsWith('queue-') || video.id.startsWith('staging-') ||
+                        video.id.startsWith('processing-') || video.id.startsWith('completed-');
+
+    if (isQueueItem) {
+      // For queue items, only allow preview if they have a videoId (video has been downloaded)
+      if (!video.videoId) {
+        return;
+      }
+
+      // Create a single preview item for the queue video
+      const previewItems: PreviewItem[] = [{
+        id: video.id,
+        name: video.name,
+        videoId: video.videoId,
+        mediaType: video.mediaType || 'video/mp4'
+      }];
+
+      this.previewItems.set(previewItems);
+      this.previewSelectedId.set(video.videoId);
+      this.previewModalOpen.set(true);
       return;
     }
 

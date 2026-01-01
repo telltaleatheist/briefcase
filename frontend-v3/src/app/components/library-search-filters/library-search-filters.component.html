@@ -2,7 +2,11 @@
   <!-- Search Bar (Always Visible) -->
   <div class="search-bar">
     <div class="search-input-wrapper">
-      <span class="search-icon">🔍</span>
+      @if (isSearching()) {
+        <span class="search-spinner">⏳</span>
+      } @else {
+        <span class="search-icon">🔍</span>
+      }
       <input
         type="text"
         [(ngModel)]="filters.searchQuery"
@@ -58,6 +62,29 @@
             (ngModelChange)="onFilterChange()"
           />
           AI Analysis
+        </label>
+      </div>
+    </div>
+
+    <!-- Search Options -->
+    <div class="filter-section">
+      <label class="section-label">Options</label>
+      <div class="checkbox-row">
+        <label class="checkbox-label" title="Match words consecutively as a phrase">
+          <input
+            type="checkbox"
+            [(ngModel)]="filters.searchOptions.usePhraseSearch"
+            (ngModelChange)="onFilterChange()"
+          />
+          Phrase
+        </label>
+        <label class="checkbox-label" title="Match similar-sounding words (e.g., 'Somalies' matches 'Somalis')">
+          <input
+            type="checkbox"
+            [(ngModel)]="filters.searchOptions.useSoundex"
+            (ngModelChange)="onFilterChange()"
+          />
+          Phonetic
         </label>
       </div>
     </div>

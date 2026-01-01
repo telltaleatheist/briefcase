@@ -30,10 +30,11 @@ const BIN_DIR = path.join(__dirname, '..', 'utilities', 'bin');
 const MODELS_DIR = path.join(__dirname, '..', 'utilities', 'models');
 const CACHE_DIR = path.join(__dirname, '..', '.build-cache', 'whisper-cpp');
 
-// Models to bundle (tiny, base)
+// Models to bundle (tiny, base, small)
 const MODELS = [
   { name: 'ggml-tiny.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin', size: '~75MB' },
   { name: 'ggml-base.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin', size: '~142MB' },
+  { name: 'ggml-small.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin', size: '~466MB' },
 ];
 
 // GitHub releases for Windows

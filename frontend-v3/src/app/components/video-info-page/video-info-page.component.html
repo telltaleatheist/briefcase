@@ -719,6 +719,16 @@
               <span class="button-icon">✕</span>
             </button>
           </div>
+          <div class="search-options">
+            <label class="search-option" title="Match words consecutively as a phrase">
+              <input type="checkbox" [(ngModel)]="transcriptSearchOptions.usePhraseSearch">
+              Phrase
+            </label>
+            <label class="search-option" title="Match similar-sounding words">
+              <input type="checkbox" [(ngModel)]="transcriptSearchOptions.useSoundex">
+              Phonetic
+            </label>
+          </div>
           <div class="search-results" *ngIf="transcriptionSearchResults.length > 0">
             <span class="results-count">{{ transcriptionSearchResults.length }} results found</span>
           </div>

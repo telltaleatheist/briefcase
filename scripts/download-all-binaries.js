@@ -59,7 +59,7 @@ async function downloadAllBinaries() {
     console.log('Summary:');
     console.log('  ✅ yt-dlp:         utilities/bin/');
     console.log('  ✅ whisper.cpp:    utilities/bin/');
-    console.log('  ✅ whisper models: utilities/models/ (tiny, base)');
+    console.log('  ✅ whisper models: utilities/models/ (tiny, base, small)');
     console.log('  ✅ llama.cpp:      utilities/bin/');
     console.log('  ✅ cogito model:   utilities/models/llama/ (8B Q6_K)');
     console.log('  ✅ ffmpeg:         node_modules/@ffmpeg-installer/');

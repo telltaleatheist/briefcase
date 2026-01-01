@@ -252,6 +252,17 @@
     resize: vertical;
     min-height: 60px;
   }
+
+  .form-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 4px;
+
+    strong {
+      color: var(--text-secondary);
+    }
+  }
 }
 
 .checkbox-label {

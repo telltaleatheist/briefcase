@@ -502,14 +502,17 @@ export class DatabaseController {
    * Search videos across filename, AI description, transcripts, analyses, and tags
    * Returns empty results if no library/database exists yet (first run)
    * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
+   * @param useSoundex - Enable phonetic matching for transcripts
+   * @param usePhraseSearch - Use phrase search (consecutive words) instead of word search (OR logic, default)
    */
   @Get('search')
   searchVideos(
     @Query('q') query: string,
     @Query('limit') limit?: string,
     @Query('searchIn') searchIn?: string,
+    @Query('useSoundex') useSoundex?: string,
+    @Query('usePhraseSearch') usePhraseSearch?: string,
   ) {
-    console.log(`[SEARCH ENDPOINT] query="${query}", searchIn="${searchIn}"`);
     if (!query || query.trim() === '') {
       return {
         results: [],
@@ -520,9 +523,13 @@ export class DatabaseController {
 
     try {
       const limitNum = limit ? parseInt(limit, 10) : 1000;
+      const searchOptions = {
+        useSoundex: useSoundex === 'true',
+        usePhraseSearch: usePhraseSearch === 'true',
+      };
 
       // Use FTS5 search for efficient full-text searching
-      const searchResults = this.databaseService.searchFTS(query, limitNum, searchIn);
+      const searchResults = this.databaseService.searchFTS(query, limitNum, searchIn, searchOptions);
 
       // Get full video details for each result
       const videos = searchResults.map(result => {

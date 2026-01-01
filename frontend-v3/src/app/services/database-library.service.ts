@@ -457,12 +457,21 @@ export class DatabaseLibraryService {
       const baseUrl = await this.getBaseUrl();
       let url = `${baseUrl}/search?q=${encodeURIComponent(query)}`;
 
+      // Convert individual filter booleans to searchIn comma-separated string
+      // Backend expects: searchIn=filename,transcript,analysis (only enabled fields)
       if (filters) {
-        if (filters.filename !== undefined) url += `&filename=${filters.filename}`;
-        if (filters.aiDescription !== undefined) url += `&aiDescription=${filters.aiDescription}`;
-        if (filters.transcript !== undefined) url += `&transcript=${filters.transcript}`;
-        if (filters.analysis !== undefined) url += `&analysis=${filters.analysis}`;
-        if (filters.tags !== undefined) url += `&tags=${filters.tags}`;
+        const searchInFields: string[] = [];
+        // Only add fields that are explicitly true (not false, not undefined)
+        if (filters.filename === true) searchInFields.push('filename');
+        if (filters.aiDescription === true) searchInFields.push('filename'); // ai_description is in videos_fts
+        if (filters.transcript === true) searchInFields.push('transcript');
+        if (filters.analysis === true) searchInFields.push('analysis');
+        // Note: tags uses a separate FTS table, currently not supported via searchIn
+        if (searchInFields.length > 0) {
+          // Deduplicate and join
+          const uniqueFields = [...new Set(searchInFields)];
+          url += `&searchIn=${uniqueFields.join(',')}`;
+        }
       }
 
       const response = await firstValueFrom(
