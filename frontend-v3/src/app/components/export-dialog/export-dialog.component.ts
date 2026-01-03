@@ -65,7 +65,7 @@ export class ExportDialogComponent implements OnInit {
 
   // Export options
   outputDirectory: string | null = null;
-  reEncode = false;
+  reEncode = true;
   overwriteOriginal = false;
 
   // Export progress

@@ -183,8 +183,8 @@ export class TranscriptSearchService {
       return text === search;
     }
 
-    // Substring match (only if search is 3+ chars to avoid false positives)
-    if (search.length >= 3 && (text.includes(search) || search.includes(text))) return true;
+    // Substring match - text word contains the search term
+    if (search.length >= 3 && text.includes(search)) return true;
 
     // Soundex match (only if enabled and for 3+ char words)
     if (options?.useSoundex && search.length >= 3) {

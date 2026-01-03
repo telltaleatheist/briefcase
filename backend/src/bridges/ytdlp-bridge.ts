@@ -73,6 +73,21 @@ export class YtDlpBridge extends EventEmitter {
   }
 
   /**
+   * Get platform-appropriate browser impersonation target
+   * Uses Chrome with curl_cffi to bypass Cloudflare bot detection
+   */
+  private getImpersonateTarget(): string {
+    switch (process.platform) {
+      case 'win32':
+        return 'chrome-116:windows-10';
+      case 'darwin':
+        return 'chrome-131:macos-14';
+      default: // linux
+        return 'chrome-131:macos-14'; // No linux targets, macOS works fine
+    }
+  }
+
+  /**
    * Get the binary path
    */
   get path(): string {
@@ -113,7 +128,8 @@ export class YtDlpBridge extends EventEmitter {
 
       // Impersonate Chrome to bypass anti-bot protection (Rumble, etc.)
       // This uses curl_cffi to fully impersonate Chrome's TLS fingerprint
-      args.push('--impersonate', 'chrome');
+      // Must specify exact target - generic "chrome" doesn't work reliably
+      args.push('--impersonate', this.getImpersonateTarget());
 
       // Format selection
       if (options?.format) {
@@ -298,7 +314,7 @@ export class YtDlpBridge extends EventEmitter {
       '--dump-json',
       '--no-playlist',
       '--flat-playlist',
-      '--impersonate', 'chrome',
+      '--impersonate', this.getImpersonateTarget(),
       url,
     ];
 
@@ -347,7 +363,7 @@ export class YtDlpBridge extends EventEmitter {
     const args = [
       '--simulate',
       '--quiet',
-      '--impersonate', 'chrome',
+      '--impersonate', this.getImpersonateTarget(),
       url,
     ];
 
