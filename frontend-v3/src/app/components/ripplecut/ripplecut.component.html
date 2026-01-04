@@ -1,0 +1,882 @@
+<!-- ============================================================================
+     RIPPLECUT - Final Cut Pro Style Layout
+     ============================================================================ -->
+<div class="ripplecut" [class.fullscreen]="isFullscreen()">
+
+  <!-- =========================================================================
+       TITLE BAR
+       ========================================================================= -->
+  <header class="title-bar">
+    <div class="window-controls">
+      <span class="control close"></span>
+      <span class="control minimize"></span>
+      <span class="control maximize"></span>
+    </div>
+    <div class="title-tabs">
+      @for (tab of tabs(); track tab.id) {
+        <button
+          class="title-tab"
+          [class.active]="tab.isActive"
+          (click)="selectTab(tab.id)">
+          {{ tab.title }}
+          <span class="tab-close" (click)="closeTab(tab.id, $event)">×</span>
+        </button>
+      }
+    </div>
+    <div class="title-actions">
+      <button class="title-btn" title="Share">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+          <polyline points="16 6 12 2 8 6"/>
+          <line x1="12" y1="2" x2="12" y2="15"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- =========================================================================
+       TOOLBAR
+       ========================================================================= -->
+  <div class="toolbar">
+    <!-- Left: Import/Media -->
+    <div class="toolbar-group">
+      <button class="tool-btn" title="Import Media">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Center: Edit Tools -->
+    <div class="toolbar-group tools-group">
+      <button
+        class="tool-btn"
+        [class.active]="activeTool() === 'select'"
+        (click)="activeTool.set('select')"
+        title="Select (A)">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M4 4l7 19 2.5-7.5L21 13 4 4z"/>
+        </svg>
+      </button>
+      <button
+        class="tool-btn"
+        [class.active]="activeTool() === 'trim'"
+        (click)="activeTool.set('trim')"
+        title="Trim (T)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </button>
+      <button
+        class="tool-btn"
+        [class.active]="activeTool() === 'blade'"
+        (click)="activeTool.set('blade')"
+        title="Blade (B)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14.5 4L3 20h7l1.5-4"/>
+          <path d="M9.5 20L21 4h-7l-1.5 4"/>
+        </svg>
+      </button>
+      <button
+        class="tool-btn"
+        [class.active]="activeTool() === 'range'"
+        (click)="activeTool.set('range')"
+        title="Range Selection (R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="5" width="18" height="14" rx="2"/>
+          <line x1="8" y1="5" x2="8" y2="19"/>
+          <line x1="16" y1="5" x2="16" y2="19"/>
+        </svg>
+      </button>
+      <div class="tool-divider"></div>
+      <button class="tool-btn" (click)="addMarker()" title="Add Marker (M)">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Right: View Options -->
+    <div class="toolbar-group">
+      <button
+        class="tool-btn"
+        [class.active]="showBrowser()"
+        (click)="toggleBrowser()"
+        title="Toggle Browser">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="18" rx="1"/>
+          <rect x="14" y="3" width="7" height="18" rx="1"/>
+        </svg>
+      </button>
+      <button
+        class="tool-btn"
+        [class.active]="showInspector()"
+        (click)="toggleInspector()"
+        title="Toggle Inspector">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <line x1="15" y1="3" x2="15" y2="21"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MAIN WORKSPACE
+       ========================================================================= -->
+  <main class="workspace">
+    <!-- Browser Panel (Left) -->
+    @if (showBrowser()) {
+      <aside class="browser-panel" [style.width.px]="browserPanelWidth()">
+        <div class="panel-tabs">
+          <button
+            [class.active]="browserTab() === 'media'"
+            (click)="browserTab.set('media')">Libraries</button>
+          <button
+            [class.active]="browserTab() === 'settings'"
+            (click)="browserTab.set('settings')">Settings</button>
+        </div>
+        <div class="panel-content">
+          <!-- Libraries/Effects/Transitions browser content -->
+          @if (browserTab() !== 'settings') {
+            <div class="browser-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" placeholder="Search">
+            </div>
+            <div class="browser-list">
+              <div class="browser-item folder">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <span>Footage</span>
+              </div>
+              <div class="browser-item folder">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <span>Audio</span>
+              </div>
+              <div class="browser-item folder">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                <span>Graphics</span>
+              </div>
+            </div>
+          }
+
+          <!-- Settings Tab (Project/Clip settings) -->
+          @if (browserTab() === 'settings') {
+            <div class="settings-panel">
+              <div class="inspector-section">
+                <h4>Transform</h4>
+                <div class="param-row">
+                  <label>Position</label>
+                  <div class="param-inputs">
+                    <input type="number" value="0" readonly>
+                    <input type="number" value="0" readonly>
+                  </div>
+                </div>
+                <div class="param-row">
+                  <label>Scale</label>
+                  <input type="number" value="100" readonly>
+                  <span class="unit">%</span>
+                </div>
+                <div class="param-row">
+                  <label>Rotation</label>
+                  <input type="number" value="0" readonly>
+                  <span class="unit">°</span>
+                </div>
+              </div>
+              <div class="inspector-section">
+                <h4>Audio</h4>
+                <div class="param-row">
+                  <label>Volume</label>
+                  <input type="range" min="-60" max="12" value="0">
+                  <span class="unit">dB</span>
+                </div>
+                <div class="param-row">
+                  <label>Pan</label>
+                  <input type="range" min="-100" max="100" value="0">
+                </div>
+              </div>
+              <div class="inspector-section">
+                <h4>Info</h4>
+                <div class="info-row">
+                  <label>Name</label>
+                  <span>{{ activeTab().title }}</span>
+                </div>
+                <div class="info-row">
+                  <label>Duration</label>
+                  <span>{{ formattedDuration() }}</span>
+                </div>
+                <div class="info-row">
+                  <label>Resolution</label>
+                  <span>1920 × 1080</span>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+        <!-- Resize handle -->
+        <div
+          class="panel-resize-handle"
+          [class.is-resizing]="isResizingBrowser()"
+          (mousedown)="startBrowserResize($event)"></div>
+      </aside>
+    }
+
+    <!-- Viewer (Center) -->
+    <section class="viewer-section">
+      <div class="viewer">
+        <div class="viewer-canvas">
+          <div class="video-frame">
+            @if (getMainClipUrl()) {
+              <video
+                #videoPlayer
+                class="video-element"
+                [src]="getMainClipUrl()"
+                [currentTime]="currentTime()"
+                [volume]="isMuted() ? 0 : volume()"
+                [playbackRate]="playbackRate()"
+                (loadedmetadata)="onVideoLoaded($event)"
+                (timeupdate)="onVideoTimeUpdate($event)"
+                (ended)="onVideoEnded()"
+                (click)="togglePlay()">
+              </video>
+            } @else {
+              <div class="video-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/>
+                  <polygon points="10 8 16 12 10 16 10 8"/>
+                </svg>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Inspector Panel (Right) - Analysis, Chapters, Transcript, Settings -->
+    @if (showInspector()) {
+      <aside class="inspector-panel" [style.width.px]="inspectorPanelWidth()">
+        <!-- Resize handle -->
+        <div
+          class="panel-resize-handle"
+          [class.is-resizing]="isResizingInspector()"
+          (mousedown)="startInspectorResize($event)"></div>
+        <div class="panel-tabs">
+          <button
+            [class.active]="inspectorTab() === 'analysis'"
+            (click)="inspectorTab.set('analysis')">Analysis</button>
+          <button
+            [class.active]="inspectorTab() === 'chapters'"
+            (click)="inspectorTab.set('chapters')">Chapters</button>
+          <button
+            [class.active]="inspectorTab() === 'transcript'"
+            (click)="inspectorTab.set('transcript')">Transcript</button>
+        </div>
+        <div class="panel-content">
+          <!-- Analysis Tab -->
+          @if (inspectorTab() === 'analysis') {
+            <div class="analysis-panel">
+              <!-- Summary Stats -->
+              <div class="analysis-summary">
+                <div class="summary-stat">
+                  <span class="stat-value">{{ analysisMarkers().length }}</span>
+                  <span class="stat-label">Findings</span>
+                </div>
+              </div>
+
+              <!-- Analysis List (accordion style) -->
+              <div class="analysis-list">
+                @for (marker of analysisMarkers(); track marker.id) {
+                  <div
+                    class="analysis-item"
+                    [id]="'analysis-item-' + marker.id"
+                    [class.expanded]="selectedMarker()?.id === marker.id">
+                    <!-- Collapsed header (always visible) -->
+                    <div class="item-header-row" (click)="selectMarker(marker)">
+                      <div class="item-indicator" [style.background]="getCategoryColor(marker.category)"></div>
+                      <div class="item-summary">
+                        <span class="item-category">{{ getCategoryLabel(marker.category) }}</span>
+                        <span class="item-time">{{ formatTimeCompact(marker.time) }}@if (marker.endTime) { → {{ formatTimeCompact(marker.endTime) }}}</span>
+                      </div>
+                      <span class="expand-icon">{{ selectedMarker()?.id === marker.id ? '▼' : '▶' }}</span>
+                    </div>
+                    <!-- Expanded content (visible when selected) -->
+                    @if (selectedMarker()?.id === marker.id) {
+                      <div class="item-expanded">
+                        <div class="expanded-message">{{ marker.message }}</div>
+                        <div class="expanded-actions">
+                          <button class="jump-btn" (click)="seekTo(marker.time); $event.stopPropagation()">
+                            Jump to {{ formatTimeCompact(marker.time) }}
+                          </button>
+                          @if (marker.endTime) {
+                            <span class="duration-label">Duration: {{ formatDurationShort(marker.endTime - marker.time) }}</span>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          }
+
+          <!-- Chapters Tab -->
+          @if (inspectorTab() === 'chapters') {
+            <div class="chapters-panel">
+              @for (chapter of chapters(); track chapter.id) {
+                <div
+                  class="chapter-item"
+                  [class.active]="currentTime() >= chapter.startTime && currentTime() < chapter.endTime"
+                  (click)="seekTo(chapter.startTime)">
+                  <div class="chapter-info">
+                    <span class="chapter-title">{{ chapter.title }}</span>
+                    <span class="chapter-time">{{ formatTimeCompact(chapter.startTime) }} - {{ formatTimeCompact(chapter.endTime) }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+
+          <!-- Transcript Tab -->
+          @if (inspectorTab() === 'transcript') {
+            <div class="transcript-panel">
+              <div class="transcript-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search transcript..."
+                  [value]="transcriptSearch()"
+                  (input)="transcriptSearch.set($any($event.target).value)">
+              </div>
+              <div class="search-options">
+                <label class="search-option">
+                  <input type="checkbox" [checked]="useSoundex()" (change)="toggleSoundex()">
+                  <span>Soundex</span>
+                </label>
+                <label class="search-option">
+                  <input type="checkbox" [checked]="usePhraseSearch()" (change)="togglePhraseSearch()">
+                  <span>Phrase</span>
+                </label>
+              </div>
+              <div class="transcript-list">
+                @for (segment of filteredTranscript(); track segment.id) {
+                  <div
+                    class="transcript-segment"
+                    [class.active]="currentTime() >= segment.startTime && currentTime() < segment.endTime"
+                    (click)="seekTo(segment.startTime)">
+                    <span class="segment-time">{{ formatTimeCompact(segment.startTime) }}</span>
+                    <span class="segment-text">{{ segment.text }}</span>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </aside>
+    }
+  </main>
+
+  <!-- =========================================================================
+       TIMELINE
+       ========================================================================= -->
+  <section class="timeline-section" [style.height.px]="timelineHeight()">
+    <!-- Resize Handle -->
+    <div
+      class="timeline-resize-handle"
+      [class.is-resizing]="isResizingTimeline()"
+      (mousedown)="startTimelineResize($event)"></div>
+
+    <!-- Timeline Header -->
+    <div class="timeline-header">
+      <div class="timeline-header-left">
+        <!-- Transport Controls (compact) -->
+        <div class="transport-mini">
+          <button class="transport-btn-mini" (click)="goToStart()" title="Go to Start">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 6h2v12H6V6zm3.5 6l8.5 6V6l-8.5 6z"/>
+            </svg>
+          </button>
+          <button class="transport-btn-mini" (click)="skipBackward()" title="Rewind (J)">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z"/>
+            </svg>
+          </button>
+          <button class="transport-btn-mini play-btn" (click)="togglePlay()" title="Play/Pause (Space)">
+            @if (isPlaying()) {
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+              </svg>
+            } @else {
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7L8 5z"/>
+              </svg>
+            }
+          </button>
+          <button class="transport-btn-mini" (click)="skipForward()" title="Fast Forward (L)">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z"/>
+            </svg>
+          </button>
+          <button class="transport-btn-mini" (click)="goToEnd()" title="Go to End">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6h-2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="timeline-header-center">
+        <!-- Timecode Display -->
+        <div class="timecode-badge">
+          @if (isExtendingMarker() && draggedMarker()) {
+            <!-- Show marker position when dragging -->
+            <span class="timecode-time">{{ formatTimecode(draggedMarker()!.time) }}</span>
+            @if (draggedMarker()!.endTime) {
+              <span class="timecode-sep">→</span>
+              <span class="timecode-time">{{ formatTimecode(draggedMarker()!.endTime!) }}</span>
+              <span class="timecode-sep">=</span>
+              <span class="timecode-time highlight">{{ formatDurationShort(draggedMarker()!.endTime! - draggedMarker()!.time) }}</span>
+            }
+            <span class="marking-indicator">MARKER</span>
+          } @else if (selectionInfo()) {
+            <span class="timecode-time">{{ selectionInfo()!.from }}</span>
+            <span class="timecode-sep">→</span>
+            <span class="timecode-time">{{ selectionInfo()!.to }}</span>
+            <span class="timecode-sep">=</span>
+            <span class="timecode-time highlight">{{ selectionInfo()!.duration }}</span>
+          } @else if (isHighlighting()) {
+            <span class="timecode-time">{{ formatTimecode(highlightStart()!) }}</span>
+            <span class="timecode-sep">→</span>
+            <span class="timecode-time">{{ formattedCurrentTime() }}</span>
+            <span class="marking-indicator">MARKING</span>
+          } @else {
+            <span class="timecode-time">{{ formattedCurrentTime() }}</span>
+            <span class="timecode-sep">/</span>
+            <span class="timecode-time dim">{{ formattedDuration() }}</span>
+          }
+        </div>
+      </div>
+      <div class="timeline-header-right">
+        <div class="scale-control">
+          <button class="scale-btn" (click)="scaleDown()" title="Decrease lane size">−</button>
+          <input
+            type="range"
+            class="scale-slider"
+            min="0"
+            max="100"
+            [value]="getScaleSliderValue()"
+            (input)="onScaleSliderChange($any($event.target).value)">
+          <button class="scale-btn" (click)="scaleUp()" title="Increase lane size">+</button>
+          <button class="scale-reset" (click)="resetScale()" title="Reset to default size">⟲</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline Ruler -->
+    <div class="timeline-ruler" #rulerTrack (click)="onRulerClick($event)">
+      @for (tick of rulerTicks(); track tick.time) {
+        <div
+          class="ruler-tick"
+          [class.major]="tick.isMajor"
+          [style.left.%]="timeToPercent(tick.time)">
+          @if (tick.label) {
+            <span class="tick-label">{{ tick.label }}</span>
+          }
+        </div>
+      }
+      <!-- Playhead in ruler -->
+      <div
+        class="ruler-playhead"
+        [style.left.%]="timeToPercent(currentTime())"
+        (mousedown)="onPlayheadMouseDown($event)">
+        <div class="playhead-head"></div>
+      </div>
+    </div>
+
+    <!-- Timeline Tracks -->
+    <div
+      class="timeline-tracks"
+      [class.is-dragging]="draggedClip()"
+      [style.--timeline-scale]="timelineScale()"
+      #timelineTrack
+      #lanesContainer
+      (click)="onTimelineClick($event)"
+      (contextmenu)="onTimelineContextMenu($event)"
+      (mouseenter)="onTimelineMouseEnter()"
+      (mouseleave)="onTimelineMouseLeave()"
+      (mousemove)="onTimelineMouseMove($event)"
+      (wheel)="onLanesWheel($event)">
+
+      <!-- Dynamic Lanes -->
+      @for (lane of activeLanes(); track lane) {
+        <div
+          class="lane"
+          [class.master-lane]="lane === 0"
+          [class.video-lane]="lane > 0"
+          [class.audio-lane]="lane < 0"
+          [class.empty-lane]="getClipsForLane(lane).length === 0"
+          [class.drag-over]="dragOverLane() === lane"
+          [attr.data-lane]="lane">
+          <div class="lane-header"></div>
+          <div class="track-content">
+            <!-- Drag preview ghost -->
+            @if (draggedClip() && draggedClipOriginalLane() === lane) {
+              <div
+                class="clip-drag-preview"
+                [style.left.%]="getDragPreviewLeft()"
+                [style.width.%]="getDragPreviewWidth()">
+              </div>
+            }
+            @for (clip of getClipsForLane(lane); track clip.id) {
+              <div
+                class="clip"
+                [class.video-clip]="getClipType(clip) === 'video'"
+                [class.title-clip]="getClipType(clip) === 'title'"
+                [class.audio-clip]="getClipType(clip) === 'audio'"
+                [class.clip-selected]="isClipSelected(clip)"
+                [class.has-markers]="getMarkersForClip(clip.id).length > 0 && lane >= 0"
+                [style.left.%]="draggedClip()?.id === clip.id ? getDragPreviewLeft() : timeToPercent(clip.startTime)"
+                [style.width.%]="timeToPercent(clip.endTime) - timeToPercent(clip.startTime)"
+                [class.dragging]="draggedClip()?.id === clip.id"
+                [class.selected]="selection() && clip.startTime >= selection()!.start && clip.endTime <= selection()!.end"
+                (mousedown)="onClipMouseDown($event, clip)">
+                <!-- Trim handles (visible when selected) -->
+                <div
+                  class="trim-handle trim-handle-left"
+                  (mousedown)="onClipTrimStart($event, clip, 'start')">
+                  <div class="trim-handle-bar"></div>
+                </div>
+                <div
+                  class="trim-handle trim-handle-right"
+                  (mousedown)="onClipTrimStart($event, clip, 'end')">
+                  <div class="trim-handle-bar"></div>
+                </div>
+                <!-- Video/Title clip content -->
+                @if (lane >= 0) {
+                  <div class="clip-content">
+                    <span class="clip-label">{{ clip.name }}</span>
+                    <!-- Link indicator for clips with attached audio -->
+                    @if (hasLinkedAudio(clip)) {
+                      <span class="link-indicator" title="Audio linked - Option+click to detach">🔗</span>
+                    }
+                  </div>
+                  <!-- Only show waveform if this video clip has linked audio -->
+                  @if (hasLinkedAudio(clip)) {
+                    <div class="clip-waveform">
+                      @for (bar of waveformBars.slice(0, 40); track $index) {
+                        <div class="mini-bar" [style.height.%]="bar * 100"></div>
+                      }
+                    </div>
+                  }
+                  <!-- Chapter markers only (shown on clip directly) -->
+                  @for (marker of getMarkersForClip(clip.id); track marker.id) {
+                    @if (marker.type === 'chapter') {
+                      <div
+                        class="clip-marker chapter-type"
+                        [class.selected]="selectedMarker()?.id === marker.id"
+                        [style.left.%]="((marker.time - clip.startTime) / (clip.endTime - clip.startTime)) * 100"
+                        [style.--marker-color]="getMarkerTypeColor(marker.type, marker.category)"
+                        [title]="marker.message"
+                        (click)="selectMarker(marker); $event.stopPropagation()">
+                      </div>
+                    }
+                  }
+                }
+                <!-- Audio clip content -->
+                @if (lane < 0) {
+                  <div class="audio-waveform-inline">
+                    @for (bar of waveformBars; track $index) {
+                      <div class="waveform-bar-inline" [style.height.%]="bar * 100"></div>
+                    }
+                  </div>
+                  <span class="clip-label audio-label">{{ clip.name }}</span>
+                  <!-- Link indicator for audio clips linked to video -->
+                  @if (clip.linkedVideoId) {
+                    <span class="link-indicator audio-link" title="Linked to video - Option+click to detach">🔗</span>
+                  }
+                }
+              </div>
+            }
+            <!-- Selection overlay (only in the lane where selection was made) -->
+            @if (selection() && selectionLane() === lane) {
+              <div
+                class="selection-range"
+                [style.left.%]="timeToPercent(selection()!.start)"
+                [style.width.%]="timeToPercent(selection()!.end) - timeToPercent(selection()!.start)"
+                (mousedown)="startSelectionMoveDrag($event)">
+                <!-- Left handle -->
+                <div
+                  class="selection-handle selection-handle-left"
+                  (mousedown)="startSelectionEdgeDrag($event, 'start')">
+                  <div class="handle-line"></div>
+                </div>
+                <!-- Right handle -->
+                <div
+                  class="selection-handle selection-handle-right"
+                  (mousedown)="startSelectionEdgeDrag($event, 'end')">
+                  <div class="handle-line"></div>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+
+      <!-- ================================================================
+           ANALYSIS MARKERS LAYER - Rendered ABOVE all lanes/clips
+           This layer sits outside lanes so it's always on top
+           ================================================================ -->
+      <div class="markers-layer">
+        @for (lane of activeLanes(); track lane) {
+          @if (lane >= 0) {
+            @for (clip of getClipsForLane(lane); track clip.id) {
+              @if (getMarkersForClip(clip.id).length > 0) {
+                <div
+                  class="marker-lane-overlay"
+                  [style.top.px]="getLaneTopOffset(lane)"
+                  [style.height.px]="getLaneHeight(lane)"
+                  [style.left.%]="timeToPercent(clip.startTime)"
+                  [style.width.%]="timeToPercent(clip.endTime) - timeToPercent(clip.startTime)">
+                  @for (marker of getMarkersForClip(clip.id); track marker.id) {
+                    @if (marker.type !== 'chapter') {
+                      <div
+                        class="marker-highlight"
+                        [class.selected]="selectedMarker()?.id === marker.id"
+                        [class.overlapping]="isOverlappingWithSelected(marker)"
+                        [class.has-range]="marker.endTime"
+                        [style.left.%]="((marker.time - clip.startTime) / (clip.endTime - clip.startTime)) * 100"
+                        [style.width.%]="marker.endTime ? ((marker.endTime - marker.time) / (clip.endTime - clip.startTime)) * 100 : 2"
+                        [style.--marker-color]="getMarkerTypeColor(marker.type, marker.category)"
+                        [title]="marker.message"
+                        (pointerdown)="selectMarker(marker); $event.stopPropagation(); $event.preventDefault()"
+                        (click)="$event.stopPropagation()"
+                        (mousedown)="$event.stopPropagation()">
+                        <!-- Left edge handle -->
+                        <div
+                          class="highlight-handle highlight-handle-left"
+                          (mousedown)="onMarkerDragStart($event, marker, clip, 'start')"></div>
+                        <!-- Right edge handle (for range markers) -->
+                        @if (marker.endTime) {
+                          <div
+                            class="highlight-handle highlight-handle-right"
+                            (mousedown)="onMarkerDragStart($event, marker, clip, 'end')"></div>
+                        }
+                      </div>
+                    }
+                  }
+                </div>
+              }
+            }
+          }
+        }
+      </div>
+
+      <!-- Shadow Playhead (skim) -->
+      @if (isSkimming() && skimTime() !== null) {
+        <div
+          class="shadow-playhead"
+          [style.left.%]="timeToPercent(skimTime()!)">
+          <div class="shadow-playhead-line"></div>
+        </div>
+      }
+
+      <!-- Playhead -->
+      <div
+        class="playhead"
+        [style.left.%]="timeToPercent(currentTime())"
+        [class.dragging]="isDraggingPlayhead()">
+        <div class="playhead-line"></div>
+      </div>
+    </div>
+
+    <!-- Zoom Scrollbar -->
+    <div class="zoom-scrollbar">
+      <div class="scrollbar-track">
+        <div
+          class="scrollbar-thumb"
+          [style.left.%]="zoombarThumbLeft()"
+          [style.width.%]="zoombarThumbWidth()">
+          <div
+            class="thumb-handle left"
+            (mousedown)="onZoombarMouseDown($event, 'left')">
+          </div>
+          <div
+            class="thumb-middle"
+            (mousedown)="onZoombarMouseDown($event, 'middle')">
+          </div>
+          <div
+            class="thumb-handle right"
+            (mousedown)="onZoombarMouseDown($event, 'right')">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================================
+       KEYBOARD SHORTCUTS DIALOG
+       ========================================================================= -->
+  @if (showShortcutsDialog()) {
+    <div class="modal-overlay" (click)="showShortcutsDialog.set(false)">
+      <div class="modal shortcuts-modal" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h2>Keyboard Shortcuts</h2>
+          <button class="modal-close" (click)="showShortcutsDialog.set(false)">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="shortcuts-grid">
+            <div class="shortcut-group">
+              <h3>Playback</h3>
+              <div class="shortcut"><kbd>Space</kbd><span>Play/Pause</span></div>
+              <div class="shortcut"><kbd>J</kbd><span>Rewind</span></div>
+              <div class="shortcut"><kbd>K</kbd><span>Stop</span></div>
+              <div class="shortcut"><kbd>L</kbd><span>Fast Forward</span></div>
+              <div class="shortcut"><kbd>←</kbd><span>Previous Frame</span></div>
+              <div class="shortcut"><kbd>→</kbd><span>Next Frame</span></div>
+              <div class="shortcut"><kbd>Home</kbd><span>Go to Start</span></div>
+              <div class="shortcut"><kbd>End</kbd><span>Go to End</span></div>
+            </div>
+            <div class="shortcut-group">
+              <h3>Tools</h3>
+              <div class="shortcut"><kbd>A</kbd><span>Select Tool</span></div>
+              <div class="shortcut"><kbd>T</kbd><span>Trim Tool</span></div>
+              <div class="shortcut"><kbd>B</kbd><span>Blade Tool</span></div>
+              <div class="shortcut"><kbd>R</kbd><span>Range Tool</span></div>
+              <div class="shortcut"><kbd>M</kbd><span>Add Marker</span></div>
+            </div>
+            <div class="shortcut-group">
+              <h3>Editing</h3>
+              <div class="shortcut"><kbd>I</kbd><span>Set In Point</span></div>
+              <div class="shortcut"><kbd>O</kbd><span>Set Out Point</span></div>
+              <div class="shortcut"><kbd>X</kbd><span>Select Clip</span></div>
+              <div class="shortcut"><kbd>,</kbd><span>Nudge Left 1 Frame</span></div>
+              <div class="shortcut"><kbd>.</kbd><span>Nudge Right 1 Frame</span></div>
+              <div class="shortcut"><kbd>[</kbd><span>Trim Start Left</span></div>
+              <div class="shortcut"><kbd>]</kbd><span>Trim End Right</span></div>
+              <div class="shortcut"><kbd>Esc</kbd><span>Deselect All</span></div>
+            </div>
+            <div class="shortcut-group">
+              <h3>View</h3>
+              <div class="shortcut"><kbd>⌘ +</kbd><span>Zoom In</span></div>
+              <div class="shortcut"><kbd>⌘ -</kbd><span>Zoom Out</span></div>
+              <div class="shortcut"><kbd>⌘ 0</kbd><span>Fit to Window</span></div>
+              <div class="shortcut"><kbd>⌘ F</kbd><span>Fullscreen</span></div>
+              <div class="shortcut"><kbd>⌘ E</kbd><span>Export</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- =========================================================================
+       EXPORT DIALOG
+       ========================================================================= -->
+  @if (showExportDialog()) {
+    <div class="modal-overlay" (click)="showExportDialog.set(false)">
+      <div class="modal export-modal" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h2>Export</h2>
+          <button class="modal-close" (click)="showExportDialog.set(false)">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="export-settings">
+            <div class="setting-group">
+              <label>Format</label>
+              <select>
+                <option>Apple ProRes 422</option>
+                <option>H.264</option>
+                <option>HEVC</option>
+              </select>
+            </div>
+            <div class="setting-group">
+              <label>Resolution</label>
+              <select>
+                <option>1920 × 1080 (1080p)</option>
+                <option>3840 × 2160 (4K)</option>
+                <option>1280 × 720 (720p)</option>
+              </select>
+            </div>
+            <div class="setting-group">
+              <label>Range</label>
+              <select>
+                <option>Entire Project</option>
+                <option>Selection Only</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" (click)="showExportDialog.set(false)">Cancel</button>
+          <button class="btn-primary">Export</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- =========================================================================
+       MARKER DIALOG
+       ========================================================================= -->
+  @if (showMarkerDialog()) {
+    <div class="modal-overlay" (click)="showMarkerDialog.set(false)">
+      <div class="modal marker-modal" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h2>Add Marker</h2>
+          <button class="modal-close" (click)="showMarkerDialog.set(false)">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="setting-group">
+            <label>Name</label>
+            <input type="text" placeholder="Marker name">
+          </div>
+          <div class="setting-group">
+            <label>Time</label>
+            <input type="text" [value]="formattedCurrentTime()" readonly>
+          </div>
+          <div class="setting-group">
+            <label>Color</label>
+            <div class="color-options">
+              <button class="color-btn" style="background: #3b82f6"></button>
+              <button class="color-btn" style="background: #f59e0b"></button>
+              <button class="color-btn" style="background: #10b981"></button>
+              <button class="color-btn" style="background: #ef4444"></button>
+              <button class="color-btn" style="background: #8b5cf6"></button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>Notes</label>
+            <textarea rows="3" placeholder="Add notes..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" (click)="showMarkerDialog.set(false)">Cancel</button>
+          <button class="btn-primary" (click)="showMarkerDialog.set(false)">Add</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Context Menu -->
+  @if (showContextMenu()) {
+    <div class="context-overlay" (click)="showContextMenu.set(false)">
+      <div
+        class="context-menu"
+        [style.left.px]="contextMenuPosition().x"
+        [style.top.px]="contextMenuPosition().y">
+        <button (click)="setInPoint(); showContextMenu.set(false)">Set In Point<kbd>I</kbd></button>
+        <button (click)="setOutPoint(); showContextMenu.set(false)">Set Out Point<kbd>O</kbd></button>
+        <div class="context-divider"></div>
+        <button (click)="addMarker(); showContextMenu.set(false)">Add Marker<kbd>M</kbd></button>
+        <div class="context-divider"></div>
+        <button (click)="showExportDialog.set(true); showContextMenu.set(false)">Export Selection<kbd>⌘E</kbd></button>
+      </div>
+    </div>
+  }
+
+</div>

@@ -1,2050 +1,2797 @@
-import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject, Optional, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Router } from '@angular/router';
-import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
-import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatSnackBarModule } from '@angular/material/snack-bar';
-import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
-import { MatExpansionModule } from '@angular/material/expansion';
-import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
-import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
-import { NotificationService } from '../../services/notification.service';
-import { DatabaseLibraryService } from '../../services/database-library.service';
-import { BackendUrlService } from '../../services/backend-url.service';
-import { AnalysisQueueService } from '../../services/analysis-queue.service';
-import { VideoTimelineComponent } from '../video-timeline/video-timeline.component';
-import { TimelineSection, TimelineSelection } from 'ngx-video-timeline-editor';
-import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
-import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewer.component';
-import videojs from 'video.js';
-import Player from 'video.js/dist/types/player';
-import { HotkeysService } from '@ngneat/hotkeys';
-import { Subscription } from 'rxjs';
+import { Router, ActivatedRoute } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
+import { ExportDialogComponent, ExportDialogData } from '../export-dialog/export-dialog.component';
+import { NavigationService } from '../../services/navigation.service';
+import { LibraryService, LibraryAnalysis, AnalysisSection as LibAnalysisSection } from '../../services/library.service';
+import { TourService } from '../../services/tour.service';
+import {
+  VideoEditorState,
+  VideoClip,
+  VideoMetadata,
+  EditorSettings,
+  TimelineSection,
+  TimelineChapter,
+  CategoryFilter,
+  ZoomState,
+  AnalysisData,
+  WaveformData,
+  TimelineSelection,
+  CustomMarker,
+  EditorTab,
+  createEditorTab
+} from '../../models/video-editor.model';
+import { TranscriptionSegment } from '../../models/video-info.model';
+
+// Sub-components
+import { MediaDisplayComponent } from './media-display/media-display.component';
+import { AnalysisPanelComponent } from './analysis-panel/analysis-panel.component';
+import { TimelineRulerComponent } from './timeline/timeline-ruler/timeline-ruler.component';
+import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline-playhead.component';
+import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track.component';
+import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
+import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
+import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
+import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
+import { TabBarComponent } from './tab-bar/tab-bar.component';
+
+// Tool types for editor
+export enum EditorTool {
+  CURSOR = 'cursor',
+  HIGHLIGHT = 'highlight'
+}
+
+// Category colors for different analysis types
+const CATEGORY_COLORS: Record<string, string> = {
+  'shocking': '#f59e0b',          // Amber
+  'political-violence': '#b91c1c', // Dark Red
+  'hate': '#dc2626',              // Red
+  'violence': '#ef4444',          // Red
+  'extremism': '#f97316',         // Orange
+  'misinformation': '#eab308',    // Yellow
+  'conspiracy': '#a855f7',        // Purple
+  'christian-nationalism': '#ec4899', // Pink
+  'false-prophecy': '#8b5cf6',    // Violet
+  // Legacy categories
+  'hate speech': '#dc2626',
+  'harmful content': '#f97316',
+  'political': '#0d6efd',
+  'educational': '#198754',
+  'entertainment': '#6610f2',
+  'news': '#0dcaf0',
+  'false prophecy': '#8b5cf6',
+  'prophecy': '#8b5cf6',
+  'spiritual': '#20c997',
+  'testimony': '#0dcaf0',
+  'teaching': '#198754',
+  'worship': '#6610f2',
+  'prayer': '#ec4899',
+  'christian nationalism': '#ec4899',
+  'nationalism': '#ec4899',
+  'political violence': '#b91c1c',
+  'rhetoric': '#fd7e14',
+  'propaganda': '#ffc107',
+  'fear-mongering': '#e83e8c',
+  'apocalyptic': '#6f42c1',
+  'end times': '#6f42c1',
+  'biblical': '#0d6efd',
+  'scripture': '#0dcaf0',
+  'sermon': '#198754',
+  'commentary': '#17a2b8',
+  'interview': '#6610f2',
+  'discussion': '#20c997',
+  'introduction': '#adb5bd',
+  'conclusion': '#adb5bd',
+  'music': '#e83e8c',
+  'advertisement': '#ffc107',
+  'promotion': '#fd7e14',
+  'default': '#6c757d'
+};
 
 @Component({
   selector: 'app-video-player',
   standalone: true,
   imports: [
     CommonModule,
-    MatDialogModule,
-    MatButtonModule,
-    MatIconModule,
-    MatProgressSpinnerModule,
-    MatTooltipModule,
-    MatSnackBarModule,
-    MatTabsModule,
-    MatExpansionModule,
-    MatMenuModule,
-    VideoTimelineComponent,
-    TranscriptSearchComponent,
-    TranscriptViewerComponent,
+    MediaDisplayComponent,
+    AnalysisPanelComponent,
+    TimelineRulerComponent,
+    TimelinePlayheadComponent,
+    TimelineTrackComponent,
+    TimelineZoomBarComponent,
+    ContextMenuComponent,
+    MarkerDialogComponent,
+    ExportDialogComponent,
+    KeyboardShortcutsDialogComponent,
+    TabBarComponent
   ],
   templateUrl: './video-player.component.html',
   styleUrls: ['./video-player.component.scss']
-  // Removed ChangeDetectionStrategy.OnPush - was causing dialog to reinitialize and clear video src
 })
-export class VideoPlayerComponent implements OnInit, AfterViewInit, OnDestroy {
-  @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
-  @ViewChild('audioElement', { static: false }) audioElement!: ElementRef<HTMLAudioElement>;
-  @ViewChild('imageElement', { static: false }) imageElement!: ElementRef<HTMLImageElement>;
-  @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
-  @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
-  @ViewChild('playerContainer', { static: false }) playerContainer!: ElementRef<HTMLDivElement>;
-  @ViewChild('contextMenuTrigger', { static: false }) contextMenuTrigger!: MatMenuTrigger;
+export class VideoPlayerComponent implements OnInit, OnDestroy {
+  private router = inject(Router);
+  private route = inject(ActivatedRoute);
+  private navService = inject(NavigationService);
+  private libraryService = inject(LibraryService);
+  private http = inject(HttpClient);
+  private tourService = inject(TourService);
 
-  // Video.js player instance (replaces manual videoEl)
-  private player: Player | null = null;
+  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly MAX_TABS = 15;
 
-  mediaType: string = 'video'; // 'video', 'audio', 'image', 'document', 'webpage'
-  imageSrc: string | null = null;
-  isLoading = true;
-  error: string | null = null;
-  metadata: ParsedAnalysisMetadata | null = null;
-  loadingMessage = 'Loading video...';
-  loadingTime = 0;
-  private loadingStartTime = 0;
-  private loadingProgressInterval: any = null;
+  // Tab management
+  tabs = signal<EditorTab[]>([]);
+  activeTabId = signal<string | null>(null);
+  currentGroupNumber = signal<number | null>(null);
+  private isRestoringTab = false; // Flag to ignore time updates during tab restore
+  private pendingSeekTime: number | null = null; // Time to seek to after video loads
 
-  // Timeline state
-  currentTime = 0;
-  duration = 0;
-  isPlaying = false;
-  timelineSections: TimelineSection[] = [];
-  currentSelection: TimelineSelection = { startTime: 0, endTime: 0 };
-  activeSectionIndex: number | null = null;
-  previousActiveSectionIndex: number | null = null;
+  // Computed active tab - derives current state from tabs array
+  activeTab = computed(() => {
+    const tabId = this.activeTabId();
+    if (!tabId) return null;
+    return this.tabs().find(t => t.id === tabId) || null;
+  });
 
-  // Throttle timer for performance optimization
-  private updateThrottleTimer: any = null;
-  private readonly UPDATE_THROTTLE_MS = 200; // Update at most every 200ms (5 times per second)
-  private loadingTimeoutTimer: any = null;
+  @ViewChild(MediaDisplayComponent) videoPlayer?: MediaDisplayComponent;
+  @ViewChild('videoPlayerArea', { static: false }) videoPlayerArea?: ElementRef<HTMLDivElement>;
 
-  // Track all timers for cleanup
-  private timers: Set<any> = new Set();
-
-  // Track all subscriptions for cleanup
-  private subscriptions: Subscription[] = [];
-
-  // Cached media element to avoid repeated DOM queries
-  private cachedMediaElement?: HTMLVideoElement | HTMLAudioElement;
-
-  // Transcript state
-  transcriptText: string | null = null;
-  transcriptExists = false;
-
-  // Auto-scroll state
-  autoScrollEnabled = true;
-  currentTabIndex = 0; // Track which tab is active (0=Analysis, 1=Search, 2=Transcript)
-
-  // Fullscreen controls state
-  isFullscreen = false;
-  isMouseOverPlayer = false;
-  private controlsHideTimer: any = null;
-  showControlsInFullscreen = false; // Controls visibility in fullscreen
-
-  // Document-level mouse event handlers for fullscreen
-  private boundDocumentMouseMove: any = null;
-  private boundDocumentMouseEnter: any = null;
-
-  // Track if opened as dialog or route
-  isDialogMode = false;
-
-  // Drag and drop state
-  isDragOver = false;
-
-  // Context menu state
-  private contextMenuClickTime = 0; // Store the time where user right-clicked
-  contextMenuPosition = { x: 0, y: 0 }; // Position for context menu
-
-  // Dialog state tracking
-  private exportDialogOpen = false;
-
-  // Category filter state (exposed from timeline component)
-  get categoryFilters() {
-    return this.timelineComponent?.categoryFilters || [];
-  }
-
-  get filteredMetadataSections() {
-    if (!this.metadata?.sections || this.categoryFilters.length === 0) {
-      return this.metadata?.sections || [];
-    }
-
-    const enabledCategories = new Set(
-      this.categoryFilters
-        .filter(f => f.enabled)
-        .map(f => f.category)
-    );
-
-    return this.metadata.sections.filter(section => {
-      const category = section.category?.toLowerCase() || 'other';
-      return enabledCategories.has(category);
-    });
-  }
-
-  public data: {
-    analysis?: LibraryAnalysis;
-    customVideo?: any;
-    videoId?: string;
-    videoPath?: string;
-    videoTitle?: string;
-    hasAnalysis?: boolean;
-    hasTranscript?: boolean;
-    realFilePath?: string; // Real file path for custom videos (for backend processing)
-  } = {};
-
-  constructor(
-    @Inject(MAT_DIALOG_DATA) @Optional() dialogData: any,
-    @Optional() private dialogRef: MatDialogRef<VideoPlayerComponent>,
-    private libraryService: LibraryService,
-    private databaseLibraryService: DatabaseLibraryService,
-    private dialog: MatDialog,
-    private notificationService: NotificationService,
-    private router: Router,
-    private ngZone: NgZone,
-    private cdr: ChangeDetectorRef,
-    private backendUrlService: BackendUrlService,
-    private http: HttpClient,
-    private analysisQueueService: AnalysisQueueService,
-    private hotkeys: HotkeysService
-  ) {
-    // If opened as dialog, use dialog data; otherwise use router state
-    if (dialogData) {
-      this.data = dialogData;
-      this.isDialogMode = true;
-    } else {
-      this.isDialogMode = false;
-      // Get data from router navigation state
-      const navigation = this.router.getCurrentNavigation();
-      const state = navigation?.extras?.state || (history.state?.navigationId ? history.state : null);
-
-      if (state && state['videoEditorData']) {
-        const routeData = state['videoEditorData'];
-        this.data = {
-          videoId: routeData.videoId,
-          videoPath: routeData.videoPath,
-          videoTitle: routeData.videoTitle
-        };
-      }
-    }
-  }
-
-  async ngOnInit() {
-    try {
-      // Determine the video ID to use for loading metadata
-      const videoId = this.data.videoId || this.data.analysis?.id;
-
-      // If hasAnalysis/hasTranscript not provided, check them asynchronously
-      let hasAnalysis = this.data.hasAnalysis;
-      let hasTranscript = this.data.hasTranscript;
-
-      if (videoId && (hasAnalysis === undefined || hasTranscript === undefined)) {
-        // Check in parallel without blocking the rest of the component initialization
-        const [analysisCheck, transcriptCheck] = await Promise.all([
-          hasAnalysis !== undefined ? Promise.resolve(hasAnalysis) : this.databaseLibraryService.hasAnalysis(videoId),
-          hasTranscript !== undefined ? Promise.resolve(hasTranscript) : this.databaseLibraryService.hasTranscript(videoId)
-        ]);
-
-        hasAnalysis = analysisCheck;
-        hasTranscript = transcriptCheck;
-      }
-
-      // Load sections (custom markers and AI analysis sections) from database
-      // Load sections regardless of whether there's an analysis - custom markers should always show
-      if (videoId) {
-        try {
-          // Parse analysis sections from the database
-          const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
-
-          // Convert database sections to timeline format
-          if (sections && sections.length > 0) {
-            this.timelineSections = sections.map(section => ({
-              startTime: section.start_seconds,
-              endTime: section.end_seconds || (section.start_seconds + 30),
-              category: section.category || 'General',
-              description: section.description || section.title || '',
-              color: this.getCategoryColor(section.category || 'General')
-            }));
-
-            // Build metadata object for display
-            this.metadata = {
-              sections: sections.map(s => ({
-                startSeconds: s.start_seconds,
-                endSeconds: s.end_seconds,
-                timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
-                category: s.category || 'General',
-                description: s.description || s.title || '',
-                quotes: [] // Database doesn't store quotes separately
-              }))
-            } as any;
-
-            console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and AI analysis)');
-          }
-        } catch (error) {
-          console.warn('Failed to load sections:', error);
-          this.metadata = null;
-        }
-      }
-
-      // Load transcript from database if available
-      if (videoId && hasTranscript) {
-        try {
-          const dbTranscript = await this.databaseLibraryService.getTranscript(videoId);
-          if (dbTranscript && dbTranscript.srt_format) {
-            // Use SRT format from database (includes timestamps for seeking)
-            // The transcript search component needs timestamps to enable jump-to-time functionality
-            this.transcriptText = dbTranscript.srt_format;
-            this.transcriptExists = !!(this.transcriptText && this.transcriptText.trim().length > 0);
-          } else {
-            this.transcriptExists = false;
-            this.transcriptText = null;
-          }
-        } catch (error) {
-          console.error('Failed to load transcript:', error);
-          this.transcriptExists = false;
-          this.transcriptText = null;
-        }
-      }
-      // For custom videos or videos without analysis/transcript, we don't have metadata or transcript
-    } catch (error) {
-      console.error('Failed to initialize video player:', error);
-      // Don't set this.error here - let the video try to load anyway
-      // Only critical errors should prevent video playback
-    }
-  }
-
-  ngAfterViewInit() {
-    // Set up keyboard shortcuts using @ngneat/hotkeys
-    this.setupKeyboardShortcuts();
-
-    // Initialize media player after view is ready
-    setTimeout(() => {
-      this.initializePlayer();
-    }, 100);
-
-    // Trigger change detection after view children are initialized
-    // This fixes the "Expression changed after checked" error for categoryFilters
-    setTimeout(() => {
-      this.cdr.detectChanges();
-    }, 0);
-  }
-
-  /**
-   * Open document or webpage in external application
-   */
-  openInExternalApp() {
-    const electron = (window as any).electron;
-    if (electron && this.data.videoPath) {
-      electron.shell.openPath(this.data.videoPath);
-    }
-  }
-
-  /**
-   * Handle mouse movement over player in fullscreen
-   */
-  private onPlayerMouseMove() {
-    if (!this.isFullscreen) return;
-
-    this.isMouseOverPlayer = true;
-    this.updateFullscreenControlsVisibility();
-
-    // Hide controls after 3 seconds of no movement (only when playing)
-    if (this.controlsHideTimer) {
-      clearTimeout(this.controlsHideTimer);
-      this.timers.delete(this.controlsHideTimer);
-    }
-
-    if (this.isPlaying) {
-      this.controlsHideTimer = setTimeout(() => {
-        // Only hide if still playing - don't hide when paused
-        if (this.isPlaying) {
-          this.ngZone.run(() => {
-            this.showControlsInFullscreen = false;
-            this.cdr.detectChanges();
-          });
-        }
-      }, 3000);
-      this.timers.add(this.controlsHideTimer);
-    }
-  }
-
-  /**
-   * Handle mouse entering player area
-   */
-  private onPlayerMouseEnter() {
-    this.isMouseOverPlayer = true;
-    if (this.isFullscreen) {
-      this.updateFullscreenControlsVisibility();
-    }
-  }
-
-  /**
-   * Handle mouse leaving player area
-   */
-  private onPlayerMouseLeave() {
-    this.isMouseOverPlayer = false;
-    if (this.isFullscreen && this.isPlaying) {
-      // Hide controls when mouse leaves and video is playing
-      this.ngZone.run(() => {
-        this.showControlsInFullscreen = false;
-        this.cdr.detectChanges();
-      });
-    }
-  }
-
-  /**
-   * Attach document-level mouse listeners for fullscreen mode
-   * This ensures we capture mouse movements anywhere in the fullscreen area
-   */
-  private attachFullscreenMouseListeners() {
-    // Create bound versions of handlers to ensure proper 'this' context and enable removal
-    this.boundDocumentMouseMove = this.onPlayerMouseMove.bind(this);
-
-    // Attach to document to capture all mouse movements in fullscreen
-    document.addEventListener('mousemove', this.boundDocumentMouseMove);
-  }
-
-  /**
-   * Detach document-level mouse listeners when exiting fullscreen
-   */
-  private detachFullscreenMouseListeners() {
-    if (this.boundDocumentMouseMove) {
-      document.removeEventListener('mousemove', this.boundDocumentMouseMove);
-      this.boundDocumentMouseMove = null;
-    }
-  }
-
-  /**
-   * Update visibility of controls in fullscreen mode
-   * Controls show when: paused OR hovering
-   */
-  private updateFullscreenControlsVisibility() {
-    if (!this.isFullscreen) {
-      this.showControlsInFullscreen = false;
-      this.cdr.detectChanges();
+  // Keyboard shortcuts
+  @HostListener('document:keydown', ['$event'])
+  handleKeyboardEvent(event: KeyboardEvent) {
+    // Don't trigger if user is typing in an input
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
       return;
     }
 
-    // Show controls if paused OR if mouse is over player
-    const shouldShow = !this.isPlaying || this.isMouseOverPlayer;
+    if (event.code === 'Space') {
+      event.preventDefault();
+      this.togglePlayPause();
+    }
 
-    this.showControlsInFullscreen = shouldShow;
-    this.cdr.detectChanges(); // Force immediate update
+    // Arrow keys to seek
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      this.skipBackward(5);
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      this.skipForward(5);
+    }
+
+    // Fullscreen with F key
+    if (event.key === 'f' || event.key === 'F') {
+      event.preventDefault();
+      this.toggleFullscreen();
+    }
+
+    // Zoom in/out with Cmd+Plus/Minus (or Ctrl on Windows)
+    // Cmd+E for export dialog
+    // Tab shortcuts
+    if (event.metaKey || event.ctrlKey) {
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault();
+        this.zoomIn();
+      } else if (event.key === '-') {
+        event.preventDefault();
+        this.zoomOut();
+      } else if (event.key === '0') {
+        event.preventDefault();
+        this.resetZoom();
+      } else if (event.key === 'e' || event.key === 'E') {
+        event.preventDefault();
+        console.log('Cmd+E pressed, opening export dialog');
+        this.openExportDialog();
+      } else if (event.key === 'w' || event.key === 'W') {
+        // Cmd+W: Close current tab
+        event.preventDefault();
+        const tabId = this.activeTabId();
+        if (tabId) {
+          this.closeTab(tabId);
+        }
+      } else if (event.shiftKey && event.key === '[') {
+        // Cmd+Shift+[: Previous tab
+        event.preventDefault();
+        this.switchToPreviousTab();
+      } else if (event.shiftKey && event.key === ']') {
+        // Cmd+Shift+]: Next tab
+        event.preventDefault();
+        this.switchToNextTab();
+      } else if (event.key >= '1' && event.key <= '9') {
+        // Cmd+1-9: Switch to tab by number
+        event.preventDefault();
+        const tabIndex = parseInt(event.key) - 1;
+        const tabs = this.tabs();
+        if (tabIndex < tabs.length) {
+          this.switchTab(tabs[tabIndex].id);
+        }
+      }
+    }
+
+    // L to increase speed (and start playing if stopped)
+    if (event.key === 'l' || event.key === 'L') {
+      event.preventDefault();
+      this.increasePlaybackSpeed();
+    }
+
+    // J to decrease speed
+    if (event.key === 'j' || event.key === 'J') {
+      event.preventDefault();
+      this.decreasePlaybackSpeed();
+    }
+
+    // A for cursor tool
+    if (event.key === 'a' || event.key === 'A') {
+      event.preventDefault();
+      this.setTool(EditorTool.CURSOR);
+    }
+
+    // R for highlight/range tool
+    if (event.key === 'r' || event.key === 'R') {
+      event.preventDefault();
+      this.setTool(EditorTool.HIGHLIGHT);
+    }
+
+    // M for marker at playhead, Shift+M for marker on selection
+    if (event.key === 'm' || event.key === 'M') {
+      event.preventDefault();
+      if (event.shiftKey && this.highlightSelection()) {
+        // Shift+M: Add marker for current selection
+        const selection = this.highlightSelection()!;
+        this.openMarkerDialog(selection.startTime, selection.endTime);
+      } else {
+        // M: Add marker at playhead
+        this.addMarker();
+      }
+    }
+
+    // Escape to close dialogs
+    if (event.key === 'Escape') {
+      if (this.showKeyboardShortcuts()) {
+        this.showKeyboardShortcuts.set(false);
+      }
+      if (this.showContextMenu$()) {
+        this.showContextMenu$.set(false);
+      }
+      if (this.showMarkerDialog()) {
+        this.showMarkerDialog.set(false);
+      }
+    }
+
+    // ? to show keyboard shortcuts (Shift+/)
+    if (event.key === '?' || (event.shiftKey && event.code === 'Slash')) {
+      event.preventDefault();
+      this.showKeyboardShortcuts.update(v => !v);
+    }
+  }
+
+  // Bound wheel handler for proper cleanup
+  private wheelHandler = (event: WheelEvent) => {
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      // Calculate mouse position relative to timeline
+      const timeline = (event.target as HTMLElement).closest('.timeline-area');
+      if (timeline) {
+        const rect = timeline.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mousePercent = mouseX / rect.width;
+
+        if (event.deltaY < 0) {
+          this.zoomIn(mousePercent);
+        } else if (event.deltaY > 0) {
+          this.zoomOut(mousePercent);
+        }
+      } else {
+        // Not over timeline, zoom on playhead
+        if (event.deltaY < 0) {
+          this.zoomIn();
+        } else if (event.deltaY > 0) {
+          this.zoomOut();
+        }
+      }
+    }
+  };
+
+  zoomIn(targetPercent?: number) {
+    const currentZoom = this.editorState().zoomState;
+    const currentTime = this.editorState().currentTime;
+    const duration = this.editorState().duration;
+
+    // Calculate max zoom: should be able to fit 5 seconds on screen
+    // This scales with video duration
+    const maxZoom = duration / 5; // e.g., 60s video = 12x max, 104s video = 20.8x max
+    const newLevel = Math.min(currentZoom.level * 1.25, maxZoom);
+
+    // Calculate the time we want to keep centered
+    let centerTime: number;
+    if (targetPercent !== undefined) {
+      // Mouse position in timeline
+      const currentVisibleDuration = duration / currentZoom.level;
+      centerTime = currentZoom.offset + (targetPercent * currentVisibleDuration);
+    } else {
+      // Use playhead position
+      centerTime = currentTime;
+    }
+
+    // Calculate new offset to keep centerTime at the same position
+    const newVisibleDuration = duration / newLevel;
+    let newOffset: number;
+    if (targetPercent !== undefined) {
+      newOffset = centerTime - (targetPercent * newVisibleDuration);
+    } else {
+      // Center on playhead (middle of screen)
+      newOffset = centerTime - (newVisibleDuration / 2);
+    }
+
+    // Clamp offset to valid range
+    const maxOffset = Math.max(0, duration - newVisibleDuration);
+    newOffset = Math.max(0, Math.min(newOffset, maxOffset));
+
+    this.onZoomChange({
+      level: newLevel,
+      offset: newOffset
+    });
+  }
+
+  zoomOut(targetPercent?: number) {
+    const currentZoom = this.editorState().zoomState;
+    const currentTime = this.editorState().currentTime;
+    const duration = this.editorState().duration;
+
+    // Min zoom is always 1x (full video visible)
+    const newLevel = Math.max(currentZoom.level / 1.25, 1);
+
+    // Calculate the time we want to keep centered
+    let centerTime: number;
+    if (targetPercent !== undefined) {
+      // Mouse position in timeline
+      const currentVisibleDuration = duration / currentZoom.level;
+      centerTime = currentZoom.offset + (targetPercent * currentVisibleDuration);
+    } else {
+      // Use playhead position
+      centerTime = currentTime;
+    }
+
+    // Calculate new offset to keep centerTime at the same position
+    const newVisibleDuration = duration / newLevel;
+    let newOffset: number;
+    if (targetPercent !== undefined) {
+      newOffset = centerTime - (targetPercent * newVisibleDuration);
+    } else {
+      // Center on playhead (middle of screen)
+      newOffset = centerTime - (newVisibleDuration / 2);
+    }
+
+    // Clamp offset to valid range
+    const maxOffset = Math.max(0, duration - newVisibleDuration);
+    newOffset = Math.max(0, Math.min(newOffset, maxOffset));
+
+    this.onZoomChange({
+      level: newLevel,
+      offset: newOffset
+    });
+  }
+
+  resetZoom() {
+    this.onZoomChange({
+      level: 1,
+      offset: 0
+    });
+  }
+
+  // Video data from route state
+  videoId = signal<string | null>(null);
+  private videoPath = signal<string | null>(null);
+  private videoTitle = signal<string>('Untitled Video');
+
+  // True when opened in a separate popout window
+  isPopoutMode = false;
+
+  // Track if video has analysis
+  hasAnalysis = signal(false);
+
+  // Loading state
+  isLoading = signal(true);
+  errorMessage = signal<string | null>(null);
+
+  // Editor state
+  editorState = signal<VideoEditorState>({
+    currentTime: 0,
+    duration: 120,
+    isPlaying: false,
+    volume: 1,
+    playbackRate: 1,
+    zoomState: { level: 1, offset: 0 }
+  });
+
+  // Current active tool
+  currentTool = signal<EditorTool>(EditorTool.CURSOR);
+
+  // Video scale/zoom
+  videoScale = signal<number>(1.0); // 1.0 = normal, 2.0 = 2x zoom
+
+  // 16:9 border overlay dimensions (calculated by ResizeObserver)
+  borderWidth = signal<number>(0);
+  borderHeight = signal<number>(0);
+  showBorder = signal<boolean>(false);
+  borderAspectRatio = signal<'16:9' | '4:3'>('16:9');
+  private resizeObserver?: ResizeObserver;
+
+  // Selection state for highlighting
+  highlightSelection = signal<TimelineSelection | null>(null);
+  isSelecting = signal(false);
+  selectionStart = signal<number | null>(null);
+
+  // Custom markers created by user
+  customMarkers = signal<CustomMarker[]>([]);
+
+  // Context menu state
+  showContextMenu$ = signal(false);
+  contextMenuPosition = signal<ContextMenuPosition>({ x: 0, y: 0 });
+  contextMenuActions = signal<ContextMenuAction[]>([]);
+
+  // Marker dialog state
+  showMarkerDialog = signal(false);
+  markerDialogData = signal<MarkerDialogData | null>(null);
+
+  // Export dialog
+  showExportDialog = signal(false);
+  exportDialogData = signal<ExportDialogData | null>(null);
+
+  // Keyboard shortcuts dialog
+  showKeyboardShortcuts = signal(false);
+
+  // Video URL
+  videoUrl = signal<string | undefined>(undefined);
+
+  // Timeline sections from analysis
+  sections = signal<TimelineSection[]>([]);
+
+  // Timeline chapters from analysis
+  chapters = signal<TimelineChapter[]>([]);
+  selectedChapterId = signal<string | undefined>(undefined);
+
+  // Transcript for video
+  transcript = signal<TranscriptionSegment[]>([]);
+
+  // Category filters
+  categoryFilters = signal<CategoryFilter[]>([]);
+
+  // Analysis data
+  analysisData = signal<AnalysisData | undefined>(undefined);
+
+  // Waveform data
+  waveformData = signal<WaveformData>({
+    samples: [],
+    sampleRate: 44100,
+    duration: 0
+  });
+
+  // Video metadata
+  metadata = signal<VideoMetadata>({
+    filename: 'Loading...',
+    format: '',
+    resolution: '',
+    frameRate: 0,
+    bitrate: '',
+    codec: '',
+    fileSize: 0,
+    duration: 0,
+    createdDate: new Date()
+  });
+
+  // Editor settings
+  settings = signal<EditorSettings>({
+    snapToGrid: true,
+    gridSize: 1,
+    autoSave: true,
+    waveformColor: '#ff6b35',
+    timelineHeight: 150,
+    showThumbnails: true,
+    audioMonitoring: false
+  });
+
+  // Computed values
+  formattedCurrentTime = computed(() => this.formatTime(this.editorState().currentTime));
+  formattedDuration = computed(() => this.formatTime(this.editorState().duration));
+  timelineProgress = computed(() => {
+    const state = this.editorState();
+    return (state.currentTime / state.duration) * 100;
+  });
+
+  // Selection duration formatted as HH:MM:SS
+  formattedSelectionDuration = computed(() => {
+    const selection = this.highlightSelection();
+    if (!selection) return null;
+
+    const durationSeconds = selection.endTime - selection.startTime;
+    if (durationSeconds < 0.1) return null; // Too small to display
+
+    const hrs = Math.floor(durationSeconds / 3600);
+    const mins = Math.floor((durationSeconds % 3600) / 60);
+    const secs = Math.floor(durationSeconds % 60);
+
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  });
+
+  // Filtered sections based on category filters
+  filteredSections = computed(() => {
+    const filters = this.categoryFilters();
+    const allSections = this.sections();
+
+    if (filters.length === 0) return allSections;
+
+    const enabledCategories = new Set(
+      filters.filter(f => f.enabled).map(f => f.category)
+    );
+
+    return allSections.filter(s =>
+      enabledCategories.has(s.category.toLowerCase())
+    );
+  });
+
+  // Sidebar visibility
+  showAnalysisSidebar = signal(true);
+
+  // Timeline resizing
+  timelineHeight = signal(280); // Increased default height
+  isResizing = signal(false);
+
+  // Fullscreen mode
+  isFullscreen = signal(false);
+  showTimelineInFullscreen = signal(true);
+  private fullscreenTimeout?: any;
+
+  private playbackInterval?: any;
+
+  // Track playing state separately to avoid effect re-triggering
+  private wasPlaying = false;
+
+  constructor() {
+    // Initialize category filters from sections with error handling
+    effect(() => {
+      try {
+        const sections = this.sections();
+        this.updateCategoryFilters(sections);
+      } catch (error) {
+        console.error('Error updating category filters:', error);
+      }
+    }, { allowSignalWrites: true });
+
+    // Set up playback effect - only react to isPlaying changes
+    effect(() => {
+      try {
+        const isPlaying = this.editorState().isPlaying;
+        if (isPlaying !== this.wasPlaying) {
+          this.wasPlaying = isPlaying;
+          if (isPlaying) {
+            this.startPlayback();
+            // Hide timeline immediately in fullscreen when playing starts
+            if (this.isFullscreen()) {
+              this.clearFullscreenTimeout();
+              this.showTimelineInFullscreen.set(false);
+            }
+          } else {
+            this.stopPlayback();
+            // Show timeline briefly when paused, then hide after delay
+            if (this.isFullscreen()) {
+              this.showTimelineInFullscreen.set(true);
+              this.hideTimelineAfterDelay();
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error in playback effect:', error);
+        this.stopPlayback();
+      }
+    }, { allowSignalWrites: true });
+  }
+
+  ngOnInit() {
+    // Hide the side navigation when entering the editor
+    this.navService.hideNav();
+
+    // Add wheel listener with passive: false to allow preventDefault
+    window.addEventListener('wheel', this.wheelHandler, { passive: false });
+
+    // Add fullscreen event listeners
+    document.addEventListener('fullscreenchange', this.onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', this.onFullscreenChange);
+    document.addEventListener('mousemove', this.onMouseMoveInFullscreen);
+
+    // Set up ResizeObserver for 16:9 border calculation
+    this.setupResizeObserver();
+
+    // Get video data from route state or query params (for popout window)
+    const navigation = this.router.getCurrentNavigation();
+    const state = navigation?.extras?.state || history.state;
+    let videoEditorData = state?.videoEditorData;
+
+    // Check query params if no route state (popout window case)
+    if (!videoEditorData) {
+      const queryParams = this.route.snapshot.queryParams;
+      if (queryParams['videoId']) {
+        videoEditorData = {
+          videoId: queryParams['videoId'],
+          videoPath: queryParams['videoPath'] || null,
+          videoTitle: queryParams['videoTitle'] ? decodeURIComponent(queryParams['videoTitle']) : 'Untitled Video'
+        };
+        // Mark as popout mode for potential UI adjustments
+        this.isPopoutMode = queryParams['popout'] === 'true';
+      }
+    }
+
+    if (videoEditorData) {
+      // Open video in a new tab
+      this.openTab(
+        videoEditorData.videoId,
+        videoEditorData.videoPath || null,
+        videoEditorData.videoTitle || 'Untitled Video'
+      );
+    } else {
+      this.isLoading.set(false);
+      this.errorMessage.set('No video data provided. Please select a video from the library.');
+      this.hasAnalysis.set(false);
+    }
+
+    // Try to start the video editor tour (basic tour first, then advanced)
+    setTimeout(() => {
+      if (this.tourService.tryAutoStartTour('video-editor', 1000)) {
+        // Queue the advanced tour to run after basic tour completes
+        this.tourService.queueTour('video-editor-advanced');
+      } else if (!this.tourService.isTourCompleted('video-editor-advanced')) {
+        // If basic tour was already completed, try the advanced tour
+        this.tourService.tryAutoStartTour('video-editor-advanced', 1000);
+      }
+    }, 1500);
+
+    // Listen for IPC events to add new tabs (when opening videos from library while editor is already open)
+    window.addEventListener('electron-add-editor-tab', this.handleAddEditorTabEvent);
+
+    // Listen for IPC events for group operations
+    window.addEventListener('electron-receive-tab', this.handleReceiveTabEvent);
+    window.addEventListener('electron-request-all-tabs', this.handleRequestAllTabsEvent);
+    window.addEventListener('electron-restore-tab-state', this.handleRestoreTabStateEvent);
+
+    // Fetch current group number
+    this.fetchCurrentGroupNumber();
+  }
+
+  private async fetchCurrentGroupNumber(): Promise<void> {
+    try {
+      if ((window as any).electron?.getCurrentGroupNumber) {
+        const groupNumber = await (window as any).electron.getCurrentGroupNumber();
+        this.currentGroupNumber.set(groupNumber);
+        console.log('Current group number:', groupNumber);
+      }
+    } catch (error) {
+      console.error('Error fetching current group number:', error);
+    }
+  }
+
+  // Handler for add-editor-tab events from Electron
+  private handleAddEditorTabEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<{ videoId: string; videoPath?: string; videoTitle: string }>;
+    const videoData = customEvent.detail;
+    if (videoData) {
+      console.log('Received add-editor-tab event:', videoData);
+      this.openTab(videoData.videoId, videoData.videoPath || null, videoData.videoTitle || 'Untitled Video');
+    }
+  };
+
+  // Handler for receive-tab events (when a tab is moved from another window)
+  private handleReceiveTabEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<any>;
+    const tabData = customEvent.detail;
+    if (tabData) {
+      console.log('Received tab from another window:', tabData.videoId);
+      this.receiveTabFromOtherWindow(tabData);
+    }
+  };
+
+  // Handler for request-all-tabs events (for consolidation)
+  private handleRequestAllTabsEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<{ targetGroupNumber: number }>;
+    const { targetGroupNumber } = customEvent.detail;
+    console.log('Request to send all tabs to group:', targetGroupNumber);
+    this.sendAllTabsToGroup(targetGroupNumber);
+  };
+
+  // Handler for restore-tab-state events (when a new window receives full tab state)
+  private handleRestoreTabStateEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<any>;
+    const tabData = customEvent.detail;
+    if (tabData) {
+      console.log('Restoring tab state:', tabData.videoId);
+      this.restoreIncomingTabState(tabData);
+    }
+  };
+
+  private async loadVideoData(videoId: string) {
+    try {
+      this.isLoading.set(true);
+      this.errorMessage.set(null);
+
+      // Load video details with timeout protection
+      const timeoutId = setTimeout(() => {
+        console.error('Video loading timed out');
+        this.errorMessage.set('Video loading timed out. Please try again.');
+        this.isLoading.set(false);
+      }, 30000); // 30 second timeout
+
+      // Load video details
+      this.libraryService.getVideo(videoId).subscribe({
+        next: (response) => {
+          clearTimeout(timeoutId);
+          if (response.success && response.data) {
+            const video = response.data;
+            this.metadata.update(m => ({
+              ...m,
+              filename: video.name,
+              fileSize: video.size || 0
+            }));
+
+            // Load transcript separately (non-blocking)
+            this.loadTranscriptForVideo(videoId).catch(err => {
+              console.warn('Transcript loading failed, continuing without it:', err);
+            });
+
+            // Always load sections (includes both AI sections and custom markers)
+            // loadAnalysisForVideo now handles both cases properly
+            this.loadAnalysisForVideo(videoId).catch(err => {
+              console.warn('Section/analysis loading failed, continuing without it:', err);
+              this.hasAnalysis.set(false);
+            });
+
+            // Set initial hasAnalysis state based on video metadata
+            if (!video.hasAnalysis) {
+              this.hasAnalysis.set(false);
+            }
+
+            // Mark tab as loaded and save state
+            this.markTabLoaded();
+          } else {
+            this.hasAnalysis.set(false);
+          }
+          this.isLoading.set(false);
+        },
+        error: (error) => {
+          clearTimeout(timeoutId);
+          console.error('Failed to load video details:', error);
+          this.hasAnalysis.set(false);
+          this.isLoading.set(false);
+        }
+      });
+
+    } catch (error) {
+      console.error('Failed to load video data:', error);
+      this.errorMessage.set('Failed to load video data. Please try again.');
+      this.isLoading.set(false);
+    }
+  }
+
+  private async loadTranscriptForVideo(videoId: string) {
+    try {
+      const data = await firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/transcript`)
+      );
+
+      if (data && data.transcript && Array.isArray(data.transcript)) {
+        this.transcript.set(data.transcript);
+      } else if (data && Array.isArray(data)) {
+        this.transcript.set(data);
+      } else if (data && data.srt_format) {
+        // Parse SRT format into segments
+        const segments = this.parseSrtToSegments(data.srt_format);
+        this.transcript.set(segments);
+      } else {
+        this.transcript.set([]);
+      }
+    } catch (error) {
+      console.log('Failed to load transcript:', error);
+      this.transcript.set([]);
+    }
+  }
+
+  private parseSrtToSegments(srtContent: string): TranscriptionSegment[] {
+    const segments: TranscriptionSegment[] = [];
+    const blocks = srtContent.trim().split(/\n\n+/);
+
+    for (const block of blocks) {
+      const lines = block.split('\n');
+      if (lines.length < 3) continue;
+
+      // Parse timestamp line (e.g., "00:00:00,000 --> 00:00:05,000")
+      const timestampLine = lines[1];
+      const timestampMatch = timestampLine.match(
+        /(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/
+      );
+
+      if (!timestampMatch) continue;
+
+      const startTime =
+        parseInt(timestampMatch[1]) * 3600 +
+        parseInt(timestampMatch[2]) * 60 +
+        parseInt(timestampMatch[3]) +
+        parseInt(timestampMatch[4]) / 1000;
+
+      const endTime =
+        parseInt(timestampMatch[5]) * 3600 +
+        parseInt(timestampMatch[6]) * 60 +
+        parseInt(timestampMatch[7]) +
+        parseInt(timestampMatch[8]) / 1000;
+
+      // Text is everything after the timestamp line
+      const text = lines.slice(2).join(' ').trim();
+
+      segments.push({
+        id: `segment-${segments.length}`,
+        startTime,
+        endTime,
+        text
+      });
+    }
+
+    return segments;
+  }
+
+  private async loadAnalysisForVideo(videoId: string) {
+    try {
+      // Always fetch sections (both AI and custom markers)
+      const sectionsData = await firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/sections`)
+      );
+      const sections = sectionsData?.sections || [];
+
+      // Fetch chapters
+      let chaptersData: any[] = [];
+      try {
+        const chaptersResponse = await firstValueFrom(
+          this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/chapters`)
+        );
+        chaptersData = chaptersResponse?.chapters || [];
+      } catch {
+        // Chapters don't exist, that's fine
+      }
+
+      // Process chapters
+      if (chaptersData.length > 0) {
+        const timelineChapters: TimelineChapter[] = chaptersData.map((chapter: any) => ({
+          id: chapter.id,
+          videoId: chapter.video_id,
+          sequence: chapter.sequence,
+          startTime: chapter.start_seconds || 0,
+          endTime: chapter.end_seconds || chapter.start_seconds + 60,
+          title: chapter.title || `Chapter ${chapter.sequence}`,
+          description: chapter.description,
+          source: chapter.source || 'ai'
+        }));
+        this.chapters.set(timelineChapters);
+      } else {
+        this.chapters.set([]);
+      }
+
+      // Try to fetch analysis data (may not exist)
+      let analysisData: any = null;
+      try {
+        analysisData = await firstValueFrom(
+          this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/analysis`)
+        );
+      } catch {
+        // Analysis doesn't exist, that's fine
+      }
+
+      if (analysisData && !analysisData.error) {
+        this.processAnalysisFromDatabase(analysisData, sections);
+      } else {
+        // No analysis, but still process sections (custom markers)
+        this.processSectionsOnly(sections);
+      }
+    } catch (error: any) {
+      console.log('Failed to load sections:', error);
+    }
+  }
+
+  /**
+   * Process sections without analysis data (for custom markers only)
+   */
+  private processSectionsOnly(sections: any[]) {
+    const timelineSections: TimelineSection[] = sections.map((section: any, index: number) => ({
+      id: section.id || `section-${index}`,
+      startTime: section.start_seconds || 0,
+      endTime: section.end_seconds || section.start_seconds + 10,
+      category: section.category || 'marker',
+      description: section.description || section.title || '',
+      color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
+    }));
+
+    this.sections.set(timelineSections);
+  }
+
+  private processAnalysisFromDatabase(analysis: any, sections: any[]) {
+    // Convert database sections to timeline sections
+    const timelineSections: TimelineSection[] = sections.map((section: any, index: number) => ({
+      id: section.id || `section-${index}`,
+      startTime: section.start_seconds || 0,
+      endTime: section.end_seconds || section.start_seconds + 10,
+      category: section.category || 'unknown',
+      description: section.description || section.content || '',
+      color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
+    }));
+
+    this.sections.set(timelineSections);
+    this.hasAnalysis.set(true);
+
+    // Set analysis data for sidebar
+    this.analysisData.set({
+      id: analysis.id || 'analysis',
+      title: analysis.suggested_title || analysis.title || this.videoTitle(),
+      summary: analysis.description || analysis.summary || '',
+      sections: timelineSections.map(s => ({
+        timeRange: `${this.formatTime(s.startTime)} - ${this.formatTime(s.endTime)}`,
+        startSeconds: s.startTime,
+        endSeconds: s.endTime,
+        category: s.category,
+        description: s.description
+      })),
+      quotes: analysis.quotes || []
+    });
+
+    // Update metadata
+    if (analysis.suggested_title) {
+      this.metadata.update(m => ({
+        ...m,
+        filename: analysis.suggested_title
+      }));
+    }
+  }
+
+  private setDemoSections() {
+    // Set demo sections for visualization
+    const demoSections: TimelineSection[] = [
+      {
+        id: '1',
+        startTime: 5,
+        endTime: 15,
+        category: 'violence',
+        description: 'Scene contains violent imagery',
+        color: CATEGORY_COLORS['violence']
+      },
+      {
+        id: '2',
+        startTime: 30,
+        endTime: 45,
+        category: 'misinformation',
+        description: 'Claims without factual basis',
+        color: CATEGORY_COLORS['misinformation']
+      },
+      {
+        id: '3',
+        startTime: 60,
+        endTime: 80,
+        category: 'educational',
+        description: 'Educational content',
+        color: CATEGORY_COLORS['educational']
+      }
+    ];
+    this.sections.set(demoSections);
+
+    // Set demo analysis data
+    this.analysisData.set({
+      id: 'demo',
+      title: 'Demo Analysis',
+      summary: 'This is demo data. Run analysis to see actual results.',
+      sections: demoSections.map(s => ({
+        timeRange: `${this.formatTime(s.startTime)} - ${this.formatTime(s.endTime)}`,
+        startSeconds: s.startTime,
+        endSeconds: s.endTime,
+        category: s.category,
+        description: s.description
+      })),
+      quotes: []
+    });
+  }
+
+  private processAnalysisData(analysis: LibraryAnalysis) {
+    // Parse the analysis file if it exists
+    if (analysis.files?.analysis) {
+      // The analysis file path needs to be fetched and parsed
+      this.fetchAndParseAnalysis(analysis);
+    }
+
+    // Set metadata
+    this.metadata.update(m => ({
+      ...m,
+      filename: analysis.title || m.filename,
+      duration: analysis.video?.durationSeconds || m.duration
+    }));
+
+    // Update duration in editor state
+    if (analysis.video?.durationSeconds) {
+      this.editorState.update(state => ({
+        ...state,
+        duration: analysis.video.durationSeconds!
+      }));
+
+      // Waveform will be generated when video loads via onVideoDurationChange
+    }
+  }
+
+  private async fetchAndParseAnalysis(analysis: LibraryAnalysis) {
+    try {
+      // Fetch the analysis JSON file
+      const analysisUrl = `${this.API_BASE}/library/analyses/${analysis.id}/analysis`;
+      const analysisJson = await firstValueFrom(
+        this.http.get<any>(analysisUrl)
+      );
+
+      // Convert to timeline sections
+      const timelineSections: TimelineSection[] = [];
+
+      if (analysisJson.analysis?.sections) {
+        analysisJson.analysis.sections.forEach((section: any, index: number) => {
+          const startSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[0] || '0:00');
+          const endSeconds = this.parseTimeToSeconds(section.timeRange?.split(' - ')[1] || '0:00') || startSeconds + 10;
+
+          timelineSections.push({
+            id: `section-${index}`,
+            startTime: startSeconds,
+            endTime: endSeconds,
+            category: section.category || 'unknown',
+            description: section.description || '',
+            color: CATEGORY_COLORS[section.category?.toLowerCase()] || CATEGORY_COLORS['default']
+          });
+        });
+      }
+
+      this.sections.set(timelineSections);
+
+      // Set analysis data for sidebar
+      this.analysisData.set({
+        id: analysis.id,
+        title: analysisJson.analysis?.title || analysis.title,
+        summary: analysisJson.analysis?.summary,
+        sections: analysisJson.analysis?.sections || [],
+        quotes: analysisJson.analysis?.quotes || []
+      });
+    } catch (error) {
+      console.error('Failed to fetch analysis:', error);
+    }
+  }
+
+  private parseTimeToSeconds(timeStr: string): number {
+    if (!timeStr) return 0;
+    const parts = timeStr.split(':').map(p => parseInt(p, 10));
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return 0;
   }
 
   ngOnDestroy() {
-    console.log('[ngOnDestroy] Cleaning up video player');
+    // Show the side navigation when leaving the editor
+    this.navService.showNav();
+    this.stopPlayback();
 
-    // Unsubscribe from ALL keyboard shortcuts to prevent memory leaks
-    this.subscriptions.forEach(sub => sub.unsubscribe());
-    this.subscriptions = [];
+    // Remove event listeners
+    window.removeEventListener('wheel', this.wheelHandler);
+    window.removeEventListener('electron-add-editor-tab', this.handleAddEditorTabEvent);
+    window.removeEventListener('electron-receive-tab', this.handleReceiveTabEvent);
+    window.removeEventListener('electron-request-all-tabs', this.handleRequestAllTabsEvent);
+    window.removeEventListener('electron-restore-tab-state', this.handleRestoreTabStateEvent);
+    document.removeEventListener('fullscreenchange', this.onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', this.onFullscreenChange);
+    document.removeEventListener('mousemove', this.onMouseMoveInFullscreen);
 
-    // Remove document-level mouse listeners if they exist
-    this.detachFullscreenMouseListeners();
+    // Clean up timeline dragging listeners
+    document.removeEventListener('mousemove', this.onDocumentMouseMove);
+    document.removeEventListener('mouseup', this.onDocumentMouseUp);
 
-    // Clear cached media element
-    this.cachedMediaElement = undefined;
+    this.clearFullscreenTimeout();
 
-    // Dispose of video.js player (handles all cleanup automatically)
-    if (this.player) {
-      this.player.dispose();
-      this.player = null;
-    }
-
-    // Clear ALL tracked timers
-    this.timers.forEach(timer => {
-      clearTimeout(timer);
-      clearInterval(timer);
-    });
-    this.timers.clear();
-
-    // Clear specific timers
-    if (this.updateThrottleTimer) {
-      clearTimeout(this.updateThrottleTimer);
-      this.updateThrottleTimer = null;
-    }
-
-    if (this.loadingTimeoutTimer) {
-      clearTimeout(this.loadingTimeoutTimer);
-      this.loadingTimeoutTimer = null;
-    }
-
-    if (this.loadingProgressInterval) {
-      clearInterval(this.loadingProgressInterval);
-      this.loadingProgressInterval = null;
+    // Clean up ResizeObserver
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
     }
   }
 
-  /**
-   * Clean up video resources (timers and player) but keep the component alive
-   */
-  private cleanupVideoResources() {
-    console.log('[cleanupVideoResources] Cleaning up old resources');
-
-    // Clear cached media element
-    this.cachedMediaElement = undefined;
-
-    // Dispose of video.js player
-    if (this.player) {
-      this.player.dispose();
-      this.player = null;
-    }
-
-    // Clear all tracked timers
-    this.timers.forEach(timer => {
-      clearTimeout(timer);
-      clearInterval(timer);
-    });
-    this.timers.clear();
-
-    // Clear specific timers
-    if (this.updateThrottleTimer) {
-      clearTimeout(this.updateThrottleTimer);
-      this.updateThrottleTimer = null;
-    }
-
-    if (this.loadingTimeoutTimer) {
-      clearTimeout(this.loadingTimeoutTimer);
-      this.loadingTimeoutTimer = null;
-    }
-
-    if (this.loadingProgressInterval) {
-      clearInterval(this.loadingProgressInterval);
-      this.loadingProgressInterval = null;
-    }
-  }
-
-  async initializePlayer() {
-    console.log('[initializePlayer] Starting initialization');
-
-    // Clean up any existing player from previous video
-    this.cleanupVideoResources();
-
-    try {
-      // Detect media type from database if we have a videoId
-      if (this.data.videoId) {
-        try {
-          const video = await this.databaseLibraryService.getVideoById(this.data.videoId);
-          if (video) {
-            this.mediaType = video.media_type || 'video';
-            console.log('[initializePlayer] Detected media type:', this.mediaType);
-
-            // For images, set the image source
-            if (this.mediaType === 'image' && video.current_path) {
-              const backendUrl = await this.backendUrlService.getBackendUrl();
-              const encodedPath = btoa(unescape(encodeURIComponent(video.current_path)));
-              this.imageSrc = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
-            }
-
-            // For documents/webpages, no player initialization needed
-            if (this.mediaType === 'document' || this.mediaType === 'webpage') {
-              this.isLoading = false;
-              return;
-            }
-          }
-        } catch (error) {
-          console.warn('Failed to detect media type, defaulting to video:', error);
-        }
-      }
-
-      // Check for appropriate element based on media type
-      if (this.mediaType === 'image') {
-        if (!this.imageElement) {
-          this.error = 'Image element not found';
-          this.isLoading = false;
-          return;
-        }
-        // Images don't need player initialization
-        this.isLoading = false;
+  // Set up ResizeObserver to calculate 16:9 border dimensions
+  private setupResizeObserver() {
+    // Use requestAnimationFrame to wait for the view to be ready
+    requestAnimationFrame(() => {
+      const element = document.querySelector('.video-player-area') as HTMLElement;
+      if (!element) {
+        // Retry after a short delay
+        setTimeout(() => this.setupResizeObserver(), 100);
         return;
       }
 
-      // Get the correct media element reference
-      let mediaElement: HTMLVideoElement | HTMLAudioElement | null = null;
-      if (this.mediaType === 'audio' && this.audioElement) {
-        mediaElement = this.audioElement.nativeElement;
-        console.log('[initializePlayer] Audio element obtained');
-      } else if (this.videoElement) {
-        mediaElement = this.videoElement.nativeElement;
-        console.log('[initializePlayer] Video element obtained');
-      }
-
-      if (!mediaElement) {
-        this.error = `${this.mediaType === 'audio' ? 'Audio' : 'Video'} element not found`;
-        this.isLoading = false;
-        return;
-      }
-
-      // Get backend URL first
-      const backendUrl = await this.backendUrlService.getBackendUrl();
-      console.log('[initializePlayer] Backend URL:', backendUrl);
-
-      // Determine media source based on whether it's an analyzed video, custom video, or library video
-      let videoUrl: string;
-
-      if (this.data.customVideo) {
-        // For custom videos, encode the file path in base64 and pass it as a query parameter
-        const encodedPath = btoa(unescape(encodeURIComponent(this.data.customVideo.videoPath)));
-        videoUrl = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
-        console.log('Loading custom video from path:', this.data.customVideo.videoPath);
-        console.log('Video URL:', videoUrl);
-      } else if (this.data.videoPath) {
-        // For library videos, encode the file path in base64 and pass it as a query parameter
-        const encodedPath = btoa(unescape(encodeURIComponent(this.data.videoPath)));
-        videoUrl = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
-        console.log('Loading library video from path:', this.data.videoPath);
-        console.log('Video URL:', videoUrl);
-      } else if (this.data.analysis) {
-        videoUrl = `${backendUrl}/api/library/videos/${this.data.analysis.id}`;
-      } else if (this.data.videoId) {
-        // Use the database stream endpoint which looks up the video by ID
-        videoUrl = `${backendUrl}/api/database/videos/${this.data.videoId}/stream`;
-        console.log('Loading video by ID:', this.data.videoId);
-      } else {
-        this.error = 'No video source provided';
-        this.isLoading = false;
-        return;
-      }
-
-      console.log('Video source:', videoUrl);
-
-      // Initialize video.js player
-      this.player = videojs(mediaElement, {
-        controls: false, // We use custom timeline controls
-        preload: 'metadata',
-        fluid: false, // Don't use fluid mode since we have custom layout
-        responsive: false, // Handle responsive ourselves
-        playsinline: true,
-        crossOrigin: 'anonymous',
-        sources: [{
-          src: videoUrl,
-          type: this.mediaType === 'audio' ? 'audio/mp4' : 'video/mp4'
-        }],
-        // Use the player container for fullscreen so our timeline/controls are included
-        fullscreen: {
-          navigationUI: 'hide'
+      this.resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          this.updateBorderDimensions(entry.contentRect.width, entry.contentRect.height);
         }
       });
 
-      // Override fullscreen methods to use our player container
-      // This ensures timeline and controls are visible in fullscreen
-      this.player.requestFullscreen = () => {
-        const container = this.playerContainer.nativeElement;
-        if (container.requestFullscreen) {
-          return container.requestFullscreen();
-        } else if ((container as any).webkitRequestFullscreen) {
-          return (container as any).webkitRequestFullscreen();
-        } else if ((container as any).mozRequestFullScreen) {
-          return (container as any).mozRequestFullScreen();
-        } else if ((container as any).msRequestFullscreen) {
-          return (container as any).msRequestFullscreen();
-        }
-        return Promise.reject('Fullscreen not supported');
-      };
+      this.resizeObserver.observe(element);
 
-      // Override exitFullscreen
-      this.player.exitFullscreen = () => {
-        if (document.exitFullscreen) {
-          return document.exitFullscreen();
-        } else if ((document as any).webkitExitFullscreen) {
-          return (document as any).webkitExitFullscreen();
-        } else if ((document as any).mozCancelFullScreen) {
-          return (document as any).mozCancelFullScreen();
-        } else if ((document as any).msExitFullscreen) {
-          return (document as any).msExitFullscreen();
-        }
-        return Promise.resolve();
-      };
-
-      // Override isFullscreen to check our container
-      this.player.isFullscreen = () => {
-        const fullscreenElement = document.fullscreenElement ||
-                                  (document as any).webkitFullscreenElement ||
-                                  (document as any).mozFullScreenElement ||
-                                  (document as any).msFullscreenElement;
-        return fullscreenElement === this.playerContainer.nativeElement;
-      };
-
-      // Cache the media element to avoid repeated DOM queries on every change detection
-      this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
-
-      // Start loading timer
-      this.loadingStartTime = Date.now();
-      this.loadingTime = 0;
-      this.loadingMessage = 'Loading video...';
-      this.cdr.markForCheck();
-
-      // Update loading message every second
-      this.loadingProgressInterval = setInterval(() => {
-        if (this.isLoading) {
-          this.loadingTime = Math.floor((Date.now() - this.loadingStartTime) / 1000);
-          this.loadingMessage = `Loading video... (${this.loadingTime}s)`;
-          this.cdr.markForCheck();
-        } else {
-          if (this.loadingProgressInterval) {
-            clearInterval(this.loadingProgressInterval);
-            this.timers.delete(this.loadingProgressInterval);
-          }
-        }
-      }, 1000);
-      this.timers.add(this.loadingProgressInterval);
-
-      // Add loading timeout (30 seconds)
-      this.loadingTimeoutTimer = setTimeout(() => {
-        if (this.isLoading) {
-          console.error('Video loading timeout after 30 seconds');
-          this.isLoading = false;
-          this.error = 'Video loading timeout. The video file may use an unsupported codec. Try converting to MP4.';
-          this.cdr.markForCheck();
-        }
-      }, 30000);
-      this.timers.add(this.loadingTimeoutTimer);
-
-      // Set up video.js event handlers
-      this.player.on('loadedmetadata', () => {
-        if (this.loadingTimeoutTimer) {
-          clearTimeout(this.loadingTimeoutTimer);
-          this.timers.delete(this.loadingTimeoutTimer);
-        }
-        // Run in NgZone to trigger change detection
-        this.ngZone.run(() => {
-          this.isLoading = false;
-          this.duration = this.player!.duration() || 0;
-          this.currentSelection = { startTime: 0, endTime: this.duration };
-          console.log('Video loaded, duration:', this.duration);
-        });
-      });
-
-      // Handle loadeddata event (fires earlier than loadedmetadata)
-      this.player.on('loadeddata', () => {
-        console.log('Video data loaded');
-        // If metadata still not loaded after data is available, try to force it
-        if (this.isLoading && this.player!.duration()) {
-          if (this.loadingTimeoutTimer) {
-            clearTimeout(this.loadingTimeoutTimer);
-            this.timers.delete(this.loadingTimeoutTimer);
-          }
-          // Run in NgZone to trigger change detection
-          this.ngZone.run(() => {
-            this.isLoading = false;
-            this.duration = this.player!.duration() || 0;
-            this.currentSelection = { startTime: 0, endTime: this.duration };
-            console.log('Using duration from loadeddata event:', this.duration);
-          });
-        }
-      });
-
-      // Handle timeupdate event
-      this.player.on('timeupdate', () => {
-        this.currentTime = this.player!.currentTime() || 0;
-
-        // Throttle updateActiveSection to avoid excessive DOM operations
-        if (!this.updateThrottleTimer) {
-          this.updateThrottleTimer = setTimeout(() => {
-            this.updateActiveSection();
-            this.updateThrottleTimer = null;
-          }, this.UPDATE_THROTTLE_MS);
-        }
-      });
-
-      // Handle play event
-      this.player.on('play', () => {
-        this.ngZone.run(() => {
-          this.isPlaying = true;
-          // Hide controls when playing starts in fullscreen (unless mouse is hovering)
-          if (this.isFullscreen) {
-            this.updateFullscreenControlsVisibility();
-          }
-        });
-      });
-
-      // Handle pause event
-      this.player.on('pause', () => {
-        this.ngZone.run(() => {
-          this.isPlaying = false;
-          // Clear any pending hide timer since we're paused
-          if (this.controlsHideTimer) {
-            clearTimeout(this.controlsHideTimer);
-            this.timers.delete(this.controlsHideTimer);
-            this.controlsHideTimer = null;
-          }
-          // Show controls when paused in fullscreen
-          if (this.isFullscreen) {
-            this.updateFullscreenControlsVisibility();
-          }
-        });
-      });
-
-      // Handle fullscreen change events
-      this.player.on('fullscreenchange', () => {
-        this.ngZone.run(() => {
-          this.isFullscreen = !!this.player!.isFullscreen();
-
-          // Attach/detach document-level mouse listeners for fullscreen
-          if (this.isFullscreen) {
-            this.attachFullscreenMouseListeners();
-            // Assume mouse is over player when entering fullscreen
-            // This ensures controls show immediately
-            this.isMouseOverPlayer = true;
-          } else {
-            this.detachFullscreenMouseListeners();
-            this.isMouseOverPlayer = false;
-          }
-
-          this.updateFullscreenControlsVisibility();
-        });
-      });
-
-      // Also listen to native fullscreen events as backup
-      document.addEventListener('fullscreenchange', () => {
-        this.ngZone.run(() => {
-          this.isFullscreen = !!document.fullscreenElement;
-
-          // Attach/detach document-level mouse listeners for fullscreen
-          if (this.isFullscreen) {
-            this.attachFullscreenMouseListeners();
-            // Assume mouse is over player when entering fullscreen
-            // This ensures controls show immediately
-            this.isMouseOverPlayer = true;
-          } else {
-            this.detachFullscreenMouseListeners();
-            this.isMouseOverPlayer = false;
-          }
-
-          this.updateFullscreenControlsVisibility();
-        });
-      });
-
-      // Add mouse movement tracking for fullscreen controls
-      const playerEl = this.player.el();
-      playerEl.addEventListener('mousemove', this.onPlayerMouseMove.bind(this));
-      playerEl.addEventListener('mouseenter', this.onPlayerMouseEnter.bind(this));
-      playerEl.addEventListener('mouseleave', this.onPlayerMouseLeave.bind(this));
-
-      // Handle error event
-      this.player.on('error', () => {
-        const error = this.player!.error();
-        console.error('Video error:', error);
-
-        // MediaError codes:
-        // 1 = MEDIA_ERR_ABORTED - fetching process aborted by user
-        // 2 = MEDIA_ERR_NETWORK - error occurred when downloading
-        // 3 = MEDIA_ERR_DECODE - error occurred when decoding
-        // 4 = MEDIA_ERR_SRC_NOT_SUPPORTED - video format not supported
-
-        let errorMessage = 'Failed to load video';
-        if (error?.code === 3) {
-          errorMessage = 'Video codec not supported by browser. The .MOV file may use a codec (like ProRes or H.265) that HTML5 video cannot decode. Try converting to H.264 MP4.';
-        } else if (error?.code === 4) {
-          errorMessage = 'Video format not supported. Try converting to MP4 with H.264 codec.';
-        } else if (error?.code === 2) {
-          errorMessage = 'Network error while loading video. Please check the file path and try again.';
-        } else if (error?.code === 1) {
-          errorMessage = 'Video loading was aborted.';
-        }
-
-        this.ngZone.run(() => {
-          this.error = errorMessage;
-          this.isLoading = false;
-          this.cdr.markForCheck();
-        });
-      });
-
-    } catch (error) {
-      console.error('Failed to initialize player:', error);
-      this.error = 'Failed to initialize video player';
-      this.isLoading = false;
-    }
-  }
-
-  setupKeyboardShortcuts() {
-    // Use @ngneat/hotkeys for keyboard shortcut management
-    // These shortcuts work globally unless user is typing in an input
-    // ALL shortcuts are stored and unsubscribed on component destroy to prevent memory leaks
-
-    // Space: Play/Pause (reset to 1x speed)
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'space', preventDefault: true }).subscribe(() => {
-        if (!this.player) return;
-        this.player.playbackRate(1);
-        if (this.player.paused()) {
-          this.player.play();
-          // Update timeline speed state when resuming
-          if (this.timelineComponent) {
-            this.timelineComponent.currentPlaybackSpeed = 1;
-          }
-        } else {
-          this.player.pause();
-          // Reset timeline speed state when pausing
-          if (this.timelineComponent) {
-            this.timelineComponent.currentPlaybackSpeed = 0;
-          }
-        }
-      })
-    );
-
-    // Arrow Left: Seek backward 5 seconds
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'arrowleft', preventDefault: true }).subscribe(() => {
-        if (!this.player) return;
-        const currentTime = this.player.currentTime();
-        if (currentTime !== undefined) {
-          const newTime = Math.max(0, currentTime - 5);
-          this.player!.currentTime(newTime);
-        }
-      })
-    );
-
-    // Arrow Right: Seek forward 5 seconds
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'arrowright', preventDefault: true }).subscribe(() => {
-        if (!this.player) return;
-        const currentTime = this.player.currentTime();
-        if (currentTime !== undefined) {
-          const newTime = Math.min(this.duration, currentTime + 5);
-          this.player!.currentTime(newTime);
-        }
-      })
-    );
-
-    // F: Toggle fullscreen
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'f', preventDefault: true }).subscribe(() => {
-        if (!this.player) return;
-        if (this.player.isFullscreen()) {
-          this.player.exitFullscreen();
-        } else {
-          this.player.requestFullscreen();
-        }
-      })
-    );
-
-    // I: Set In point (selection start)
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'i', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.setSelectionFromPlayhead();
-        }
-      })
-    );
-
-    // O: Set Out point (selection end)
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'o', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.setSelectionToPlayhead();
-        }
-      })
-    );
-
-    // A: Select cursor tool
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'a', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.selectTool('cursor');
-        }
-      })
-    );
-
-    // R: Select highlight/range tool
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'r', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.selectTool('highlight');
-        }
-      })
-    );
-
-    // J: Rewind / Slow down playback
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'j', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.handleJKey();
-        }
-      })
-    );
-
-    // K: Pause and reset speed to 1x
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'k', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.handleKKey();
-        }
-      })
-    );
-
-    // L: Fast forward / Speed up playback
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'l', preventDefault: true }).subscribe(() => {
-        if (this.timelineComponent) {
-          this.timelineComponent.handleLKey();
-        }
-      })
-    );
-
-    // M: Add marker at playhead or from selection
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'm', preventDefault: true }).subscribe(() => {
-        this.openAddMarkerDialog();
-      })
-    );
-
-    // Cmd+E: Export clip
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'meta.e', preventDefault: true }).subscribe(() => {
-        this.openExportDialog();
-      })
-    );
-
-    // ?: Show keyboard shortcuts help
-    this.subscriptions.push(
-      this.hotkeys.addShortcut({ keys: 'shift./', preventDefault: true }).subscribe(() => {
-        this.showKeyboardShortcuts();
-      })
-    );
-  }
-
-  /**
-   * Show keyboard shortcuts help dialog
-   */
-  showKeyboardShortcuts() {
-    const shortcuts = `
-Keyboard Shortcuts:
-
-Space - Play/Pause (resets to 1x speed)
-J - Rewind / Slow down playback
-K - Pause and reset speed
-L - Fast forward / Speed up playback
-← - Seek backward 5 seconds
-→ - Seek forward 5 seconds
-F - Toggle fullscreen
-I - Set In point (selection start)
-O - Set Out point (selection end)
-A - Select cursor tool
-R - Select range/highlight tool
-M - Add marker at playhead or from selection
-⌘E - Export clip(s)
-? - Show keyboard shortcuts
-
-Tip: Right-click on the timeline for additional options.
-    `.trim();
-
-    alert(shortcuts);
-  }
-
-  /**
-   * Handle timeline context menu (right-click)
-   */
-  onTimelineContextMenu(event: { event: MouseEvent, time: number }) {
-    // Store the time where the user clicked for context menu actions
-    this.contextMenuClickTime = event.time;
-
-    // Set menu position
-    this.contextMenuPosition = {
-      x: event.event.clientX,
-      y: event.event.clientY
-    };
-
-    // Open the context menu
-    if (this.contextMenuTrigger) {
-      this.contextMenuTrigger.openMenu();
-    }
-  }
-
-  /**
-   * Handle "Add Marker" from context menu
-   */
-  onContextMenuAddMarker() {
-    // Temporarily set current time to the context menu click time
-    const originalTime = this.currentTime;
-    this.currentTime = this.contextMenuClickTime;
-
-    // Open marker dialog (which will use currentTime if no selection)
-    this.openAddMarkerDialog().then(() => {
-      // Restore original time
-      this.currentTime = originalTime;
+      // Initial calculation
+      const rect = element.getBoundingClientRect();
+      this.updateBorderDimensions(rect.width, rect.height);
     });
   }
 
-  /**
-   * Handle "Export Clip" from context menu
-   */
-  onContextMenuExport() {
-    this.openExportDialog();
+  // Calculate the largest rectangle of the selected aspect ratio that fits within the container
+  private updateBorderDimensions(containerWidth: number, containerHeight: number) {
+    const aspectRatio = this.borderAspectRatio();
+    const targetAspectRatio = aspectRatio === '16:9' ? 16 / 9 : 4 / 3;
+    const containerAspectRatio = containerWidth / containerHeight;
+
+    let width: number;
+    let height: number;
+
+    if (containerAspectRatio > targetAspectRatio) {
+      // Container is wider than target - height is the limiting factor
+      height = containerHeight;
+      width = height * targetAspectRatio;
+    } else {
+      // Container is taller than target - width is the limiting factor
+      width = containerWidth;
+      height = width / targetAspectRatio;
+    }
+
+    this.borderWidth.set(width);
+    this.borderHeight.set(height);
   }
 
-  seekToTime(seconds: number, sectionIndex?: number) {
-    if (this.player) {
-      this.player.currentTime(seconds);
-      this.player.play();
-    }
-    // Set active section if index provided
-    if (sectionIndex !== undefined && this.metadata?.sections) {
-      // Verify the index is within bounds
-      if (sectionIndex >= 0 && sectionIndex < this.metadata.sections.length) {
-        this.activeSectionIndex = sectionIndex;
+  // Toggle border visibility
+  toggleBorder() {
+    this.showBorder.update(v => !v);
+  }
 
-        // Auto-select the section's time range
-        const section = this.metadata.sections[sectionIndex];
-        if (section) {
-          const endTime = section.endSeconds ||
-            (this.metadata.sections[sectionIndex + 1]?.startSeconds || this.duration);
-          this.currentSelection = {
-            startTime: section.startSeconds,
-            endTime: endTime
-          };
-        }
+  // Change border aspect ratio
+  onAspectRatioChange(ratio: '16:9' | '4:3') {
+    this.borderAspectRatio.set(ratio);
+    // Recalculate border dimensions
+    const element = document.querySelector('.video-player-area') as HTMLElement;
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      this.updateBorderDimensions(rect.width, rect.height);
+    }
+  }
+
+  // Navigate back to library or close window in popout mode
+  goBack() {
+    if (this.isPopoutMode) {
+      window.close();
+    } else {
+      this.router.navigate(['/']);
+    }
+  }
+
+  private updateCategoryFilters(sections: TimelineSection[]): void {
+    const categories = new Map<string, CategoryFilter>();
+
+    sections.forEach(section => {
+      const category = section.category.toLowerCase();
+      if (!categories.has(category)) {
+        categories.set(category, {
+          category,
+          label: section.category,
+          color: section.color,
+          enabled: true
+        });
       }
-    }
-  }
-
-  /**
-   * Update active section based on current playback time
-   */
-  updateActiveSection() {
-    if (!this.metadata?.sections) return;
-
-    const currentSection = this.metadata.sections.findIndex((section, index) => {
-      const startTime = section.startSeconds;
-      const endTime = section.endSeconds ||
-        (this.metadata!.sections[index + 1]?.startSeconds || this.duration);
-
-      return this.currentTime >= startTime && this.currentTime < endTime;
     });
 
-    if (currentSection !== -1 && currentSection !== this.previousActiveSectionIndex) {
-      this.activeSectionIndex = currentSection;
-      this.previousActiveSectionIndex = currentSection;
+    const filters = Array.from(categories.values())
+      .sort((a, b) => a.label.localeCompare(b.label));
 
-      // Auto-scroll to section in AI Analysis tab if it's currently open (works during playback AND scrubbing)
-      if (this.tabGroup && this.tabGroup.selectedIndex === 0) {
-        this.scrollToActiveSection();
-      }
-    } else if (currentSection === -1) {
-      this.previousActiveSectionIndex = null;
-    }
+    this.categoryFilters.set(filters);
   }
 
-  /**
-   * Scroll to the active section in the sections list
-   */
-  private scrollToActiveSection() {
-    // Only auto-scroll if enabled
-    if (!this.autoScrollEnabled) return;
+  private startPlayback() {
+    this.stopPlayback();
+    // Add safety check to prevent runaway intervals
+    let intervalCount = 0;
+    this.playbackInterval = setInterval(() => {
+      intervalCount++;
 
-    // Wait for next tick to ensure DOM is updated
-    setTimeout(() => {
-      const activeElement = document.querySelector('.section-item.active');
-      if (activeElement) {
-        // Use instant scrolling instead of smooth to reduce performance impact
-        activeElement.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+      // Safety: stop after 1 hour of continuous playback
+      if (intervalCount > 36000) {
+        console.warn('Playback interval safety limit reached, stopping');
+        this.stopPlayback();
+        this.togglePlayPause();
+        return;
       }
+
+      const state = this.editorState();
+      let newTime = state.currentTime + (0.1 * state.playbackRate);
+
+      if (newTime >= state.duration) {
+        newTime = state.duration;
+        this.togglePlayPause();
+      }
+
+      this.updateCurrentTime(newTime);
     }, 100);
   }
 
-  /**
-   * Toggle auto-scroll for AI analysis and transcript
-   */
-  toggleAutoScroll() {
-    this.autoScrollEnabled = !this.autoScrollEnabled;
-  }
-
-  /**
-   * Handle tab change to track which tab is active
-   */
-  onTabChange(event: any) {
-    this.currentTabIndex = event.index;
-  }
-
-  /**
-   * Get dynamic tooltip text based on current tab
-   */
-  getAutoScrollTooltip(): string {
-    if (!this.autoScrollEnabled) {
-      return 'Auto-scroll: OFF - Click to enable scrolling with video playback';
-    }
-
-    switch (this.currentTabIndex) {
-      case 0: // Analysis tab
-        return 'Auto-scroll: ON - Analysis sections will scroll with video playback';
-      case 1: // Search tab
-        return 'Auto-scroll: ON - (Search tab does not auto-scroll)';
-      case 2: // Transcript tab
-        return 'Auto-scroll: ON - Transcript will scroll with video playback';
-      default:
-        return 'Auto-scroll: ON - Content will scroll with video playback';
+  private stopPlayback() {
+    if (this.playbackInterval) {
+      clearInterval(this.playbackInterval);
+      this.playbackInterval = undefined;
     }
   }
 
-  /**
-   * Get dynamic label text based on current tab
-   */
-  getAutoScrollLabel(): string {
-    if (!this.autoScrollEnabled) {
-      return 'Auto-scroll disabled';
-    }
+  // Playback controls
+  togglePlayPause() {
+    this.editorState.update(state => ({
+      ...state,
+      isPlaying: !state.isPlaying
+    }));
+  }
 
-    switch (this.currentTabIndex) {
-      case 0: // Analysis tab
-        return 'Auto-scroll: Analysis';
-      case 1: // Search tab
-        return 'Auto-scroll enabled (N/A for search)';
-      case 2: // Transcript tab
-        return 'Auto-scroll: Transcript';
-      default:
-        return 'Auto-scroll enabled';
+  updateCurrentTime(time: number) {
+    this.editorState.update(state => ({
+      ...state,
+      currentTime: Math.max(0, Math.min(time, state.duration))
+    }));
+  }
+
+  seekTo(time: number) {
+    this.updateCurrentTime(time);
+    if (this.videoPlayer) {
+      this.videoPlayer.seekTo(time);
     }
   }
 
-  /**
-   * Check if a section is currently active
-   */
-  isSectionActive(index: number): boolean {
-    return this.activeSectionIndex === index;
+  skipBackward(seconds: number = 5) {
+    const state = this.editorState();
+    this.seekTo(state.currentTime - seconds);
   }
 
-  close() {
-    if (this.dialogRef) {
-      // Opened as dialog - close it
-      this.dialogRef.close();
-    } else {
-      // Opened as route - navigate back to library
-      this.router.navigate(['/library']);
-    }
+  skipForward(seconds: number = 5) {
+    const state = this.editorState();
+    this.seekTo(state.currentTime + seconds);
   }
 
-
-  /**
-   * Handle timeline seek event
-   */
-  onTimelineSeek(time: number) {
-    if (this.player) {
-      this.player.currentTime(time);
-    }
+  setPlaybackRate(rate: number) {
+    this.editorState.update(state => ({
+      ...state,
+      playbackRate: rate
+    }));
   }
 
-  /**
-   * Handle timeline selection change event
-   */
-  onSelectionChange(selection: TimelineSelection) {
-    this.currentSelection = selection;
-    console.log('Selection changed:', selection);
-  }
+  // Increase playback speed with L key
+  increasePlaybackSpeed() {
+    const currentRate = this.editorState().playbackRate;
+    const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
-  /**
-   * Handle play/pause toggle from timeline
-   */
-  onPlayPause() {
-    if (this.player) {
-      if (this.player.paused()) {
-        this.player.play();
-      } else {
-        this.player.pause();
-      }
-    }
-  }
-
-  /**
-   * Handle playback speed change from timeline (J/K/L keys)
-   */
-  onPlaybackSpeed(speed: number) {
-    if (!this.player) return;
-
-    if (speed < 0) {
-      // Backwards playback - simulate by jumping backwards repeatedly
-      const absSpeed = Math.abs(speed);
-      this.player.pause();
-      // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
-      const jumpAmount = 0.5 * absSpeed;
-      const currentTime = this.player.currentTime();
-      if (currentTime !== undefined) {
-        this.player.currentTime(Math.max(0, currentTime - jumpAmount));
-      }
-    } else if (speed === 0) {
-      // Pause (K key)
-      this.player.pause();
-      this.player.playbackRate(1); // Reset to normal speed
-    } else {
-      // Forward playback at specified speed (L key)
-      this.player.playbackRate(speed);
-      if (this.player.paused()) {
-        this.player.play();
-      }
-    }
-  }
-
-  /**
-   * Open create clip dialog
-   */
-  async openCreateClipDialog() {
-    // If we have a videoPath but no analysis or customVideo, create a customVideo object
-    let customVideoData = this.data.customVideo;
-    if (!this.data.analysis && !this.data.customVideo && this.data.videoPath) {
-      customVideoData = {
-        videoPath: this.data.videoPath,
-        title: this.data.videoTitle || 'Video'
-      };
-    }
-
-    // For custom videos with real file paths (dragged/dropped files), ensure we pass the real path
-    if (customVideoData && this.data.realFilePath) {
-      customVideoData = {
-        ...customVideoData,
-        realFilePath: this.data.realFilePath
-      };
-    }
-
-    // Import and open the CreateClipDialogComponent as a modal
-    const { CreateClipDialogComponent } = await import('../create-clip-dialog/create-clip-dialog.component');
-
-    const dialogRef = this.dialog.open(CreateClipDialogComponent, {
-      width: '600px',
-      data: {
-        analysis: this.data.analysis,
-        customVideo: customVideoData,
-        startTime: this.currentSelection.startTime,
-        endTime: this.currentSelection.endTime
-      }
-    });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (result?.created) {
-      console.log('[VideoPlayer] Clip created, result:', result);
-
-      // If the clip is queued for background processing, don't show a notification yet
-      // The notification will be shown when the background processing completes
-      if (result.queued) {
-        console.log('[VideoPlayer] Clip queued for background processing, skipping immediate notification');
-        return;
-      }
-
-      // Check if we have a videoId (from import) to navigate to
-      const videoId = result.videoId;
-      console.log('[VideoPlayer] VideoId:', videoId);
-
-      if (videoId) {
-        console.log('[VideoPlayer] Showing navigation notification');
-        // If the clip was imported to the library, offer navigation
-        this.notificationService.toastOnly(
-          'success',
-          'Clip Created',
-          'Click to view in library',
-          {
-            type: 'navigate-library',
-            videoId: videoId
-          }
-        );
-      } else {
-        console.log('[VideoPlayer] No videoId, showing folder notification');
-        // Otherwise, just offer to open the folder
-        this.notificationService.toastOnly(
-          'success',
-          'Clip Created',
-          `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`,
-          {
-            type: 'open-folder',
-            path: result.extraction?.outputPath
-          }
-        );
-      }
-    }
-  }
-
-  async openAddMarkerDialog() {
-    const videoId = this.data.videoId || this.data.analysis?.id;
-
-    if (!videoId) {
-      this.notificationService.toastOnly('error', 'Error', 'No video ID available for marker creation');
+    // If not playing, start playing first
+    if (!this.editorState().isPlaying) {
+      this.startPlayback();
       return;
     }
 
-    // Determine start and end time:
-    // If there's a selection (range > 1 second), use it
-    // Otherwise, use playhead position with 1 second duration
-    let startTime = this.currentSelection.startTime;
-    let endTime = this.currentSelection.endTime;
-
-    if (endTime - startTime < 1) {
-      // No valid selection, use current playhead position
-      startTime = this.currentTime;
-      endTime = Math.min(startTime + 1, this.duration); // 1 second marker or until end
+    // Find next higher speed
+    let nextSpeed = currentRate;
+    for (const speed of speeds) {
+      if (speed > currentRate) {
+        nextSpeed = speed;
+        break;
+      }
     }
 
-    // Import and open the AddMarkerDialogComponent as a modal
-    const { AddMarkerDialogComponent } = await import('../add-marker-dialog/add-marker-dialog.component');
+    // Max out at 4x
+    if (currentRate >= 4) {
+      nextSpeed = 4;
+    }
 
-    const dialogRef = this.dialog.open(AddMarkerDialogComponent, {
-      width: '600px',
-      data: {
-        videoId: videoId,
-        videoTitle: this.data.videoTitle || 'Video',
-        startTime: startTime,
-        endTime: endTime
+    this.setPlaybackRate(nextSpeed);
+  }
+
+  // Decrease playback speed with J key
+  decreasePlaybackSpeed() {
+    const currentRate = this.editorState().playbackRate;
+    const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+
+    // Find next lower speed
+    let nextSpeed = currentRate;
+    for (let i = speeds.length - 1; i >= 0; i--) {
+      if (speeds[i] < currentRate) {
+        nextSpeed = speeds[i];
+        break;
       }
-    });
+    }
 
-    const result = await dialogRef.afterClosed().toPromise();
+    // Min out at 0.25x
+    if (currentRate <= 0.25) {
+      nextSpeed = 0.25;
+    }
 
-    if (result?.created) {
-      // Reload timeline sections to show the new marker
-      await this.reloadAnalysisSections();
+    this.setPlaybackRate(nextSpeed);
+  }
 
-      // Show success notification with action to navigate to library
-      this.notificationService.toastOnly(
-        'success',
-        'Marker Created',
-        'New marker has been added to the timeline',
-        {
-          type: 'navigate-library',
-          videoId: videoId
-        }
-      );
+  setVolume(volume: number) {
+    this.editorState.update(state => ({
+      ...state,
+      volume: Math.max(0, Math.min(1, volume))
+    }));
+  }
+
+  // Tool management
+  setTool(tool: EditorTool) {
+    this.currentTool.set(tool);
+    console.log('Switched to tool:', tool);
+  }
+
+  setToolCursor() {
+    this.setTool(EditorTool.CURSOR);
+  }
+
+  setToolHighlight() {
+    this.setTool(EditorTool.HIGHLIGHT);
+  }
+
+  onScaleChange(value: string) {
+    const scale = parseFloat(value);
+    this.videoScale.set(scale);
+  }
+
+  // Get time from mouse position on timeline
+  private getTimeFromMousePosition(event: MouseEvent): number | null {
+    const target = event.currentTarget as HTMLElement;
+    // Look for the timeline track container which has the margins
+    const trackContainer = target.querySelector('.timeline-track-container') ||
+                          target.querySelector('app-timeline-track');
+    if (!trackContainer) return null;
+
+    const containerRect = trackContainer.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left;
+    const trackWidth = containerRect.width;
+
+    if (clickX < 0 || clickX > trackWidth || trackWidth <= 0) return null;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+    const percentage = clickX / trackWidth;
+
+    return state.zoomState.offset + (percentage * visibleDuration);
+  }
+
+  // Get time from mouse position for document-level events
+  private getTimeFromMousePositionDocument(event: MouseEvent): number | null {
+    const timelineElement = document.querySelector('.track-content') as HTMLElement;
+    if (!timelineElement) return null;
+
+    // Look for the timeline track container which has the margins
+    const trackContainer = timelineElement.querySelector('.timeline-track-container') ||
+                          timelineElement.querySelector('app-timeline-track');
+    if (!trackContainer) return null;
+
+    const containerRect = trackContainer.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left;
+    const trackWidth = containerRect.width;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+    const percentage = Math.max(0, Math.min(1, clickX / trackWidth));
+
+    return state.zoomState.offset + (percentage * visibleDuration);
+  }
+
+  // Show context menu for highlighted selection
+  private showContextMenu(event: MouseEvent) {
+    const actions: ContextMenuAction[] = [
+      {
+        id: 'export',
+        label: 'Export Selection',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+      },
+      {
+        id: 'add-marker',
+        label: 'Add Marker',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L12 22"/><path d="M17 7L12 2 7 7"/></svg>'
+      },
+      { id: 'divider', label: '', divider: true },
+      {
+        id: 'clear',
+        label: 'Clear Selection',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'
+      }
+    ];
+
+    this.contextMenuActions.set(actions);
+    this.contextMenuPosition.set({ x: event.clientX, y: event.clientY });
+    this.showContextMenu$.set(true);
+  }
+
+  // Handle context menu action
+  onContextMenuAction(actionId: string) {
+    this.showContextMenu$.set(false);
+
+    switch (actionId) {
+      case 'export':
+        this.openExportDialog();
+        break;
+      case 'add-marker':
+        this.addMarker();
+        break;
+      case 'clear':
+        this.clearSelection();
+        break;
     }
   }
 
-  /**
-   * Reload analysis sections from database
-   */
-  private async reloadAnalysisSections() {
-    const videoId = this.data.videoId || this.data.analysis?.id;
+  // Close context menu
+  onContextMenuClose() {
+    this.showContextMenu$.set(false);
+  }
+
+  // Set in-point at current playhead position
+  setInPoint() {
+    const currentTime = this.editorState().currentTime;
+    const selection = this.highlightSelection();
+
+    if (selection) {
+      // Update existing selection start
+      this.highlightSelection.set({
+        startTime: currentTime,
+        endTime: Math.max(currentTime, selection.endTime)
+      });
+    } else {
+      // Create new selection starting at current time
+      this.highlightSelection.set({
+        startTime: currentTime,
+        endTime: currentTime
+      });
+    }
+  }
+
+  // Set out-point at current playhead position
+  setOutPoint() {
+    const currentTime = this.editorState().currentTime;
+    const selection = this.highlightSelection();
+
+    if (selection) {
+      // Update existing selection end
+      this.highlightSelection.set({
+        startTime: Math.min(selection.startTime, currentTime),
+        endTime: currentTime
+      });
+    } else {
+      // Create new selection ending at current time
+      this.highlightSelection.set({
+        startTime: currentTime,
+        endTime: currentTime
+      });
+    }
+  }
+
+  // Clear current selection
+  clearSelection() {
+    this.highlightSelection.set(null);
+    this.selectionStart.set(null);
+    this.isSelecting.set(false);
+  }
+
+  // Track which selection handle is being dragged
+  private draggingHandle: 'left' | 'right' | null = null;
+
+  // Start dragging a selection handle
+  onSelectionHandleStart(event: MouseEvent, handle: 'left' | 'right') {
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.draggingHandle = handle;
+    document.body.style.cursor = 'ew-resize';
+
+    const onMouseMove = (e: MouseEvent) => {
+      const time = this.getTimeFromMousePositionDocument(e);
+      if (time === null) return;
+
+      const selection = this.highlightSelection();
+      if (!selection) return;
+
+      if (this.draggingHandle === 'left') {
+        // Dragging left handle - update start time
+        const newStart = Math.min(time, selection.endTime - 0.1);
+        this.highlightSelection.set({
+          startTime: Math.max(0, newStart),
+          endTime: selection.endTime
+        });
+        // Make playhead follow the handle
+        this.seekTo(Math.max(0, newStart));
+      } else if (this.draggingHandle === 'right') {
+        // Dragging right handle - update end time
+        const newEnd = Math.max(time, selection.startTime + 0.1);
+        this.highlightSelection.set({
+          startTime: selection.startTime,
+          endTime: Math.min(this.editorState().duration, newEnd)
+        });
+        // Make playhead follow the handle
+        this.seekTo(Math.min(this.editorState().duration, newEnd));
+      }
+    };
+
+    const onMouseUp = () => {
+      this.draggingHandle = null;
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  // Handle dragging the entire selection to move it
+  onSelectionDragStart(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const selection = this.highlightSelection();
+    if (!selection) return;
+
+    const startTime = this.getTimeFromMousePositionDocument(event);
+    if (startTime === null) return;
+
+    const selectionDuration = selection.endTime - selection.startTime;
+    const initialOffset = startTime - selection.startTime;
+
+    document.body.style.cursor = 'move';
+
+    const onMouseMove = (e: MouseEvent) => {
+      const time = this.getTimeFromMousePositionDocument(e);
+      if (time === null) return;
+
+      // Calculate new position based on where we grabbed
+      const newStart = time - initialOffset;
+      const clampedStart = Math.max(0, Math.min(this.editorState().duration - selectionDuration, newStart));
+      const clampedEnd = clampedStart + selectionDuration;
+
+      this.highlightSelection.set({
+        startTime: clampedStart,
+        endTime: clampedEnd
+      });
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  // Add a marker to the current selection or current time
+  addMarker() {
+    const selection = this.highlightSelection();
+    const videoId = this.videoId();
+
+    if (!videoId) {
+      console.error('No video ID available');
+      return;
+    }
+
+    if (selection) {
+      // Add marker for selected range
+      this.openMarkerDialog(selection.startTime, selection.endTime);
+    } else {
+      // Add marker at current playhead position
+      const currentTime = this.editorState().currentTime;
+      this.openMarkerDialog(currentTime);
+    }
+  }
+
+  // Open the marker dialog
+  private openMarkerDialog(startTime: number, endTime?: number) {
+    const videoId = this.videoId();
+    if (!videoId) return;
+
+    this.markerDialogData.set({
+      videoId,
+      startTime,
+      endTime
+    });
+    this.showMarkerDialog.set(true);
+  }
+
+  // Handle marker dialog save
+  async onMarkerSave(marker: Partial<CustomMarker>) {
+    this.showMarkerDialog.set(false);
+
+    try {
+      const result = await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/database/analysis-sections`, {
+          videoId: marker.videoId,
+          startSeconds: marker.startTime,
+          endSeconds: marker.endTime || marker.startTime,
+          title: marker.message,
+          description: marker.message,
+          category: marker.category || 'marker'
+        })
+      );
+
+      if (result.success) {
+        // Refresh sections to include new marker
+        await this.loadAnalysisForVideo(this.videoId()!);
+        // Clear selection after adding marker
+        this.clearSelection();
+      } else {
+        console.error('Failed to save marker:', result.error);
+      }
+    } catch (error) {
+      console.error('Error saving marker:', error);
+    }
+  }
+
+  // Handle marker dialog cancel
+  onMarkerCancel() {
+    this.showMarkerDialog.set(false);
+  }
+
+  // Handle chapter save from marker dialog
+  async onChapterSave(chapter: Partial<TimelineChapter>) {
+    this.showMarkerDialog.set(false);
+
+    try {
+      const result = await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/database/chapters`, {
+          videoId: chapter.videoId,
+          startSeconds: chapter.startTime,
+          endSeconds: chapter.endTime,
+          title: chapter.title,
+          description: chapter.description,
+          sequence: chapter.sequence
+        })
+      );
+
+      if (result.success) {
+        // Refresh chapters to include new chapter
+        await this.loadAnalysisForVideo(this.videoId()!);
+        // Clear selection after adding chapter
+        this.clearSelection();
+      } else {
+        console.error('Failed to save chapter:', result.error);
+      }
+    } catch (error) {
+      console.error('Error saving chapter:', error);
+    }
+  }
+
+  // Handle marker delete
+  async onMarkerDelete(markerId: string) {
+    this.showMarkerDialog.set(false);
+
+    const videoId = this.videoId();
     if (!videoId) return;
 
     try {
-      const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
+      const result = await firstValueFrom(
+        this.http.delete<any>(`${this.API_BASE}/database/videos/${videoId}/sections/${markerId}`)
+      );
 
-      if (sections && sections.length > 0) {
-        this.timelineSections = sections.map(section => ({
-          startTime: section.start_seconds,
-          endTime: section.end_seconds || (section.start_seconds + 30),
-          category: section.category || 'General',
-          description: section.description || section.title || '',
-          color: this.getCategoryColor(section.category || 'General')
-        }));
-
-        // Also update metadata for sidebar display
-        this.metadata = {
-          sections: sections.map(s => ({
-            startSeconds: s.start_seconds,
-            endSeconds: s.end_seconds,
-            timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds || s.start_seconds),
-            category: s.category || 'General',
-            description: s.description || s.title || '',
-            quotes: []
-          }))
-        } as any;
+      if (result.success) {
+        // Refresh sections
+        await this.loadAnalysisForVideo(this.videoId()!);
       } else {
-        // No sections left
-        this.timelineSections = [];
-        if (this.metadata) {
-          this.metadata.sections = [];
-        }
+        console.error('Failed to delete marker:', result.error);
       }
-
-      this.cdr.detectChanges();
     } catch (error) {
-      console.error('Failed to reload analysis sections:', error);
+      console.error('Error deleting marker:', error);
     }
   }
 
-  /**
-   * Delete an analysis section
-   */
-  async deleteSection(section: any, index: number) {
-    const videoId = this.data.videoId || this.data.analysis?.id;
+  // Open export dialog
+  openExportDialog() {
+    const videoId = this.videoId();
+    const videoPath = this.videoPath();
+    const videoTitle = this.metadata().filename;
+
+    console.log('openExportDialog called:', { videoId, videoPath, videoTitle });
+
     if (!videoId) {
-      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      console.error('Cannot open export dialog: missing video ID');
       return;
     }
 
-    // Find the actual database section ID
-    // We need to get all sections from the database to find the matching one
-    try {
-      const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
-      const matchingSection = dbSections.find(s =>
-        s.start_seconds === section.startSeconds &&
-        s.category === section.category &&
-        s.description === section.description
-      );
+    // videoPath might be null if opened from certain routes - that's ok, backend can look it up
+    if (!videoPath) {
+      console.warn('videoPath is null, export dialog may need to fetch it');
+    }
 
-      if (!matchingSection) {
-        this.notificationService.toastOnly('error', 'Error', 'Could not find section to delete');
+    // Prepare AI analysis sections for export
+    const aiSections = this.filteredSections().map(section => ({
+      id: section.id,
+      category: section.category,
+      description: section.description,
+      startSeconds: section.startTime,
+      endSeconds: section.endTime,
+      timeRange: `${this.formatTime(section.startTime)} - ${this.formatTime(section.endTime)}`
+    }));
+
+    // Include custom markers as exportable sections
+    const customMarkerSections = this.customMarkers()
+      .filter(marker => marker.endTime !== undefined && marker.endTime > marker.startTime)
+      .map(marker => ({
+        id: marker.id,
+        category: marker.category || 'Marker',
+        description: marker.message,
+        startSeconds: marker.startTime,
+        endSeconds: marker.endTime!,
+        timeRange: `${this.formatTime(marker.startTime)} - ${this.formatTime(marker.endTime!)}`
+      }));
+
+    // Combine AI sections and custom markers
+    const sections = [...aiSections, ...customMarkerSections];
+
+    // Get current selection if any
+    const selection = this.highlightSelection();
+
+    this.exportDialogData.set({
+      sections,
+      selectionStart: selection?.startTime,
+      selectionEnd: selection?.endTime,
+      videoId,
+      videoPath,
+      videoTitle
+    });
+    this.showExportDialog.set(true);
+  }
+
+  onExportDialogClose() {
+    this.showExportDialog.set(false);
+    this.exportDialogData.set(null);
+  }
+
+  // Calculate selection overlay left position
+  getSelectionLeft(): number {
+    const selection = this.highlightSelection();
+    if (!selection) return 0;
+
+    const state = this.editorState();
+    const visibleStart = state.zoomState.offset;
+    const visibleDuration = state.duration / state.zoomState.level;
+
+    const relativeStart = selection.startTime - visibleStart;
+    return (relativeStart / visibleDuration) * 100;
+  }
+
+  // Calculate selection overlay width
+  getSelectionWidth(): number {
+    const selection = this.highlightSelection();
+    if (!selection) return 0;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+
+    const duration = selection.endTime - selection.startTime;
+    return (duration / visibleDuration) * 100;
+  }
+
+  // Zoom controls
+  onZoomChange(zoomState: ZoomState) {
+    this.editorState.update(state => ({
+      ...state,
+      zoomState
+    }));
+  }
+
+  // Section interaction
+  onSectionClick(section: TimelineSection) {
+    this.editorState.update(state => ({
+      ...state,
+      selectedSection: section
+    }));
+    // Seek to section start
+    this.seekTo(section.startTime);
+  }
+
+  onSectionHover(section: TimelineSection | null) {
+    // Could show tooltip or highlight
+  }
+
+  // Chapter interaction
+  onChapterClick(chapter: TimelineChapter) {
+    this.selectedChapterId.set(chapter.id);
+    // Seek to chapter start
+    this.seekTo(chapter.startTime);
+  }
+
+  onChapterHover(chapter: TimelineChapter | null) {
+    // Could show tooltip or highlight
+  }
+
+  // Delete chapter from analysis panel
+  async onChapterDelete(chapterId: string) {
+    const videoId = this.videoId();
+    if (!videoId) return;
+
+    try {
+      await firstValueFrom(
+        this.http.delete(`${this.API_BASE}/database/videos/${videoId}/chapters/${chapterId}`)
+      );
+      // Remove from local state
+      this.chapters.update(chapters => chapters.filter(c => c.id !== chapterId));
+      // Clear selection if deleted chapter was selected
+      if (this.selectedChapterId() === chapterId) {
+        this.selectedChapterId.set(undefined);
+      }
+    } catch (error) {
+      console.error('Failed to delete chapter:', error);
+    }
+  }
+
+  // Delete section from analysis panel
+  onSectionDeleteFromPanel(sectionId: string) {
+    this.onMarkerDelete(sectionId);
+  }
+
+  // Category filter toggle
+  onFilterToggle(category: string) {
+    this.categoryFilters.update(filters =>
+      filters.map(f =>
+        f.category === category
+          ? { ...f, enabled: !f.enabled }
+          : f
+      )
+    );
+  }
+
+  // Select all category filters
+  onFilterSelectAll() {
+    this.categoryFilters.update(filters =>
+      filters.map(f => ({ ...f, enabled: true }))
+    );
+  }
+
+  // Deselect all category filters
+  onFilterDeselectAll() {
+    this.categoryFilters.update(filters =>
+      filters.map(f => ({ ...f, enabled: false }))
+    );
+  }
+
+  // Select only marker category filters
+  onFilterSelectMarkers() {
+    this.categoryFilters.update(filters =>
+      filters.map(f => ({ ...f, enabled: f.category.toLowerCase() === 'marker' }))
+    );
+  }
+
+  // Sidebar toggle
+  toggleAnalysisSidebar() {
+    this.showAnalysisSidebar.update(v => !v);
+  }
+
+  // Fullscreen toggle
+  async toggleFullscreen() {
+    const element = document.documentElement;
+
+    if (!this.isFullscreen()) {
+      try {
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if ((element as any).webkitRequestFullscreen) {
+          await (element as any).webkitRequestFullscreen();
+        }
+      } catch (err) {
+        console.error('Failed to enter fullscreen:', err);
+      }
+    } else {
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+      } catch (err) {
+        console.error('Failed to exit fullscreen:', err);
+      }
+    }
+  }
+
+  // Handle fullscreen change events
+  private onFullscreenChange = () => {
+    const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+    this.isFullscreen.set(isFs);
+
+    if (isFs) {
+      // In fullscreen, show controls initially then hide after delay
+      this.showTimelineInFullscreen.set(true);
+      this.hideTimelineAfterDelay();
+    } else {
+      // Exiting fullscreen, always show timeline
+      this.showTimelineInFullscreen.set(true);
+      this.clearFullscreenTimeout();
+    }
+  };
+
+  // Handle mouse movement in fullscreen to show timeline
+  private onMouseMoveInFullscreen = () => {
+    if (!this.isFullscreen()) return;
+
+    this.showTimelineInFullscreen.set(true);
+
+    // Always hide after delay in fullscreen (whether playing or paused)
+    this.hideTimelineAfterDelay();
+  };
+
+  private hideTimelineAfterDelay() {
+    this.clearFullscreenTimeout();
+    this.fullscreenTimeout = setTimeout(() => {
+      // Hide controls in fullscreen after mouse is idle (regardless of play state)
+      if (this.isFullscreen()) {
+        this.showTimelineInFullscreen.set(false);
+      }
+    }, 2000);
+  }
+
+  private clearFullscreenTimeout() {
+    if (this.fullscreenTimeout) {
+      clearTimeout(this.fullscreenTimeout);
+      this.fullscreenTimeout = undefined;
+    }
+  }
+
+  // Dragging state
+  private isDraggingTimeline = false;
+
+  // Timeline mouse down to start seeking or selection
+  onTimelineMouseDown(event: MouseEvent) {
+    event.preventDefault(); // Prevent text selection
+
+    if (this.currentTool() === EditorTool.HIGHLIGHT) {
+      // Start selection for highlight tool
+      const time = this.getTimeFromMousePosition(event);
+      if (time !== null) {
+        this.selectionStart.set(time);
+        this.isSelecting.set(true);
+        this.highlightSelection.set({ startTime: time, endTime: time });
+
+        document.body.style.cursor = 'crosshair';
+        document.addEventListener('mousemove', this.onDocumentMouseMove);
+        document.addEventListener('mouseup', this.onDocumentMouseUp);
+      }
+    } else {
+      // Cursor tool - seek to position
+      this.isDraggingTimeline = true;
+      this.seekToMousePosition(event);
+
+      document.body.style.cursor = 'ew-resize';
+      document.addEventListener('mousemove', this.onDocumentMouseMove);
+      document.addEventListener('mouseup', this.onDocumentMouseUp);
+    }
+  }
+
+  // Document mouse move while dragging
+  private onDocumentMouseMove = (event: MouseEvent) => {
+    if (this.isSelecting()) {
+      // Update selection for highlight tool
+      const time = this.getTimeFromMousePositionDocument(event);
+      if (time !== null && this.selectionStart() !== null) {
+        const startTime = Math.min(this.selectionStart()!, time);
+        const endTime = Math.max(this.selectionStart()!, time);
+        this.highlightSelection.set({ startTime, endTime });
+      }
+    } else if (this.isDraggingTimeline) {
+      // Find the timeline element
+      const timelineElement = document.querySelector('.track-content') as HTMLElement;
+      if (timelineElement) {
+        this.seekToMousePosition(event, timelineElement);
+      }
+    }
+  }
+
+  // Document mouse up to stop dragging
+  private onDocumentMouseUp = () => {
+    if (this.isSelecting()) {
+      this.isSelecting.set(false);
+
+      // If selection is too small, clear it
+      const selection = this.highlightSelection();
+      if (selection && Math.abs(selection.endTime - selection.startTime) < 0.1) {
+        this.highlightSelection.set(null);
+      }
+    }
+
+    this.isDraggingTimeline = false;
+    document.body.style.cursor = ''; // Reset cursor
+    document.removeEventListener('mousemove', this.onDocumentMouseMove);
+    document.removeEventListener('mouseup', this.onDocumentMouseUp);
+  }
+
+  // Timeline click to seek (now calls the common seek method)
+  onTimelineClick(event: MouseEvent) {
+    // Handle right-click for context menu
+    if (event.button === 2 && this.highlightSelection()) {
+      event.preventDefault();
+      this.showContextMenu(event);
+      return;
+    }
+
+    // Only seek if not dragging and using cursor tool
+    if (!this.isDraggingTimeline && this.currentTool() === EditorTool.CURSOR) {
+      this.seekToMousePosition(event);
+    }
+  }
+
+  // Common method to seek based on mouse position
+  private seekToMousePosition(event: MouseEvent, element?: HTMLElement) {
+    const target = element || event.currentTarget as HTMLElement;
+
+    // Look for the timeline track container which has the actual margins
+    const trackContainer = target.querySelector('.timeline-track-container') ||
+                          target.querySelector('app-timeline-track');
+    if (!trackContainer) return;
+
+    const containerRect = trackContainer.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left;
+    const trackWidth = containerRect.width;
+
+    if (clickX < 0 || clickX > trackWidth || trackWidth <= 0) return;
+
+    const percentage = clickX / trackWidth;
+    const zoomState = this.editorState().zoomState;
+    const visibleDuration = this.editorState().duration / zoomState.level;
+    const time = zoomState.offset + (percentage * visibleDuration);
+
+    this.seekTo(Math.max(0, Math.min(time, this.editorState().duration)));
+  }
+
+  // Timeline resize
+  onResizeStart(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isResizing.set(true);
+
+    // Add visual feedback
+    document.body.style.cursor = 'ns-resize';
+
+    const startY = event.clientY;
+    const startHeight = this.timelineHeight();
+
+    const onMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const deltaY = startY - e.clientY;
+      const newHeight = Math.max(150, Math.min(600, startHeight + deltaY));
+      this.timelineHeight.set(newHeight);
+    };
+
+    const onMouseUp = () => {
+      this.isResizing.set(false);
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  // Video player events
+  onVideoTimeUpdate(time: number) {
+    // Ignore time updates during tab restoration (video resets to 0 when source changes)
+    if (this.isRestoringTab) {
+      return;
+    }
+    this.updateCurrentTime(time);
+  }
+
+  async onVideoDurationChange(duration: number) {
+    // Don't set duration to 0 - keep default if video fails to load
+    if (duration <= 0) return;
+
+    this.editorState.update(state => ({
+      ...state,
+      duration
+    }));
+    this.metadata.update(m => ({
+      ...m,
+      duration
+    }));
+
+    // If we were restoring a tab, seek to the saved position now that video is loaded
+    if (this.isRestoringTab && this.pendingSeekTime !== null) {
+      // Use setTimeout to ensure video element is ready
+      setTimeout(() => {
+        if (this.videoPlayer && this.pendingSeekTime !== null) {
+          this.videoPlayer.seekTo(this.pendingSeekTime);
+        }
+        this.isRestoringTab = false;
+        this.pendingSeekTime = null;
+      }, 50);
+    }
+
+    // Phase 1: Show demo waveform immediately for instant feedback
+    this.waveformData.set({
+      samples: this.generateDemoWaveform(duration),
+      sampleRate: 44100,
+      duration
+    });
+
+    // Phase 2: Generate quick low-res waveform from client-side (real audio data)
+    const url = this.videoUrl();
+    if (url) {
+      this.generateQuickClientWaveform(url, duration);
+    }
+
+    // Phase 3: Load high-quality waveform from server in background
+    const videoId = this.videoId();
+    if (videoId) {
+      this.loadWaveformFromServer(videoId, duration);
+    }
+  }
+
+  onVideoPlayStateChange(isPlaying: boolean) {
+    this.editorState.update(state => ({
+      ...state,
+      isPlaying
+    }));
+  }
+
+  onVideoEnded() {
+    this.editorState.update(state => ({
+      ...state,
+      isPlaying: false,
+      currentTime: 0
+    }));
+  }
+
+  // Utilities
+  formatTime(seconds: number): string {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 100);
+
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+  }
+
+  formatFileSize(bytes: number): string {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+  }
+
+  // Phase 2: Generate quick low-resolution waveform from client-side
+  // Only samples every N seconds to avoid memory issues
+  private async generateQuickClientWaveform(videoUrl: string, duration: number): Promise<void> {
+    try {
+      // Skip client-side generation for very large files (>3 hours)
+      if (duration > 10800) { // > 3 hours
+        console.log('Skipping client-side waveform for long video, waiting for server...');
         return;
       }
 
-      // Delete the section from the database
-      const result = await this.databaseLibraryService.deleteAnalysisSection(videoId, matchingSection.id);
+      console.log('Generating quick client-side waveform...');
 
-      if (result.success) {
-        // Reload all sections to refresh the UI
-        await this.reloadAnalysisSections();
-      } else {
-        this.notificationService.toastOnly('error', 'Delete Failed', result.error || 'Failed to delete section');
+      // Fetch only the first 3MB of the video to generate initial waveform
+      const response = await fetch(videoUrl, {
+        headers: {
+          'Range': `bytes=0-${3 * 1024 * 1024}` // First 3MB
+        }
+      });
+
+      if (!response.ok || response.status === 416) {
+        console.log('Range requests not supported, skipping client-side waveform');
+        return;
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      try {
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const rawData = audioBuffer.getChannelData(0);
+
+        // Generate initial waveform - much higher resolution than before
+        // Aim for ~10 samples per second for good initial detail
+        const targetSamples = Math.min(Math.floor(duration * 10), 5000); // Up to 5000 samples
+        const blockSize = Math.floor(rawData.length / targetSamples);
+
+        const samples: number[] = [];
+        for (let i = 0; i < targetSamples; i++) {
+          const blockStart = blockSize * i;
+          let sum = 0;
+          const actualBlockSize = Math.min(blockSize, rawData.length - blockStart);
+
+          for (let j = 0; j < actualBlockSize; j++) {
+            sum += Math.abs(rawData[blockStart + j]);
+          }
+          samples.push(sum / actualBlockSize);
+        }
+
+        // Normalize
+        const max = Math.max(...samples, 0.01);
+        const normalizedSamples = samples.map(s => s / max);
+
+        console.log(`✓ Generated ${normalizedSamples.length} client-side samples from partial audio`);
+
+        // Update waveform with real (but low-res) data
+        this.waveformData.set({
+          samples: normalizedSamples,
+          sampleRate: 44100,
+          duration
+        });
+
+        await audioContext.close();
+      } catch (decodeError) {
+        // Expected for formats that don't support partial decoding
+        console.log('Partial decode not supported for this format, waiting for server waveform...');
+        await audioContext.close();
       }
     } catch (error) {
-      console.error('Error deleting section:', error);
-      this.notificationService.toastOnly('error', 'Delete Failed', 'An error occurred while deleting');
+      // Silently fail - server waveform will handle it
+      console.log('Client-side waveform skipped, using server waveform');
     }
   }
 
-  formatTime(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
+  // Phase 3: Load high-quality waveform from server with progressive updates
+  private async loadWaveformFromServer(videoId: string, duration: number): Promise<void> {
+    try {
+      console.log(`🎵 Starting progressive waveform generation...`);
 
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
+      // Start generation with progressive mode - request samples based on duration
+      // Target: 2000 samples per 60 seconds for maximum granularity
+      const samplesPerMinute = 2000;
+      const targetSamples = Math.ceil((duration / 60) * samplesPerMinute);
+      console.log(`Requesting ${targetSamples} samples (${samplesPerMinute} per minute for ${duration.toFixed(1)}s video)`);
 
-  formatTimeRange(startSeconds: number, endSeconds: number): string {
-    return `${this.formatTime(startSeconds)} - ${this.formatTime(endSeconds)}`;
-  }
-
-  /**
-   * Toggle category filter
-   */
-  toggleCategoryFilter(category: string) {
-    if (this.timelineComponent) {
-      this.timelineComponent.toggleCategoryFilter(category);
-    }
-  }
-
-  /**
-   * Open bulk export dialog with filtered sections
-   */
-  /**
-   * Open export dialog with options for selected range or specific markers/sections
-   */
-  async openExportDialog() {
-    // Prevent opening multiple export dialogs
-    if (this.exportDialogOpen) {
-      return;
-    }
-
-    const videoId = this.data.videoId || this.data.analysis?.id;
-    if (!videoId) {
-      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
-      return;
-    }
-
-    const videoPath = this.data.videoPath || this.data.analysis?.video.currentPath;
-    if (!videoPath) {
-      this.notificationService.toastOnly('error', 'Error', 'No video path available');
-      return;
-    }
-
-    // Get all sections from database
-    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
-
-    // Import and open the ExportDialogComponent
-    const { ExportDialogComponent } = await import('../export-dialog/export-dialog.component');
-
-    // Mark dialog as open
-    this.exportDialogOpen = true;
-
-    const dialogRef = this.dialog.open(ExportDialogComponent, {
-      width: '800px',
-      maxHeight: '90vh',
-      data: {
-        sections: dbSections.map(section => ({
-          id: section.id,
-          category: section.category || 'Other',
-          description: section.description || section.title || '',
-          startSeconds: section.start_seconds,
-          endSeconds: section.end_seconds || (section.start_seconds + 30),
-          timeRange: this.formatTimeRange(section.start_seconds, section.end_seconds)
-        })),
-        selectionStart: this.currentSelection.startTime,
-        selectionEnd: this.currentSelection.endTime,
-        videoId: videoId,
-        videoPath: videoPath,
-        videoTitle: this.data.videoTitle || 'Video'
-      }
-    });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    // Mark dialog as closed
-    this.exportDialogOpen = false;
-
-    if (result?.export) {
-      // Handle the export
-      await this.processExport(result.data);
-    }
-  }
-
-  /**
-   * Process the export request
-   */
-  private async processExport(exportData: any) {
-    const sections: any[] = [];
-
-    // Add selection if included
-    if (exportData.includeSelection) {
-      sections.push({
-        start_seconds: exportData.selectionStart,
-        end_seconds: exportData.selectionEnd,
-        category: 'Selection',
-        description: 'Timeline Selection'
-      });
-    }
-
-    // Add selected sections
-    exportData.sections.forEach((section: any) => {
-      sections.push({
-        start_seconds: section.startSeconds,
-        end_seconds: section.endSeconds,
-        category: section.category,
-        description: section.description
-      });
-    });
-
-    if (sections.length === 0) {
-      this.notificationService.toastOnly('info', 'No Clips', 'No sections selected for export');
-      return;
-    }
-
-    // Call the existing bulk export dialog with the selected sections
-    await this.processBulkExport(exportData.videoId, exportData.videoPath, sections);
-  }
-
-  /**
-   * Process bulk export with given sections
-   */
-  private async processBulkExport(videoId: string, videoPath: string, sections: any[]) {
-    // Import and open the BulkExportDialogComponent
-    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
-
-    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
-      width: '600px',
-      data: {
-        videoId: videoId,
-        videoPath: videoPath,
-        sections: sections
-      }
-    });
-
-    await dialogRef.afterClosed().toPromise();
-  }
-
-  async openBulkExport() {
-    const videoId = this.data.videoId || this.data.analysis?.id;
-    if (!videoId) {
-      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
-      return;
-    }
-
-    const videoPath = this.data.videoPath || this.data.analysis?.video.currentPath;
-    if (!videoPath) {
-      this.notificationService.toastOnly('error', 'Error', 'No video path available');
-      return;
-    }
-
-    // Get the filtered sections from the database
-    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
-
-    // Filter sections based on active category filters
-    const enabledCategories = new Set(
-      this.categoryFilters
-        .filter(f => f.enabled)
-        .map(f => f.category)
-    );
-
-    const filteredSections = dbSections.filter(section => {
-      const category = section.category?.toLowerCase() || 'other';
-      return enabledCategories.has(category);
-    });
-
-    if (filteredSections.length === 0) {
-      this.notificationService.toastOnly('info', 'No Clips', 'No sections match the current filter');
-      return;
-    }
-
-    // Import and open the BulkExportDialogComponent
-    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
-
-    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
-      width: '600px',
-      data: {
-        videoId: videoId,
-        videoPath: videoPath,
-        sections: filteredSections
-      }
-    });
-
-    await dialogRef.afterClosed().toPromise();
-  }
-
-  getCategoryColor(category: string): string {
-    if (!category) return '#757575';
-
-    // Normalize category name for consistent matching
-    const normalizedCategory = category.toLowerCase().trim();
-
-    // Define specific colors for known categories
-    const categoryColors: { [key: string]: string } = {
-      'extremism': '#ef4444',    // Red
-      'hate': '#f97316',         // Orange
-      'violence': '#dc2626',     // Dark red
-      'conspiracy': '#eab308',   // Yellow
-      'misinformation': '#f59e0b', // Amber
-      'interesting': '#3b82f6',  // Blue
-      'notable': '#06b6d4',      // Cyan
-      'important': '#10b981',    // Green
-      'controversial': '#ec4899', // Pink
-      'custom': '#22c55e',       // Bright green - User-created markers
-    };
-
-    // Check if we have a specific color for this category
-    if (categoryColors[normalizedCategory]) {
-      return categoryColors[normalizedCategory];
-    }
-
-    // Fall back to hash-based color for unknown categories
-    const colors = [
-      '#ef4444', '#f97316', '#eab308', '#22c55e',
-      '#3b82f6', '#a855f7', '#ec4899',
-    ];
-
-    const hash = category.split('').reduce((acc, char) => {
-      return char.charCodeAt(0) + ((acc << 5) - acc);
-    }, 0);
-
-    return colors[Math.abs(hash) % colors.length];
-  }
-
-  /**
-   * Handle transcript search seek event
-   */
-  onTranscriptSeek(timestamp: number) {
-    console.log('onTranscriptSeek called with timestamp:', timestamp);
-    this.seekToTime(timestamp);
-  }
-
-  /**
-   * Handle run analysis request from transcript search
-   * This directly starts transcription without prompting for AI analysis
-   */
-  async onRunTranscriptAnalysis() {
-    // Get video details
-    const videoId = this.data.videoId || this.data.analysis?.id;
-    const videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath;
-    const videoTitle = this.data.analysis?.title || this.data.videoTitle || 'Unknown';
-
-    if (!videoPath) {
-      this.notificationService.toastOnly('error', 'Error', 'No video path available for transcription');
-      return;
-    }
-
-    // Add to analysis queue (transcribe-only mode)
-    // Note: aiModel is not used for transcribe-only, but we need to pass something
-    // The actual processing will skip AI analysis for this mode
-    this.analysisQueueService.addPendingJob({
-      input: videoPath,
-      inputType: 'file',
-      mode: 'transcribe-only',
-      aiModel: '',  // Not used for transcribe-only mode
-      whisperModel: 'base',
-      language: 'en',
-      customInstructions: '',
-      displayName: videoTitle,
-      videoId: videoId,
-      loading: false
-    });
-
-    this.notificationService.toastOnly(
-      'success',
-      'Added to Queue',
-      'Video transcription has been added to the analysis queue. Click the queue button in the header to start processing.'
-    );
-  }
-
-  /**
-   * Generate AI analysis and/or transcript for this video
-   */
-  async generateAnalysis() {
-    // Get video details
-    // IMPORTANT: Don't use analysis.id as fallback - that's the analysis ID, not video ID!
-    const videoId = this.data.videoId;
-    let videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath || this.data.realFilePath;
-    const videoTitle = this.data.analysis?.title || this.data.videoTitle || this.data.customVideo?.title || 'Unknown';
-
-    // For custom/dropped videos, use the real file path
-    if (this.data.customVideo?.videoPath || (this.data.videoPath && !this.data.videoId)) {
-      videoPath = this.data.realFilePath || this.data.videoPath;
-    }
-
-    // Check if we have a valid file path (not a blob URL)
-    if (!videoPath || videoPath.startsWith('blob:')) {
-      this.notificationService.toastOnly(
-        'error',
-        'Cannot Analyze',
-        'Unable to get file path for this video. Please import the video to the library first.'
+      const generationPromise = firstValueFrom(
+        this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/waveform?samples=${targetSamples}&progressive=true`)
       );
-      return;
-    }
 
-    // Add to analysis queue (full analysis mode)
-    // User must have configured a default AI model in settings
-    // The queue processing will prompt to select one if not configured
-    this.analysisQueueService.addPendingJob({
-      input: videoPath,
-      inputType: 'file',
-      mode: 'full',
-      aiModel: '',  // Will use configured default or prompt user to select
-      whisperModel: 'base',
-      language: 'en',
-      customInstructions: '',
-      displayName: videoTitle,
-      videoId: videoId,
-      loading: false
-    });
-
-    this.notificationService.toastOnly(
-      'success',
-      'Added to Queue',
-      'Video has been added to the analysis queue. Click the queue button in the header to start processing.'
-    );
-  }
-
-  /**
-   * Open relink dialog to fix missing video
-   */
-  async relinkVideo() {
-    const { RelinkDialogComponent } = await import('../relink-dialog/relink-dialog.component');
-
-    const dialogRef = this.dialog.open(RelinkDialogComponent, {
-      width: '700px',
-      data: { analysis: this.data.analysis }
-    });
-
-    const result = await dialogRef.afterClosed().toPromise();
-
-    if (result?.relinked) {
-      // Video was successfully relinked, reload the player
-      this.error = null;
-      this.isLoading = true;
-
-      // Dispose of old player
-      if (this.player) {
-        this.player.dispose();
-        this.player = null;
-      }
-
-      // Reinitialize the player with new video path
-      setTimeout(() => {
-        this.initializePlayer();
-      }, 100);
-
-      this.notificationService.toastOnly('success', 'Video Relinked', 'Video has been successfully relinked!');
-    }
-  }
-
-  /**
-   * Handle drag over event
-   */
-  onDragOver(event: DragEvent): void {
-    event.preventDefault();
-    event.stopPropagation();
-    this.isDragOver = true;
-  }
-
-  /**
-   * Handle drag leave event
-   */
-  onDragLeave(event: DragEvent): void {
-    event.preventDefault();
-    event.stopPropagation();
-    this.isDragOver = false;
-  }
-
-  /**
-   * Handle drop event
-   */
-  onDrop(event: DragEvent): void {
-    event.preventDefault();
-    event.stopPropagation();
-    this.isDragOver = false;
-
-    const files = event.dataTransfer?.files;
-    if (files && files.length > 0) {
-      this.loadVideoFile(files[0]);
-    }
-  }
-
-  /**
-   * Handle file selection from input
-   */
-  onFileSelected(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    if (input.files && input.files.length > 0) {
-      this.loadVideoFile(input.files[0]);
-    }
-  }
-
-  /**
-   * Load a video from the database with its analysis and transcript data
-   */
-  private async loadExistingVideoFromDatabase(response: any, filePath: string): Promise<void> {
-    const video = response.video;
-    const analysis = response.analysis;
-    const transcript = response.transcript;
-    const sections = response.sections;
-
-    console.log('Loading existing video from database:', {
-      videoId: video.id,
-      mediaType: video.media_type,
-      hasAnalysis: !!analysis,
-      hasTranscript: !!transcript,
-      sectionsCount: sections?.length || 0
-    });
-
-    // Set media type from database
-    this.mediaType = video.media_type || 'video';
-
-    // Update component data to use the database video
-    this.data = {
-      videoId: video.id,
-      videoPath: filePath,
-      videoTitle: video.filename,
-      hasAnalysis: !!analysis,
-      hasTranscript: !!transcript
-    };
-
-    // Load sections (custom markers and analysis sections)
-    // Load sections regardless of whether there's an analysis - custom markers should always show
-    if (sections && sections.length > 0) {
-      try {
-        // Convert database sections to timeline format
-        this.timelineSections = sections.map((section: any) => ({
-          startTime: section.start_seconds,
-          endTime: section.end_seconds || (section.start_seconds + 30),
-          category: section.category || 'General',
-          description: section.description || section.title || '',
-          color: this.getCategoryColor(section.category || 'General')
-        }));
-
-        // Build metadata object for display
-        this.metadata = {
-          sections: sections.map((s: any) => ({
-            startSeconds: s.start_seconds,
-            endSeconds: s.end_seconds,
-            timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
-            category: s.category || 'General',
-            description: s.description || s.title || '',
-            quotes: [] // Database doesn't store quotes separately
-          }))
-        } as any;
-
-        console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and analysis)');
-      } catch (error) {
-        console.error('Failed to load sections:', error);
-      }
-    }
-
-    // Parse and load analysis metadata if available
-    if (analysis) {
-      console.log('Analysis metadata available');
-    }
-
-    // Load transcript if available
-    if (transcript) {
-      try {
-        // Use SRT format from database if available (includes timestamps for seeking)
-        // Otherwise fall back to plain text
-        this.transcriptText = transcript.srt_format || transcript.plain_text;
-        this.transcriptExists = !!(this.transcriptText && this.transcriptText.trim().length > 0);
-        console.log('Loaded transcript');
-      } catch (error) {
-        console.error('Failed to load transcript:', error);
-      }
-    }
-
-    // Now initialize the video player using the normal flow
-    // This will use the videoPath we set in this.data
-    this.initializePlayer();
-  }
-
-
-  /**
-   * Load a video file from disk
-   */
-  private async loadVideoFile(file: File): Promise<void> {
-    // Validate file type
-    if (!file.type.startsWith('video/')) {
-      this.notificationService.toastOnly('error', 'Invalid File', 'Please select a valid video file');
-      return;
-    }
-
-    // Clear any existing errors
-    this.error = null;
-    this.isLoading = true;
-    this.loadingMessage = 'Checking if video exists in database...';
-
-    // Try to get the real file path (only works in Electron)
-    const electron = (window as any).electron;
-    let filePath: string | null = null;
-
-    if (electron && electron.getFilePathFromFile) {
-      try {
-        filePath = electron.getFilePathFromFile(file);
-        console.log('Got file path from Electron:', filePath);
-      } catch (error) {
-        console.warn('Failed to get file path from Electron:', error);
-      }
-    }
-
-    // If we have a file path, check if this video exists in the database
-    if (filePath) {
-      try {
-        const url = await this.backendUrlService.getApiUrl('/database/videos/lookup-by-file');
-        const response = await this.http.post<any>(url, { filePath }).toPromise();
-
-        if (response?.success && response.found) {
-          // Video exists in database! Load it with its analysis and transcript
-          console.log('Video found in database:', response.video);
-
-          this.notificationService.toastOnly(
-            'info',
-            'Video Found in Library',
-            'Loading existing analysis and transcript data...'
+      // Poll for progress updates every 1 second
+      const pollInterval = setInterval(async () => {
+        try {
+          const progressResponse = await firstValueFrom(
+            this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/waveform/progress`)
           );
 
-          // Load the video from the database with all its metadata
-          await this.loadExistingVideoFromDatabase(response, filePath);
-          return;
-        } else {
-          console.log('Video not found in database, loading as new video');
+          if (progressResponse.success && progressResponse.data) {
+            const { progress, status, partial } = progressResponse.data;
+            console.log(`📊 Waveform progress: ${progress}% - ${status}`);
+
+            // Update with partial waveform if available
+            if (partial && partial.samples && partial.samples.length > 0) {
+              console.log(`✓ Updating with ${partial.samples.length} samples (${progress}%)`);
+              // Create a completely new object to trigger change detection
+              this.waveformData.set({
+                samples: [...partial.samples], // Create new array
+                sampleRate: partial.sampleRate || 44100,
+                duration: partial.duration || duration
+              });
+            }
+
+            // Stop polling when complete
+            if (progress >= 100) {
+              clearInterval(pollInterval);
+            }
+          }
+        } catch (err) {
+          // Progress endpoint might not be ready yet, continue polling
         }
+      }, 1000);
+
+      // Wait for final result
+      const response = await generationPromise;
+      clearInterval(pollInterval);
+
+      console.log('Server waveform response:', response);
+
+      if (response.success && response.data && response.data.samples && response.data.samples.length > 0) {
+        console.log(`✅ Final waveform: ${response.data.samples.length} samples`);
+
+        // Replace with final high-quality waveform
+        this.waveformData.set({
+          samples: response.data.samples,
+          sampleRate: response.data.sampleRate || 44100,
+          duration: response.data.duration || duration
+        });
+      } else {
+        console.warn('Server waveform not available, keeping current version');
+      }
+    } catch (error) {
+      console.warn('Server waveform loading failed, keeping current version:', error);
+    }
+  }
+
+  // Generate demo waveform data (fallback)
+  private generateDemoWaveform(duration: number): number[] {
+    const samples: number[] = [];
+    const sampleCount = Math.max(100, duration * 10);
+
+    for (let i = 0; i < sampleCount; i++) {
+      const baseAmplitude = 0.3 + Math.random() * 0.4;
+      const variation = Math.sin(i / 10) * 0.2;
+      samples.push(Math.max(0, Math.min(1, baseAmplitude + variation)));
+    }
+
+    return samples;
+  }
+
+  // Get category color
+  getCategoryColor(category: string): string {
+    return CATEGORY_COLORS[category.toLowerCase()] || CATEGORY_COLORS['default'];
+  }
+
+  // Handle generate analysis button click
+  onGenerateAnalysis(videoId: string) {
+    // Navigate to library page with state to trigger analysis
+    this.router.navigate(['/'], {
+      state: {
+        triggerAnalysis: true,
+        videoId: videoId,
+        videoName: this.metadata().filename
+      }
+    });
+  }
+
+  // ========== TAB MANAGEMENT ==========
+
+  /**
+   * Open a video in a new tab or focus existing tab
+   */
+  openTab(videoId: string, videoPath: string | null, videoTitle: string): void {
+    // Check if video is already open in a tab
+    const existingTab = this.tabs().find(t => t.videoId === videoId);
+    if (existingTab) {
+      this.switchTab(existingTab.id);
+      return;
+    }
+
+    // Check tab limit
+    if (this.tabs().length >= this.MAX_TABS) {
+      console.warn(`Maximum tabs (${this.MAX_TABS}) reached`);
+      return;
+    }
+
+    // Save current tab state before opening new one
+    this.saveCurrentTabState();
+
+    // Create new tab
+    const videoUrl = `${this.API_BASE}/database/videos/${videoId}/stream`;
+    const newTab = createEditorTab(videoId, videoPath, videoTitle, videoUrl);
+
+    // Add tab and make it active
+    this.tabs.update(tabs => [...tabs, newTab]);
+    this.activeTabId.set(newTab.id);
+
+    // Restore new tab state to signals
+    this.restoreTabState(newTab);
+
+    // Load video data for the new tab
+    this.loadVideoData(videoId);
+  }
+
+  /**
+   * Switch to a different tab
+   */
+  switchTab(tabId: string): void {
+    if (this.activeTabId() === tabId) return;
+
+    const tab = this.tabs().find(t => t.id === tabId);
+    if (!tab) return;
+
+    // Pause playback before switching
+    if (this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    // Save current tab state
+    this.saveCurrentTabState();
+
+    // Switch to new tab
+    this.activeTabId.set(tabId);
+
+    // Restore new tab's state
+    this.restoreTabState(tab);
+
+    // If tab data isn't loaded yet, load it
+    if (!tab.isLoaded) {
+      this.loadVideoData(tab.videoId);
+    }
+  }
+
+  /**
+   * Close a tab
+   */
+  closeTab(tabId: string): void {
+    const tabs = this.tabs();
+    const tabIndex = tabs.findIndex(t => t.id === tabId);
+    if (tabIndex === -1) return;
+
+    // Pause playback if closing active tab
+    if (this.activeTabId() === tabId && this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    // Remove the tab
+    this.tabs.update(tabs => tabs.filter(t => t.id !== tabId));
+
+    // If we closed the active tab, switch to another
+    if (this.activeTabId() === tabId) {
+      const remainingTabs = this.tabs();
+      if (remainingTabs.length > 0) {
+        // Switch to adjacent tab (prefer right, then left)
+        const newIndex = Math.min(tabIndex, remainingTabs.length - 1);
+        this.switchTab(remainingTabs[newIndex].id);
+      } else {
+        // No tabs left, go back to library
+        this.activeTabId.set(null);
+        this.goBack();
+      }
+    }
+  }
+
+  /**
+   * Close all tabs except the specified one
+   */
+  closeOtherTabs(keepTabId: string): void {
+    const tabToKeep = this.tabs().find(t => t.id === keepTabId);
+    if (!tabToKeep) return;
+
+    // Pause playback if needed
+    if (this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    this.tabs.set([tabToKeep]);
+    this.switchTab(keepTabId);
+  }
+
+  /**
+   * Close all tabs
+   */
+  closeAllTabs(): void {
+    // Pause playback if needed
+    if (this.editorState().isPlaying) {
+      this.togglePlayPause();
+    }
+
+    this.tabs.set([]);
+    this.activeTabId.set(null);
+    this.goBack();
+  }
+
+  /**
+   * Switch to the previous tab
+   */
+  switchToPreviousTab(): void {
+    const tabs = this.tabs();
+    if (tabs.length <= 1) return;
+
+    const currentIndex = tabs.findIndex(t => t.id === this.activeTabId());
+    if (currentIndex === -1) return;
+
+    const previousIndex = currentIndex === 0 ? tabs.length - 1 : currentIndex - 1;
+    this.switchTab(tabs[previousIndex].id);
+  }
+
+  /**
+   * Switch to the next tab
+   */
+  switchToNextTab(): void {
+    const tabs = this.tabs();
+    if (tabs.length <= 1) return;
+
+    const currentIndex = tabs.findIndex(t => t.id === this.activeTabId());
+    if (currentIndex === -1) return;
+
+    const nextIndex = currentIndex === tabs.length - 1 ? 0 : currentIndex + 1;
+    this.switchTab(tabs[nextIndex].id);
+  }
+
+  /**
+   * Save current signal state to the active tab
+   */
+  private saveCurrentTabState(): void {
+    const tabId = this.activeTabId();
+    if (!tabId) return;
+
+    this.tabs.update(tabs => tabs.map(tab => {
+      if (tab.id !== tabId) return tab;
+
+      return {
+        ...tab,
+        editorState: this.editorState(),
+        sections: this.sections(),
+        chapters: this.chapters(),
+        transcript: this.transcript(),
+        analysisData: this.analysisData() || null,
+        waveformData: this.waveformData(),
+        categoryFilters: this.categoryFilters(),
+        highlightSelection: this.highlightSelection(),
+        hasAnalysis: this.hasAnalysis()
+      };
+    }));
+  }
+
+  /**
+   * Restore a tab's state to the component signals
+   */
+  private restoreTabState(tab: EditorTab): void {
+    const currentUrl = this.videoUrl();
+    const isVideoChanging = currentUrl !== tab.videoUrl;
+
+    // If video URL is changing, set up restoration to preserve playhead position
+    if (isVideoChanging && tab.editorState.currentTime > 0) {
+      this.isRestoringTab = true;
+      this.pendingSeekTime = tab.editorState.currentTime;
+    }
+
+    this.videoId.set(tab.videoId);
+    this.videoPath.set(tab.videoPath);
+    this.videoTitle.set(tab.videoTitle);
+    this.videoUrl.set(tab.videoUrl);
+    this.editorState.set(tab.editorState);
+    this.sections.set(tab.sections);
+    this.chapters.set(tab.chapters);
+    this.transcript.set(tab.transcript);
+    this.analysisData.set(tab.analysisData || undefined);
+    this.waveformData.set(tab.waveformData);
+    this.categoryFilters.set(tab.categoryFilters);
+    this.highlightSelection.set(tab.highlightSelection);
+    this.hasAnalysis.set(tab.hasAnalysis);
+
+    // Update metadata
+    this.metadata.update(m => ({
+      ...m,
+      filename: tab.videoTitle
+    }));
+
+    // If video URL didn't change but position did, seek directly
+    if (!isVideoChanging && tab.editorState.currentTime > 0 && this.videoPlayer) {
+      this.videoPlayer.seekTo(tab.editorState.currentTime);
+    }
+  }
+
+  /**
+   * Mark the current tab as loaded and save its state
+   */
+  private markTabLoaded(): void {
+    const tabId = this.activeTabId();
+    if (!tabId) return;
+
+    this.tabs.update(tabs => tabs.map(tab => {
+      if (tab.id !== tabId) return tab;
+      return { ...tab, isLoaded: true };
+    }));
+
+    this.saveCurrentTabState();
+  }
+
+  /**
+   * Handle tab selection from tab bar
+   */
+  onTabSelect(tabId: string): void {
+    this.switchTab(tabId);
+  }
+
+  /**
+   * Handle tab close from tab bar
+   */
+  onTabClose(tabId: string): void {
+    this.closeTab(tabId);
+  }
+
+  /**
+   * Handle close other tabs from tab bar
+   */
+  onTabCloseOthers(tabId: string): void {
+    this.closeOtherTabs(tabId);
+  }
+
+  /**
+   * Handle close all tabs from tab bar
+   */
+  onTabCloseAll(): void {
+    this.closeAllTabs();
+  }
+
+  // ===== Group Management Methods =====
+
+  /**
+   * Handle moving a tab to another group
+   */
+  async onMoveTabToGroup(event: { tabId: string; targetGroupNumber: number }): Promise<void> {
+    const tab = this.tabs().find(t => t.id === event.tabId);
+    if (!tab) return;
+
+    // Prepare tab data for transfer
+    const tabData = this.prepareTabDataForTransfer(tab);
+
+    try {
+      // Send to target group
+      const success = await (window as any).electron.moveTabToGroup(tabData, event.targetGroupNumber);
+      if (success) {
+        // Remove from this window
+        this.closeTab(event.tabId);
+        console.log(`Moved tab ${tab.videoTitle} to Group ${event.targetGroupNumber}`);
+      }
+    } catch (error) {
+      console.error('Error moving tab to group:', error);
+    }
+  }
+
+  /**
+   * Handle moving a tab to a new group (new window)
+   */
+  async onMoveTabToNewGroup(tabId: string): Promise<void> {
+    const tab = this.tabs().find(t => t.id === tabId);
+    if (!tab) return;
+
+    // Prepare tab data for transfer
+    const tabData = this.prepareTabDataForTransfer(tab);
+
+    try {
+      // Create new group with this tab
+      const newGroupNumber = await (window as any).electron.createGroupWithTab(tabData);
+      if (newGroupNumber) {
+        // Remove from this window
+        this.closeTab(tabId);
+        console.log(`Moved tab ${tab.videoTitle} to new Group ${newGroupNumber}`);
+      }
+    } catch (error) {
+      console.error('Error creating new group with tab:', error);
+    }
+  }
+
+  /**
+   * Handle consolidating all groups
+   */
+  async onConsolidateGroups(): Promise<void> {
+    try {
+      await (window as any).electron.consolidateGroups();
+      console.log('Consolidate groups request sent');
+    } catch (error) {
+      console.error('Error consolidating groups:', error);
+    }
+  }
+
+  /**
+   * Handle renaming a tab
+   */
+  onTabRename(tabId: string): void {
+    const tab = this.tabs().find(t => t.id === tabId);
+    if (!tab) return;
+
+    const newTitle = prompt('Enter new tab title:', tab.videoTitle);
+    if (newTitle && newTitle.trim() !== '') {
+      this.tabs.update(tabs => tabs.map(t => {
+        if (t.id !== tabId) return t;
+        return { ...t, videoTitle: newTitle.trim() };
+      }));
+    }
+  }
+
+  /**
+   * Prepare tab data for transfer to another window
+   */
+  private prepareTabDataForTransfer(tab: EditorTab): any {
+    return {
+      videoId: tab.videoId,
+      videoPath: tab.videoPath,
+      videoTitle: tab.videoTitle,
+      videoUrl: tab.videoUrl,
+      editorState: tab.editorState,
+      sections: tab.sections,
+      chapters: tab.chapters,
+      waveformData: tab.waveformData,
+      transcript: tab.transcript,
+      analysisData: tab.analysisData,
+      highlightSelection: tab.highlightSelection,
+      categoryFilters: tab.categoryFilters,
+      hasAnalysis: tab.hasAnalysis
+    };
+  }
+
+  /**
+   * Receive a tab from another window
+   */
+  private receiveTabFromOtherWindow(tabData: any): void {
+    // Check if we already have this video open
+    const existingTab = this.tabs().find(t => t.videoId === tabData.videoId);
+    if (existingTab) {
+      // Just switch to the existing tab
+      this.switchTab(existingTab.id);
+      return;
+    }
+
+    // Check max tabs
+    if (this.tabs().length >= this.MAX_TABS) {
+      console.warn('Cannot receive tab: at max tabs limit');
+      return;
+    }
+
+    // Create new tab with the transferred data
+    const newTab = createEditorTab(
+      tabData.videoId,
+      tabData.videoPath,
+      tabData.videoTitle,
+      tabData.videoUrl
+    );
+
+    // Restore the full state
+    const restoredTab: EditorTab = {
+      ...newTab,
+      editorState: tabData.editorState || newTab.editorState,
+      sections: tabData.sections || [],
+      chapters: tabData.chapters || [],
+      waveformData: tabData.waveformData || newTab.waveformData,
+      transcript: tabData.transcript || [],
+      analysisData: tabData.analysisData,
+      highlightSelection: tabData.highlightSelection,
+      categoryFilters: tabData.categoryFilters || [],
+      hasAnalysis: tabData.hasAnalysis || false,
+      isLoaded: true // Mark as loaded since we already have the data
+    };
+
+    this.tabs.update(tabs => [...tabs, restoredTab]);
+    this.activeTabId.set(restoredTab.id);
+  }
+
+  /**
+   * Send all tabs to another group (for consolidation)
+   */
+  private async sendAllTabsToGroup(targetGroupNumber: number): Promise<void> {
+    const allTabs = this.tabs();
+
+    for (const tab of allTabs) {
+      const tabData = this.prepareTabDataForTransfer(tab);
+      try {
+        await (window as any).electron.moveTabToGroup(tabData, targetGroupNumber);
       } catch (error) {
-        console.error('Error checking if video exists in database:', error);
-        // Continue loading as a new video if lookup fails
+        console.error('Error sending tab to group:', error);
       }
     }
 
-    // Video not in database or no file path - load as custom video
-    this.loadingMessage = 'Loading video...';
-
-    // Create object URL for the file (for browser playback)
-    const videoUrl = URL.createObjectURL(file);
-
-    // Update data to reflect custom video
-    this.data = {
-      ...this.data,
-      customVideo: {
-        title: file.name,
-        videoPath: videoUrl, // Blob URL for browser playback
-        isLocalFile: true
-      },
-      videoTitle: file.name,
-      realFilePath: filePath || undefined // Real file path for backend processing (if available)
-    };
-
-    // Reinitialize the player with the new video
-    // initializePlayer handles all cleanup and setup
-    await this.initializePlayer();
+    // Close this window after sending all tabs
+    window.close();
   }
 
   /**
-   * Get the current media element (video or audio) for waveform generation
+   * Restore incoming tab state (when window is created with tab data from another window)
    */
-  getMediaElement(): HTMLVideoElement | HTMLAudioElement | undefined {
-    // Return cached media element to avoid repeated DOM queries on every change detection
-    // CRITICAL: This method is called from template binding, so it runs on EVERY change detection cycle
-    // Using a cached value prevents thousands of querySelector calls and prevents triggering
-    // unnecessary ngOnChanges in child components
-    if (this.cachedMediaElement) {
-      return this.cachedMediaElement;
-    }
-    // Fallback: If cache is empty but player exists, query and cache it
-    if (this.player) {
-      this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
-      return this.cachedMediaElement;
-    }
-    // Final fallback to direct element references if player not initialized
-    if (this.mediaType === 'audio' && this.audioElement) {
-      return this.audioElement.nativeElement;
-    } else if (this.mediaType === 'video' && this.videoElement) {
-      return this.videoElement.nativeElement;
-    }
-    return undefined;
-  }
-
-  /**
-   * Cleanup loading timers
-   */
-  private cleanupLoadingTimers(): void {
-    if (this.loadingProgressInterval) {
-      clearInterval(this.loadingProgressInterval);
-      this.timers.delete(this.loadingProgressInterval);
-      this.loadingProgressInterval = null;
-    }
-    if (this.loadingTimeoutTimer) {
-      clearTimeout(this.loadingTimeoutTimer);
-      this.timers.delete(this.loadingTimeoutTimer);
-      this.loadingTimeoutTimer = null;
+  private restoreIncomingTabState(tabData: any): void {
+    const currentTab = this.tabs().find(t => t.videoId === tabData.videoId);
+    if (currentTab) {
+      // Update the existing tab with the full state
+      this.tabs.update(tabs => tabs.map(t => {
+        if (t.videoId !== tabData.videoId) return t;
+        return {
+          ...t,
+          editorState: tabData.editorState || t.editorState,
+          sections: tabData.sections || t.sections,
+          chapters: tabData.chapters || t.chapters,
+          waveformData: tabData.waveformData || t.waveformData,
+          transcript: tabData.transcript || t.transcript,
+          analysisData: tabData.analysisData ?? t.analysisData,
+          highlightSelection: tabData.highlightSelection ?? t.highlightSelection,
+          categoryFilters: tabData.categoryFilters || t.categoryFilters,
+          hasAnalysis: tabData.hasAnalysis ?? t.hasAnalysis,
+          isLoaded: true
+        };
+      }));
     }
   }
 }

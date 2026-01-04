@@ -153,9 +153,9 @@ export class TourService {
       ],
     });
 
-    // RippleCut (video editor) tour
-    this.tours.set('video-editor', {
-      id: 'video-editor',
+    // Video Player tour
+    this.tours.set('video-player', {
+      id: 'video-player',
       name: 'RippleCut Tour',
       steps: [
         {
@@ -565,9 +565,9 @@ export class TourService {
       ],
     });
 
-    // Advanced RippleCut tour
-    this.tours.set('video-editor-advanced', {
-      id: 'video-editor-advanced',
+    // Advanced Video Player tour
+    this.tours.set('video-player-advanced', {
+      id: 'video-player-advanced',
       name: 'Advanced RippleCut Tour',
       steps: [
         {
@@ -765,7 +765,7 @@ export class TourService {
       return this.tours.get('video-info') || null;
     }
     if (route.includes('/video/')) {
-      return this.tours.get('video-editor') || null;
+      return this.tours.get('video-player') || null;
     }
     return null;
   }
@@ -784,7 +784,7 @@ export class TourService {
       return 'video-info';
     }
     if (route.includes('/video/')) {
-      return 'video-editor';
+      return 'video-player';
     }
     return null;
   }

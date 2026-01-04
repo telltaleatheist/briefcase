@@ -1,0 +1,3038 @@
+// ============================================================================
+// RIPPLECUT - Final Cut Pro Style (Creamsicle Edition)
+// ============================================================================
+
+// Colors - Creamsicle Theme (neutral dark backgrounds with orange accents)
+$bg-app: #1a1a1a;
+$bg-panel: #222222;
+$bg-surface: #2a2a2a;
+$bg-elevated: #333333;
+$bg-dark: #141414;
+$bg-black: #0a0a0a;
+
+$border: #3a3a3a;
+$border-light: #444444;
+
+$text: #f0f0f0;
+$text-dim: #999999;
+$text-muted: #666666;
+
+// Primary creamsicle colors
+$accent: #ff6b35;
+$accent-bright: #ff8f5a;
+$accent-dim: #e55529;
+$accent-glow: rgba(255, 107, 53, 0.4);
+
+// Secondary accent
+$secondary: #ffa366;
+$golden: #ffc107;
+$peachy: #ffb380;
+
+$playhead: #ff6b35;
+$selection: rgba(255, 107, 53, 0.25);
+
+// Layout
+$titlebar-height: 38px;
+$toolbar-height: 40px;
+$timeline-header-height: 28px;
+$ruler-height: 24px;
+$track-height: 64px;
+
+// ============================================================================
+// BASE
+// ============================================================================
+
+.ripplecut {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: $bg-app;
+  color: $text;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  font-size: 12px;
+  user-select: none;
+  overflow: hidden;
+  // Prevent browser back/forward navigation on horizontal scroll
+  overscroll-behavior: none;
+
+  &.fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+  }
+}
+
+// ============================================================================
+// TITLE BAR
+// ============================================================================
+
+.title-bar {
+  display: flex;
+  align-items: center;
+  height: $titlebar-height;
+  background: linear-gradient(180deg, #333333 0%, #2a2a2a 100%);
+  border-bottom: 1px solid $border;
+  padding: 0 12px;
+  -webkit-app-region: drag;
+}
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+  margin-right: 16px;
+  -webkit-app-region: no-drag;
+
+  .control {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    cursor: pointer;
+
+    &.close { background: #ff5f57; }
+    &.minimize { background: #febc2e; }
+    &.maximize { background: #28c840; }
+  }
+}
+
+.title-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  -webkit-app-region: no-drag;
+}
+
+.title-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px 4px 0 0;
+  color: $text-dim;
+  font-size: 11px;
+  cursor: pointer;
+
+  &:hover { background: rgba(255,255,255,0.05); }
+
+  &.active {
+    background: $bg-panel;
+    color: $text;
+  }
+
+  .tab-close {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0;
+
+    &:hover { background: rgba(255,255,255,0.2); }
+  }
+
+  &:hover .tab-close { opacity: 1; }
+}
+
+.title-actions {
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.title-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: $text-dim;
+  cursor: pointer;
+
+  svg { width: 16px; height: 16px; }
+  &:hover { background: rgba(255,255,255,0.1); }
+}
+
+// ============================================================================
+// TOOLBAR
+// ============================================================================
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: $toolbar-height;
+  background: $bg-panel;
+  border-bottom: 1px solid $border;
+  padding: 0 8px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tools-group {
+  background: $bg-surface;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.tool-btn {
+  width: 32px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: $text-dim;
+  cursor: pointer;
+  transition: all 0.1s;
+
+  svg { width: 16px; height: 16px; }
+
+  &:hover {
+    background: rgba(255,255,255,0.1);
+    color: $text;
+  }
+
+  &.active {
+    background: $accent;
+    color: white;
+  }
+}
+
+.tool-divider {
+  width: 1px;
+  height: 20px;
+  background: $border;
+  margin: 0 4px;
+}
+
+// ============================================================================
+// WORKSPACE
+// ============================================================================
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: $bg-dark;
+}
+
+// ============================================================================
+// PANELS (Browser & Inspector)
+// ============================================================================
+
+.browser-panel,
+.inspector-panel {
+  position: relative;
+  background: $bg-panel;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0; // Important for nested flex overflow
+  min-width: 180px;
+  max-width: 400px;
+}
+
+.browser-panel {
+  border-right: 1px solid $border;
+}
+
+.inspector-panel {
+  border-left: 1px solid $border;
+}
+
+// Panel resize handles
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 10;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 40px;
+    background: $border-light;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+  }
+
+  &:hover::before,
+  &.is-resizing::before {
+    opacity: 1;
+    background: $accent;
+  }
+}
+
+.browser-panel .panel-resize-handle {
+  right: -3px;
+  &::before { right: 0; }
+}
+
+.inspector-panel .panel-resize-handle {
+  left: -3px;
+  &::before { left: 0; }
+}
+
+// Smaller text for inspector panel tabs (Analysis, Chapters, Transcript are longer words)
+.inspector-panel .panel-tabs button {
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  padding: 8px 4px;
+}
+
+.panel-tabs {
+  display: flex;
+  background: $bg-surface;
+  border-bottom: 1px solid $border;
+  overflow: hidden;
+
+  button {
+    flex: 1;
+    min-width: 0; // Allow shrinking below content size
+    padding: 8px 6px;
+    background: transparent;
+    border: none;
+    color: $text-dim;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:hover { color: $text; }
+    &.active {
+      color: $text;
+      border-bottom-color: $accent;
+    }
+  }
+}
+
+.panel-content {
+  flex: 1;
+  min-height: 0; // Important for flex overflow to work
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+}
+
+// Browser
+.browser-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: $bg-dark;
+  border-radius: 4px;
+  margin-bottom: 8px;
+
+  svg { width: 14px; height: 14px; color: $text-muted; }
+
+  input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: $text;
+    font-size: 11px;
+    &::placeholder { color: $text-muted; }
+    &:focus { outline: none; }
+  }
+}
+
+.browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.browser-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover { background: rgba(255,255,255,0.05); }
+
+  &.folder {
+    svg { width: 16px; height: 16px; color: #ffa366; }
+    span { font-size: 11px; }
+  }
+
+  &.clip {
+    .clip-thumb {
+      width: 48px;
+      height: 27px;
+      min-width: 48px;
+      background: $bg-surface;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .clip-info {
+      flex: 1;
+      min-width: 0;
+      max-width: calc(100% - 56px); // Account for thumb + gap
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .clip-name {
+      display: block;
+      font-size: 11px !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      width: 100%;
+      max-width: 100%;
+    }
+    .clip-duration {
+      display: block;
+      font-size: 10px;
+      color: $text-muted;
+    }
+  }
+}
+
+// Inspector
+.inspector-section {
+  margin-bottom: 16px;
+
+  h4 {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: $text-dim;
+    margin: 0 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid $border;
+  }
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+
+  label {
+    width: 60px;
+    font-size: 11px;
+    color: $text-dim;
+  }
+
+  input[type="number"],
+  select {
+    flex: 1;
+    padding: 4px 6px;
+    background: $bg-dark;
+    border: 1px solid $border;
+    border-radius: 3px;
+    color: $text;
+    font-size: 11px;
+
+    &:focus { outline: none; border-color: $accent; }
+  }
+
+  input[type="range"] {
+    flex: 1;
+    height: 3px;
+    -webkit-appearance: none;
+    background: $bg-dark;
+    border-radius: 2px;
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: $text;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+  }
+
+  .param-inputs {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+    input { width: 50%; }
+  }
+
+  .unit {
+    width: 20px;
+    font-size: 10px;
+    color: $text-muted;
+  }
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 11px;
+
+  label { color: $text-dim; }
+  span { color: $text; }
+}
+
+// ============================================================================
+// VIEWER
+// ============================================================================
+
+.viewer-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.viewer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: $bg-black;
+  min-height: 0; // Allow flex shrinking
+  min-width: 0;
+}
+
+.viewer-canvas {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  min-height: 0; // Allow flex shrinking
+  overflow: hidden;
+}
+
+.video-frame {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-placeholder {
+  color: $text-muted;
+  svg {
+    width: 64px;
+    height: 64px;
+    opacity: 0.3;
+  }
+}
+
+.video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  cursor: pointer;
+}
+
+.viewer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 12px;
+  background: $bg-panel;
+  border-top: 1px solid $border;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.transport-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: $text-dim;
+  cursor: pointer;
+
+  svg { width: 18px; height: 18px; }
+
+  &:hover { background: rgba(255,255,255,0.1); color: $text; }
+
+  &.play-btn {
+    width: 40px;
+    height: 40px;
+    background: $accent;
+    color: white;
+
+    svg { width: 20px; height: 20px; }
+    &:hover { background: $accent-bright; }
+  }
+}
+
+.timecode-display {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 14px;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  .timecode { color: $text; }
+  .timecode-separator { color: $text-muted; margin: 0 4px; }
+  .total { color: $text-dim; }
+
+  // Selection mode styles
+  .selection-from {
+    color: $accent-bright;
+  }
+
+  .selection-to {
+    color: $accent-bright;
+  }
+
+  .selection-duration {
+    color: $golden;
+    font-weight: 600;
+    padding: 2px 8px;
+    background: rgba($golden, 0.15);
+    border-radius: 4px;
+    margin-left: 4px;
+  }
+
+  // Highlight/Marking mode styles
+  .highlight-start {
+    color: $peachy;
+  }
+
+  .highlight-indicator {
+    color: $accent;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 3px 8px;
+    background: rgba($accent, 0.2);
+    border: 1px solid rgba($accent, 0.4);
+    border-radius: 4px;
+    margin-left: 8px;
+    animation: pulse-glow 1s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba($accent, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba($accent, 0.5);
+  }
+}
+
+// ============================================================================
+// TIMELINE
+// ============================================================================
+
+.timeline-section {
+  display: flex;
+  flex-direction: column;
+  background: $bg-panel;
+  border-top: 1px solid $border;
+  position: relative;
+  // Height is controlled by signal for resizing
+}
+
+// Resize handle at top of timeline
+.timeline-resize-handle {
+  position: absolute;
+  top: -6px;
+  left: 0;
+  right: 0;
+  height: 12px;
+  cursor: ns-resize;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &::before {
+    content: '';
+    width: 60px;
+    height: 4px;
+    background: $border-light;
+    border-radius: 2px;
+    opacity: 0.5;
+    transition: all 0.15s;
+  }
+
+  &:hover::before {
+    opacity: 1;
+    background: $accent;
+    width: 80px;
+    box-shadow: 0 0 8px rgba($accent, 0.4);
+  }
+
+  &.is-resizing::before {
+    opacity: 1;
+    background: $accent-bright;
+    width: 100px;
+    box-shadow: 0 0 12px rgba($accent, 0.6);
+  }
+}
+
+// Chapter Track (thin line at top)
+.chapter-track {
+  display: flex;
+  height: 24px;
+  background: $bg-surface;
+  border-bottom: 1px solid $border;
+}
+
+.chapter-track-header {
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $bg-surface;
+  border-right: 1px solid $border;
+
+  .track-icon {
+    font-size: 9px;
+    font-weight: 600;
+    color: $secondary;
+  }
+}
+
+.chapter-track-content {
+  flex: 1;
+  position: relative;
+  cursor: pointer;
+}
+
+.chapter-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  z-index: 5;
+
+  &:hover {
+    .chapter-marker-label { opacity: 1; }
+    .chapter-marker-icon { transform: scale(1.2); }
+  }
+}
+
+.chapter-marker-icon {
+  width: 10px;
+  height: 10px;
+  background: $secondary;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  transition: transform 0.1s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.chapter-marker-label {
+  font-size: 9px;
+  font-weight: 500;
+  color: $secondary;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  transform: rotate(0deg); // Reset rotation from icon
+  padding-left: 2px;
+}
+
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: $timeline-header-height;
+  padding: 0 12px;
+  background: $bg-surface;
+  border-bottom: 1px solid $border;
+}
+
+.timeline-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .project-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: $text;
+  }
+}
+
+// Mini transport controls for timeline header
+.transport-mini {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.transport-btn-mini {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: $text-dim;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.1s;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &:hover {
+    color: $text;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  &.play-btn {
+    width: 28px;
+    height: 28px;
+    background: rgba($accent, 0.2);
+    color: $accent-bright;
+
+    svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    &:hover {
+      background: rgba($accent, 0.4);
+      color: white;
+    }
+  }
+}
+
+.timeline-header-center {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+// Timecode badge in timeline header
+.timecode-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: $bg-dark;
+  border: 1px solid $border;
+  border-radius: 4px;
+
+  .timecode-time {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 12px;
+    color: $accent-bright;
+    letter-spacing: 0.5px;
+
+    &.dim {
+      color: $text-muted;
+    }
+
+    &.highlight {
+      color: $peachy;
+      font-weight: 600;
+    }
+  }
+
+  .timecode-sep {
+    color: $text-dim;
+    font-size: 10px;
+  }
+
+  .marking-indicator {
+    font-size: 9px;
+    font-weight: 600;
+    color: $accent;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 2px 6px;
+    background: rgba($accent, 0.2);
+    border-radius: 3px;
+    margin-left: 4px;
+  }
+}
+
+// Legacy badge styles (can be removed if not used elsewhere)
+.playhead-badge,
+.selection-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: $bg-dark;
+  border: 1px solid $border;
+  border-radius: 4px;
+  font-size: 10px;
+
+  .badge-label {
+    color: $text-muted;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 9px;
+  }
+
+  .badge-time {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 11px;
+    color: $text;
+    letter-spacing: 0.5px;
+
+    &.empty {
+      color: $text-muted;
+      opacity: 0.5;
+    }
+  }
+
+  .badge-clear {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: $text-dim;
+    cursor: pointer;
+    font-size: 14px;
+    border-radius: 2px;
+    margin-left: 2px;
+
+    &:hover {
+      color: white;
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
+}
+
+.playhead-badge {
+  border-color: rgba($accent, 0.4);
+  background: rgba($accent, 0.1);
+
+  .badge-label {
+    color: $accent;
+  }
+
+  .badge-time {
+    color: $accent-bright;
+  }
+}
+
+.selection-badge {
+  &.has-selection {
+    border-color: rgba($secondary, 0.5);
+    background: rgba($secondary, 0.1);
+
+    .badge-label {
+      color: $secondary;
+    }
+
+    .badge-time {
+      color: $peachy;
+    }
+
+    .badge-clear {
+      color: $secondary;
+
+      &:hover {
+        color: white;
+        background: rgba($secondary, 0.3);
+      }
+    }
+  }
+}
+
+.timeline-header-right {
+  .scale-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .scale-btn {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: $bg-dark;
+    border: 1px solid $border;
+    border-radius: 3px;
+    color: $text-dim;
+    font-size: 14px;
+    cursor: pointer;
+
+    &:hover {
+      color: $text;
+      border-color: $border-light;
+    }
+  }
+
+  .scale-slider {
+    width: 80px;
+    height: 4px;
+    -webkit-appearance: none;
+    background: $bg-dark;
+    border-radius: 2px;
+    border: 1px solid $border;
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: $accent;
+      border-radius: 50%;
+      cursor: pointer;
+
+      &:hover {
+        background: $accent-bright;
+      }
+    }
+  }
+
+  .scale-reset {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: $text-muted;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 3px;
+
+    &:hover {
+      color: $accent;
+      background: rgba($accent, 0.1);
+    }
+  }
+
+  // Legacy zoom control (keep for reference)
+  .zoom-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .zoom-btn {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: $bg-dark;
+    border: 1px solid $border;
+    border-radius: 3px;
+    color: $text-dim;
+    font-size: 14px;
+    cursor: pointer;
+
+    &:hover { border-color: $accent; color: $text; }
+  }
+
+  .zoom-slider {
+    width: 80px;
+    height: 3px;
+    -webkit-appearance: none;
+    background: $bg-dark;
+    border-radius: 2px;
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 10px;
+      height: 10px;
+      background: $text;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+  }
+}
+
+// Timeline Ruler
+.timeline-ruler {
+  position: relative;
+  height: 32px;
+  background: $bg-surface;
+  border-bottom: 1px solid $border;
+  cursor: pointer;
+  overflow: hidden;
+  // Prevent browser back/forward navigation on horizontal scroll
+  overscroll-behavior-x: none;
+  touch-action: pan-y pinch-zoom;
+}
+
+.ruler-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 8px;
+  background: $text-muted;
+
+  &.major {
+    height: 14px;
+    background: $text-dim;
+  }
+
+  .tick-label {
+    position: absolute;
+    bottom: 16px;
+    left: 4px;
+    font-size: 11px;
+    font-family: 'SF Mono', monospace;
+    color: $text;
+    white-space: nowrap;
+  }
+}
+
+.ruler-playhead {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 10;
+
+  .playhead-head {
+    width: 12px;
+    height: 12px;
+    background: $playhead;
+    clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+  }
+
+  &:hover .playhead-head {
+    transform: scale(1.1);
+  }
+}
+
+// Timeline Tracks
+.timeline-tracks {
+  position: relative;
+  flex: 1;
+  min-height: 100px;
+  background: $bg-dark;
+  overflow-x: hidden;
+  overflow-y: auto; // Enable vertical scrolling for many lanes
+  // Prevent browser back/forward navigation on horizontal scroll
+  overscroll-behavior-x: none;
+  touch-action: pan-y pinch-zoom;
+
+  // Custom scrollbar styling - Creamsicle theme
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: $bg-dark;
+    border-left: 1px solid $border;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba($accent, 0.5) 0%, rgba($accent-dim, 0.4) 100%);
+    border: 1px solid rgba($accent, 0.3);
+    border-radius: 5px;
+
+    &:hover {
+      background: linear-gradient(180deg, rgba($accent, 0.7) 0%, rgba($accent-dim, 0.6) 100%);
+      border-color: rgba($accent, 0.5);
+    }
+
+    &:active {
+      background: linear-gradient(180deg, $accent 0%, $accent-dim 100%);
+    }
+  }
+}
+
+// Lanes (dynamic track system)
+// Base heights - scaled by --timeline-scale variable
+$base-track-height: 64px;
+$base-audio-track-height: 32px;
+
+.lane {
+  display: flex;
+  // Scale lane height based on --timeline-scale (default 1.0)
+  height: calc(#{$base-track-height} * var(--timeline-scale, 1));
+  border-bottom: 1px solid transparent; // Hidden by default
+  transition: height 0.1s ease-out;
+
+  &:last-child { border-bottom: none; }
+
+  // Show lane dividers when dragging clips
+  .timeline-tracks.is-dragging & {
+    border-bottom-color: $border;
+  }
+
+  // Empty lane styling (no clips)
+  &.empty-lane {
+    opacity: 0.5;
+
+    .track-content {
+      background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 4px,
+        rgba(255, 255, 255, 0.02) 4px,
+        rgba(255, 255, 255, 0.02) 8px
+      );
+    }
+
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+
+  &.drag-over {
+    background: rgba($accent, 0.1);
+    opacity: 1;
+
+    .track-content {
+      background: rgba($accent, 0.05);
+    }
+  }
+
+  &.master-lane {
+    .lane-header {
+      background: $bg-dark;
+      .lane-label { color: $accent; }
+    }
+  }
+
+  &.video-lane {
+    .lane-header {
+      background: $bg-dark;
+      .lane-label { color: $secondary; }
+    }
+  }
+
+  &.audio-lane {
+    // Audio lanes are half the height of video lanes
+    height: calc(#{$base-audio-track-height} * var(--timeline-scale, 1));
+
+    .lane-header {
+      background: $bg-dark;
+      .lane-label { color: #5aab78; }
+    }
+
+    // Adjust clip positioning for shorter lanes
+    .clip {
+      top: 2px;
+      bottom: 2px;
+    }
+
+    .audio-waveform-inline {
+      inset: 4px 4px;
+    }
+
+    .clip-label.audio-label {
+      top: 2px;
+      font-size: 9px;
+    }
+  }
+}
+
+.lane-header {
+  width: 60px;
+  min-width: 60px;
+  flex-shrink: 0;
+  background: $bg-dark;
+  border-right: 1px solid $border;
+  position: relative;
+  z-index: 10; // Stay above clips
+}
+
+.lane-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+// Legacy track support
+.track {
+  display: flex;
+  height: $track-height;
+  border-bottom: 1px solid $border;
+
+  &:last-child { border-bottom: none; }
+}
+
+.track-header {
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $bg-surface;
+  border-right: 1px solid $border;
+
+  .track-icon {
+    font-size: 10px;
+    font-weight: 600;
+    color: $text-dim;
+  }
+}
+
+.track-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden; // Clip content at edges to prevent overlap with lane-header
+}
+
+// Timeline Clips (only in track-content, not in browser)
+.track-content .clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 4px;
+  overflow: visible; // Allow trim handles to extend outside
+  cursor: grab;
+  transition: box-shadow 0.1s;
+
+  &:hover {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.3);
+
+    .trim-handle {
+      opacity: 0.5;
+    }
+  }
+
+  &.selected {
+    box-shadow: 0 0 0 2px $accent;
+  }
+
+  // FCPX-style yellow selection
+  &.clip-selected {
+    box-shadow: 0 0 0 2px #ffc107, 0 0 8px rgba(255, 193, 7, 0.4);
+    z-index: 50;
+
+    .trim-handle {
+      opacity: 1;
+    }
+  }
+
+  &.dragging {
+    cursor: grabbing;
+    opacity: 0.9;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 2px $accent;
+    z-index: 100;
+  }
+
+  // Trim handles (FCPX-style)
+  .trim-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: ew-resize;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    .trim-handle-bar {
+      width: 3px;
+      height: 24px;
+      max-height: 80%;
+      background: #ffc107;
+      border-radius: 2px;
+      box-shadow: 0 0 4px rgba(255, 193, 7, 0.5);
+    }
+
+    &:hover {
+      opacity: 1 !important;
+
+      .trim-handle-bar {
+        background: #ffda44;
+        box-shadow: 0 0 8px rgba(255, 193, 7, 0.8);
+      }
+    }
+
+    &:active {
+      .trim-handle-bar {
+        background: #fff;
+      }
+    }
+  }
+
+  .trim-handle-left {
+    left: -4px;
+  }
+
+  .trim-handle-right {
+    right: -4px;
+  }
+}
+
+// Drag preview ghost
+.clip-drag-preview {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.video-clip {
+  background: linear-gradient(180deg, #d45a2a 0%, #a84420 100%);
+  border: 1px solid #ff6b35;
+
+  // When clip has analysis strip, adjust content positioning
+  &:has(.analysis-strip) {
+    .clip-content {
+      padding-top: calc(16px * var(--timeline-scale, 1)); // Space for analysis strip
+    }
+  }
+
+  .clip-content {
+    padding: calc(4px * var(--timeline-scale, 1)) calc(8px * var(--timeline-scale, 1));
+    position: relative;
+    z-index: 1; // Keep below analysis-strip
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .clip-label {
+    font-size: calc(10px * var(--timeline-scale, 1));
+    font-weight: 500;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .clip-waveform {
+    position: absolute;
+    bottom: calc(4px * var(--timeline-scale, 1));
+    left: calc(4px * var(--timeline-scale, 1));
+    right: calc(4px * var(--timeline-scale, 1));
+    height: calc(20px * var(--timeline-scale, 1));
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    opacity: 0.4;
+
+    .mini-bar {
+      flex: 1;
+      background: white;
+      min-width: 1px;
+    }
+  }
+}
+
+.analysis-clip {
+  background: var(--clip-color, #666);
+  opacity: 0.8;
+  border: 1px solid var(--clip-color, #888);
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+
+  .clip-label {
+    font-size: 9px;
+    font-weight: 500;
+    color: white;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+}
+
+// Audio Waveform
+.audio-waveform {
+  position: absolute;
+  inset: 8px 0;
+  display: flex;
+  align-items: center;
+}
+
+.waveform-bar {
+  position: absolute;
+  width: 2px;
+  background: #5aab78;
+  opacity: 0.6;
+  border-radius: 1px;
+  transform: translateY(-50%);
+  top: 50%;
+}
+
+// Markers
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--marker-color, #f59e0b);
+  transform: translateX(-50%);
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 8px;
+    height: 8px;
+    background: var(--marker-color, #f59e0b);
+    border-radius: 50%;
+  }
+}
+
+// Selection Range (with drag handles like ClipChimp)
+// Now rendered inside track-content, so it only spans the lane height
+.selection-range {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  background: $selection;
+  border: 2px solid $accent;
+  border-radius: 4px;
+  pointer-events: auto;
+  cursor: move;
+  z-index: 25;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  &:hover {
+    background: rgba($accent, 0.35);
+  }
+}
+
+.selection-handle {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: 100%;
+  pointer-events: auto;
+  cursor: ew-resize;
+  z-index: 21;
+
+  .handle-line {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 60%;
+    background: $accent;
+    border-radius: 2px;
+    transition: all 0.15s ease;
+  }
+
+  &:hover .handle-line {
+    width: 6px;
+    background: $accent-bright;
+  }
+
+  &.selection-handle-left {
+    left: -8px;
+
+    .handle-line {
+      left: 6px;
+    }
+  }
+
+  &.selection-handle-right {
+    right: -8px;
+
+    .handle-line {
+      right: 6px;
+    }
+  }
+}
+
+// Playhead
+// Shadow playhead (skim)
+.shadow-playhead {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 15;
+
+  .shadow-playhead-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.4);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 20;
+
+  .playhead-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    background: $playhead;
+    transform: translateX(-50%);
+    box-shadow: 0 0 4px rgba($playhead, 0.5);
+    pointer-events: none;
+  }
+
+  &.dragging .playhead-line {
+    width: 3px;
+    box-shadow: 0 0 8px rgba($playhead, 0.8);
+  }
+}
+
+// ============================================================================
+// ZOOM SCROLLBAR (Creamsicle style)
+// ============================================================================
+
+.zoom-scrollbar {
+  height: 28px;
+  padding: 6px 60px;
+  background: $bg-dark;
+  border-top: 1px solid $border;
+  // Prevent browser back/forward navigation on horizontal scroll
+  overscroll-behavior-x: none;
+  touch-action: pan-y pinch-zoom;
+}
+
+.scrollbar-track {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(180deg, $bg-black 0%, $bg-dark 50%, $bg-black 100%);
+  border: 1px solid $border;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.scrollbar-thumb {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: stretch;
+  min-width: 60px;
+  background: linear-gradient(180deg,
+    rgba($accent-bright, 0.3) 0%,
+    rgba($accent, 0.4) 50%,
+    rgba($accent-dim, 0.3) 100%
+  );
+  border: 1px solid rgba($accent, 0.5);
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 8px rgba($accent, 0.15);
+
+  &:hover {
+    background: linear-gradient(180deg,
+      rgba($accent-bright, 0.5) 0%,
+      rgba($accent, 0.6) 50%,
+      rgba($accent-dim, 0.5) 100%
+    );
+    border-color: rgba($accent-bright, 0.7);
+    box-shadow: 0 0 12px rgba($accent, 0.3);
+  }
+
+  .thumb-handle {
+    width: 12px;
+    background: linear-gradient(180deg,
+      $accent-bright 0%,
+      $accent 30%,
+      $accent 70%,
+      $accent-dim 100%
+    );
+    cursor: ew-resize;
+    transition: all 0.15s ease;
+    position: relative;
+
+    // Grip lines
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 2px;
+      height: 60%;
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 1px;
+      box-shadow: -3px 0 0 rgba(255, 255, 255, 0.2), 3px 0 0 rgba(255, 255, 255, 0.2);
+    }
+
+    &:hover {
+      width: 16px;
+      background: linear-gradient(180deg,
+        $accent-bright 0%,
+        lighten($accent, 10%) 50%,
+        $accent 100%
+      );
+    }
+
+    &.left {
+      border-radius: 5px 0 0 5px;
+    }
+
+    &.right {
+      border-radius: 0 5px 5px 0;
+    }
+  }
+
+  .thumb-middle {
+    flex: 1;
+    cursor: grab;
+    position: relative;
+
+    // Subtle center grip indicator
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+    }
+
+    &:hover::before {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
+}
+
+// ============================================================================
+// MODALS
+// ============================================================================
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: $bg-panel;
+  border: 1px solid $border;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  min-width: 400px;
+  max-width: 90vw;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid $border;
+
+  h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .modal-close {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: $text-dim;
+    font-size: 18px;
+    cursor: pointer;
+    border-radius: 4px;
+
+    &:hover { background: rgba(255,255,255,0.1); }
+  }
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid $border;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: $accent;
+  border: none;
+  color: white;
+  &:hover { background: $accent-bright; }
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid $border;
+  color: $text;
+  &:hover { border-color: $text-dim; }
+}
+
+// Shortcuts Modal
+.shortcuts-modal {
+  width: 600px;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.shortcut-group {
+  h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: $accent;
+    margin: 0 0 8px;
+  }
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 11px;
+
+  kbd {
+    padding: 2px 6px;
+    background: $bg-dark;
+    border: 1px solid $border;
+    border-radius: 3px;
+    font-family: 'SF Mono', monospace;
+    font-size: 10px;
+  }
+
+  span { color: $text-dim; }
+}
+
+// Export & Marker Modals
+.setting-group {
+  margin-bottom: 12px;
+
+  label {
+    display: block;
+    font-size: 11px;
+    color: $text-dim;
+    margin-bottom: 4px;
+  }
+
+  input, select, textarea {
+    width: 100%;
+    padding: 8px;
+    background: $bg-dark;
+    border: 1px solid $border;
+    border-radius: 4px;
+    color: $text;
+    font-size: 12px;
+
+    &:focus { outline: none; border-color: $accent; }
+  }
+
+  textarea { resize: vertical; }
+}
+
+.color-options {
+  display: flex;
+  gap: 8px;
+}
+
+.color-btn {
+  width: 24px;
+  height: 24px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+
+  &:hover { border-color: white; }
+}
+
+// ============================================================================
+// DRAGGABLE CLIPS
+// ============================================================================
+
+.draggable-clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: grab;
+  transition: box-shadow 0.1s, transform 0.1s;
+
+  &:hover {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.3);
+  }
+
+  &.selected {
+    box-shadow: 0 0 0 2px $accent;
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  &[draggable="true"]:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.2);
+  }
+}
+
+.video-clip.draggable-clip {
+  background: linear-gradient(180deg, #d45a2a 0%, #a84420 100%);
+  border: 1px solid #ff6b35;
+
+  .clip-content {
+    padding: 4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .clip-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .clip-duration {
+    font-size: 8px;
+    color: rgba(255,255,255,0.7);
+  }
+}
+
+// Link indicator for audio-video linking
+.clip .link-indicator {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 9px;
+  opacity: 0.5;
+  cursor: pointer;
+  z-index: 10;
+  filter: grayscale(100%) brightness(2);
+  transition: all 0.15s;
+  line-height: 1;
+
+  &:hover {
+    opacity: 1;
+    filter: grayscale(0%);
+    transform: scale(1.3);
+  }
+}
+
+.audio-clip .link-indicator.audio-link {
+  top: 50%;
+  transform: translateY(-50%);
+  right: 6px;
+
+  &:hover {
+    transform: translateY(-50%) scale(1.3);
+  }
+}
+
+.title-clip {
+  background: linear-gradient(180deg, #ff9f5a 0%, #e07830 100%);
+  border: 1px solid #ffb380;
+
+  .clip-content {
+    padding: calc(4px * var(--timeline-scale, 1)) calc(6px * var(--timeline-scale, 1));
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    align-items: center;
+  }
+
+  .clip-label {
+    font-size: calc(9px * var(--timeline-scale, 1));
+    font-weight: 500;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .clip-icon {
+    font-size: calc(9px * var(--timeline-scale, 1));
+    color: rgba(255,255,255,0.7);
+  }
+}
+
+.audio-clip {
+  background: linear-gradient(180deg, #4a9068 0%, #3a7854 100%);
+  border: 1px solid #5aab78;
+  position: relative;
+  overflow: hidden;
+
+  .clip-label.audio-label {
+    position: absolute;
+    top: calc(2px * var(--timeline-scale, 1));
+    left: calc(6px * var(--timeline-scale, 1));
+    right: calc(6px * var(--timeline-scale, 1));
+    font-size: calc(9px * var(--timeline-scale, 1));
+    font-weight: 500;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    z-index: 2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .audio-waveform-inline {
+    position: absolute;
+    inset: calc(8px * var(--timeline-scale, 1)) calc(4px * var(--timeline-scale, 1));
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    opacity: 0.6;
+
+    .waveform-bar-inline {
+      flex: 1;
+      min-width: 1px;
+      max-width: 2px;
+      background: white;
+      border-radius: 1px;
+    }
+  }
+}
+
+// Dragging state for clips
+.clip.dragging,
+.draggable-clip.dragging {
+  opacity: 0.5;
+  box-shadow: 0 0 0 2px $accent;
+}
+
+// ============================================================================
+// MARKERS LAYER - Sits OUTSIDE all lanes, always on top
+// ============================================================================
+
+.markers-layer {
+  position: absolute;
+  top: 0;
+  left: 60px; // Account for lane headers
+  right: 0;
+  bottom: 0;
+  z-index: 1000; // WAY above everything
+  pointer-events: none; // Let clicks pass through to lanes/clips by default
+  overflow: hidden;
+  // DEBUG: Uncomment to see if layer is rendering on top
+  // background: rgba(255, 0, 0, 0.1);
+}
+
+.marker-lane-overlay {
+  position: absolute;
+  pointer-events: none; // Container doesn't capture events
+  padding: 4px 0; // Match clip top/bottom offset
+  box-sizing: border-box;
+}
+
+// Clips with markers need top padding for the highlight strip
+.clip.has-markers {
+  .clip-content {
+    padding-top: calc(16px * var(--timeline-scale, 1));
+  }
+}
+
+// Marker highlights - ClipChimp-style transparent highlight sections
+.marker-highlight {
+  position: absolute;
+  top: 4px; // Positioned at top of lane (after padding)
+  height: calc(14px * var(--timeline-scale, 1)); // Fixed height strip at top
+  min-width: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid var(--marker-color, #4a90d9);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, border-color 0.15s;
+  z-index: 1;
+  pointer-events: auto !important; // MUST capture pointer events
+
+  // Use pseudo-element for colored background overlay
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--marker-color, #4a90d9);
+    opacity: 0.15;
+    border-radius: 1px;
+    transition: opacity 0.15s;
+  }
+
+  &:hover {
+    box-shadow: 0 0 6px var(--marker-color, #4a90d9);
+    z-index: 5;
+
+    &::before {
+      opacity: 0.3;
+    }
+  }
+
+  // Active state (mouse pressed) - immediate visual feedback
+  &:active {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 12px var(--marker-color, #4a90d9);
+    z-index: 20;
+
+    &::before {
+      opacity: 0.5;
+    }
+  }
+
+  &.selected {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6), 0 0 10px var(--marker-color, #4a90d9);
+    z-index: 10;
+
+    &::before {
+      opacity: 0.4;
+    }
+  }
+
+  // Overlapping with selected marker - fade back
+  &.overlapping {
+    opacity: 0.35;
+    z-index: 1;
+    border-style: dashed;
+
+    &::before {
+      opacity: 0.1;
+    }
+
+    &:hover {
+      opacity: 0.6;
+      border-style: solid;
+
+      &::before {
+        opacity: 0.2;
+      }
+    }
+  }
+
+  // Non-range markers (single point)
+  &:not(.has-range) {
+    min-width: 6px;
+    max-width: 6px;
+    border-width: 2px;
+    border-radius: 2px;
+    transform: translateX(-50%);
+  }
+}
+
+// Highlight drag handles
+.highlight-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 5;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 60%;
+    background: rgba(255, 255, 255, 0.4);
+    border-radius: 1px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  &:hover::before {
+    opacity: 1;
+  }
+
+  &.highlight-handle-left {
+    left: -4px;
+    &::before { left: 3px; }
+  }
+
+  &.highlight-handle-right {
+    right: -4px;
+    &::before { right: 3px; }
+  }
+}
+
+// ============================================================================
+// CLIP MARKERS (Chapter markers only - pennant style)
+// ============================================================================
+
+.clip-markers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.clip-marker {
+  position: absolute;
+  top: 2px;
+  height: 8px;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 5;
+
+  &:hover .marker-tooltip {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  // Single point markers (no range)
+  &:not(.has-range) {
+    width: 8px;
+    transform: translateX(-50%);
+  }
+
+  // Chapter markers - elegant flag/pennant design
+  &.chapter-type {
+    top: calc(14px * var(--timeline-scale, 1) + 2px); // Below analysis strip
+
+    .marker-icon {
+      display: none;
+    }
+
+    // Flag pole
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      width: 2px;
+      height: calc(16px * var(--timeline-scale, 1));
+      background: linear-gradient(180deg, #ffa366 0%, rgba(255, 163, 102, 0.4) 100%);
+      transform: translateX(-50%);
+      border-radius: 1px;
+    }
+
+    // Pennant flag
+    &::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: calc(50% + 1px);
+      width: 0;
+      height: 0;
+      border-top: 5px solid #ffa366;
+      border-right: 8px solid #ffa366;
+      border-bottom: 5px solid transparent;
+      filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.3));
+    }
+
+    &:hover::before {
+      background: linear-gradient(180deg, #ffc107 0%, rgba(255, 193, 7, 0.5) 100%);
+    }
+
+    &:hover::after {
+      border-top-color: #ffc107;
+      border-right-color: #ffc107;
+      transform: scale(1.1);
+    }
+  }
+}
+
+// Marker dots - same size circles for start and end
+.marker-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--marker-color, #4a90d9);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+  transition: transform 0.1s, box-shadow 0.1s;
+  z-index: 2;
+
+  &:hover {
+    transform: translateY(-50%) scale(1.3);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  }
+}
+
+// Selected marker state
+.clip-marker.selected {
+  z-index: 20;
+
+  .marker-dot {
+    transform: translateY(-50%) scale(1.2);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 0 8px var(--marker-color, #4a90d9);
+  }
+
+  .marker-start-dot {
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+
+  .marker-end-dot {
+    transform: translate(50%, -50%) scale(1.2);
+  }
+
+  .marker-range-line {
+    opacity: 1;
+    height: 3px;
+  }
+}
+
+.marker-start-dot {
+  left: 0;
+  transform: translate(-50%, -50%);
+
+  &:hover {
+    transform: translate(-50%, -50%) scale(1.3);
+  }
+}
+
+.marker-end-dot {
+  right: 0;
+  transform: translate(50%, -50%);
+
+  &:hover {
+    transform: translate(50%, -50%) scale(1.3);
+  }
+}
+
+// Connecting line between dots
+.marker-range-line {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: var(--marker-color, #4a90d9);
+  transform: translateY(-50%);
+  border-radius: 1px;
+  opacity: 0.7;
+}
+
+// Legacy marker-icon (hide it, use dots instead)
+.marker-icon {
+  display: none;
+}
+
+.marker-tooltip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: $bg-elevated;
+  border: 1px solid $border;
+  border-radius: 4px;
+  font-size: 9px;
+  color: $text;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s;
+  z-index: 100;
+  pointer-events: none;
+
+  // Arrow pointing down
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: $border;
+  }
+}
+
+// Range markers (extendable)
+.range-marker {
+  position: absolute;
+  top: 2px;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0.6;
+  cursor: pointer;
+  pointer-events: auto;
+
+  &.standard { background: rgba(74, 144, 217, 0.5); border: 1px solid #4a90d9; }
+  &.todo { background: rgba(239, 68, 68, 0.5); border: 1px solid #ef4444; }
+  &.completed { background: rgba(34, 197, 94, 0.5); border: 1px solid #22c55e; }
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+.marker-range-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  background: transparent;
+
+  &.left { left: -3px; }
+  &.right { right: -3px; }
+
+  &:hover {
+    background: rgba(255,255,255,0.2);
+  }
+}
+
+// ============================================================================
+// TRACK DRAG STATES
+// ============================================================================
+
+.track {
+  &.drag-over {
+    .track-content {
+      background: rgba($accent, 0.15);
+      box-shadow: inset 0 0 0 2px rgba($accent, 0.4);
+    }
+    .track-header {
+      background: rgba($accent, 0.2);
+    }
+  }
+}
+
+.track-content {
+  &.drag-over {
+    background: rgba($accent, 0.15);
+    box-shadow: inset 0 0 0 2px rgba($accent, 0.4);
+  }
+}
+
+.drop-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: $accent;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba($accent, 0.6);
+  pointer-events: none;
+  z-index: 50;
+}
+
+// Dragging clip ghost
+.clip-ghost {
+  position: fixed;
+  opacity: 0.8;
+  pointer-events: none;
+  z-index: 1000;
+  transform: rotate(2deg);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+// ============================================================================
+// MARKER DRAGGING
+// ============================================================================
+
+.marker-dragging {
+  .marker-icon,
+  .chapter-marker-icon {
+    transform: scale(1.4);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+}
+
+.marker-drag-handle {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 8px;
+  background: transparent;
+  cursor: grab;
+
+  &:hover {
+    &::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 8px;
+      height: 4px;
+      background: rgba(255,255,255,0.3);
+      border-radius: 2px;
+    }
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+// ============================================================================
+// TRACK LABELS
+// ============================================================================
+
+.track-header {
+  .track-icon {
+    &.video { color: $accent; }
+    &.titles { color: $peachy; }
+    &.audio { color: #5aab78; }
+    &.analysis { color: $secondary; }
+  }
+}
+
+// ============================================================================
+// EMPTY TRACK STATE
+// ============================================================================
+
+.empty-track-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-muted;
+  font-size: 10px;
+  font-style: italic;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+// ============================================================================
+// ANALYSIS PANEL
+// ============================================================================
+
+.analysis-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analysis-summary {
+  display: flex;
+  gap: 8px;
+}
+
+.summary-stat {
+  flex: 1;
+  padding: 8px;
+  background: $bg-dark;
+  border-radius: 6px;
+  text-align: center;
+
+  .stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 600;
+    color: $text;
+  }
+
+  .stat-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    color: $text-muted;
+  }
+
+  &.high .stat-value { color: #ef4444; }
+  &.medium .stat-value { color: #f59e0b; }
+}
+
+// (selected-analysis section removed - now using accordion style)
+
+.analysis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analysis-item {
+  background: transparent;
+  border-radius: 6px;
+  transition: background 0.15s;
+  overflow: hidden;
+
+  &.high { border-left: 3px solid #ef4444; }
+  &.medium { border-left: 3px solid #f59e0b; }
+
+  &.expanded {
+    background: $bg-dark;
+  }
+
+  .item-header-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    cursor: pointer;
+
+    &:hover { background: rgba(255,255,255,0.05); }
+  }
+
+  .item-indicator {
+    width: 5px;
+    height: 32px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .item-summary {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .item-category {
+    font-size: 13px;
+    font-weight: 500;
+    color: $text;
+  }
+
+  .item-time {
+    font-size: 11px;
+    font-family: 'SF Mono', monospace;
+    color: $text-muted;
+  }
+
+  .item-severity {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 3px;
+
+    &.high { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+    &.medium { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+    &.low { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+  }
+
+  .expand-icon {
+    font-size: 10px;
+    color: $text-muted;
+    width: 16px;
+    text-align: center;
+  }
+
+  .item-expanded {
+    padding: 0 12px 16px 24px;
+    animation: slideDown 0.15s ease-out;
+  }
+
+  .expanded-message {
+    font-size: 14px;
+    line-height: 1.6;
+    color: $text;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 4px;
+  }
+
+  .expanded-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .jump-btn {
+    padding: 8px 16px;
+    background: $accent;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover { background: $accent-bright; }
+  }
+
+  .duration-label {
+    font-size: 10px;
+    color: $text-muted;
+    font-family: 'SF Mono', monospace;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ============================================================================
+// CHAPTERS PANEL
+// ============================================================================
+
+.chapters-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chapter-item {
+  display: flex;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+
+  &:hover { background: rgba(255,255,255,0.05); }
+  &.active { background: rgba($accent, 0.15); }
+
+  .chapter-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .chapter-title {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: $text;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chapter-time {
+    font-size: 9px;
+    font-family: 'SF Mono', monospace;
+    color: $text-muted;
+  }
+}
+
+// ============================================================================
+// TRANSCRIPT PANEL
+// ============================================================================
+
+.transcript-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transcript-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: $bg-dark;
+  border-radius: 4px;
+
+  svg { width: 14px; height: 14px; color: $text-muted; }
+
+  input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: $text;
+    font-size: 11px;
+    &::placeholder { color: $text-muted; }
+    &:focus { outline: none; }
+  }
+}
+
+.search-options {
+  display: flex;
+  gap: 12px;
+}
+
+.search-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: $text-dim;
+  cursor: pointer;
+
+  input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+    accent-color: $accent;
+  }
+}
+
+.transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.transcript-segment {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+
+  &:hover { background: rgba(255,255,255,0.05); }
+  &.active { background: rgba($accent, 0.15); }
+
+  .segment-time {
+    flex-shrink: 0;
+    width: 40px;
+    font-size: 9px;
+    font-family: 'SF Mono', monospace;
+    color: $text-muted;
+  }
+
+  .segment-text {
+    font-size: 11px;
+    color: $text;
+    line-height: 1.4;
+  }
+}
+
+// ============================================================================
+// SETTINGS PANEL
+// ============================================================================
+
+.settings-panel {
+  .inspector-section + .inspector-section {
+    margin-top: 16px;
+  }
+}
+
+// Selected marker on clip
+.clip-marker.selected {
+  z-index: 10;
+
+  .marker-icon {
+    transform: scale(1.4);
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.4);
+  }
+}
+
+// Marker with range (has duration)
+.clip-marker.has-range {
+  // Container now spans the full range width
+
+  .marker-range-bar {
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    right: 0;
+    height: 3px;
+    background: var(--marker-color, $accent);
+    opacity: 0.6;
+    transform: translateY(-50%);
+    border-radius: 1px;
+  }
+
+  .marker-end-cap {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 6px;
+    height: 6px;
+    background: var(--marker-color, $accent);
+    border-radius: 50%;
+    transform: translate(50%, -50%);
+    box-shadow: 0 0 4px var(--marker-color, $accent);
+  }
+}
+
+// Extend handle (FCP-style "bat" or handle for dragging out duration)
+.marker-extend-handle {
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 20px;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+
+  .extend-handle-icon {
+    width: 8px;
+    height: 14px;
+    background: var(--marker-color, $accent);
+    border-radius: 2px;
+    box-shadow: 0 0 6px var(--marker-color, $accent);
+    position: relative;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 2px;
+      width: 4px;
+      height: 2px;
+      background: rgba(255,255,255,0.5);
+      border-radius: 1px;
+    }
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 7px;
+      left: 2px;
+      width: 4px;
+      height: 2px;
+      background: rgba(255,255,255,0.5);
+      border-radius: 1px;
+    }
+  }
+
+  &:hover .extend-handle-icon {
+    transform: scale(1.1);
+    box-shadow: 0 0 10px var(--marker-color, $accent);
+  }
+
+  &:active .extend-handle-icon {
+    transform: scale(0.95);
+  }
+}
+
+// For markers without a range, position extend handle next to the icon
+.clip-marker:not(.has-range) .marker-extend-handle {
+  right: auto;
+  left: 12px;
+}
+
+// Analysis marker style (slightly larger)
+.clip-marker.analysis-marker {
+  .marker-icon {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+}
+
+// Context Menu
+.context-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.context-menu {
+  position: fixed;
+  background: $bg-elevated;
+  border: 1px solid $border;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  padding: 4px;
+  min-width: 180px;
+
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: $text;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+
+    kbd {
+      font-size: 10px;
+      color: $text-muted;
+    }
+
+    &:hover { background: $accent; }
+  }
+
+  .context-divider {
+    height: 1px;
+    background: $border;
+    margin: 4px 0;
+  }
+}

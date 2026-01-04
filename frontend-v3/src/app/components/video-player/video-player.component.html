@@ -1,290 +1,370 @@
-<div class="video-player-dialog" #playerContainer [class.route-mode]="!isDialogMode" [class.is-fullscreen]="isFullscreen">
-  <!-- Header for route mode -->
-  <div class="dialog-header" *ngIf="!isDialogMode">
-    <button mat-icon-button (click)="close()" class="back-button" matTooltip="Back to Library">
-      <mat-icon>arrow_back</mat-icon>
-    </button>
-    <h2>
-      <mat-icon>movie</mat-icon>
-      {{ data.analysis?.title || data.customVideo?.title || data.videoTitle || 'Video Editor' }}
-    </h2>
-
-    <div style="flex: 1"></div>
-
-    <button mat-icon-button (click)="openAddMarkerDialog()" matTooltip="Add Marker (M)">
-      <mat-icon>bookmark_add</mat-icon>
-    </button>
-
-    <button mat-icon-button (click)="openExportDialog()" matTooltip="Export Clip (⌘E)">
-      <mat-icon>file_download</mat-icon>
-    </button>
-
-    <button mat-icon-button (click)="generateAnalysis()" matTooltip="Generate AI Analysis">
-      <mat-icon>psychology</mat-icon>
-    </button>
-  </div>
-
-  <!-- Header for dialog mode -->
-  <div class="dialog-header" *ngIf="isDialogMode">
-    <button mat-icon-button (click)="close()" class="back-button" matTooltip="Back to Clip Creator">
-      <mat-icon>arrow_back</mat-icon>
-    </button>
-    <h2>
-      <mat-icon>movie</mat-icon>
-      {{ data.analysis?.title || data.customVideo?.title || data.videoTitle || 'Video Player' }}
-    </h2>
-
-    <div style="flex: 1"></div>
-
-    <button *ngIf="data.analysis" mat-icon-button (click)="relinkVideo()" class="relink-button" matTooltip="Relink Video">
-      <mat-icon>link</mat-icon>
-    </button>
-
-    <button mat-icon-button (click)="close()" class="close-button" matTooltip="Close">
-      <mat-icon>close</mat-icon>
-    </button>
-  </div>
-
-  <div class="dialog-content">
-    <!-- Loading State -->
-    <div *ngIf="isLoading" class="loading-overlay">
-      <mat-spinner diameter="60"></mat-spinner>
-      <p>{{ loadingMessage }}</p>
-      <p class="loading-hint" *ngIf="loadingTime > 10">This video may use a codec that's slow to decode in the browser. Consider converting to MP4 for better performance.</p>
+<div class="video-editor" [class.fullscreen]="isFullscreen()" [class.timeline-hidden]="isFullscreen() && !showTimelineInFullscreen()">
+  <!-- Header with controls -->
+  <div class="editor-header">
+    <div class="header-left">
+      <button class="back-btn" (click)="goBack()" title="Back to Library">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+      </button>
+      <h2 class="editor-title">RippleCut</h2>
+      <span class="project-name">{{ metadata().filename }}</span>
     </div>
 
-    <!-- Error State / Drop Zone -->
-    <div *ngIf="error && !isLoading" class="error-container"
-         [class.drag-over]="isDragOver"
-         (drop)="onDrop($event)"
-         (dragover)="onDragOver($event)"
-         (dragleave)="onDragLeave($event)">
-      <input #fileInput type="file" accept="video/*" (change)="onFileSelected($event)" style="display: none">
-
-      <div class="drop-zone-content">
-        <mat-icon class="drop-icon">{{ isDragOver ? 'file_download' : 'video_library' }}</mat-icon>
-        <h3>{{ isDragOver ? 'Drop Video Here' : 'No Video Loaded' }}</h3>
-        <p *ngIf="!isDragOver">{{ error }}</p>
-        <p class="drop-hint" *ngIf="!isDragOver">Drag and drop a video file here, or click the button below</p>
-
-        <div class="error-actions" *ngIf="!isDragOver">
-          <button mat-raised-button color="primary" (click)="fileInput.click()">
-            <mat-icon>folder_open</mat-icon>
-            Open Video File
-          </button>
-          <button mat-raised-button color="accent" (click)="relinkVideo()" *ngIf="data.analysis">
-            <mat-icon>link</mat-icon>
-            Relink Video
-          </button>
-          <button mat-button (click)="close()" *ngIf="isDialogMode">Close</button>
-        </div>
-      </div>
+    <div class="header-center">
+      <!-- Keep header center empty or add other controls later -->
     </div>
 
-    <!-- Media Player (Video/Audio/Image) -->
-    <div class="video-container" [class.hidden]="isLoading || error">
-      <!-- Video Player -->
-      <video
-        *ngIf="mediaType === 'video'"
-        #videoElement
-        class="video-js native-video-player"
-        playsinline
-        preload="metadata"
-        crossorigin="anonymous">
-      </video>
+    <div class="header-right">
+      <button
+        class="sidebar-toggle"
+        [class.active]="showAnalysisSidebar()"
+        (click)="toggleAnalysisSidebar()"
+        title="Toggle Analysis Panel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+      <button
+        class="fullscreen-toggle"
+        [class.active]="isFullscreen()"
+        (click)="toggleFullscreen()"
+        title="Toggle Fullscreen">
+        @if (isFullscreen()) {
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+          </svg>
+        } @else {
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        }
+      </button>
+    </div>
+  </div>
 
-      <!-- Audio Player -->
-      <div *ngIf="mediaType === 'audio'" class="audio-player-container">
-        <audio
-          #audioElement
-          class="video-js native-audio-player"
-          preload="metadata"
-          crossorigin="anonymous">
-        </audio>
-        <div class="audio-visualizer">
-          <mat-icon class="audio-icon">audiotrack</mat-icon>
-          <div class="audio-info">
-            <h3>{{ data.videoTitle || 'Audio File' }}</h3>
-            <p>Playing audio file</p>
-          </div>
+  <!-- Tab Bar -->
+  @if (tabs().length > 0) {
+    <app-tab-bar
+      [tabs]="tabs()"
+      [activeTabId]="activeTabId()"
+      [maxTabs]="15"
+      [currentGroupNumber]="currentGroupNumber()"
+      (tabSelect)="onTabSelect($event)"
+      (tabClose)="onTabClose($event)"
+      (tabCloseOthers)="onTabCloseOthers($event)"
+      (tabCloseAll)="onTabCloseAll()"
+      (tabRename)="onTabRename($event)"
+      (moveTabToGroup)="onMoveTabToGroup($event)"
+      (moveTabToNewGroup)="onMoveTabToNewGroup($event)"
+      (consolidateGroups)="onConsolidateGroups()">
+    </app-tab-bar>
+  }
+
+  <!-- Main editor area -->
+  <div class="editor-main">
+    <!-- Center Content Area -->
+    <div class="editor-content">
+      <!-- Video Player Area -->
+      <div class="video-player-area" #videoPlayerArea>
+        <!-- Orange border overlay - dimensions calculated by ResizeObserver -->
+        @if (showBorder()) {
+          <div class="video-border-overlay"
+               [style.width.px]="borderWidth()"
+               [style.height.px]="borderHeight()"></div>
+        }
+
+        <!-- Video player with scale transform -->
+        <div class="video-scale-wrapper" [style.transform]="'scale(' + videoScale() + ')'">
+          <app-media-display
+            [videoUrl]="videoUrl()"
+            [currentTime]="editorState().currentTime"
+            [isPlaying]="editorState().isPlaying"
+            [volume]="editorState().volume"
+            [playbackRate]="editorState().playbackRate"
+            (timeUpdate)="onVideoTimeUpdate($event)"
+            (durationChange)="onVideoDurationChange($event)"
+            (playStateChange)="onVideoPlayStateChange($event)"
+            (ended)="onVideoEnded()"
+            (doubleClick)="toggleFullscreen()">
+          </app-media-display>
         </div>
       </div>
 
-      <!-- Image Viewer -->
-      <div *ngIf="mediaType === 'image'" class="image-viewer-container">
-        <img
-          #imageElement
-          class="image-viewer"
-          [src]="imageSrc"
-          alt="{{ data.videoTitle || 'Image' }}">
+      <!-- Resize Handle -->
+      <div
+        class="resize-handle"
+        [class.dragging]="isResizing()"
+        (mousedown)="onResizeStart($event)">
       </div>
 
-      <!-- Document/Webpage Placeholder -->
-      <div *ngIf="mediaType === 'document' || mediaType === 'webpage'" class="document-placeholder">
-        <mat-icon class="document-icon">{{ mediaType === 'document' ? 'description' : 'public' }}</mat-icon>
-        <h3>{{ data.videoTitle || 'Document' }}</h3>
-        <p>Preview not available for this file type</p>
-        <button mat-raised-button color="primary" (click)="openInExternalApp()">
-          <mat-icon>open_in_new</mat-icon>
-          Open in External App
-        </button>
-      </div>
-    </div>
-
-    <!-- Analysis Sections Sidebar with Tabs -->
-    <div class="sections-sidebar"
-         *ngIf="!error && !isLoading && duration > 0"
-         [class.hide-in-fullscreen]="isFullscreen">
-      <!-- Auto-scroll toggle button - Always visible -->
-      <div class="sidebar-toolbar">
-        <button
-          mat-icon-button
-          (click)="toggleAutoScroll()"
-          [matTooltip]="getAutoScrollTooltip()"
-          class="auto-scroll-toggle"
-          [class.enabled]="autoScrollEnabled">
-          <mat-icon>{{ autoScrollEnabled ? 'sync' : 'sync_disabled' }}</mat-icon>
-        </button>
-        <span class="toolbar-label">{{ getAutoScrollLabel() }}</span>
-      </div>
-
-      <mat-tab-group #tabGroup class="sidebar-tabs" animationDuration="200ms" (selectedTabChange)="onTabChange($event)">
-        <!-- Analysis Tab -->
-        <mat-tab label="Analysis">
-          <div class="tab-content">
-            <!-- Show analysis sections if available -->
-            <div *ngIf="metadata && metadata.sections && metadata.sections.length > 0" class="sections-container">
-              <!-- Category Filters Accordion -->
-              <mat-accordion *ngIf="categoryFilters.length > 0" class="category-filters-accordion">
-                <mat-expansion-panel class="category-filters-panel" [expanded]="false">
-                  <mat-expansion-panel-header>
-                    <mat-panel-title>
-                      <mat-icon>filter_list</mat-icon>
-                      <span>Filter Categories</span>
-                    </mat-panel-title>
-                  </mat-expansion-panel-header>
-                  <div class="filters-list">
-                    <label *ngFor="let filter of categoryFilters" class="filter-checkbox">
-                      <input
-                        type="checkbox"
-                        [checked]="filter.enabled"
-                        (change)="toggleCategoryFilter(filter.category)">
-                      <span class="filter-indicator" [style.background-color]="filter.color"></span>
-                      <span class="filter-label">{{ filter.label }}</span>
-                    </label>
-                  </div>
-                </mat-expansion-panel>
-              </mat-accordion>
-
-              <p class="sections-hint">Click a section to jump to that timestamp</p>
-              <div class="sections-list">
-                <div
-                  *ngFor="let section of filteredMetadataSections; let i = index"
-                  class="section-item"
-                  [class.active]="isSectionActive(i)">
-                  <div class="section-clickable" (click)="seekToTime(section.startSeconds, i)" [matTooltip]="section.description">
-                    <div class="section-marker" [style.background-color]="getCategoryColor(section.category)"></div>
-                    <div class="section-content">
-                      <div class="section-header">
-                        <span class="section-time">{{ section.timeRange }}</span>
-                        <span class="section-category" [style.color]="getCategoryColor(section.category)">
-                          {{ section.category }}
-                        </span>
-                      </div>
-                      <p class="section-description">{{ section.description }}</p>
-                      <div class="section-quotes" *ngIf="section.quotes.length > 0">
-                        <div *ngFor="let quote of section.quotes" class="quote-item">
-                          <span class="quote-timestamp">{{ quote.timestamp }}</span>
-                          <span class="quote-text">"{{ quote.text }}"</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <button mat-icon-button
-                          class="delete-section-button"
-                          (click)="deleteSection(section, i); $event.stopPropagation()"
-                          matTooltip="Delete this section">
-                    <mat-icon>close</mat-icon>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Show generate button if no analysis -->
-            <div *ngIf="!metadata || !metadata.sections || metadata.sections.length === 0" class="no-analysis-container">
-              <mat-icon class="no-analysis-icon">analytics</mat-icon>
-              <h3>No AI Analysis</h3>
-              <p>This video hasn't been analyzed yet. Generate an AI analysis to identify key moments and insights.</p>
-              <button mat-raised-button color="primary" (click)="generateAnalysis()">
-                <mat-icon>play_arrow</mat-icon>
-                Generate AI Analysis
+      <!-- Timeline Area -->
+      <div class="timeline-area" [style.height.px]="timelineHeight()">
+        <!-- Timeline Toolbar -->
+        <div class="timeline-toolbar">
+          <div class="toolbar-left">
+            <!-- Tool buttons -->
+            <div class="tool-buttons">
+              <button
+                class="tool-btn"
+                [class.active]="currentTool() === 'cursor'"
+                (click)="setToolCursor()"
+                title="Cursor Tool (A)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7 2l12 11.2-5.8.5-3.3 5.3L7 2z"/>
+                </svg>
+              </button>
+              <button
+                class="tool-btn"
+                [class.active]="currentTool() === 'highlight'"
+                (click)="setToolHighlight()"
+                title="Range Selection Tool (R)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3.5 18.5l4-4L11 18v3H8l-4.5-2.5zM20.7 7c.4-.4.4-1 0-1.4l-2.3-2.3c-.4-.4-1-.4-1.4 0l-1.5 1.5 3.7 3.7L20.7 7zM6 12.5L16.5 2l3.7 3.7L9.7 16.2l-4.2.5.5-4.2z"/>
+                </svg>
               </button>
             </div>
-          </div>
-        </mat-tab>
 
-        <!-- Transcript Search Tab -->
-        <mat-tab label="Search">
-          <div class="tab-content search-tab-content">
-            <app-transcript-search
-              [transcriptText]="transcriptText"
-              [transcriptExists]="transcriptExists"
-              (seekToTime)="onTranscriptSeek($event)"
-              (runAnalysis)="onRunTranscriptAnalysis()">
-            </app-transcript-search>
-          </div>
-        </mat-tab>
+            <!-- Scale Control -->
+            <div class="scale-control">
+              <label class="scale-label">Scale</label>
+              <input
+                type="range"
+                class="scale-slider"
+                min="1.0"
+                max="10.0"
+                step="0.1"
+                [value]="videoScale()"
+                (input)="onScaleChange($any($event.target).value)"
+                title="Video Scale (Zoom)">
+              <span class="scale-value">{{ videoScale().toFixed(1) }}x</span>
+            </div>
 
-        <!-- Transcript Viewer Tab -->
-        <mat-tab label="Transcript">
-          <div class="tab-content transcript-tab-content">
-            <app-transcript-viewer
-              [transcriptText]="transcriptText"
-              [transcriptExists]="transcriptExists"
-              [currentTime]="currentTime"
-              [autoScrollEnabled]="autoScrollEnabled"
-              (seekToTime)="onTranscriptSeek($event)"
-              (runAnalysis)="onRunTranscriptAnalysis()">
-            </app-transcript-viewer>
+            <!-- Border Controls -->
+            <div class="border-control">
+              <label class="border-checkbox">
+                <input
+                  type="checkbox"
+                  [checked]="showBorder()"
+                  (change)="toggleBorder()">
+                <span class="checkbox-label">Border</span>
+              </label>
+              <select
+                class="aspect-ratio-select"
+                [value]="borderAspectRatio()"
+                (change)="onAspectRatioChange($any($event.target).value)"
+                [disabled]="!showBorder()">
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+              </select>
+            </div>
           </div>
-        </mat-tab>
-      </mat-tab-group>
+          <div class="toolbar-center">
+            <!-- Play/Pause -->
+            <button class="toolbar-btn play-btn" (click)="togglePlayPause()" title="Play/Pause (Space)">
+              @if (editorState().isPlaying) {
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+              } @else {
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              }
+            </button>
+
+            <!-- Time display -->
+            <div class="time-display compact">
+              <span class="current-time">{{ formattedCurrentTime() }}</span>
+              <span class="time-separator">/</span>
+              <span class="total-time">{{ formattedDuration() }}</span>
+            </div>
+
+            <!-- Selection duration display -->
+            @if (formattedSelectionDuration()) {
+              <div class="selection-duration" title="Selection Duration">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 5h2v14H3V5zm4 0h2v14H7V5zm4 0h6v14h-6V5zm8 0h2v14h-2V5z"/>
+                </svg>
+                <span>{{ formattedSelectionDuration() }}</span>
+              </div>
+            }
+
+            <!-- Playback speed -->
+            <div class="speed-selector">
+              <select
+                [value]="editorState().playbackRate"
+                (change)="setPlaybackRate(+$any($event.target).value)"
+                title="Speed (L/J to adjust)">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1">1x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+                <option value="3">3x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+
+            <!-- Volume -->
+            <div class="volume-control">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+              </svg>
+              <input
+                type="range"
+                class="volume-slider"
+                min="0"
+                max="1"
+                step="0.01"
+                [value]="editorState().volume"
+                (input)="setVolume(+$any($event.target).value)"
+              />
+            </div>
+          </div>
+          <div class="toolbar-right">
+            <button
+              class="toolbar-btn"
+              [class.active]="isFullscreen()"
+              (click)="toggleFullscreen()"
+              title="Fullscreen (F)">
+              @if (isFullscreen()) {
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+                </svg>
+              } @else {
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                </svg>
+              }
+            </button>
+          </div>
+        </div>
+
+        <!-- Timeline ruler -->
+        <app-timeline-ruler
+          [duration]="editorState().duration"
+          [zoomState]="editorState().zoomState"
+          (seek)="seekTo($event)">
+        </app-timeline-ruler>
+
+        <!-- Timeline tracks -->
+        <div class="timeline-tracks">
+          <!-- Track content -->
+          <div class="track-content"
+               (mousedown)="onTimelineMouseDown($event)"
+               (click)="onTimelineClick($event)"
+               (contextmenu)="onTimelineClick($event)">
+            <!-- Track wrapper for vertical centering -->
+            <div class="track-wrapper">
+              <!-- Unified timeline track component -->
+              <app-timeline-track
+                [sections]="filteredSections()"
+                [chapters]="chapters()"
+                [duration]="editorState().duration"
+                [currentTime]="editorState().currentTime"
+                [zoomState]="editorState().zoomState"
+                [selectedSection]="editorState().selectedSection"
+                [selectedChapterId]="selectedChapterId()"
+                [waveformData]="waveformData()"
+                [waveformColor]="settings().waveformColor"
+                [selection]="highlightSelection()"
+                (sectionClick)="onSectionClick($event)"
+                (sectionHover)="onSectionHover($event)"
+                (chapterClick)="onChapterClick($event)"
+                (chapterHover)="onChapterHover($event)"
+                (selectionHandleStart)="onSelectionHandleStart($event.event, $event.handle)"
+                (selectionDragStart)="onSelectionDragStart($event)">
+              </app-timeline-track>
+            </div>
+          </div>
+        </div>
+
+        <!-- Playhead wrapper with proper margins -->
+        <div class="playhead-wrapper">
+          <app-timeline-playhead
+            [currentTime]="editorState().currentTime"
+            [duration]="editorState().duration"
+            [zoomState]="editorState().zoomState"
+            (seek)="seekTo($event)">
+          </app-timeline-playhead>
+        </div>
+
+        <!-- Zoom bar -->
+        <app-timeline-zoom-bar
+          [duration]="editorState().duration"
+          [zoomState]="editorState().zoomState"
+          (zoomChange)="onZoomChange($event)">
+        </app-timeline-zoom-bar>
+      </div>
     </div>
-  </div>
 
-  <!-- Timeline with Range Selection -->
-  <app-video-timeline
-    *ngIf="!error && !isLoading && duration > 0"
-    [class.fullscreen-controls]="isFullscreen"
-    [class.show-in-fullscreen]="isFullscreen && showControlsInFullscreen"
-    [duration]="duration"
-    [currentTime]="currentTime"
-    [sections]="timelineSections"
-    [isPlaying]="isPlaying"
-    [mediaElement]="getMediaElement()"
-    (seek)="onTimelineSeek($event)"
-    (selectionChange)="onSelectionChange($event)"
-    (playPause)="onPlayPause()"
-    (playbackSpeed)="onPlaybackSpeed($event)"
-    (contextMenu)="onTimelineContextMenu($event)">
-  </app-video-timeline>
-
-  <!-- Timeline Context Menu -->
-  <div [style.left.px]="contextMenuPosition.x" [style.top.px]="contextMenuPosition.y"
-       [style.position]="'fixed'" [style.visibility]="'hidden'"
-       #contextMenuTrigger="matMenuTrigger" [matMenuTriggerFor]="timelineContextMenu"></div>
-  <mat-menu #timelineContextMenu="matMenu">
-    <button mat-menu-item (click)="onContextMenuAddMarker()">
-      <mat-icon>bookmark_add</mat-icon>
-      <span>Add Marker</span>
-    </button>
-    <button mat-menu-item (click)="onContextMenuExport()" [disabled]="currentSelection.endTime - currentSelection.startTime < 1">
-      <mat-icon>file_download</mat-icon>
-      <span>Export Clip</span>
-    </button>
-  </mat-menu>
-
-  <!-- Clip Creation Actions - HIDDEN FOR NOW, will be replaced with better UI -->
-  <div class="clip-actions" *ngIf="false">
+    <!-- Analysis Sidebar (Right) -->
+    @if (showAnalysisSidebar()) {
+      <div class="analysis-sidebar">
+        <app-analysis-panel
+          [sections]="filteredSections()"
+          [chapters]="chapters()"
+          [categoryFilters]="categoryFilters()"
+          [selectedSection]="editorState().selectedSection"
+          [selectedChapterId]="selectedChapterId()"
+          [currentTime]="editorState().currentTime"
+          [analysisData]="analysisData()"
+          [hasAnalysis]="hasAnalysis()"
+          [videoId]="videoId() ?? undefined"
+          [transcript]="transcript()"
+          (sectionClick)="onSectionClick($event)"
+          (sectionDelete)="onSectionDeleteFromPanel($event)"
+          (chapterClick)="onChapterClick($event)"
+          (chapterDelete)="onChapterDelete($event)"
+          (filterToggle)="onFilterToggle($event)"
+          (filterSelectAll)="onFilterSelectAll()"
+          (filterDeselectAll)="onFilterDeselectAll()"
+          (filterSelectMarkers)="onFilterSelectMarkers()"
+          (generateAnalysis)="onGenerateAnalysis($event)"
+          (transcriptSeek)="seekTo($event)">
+        </app-analysis-panel>
+      </div>
+    }
   </div>
 </div>
+
+<!-- Context Menu -->
+@if (showContextMenu$()) {
+  <app-context-menu
+    [position]="contextMenuPosition()"
+    [actions]="contextMenuActions()"
+    (actionSelected)="onContextMenuAction($event)"
+    (closed)="onContextMenuClose()">
+  </app-context-menu>
+}
+
+<!-- Marker Dialog -->
+@if (showMarkerDialog() && markerDialogData()) {
+  <app-marker-dialog
+    [data]="markerDialogData()!"
+    (save)="onMarkerSave($event)"
+    (saveChapter)="onChapterSave($event)"
+    (cancel)="onMarkerCancel()"
+    (delete)="onMarkerDelete($event)"
+    (deleteChapter)="onChapterDelete($event)">
+  </app-marker-dialog>
+}
+
+<!-- Export Dialog -->
+@if (showExportDialog() && exportDialogData()) {
+  <app-export-dialog
+    [data]="exportDialogData()!"
+    (close)="onExportDialogClose()">
+  </app-export-dialog>
+}
+
+<!-- Keyboard Shortcuts Dialog -->
+@if (showKeyboardShortcuts()) {
+  <app-keyboard-shortcuts-dialog
+    (close)="showKeyboardShortcuts.set(false)">
+  </app-keyboard-shortcuts-dialog>
+}

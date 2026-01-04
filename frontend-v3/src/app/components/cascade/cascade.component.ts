@@ -411,6 +411,7 @@ export class CascadeComponent {
     // Library item actions
     // "Open" action - opens in video editor
     actions.push({ label: `Open${countSuffix}`, icon: '🎬', action: 'openInEditor' });
+    actions.push({ label: `Open in RippleCut${countSuffix}`, icon: '✂️', action: 'openInRipplecut' });
 
     // Single video actions
     if (count <= 1) {

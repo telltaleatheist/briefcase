@@ -13,13 +13,13 @@ import {
 import { CommonModule } from '@angular/common';
 
 @Component({
-  selector: 'app-video-player',
+  selector: 'app-media-display',
   standalone: true,
   imports: [CommonModule],
-  templateUrl: './video-player.component.html',
-  styleUrls: ['./video-player.component.scss']
+  templateUrl: './media-display.component.html',
+  styleUrls: ['./media-display.component.scss']
 })
-export class VideoPlayerComponent implements OnChanges, AfterViewInit, OnDestroy {
+export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestroy {
   @Input() videoUrl?: string;
   @Input() currentTime: number = 0;
   @Input() isPlaying: boolean = false;

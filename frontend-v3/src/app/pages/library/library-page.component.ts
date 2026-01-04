@@ -1724,6 +1724,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.openInEditor(videosToProcess[0]);
         break;
 
+      case 'openInRipplecut':
+        this.openInRipplecut(videosToProcess[0]);
+        break;
+
       case 'reveal':
         // Reveal file in Finder/Explorer
         if (videosToProcess[0]?.filePath) {
@@ -1836,6 +1840,55 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
       });
     }
+  }
+
+  openInRipplecut(video?: VideoItem) {
+    // If no video passed, get first selected video
+    if (!video) {
+      const selectedItemIds = this.selectedVideoIds();
+
+      if (selectedItemIds.size === 0) {
+        this.notificationService.warning('No Selection', 'Please select a video first');
+        return;
+      }
+
+      if (selectedItemIds.size !== 1) {
+        this.notificationService.warning('Multiple Selection', 'Please select exactly one video to open in RippleCut');
+        return;
+      }
+
+      // Get the video from selected ID
+      const allVideos: VideoItem[] = [];
+      this.filteredWeeks().forEach(week => {
+        allVideos.push(...week.videos);
+      });
+      this.videoWeeks().forEach(week => {
+        week.videos.forEach(v => {
+          if (!allVideos.find(existing => existing.id === v.id)) {
+            allVideos.push(v);
+          }
+        });
+      });
+
+      const itemId = Array.from(selectedItemIds)[0];
+      const parts = itemId.split('|');
+      const videoId = parts.length > 1 ? parts[1] : itemId;
+      video = allVideos.find(v => v.id === videoId) || allVideos.find(v => v.id === itemId);
+    }
+
+    if (!video) {
+      this.notificationService.error('Video Not Found', 'Could not find selected video');
+      return;
+    }
+
+    // Navigate to RippleCut route with query params
+    this.router.navigate(['/ripplecut'], {
+      queryParams: {
+        videoId: video.id,
+        videoPath: video.filePath,
+        videoTitle: video.name
+      }
+    });
   }
 
   viewMore() {

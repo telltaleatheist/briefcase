@@ -1,0 +1,2050 @@
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, Inject, Optional, NgZone, ChangeDetectorRef, ChangeDetectionStrategy } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { Router } from '@angular/router';
+import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef, MatDialog } from '@angular/material/dialog';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTabsModule, MatTabGroup } from '@angular/material/tabs';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
+import { LibraryService, LibraryAnalysis, ParsedAnalysisMetadata } from '../../services/library.service';
+import { NotificationService } from '../../services/notification.service';
+import { DatabaseLibraryService } from '../../services/database-library.service';
+import { BackendUrlService } from '../../services/backend-url.service';
+import { AnalysisQueueService } from '../../services/analysis-queue.service';
+import { VideoTimelineComponent } from '../video-timeline/video-timeline.component';
+import { TimelineSection, TimelineSelection } from 'ngx-video-timeline-editor';
+import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
+import { TranscriptViewerComponent } from '../transcript-viewer/transcript-viewer.component';
+import videojs from 'video.js';
+import Player from 'video.js/dist/types/player';
+import { HotkeysService } from '@ngneat/hotkeys';
+import { Subscription } from 'rxjs';
+
+@Component({
+  selector: 'app-video-preview',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatDialogModule,
+    MatButtonModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule,
+    MatSnackBarModule,
+    MatTabsModule,
+    MatExpansionModule,
+    MatMenuModule,
+    VideoTimelineComponent,
+    TranscriptSearchComponent,
+    TranscriptViewerComponent,
+  ],
+  templateUrl: './video-preview.component.html',
+  styleUrls: ['./video-preview.component.scss']
+  // Removed ChangeDetectionStrategy.OnPush - was causing dialog to reinitialize and clear video src
+})
+export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
+  @ViewChild('videoElement', { static: false }) videoElement!: ElementRef<HTMLVideoElement>;
+  @ViewChild('audioElement', { static: false }) audioElement!: ElementRef<HTMLAudioElement>;
+  @ViewChild('imageElement', { static: false }) imageElement!: ElementRef<HTMLImageElement>;
+  @ViewChild('tabGroup', { static: false}) tabGroup!: MatTabGroup;
+  @ViewChild(VideoTimelineComponent, { static: false }) timelineComponent?: VideoTimelineComponent;
+  @ViewChild('playerContainer', { static: false }) playerContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('contextMenuTrigger', { static: false }) contextMenuTrigger!: MatMenuTrigger;
+
+  // Video.js player instance (replaces manual videoEl)
+  private player: Player | null = null;
+
+  mediaType: string = 'video'; // 'video', 'audio', 'image', 'document', 'webpage'
+  imageSrc: string | null = null;
+  isLoading = true;
+  error: string | null = null;
+  metadata: ParsedAnalysisMetadata | null = null;
+  loadingMessage = 'Loading video...';
+  loadingTime = 0;
+  private loadingStartTime = 0;
+  private loadingProgressInterval: any = null;
+
+  // Timeline state
+  currentTime = 0;
+  duration = 0;
+  isPlaying = false;
+  timelineSections: TimelineSection[] = [];
+  currentSelection: TimelineSelection = { startTime: 0, endTime: 0 };
+  activeSectionIndex: number | null = null;
+  previousActiveSectionIndex: number | null = null;
+
+  // Throttle timer for performance optimization
+  private updateThrottleTimer: any = null;
+  private readonly UPDATE_THROTTLE_MS = 200; // Update at most every 200ms (5 times per second)
+  private loadingTimeoutTimer: any = null;
+
+  // Track all timers for cleanup
+  private timers: Set<any> = new Set();
+
+  // Track all subscriptions for cleanup
+  private subscriptions: Subscription[] = [];
+
+  // Cached media element to avoid repeated DOM queries
+  private cachedMediaElement?: HTMLVideoElement | HTMLAudioElement;
+
+  // Transcript state
+  transcriptText: string | null = null;
+  transcriptExists = false;
+
+  // Auto-scroll state
+  autoScrollEnabled = true;
+  currentTabIndex = 0; // Track which tab is active (0=Analysis, 1=Search, 2=Transcript)
+
+  // Fullscreen controls state
+  isFullscreen = false;
+  isMouseOverPlayer = false;
+  private controlsHideTimer: any = null;
+  showControlsInFullscreen = false; // Controls visibility in fullscreen
+
+  // Document-level mouse event handlers for fullscreen
+  private boundDocumentMouseMove: any = null;
+  private boundDocumentMouseEnter: any = null;
+
+  // Track if opened as dialog or route
+  isDialogMode = false;
+
+  // Drag and drop state
+  isDragOver = false;
+
+  // Context menu state
+  private contextMenuClickTime = 0; // Store the time where user right-clicked
+  contextMenuPosition = { x: 0, y: 0 }; // Position for context menu
+
+  // Dialog state tracking
+  private exportDialogOpen = false;
+
+  // Category filter state (exposed from timeline component)
+  get categoryFilters() {
+    return this.timelineComponent?.categoryFilters || [];
+  }
+
+  get filteredMetadataSections() {
+    if (!this.metadata?.sections || this.categoryFilters.length === 0) {
+      return this.metadata?.sections || [];
+    }
+
+    const enabledCategories = new Set(
+      this.categoryFilters
+        .filter(f => f.enabled)
+        .map(f => f.category)
+    );
+
+    return this.metadata.sections.filter(section => {
+      const category = section.category?.toLowerCase() || 'other';
+      return enabledCategories.has(category);
+    });
+  }
+
+  public data: {
+    analysis?: LibraryAnalysis;
+    customVideo?: any;
+    videoId?: string;
+    videoPath?: string;
+    videoTitle?: string;
+    hasAnalysis?: boolean;
+    hasTranscript?: boolean;
+    realFilePath?: string; // Real file path for custom videos (for backend processing)
+  } = {};
+
+  constructor(
+    @Inject(MAT_DIALOG_DATA) @Optional() dialogData: any,
+    @Optional() private dialogRef: MatDialogRef<VideoPreviewComponent>,
+    private libraryService: LibraryService,
+    private databaseLibraryService: DatabaseLibraryService,
+    private dialog: MatDialog,
+    private notificationService: NotificationService,
+    private router: Router,
+    private ngZone: NgZone,
+    private cdr: ChangeDetectorRef,
+    private backendUrlService: BackendUrlService,
+    private http: HttpClient,
+    private analysisQueueService: AnalysisQueueService,
+    private hotkeys: HotkeysService
+  ) {
+    // If opened as dialog, use dialog data; otherwise use router state
+    if (dialogData) {
+      this.data = dialogData;
+      this.isDialogMode = true;
+    } else {
+      this.isDialogMode = false;
+      // Get data from router navigation state
+      const navigation = this.router.getCurrentNavigation();
+      const state = navigation?.extras?.state || (history.state?.navigationId ? history.state : null);
+
+      if (state && state['videoEditorData']) {
+        const routeData = state['videoEditorData'];
+        this.data = {
+          videoId: routeData.videoId,
+          videoPath: routeData.videoPath,
+          videoTitle: routeData.videoTitle
+        };
+      }
+    }
+  }
+
+  async ngOnInit() {
+    try {
+      // Determine the video ID to use for loading metadata
+      const videoId = this.data.videoId || this.data.analysis?.id;
+
+      // If hasAnalysis/hasTranscript not provided, check them asynchronously
+      let hasAnalysis = this.data.hasAnalysis;
+      let hasTranscript = this.data.hasTranscript;
+
+      if (videoId && (hasAnalysis === undefined || hasTranscript === undefined)) {
+        // Check in parallel without blocking the rest of the component initialization
+        const [analysisCheck, transcriptCheck] = await Promise.all([
+          hasAnalysis !== undefined ? Promise.resolve(hasAnalysis) : this.databaseLibraryService.hasAnalysis(videoId),
+          hasTranscript !== undefined ? Promise.resolve(hasTranscript) : this.databaseLibraryService.hasTranscript(videoId)
+        ]);
+
+        hasAnalysis = analysisCheck;
+        hasTranscript = transcriptCheck;
+      }
+
+      // Load sections (custom markers and AI analysis sections) from database
+      // Load sections regardless of whether there's an analysis - custom markers should always show
+      if (videoId) {
+        try {
+          // Parse analysis sections from the database
+          const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+          // Convert database sections to timeline format
+          if (sections && sections.length > 0) {
+            this.timelineSections = sections.map(section => ({
+              startTime: section.start_seconds,
+              endTime: section.end_seconds || (section.start_seconds + 30),
+              category: section.category || 'General',
+              description: section.description || section.title || '',
+              color: this.getCategoryColor(section.category || 'General')
+            }));
+
+            // Build metadata object for display
+            this.metadata = {
+              sections: sections.map(s => ({
+                startSeconds: s.start_seconds,
+                endSeconds: s.end_seconds,
+                timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
+                category: s.category || 'General',
+                description: s.description || s.title || '',
+                quotes: [] // Database doesn't store quotes separately
+              }))
+            } as any;
+
+            console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and AI analysis)');
+          }
+        } catch (error) {
+          console.warn('Failed to load sections:', error);
+          this.metadata = null;
+        }
+      }
+
+      // Load transcript from database if available
+      if (videoId && hasTranscript) {
+        try {
+          const dbTranscript = await this.databaseLibraryService.getTranscript(videoId);
+          if (dbTranscript && dbTranscript.srt_format) {
+            // Use SRT format from database (includes timestamps for seeking)
+            // The transcript search component needs timestamps to enable jump-to-time functionality
+            this.transcriptText = dbTranscript.srt_format;
+            this.transcriptExists = !!(this.transcriptText && this.transcriptText.trim().length > 0);
+          } else {
+            this.transcriptExists = false;
+            this.transcriptText = null;
+          }
+        } catch (error) {
+          console.error('Failed to load transcript:', error);
+          this.transcriptExists = false;
+          this.transcriptText = null;
+        }
+      }
+      // For custom videos or videos without analysis/transcript, we don't have metadata or transcript
+    } catch (error) {
+      console.error('Failed to initialize video player:', error);
+      // Don't set this.error here - let the video try to load anyway
+      // Only critical errors should prevent video playback
+    }
+  }
+
+  ngAfterViewInit() {
+    // Set up keyboard shortcuts using @ngneat/hotkeys
+    this.setupKeyboardShortcuts();
+
+    // Initialize media player after view is ready
+    setTimeout(() => {
+      this.initializePlayer();
+    }, 100);
+
+    // Trigger change detection after view children are initialized
+    // This fixes the "Expression changed after checked" error for categoryFilters
+    setTimeout(() => {
+      this.cdr.detectChanges();
+    }, 0);
+  }
+
+  /**
+   * Open document or webpage in external application
+   */
+  openInExternalApp() {
+    const electron = (window as any).electron;
+    if (electron && this.data.videoPath) {
+      electron.shell.openPath(this.data.videoPath);
+    }
+  }
+
+  /**
+   * Handle mouse movement over player in fullscreen
+   */
+  private onPlayerMouseMove() {
+    if (!this.isFullscreen) return;
+
+    this.isMouseOverPlayer = true;
+    this.updateFullscreenControlsVisibility();
+
+    // Hide controls after 3 seconds of no movement (only when playing)
+    if (this.controlsHideTimer) {
+      clearTimeout(this.controlsHideTimer);
+      this.timers.delete(this.controlsHideTimer);
+    }
+
+    if (this.isPlaying) {
+      this.controlsHideTimer = setTimeout(() => {
+        // Only hide if still playing - don't hide when paused
+        if (this.isPlaying) {
+          this.ngZone.run(() => {
+            this.showControlsInFullscreen = false;
+            this.cdr.detectChanges();
+          });
+        }
+      }, 3000);
+      this.timers.add(this.controlsHideTimer);
+    }
+  }
+
+  /**
+   * Handle mouse entering player area
+   */
+  private onPlayerMouseEnter() {
+    this.isMouseOverPlayer = true;
+    if (this.isFullscreen) {
+      this.updateFullscreenControlsVisibility();
+    }
+  }
+
+  /**
+   * Handle mouse leaving player area
+   */
+  private onPlayerMouseLeave() {
+    this.isMouseOverPlayer = false;
+    if (this.isFullscreen && this.isPlaying) {
+      // Hide controls when mouse leaves and video is playing
+      this.ngZone.run(() => {
+        this.showControlsInFullscreen = false;
+        this.cdr.detectChanges();
+      });
+    }
+  }
+
+  /**
+   * Attach document-level mouse listeners for fullscreen mode
+   * This ensures we capture mouse movements anywhere in the fullscreen area
+   */
+  private attachFullscreenMouseListeners() {
+    // Create bound versions of handlers to ensure proper 'this' context and enable removal
+    this.boundDocumentMouseMove = this.onPlayerMouseMove.bind(this);
+
+    // Attach to document to capture all mouse movements in fullscreen
+    document.addEventListener('mousemove', this.boundDocumentMouseMove);
+  }
+
+  /**
+   * Detach document-level mouse listeners when exiting fullscreen
+   */
+  private detachFullscreenMouseListeners() {
+    if (this.boundDocumentMouseMove) {
+      document.removeEventListener('mousemove', this.boundDocumentMouseMove);
+      this.boundDocumentMouseMove = null;
+    }
+  }
+
+  /**
+   * Update visibility of controls in fullscreen mode
+   * Controls show when: paused OR hovering
+   */
+  private updateFullscreenControlsVisibility() {
+    if (!this.isFullscreen) {
+      this.showControlsInFullscreen = false;
+      this.cdr.detectChanges();
+      return;
+    }
+
+    // Show controls if paused OR if mouse is over player
+    const shouldShow = !this.isPlaying || this.isMouseOverPlayer;
+
+    this.showControlsInFullscreen = shouldShow;
+    this.cdr.detectChanges(); // Force immediate update
+  }
+
+  ngOnDestroy() {
+    console.log('[ngOnDestroy] Cleaning up video player');
+
+    // Unsubscribe from ALL keyboard shortcuts to prevent memory leaks
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.subscriptions = [];
+
+    // Remove document-level mouse listeners if they exist
+    this.detachFullscreenMouseListeners();
+
+    // Clear cached media element
+    this.cachedMediaElement = undefined;
+
+    // Dispose of video.js player (handles all cleanup automatically)
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
+
+    // Clear ALL tracked timers
+    this.timers.forEach(timer => {
+      clearTimeout(timer);
+      clearInterval(timer);
+    });
+    this.timers.clear();
+
+    // Clear specific timers
+    if (this.updateThrottleTimer) {
+      clearTimeout(this.updateThrottleTimer);
+      this.updateThrottleTimer = null;
+    }
+
+    if (this.loadingTimeoutTimer) {
+      clearTimeout(this.loadingTimeoutTimer);
+      this.loadingTimeoutTimer = null;
+    }
+
+    if (this.loadingProgressInterval) {
+      clearInterval(this.loadingProgressInterval);
+      this.loadingProgressInterval = null;
+    }
+  }
+
+  /**
+   * Clean up video resources (timers and player) but keep the component alive
+   */
+  private cleanupVideoResources() {
+    console.log('[cleanupVideoResources] Cleaning up old resources');
+
+    // Clear cached media element
+    this.cachedMediaElement = undefined;
+
+    // Dispose of video.js player
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
+
+    // Clear all tracked timers
+    this.timers.forEach(timer => {
+      clearTimeout(timer);
+      clearInterval(timer);
+    });
+    this.timers.clear();
+
+    // Clear specific timers
+    if (this.updateThrottleTimer) {
+      clearTimeout(this.updateThrottleTimer);
+      this.updateThrottleTimer = null;
+    }
+
+    if (this.loadingTimeoutTimer) {
+      clearTimeout(this.loadingTimeoutTimer);
+      this.loadingTimeoutTimer = null;
+    }
+
+    if (this.loadingProgressInterval) {
+      clearInterval(this.loadingProgressInterval);
+      this.loadingProgressInterval = null;
+    }
+  }
+
+  async initializePlayer() {
+    console.log('[initializePlayer] Starting initialization');
+
+    // Clean up any existing player from previous video
+    this.cleanupVideoResources();
+
+    try {
+      // Detect media type from database if we have a videoId
+      if (this.data.videoId) {
+        try {
+          const video = await this.databaseLibraryService.getVideoById(this.data.videoId);
+          if (video) {
+            this.mediaType = video.media_type || 'video';
+            console.log('[initializePlayer] Detected media type:', this.mediaType);
+
+            // For images, set the image source
+            if (this.mediaType === 'image' && video.current_path) {
+              const backendUrl = await this.backendUrlService.getBackendUrl();
+              const encodedPath = btoa(unescape(encodeURIComponent(video.current_path)));
+              this.imageSrc = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+            }
+
+            // For documents/webpages, no player initialization needed
+            if (this.mediaType === 'document' || this.mediaType === 'webpage') {
+              this.isLoading = false;
+              return;
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to detect media type, defaulting to video:', error);
+        }
+      }
+
+      // Check for appropriate element based on media type
+      if (this.mediaType === 'image') {
+        if (!this.imageElement) {
+          this.error = 'Image element not found';
+          this.isLoading = false;
+          return;
+        }
+        // Images don't need player initialization
+        this.isLoading = false;
+        return;
+      }
+
+      // Get the correct media element reference
+      let mediaElement: HTMLVideoElement | HTMLAudioElement | null = null;
+      if (this.mediaType === 'audio' && this.audioElement) {
+        mediaElement = this.audioElement.nativeElement;
+        console.log('[initializePlayer] Audio element obtained');
+      } else if (this.videoElement) {
+        mediaElement = this.videoElement.nativeElement;
+        console.log('[initializePlayer] Video element obtained');
+      }
+
+      if (!mediaElement) {
+        this.error = `${this.mediaType === 'audio' ? 'Audio' : 'Video'} element not found`;
+        this.isLoading = false;
+        return;
+      }
+
+      // Get backend URL first
+      const backendUrl = await this.backendUrlService.getBackendUrl();
+      console.log('[initializePlayer] Backend URL:', backendUrl);
+
+      // Determine media source based on whether it's an analyzed video, custom video, or library video
+      let videoUrl: string;
+
+      if (this.data.customVideo) {
+        // For custom videos, encode the file path in base64 and pass it as a query parameter
+        const encodedPath = btoa(unescape(encodeURIComponent(this.data.customVideo.videoPath)));
+        videoUrl = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+        console.log('Loading custom video from path:', this.data.customVideo.videoPath);
+        console.log('Video URL:', videoUrl);
+      } else if (this.data.videoPath) {
+        // For library videos, encode the file path in base64 and pass it as a query parameter
+        const encodedPath = btoa(unescape(encodeURIComponent(this.data.videoPath)));
+        videoUrl = `${backendUrl}/api/library/videos/custom?path=${encodeURIComponent(encodedPath)}`;
+        console.log('Loading library video from path:', this.data.videoPath);
+        console.log('Video URL:', videoUrl);
+      } else if (this.data.analysis) {
+        videoUrl = `${backendUrl}/api/library/videos/${this.data.analysis.id}`;
+      } else if (this.data.videoId) {
+        // Use the database stream endpoint which looks up the video by ID
+        videoUrl = `${backendUrl}/api/database/videos/${this.data.videoId}/stream`;
+        console.log('Loading video by ID:', this.data.videoId);
+      } else {
+        this.error = 'No video source provided';
+        this.isLoading = false;
+        return;
+      }
+
+      console.log('Video source:', videoUrl);
+
+      // Initialize video.js player
+      this.player = videojs(mediaElement, {
+        controls: false, // We use custom timeline controls
+        preload: 'metadata',
+        fluid: false, // Don't use fluid mode since we have custom layout
+        responsive: false, // Handle responsive ourselves
+        playsinline: true,
+        crossOrigin: 'anonymous',
+        sources: [{
+          src: videoUrl,
+          type: this.mediaType === 'audio' ? 'audio/mp4' : 'video/mp4'
+        }],
+        // Use the player container for fullscreen so our timeline/controls are included
+        fullscreen: {
+          navigationUI: 'hide'
+        }
+      });
+
+      // Override fullscreen methods to use our player container
+      // This ensures timeline and controls are visible in fullscreen
+      this.player.requestFullscreen = () => {
+        const container = this.playerContainer.nativeElement;
+        if (container.requestFullscreen) {
+          return container.requestFullscreen();
+        } else if ((container as any).webkitRequestFullscreen) {
+          return (container as any).webkitRequestFullscreen();
+        } else if ((container as any).mozRequestFullScreen) {
+          return (container as any).mozRequestFullScreen();
+        } else if ((container as any).msRequestFullscreen) {
+          return (container as any).msRequestFullscreen();
+        }
+        return Promise.reject('Fullscreen not supported');
+      };
+
+      // Override exitFullscreen
+      this.player.exitFullscreen = () => {
+        if (document.exitFullscreen) {
+          return document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          return (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          return (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          return (document as any).msExitFullscreen();
+        }
+        return Promise.resolve();
+      };
+
+      // Override isFullscreen to check our container
+      this.player.isFullscreen = () => {
+        const fullscreenElement = document.fullscreenElement ||
+                                  (document as any).webkitFullscreenElement ||
+                                  (document as any).mozFullScreenElement ||
+                                  (document as any).msFullscreenElement;
+        return fullscreenElement === this.playerContainer.nativeElement;
+      };
+
+      // Cache the media element to avoid repeated DOM queries on every change detection
+      this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
+
+      // Start loading timer
+      this.loadingStartTime = Date.now();
+      this.loadingTime = 0;
+      this.loadingMessage = 'Loading video...';
+      this.cdr.markForCheck();
+
+      // Update loading message every second
+      this.loadingProgressInterval = setInterval(() => {
+        if (this.isLoading) {
+          this.loadingTime = Math.floor((Date.now() - this.loadingStartTime) / 1000);
+          this.loadingMessage = `Loading video... (${this.loadingTime}s)`;
+          this.cdr.markForCheck();
+        } else {
+          if (this.loadingProgressInterval) {
+            clearInterval(this.loadingProgressInterval);
+            this.timers.delete(this.loadingProgressInterval);
+          }
+        }
+      }, 1000);
+      this.timers.add(this.loadingProgressInterval);
+
+      // Add loading timeout (30 seconds)
+      this.loadingTimeoutTimer = setTimeout(() => {
+        if (this.isLoading) {
+          console.error('Video loading timeout after 30 seconds');
+          this.isLoading = false;
+          this.error = 'Video loading timeout. The video file may use an unsupported codec. Try converting to MP4.';
+          this.cdr.markForCheck();
+        }
+      }, 30000);
+      this.timers.add(this.loadingTimeoutTimer);
+
+      // Set up video.js event handlers
+      this.player.on('loadedmetadata', () => {
+        if (this.loadingTimeoutTimer) {
+          clearTimeout(this.loadingTimeoutTimer);
+          this.timers.delete(this.loadingTimeoutTimer);
+        }
+        // Run in NgZone to trigger change detection
+        this.ngZone.run(() => {
+          this.isLoading = false;
+          this.duration = this.player!.duration() || 0;
+          this.currentSelection = { startTime: 0, endTime: this.duration };
+          console.log('Video loaded, duration:', this.duration);
+        });
+      });
+
+      // Handle loadeddata event (fires earlier than loadedmetadata)
+      this.player.on('loadeddata', () => {
+        console.log('Video data loaded');
+        // If metadata still not loaded after data is available, try to force it
+        if (this.isLoading && this.player!.duration()) {
+          if (this.loadingTimeoutTimer) {
+            clearTimeout(this.loadingTimeoutTimer);
+            this.timers.delete(this.loadingTimeoutTimer);
+          }
+          // Run in NgZone to trigger change detection
+          this.ngZone.run(() => {
+            this.isLoading = false;
+            this.duration = this.player!.duration() || 0;
+            this.currentSelection = { startTime: 0, endTime: this.duration };
+            console.log('Using duration from loadeddata event:', this.duration);
+          });
+        }
+      });
+
+      // Handle timeupdate event
+      this.player.on('timeupdate', () => {
+        this.currentTime = this.player!.currentTime() || 0;
+
+        // Throttle updateActiveSection to avoid excessive DOM operations
+        if (!this.updateThrottleTimer) {
+          this.updateThrottleTimer = setTimeout(() => {
+            this.updateActiveSection();
+            this.updateThrottleTimer = null;
+          }, this.UPDATE_THROTTLE_MS);
+        }
+      });
+
+      // Handle play event
+      this.player.on('play', () => {
+        this.ngZone.run(() => {
+          this.isPlaying = true;
+          // Hide controls when playing starts in fullscreen (unless mouse is hovering)
+          if (this.isFullscreen) {
+            this.updateFullscreenControlsVisibility();
+          }
+        });
+      });
+
+      // Handle pause event
+      this.player.on('pause', () => {
+        this.ngZone.run(() => {
+          this.isPlaying = false;
+          // Clear any pending hide timer since we're paused
+          if (this.controlsHideTimer) {
+            clearTimeout(this.controlsHideTimer);
+            this.timers.delete(this.controlsHideTimer);
+            this.controlsHideTimer = null;
+          }
+          // Show controls when paused in fullscreen
+          if (this.isFullscreen) {
+            this.updateFullscreenControlsVisibility();
+          }
+        });
+      });
+
+      // Handle fullscreen change events
+      this.player.on('fullscreenchange', () => {
+        this.ngZone.run(() => {
+          this.isFullscreen = !!this.player!.isFullscreen();
+
+          // Attach/detach document-level mouse listeners for fullscreen
+          if (this.isFullscreen) {
+            this.attachFullscreenMouseListeners();
+            // Assume mouse is over player when entering fullscreen
+            // This ensures controls show immediately
+            this.isMouseOverPlayer = true;
+          } else {
+            this.detachFullscreenMouseListeners();
+            this.isMouseOverPlayer = false;
+          }
+
+          this.updateFullscreenControlsVisibility();
+        });
+      });
+
+      // Also listen to native fullscreen events as backup
+      document.addEventListener('fullscreenchange', () => {
+        this.ngZone.run(() => {
+          this.isFullscreen = !!document.fullscreenElement;
+
+          // Attach/detach document-level mouse listeners for fullscreen
+          if (this.isFullscreen) {
+            this.attachFullscreenMouseListeners();
+            // Assume mouse is over player when entering fullscreen
+            // This ensures controls show immediately
+            this.isMouseOverPlayer = true;
+          } else {
+            this.detachFullscreenMouseListeners();
+            this.isMouseOverPlayer = false;
+          }
+
+          this.updateFullscreenControlsVisibility();
+        });
+      });
+
+      // Add mouse movement tracking for fullscreen controls
+      const playerEl = this.player.el();
+      playerEl.addEventListener('mousemove', this.onPlayerMouseMove.bind(this));
+      playerEl.addEventListener('mouseenter', this.onPlayerMouseEnter.bind(this));
+      playerEl.addEventListener('mouseleave', this.onPlayerMouseLeave.bind(this));
+
+      // Handle error event
+      this.player.on('error', () => {
+        const error = this.player!.error();
+        console.error('Video error:', error);
+
+        // MediaError codes:
+        // 1 = MEDIA_ERR_ABORTED - fetching process aborted by user
+        // 2 = MEDIA_ERR_NETWORK - error occurred when downloading
+        // 3 = MEDIA_ERR_DECODE - error occurred when decoding
+        // 4 = MEDIA_ERR_SRC_NOT_SUPPORTED - video format not supported
+
+        let errorMessage = 'Failed to load video';
+        if (error?.code === 3) {
+          errorMessage = 'Video codec not supported by browser. The .MOV file may use a codec (like ProRes or H.265) that HTML5 video cannot decode. Try converting to H.264 MP4.';
+        } else if (error?.code === 4) {
+          errorMessage = 'Video format not supported. Try converting to MP4 with H.264 codec.';
+        } else if (error?.code === 2) {
+          errorMessage = 'Network error while loading video. Please check the file path and try again.';
+        } else if (error?.code === 1) {
+          errorMessage = 'Video loading was aborted.';
+        }
+
+        this.ngZone.run(() => {
+          this.error = errorMessage;
+          this.isLoading = false;
+          this.cdr.markForCheck();
+        });
+      });
+
+    } catch (error) {
+      console.error('Failed to initialize player:', error);
+      this.error = 'Failed to initialize video player';
+      this.isLoading = false;
+    }
+  }
+
+  setupKeyboardShortcuts() {
+    // Use @ngneat/hotkeys for keyboard shortcut management
+    // These shortcuts work globally unless user is typing in an input
+    // ALL shortcuts are stored and unsubscribed on component destroy to prevent memory leaks
+
+    // Space: Play/Pause (reset to 1x speed)
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'space', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        this.player.playbackRate(1);
+        if (this.player.paused()) {
+          this.player.play();
+          // Update timeline speed state when resuming
+          if (this.timelineComponent) {
+            this.timelineComponent.currentPlaybackSpeed = 1;
+          }
+        } else {
+          this.player.pause();
+          // Reset timeline speed state when pausing
+          if (this.timelineComponent) {
+            this.timelineComponent.currentPlaybackSpeed = 0;
+          }
+        }
+      })
+    );
+
+    // Arrow Left: Seek backward 5 seconds
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'arrowleft', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        const currentTime = this.player.currentTime();
+        if (currentTime !== undefined) {
+          const newTime = Math.max(0, currentTime - 5);
+          this.player!.currentTime(newTime);
+        }
+      })
+    );
+
+    // Arrow Right: Seek forward 5 seconds
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'arrowright', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        const currentTime = this.player.currentTime();
+        if (currentTime !== undefined) {
+          const newTime = Math.min(this.duration, currentTime + 5);
+          this.player!.currentTime(newTime);
+        }
+      })
+    );
+
+    // F: Toggle fullscreen
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'f', preventDefault: true }).subscribe(() => {
+        if (!this.player) return;
+        if (this.player.isFullscreen()) {
+          this.player.exitFullscreen();
+        } else {
+          this.player.requestFullscreen();
+        }
+      })
+    );
+
+    // I: Set In point (selection start)
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'i', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.setSelectionFromPlayhead();
+        }
+      })
+    );
+
+    // O: Set Out point (selection end)
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'o', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.setSelectionToPlayhead();
+        }
+      })
+    );
+
+    // A: Select cursor tool
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'a', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.selectTool('cursor');
+        }
+      })
+    );
+
+    // R: Select highlight/range tool
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'r', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.selectTool('highlight');
+        }
+      })
+    );
+
+    // J: Rewind / Slow down playback
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'j', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.handleJKey();
+        }
+      })
+    );
+
+    // K: Pause and reset speed to 1x
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'k', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.handleKKey();
+        }
+      })
+    );
+
+    // L: Fast forward / Speed up playback
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'l', preventDefault: true }).subscribe(() => {
+        if (this.timelineComponent) {
+          this.timelineComponent.handleLKey();
+        }
+      })
+    );
+
+    // M: Add marker at playhead or from selection
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'm', preventDefault: true }).subscribe(() => {
+        this.openAddMarkerDialog();
+      })
+    );
+
+    // Cmd+E: Export clip
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'meta.e', preventDefault: true }).subscribe(() => {
+        this.openExportDialog();
+      })
+    );
+
+    // ?: Show keyboard shortcuts help
+    this.subscriptions.push(
+      this.hotkeys.addShortcut({ keys: 'shift./', preventDefault: true }).subscribe(() => {
+        this.showKeyboardShortcuts();
+      })
+    );
+  }
+
+  /**
+   * Show keyboard shortcuts help dialog
+   */
+  showKeyboardShortcuts() {
+    const shortcuts = `
+Keyboard Shortcuts:
+
+Space - Play/Pause (resets to 1x speed)
+J - Rewind / Slow down playback
+K - Pause and reset speed
+L - Fast forward / Speed up playback
+← - Seek backward 5 seconds
+→ - Seek forward 5 seconds
+F - Toggle fullscreen
+I - Set In point (selection start)
+O - Set Out point (selection end)
+A - Select cursor tool
+R - Select range/highlight tool
+M - Add marker at playhead or from selection
+⌘E - Export clip(s)
+? - Show keyboard shortcuts
+
+Tip: Right-click on the timeline for additional options.
+    `.trim();
+
+    alert(shortcuts);
+  }
+
+  /**
+   * Handle timeline context menu (right-click)
+   */
+  onTimelineContextMenu(event: { event: MouseEvent, time: number }) {
+    // Store the time where the user clicked for context menu actions
+    this.contextMenuClickTime = event.time;
+
+    // Set menu position
+    this.contextMenuPosition = {
+      x: event.event.clientX,
+      y: event.event.clientY
+    };
+
+    // Open the context menu
+    if (this.contextMenuTrigger) {
+      this.contextMenuTrigger.openMenu();
+    }
+  }
+
+  /**
+   * Handle "Add Marker" from context menu
+   */
+  onContextMenuAddMarker() {
+    // Temporarily set current time to the context menu click time
+    const originalTime = this.currentTime;
+    this.currentTime = this.contextMenuClickTime;
+
+    // Open marker dialog (which will use currentTime if no selection)
+    this.openAddMarkerDialog().then(() => {
+      // Restore original time
+      this.currentTime = originalTime;
+    });
+  }
+
+  /**
+   * Handle "Export Clip" from context menu
+   */
+  onContextMenuExport() {
+    this.openExportDialog();
+  }
+
+  seekToTime(seconds: number, sectionIndex?: number) {
+    if (this.player) {
+      this.player.currentTime(seconds);
+      this.player.play();
+    }
+    // Set active section if index provided
+    if (sectionIndex !== undefined && this.metadata?.sections) {
+      // Verify the index is within bounds
+      if (sectionIndex >= 0 && sectionIndex < this.metadata.sections.length) {
+        this.activeSectionIndex = sectionIndex;
+
+        // Auto-select the section's time range
+        const section = this.metadata.sections[sectionIndex];
+        if (section) {
+          const endTime = section.endSeconds ||
+            (this.metadata.sections[sectionIndex + 1]?.startSeconds || this.duration);
+          this.currentSelection = {
+            startTime: section.startSeconds,
+            endTime: endTime
+          };
+        }
+      }
+    }
+  }
+
+  /**
+   * Update active section based on current playback time
+   */
+  updateActiveSection() {
+    if (!this.metadata?.sections) return;
+
+    const currentSection = this.metadata.sections.findIndex((section, index) => {
+      const startTime = section.startSeconds;
+      const endTime = section.endSeconds ||
+        (this.metadata!.sections[index + 1]?.startSeconds || this.duration);
+
+      return this.currentTime >= startTime && this.currentTime < endTime;
+    });
+
+    if (currentSection !== -1 && currentSection !== this.previousActiveSectionIndex) {
+      this.activeSectionIndex = currentSection;
+      this.previousActiveSectionIndex = currentSection;
+
+      // Auto-scroll to section in AI Analysis tab if it's currently open (works during playback AND scrubbing)
+      if (this.tabGroup && this.tabGroup.selectedIndex === 0) {
+        this.scrollToActiveSection();
+      }
+    } else if (currentSection === -1) {
+      this.previousActiveSectionIndex = null;
+    }
+  }
+
+  /**
+   * Scroll to the active section in the sections list
+   */
+  private scrollToActiveSection() {
+    // Only auto-scroll if enabled
+    if (!this.autoScrollEnabled) return;
+
+    // Wait for next tick to ensure DOM is updated
+    setTimeout(() => {
+      const activeElement = document.querySelector('.section-item.active');
+      if (activeElement) {
+        // Use instant scrolling instead of smooth to reduce performance impact
+        activeElement.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+      }
+    }, 100);
+  }
+
+  /**
+   * Toggle auto-scroll for AI analysis and transcript
+   */
+  toggleAutoScroll() {
+    this.autoScrollEnabled = !this.autoScrollEnabled;
+  }
+
+  /**
+   * Handle tab change to track which tab is active
+   */
+  onTabChange(event: any) {
+    this.currentTabIndex = event.index;
+  }
+
+  /**
+   * Get dynamic tooltip text based on current tab
+   */
+  getAutoScrollTooltip(): string {
+    if (!this.autoScrollEnabled) {
+      return 'Auto-scroll: OFF - Click to enable scrolling with video playback';
+    }
+
+    switch (this.currentTabIndex) {
+      case 0: // Analysis tab
+        return 'Auto-scroll: ON - Analysis sections will scroll with video playback';
+      case 1: // Search tab
+        return 'Auto-scroll: ON - (Search tab does not auto-scroll)';
+      case 2: // Transcript tab
+        return 'Auto-scroll: ON - Transcript will scroll with video playback';
+      default:
+        return 'Auto-scroll: ON - Content will scroll with video playback';
+    }
+  }
+
+  /**
+   * Get dynamic label text based on current tab
+   */
+  getAutoScrollLabel(): string {
+    if (!this.autoScrollEnabled) {
+      return 'Auto-scroll disabled';
+    }
+
+    switch (this.currentTabIndex) {
+      case 0: // Analysis tab
+        return 'Auto-scroll: Analysis';
+      case 1: // Search tab
+        return 'Auto-scroll enabled (N/A for search)';
+      case 2: // Transcript tab
+        return 'Auto-scroll: Transcript';
+      default:
+        return 'Auto-scroll enabled';
+    }
+  }
+
+  /**
+   * Check if a section is currently active
+   */
+  isSectionActive(index: number): boolean {
+    return this.activeSectionIndex === index;
+  }
+
+  close() {
+    if (this.dialogRef) {
+      // Opened as dialog - close it
+      this.dialogRef.close();
+    } else {
+      // Opened as route - navigate back to library
+      this.router.navigate(['/library']);
+    }
+  }
+
+
+  /**
+   * Handle timeline seek event
+   */
+  onTimelineSeek(time: number) {
+    if (this.player) {
+      this.player.currentTime(time);
+    }
+  }
+
+  /**
+   * Handle timeline selection change event
+   */
+  onSelectionChange(selection: TimelineSelection) {
+    this.currentSelection = selection;
+    console.log('Selection changed:', selection);
+  }
+
+  /**
+   * Handle play/pause toggle from timeline
+   */
+  onPlayPause() {
+    if (this.player) {
+      if (this.player.paused()) {
+        this.player.play();
+      } else {
+        this.player.pause();
+      }
+    }
+  }
+
+  /**
+   * Handle playback speed change from timeline (J/K/L keys)
+   */
+  onPlaybackSpeed(speed: number) {
+    if (!this.player) return;
+
+    if (speed < 0) {
+      // Backwards playback - simulate by jumping backwards repeatedly
+      const absSpeed = Math.abs(speed);
+      this.player.pause();
+      // Jump back proportional to speed (1x = 0.5s, 2x = 1s, 4x = 2s, 8x = 4s)
+      const jumpAmount = 0.5 * absSpeed;
+      const currentTime = this.player.currentTime();
+      if (currentTime !== undefined) {
+        this.player.currentTime(Math.max(0, currentTime - jumpAmount));
+      }
+    } else if (speed === 0) {
+      // Pause (K key)
+      this.player.pause();
+      this.player.playbackRate(1); // Reset to normal speed
+    } else {
+      // Forward playback at specified speed (L key)
+      this.player.playbackRate(speed);
+      if (this.player.paused()) {
+        this.player.play();
+      }
+    }
+  }
+
+  /**
+   * Open create clip dialog
+   */
+  async openCreateClipDialog() {
+    // If we have a videoPath but no analysis or customVideo, create a customVideo object
+    let customVideoData = this.data.customVideo;
+    if (!this.data.analysis && !this.data.customVideo && this.data.videoPath) {
+      customVideoData = {
+        videoPath: this.data.videoPath,
+        title: this.data.videoTitle || 'Video'
+      };
+    }
+
+    // For custom videos with real file paths (dragged/dropped files), ensure we pass the real path
+    if (customVideoData && this.data.realFilePath) {
+      customVideoData = {
+        ...customVideoData,
+        realFilePath: this.data.realFilePath
+      };
+    }
+
+    // Import and open the CreateClipDialogComponent as a modal
+    const { CreateClipDialogComponent } = await import('../create-clip-dialog/create-clip-dialog.component');
+
+    const dialogRef = this.dialog.open(CreateClipDialogComponent, {
+      width: '600px',
+      data: {
+        analysis: this.data.analysis,
+        customVideo: customVideoData,
+        startTime: this.currentSelection.startTime,
+        endTime: this.currentSelection.endTime
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.created) {
+      console.log('[VideoPlayer] Clip created, result:', result);
+
+      // If the clip is queued for background processing, don't show a notification yet
+      // The notification will be shown when the background processing completes
+      if (result.queued) {
+        console.log('[VideoPlayer] Clip queued for background processing, skipping immediate notification');
+        return;
+      }
+
+      // Check if we have a videoId (from import) to navigate to
+      const videoId = result.videoId;
+      console.log('[VideoPlayer] VideoId:', videoId);
+
+      if (videoId) {
+        console.log('[VideoPlayer] Showing navigation notification');
+        // If the clip was imported to the library, offer navigation
+        this.notificationService.toastOnly(
+          'success',
+          'Clip Created',
+          'Click to view in library',
+          {
+            type: 'navigate-library',
+            videoId: videoId
+          }
+        );
+      } else {
+        console.log('[VideoPlayer] No videoId, showing folder notification');
+        // Otherwise, just offer to open the folder
+        this.notificationService.toastOnly(
+          'success',
+          'Clip Created',
+          `Clip saved to: ${result.extraction?.outputPath || 'clips folder'}`,
+          {
+            type: 'open-folder',
+            path: result.extraction?.outputPath
+          }
+        );
+      }
+    }
+  }
+
+  async openAddMarkerDialog() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available for marker creation');
+      return;
+    }
+
+    // Determine start and end time:
+    // If there's a selection (range > 1 second), use it
+    // Otherwise, use playhead position with 1 second duration
+    let startTime = this.currentSelection.startTime;
+    let endTime = this.currentSelection.endTime;
+
+    if (endTime - startTime < 1) {
+      // No valid selection, use current playhead position
+      startTime = this.currentTime;
+      endTime = Math.min(startTime + 1, this.duration); // 1 second marker or until end
+    }
+
+    // Import and open the AddMarkerDialogComponent as a modal
+    const { AddMarkerDialogComponent } = await import('../add-marker-dialog/add-marker-dialog.component');
+
+    const dialogRef = this.dialog.open(AddMarkerDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: videoId,
+        videoTitle: this.data.videoTitle || 'Video',
+        startTime: startTime,
+        endTime: endTime
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.created) {
+      // Reload timeline sections to show the new marker
+      await this.reloadAnalysisSections();
+
+      // Show success notification with action to navigate to library
+      this.notificationService.toastOnly(
+        'success',
+        'Marker Created',
+        'New marker has been added to the timeline',
+        {
+          type: 'navigate-library',
+          videoId: videoId
+        }
+      );
+    }
+  }
+
+  /**
+   * Reload analysis sections from database
+   */
+  private async reloadAnalysisSections() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) return;
+
+    try {
+      const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+      if (sections && sections.length > 0) {
+        this.timelineSections = sections.map(section => ({
+          startTime: section.start_seconds,
+          endTime: section.end_seconds || (section.start_seconds + 30),
+          category: section.category || 'General',
+          description: section.description || section.title || '',
+          color: this.getCategoryColor(section.category || 'General')
+        }));
+
+        // Also update metadata for sidebar display
+        this.metadata = {
+          sections: sections.map(s => ({
+            startSeconds: s.start_seconds,
+            endSeconds: s.end_seconds,
+            timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds || s.start_seconds),
+            category: s.category || 'General',
+            description: s.description || s.title || '',
+            quotes: []
+          }))
+        } as any;
+      } else {
+        // No sections left
+        this.timelineSections = [];
+        if (this.metadata) {
+          this.metadata.sections = [];
+        }
+      }
+
+      this.cdr.detectChanges();
+    } catch (error) {
+      console.error('Failed to reload analysis sections:', error);
+    }
+  }
+
+  /**
+   * Delete an analysis section
+   */
+  async deleteSection(section: any, index: number) {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      return;
+    }
+
+    // Find the actual database section ID
+    // We need to get all sections from the database to find the matching one
+    try {
+      const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+      const matchingSection = dbSections.find(s =>
+        s.start_seconds === section.startSeconds &&
+        s.category === section.category &&
+        s.description === section.description
+      );
+
+      if (!matchingSection) {
+        this.notificationService.toastOnly('error', 'Error', 'Could not find section to delete');
+        return;
+      }
+
+      // Delete the section from the database
+      const result = await this.databaseLibraryService.deleteAnalysisSection(videoId, matchingSection.id);
+
+      if (result.success) {
+        // Reload all sections to refresh the UI
+        await this.reloadAnalysisSections();
+      } else {
+        this.notificationService.toastOnly('error', 'Delete Failed', result.error || 'Failed to delete section');
+      }
+    } catch (error) {
+      console.error('Error deleting section:', error);
+      this.notificationService.toastOnly('error', 'Delete Failed', 'An error occurred while deleting');
+    }
+  }
+
+  formatTime(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  formatTimeRange(startSeconds: number, endSeconds: number): string {
+    return `${this.formatTime(startSeconds)} - ${this.formatTime(endSeconds)}`;
+  }
+
+  /**
+   * Toggle category filter
+   */
+  toggleCategoryFilter(category: string) {
+    if (this.timelineComponent) {
+      this.timelineComponent.toggleCategoryFilter(category);
+    }
+  }
+
+  /**
+   * Open bulk export dialog with filtered sections
+   */
+  /**
+   * Open export dialog with options for selected range or specific markers/sections
+   */
+  async openExportDialog() {
+    // Prevent opening multiple export dialogs
+    if (this.exportDialogOpen) {
+      return;
+    }
+
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      return;
+    }
+
+    const videoPath = this.data.videoPath || this.data.analysis?.video.currentPath;
+    if (!videoPath) {
+      this.notificationService.toastOnly('error', 'Error', 'No video path available');
+      return;
+    }
+
+    // Get all sections from database
+    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+    // Import and open the ExportDialogComponent
+    const { ExportDialogComponent } = await import('../export-dialog/export-dialog.component');
+
+    // Mark dialog as open
+    this.exportDialogOpen = true;
+
+    const dialogRef = this.dialog.open(ExportDialogComponent, {
+      width: '800px',
+      maxHeight: '90vh',
+      data: {
+        sections: dbSections.map(section => ({
+          id: section.id,
+          category: section.category || 'Other',
+          description: section.description || section.title || '',
+          startSeconds: section.start_seconds,
+          endSeconds: section.end_seconds || (section.start_seconds + 30),
+          timeRange: this.formatTimeRange(section.start_seconds, section.end_seconds)
+        })),
+        selectionStart: this.currentSelection.startTime,
+        selectionEnd: this.currentSelection.endTime,
+        videoId: videoId,
+        videoPath: videoPath,
+        videoTitle: this.data.videoTitle || 'Video'
+      }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    // Mark dialog as closed
+    this.exportDialogOpen = false;
+
+    if (result?.export) {
+      // Handle the export
+      await this.processExport(result.data);
+    }
+  }
+
+  /**
+   * Process the export request
+   */
+  private async processExport(exportData: any) {
+    const sections: any[] = [];
+
+    // Add selection if included
+    if (exportData.includeSelection) {
+      sections.push({
+        start_seconds: exportData.selectionStart,
+        end_seconds: exportData.selectionEnd,
+        category: 'Selection',
+        description: 'Timeline Selection'
+      });
+    }
+
+    // Add selected sections
+    exportData.sections.forEach((section: any) => {
+      sections.push({
+        start_seconds: section.startSeconds,
+        end_seconds: section.endSeconds,
+        category: section.category,
+        description: section.description
+      });
+    });
+
+    if (sections.length === 0) {
+      this.notificationService.toastOnly('info', 'No Clips', 'No sections selected for export');
+      return;
+    }
+
+    // Call the existing bulk export dialog with the selected sections
+    await this.processBulkExport(exportData.videoId, exportData.videoPath, sections);
+  }
+
+  /**
+   * Process bulk export with given sections
+   */
+  private async processBulkExport(videoId: string, videoPath: string, sections: any[]) {
+    // Import and open the BulkExportDialogComponent
+    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
+
+    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: videoId,
+        videoPath: videoPath,
+        sections: sections
+      }
+    });
+
+    await dialogRef.afterClosed().toPromise();
+  }
+
+  async openBulkExport() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId) {
+      this.notificationService.toastOnly('error', 'Error', 'No video ID available');
+      return;
+    }
+
+    const videoPath = this.data.videoPath || this.data.analysis?.video.currentPath;
+    if (!videoPath) {
+      this.notificationService.toastOnly('error', 'Error', 'No video path available');
+      return;
+    }
+
+    // Get the filtered sections from the database
+    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+
+    // Filter sections based on active category filters
+    const enabledCategories = new Set(
+      this.categoryFilters
+        .filter(f => f.enabled)
+        .map(f => f.category)
+    );
+
+    const filteredSections = dbSections.filter(section => {
+      const category = section.category?.toLowerCase() || 'other';
+      return enabledCategories.has(category);
+    });
+
+    if (filteredSections.length === 0) {
+      this.notificationService.toastOnly('info', 'No Clips', 'No sections match the current filter');
+      return;
+    }
+
+    // Import and open the BulkExportDialogComponent
+    const { BulkExportDialogComponent } = await import('../bulk-export-dialog/bulk-export-dialog.component');
+
+    const dialogRef = this.dialog.open(BulkExportDialogComponent, {
+      width: '600px',
+      data: {
+        videoId: videoId,
+        videoPath: videoPath,
+        sections: filteredSections
+      }
+    });
+
+    await dialogRef.afterClosed().toPromise();
+  }
+
+  getCategoryColor(category: string): string {
+    if (!category) return '#757575';
+
+    // Normalize category name for consistent matching
+    const normalizedCategory = category.toLowerCase().trim();
+
+    // Define specific colors for known categories
+    const categoryColors: { [key: string]: string } = {
+      'extremism': '#ef4444',    // Red
+      'hate': '#f97316',         // Orange
+      'violence': '#dc2626',     // Dark red
+      'conspiracy': '#eab308',   // Yellow
+      'misinformation': '#f59e0b', // Amber
+      'interesting': '#3b82f6',  // Blue
+      'notable': '#06b6d4',      // Cyan
+      'important': '#10b981',    // Green
+      'controversial': '#ec4899', // Pink
+      'custom': '#22c55e',       // Bright green - User-created markers
+    };
+
+    // Check if we have a specific color for this category
+    if (categoryColors[normalizedCategory]) {
+      return categoryColors[normalizedCategory];
+    }
+
+    // Fall back to hash-based color for unknown categories
+    const colors = [
+      '#ef4444', '#f97316', '#eab308', '#22c55e',
+      '#3b82f6', '#a855f7', '#ec4899',
+    ];
+
+    const hash = category.split('').reduce((acc, char) => {
+      return char.charCodeAt(0) + ((acc << 5) - acc);
+    }, 0);
+
+    return colors[Math.abs(hash) % colors.length];
+  }
+
+  /**
+   * Handle transcript search seek event
+   */
+  onTranscriptSeek(timestamp: number) {
+    console.log('onTranscriptSeek called with timestamp:', timestamp);
+    this.seekToTime(timestamp);
+  }
+
+  /**
+   * Handle run analysis request from transcript search
+   * This directly starts transcription without prompting for AI analysis
+   */
+  async onRunTranscriptAnalysis() {
+    // Get video details
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    const videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath;
+    const videoTitle = this.data.analysis?.title || this.data.videoTitle || 'Unknown';
+
+    if (!videoPath) {
+      this.notificationService.toastOnly('error', 'Error', 'No video path available for transcription');
+      return;
+    }
+
+    // Add to analysis queue (transcribe-only mode)
+    // Note: aiModel is not used for transcribe-only, but we need to pass something
+    // The actual processing will skip AI analysis for this mode
+    this.analysisQueueService.addPendingJob({
+      input: videoPath,
+      inputType: 'file',
+      mode: 'transcribe-only',
+      aiModel: '',  // Not used for transcribe-only mode
+      whisperModel: 'base',
+      language: 'en',
+      customInstructions: '',
+      displayName: videoTitle,
+      videoId: videoId,
+      loading: false
+    });
+
+    this.notificationService.toastOnly(
+      'success',
+      'Added to Queue',
+      'Video transcription has been added to the analysis queue. Click the queue button in the header to start processing.'
+    );
+  }
+
+  /**
+   * Generate AI analysis and/or transcript for this video
+   */
+  async generateAnalysis() {
+    // Get video details
+    // IMPORTANT: Don't use analysis.id as fallback - that's the analysis ID, not video ID!
+    const videoId = this.data.videoId;
+    let videoPath = this.data.analysis?.video?.currentPath || this.data.videoPath || this.data.realFilePath;
+    const videoTitle = this.data.analysis?.title || this.data.videoTitle || this.data.customVideo?.title || 'Unknown';
+
+    // For custom/dropped videos, use the real file path
+    if (this.data.customVideo?.videoPath || (this.data.videoPath && !this.data.videoId)) {
+      videoPath = this.data.realFilePath || this.data.videoPath;
+    }
+
+    // Check if we have a valid file path (not a blob URL)
+    if (!videoPath || videoPath.startsWith('blob:')) {
+      this.notificationService.toastOnly(
+        'error',
+        'Cannot Analyze',
+        'Unable to get file path for this video. Please import the video to the library first.'
+      );
+      return;
+    }
+
+    // Add to analysis queue (full analysis mode)
+    // User must have configured a default AI model in settings
+    // The queue processing will prompt to select one if not configured
+    this.analysisQueueService.addPendingJob({
+      input: videoPath,
+      inputType: 'file',
+      mode: 'full',
+      aiModel: '',  // Will use configured default or prompt user to select
+      whisperModel: 'base',
+      language: 'en',
+      customInstructions: '',
+      displayName: videoTitle,
+      videoId: videoId,
+      loading: false
+    });
+
+    this.notificationService.toastOnly(
+      'success',
+      'Added to Queue',
+      'Video has been added to the analysis queue. Click the queue button in the header to start processing.'
+    );
+  }
+
+  /**
+   * Open relink dialog to fix missing video
+   */
+  async relinkVideo() {
+    const { RelinkDialogComponent } = await import('../relink-dialog/relink-dialog.component');
+
+    const dialogRef = this.dialog.open(RelinkDialogComponent, {
+      width: '700px',
+      data: { analysis: this.data.analysis }
+    });
+
+    const result = await dialogRef.afterClosed().toPromise();
+
+    if (result?.relinked) {
+      // Video was successfully relinked, reload the player
+      this.error = null;
+      this.isLoading = true;
+
+      // Dispose of old player
+      if (this.player) {
+        this.player.dispose();
+        this.player = null;
+      }
+
+      // Reinitialize the player with new video path
+      setTimeout(() => {
+        this.initializePlayer();
+      }, 100);
+
+      this.notificationService.toastOnly('success', 'Video Relinked', 'Video has been successfully relinked!');
+    }
+  }
+
+  /**
+   * Handle drag over event
+   */
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = true;
+  }
+
+  /**
+   * Handle drag leave event
+   */
+  onDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = false;
+  }
+
+  /**
+   * Handle drop event
+   */
+  onDrop(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = false;
+
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      this.loadVideoFile(files[0]);
+    }
+  }
+
+  /**
+   * Handle file selection from input
+   */
+  onFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      this.loadVideoFile(input.files[0]);
+    }
+  }
+
+  /**
+   * Load a video from the database with its analysis and transcript data
+   */
+  private async loadExistingVideoFromDatabase(response: any, filePath: string): Promise<void> {
+    const video = response.video;
+    const analysis = response.analysis;
+    const transcript = response.transcript;
+    const sections = response.sections;
+
+    console.log('Loading existing video from database:', {
+      videoId: video.id,
+      mediaType: video.media_type,
+      hasAnalysis: !!analysis,
+      hasTranscript: !!transcript,
+      sectionsCount: sections?.length || 0
+    });
+
+    // Set media type from database
+    this.mediaType = video.media_type || 'video';
+
+    // Update component data to use the database video
+    this.data = {
+      videoId: video.id,
+      videoPath: filePath,
+      videoTitle: video.filename,
+      hasAnalysis: !!analysis,
+      hasTranscript: !!transcript
+    };
+
+    // Load sections (custom markers and analysis sections)
+    // Load sections regardless of whether there's an analysis - custom markers should always show
+    if (sections && sections.length > 0) {
+      try {
+        // Convert database sections to timeline format
+        this.timelineSections = sections.map((section: any) => ({
+          startTime: section.start_seconds,
+          endTime: section.end_seconds || (section.start_seconds + 30),
+          category: section.category || 'General',
+          description: section.description || section.title || '',
+          color: this.getCategoryColor(section.category || 'General')
+        }));
+
+        // Build metadata object for display
+        this.metadata = {
+          sections: sections.map((s: any) => ({
+            startSeconds: s.start_seconds,
+            endSeconds: s.end_seconds,
+            timeRange: this.formatTimeRange(s.start_seconds, s.end_seconds),
+            category: s.category || 'General',
+            description: s.description || s.title || '',
+            quotes: [] // Database doesn't store quotes separately
+          }))
+        } as any;
+
+        console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and analysis)');
+      } catch (error) {
+        console.error('Failed to load sections:', error);
+      }
+    }
+
+    // Parse and load analysis metadata if available
+    if (analysis) {
+      console.log('Analysis metadata available');
+    }
+
+    // Load transcript if available
+    if (transcript) {
+      try {
+        // Use SRT format from database if available (includes timestamps for seeking)
+        // Otherwise fall back to plain text
+        this.transcriptText = transcript.srt_format || transcript.plain_text;
+        this.transcriptExists = !!(this.transcriptText && this.transcriptText.trim().length > 0);
+        console.log('Loaded transcript');
+      } catch (error) {
+        console.error('Failed to load transcript:', error);
+      }
+    }
+
+    // Now initialize the video player using the normal flow
+    // This will use the videoPath we set in this.data
+    this.initializePlayer();
+  }
+
+
+  /**
+   * Load a video file from disk
+   */
+  private async loadVideoFile(file: File): Promise<void> {
+    // Validate file type
+    if (!file.type.startsWith('video/')) {
+      this.notificationService.toastOnly('error', 'Invalid File', 'Please select a valid video file');
+      return;
+    }
+
+    // Clear any existing errors
+    this.error = null;
+    this.isLoading = true;
+    this.loadingMessage = 'Checking if video exists in database...';
+
+    // Try to get the real file path (only works in Electron)
+    const electron = (window as any).electron;
+    let filePath: string | null = null;
+
+    if (electron && electron.getFilePathFromFile) {
+      try {
+        filePath = electron.getFilePathFromFile(file);
+        console.log('Got file path from Electron:', filePath);
+      } catch (error) {
+        console.warn('Failed to get file path from Electron:', error);
+      }
+    }
+
+    // If we have a file path, check if this video exists in the database
+    if (filePath) {
+      try {
+        const url = await this.backendUrlService.getApiUrl('/database/videos/lookup-by-file');
+        const response = await this.http.post<any>(url, { filePath }).toPromise();
+
+        if (response?.success && response.found) {
+          // Video exists in database! Load it with its analysis and transcript
+          console.log('Video found in database:', response.video);
+
+          this.notificationService.toastOnly(
+            'info',
+            'Video Found in Library',
+            'Loading existing analysis and transcript data...'
+          );
+
+          // Load the video from the database with all its metadata
+          await this.loadExistingVideoFromDatabase(response, filePath);
+          return;
+        } else {
+          console.log('Video not found in database, loading as new video');
+        }
+      } catch (error) {
+        console.error('Error checking if video exists in database:', error);
+        // Continue loading as a new video if lookup fails
+      }
+    }
+
+    // Video not in database or no file path - load as custom video
+    this.loadingMessage = 'Loading video...';
+
+    // Create object URL for the file (for browser playback)
+    const videoUrl = URL.createObjectURL(file);
+
+    // Update data to reflect custom video
+    this.data = {
+      ...this.data,
+      customVideo: {
+        title: file.name,
+        videoPath: videoUrl, // Blob URL for browser playback
+        isLocalFile: true
+      },
+      videoTitle: file.name,
+      realFilePath: filePath || undefined // Real file path for backend processing (if available)
+    };
+
+    // Reinitialize the player with the new video
+    // initializePlayer handles all cleanup and setup
+    await this.initializePlayer();
+  }
+
+  /**
+   * Get the current media element (video or audio) for waveform generation
+   */
+  getMediaElement(): HTMLVideoElement | HTMLAudioElement | undefined {
+    // Return cached media element to avoid repeated DOM queries on every change detection
+    // CRITICAL: This method is called from template binding, so it runs on EVERY change detection cycle
+    // Using a cached value prevents thousands of querySelector calls and prevents triggering
+    // unnecessary ngOnChanges in child components
+    if (this.cachedMediaElement) {
+      return this.cachedMediaElement;
+    }
+    // Fallback: If cache is empty but player exists, query and cache it
+    if (this.player) {
+      this.cachedMediaElement = this.player.el().querySelector('video, audio') as HTMLVideoElement | HTMLAudioElement;
+      return this.cachedMediaElement;
+    }
+    // Final fallback to direct element references if player not initialized
+    if (this.mediaType === 'audio' && this.audioElement) {
+      return this.audioElement.nativeElement;
+    } else if (this.mediaType === 'video' && this.videoElement) {
+      return this.videoElement.nativeElement;
+    }
+    return undefined;
+  }
+
+  /**
+   * Cleanup loading timers
+   */
+  private cleanupLoadingTimers(): void {
+    if (this.loadingProgressInterval) {
+      clearInterval(this.loadingProgressInterval);
+      this.timers.delete(this.loadingProgressInterval);
+      this.loadingProgressInterval = null;
+    }
+    if (this.loadingTimeoutTimer) {
+      clearTimeout(this.loadingTimeoutTimer);
+      this.timers.delete(this.loadingTimeoutTimer);
+      this.loadingTimeoutTimer = null;
+    }
+  }
+}

@@ -1,11 +1,11 @@
 import { Component } from '@angular/core';
-import { VideoEditorComponent } from '../../components/video-editor/video-editor.component';
+import { VideoPlayerComponent } from '../../components/video-player/video-player.component';
 
 @Component({
   selector: 'app-editor',
   standalone: true,
-  imports: [VideoEditorComponent],
-  template: '<app-video-editor />',
+  imports: [VideoPlayerComponent],
+  template: '<app-video-player />',
   styles: [`
     :host {
       display: block;

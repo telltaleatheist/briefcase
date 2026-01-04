@@ -13,8 +13,13 @@ export const routes: Routes = [
   },
   {
     path: 'editor',
-    loadComponent: () => import('./components/video-editor/video-editor.component').then(m => m.VideoEditorComponent),
-    title: 'Video Editor | ClipChimp'
+    loadComponent: () => import('./components/video-player/video-player.component').then(m => m.VideoPlayerComponent),
+    title: 'Video Player | ClipChimp'
+  },
+  {
+    path: 'ripplecut',
+    loadComponent: () => import('./pages/ripplecut/ripplecut-page.component').then(m => m.RipplecutPageComponent),
+    title: 'RippleCut | ClipChimp'
   },
   {
     path: 'video/:id',
