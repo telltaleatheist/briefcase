@@ -1721,7 +1721,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         break;
 
       case 'openInEditor':
-        this.openInEditor(videosToProcess[0]);
+        this.openInEditor(videosToProcess);
         break;
 
       case 'openInRipplecut':
@@ -1770,9 +1770,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  openInEditor(video?: VideoItem) {
-    // If no video passed, get first selected video
-    if (!video) {
+  openInEditor(videos?: VideoItem | VideoItem[]) {
+    // Normalize to array
+    let videosToOpen: VideoItem[] = [];
+
+    if (videos) {
+      videosToOpen = Array.isArray(videos) ? videos : [videos];
+    } else {
+      // No videos passed, get from selection
       const selectedItemIds = this.selectedVideoIds();
 
       if (selectedItemIds.size === 0) {
@@ -1780,18 +1785,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         return;
       }
 
-      if (selectedItemIds.size !== 1) {
-        this.notificationService.warning('Multiple Selection', 'Please select exactly one video to open in editor');
-        return;
-      }
-
-      // Get the video from selected ID - check both filtered and all weeks
+      // Get all available videos
       const allVideos: VideoItem[] = [];
-      // First check filtered weeks (what's currently visible)
       this.filteredWeeks().forEach(week => {
         allVideos.push(...week.videos);
       });
-      // Also add from all weeks in case selection came from unfiltered view
       this.videoWeeks().forEach(week => {
         week.videos.forEach(v => {
           if (!allVideos.find(existing => existing.id === v.id)) {
@@ -1800,42 +1798,42 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         });
       });
 
-      // The itemId format is "weekLabel|videoId"
-      const itemId = Array.from(selectedItemIds)[0];
-      const parts = itemId.split('|');
-      const videoId = parts.length > 1 ? parts[1] : itemId;
-
-      // Try to find by extracted videoId first
-      video = allVideos.find(v => v.id === videoId);
-
-      // If not found, try matching the full itemId as videoId (in case format changed)
-      if (!video) {
-        video = allVideos.find(v => v.id === itemId);
+      // Find videos matching selected IDs
+      for (const itemId of selectedItemIds) {
+        const parts = itemId.split('|');
+        const videoId = parts.length > 1 ? parts[1] : itemId;
+        const video = allVideos.find(v => v.id === videoId) || allVideos.find(v => v.id === itemId);
+        if (video) {
+          videosToOpen.push(video);
+        }
       }
     }
 
-    if (!video) {
-      console.error('Could not find video. Selected IDs:', Array.from(this.selectedVideoIds()));
-      this.notificationService.error('Video Not Found', 'Could not find selected video');
+    if (videosToOpen.length === 0) {
+      console.error('Could not find videos. Selected IDs:', Array.from(this.selectedVideoIds()));
+      this.notificationService.error('Video Not Found', 'Could not find selected video(s)');
       return;
     }
 
-    // Open editor in a new window via Electron
-    // videoPath is optional - the editor can stream by videoId if path is missing
+    // Open editor - first video creates window, rest become tabs
     if (this.electronService.isElectron) {
-      this.electronService.openEditorWindow({
-        videoId: video.id,
-        videoPath: video.filePath,
-        videoTitle: video.name
-      });
+      // Open all videos sequentially - Electron handles adding as tabs
+      for (const video of videosToOpen) {
+        this.electronService.openEditorWindow({
+          videoId: video.id,
+          videoPath: video.filePath,
+          videoTitle: video.name
+        });
+      }
     } else {
-      // Fallback for non-Electron: navigate to editor route
+      // Fallback for non-Electron: navigate to editor route with first video
+      const firstVideo = videosToOpen[0];
       this.router.navigate(['/editor'], {
         state: {
           videoEditorData: {
-            videoId: video.id,
-            videoPath: video.filePath,
-            videoTitle: video.name
+            videoId: firstVideo.id,
+            videoPath: firstVideo.filePath,
+            videoTitle: firstVideo.name
           }
         }
       });

@@ -12,14 +12,14 @@
         [(ngModel)]="filters.searchQuery"
         (ngModelChange)="onSearchChange()"
         (focus)="onSearchFocus()"
-        placeholder="Search: words, &quot;phrase&quot;, -exclude, wild*"
+        placeholder="Search filenames: all words must match"
         title="Search tips:
 • Multiple words: all must match
 • Exact phrase: &quot;hello world&quot;
 • Exclude: -unwanted (removes results with that word)
 • Wildcards: test* matches testing, tests
 • OR operator: word1 OR word2
-• Searches: filename, transcript, analysis, tags"
+• Enable Transcript/Analysis in filters for deeper search"
         class="search-input"
       />
     </div>
@@ -70,13 +70,13 @@
     <div class="filter-section">
       <label class="section-label">Options</label>
       <div class="checkbox-row">
-        <label class="checkbox-label" title="Match words consecutively as a phrase">
+        <label class="checkbox-label" title="All words must match (AND logic). Uncheck for any word matches (OR logic).">
           <input
             type="checkbox"
             [(ngModel)]="filters.searchOptions.usePhraseSearch"
             (ngModelChange)="onFilterChange()"
           />
-          Phrase
+          All Words
         </label>
         <label class="checkbox-label" title="Match similar-sounding words (e.g., 'Somalies' matches 'Somalis')">
           <input

@@ -621,10 +621,14 @@ export class CascadeComponent {
     switch (action) {
       case 'open':
       case 'openInEditor':
-        // Open in video editor - emit for all selected videos
-        videos.forEach(v => {
-          this.videoAction.emit({ action: 'openInEditor', videos: [v] });
-        });
+        // Open in video editor - emit all selected videos at once
+        // Filter out queue/staging/processing items that can't be opened in editor
+        const editableVideos = videos.filter(v =>
+          !this.isQueueItem(v) && !this.isStagingItem(v) && !this.isProcessingItem(v)
+        );
+        if (editableVideos.length > 0) {
+          this.videoAction.emit({ action: 'openInEditor', videos: editableVideos });
+        }
         break;
 
       case 'openInMediaPlayer':
@@ -1127,16 +1131,33 @@ export class CascadeComponent {
       return;
     }
 
-    // Enter to open in editor
-    if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey) {
-      const highlightedId = this.highlightedItemId();
-      if (highlightedId) {
-        event.preventDefault();
-        const video = this.getVideoByItemId(highlightedId);
-        // Don't allow opening queue, staging, or processing items in editor
-        if (video && !this.isQueueItem(video) && !this.isStagingItem(video) && !this.isProcessingItem(video)) {
-          this.videoAction.emit({ action: 'openInEditor', videos: [video] });
+    // Enter or Cmd+O to open in editor
+    const isOpenShortcut = (event.key === 'Enter' && !event.ctrlKey && !event.metaKey) ||
+                           (event.key === 'o' && (event.metaKey || event.ctrlKey));
+    if (isOpenShortcut) {
+      event.preventDefault();
+      // Get selected videos, or fall back to highlighted video
+      const selectedVideos = this.getSelectedVideos();
+      let videosToOpen: VideoItem[] = [];
+
+      if (selectedVideos.length > 0) {
+        // Filter out queue/staging/processing items
+        videosToOpen = selectedVideos.filter(v =>
+          !this.isQueueItem(v) && !this.isStagingItem(v) && !this.isProcessingItem(v)
+        );
+      } else {
+        // No selection - use highlighted video
+        const highlightedId = this.highlightedItemId();
+        if (highlightedId) {
+          const video = this.getVideoByItemId(highlightedId);
+          if (video && !this.isQueueItem(video) && !this.isStagingItem(video) && !this.isProcessingItem(video)) {
+            videosToOpen = [video];
+          }
         }
+      }
+
+      if (videosToOpen.length > 0) {
+        this.videoAction.emit({ action: 'openInEditor', videos: videosToOpen });
       }
       return;
     }

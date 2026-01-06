@@ -529,7 +529,36 @@ export class QueueService implements OnDestroy {
         const backendJobs = response.jobs;
         console.log(`[QueueService] Found ${backendJobs.length} backend jobs`);
 
-        // Convert and merge with existing jobs
+        // Create a set of backend job IDs for quick lookup
+        const backendJobIds = new Set(backendJobs.map((j: any) => j.id));
+
+        // First: Reset orphaned processing jobs to pending
+        // These are jobs that were processing when the app closed, but the backend
+        // no longer has them (e.g., backend restarted and lost its in-memory queue)
+        const currentJobs = this.jobs();
+        let orphanedCount = 0;
+        currentJobs.forEach(job => {
+          if (job.state === 'processing' && job.backendJobId && !backendJobIds.has(job.backendJobId)) {
+            console.log(`[QueueService] Resetting orphaned processing job to pending: ${job.id} (backend: ${job.backendJobId})`);
+            this.updateJobState(job.id, 'pending');
+            // Clear the backend job ID since it no longer exists
+            this.frontendToBackendIdMap.delete(job.id);
+            this.backendToFrontendIdMap.delete(job.backendJobId);
+            job.backendJobId = undefined;
+            // Reset task states too
+            job.tasks.forEach(task => {
+              if (task.state === 'running') {
+                this.updateTaskState(job.id, task.type, 'pending');
+              }
+            });
+            orphanedCount++;
+          }
+        });
+        if (orphanedCount > 0) {
+          console.log(`[QueueService] Reset ${orphanedCount} orphaned processing jobs to pending`);
+        }
+
+        // Second: Sync with backend jobs
         backendJobs.forEach((backendJob: any) => {
           // Check if we already have this job (by backend ID)
           const existingJob = this.jobs().find(j => j.backendJobId === backendJob.id);
@@ -548,9 +577,46 @@ export class QueueService implements OnDestroy {
         });
 
         console.log(`[QueueService] Queue restored with ${this.jobs().length} total jobs`);
+      } else {
+        // Backend returned no jobs - reset any processing jobs to pending
+        const currentJobs = this.jobs();
+        let resetCount = 0;
+        currentJobs.forEach(job => {
+          if (job.state === 'processing') {
+            console.log(`[QueueService] No backend jobs - resetting processing job to pending: ${job.id}`);
+            this.updateJobState(job.id, 'pending');
+            if (job.backendJobId) {
+              this.frontendToBackendIdMap.delete(job.id);
+              this.backendToFrontendIdMap.delete(job.backendJobId);
+              job.backendJobId = undefined;
+            }
+            job.tasks.forEach(task => {
+              if (task.state === 'running') {
+                this.updateTaskState(job.id, task.type, 'pending');
+              }
+            });
+            resetCount++;
+          }
+        });
+        if (resetCount > 0) {
+          console.log(`[QueueService] Reset ${resetCount} processing jobs to pending (no backend jobs found)`);
+        }
       }
     } catch (error) {
       console.error('[QueueService] Failed to restore from backend:', error);
+      // On error, also reset processing jobs to pending so user can retry
+      const currentJobs = this.jobs();
+      currentJobs.forEach(job => {
+        if (job.state === 'processing') {
+          console.log(`[QueueService] Backend error - resetting processing job to pending: ${job.id}`);
+          this.updateJobState(job.id, 'pending');
+          job.tasks.forEach(task => {
+            if (task.state === 'running') {
+              this.updateTaskState(job.id, task.type, 'pending');
+            }
+          });
+        }
+      });
     }
   }
 

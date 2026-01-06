@@ -1,4 +1,4 @@
-import { Component, signal, computed, inject, input, output } from '@angular/core';
+import { Component, signal, computed, inject, input, output, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { firstValueFrom } from 'rxjs';
 import { CascadeComponent } from '../cascade/cascade.component';
@@ -38,6 +38,31 @@ export class TabsTabComponent {
   renamingTabName = signal<string>('');
   renamingTabId = signal<string>('');
 
+  // Track initialization state
+  private initialized = false;
+
+  constructor() {
+    // Watch the service's tabs signal for external updates (e.g., tab created from library page)
+    effect(() => {
+      const serviceTabs = this.tabsService.tabs();
+      // Only react to changes after initial load
+      if (this.initialized && serviceTabs.length > 0) {
+        // Check if our local tabs are out of sync with the service
+        const localTabs = this.allTabs();
+        const serviceTabIds = new Set(serviceTabs.map(t => t.id));
+        const localTabIds = new Set(localTabs.map(t => t.id));
+
+        // If there's a new tab in the service that we don't have locally, reload
+        const hasNewTabs = serviceTabs.some(t => !localTabIds.has(t.id));
+        const hasRemovedTabs = localTabs.some(t => !serviceTabIds.has(t.id));
+
+        if (hasNewTabs || hasRemovedTabs) {
+          this.loadTabsData();
+        }
+      }
+    });
+  }
+
   // Computed property for tab weeks
   tabWeeks = computed<VideoWeek[]>(() => {
     const tabs = this.allTabs();
@@ -58,11 +83,14 @@ export class TabsTabComponent {
       const response = await firstValueFrom(this.libraryService.getCurrentLibrary());
       if (response.success && response.data) {
         await this.loadTabsData();
+        this.initialized = true;
       } else {
         console.log('No active library, skipping tabs load');
+        this.initialized = true;
       }
     } catch (error) {
       console.log('No active library available, skipping tabs load');
+      this.initialized = true;
     }
   }
 

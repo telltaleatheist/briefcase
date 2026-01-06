@@ -9,7 +9,7 @@ import { ButtonComponent } from '../button/button.component';
   imports: [CommonModule, FormsModule, ButtonComponent],
   template: `
     @if (visible()) {
-      <div class="modal-overlay" (click)="onOverlayClick($event)">
+      <div class="modal-overlay" (click)="onOverlayClick($event)" (mousedown)="$event.stopPropagation()">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <div class="modal-header">
             <h3 class="modal-title">{{ modalTitle() }}</h3>

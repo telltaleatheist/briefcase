@@ -1,6 +1,6 @@
 // Queue Manager Service - Executes task-based jobs with configurable concurrency
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaOperationsService } from '../media/media-operations.service';
@@ -24,10 +24,11 @@ export interface ActiveTask {
   progress: number;
   message: string;
   startedAt: Date;
+  lastProgressAt: Date;  // Track when we last received progress update
 }
 
 @Injectable()
-export class QueueManagerService implements OnModuleDestroy {
+export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private readonly logger = new Logger(QueueManagerService.name);
 
   // Unified job queue (no more separate batch/analysis queues)
@@ -43,6 +44,12 @@ export class QueueManagerService implements OnModuleDestroy {
   // Queue processing state
   private processing = false;
 
+  // Watchdog timer for detecting stuck tasks
+  private watchdogInterval: NodeJS.Timeout | null = null;
+  private readonly WATCHDOG_INTERVAL_MS = 60000;  // Check every minute
+  private readonly AI_TASK_TIMEOUT_MS = 30 * 60 * 1000;  // 30 minutes for AI tasks
+  private readonly MAIN_TASK_TIMEOUT_MS = 10 * 60 * 1000;  // 10 minutes for other tasks
+
   // Concurrency limits (5+1 model)
   private readonly MAX_MAIN_CONCURRENT = 5;  // 5 general tasks
   private readonly MAX_AI_CONCURRENT = 1;     // 1 AI task
@@ -54,6 +61,87 @@ export class QueueManagerService implements OnModuleDestroy {
     private readonly databaseService: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Lifecycle hook - called when the module is initialized
+   * Starts the watchdog timer to detect stuck tasks
+   */
+  onModuleInit() {
+    this.startWatchdog();
+  }
+
+  /**
+   * Start the watchdog timer
+   */
+  private startWatchdog() {
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+    }
+
+    this.watchdogInterval = setInterval(() => {
+      this.checkForStuckTasks();
+    }, this.WATCHDOG_INTERVAL_MS);
+
+    this.logger.log('Watchdog started - will check for stuck tasks every minute');
+  }
+
+  /**
+   * Check for tasks that have been running too long
+   */
+  private checkForStuckTasks() {
+    const now = new Date();
+
+    // Check AI pool
+    if (this.aiPool) {
+      const runningMs = now.getTime() - this.aiPool.startedAt.getTime();
+      const lastProgressMs = now.getTime() - this.aiPool.lastProgressAt.getTime();
+
+      if (runningMs > this.AI_TASK_TIMEOUT_MS) {
+        this.logger.warn(
+          `⚠️ AI task ${this.aiPool.taskId} has been running for ${Math.round(runningMs / 60000)} minutes ` +
+          `(last progress: ${Math.round(lastProgressMs / 1000)}s ago at ${this.aiPool.progress}%)`
+        );
+      } else if (lastProgressMs > 5 * 60 * 1000) {  // 5 minutes without progress
+        this.logger.warn(
+          `⚠️ AI task ${this.aiPool.taskId} hasn't reported progress in ${Math.round(lastProgressMs / 60000)} minutes ` +
+          `(stuck at ${this.aiPool.progress}%)`
+        );
+      }
+    }
+
+    // Check main pool
+    for (const [taskId, task] of this.mainPool.entries()) {
+      const runningMs = now.getTime() - task.startedAt.getTime();
+      const lastProgressMs = now.getTime() - task.lastProgressAt.getTime();
+
+      if (runningMs > this.MAIN_TASK_TIMEOUT_MS) {
+        this.logger.warn(
+          `⚠️ Main task ${taskId} (${task.type}) has been running for ${Math.round(runningMs / 60000)} minutes ` +
+          `(last progress: ${Math.round(lastProgressMs / 1000)}s ago at ${task.progress}%)`
+        );
+      }
+    }
+  }
+
+  /**
+   * Update progress for an active task (called by event handlers)
+   */
+  updateTaskProgress(jobId: string, progress: number, message?: string): void {
+    // Update AI pool if matching
+    if (this.aiPool?.jobId === jobId) {
+      this.aiPool.progress = progress;
+      this.aiPool.lastProgressAt = new Date();
+      if (message) this.aiPool.message = message;
+    }
+
+    // Update main pool if matching
+    const mainTask = this.mainPool.get(jobId);
+    if (mainTask) {
+      mainTask.progress = progress;
+      mainTask.lastProgressAt = new Date();
+      if (message) mainTask.message = message;
+    }
+  }
 
   /**
    * Calculate the nearest Sunday date folder name
@@ -100,6 +188,12 @@ export class QueueManagerService implements OnModuleDestroy {
    * Clears all queues on application shutdown
    */
   onModuleDestroy() {
+    // Stop the watchdog
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+      this.watchdogInterval = null;
+    }
+
     // Mark all pending and processing jobs as failed
     for (const job of this.jobQueue.values()) {
       if (job.status === 'pending' || job.status === 'processing') {
@@ -421,6 +515,7 @@ export class QueueManagerService implements OnModuleDestroy {
 
     // Use job.id for progress tracking so frontend can map it correctly
     const taskId = job.id;
+    const now = new Date();
     const activeTask: ActiveTask = {
       taskId,
       jobId: job.id,
@@ -429,7 +524,8 @@ export class QueueManagerService implements OnModuleDestroy {
       pool,
       progress: 0,
       message: 'Starting...',
-      startedAt: new Date(),
+      startedAt: now,
+      lastProgressAt: now,
     };
 
     // Add to appropriate pool

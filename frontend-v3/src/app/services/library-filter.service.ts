@@ -9,7 +9,7 @@ export interface SearchInFields {
 
 export interface SearchOptions {
   useSoundex: boolean;       // Phonetic matching (catches transcription errors like "Somalies" vs "Somalis")
-  usePhraseSearch: boolean;  // Phrase search (consecutive words) vs word search (OR logic) - default is word search
+  usePhraseSearch: boolean;  // AND logic (all words must match) vs OR logic (any word matches) - default is AND
 }
 
 export interface LibraryFilters {
@@ -451,8 +451,8 @@ export class LibraryFilterService {
   getDefaultFilters(): LibraryFilters {
     return {
       searchQuery: '',
-      searchIn: { filename: true, transcript: true, analysis: true },
-      searchOptions: { useSoundex: false, usePhraseSearch: false },
+      searchIn: { filename: true, transcript: false, analysis: false },
+      searchOptions: { useSoundex: false, usePhraseSearch: true },
       dateRange: 'all',
       mediaType: 'all',
       duration: 'all',

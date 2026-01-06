@@ -3755,25 +3755,44 @@ export class DatabaseController {
           // Check if file is already in clips folder
           const isInClipsFolder = normalizedFileDir === normalizedClipsFolder;
 
-          let finalFilename = filename;
+          let finalFilename = filename;  // Just the filename (no folder)
+          let relativePath = filename;   // Relative path from clips folder (may include week folder)
 
           if (!isInClipsFolder) {
-            // Calculate week folder based on file creation date
+            // Calculate week folder based on UPLOAD DATE from filename (preferred) or filesystem date (fallback)
             const stats = fs.statSync(filePath);
-            const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
 
-            // Calculate Sunday of the current week for the file's creation date
-            const dayOfWeek = fileCreationDate.getDay();
-            const sundayDate = new Date(fileCreationDate);
+            // Try to extract upload date from filename first (e.g., "2017-01-01 video title.mp4")
+            const dateInfo = FilenameDateUtil.extractDateInfo(filename);
+            let folderDate: Date;
+
+            if (dateInfo.hasDate) {
+              // Use the upload date from filename for folder organization
+              const isoDate = FilenameDateUtil.toISODate(dateInfo.date);
+              if (isoDate) {
+                folderDate = new Date(isoDate + 'T12:00:00'); // Use noon to avoid timezone issues
+                this.logger.log(`Using upload date from filename for folder: ${isoDate}`);
+              } else {
+                // Fallback to filesystem date if date parsing fails
+                folderDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+              }
+            } else {
+              // No date in filename, use filesystem creation date
+              folderDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
+            }
+
+            // Calculate Sunday of the current week for the folder date
+            const dayOfWeek = folderDate.getDay();
+            const sundayDate = new Date(folderDate);
 
             if (dayOfWeek === 0) {
               // Already Sunday
             } else if (dayOfWeek <= 3) {
               // Monday-Wednesday: go back to previous Sunday
-              sundayDate.setDate(fileCreationDate.getDate() - dayOfWeek);
+              sundayDate.setDate(folderDate.getDate() - dayOfWeek);
             } else {
               // Thursday-Saturday: go forward to next Sunday
-              sundayDate.setDate(fileCreationDate.getDate() + (7 - dayOfWeek));
+              sundayDate.setDate(folderDate.getDate() + (7 - dayOfWeek));
             }
 
             const year = sundayDate.getFullYear();
@@ -3802,7 +3821,8 @@ export class DatabaseController {
               counter++;
             }
 
-            finalFilename = path.join(weekFolder, uniqueFilename);  // Include week folder in path
+            finalFilename = uniqueFilename;  // Just the filename (no folder)
+            relativePath = path.join(weekFolder, uniqueFilename);  // Relative path includes week folder
             const finalTargetPath = path.join(weekFolderPath, uniqueFilename);
             fs.copyFileSync(filePath, finalTargetPath);
 
@@ -3810,7 +3830,7 @@ export class DatabaseController {
             fs.utimesSync(finalTargetPath, stats.atime, stats.mtime);
 
             this.logger.log(`Copied to: ${finalTargetPath}`);
-            filesToScan.add(finalFilename);  // Use relative path with week folder
+            filesToScan.add(relativePath);  // Use relative path with week folder for scanning
           } else {
             this.logger.log(`File already in clips folder: ${filename}`);
             filesToScan.add(filename);
@@ -3819,7 +3839,8 @@ export class DatabaseController {
           results.push({
             success: true,
             filePath,
-            filename: finalFilename,
+            filename: finalFilename,      // Just the filename
+            relativePath: relativePath,   // Relative path including week folder
             pendingScan: true
           });
         } catch (error: any) {
@@ -3839,11 +3860,11 @@ export class DatabaseController {
         if (!result.success || !result.pendingScan) continue;
 
         try {
-          const filePath = path.join(clipsFolder, result.filename);
+          const filePath = path.join(clipsFolder, result.relativePath || result.filename);
 
           // Check if already in database by filename
           const existingByFilename = this.databaseService.getAllVideos({ linkedOnly: false })
-            .find((v: any) => v.filename === result.filename);
+            .find((v: any) => v.filename === result.filename || v.current_path === (result.relativePath || result.filename));
 
           if (existingByFilename) {
             // File exists in database - update its path and mark as linked
@@ -3877,9 +3898,9 @@ export class DatabaseController {
           const videoId = require('uuid').v4();
           const fileCreationDate = stats.birthtime < stats.mtime ? stats.birthtime : stats.mtime;
 
-          // Extract upload date from filename or parent folder
+          // Extract upload date from filename
           let uploadDate: string | undefined;
-          const dateInfo = FilenameDateUtil.extractDateInfo(result.filename);
+          const dateInfo = FilenameDateUtil.extractDateInfo(result.filename);  // Use actual filename, not path
           if (dateInfo.hasDate) {
             uploadDate = FilenameDateUtil.toISODate(dateInfo.date) || undefined;
           }
@@ -3905,9 +3926,9 @@ export class DatabaseController {
 
           this.databaseService.insertVideo({
             id: videoId,
-            filename: result.filename,
+            filename: result.filename,           // Just the filename (no folder)
             fileHash: fileHash,
-            currentPath: result.filename, // Store as relative path
+            currentPath: result.relativePath || result.filename,  // Relative path including week folder
             uploadDate: uploadDate,
             downloadDate: fileCreationDate.toISOString(),
             fileSizeBytes: stats.size,
