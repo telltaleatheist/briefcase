@@ -521,16 +521,29 @@ export class LibraryService {
   }
 
   /**
-   * Calculate week folder (Sunday-based) for a given date
+   * Calculate week folder using nearest Sunday
+   * Mon-Wed go back to previous Sunday, Thu-Sat go forward to next Sunday.
    */
   calculateWeekFolder(date: Date): string {
     const d = new Date(date);
     const dayOfWeek = d.getDay(); // 0 = Sunday
-    const sunday = new Date(d);
-    sunday.setDate(d.getDate() - dayOfWeek);
+    const sundayDate = new Date(d);
 
-    // Format as YYYY-MM-DD
-    return sunday.toISOString().split('T')[0];
+    if (dayOfWeek === 0) {
+      // Already Sunday, use current day
+    } else if (dayOfWeek <= 3) {
+      // Monday-Wednesday: go back to previous Sunday
+      sundayDate.setDate(d.getDate() - dayOfWeek);
+    } else {
+      // Thursday-Saturday: go forward to next Sunday
+      sundayDate.setDate(d.getDate() + (7 - dayOfWeek));
+    }
+
+    const year = sundayDate.getFullYear();
+    const month = String(sundayDate.getMonth() + 1).padStart(2, '0');
+    const day = String(sundayDate.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
   }
 
   /**

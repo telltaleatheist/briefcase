@@ -66,20 +66,21 @@ export class FileScannerService {
   ) {}
 
   /**
-   * Calculate the Sunday of the current week for a given date
-   * Format: YYYY-MM-DD (e.g., "2025-09-02")
+   * Calculate the nearest Sunday for a given date
+   * Mon-Wed go back to previous Sunday, Thu-Sat go forward to next Sunday.
+   * Format: YYYY-MM-DD (e.g., "2025-01-05")
    */
-  private getWeekStartDate(date: Date = new Date()): string {
+  private getNearestSunday(date: Date = new Date()): string {
     const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
     const sundayDate = new Date(date);
 
-    // Always use the Sunday that ends the current week (upcoming Sunday)
-    // Week runs Monday-Sunday, folder named after the Sunday
     if (dayOfWeek === 0) {
       // Already Sunday, use current day
-      // No adjustment needed
+    } else if (dayOfWeek <= 3) {
+      // Monday-Wednesday: go back to previous Sunday
+      sundayDate.setDate(date.getDate() - dayOfWeek);
     } else {
-      // Monday-Saturday: go forward to next Sunday
+      // Thursday-Saturday: go forward to next Sunday
       sundayDate.setDate(date.getDate() + (7 - dayOfWeek));
     }
 
@@ -740,7 +741,7 @@ export class FileScannerService {
             this.logger.log(`Video in clips root, moving to week folder: ${fullPath}`);
             // Use upload date from filename for folder organization, fall back to filesystem date
             const folderDate = uploadDate ? new Date(uploadDate + 'T12:00:00') : fileCreationDate;
-            const weekFolder = this.getWeekStartDate(folderDate);
+            const weekFolder = this.getNearestSunday(folderDate);
             const weekFolderPath = path.join(clipsRoot, weekFolder);
 
             if (!fs.existsSync(weekFolderPath)) {
@@ -758,7 +759,7 @@ export class FileScannerService {
           // File is outside clips folder - copy to weekly folder
           // Use upload date from filename for folder organization, fall back to filesystem date
           const folderDate = uploadDate ? new Date(uploadDate + 'T12:00:00') : fileCreationDate;
-          const weekFolder = this.getWeekStartDate(folderDate);
+          const weekFolder = this.getNearestSunday(folderDate);
 
           this.logger.log(`Using week folder based on ${uploadDate ? 'upload date from filename' : 'filesystem date'}: ${weekFolder}`);
 

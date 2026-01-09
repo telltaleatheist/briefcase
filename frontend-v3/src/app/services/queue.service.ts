@@ -352,12 +352,78 @@ export class QueueService implements OnDestroy {
   }
 
   /**
-   * Clear all jobs
+   * Clear all jobs (including processing ones)
+   * This is a forceful operation - cancels backend jobs first
    */
   clearAll(): void {
+    console.log('[QueueService] CLEAR ALL called');
+
+    // Get all backend job IDs for processing jobs before clearing
+    const processingJobs = this.processingJobs();
+    const backendJobIds = processingJobs
+      .map(job => this.frontendToBackendIdMap.get(job.id))
+      .filter((id): id is string => !!id);
+
+    // Clear all mappings
     this.backendToFrontendIdMap.clear();
     this.frontendToBackendIdMap.clear();
+
+    // Clear all jobs immediately
     this.jobs.set([]);
+
+    console.log('[QueueService] All jobs cleared from frontend');
+
+    // Notify backend to cancel any running jobs (fire and forget)
+    if (backendJobIds.length > 0) {
+      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
+        tap(() => console.log('[QueueService] Backend notified to cancel jobs')),
+        catchError(error => {
+          console.error('[QueueService] Failed to notify backend (non-blocking):', error);
+          return of(undefined);
+        })
+      ).subscribe();
+    }
+  }
+
+  /**
+   * Clear pending and processing jobs (keeps completed/failed for review)
+   * Useful for "Clear Queue" that removes waiting items but keeps history
+   */
+  clearPendingAndProcessing(): void {
+    console.log('[QueueService] CLEAR PENDING AND PROCESSING called');
+
+    // Get backend job IDs for all jobs we're about to clear
+    const jobsToClear = this.jobs().filter(j => j.state === 'pending' || j.state === 'processing');
+    const backendJobIds = jobsToClear
+      .map(job => this.frontendToBackendIdMap.get(job.id))
+      .filter((id): id is string => !!id);
+
+    // Clean up ID maps for cleared jobs
+    jobsToClear.forEach(job => {
+      const backendId = this.frontendToBackendIdMap.get(job.id);
+      if (backendId) {
+        this.backendToFrontendIdMap.delete(backendId);
+        this.frontendToBackendIdMap.delete(job.id);
+      }
+    });
+
+    // Remove pending and processing jobs, keep completed/failed
+    this.jobs.update(jobs =>
+      jobs.filter(job => job.state !== 'pending' && job.state !== 'processing')
+    );
+
+    console.log(`[QueueService] Cleared ${jobsToClear.length} pending/processing jobs`);
+
+    // Notify backend to cancel running jobs (fire and forget)
+    if (backendJobIds.length > 0) {
+      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
+        tap(() => console.log('[QueueService] Backend notified to cancel jobs')),
+        catchError(error => {
+          console.error('[QueueService] Failed to notify backend (non-blocking):', error);
+          return of(undefined);
+        })
+      ).subscribe();
+    }
   }
 
   /**
@@ -382,43 +448,61 @@ export class QueueService implements OnDestroy {
   }
 
   /**
-   * Stop all processing and move processing jobs back to pending
-   * Also cancels jobs on the backend
+   * Stop all processing IMMEDIATELY and move processing jobs back to pending
+   * This is a forceful operation - it updates frontend state first, then notifies backend
    */
   stopProcessing(): Observable<void> {
     const processingJobs = this.processingJobs();
+    console.log(`[QueueService] STOP PROCESSING called - ${processingJobs.length} processing jobs`);
+
     if (processingJobs.length === 0) {
+      console.log('[QueueService] No processing jobs to stop');
       return of(undefined);
     }
 
-    console.log(`[QueueService] Stopping ${processingJobs.length} processing jobs`);
-
-    // Get backend job IDs to cancel
+    // Get backend job IDs BEFORE we modify jobs
     const backendJobIds = processingJobs
       .map(job => this.frontendToBackendIdMap.get(job.id))
       .filter((id): id is string => !!id);
 
-    // Move all processing jobs back to pending state immediately
+    // IMMEDIATELY move all processing jobs back to pending state
+    // This happens synchronously - no waiting for backend
     processingJobs.forEach(job => {
+      console.log(`[QueueService] Resetting job ${job.id} to pending`);
       // Reset job state and clear any errors/timestamps
       this.resetJobToDefault(job.id);
       // Reset ALL task states and progress back to pending
-      // This includes completed, running, and failed tasks
       job.tasks.forEach(task => {
         this.resetTaskToDefault(job.id, task.type);
       });
+      // Clear backend job ID mapping since we're resetting
+      if (job.backendJobId) {
+        this.backendToFrontendIdMap.delete(job.backendJobId);
+        this.frontendToBackendIdMap.delete(job.id);
+      }
     });
 
-    // Cancel on backend
+    // Clear the backendJobId from the job objects themselves
+    this.jobs.update(jobs =>
+      jobs.map(job => {
+        if (job.state === 'pending' && job.backendJobId) {
+          return { ...job, backendJobId: undefined };
+        }
+        return job;
+      })
+    );
+
+    console.log(`[QueueService] All processing jobs reset to pending. Notifying backend...`);
+
+    // Notify backend (fire and forget - don't block on this)
     if (backendJobIds.length > 0) {
-      return this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
-        tap(() => console.log('[QueueService] Backend jobs cancelled')),
-        map(() => undefined),
+      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
+        tap(() => console.log('[QueueService] Backend notified of cancellation')),
         catchError(error => {
-          console.error('[QueueService] Failed to cancel backend jobs:', error);
+          console.error('[QueueService] Failed to notify backend (non-blocking):', error);
           return of(undefined);
         })
-      );
+      ).subscribe(); // Fire and forget
     }
 
     return of(undefined);

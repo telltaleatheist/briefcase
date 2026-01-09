@@ -249,6 +249,66 @@
       }
     }
   }
+
+  // Category filter chips
+  .category-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color, #333);
+    background: var(--bg-secondary, #2a2a2a);
+    flex-shrink: 0;
+
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--bg-tertiary, #333);
+      border: 1px solid var(--border-color, #444);
+      border-radius: 16px;
+      color: var(--text-secondary, #999);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+
+      &:hover {
+        background: var(--bg-card, #3a3a3a);
+        border-color: var(--primary-orange, #ff6b35);
+        color: var(--text-primary, #ccc);
+      }
+
+      &.active {
+        background: rgba(255, 107, 53, 0.2);
+        border-color: var(--primary-orange, #ff6b35);
+        color: var(--primary-orange, #ff6b35);
+      }
+
+      &.inactive {
+        opacity: 0.5;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+
+      &.clear-chip {
+        background: transparent;
+        border-color: transparent;
+        color: var(--text-muted, #666);
+        padding: 4px 6px;
+
+        &:hover {
+          color: var(--primary-orange, #ff6b35);
+          background: transparent;
+          border-color: transparent;
+        }
+      }
+    }
+  }
 }
 
 .sections-list {

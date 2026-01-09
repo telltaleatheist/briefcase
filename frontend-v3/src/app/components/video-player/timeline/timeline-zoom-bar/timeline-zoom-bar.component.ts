@@ -185,4 +185,30 @@ export class TimelineZoomBarComponent {
       offset: 0
     });
   }
+
+  onWheel(event: WheelEvent): void {
+    // Only handle horizontal panning (no zoom modifiers)
+    if (event.metaKey || event.ctrlKey) {
+      return; // Let parent handle zoom
+    }
+
+    event.preventDefault();
+
+    const visibleDuration = this.duration / this.zoomState.level;
+    const maxOffset = this.duration - visibleDuration;
+
+    if (maxOffset <= 0) return; // Can't scroll if not zoomed
+
+    // Scroll amount: use deltaX for horizontal scroll, deltaY for vertical wheel
+    const delta = event.deltaX !== 0 ? event.deltaX : event.deltaY;
+
+    // Scroll by a percentage of visible duration (5% per wheel tick)
+    const scrollAmount = (delta / 100) * visibleDuration * 0.5;
+    const newOffset = Math.max(0, Math.min(maxOffset, this.zoomState.offset + scrollAmount));
+
+    this.zoomChange.emit({
+      ...this.zoomState,
+      offset: newOffset
+    });
+  }
 }

@@ -256,8 +256,22 @@ export class QueueTabComponent {
     this.selectedStagingIds.set(new Set());
   }
 
+  /**
+   * Clear All - removes pending and processing items
+   * This is the "nuke" option - clears everything except completed history
+   */
+  onClearAll() {
+    console.log('[QueueTab] Clear All requested');
+    // Clear pending and processing jobs
+    this.queueService.clearPendingAndProcessing();
+    // Clear any selection
+    this.selectedStagingIds.set(new Set());
+    this.selectedProcessingIds.set(new Set());
+  }
+
   onStopProcessing() {
-    // Stop all processing and move jobs back to pending
+    console.log('[QueueTab] Stop Processing requested');
+    // Stop all processing IMMEDIATELY - this moves processing jobs to pending
     this.queueService.stopProcessing().subscribe({
       next: () => {
         console.log('[QueueTab] Processing stopped');

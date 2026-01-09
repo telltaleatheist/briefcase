@@ -565,12 +565,27 @@ export class LibraryService {
   }
 
   /**
-   * Get date key in folder format (YYYY-MM-DD)
+   * Get date key for the nearest Sunday to this date (YYYY-MM-DD format)
+   * Mon-Wed go back to previous Sunday, Thu-Sat go forward to next Sunday
+   * This groups all videos from the same week under one section header
    */
   private getDateKey(date: Date): string {
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
+    const d = new Date(date);
+    const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, etc.
+
+    if (dayOfWeek === 0) {
+      // Already Sunday, use current day
+    } else if (dayOfWeek <= 3) {
+      // Monday-Wednesday: go back to previous Sunday
+      d.setDate(d.getDate() - dayOfWeek);
+    } else {
+      // Thursday-Saturday: go forward to next Sunday
+      d.setDate(d.getDate() + (7 - dayOfWeek));
+    }
+
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 

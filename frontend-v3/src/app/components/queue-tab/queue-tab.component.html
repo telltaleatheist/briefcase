@@ -24,6 +24,14 @@
         </button>
       }
 
+      <!-- Clear All button - shows when there are pending OR processing items -->
+      @if (pendingCount() > 0 || processingCount() > 0) {
+        <button class="btn btn-secondary" (click)="onClearAll()">
+          <span class="btn-icon">🗑️</span>
+          <span>Clear All</span>
+        </button>
+      }
+
       <!-- Show buttons when staging items exist -->
       @if (pendingCount() > 0) {
         <!-- Configure button (only when items selected) -->
@@ -52,12 +60,6 @@
             <span class="badge">{{ selectedStagingIds().size }}</span>
           </button>
         }
-
-        <!-- Clear All button (always show when pending items exist) -->
-        <button class="btn btn-secondary" (click)="onClearPending()">
-          <span class="btn-icon">🗑️</span>
-          <span>Clear All</span>
-        </button>
 
         <!-- Process All button (always show when staging items exist) -->
         <button class="btn btn-primary" (click)="onProcessAll()">

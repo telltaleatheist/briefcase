@@ -270,12 +270,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Bound wheel handler for proper cleanup
   private wheelHandler = (event: WheelEvent) => {
+    // Check if over timeline area
+    const timeline = (event.target as HTMLElement).closest('.timeline-area');
+
     if (event.metaKey || event.ctrlKey) {
+      // Zoom with Ctrl/Cmd + wheel
       event.preventDefault();
       event.stopPropagation();
 
-      // Calculate mouse position relative to timeline
-      const timeline = (event.target as HTMLElement).closest('.timeline-area');
       if (timeline) {
         const rect = timeline.getBoundingClientRect();
         const mouseX = event.clientX - rect.left;
@@ -293,6 +295,27 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         } else if (event.deltaY > 0) {
           this.zoomOut();
         }
+      }
+    } else if (timeline) {
+      // Horizontal scroll/pan over timeline without modifiers
+      const state = this.editorState();
+      const visibleDuration = state.duration / state.zoomState.level;
+      const maxOffset = state.duration - visibleDuration;
+
+      if (maxOffset > 0) {
+        event.preventDefault();
+
+        // Use deltaX for horizontal scroll, deltaY for vertical wheel
+        const delta = event.deltaX !== 0 ? event.deltaX : event.deltaY;
+
+        // Scroll by a percentage of visible duration
+        const scrollAmount = (delta / 100) * visibleDuration * 0.5;
+        const newOffset = Math.max(0, Math.min(maxOffset, state.zoomState.offset + scrollAmount));
+
+        this.onZoomChange({
+          ...state.zoomState,
+          offset: newOffset
+        });
       }
     }
   };
@@ -2251,10 +2274,13 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       console.log(`🎵 Starting progressive waveform generation...`);
 
       // Start generation with progressive mode - request samples based on duration
-      // Target: 2000 samples per 60 seconds for maximum granularity
-      const samplesPerMinute = 2000;
-      const targetSamples = Math.ceil((duration / 60) * samplesPerMinute);
-      console.log(`Requesting ${targetSamples} samples (${samplesPerMinute} per minute for ${duration.toFixed(1)}s video)`);
+      // Use more samples for longer videos to maintain detail when zoomed
+      // Short videos (<10 min): 3000 samples per minute (~50/sec)
+      // Long videos (10+ min): 6000 samples per minute (~100/sec)
+      const isLongVideo = duration >= 600; // 10 minutes
+      const samplesPerMinute = isLongVideo ? 6000 : 3000;
+      const targetSamples = Math.max(1000, Math.ceil((duration / 60) * samplesPerMinute));
+      console.log(`Requesting ${targetSamples} samples (${samplesPerMinute} per minute for ${duration.toFixed(1)}s ${isLongVideo ? 'long' : 'short'} video)`);
 
       const generationPromise = firstValueFrom(
         this.http.get<any>(`${this.API_BASE}/database/videos/${videoId}/waveform?samples=${targetSamples}&progressive=true`)

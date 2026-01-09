@@ -12,7 +12,7 @@ import { ElectronService } from '../../services/electron.service';
 import { LibraryService } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
-import { extractTitleFromFilename } from '@shared/filename-utils';
+import { extractTitleFromFilename, extractDateFromFilename, formatDateForDisplay } from '@shared/filename-utils';
 
 interface ExpandableVideoWeek extends VideoWeek {
   expanded: boolean;
@@ -80,6 +80,10 @@ export class CascadeComponent {
   @Input() showDuration = true;
   @Input() showDeleteButton = true;
   @Input() showEditButton = false;
+  @Input() showQuickActions = true;
+  @Input() showSuggestedTitle = true;
+  @Input() suggestedTitleIcon = '';  // Icon to show before suggested title (empty by default)
+  @Input() suggestedTitleLabel = 'Title Suggestion:';  // Label to show (empty string to hide)
 
   // Delete behavior: 'options' shows 3-option modal, 'simple' emits directly
   @Input() deleteMode: 'options' | 'simple' = 'options';
@@ -1685,6 +1689,21 @@ export class CascadeComponent {
       day: 'numeric',
       year: 'numeric'
     });
+  }
+
+  /**
+   * Get the date badge from a filename (for display in orange badge)
+   */
+  getDateBadge(name: string): string | null {
+    const date = extractDateFromFilename(name);
+    return date ? formatDateForDisplay(date) : null;
+  }
+
+  /**
+   * Get the display title (without date prefix)
+   */
+  getDisplayTitle(name: string): string {
+    return extractTitleFromFilename(name);
   }
 
   // TrackBy function for virtual scroll

@@ -83,6 +83,11 @@ export class ExportDialogComponent implements OnInit {
 
   // Cascade weeks data (sections grouped by category)
   cascadeWeeks = signal<VideoWeek[]>([]);
+  allCascadeWeeks = signal<VideoWeek[]>([]);  // Store unfiltered weeks
+
+  // Filter chips for categories
+  availableCategories = signal<string[]>([]);
+  selectedCategories = signal<Set<string>>(new Set());
 
   // Map section IDs to ExportSection for lookup
   private sectionMap = new Map<string, ExportSection>();
@@ -184,19 +189,35 @@ export class ExportDialogComponent implements OnInit {
       return a.localeCompare(b);
     });
 
+    // Store available categories for filter chips
+    this.availableCategories.set(sortedCategories);
+
     // Build weeks array
     const weeks: VideoWeek[] = sortedCategories.map(category => {
       const categorySections = categoryMap.get(category)!;
       const categoryColor = this.getCategoryColor(category);
 
       // Convert ExportSections to VideoItems
-      const videos: VideoItem[] = categorySections.map(section => ({
-        id: section.id,
-        name: section.description,
-        duration: section.timeRange,
-        tags: [`category:${section.category}`, `color:${categoryColor}`],
-        suggestedTitle: section.timeRange // Show time range as secondary info
-      }));
+      const videos: VideoItem[] = categorySections.map(section => {
+        // Calculate actual clip duration
+        const clipDurationSeconds = section.endSeconds - section.startSeconds;
+        const clipDuration = section.id === '__full_video__'
+          ? 'Full'
+          : this.formatTime(clipDurationSeconds);
+
+        // Build time range for display under title
+        const timeRange = section.id === '__full_video__'
+          ? 'Entire video with changes applied'
+          : `${this.formatTime(section.startSeconds)} - ${this.formatTime(section.endSeconds)}`;
+
+        return {
+          id: section.id,
+          name: section.description,
+          duration: clipDuration,  // Clip length on the right
+          tags: [`category:${section.category}`, `color:${categoryColor}`],
+          suggestedTitle: timeRange  // Timestamps under the title
+        };
+      });
 
       // Get icon for category
       const icon = this.getCategoryIcon(category);
@@ -208,13 +229,69 @@ export class ExportDialogComponent implements OnInit {
       };
     });
 
+    // Store all weeks and set as current
+    this.allCascadeWeeks.set(weeks);
     this.cascadeWeeks.set(weeks);
+  }
+
+  /**
+   * Toggle category filter chip
+   */
+  toggleCategoryFilter(category: string) {
+    const selected = new Set(this.selectedCategories());
+
+    if (selected.has(category)) {
+      selected.delete(category);
+    } else {
+      selected.add(category);
+    }
+
+    this.selectedCategories.set(selected);
+    this.applyFilters();
+  }
+
+  /**
+   * Check if a category is selected
+   */
+  isCategorySelected(category: string): boolean {
+    const selected = this.selectedCategories();
+    return selected.size === 0 || selected.has(category);
+  }
+
+  /**
+   * Apply category filters to cascade weeks
+   */
+  private applyFilters() {
+    const selected = this.selectedCategories();
+    const allWeeks = this.allCascadeWeeks();
+
+    if (selected.size === 0) {
+      // No filters - show all
+      this.cascadeWeeks.set(allWeeks);
+    } else {
+      // Filter to only show selected categories
+      const filtered = allWeeks.filter(week => {
+        // Extract category from weekLabel (format: "icon Category")
+        const parts = week.weekLabel.split(' ');
+        const category = parts.slice(1).join(' ');
+        return selected.has(category);
+      });
+      this.cascadeWeeks.set(filtered);
+    }
+  }
+
+  /**
+   * Clear all category filters
+   */
+  clearCategoryFilters() {
+    this.selectedCategories.set(new Set());
+    this.cascadeWeeks.set(this.allCascadeWeeks());
   }
 
   /**
    * Get icon for category
    */
-  private getCategoryIcon(category: string): string {
+  getCategoryIcon(category: string): string {
     const icons: Record<string, string> = {
       'export changes': '📹',
       'current selection': '✂️',

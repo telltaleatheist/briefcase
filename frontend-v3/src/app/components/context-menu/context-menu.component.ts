@@ -183,12 +183,18 @@ export class ContextMenuComponent implements AfterViewChecked, OnChanges {
       // Estimate menu height (typical context menu is ~200-300px)
       const estimatedHeight = 250;
       const viewportHeight = window.innerHeight;
+      const padding = 8;
 
       let y = this.position.y;
 
       // If likely to overflow bottom, flip upward
-      if (y + estimatedHeight > viewportHeight) {
+      if (y + estimatedHeight > viewportHeight - padding) {
         y = this.position.y - estimatedHeight;
+      }
+
+      // If that puts it off the top, clamp to top
+      if (y < padding) {
+        y = padding;
       }
 
       this.adjustedPosition = { x: this.position.x, y };
@@ -228,15 +234,33 @@ export class ContextMenuComponent implements AfterViewChecked, OnChanges {
 
     const menuRect = menu.getBoundingClientRect();
     const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const padding = 8; // Minimum distance from viewport edges
 
+    let x = this.position.x;
     let y = this.position.y;
 
-    // If menu would go off bottom, open above cursor instead
-    if (this.position.y + menuRect.height > viewportHeight) {
+    // If menu would go off bottom, try to open above cursor
+    if (y + menuRect.height > viewportHeight - padding) {
       y = this.position.y - menuRect.height;
     }
 
-    this.adjustedPosition = { x: this.position.x, y };
+    // If menu goes off top, clamp to top of viewport
+    if (y < padding) {
+      y = padding;
+    }
+
+    // If menu would go off right edge, shift left
+    if (x + menuRect.width > viewportWidth - padding) {
+      x = viewportWidth - menuRect.width - padding;
+    }
+
+    // If menu goes off left, clamp to left of viewport
+    if (x < padding) {
+      x = padding;
+    }
+
+    this.adjustedPosition = { x, y };
     this.cdr.detectChanges();
   }
 

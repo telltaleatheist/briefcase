@@ -5,15 +5,16 @@
     <button class="zoom-btn" (click)="zoomIn()" title="Zoom in">+</button>
   </div>
 
-  <div class="zoom-track" (click)="onTrackClick($event)">
+  <div class="zoom-track" (click)="onTrackClick($event)" (wheel)="onWheel($event)">
     <div
       class="zoom-thumb"
       [style.left.%]="thumbLeft"
       [style.width.%]="thumbWidth"
-      (mousedown)="onThumbDragStart($event)">
-      <div class="handle left" (mousedown)="onLeftHandleDrag($event)"></div>
+      (mousedown)="onThumbDragStart($event)"
+      (click)="$event.stopPropagation()">
+      <div class="handle left" (mousedown)="onLeftHandleDrag($event)" (click)="$event.stopPropagation()"></div>
       <div class="handle-center"></div>
-      <div class="handle right" (mousedown)="onRightHandleDrag($event)"></div>
+      <div class="handle right" (mousedown)="onRightHandleDrag($event)" (click)="$event.stopPropagation()"></div>
     </div>
   </div>
 

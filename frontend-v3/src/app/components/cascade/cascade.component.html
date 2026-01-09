@@ -63,9 +63,6 @@
                   [attr.aria-expanded]="isExpanded(item.video.id)">
                   <span class="expand-icon" [class.expanded]="isExpanded(item.video.id)">▶</span>
                 </button>
-              } @else if (!item.video.isGhost) {
-                <!-- Video Icon (not for ghosts) -->
-                <div class="video-icon">📹</div>
               }
 
             <!-- Video Content -->
@@ -83,7 +80,15 @@
                 @if (item.video.titleLoading) {
                   <span class="title-spinner"></span>
                 }
-                <span class="title-text">{{ item.video.name }}</span>
+                <!-- Date badge or placeholder for alignment (skip for child/ghost items) -->
+                @if (!item.video.isGhost) {
+                  @if (getDateBadge(item.video.name); as dateBadge) {
+                    <span class="date-badge">{{ dateBadge }}</span>
+                  } @else {
+                    <span class="date-placeholder"></span>
+                  }
+                }
+                <span class="title-text">{{ getDisplayTitle(item.video.name) || item.video.name }}</span>
               </div>
 
               <!-- Ghost relationship indicator for parents (BELOW title) -->
@@ -110,8 +115,10 @@
               }
 
               <!-- Suggested Title Row (not for ghosts) -->
-              @if (item.video.suggestedTitle && !item.video.isGhost) {
+              @if (showSuggestedTitle && item.video.suggestedTitle && !item.video.isGhost) {
                 <div class="video-meta">
+                  <!-- Placeholder to align with title above -->
+                  <span class="date-placeholder"></span>
                   @if (isQueueItem(item.video)) {
                     <!-- Queue item status display -->
                     <span class="meta-icon">⏳</span>
@@ -126,13 +133,19 @@
                     <span class="meta-filename duplicate-warning">{{ item.video.suggestedTitle.substring(2).trim() }}</span>
                   } @else {
                     <!-- AI suggested title display -->
-                    <span class="meta-icon">✨</span>
-                    <span class="meta-label">AI Title:</span>
+                    @if (suggestedTitleIcon) {
+                      <span class="meta-icon">{{ suggestedTitleIcon }}</span>
+                    }
+                    @if (suggestedTitleLabel) {
+                      <span class="meta-label">{{ suggestedTitleLabel }}</span>
+                    }
                     <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
-                    <span
-                      class="meta-action"
-                      (click)="openSuggestedTitleModal(item.video); $event.stopPropagation()"
-                    >Edit</span>
+                    @if (suggestedTitleLabel) {
+                      <span
+                        class="meta-action"
+                        (click)="openSuggestedTitleModal(item.video); $event.stopPropagation()"
+                      >Edit</span>
+                    }
                     @if (item.video.downloadDate) {
                       <span class="meta-separator">•</span>
                       <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
@@ -149,7 +162,7 @@
               }
 
               <!-- Quick Action Buttons (always visible for library items) -->
-              @if (!item.video.isGhost && !isStagingItem(item.video) && !isProcessingItem(item.video) && !isQueueItem(item.video)) {
+              @if (showQuickActions && !item.video.isGhost && !isStagingItem(item.video) && !isProcessingItem(item.video) && !isQueueItem(item.video)) {
                 <div class="quick-actions">
                   <button
                     class="action-btn open-btn"

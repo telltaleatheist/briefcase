@@ -66,3 +66,35 @@ export function hasDatePrefix(filename: string): boolean {
   const datePattern = /^(\d{4}-\d{2}-(?:\d{2}|T[123])|\d{4}-\d{2}|\d{4})\s+/;
   return datePattern.test(filename);
 }
+
+/**
+ * Extract the date prefix from a filename
+ *
+ * @param filename - Filename to extract date from
+ * @returns Date string (e.g., "2025-01-15") or null if no date
+ */
+export function extractDateFromFilename(filename: string): string | null {
+  if (!filename) return null;
+
+  // Remove extension for checking
+  const lastDot = filename.lastIndexOf('.');
+  const nameWithoutExt = lastDot > 0 ? filename.substring(0, lastDot) : filename;
+
+  // Match date patterns at the start
+  const datePattern = /^(\d{4}-\d{2}-(?:\d{2}|T[123])|\d{4}-\d{2}|\d{4})\s+/;
+  const match = nameWithoutExt.match(datePattern);
+
+  return match ? match[1] : null;
+}
+
+/**
+ * Format a date string for display (keeps YYYY-MM-DD format)
+ *
+ * @param dateStr - Date string from filename
+ * @returns Formatted date for display
+ */
+export function formatDateForDisplay(dateStr: string): string {
+  if (!dateStr) return '';
+  // Return as-is (already in YYYY-MM-DD or similar format)
+  return dateStr;
+}

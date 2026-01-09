@@ -68,7 +68,7 @@
           </div>
 
           <!-- Category Sections using Cascade Component -->
-          @if (cascadeWeeks().length > 0) {
+          @if (cascadeWeeks().length > 0 || allCascadeWeeks().length > 0) {
             <div class="categories-container">
               <div class="export-header">
                 <p class="hint-text">Select clips to export:</p>
@@ -79,13 +79,37 @@
                 </div>
               </div>
 
+              <!-- Category Filter Chips -->
+              @if (availableCategories().length > 1) {
+                <div class="category-filters">
+                  @for (category of availableCategories(); track category) {
+                    <button
+                      class="filter-chip"
+                      [class.active]="isCategorySelected(category) && selectedCategories().size > 0"
+                      [class.inactive]="!isCategorySelected(category)"
+                      (click)="toggleCategoryFilter(category)"
+                    >
+                      {{ getCategoryIcon(category) }} {{ category }}
+                    </button>
+                  }
+                  @if (selectedCategories().size > 0) {
+                    <button class="filter-chip clear-chip" (click)="clearCategoryFilters()">
+                      Clear
+                    </button>
+                  }
+                </div>
+              }
+
               <div class="cascade-wrapper">
                 <app-cascade
                   [weeks]="cascadeWeeks()"
                   [showDuration]="true"
                   [showEditButton]="false"
                   [showDeleteButton]="false"
-                  [showStatusIndicator]="true"
+                  [showStatusIndicator]="false"
+                  [showQuickActions]="false"
+                  [showSuggestedTitle]="true"
+                  [suggestedTitleLabel]="''"
                   (selectionChanged)="onCascadeSelectionChanged($event)"
                   (videoAction)="onCascadeVideoAction($event)"
                 />
