@@ -58,6 +58,32 @@
               </div>
               <span class="selection-indicator" *ngIf="settings.normalizeAudio">✓</span>
             </div>
+            <!-- Normalize Audio Config -->
+            <div class="task-config" *ngIf="settings.normalizeAudio">
+              <div class="config-form">
+                <div class="form-group granularity-group">
+                  <div class="label-row">
+                    <label>Target Loudness</label>
+                    <span class="granularity-value">{{ getAudioLevelLabel() }}</span>
+                  </div>
+                  <div class="slider-container">
+                    <span class="slider-label-left">Quiet</span>
+                    <input
+                      type="range"
+                      min="-24"
+                      max="-14"
+                      step="1"
+                      [(ngModel)]="settings.audioLevel"
+                      class="granularity-slider"
+                    />
+                    <span class="slider-label-right">Loud</span>
+                  </div>
+                  <div class="granularity-description">
+                    {{ getAudioLevelDescription() }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Transcribe -->

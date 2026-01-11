@@ -2711,6 +2711,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Handle tab reorder from drag and drop
+   */
+  onTabReorder({ fromIndex, toIndex }: { fromIndex: number; toIndex: number }): void {
+    this.tabs.update(tabs => {
+      const newTabs = [...tabs];
+      const [movedTab] = newTabs.splice(fromIndex, 1);
+      newTabs.splice(toIndex, 0, movedTab);
+      return newTabs;
+    });
+  }
+
+  /**
    * Prepare tab data for transfer to another window
    */
   private prepareTabDataForTransfer(tab: EditorTab): any {

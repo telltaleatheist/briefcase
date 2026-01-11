@@ -22,7 +22,7 @@ export interface VideoJobSettings {
   fixAspectRatio: boolean;
   aspectRatio?: '16:9' | '4:3' | '1:1' | '9:16';
   normalizeAudio: boolean;
-  audioLevel?: number; // -60 to 0 dB
+  audioLevel?: number; // Target loudness in LUFS (-24 quiet to -14 loud, default -16)
   transcribe: boolean;
   whisperModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large';
   whisperLanguage?: string;

@@ -1,11 +1,18 @@
 <div class="tab-bar" (click)="closeContextMenu()">
   <div class="tabs-container">
-    @for (tab of tabs; track tab.id) {
+    @for (tab of tabs; track tab.id; let i = $index) {
       <div
         class="tab"
         [class.active]="tab.id === activeTabId"
         [class.loading]="!tab.isLoaded"
+        [class.drag-over]="dragOverIndex() === i"
         [title]="tab.videoTitle"
+        draggable="true"
+        (dragstart)="onDragStart($event, i)"
+        (dragover)="onDragOver($event, i)"
+        (dragleave)="onDragLeave()"
+        (drop)="onDrop($event, i)"
+        (dragend)="onDragEnd()"
         (mousedown)="onTabClick(tab.id, $event)"
         (contextmenu)="onTabContextMenu(tab.id, $event)"
         (auxclick)="onTabClick(tab.id, $event)">

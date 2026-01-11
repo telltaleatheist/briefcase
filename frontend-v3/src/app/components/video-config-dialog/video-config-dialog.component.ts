@@ -54,6 +54,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   settings: VideoJobSettings = {
     fixAspectRatio: false,
     normalizeAudio: false,
+    audioLevel: -16, // Default to -16 LUFS (standard web/podcast level)
     transcribe: false,
     whisperModel: 'base',
     whisperLanguage: '',
@@ -131,6 +132,20 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     if (value <= 8) return 'Flag content including edge cases and possible matches';
     if (value === 9) return 'Flag all possible matches, including weak associations';
     return 'Flag EVERYTHING remotely related - metaphors, implications, tangential references';
+  }
+
+  getAudioLevelLabel(): string {
+    const level = this.settings.audioLevel || -16;
+    return `${level} LUFS`;
+  }
+
+  getAudioLevelDescription(): string {
+    const level = this.settings.audioLevel || -16;
+    if (level <= -22) return 'Very quiet - suitable for background music or ambient content';
+    if (level <= -19) return 'Quiet - similar to traditional broadcast standards (EBU R128)';
+    if (level <= -17) return 'Moderate - good for podcasts and general web content';
+    if (level <= -15) return 'Standard - typical for YouTube and streaming platforms';
+    return 'Loud - maximizes perceived volume, may reduce dynamic range';
   }
 
   private loadDefaultGranularity() {
@@ -438,6 +453,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     this.settings = {
       fixAspectRatio: false,
       normalizeAudio: false,
+      audioLevel: -16, // Default to -16 LUFS (standard web/podcast level)
       transcribe: false,
       whisperModel: 'base',
       whisperLanguage: '',

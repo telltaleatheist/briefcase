@@ -317,7 +317,7 @@ export class MediaOperationsService {
 
       // Use loudnorm filter for proper audio normalization (EBU R128 standard)
       // This normalizes to target integrated loudness (LUFS) so all videos have consistent perceived volume
-      const targetLoudness = options.level || -14;  // Default to -14 LUFS (YouTube standard)
+      const targetLoudness = options.level || -16;  // Default to -16 LUFS (standard web/podcast level)
       const normalizedPath = await this.ffmpegService.normalizeAudio(videoPath, targetLoudness, jobId);
 
       if (!normalizedPath) {

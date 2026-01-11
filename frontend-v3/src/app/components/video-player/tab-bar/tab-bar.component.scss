@@ -69,6 +69,19 @@
       opacity: 0.6;
     }
   }
+
+  &.drag-over {
+    border-left: 2px solid #ff6b35;
+    padding-left: 10px;
+  }
+
+  &[draggable="true"] {
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
 }
 
 .tab-title {

@@ -245,7 +245,7 @@ export class QueueController {
       // Post-processing options (run after import)
       fixAspectRatio?: boolean;
       normalizeAudio?: boolean;
-      audioLevel?: number; // Target audio level in LUFS (default -14, YouTube standard)
+      audioLevel?: number; // Target audio level in LUFS (default -16, range -24 to -14)
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
@@ -273,7 +273,7 @@ export class QueueController {
         options: {
           fixAspectRatio: true,
           normalizeAudio: true,
-          level: body.audioLevel || -14,
+          level: body.audioLevel || -16,
         },
       });
     } else if (body.fixAspectRatio) {
@@ -281,7 +281,7 @@ export class QueueController {
     } else if (body.normalizeAudio) {
       tasks.push({
         type: 'normalize-audio',
-        options: { level: body.audioLevel || -14 },
+        options: { level: body.audioLevel || -16 },
       });
     }
 

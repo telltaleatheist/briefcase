@@ -35,6 +35,7 @@ export class TabBarComponent {
   @Output() tabCloseOthers = new EventEmitter<string>();
   @Output() tabCloseAll = new EventEmitter<void>();
   @Output() tabRename = new EventEmitter<string>();
+  @Output() tabReorder = new EventEmitter<{ fromIndex: number; toIndex: number }>();
   @Output() moveTabToGroup = new EventEmitter<{ tabId: string; targetGroupNumber: number }>();
   @Output() moveTabToNewGroup = new EventEmitter<string>();
   @Output() consolidateGroups = new EventEmitter<void>();
@@ -42,6 +43,10 @@ export class TabBarComponent {
   // Track if tab context menu is open
   contextMenuTabId = signal<string | null>(null);
   contextMenuPosition = signal<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Drag and drop state
+  dragIndex = signal<number | null>(null);
+  dragOverIndex = signal<number | null>(null);
 
   // Available groups for moving tabs
   availableGroups = signal<EditorGroupInfo[]>([]);
@@ -153,5 +158,43 @@ export class TabBarComponent {
   onRenameTab(tabId: string): void {
     this.closeContextMenu();
     this.tabRename.emit(tabId);
+  }
+
+  // Drag and drop handlers
+  onDragStart(event: DragEvent, index: number): void {
+    this.dragIndex.set(index);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', index.toString());
+    }
+  }
+
+  onDragOver(event: DragEvent, index: number): void {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    if (this.dragIndex() !== null && this.dragIndex() !== index) {
+      this.dragOverIndex.set(index);
+    }
+  }
+
+  onDragLeave(): void {
+    this.dragOverIndex.set(null);
+  }
+
+  onDrop(event: DragEvent, toIndex: number): void {
+    event.preventDefault();
+    const fromIndex = this.dragIndex();
+    if (fromIndex !== null && fromIndex !== toIndex) {
+      this.tabReorder.emit({ fromIndex, toIndex });
+    }
+    this.dragIndex.set(null);
+    this.dragOverIndex.set(null);
+  }
+
+  onDragEnd(): void {
+    this.dragIndex.set(null);
+    this.dragOverIndex.set(null);
   }
 }
