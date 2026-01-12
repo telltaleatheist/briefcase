@@ -19,8 +19,15 @@ export interface ExportSection {
   icon?: string;
 }
 
+export interface MuteSectionExport {
+  id: string;
+  startSeconds: number;
+  endSeconds: number;
+}
+
 export interface ExportDialogData {
   sections: ExportSection[];
+  muteSections?: MuteSectionExport[];
   selectionStart?: number;
   selectionEnd?: number;
   videoId: string;
@@ -67,6 +74,11 @@ export class ExportDialogComponent implements OnInit {
   outputDirectory: string | null = null;
   reEncode = true;
   overwriteOriginal = false;
+  applyMutes = true;  // Whether to apply mute sections during export
+  saveCopy = true;    // Save as copy with (censored) suffix
+
+  // Mute sections data
+  muteSections: MuteSectionExport[] = [];
 
   // Export progress
   exportComplete = false;
@@ -154,10 +166,42 @@ export class ExportDialogComponent implements OnInit {
     // Build cascadeWeeks by grouping sections by category
     this.buildCascadeWeeks(cascadeSections);
 
+    // Initialize mute sections from dialog data
+    this.muteSections = this.data.muteSections || [];
+
     // Start the export dialog tour
     setTimeout(() => {
       this.tourService.tryAutoStartTour('export-dialog', 500);
     }, 300);
+  }
+
+  /**
+   * Check if there are mute sections to apply
+   */
+  hasMuteSections(): boolean {
+    return this.muteSections.length > 0;
+  }
+
+  /**
+   * Get mute sections formatted for display
+   */
+  getMuteSectionsDisplay(): Array<{ startTime: string; endTime: string; duration: string }> {
+    return this.muteSections.map(section => ({
+      startTime: this.formatTime(section.startSeconds),
+      endTime: this.formatTime(section.endSeconds),
+      duration: this.formatTime(section.endSeconds - section.startSeconds)
+    }));
+  }
+
+  /**
+   * Get total muted duration
+   */
+  getTotalMuteDuration(): string {
+    const totalSeconds = this.muteSections.reduce(
+      (total, section) => total + (section.endSeconds - section.startSeconds),
+      0
+    );
+    return this.formatTime(totalSeconds);
   }
 
   /**
@@ -496,6 +540,11 @@ export class ExportDialogComponent implements OnInit {
       // For full video export with only scale changes, send null for times
       const isFullVideo = section.id === '__full_video__';
 
+      // Build mute sections array for the request if applying mutes
+      const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
+        ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
+        : undefined;
+
       await firstValueFrom(
         this.http.post(url, {
           videoId: this.data.videoId,
@@ -503,6 +552,7 @@ export class ExportDialogComponent implements OnInit {
           startTime: isFullVideo ? null : section.startSeconds,
           endTime: isFullVideo ? null : section.endSeconds,
           reEncode: this.reEncode,
+          muteSections: muteSectionsForRequest,
         })
       );
 
@@ -525,6 +575,16 @@ export class ExportDialogComponent implements OnInit {
     // For full video export, send null for times to indicate full video
     const isFullVideo = section.id === '__full_video__';
 
+    // Build mute sections array for the request if applying mutes
+    const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
+      ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
+      : undefined;
+
+    // Add (censored) suffix if saving as copy with mutes applied
+    const outputSuffix = this.saveCopy && this.applyMutes && this.hasMuteSections()
+      ? ' (censored)'
+      : undefined;
+
     await firstValueFrom(
       this.http.post(url, {
         videoPath: this.data.videoPath,
@@ -534,6 +594,8 @@ export class ExportDialogComponent implements OnInit {
         title: section.description,
         customDirectory: this.outputDirectory || undefined,
         reEncode: this.reEncode,
+        muteSections: muteSectionsForRequest,
+        outputSuffix: outputSuffix,
       })
     );
   }

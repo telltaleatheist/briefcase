@@ -129,6 +129,137 @@
   }
 }
 
+// Muted sections panel
+.mute-sections-panel {
+  background: rgba(220, 53, 69, 0.08);
+  border-bottom: 1px solid var(--border-color, #333);
+  padding: 12px 20px;
+  flex-shrink: 0;
+
+  .mute-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+
+    .mute-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #dc3545;
+
+      svg {
+        opacity: 0.9;
+      }
+    }
+
+    .mute-duration {
+      font-size: 11px;
+      color: var(--text-muted, #999);
+      font-family: monospace;
+    }
+  }
+
+  .mute-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+
+    .mute-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      background: rgba(220, 53, 69, 0.15);
+      border: 1px solid rgba(220, 53, 69, 0.4);
+      border-radius: 4px;
+      font-size: 11px;
+
+      .mute-range {
+        color: var(--text-primary, #ccc);
+        font-family: monospace;
+      }
+
+      .mute-length {
+        color: var(--text-muted, #999);
+        font-size: 10px;
+        padding: 1px 4px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 2px;
+      }
+    }
+  }
+
+  .mute-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(220, 53, 69, 0.2);
+
+    .checkbox-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text-secondary, #999);
+
+      &.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      input {
+        position: absolute;
+        opacity: 0;
+        cursor: pointer;
+        height: 0;
+        width: 0;
+      }
+
+      .checkmark {
+        position: relative;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--border-color, #555);
+        border-radius: 3px;
+        background: transparent;
+        flex-shrink: 0;
+
+        &::after {
+          content: '';
+          position: absolute;
+          display: none;
+          left: 3px;
+          top: 0;
+          width: 4px;
+          height: 7px;
+          border: solid #fff;
+          border-width: 0 2px 2px 0;
+          transform: rotate(45deg);
+        }
+      }
+
+      input:checked ~ .checkmark {
+        background: #dc3545;
+        border-color: #dc3545;
+
+        &::after {
+          display: block;
+        }
+      }
+
+      .option-label {
+        white-space: nowrap;
+      }
+    }
+  }
+}
+
 .export-progress {
   padding: 32px 20px;
   text-align: center;

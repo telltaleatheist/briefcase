@@ -2,8 +2,9 @@ import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TimelineSectionsLayerComponent } from '../timeline-sections-layer/timeline-sections-layer.component';
 import { TimelineChaptersLayerComponent } from '../timeline-chapters-layer/timeline-chapters-layer.component';
+import { TimelineMuteLayerComponent, MuteResizeEvent } from '../timeline-mute-layer/timeline-mute-layer.component';
 import { TimelineWaveformComponent } from '../timeline-waveform/timeline-waveform.component';
-import { TimelineSection, TimelineChapter, ZoomState, WaveformData, TimelineSelection } from '../../../../models/video-editor.model';
+import { TimelineSection, TimelineChapter, MuteSection, ZoomState, WaveformData, TimelineSelection } from '../../../../models/video-editor.model';
 
 @Component({
   selector: 'app-timeline-track',
@@ -12,6 +13,7 @@ import { TimelineSection, TimelineChapter, ZoomState, WaveformData, TimelineSele
     CommonModule,
     TimelineSectionsLayerComponent,
     TimelineChaptersLayerComponent,
+    TimelineMuteLayerComponent,
     TimelineWaveformComponent
   ],
   templateUrl: './timeline-track.component.html',
@@ -20,11 +22,13 @@ import { TimelineSection, TimelineChapter, ZoomState, WaveformData, TimelineSele
 export class TimelineTrackComponent {
   @Input() sections: TimelineSection[] = [];
   @Input() chapters: TimelineChapter[] = [];
+  @Input() muteSections: MuteSection[] = [];
   @Input() duration: number = 0;
   @Input() currentTime: number = 0;
   @Input() zoomState: ZoomState = { level: 1, offset: 0 };
   @Input() selectedSection: TimelineSection | undefined;
   @Input() selectedChapterId?: string;
+  @Input() selectedMuteSection?: MuteSection;
   @Input() waveformData: WaveformData = { samples: [], sampleRate: 44100, duration: 0 };
   @Input() waveformColor: string = '#ff6b35';
 
@@ -35,6 +39,9 @@ export class TimelineTrackComponent {
   @Output() sectionHover = new EventEmitter<TimelineSection | null>();
   @Output() chapterClick = new EventEmitter<TimelineChapter>();
   @Output() chapterHover = new EventEmitter<TimelineChapter | null>();
+  @Output() muteSectionClick = new EventEmitter<MuteSection>();
+  @Output() muteSectionDelete = new EventEmitter<MuteSection>();
+  @Output() muteSectionResizeStart = new EventEmitter<MuteResizeEvent>();
   @Output() selectionHandleStart = new EventEmitter<{ event: MouseEvent; handle: 'left' | 'right' }>();
   @Output() selectionDragStart = new EventEmitter<MouseEvent>();
 
@@ -52,6 +59,18 @@ export class TimelineTrackComponent {
 
   onChapterHover(chapter: TimelineChapter | null) {
     this.chapterHover.emit(chapter);
+  }
+
+  onMuteSectionClick(section: MuteSection) {
+    this.muteSectionClick.emit(section);
+  }
+
+  onMuteSectionDelete(section: MuteSection) {
+    this.muteSectionDelete.emit(section);
+  }
+
+  onMuteSectionResizeStart(event: MuteResizeEvent) {
+    this.muteSectionResizeStart.emit(event);
   }
 
   onSelectionHandleMouseDown(event: MouseEvent, handle: 'left' | 'right') {

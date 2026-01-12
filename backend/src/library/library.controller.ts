@@ -1086,6 +1086,8 @@ export class LibraryController {
       customDirectory?: string;
       reEncode?: boolean;
       scale?: number;
+      muteSections?: Array<{ startSeconds: number; endSeconds: number }>;
+      outputSuffix?: string;
     }
   ) {
     try {
@@ -1192,6 +1194,8 @@ export class LibraryController {
         outputPath,
         reEncode: body.reEncode,
         scale: body.scale,
+        muteSections: body.muteSections,
+        outputSuffix: body.outputSuffix,
         metadata: {
           title: body.title,
           description: body.description,
@@ -1262,6 +1266,7 @@ export class LibraryController {
       endTime: number | null;
       reEncode?: boolean;
       scale?: number;
+      muteSections?: Array<{ startSeconds: number; endSeconds: number }>;
     }
   ) {
     try {
@@ -1312,6 +1317,7 @@ export class LibraryController {
         outputPath: tempPath,
         reEncode: body.reEncode || false,
         scale: body.scale,
+        muteSections: body.muteSections,
       });
 
       if (!extractionResult.success) {

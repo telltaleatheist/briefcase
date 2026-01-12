@@ -20,6 +20,7 @@ import {
   WaveformData,
   TimelineSelection,
   CustomMarker,
+  MuteSection,
   EditorTab,
   createEditorTab
 } from '../../models/video-editor.model';
@@ -31,6 +32,7 @@ import { AnalysisPanelComponent } from './analysis-panel/analysis-panel.componen
 import { TimelineRulerComponent } from './timeline/timeline-ruler/timeline-ruler.component';
 import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline-playhead.component';
 import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track.component';
+import { MuteResizeEvent } from './timeline/timeline-mute-layer/timeline-mute-layer.component';
 import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
 import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
 import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
@@ -111,6 +113,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   styleUrls: ['./video-player.component.scss']
 })
 export class VideoPlayerComponent implements OnInit, OnDestroy {
+  // Expose Math for template use
+  Math = Math;
+
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private navService = inject(NavigationService);
@@ -245,6 +250,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       } else {
         // M: Add marker at playhead
         this.addMarker();
+      }
+    }
+
+    // U for mute selection (Shift+U)
+    if ((event.key === 'u' || event.key === 'U') && event.shiftKey) {
+      event.preventDefault();
+      if (this.highlightSelection()) {
+        this.addMuteSection();
       }
     }
 
@@ -452,6 +465,12 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Custom markers created by user
   customMarkers = signal<CustomMarker[]>([]);
+
+  // Mute sections for audio censoring
+  muteSections = signal<MuteSection[]>([]);
+  selectedMuteSection = signal<MuteSection | undefined>(undefined);
+  // Track if we're in muted state due to mute section (not user manually muting)
+  private isAutoMuted = false;
 
   // Context menu state
   showContextMenu$ = signal(false);
@@ -771,6 +790,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
               this.hasAnalysis.set(false);
             });
 
+            // Load mute sections for audio censoring
+            this.loadMuteSections(videoId).catch(err => {
+              console.warn('Mute sections loading failed, continuing without it:', err);
+            });
+
             // Set initial hasAnalysis state based on video metadata
             if (!video.hasAnalysis) {
               this.hasAnalysis.set(false);
@@ -861,6 +885,156 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }
 
     return segments;
+  }
+
+  /**
+   * Load mute sections for a video
+   */
+  private async loadMuteSections(videoId: string) {
+    try {
+      const response = await firstValueFrom(
+        this.libraryService.getMuteSections(videoId)
+      );
+      if (response.success && response.data) {
+        this.muteSections.set(response.data);
+      } else {
+        this.muteSections.set([]);
+      }
+    } catch (error) {
+      console.log('Failed to load mute sections:', error);
+      this.muteSections.set([]);
+    }
+  }
+
+  /**
+   * Add a mute section for the current selection
+   */
+  async addMuteSection() {
+    const selection = this.highlightSelection();
+    if (!selection) return;
+
+    const videoId = this.activeTab()?.videoId;
+    if (!videoId) return;
+
+    try {
+      const response = await firstValueFrom(
+        this.libraryService.addMuteSection(videoId, selection.startTime, selection.endTime)
+      );
+
+      if (response.success) {
+        // Reload mute sections to get the new one
+        await this.loadMuteSections(videoId);
+        // Clear selection after adding mute
+        this.highlightSelection.set(null);
+      }
+    } catch (error) {
+      console.error('Failed to add mute section:', error);
+    }
+  }
+
+  /**
+   * Delete a mute section
+   */
+  async deleteMuteSection(section: MuteSection) {
+    try {
+      const response = await firstValueFrom(
+        this.libraryService.deleteMuteSection(section.id)
+      );
+
+      if (response.success) {
+        // Remove from local state
+        this.muteSections.update(sections =>
+          sections.filter(s => s.id !== section.id)
+        );
+        this.selectedMuteSection.set(undefined);
+      }
+    } catch (error) {
+      console.error('Failed to delete mute section:', error);
+    }
+  }
+
+  /**
+   * Handle mute section click from timeline
+   */
+  onMuteSectionClick(section: MuteSection) {
+    this.selectedMuteSection.set(section);
+    // Seek to the start of the mute section
+    this.seekTo(section.startSeconds);
+  }
+
+  /**
+   * Handle mute section delete from timeline
+   */
+  onMuteSectionDelete(section: MuteSection) {
+    this.deleteMuteSection(section);
+  }
+
+  // Track which mute section is being resized
+  private resizingMuteSection: MuteSection | null = null;
+  private resizingMuteHandle: 'left' | 'right' | null = null;
+
+  /**
+   * Handle mute section resize start from timeline
+   */
+  onMuteSectionResizeStart(event: MuteResizeEvent) {
+    event.event.preventDefault();
+    event.event.stopPropagation();
+
+    this.resizingMuteSection = event.section;
+    this.resizingMuteHandle = event.handle;
+    document.body.style.cursor = 'ew-resize';
+
+    const onMouseMove = (e: MouseEvent) => {
+      const time = this.getTimeFromMousePositionDocument(e);
+      if (time === null || !this.resizingMuteSection) return;
+
+      const section = this.resizingMuteSection;
+
+      if (this.resizingMuteHandle === 'left') {
+        // Dragging left handle - update start time
+        const newStart = Math.max(0, Math.min(time, section.endSeconds - 0.1));
+        // Update local state immediately for smooth feedback
+        this.muteSections.update(sections =>
+          sections.map(s => s.id === section.id ? { ...s, startSeconds: newStart } : s)
+        );
+        this.resizingMuteSection = { ...section, startSeconds: newStart };
+      } else if (this.resizingMuteHandle === 'right') {
+        // Dragging right handle - update end time
+        const newEnd = Math.min(this.editorState().duration, Math.max(time, section.startSeconds + 0.1));
+        // Update local state immediately for smooth feedback
+        this.muteSections.update(sections =>
+          sections.map(s => s.id === section.id ? { ...s, endSeconds: newEnd } : s)
+        );
+        this.resizingMuteSection = { ...section, endSeconds: newEnd };
+      }
+    };
+
+    const onMouseUp = async () => {
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+
+      // Save the final position to the database
+      if (this.resizingMuteSection) {
+        const section = this.resizingMuteSection;
+        try {
+          const response = await firstValueFrom(
+            this.libraryService.updateMuteSection(section.id, section.startSeconds, section.endSeconds)
+          );
+          if (!response.success) {
+            console.error('Failed to update mute section:', response.error);
+          }
+        } catch (error) {
+          console.error('Failed to update mute section:', error);
+        }
+      }
+
+      this.resizingMuteSection = null;
+      this.resizingMuteHandle = null;
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 
   private async loadAnalysisForVideo(videoId: string) {
@@ -1343,10 +1517,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   setVolume(volume: number) {
+    // Allow volume up to 3 (300%) for amplification
+    const clampedVolume = Math.max(0, Math.min(3, volume));
+
     this.editorState.update(state => ({
       ...state,
-      volume: Math.max(0, Math.min(1, volume))
+      volume: clampedVolume
     }));
+
+    // Initialize audio context on user interaction (needed for amplification)
+    if (clampedVolume > 1 && this.videoPlayer) {
+      this.videoPlayer.ensureAudioContext();
+    }
   }
 
   // Tool management
@@ -1423,6 +1605,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         label: 'Add Marker',
         icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L12 22"/><path d="M17 7L12 2 7 7"/></svg>'
       },
+      {
+        id: 'mute-selection',
+        label: 'Mute Selection',
+        icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>'
+      },
       { id: 'divider', label: '', divider: true },
       {
         id: 'clear',
@@ -1446,6 +1633,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         break;
       case 'add-marker':
         this.addMarker();
+        break;
+      case 'mute-selection':
+        this.addMuteSection();
         break;
       case 'clear':
         this.clearSelection();
@@ -1761,8 +1951,16 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // Get current selection if any
     const selection = this.highlightSelection();
 
+    // Convert mute sections for export dialog
+    const muteSectionsForExport = this.muteSections().map(ms => ({
+      id: ms.id,
+      startSeconds: ms.startSeconds,
+      endSeconds: ms.endSeconds
+    }));
+
     this.exportDialogData.set({
       sections,
+      muteSections: muteSectionsForExport,
       selectionStart: selection?.startTime,
       selectionEnd: selection?.endTime,
       videoId,
@@ -2110,6 +2308,46 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       return;
     }
     this.updateCurrentTime(time);
+
+    // Real-time muting: Check if current time is within any mute section
+    this.handleAutoMute(time);
+  }
+
+  /**
+   * Handle automatic muting based on mute sections
+   */
+  private handleAutoMute(currentTime: number) {
+    const sections = this.muteSections();
+    if (sections.length === 0) {
+      // No mute sections, ensure we're not auto-muted
+      if (this.isAutoMuted) {
+        this.isAutoMuted = false;
+        // Only unmute if the video element exists and user hasn't manually set volume to 0
+        if (this.videoPlayer && this.editorState().volume > 0) {
+          this.videoPlayer.setMuted(false);
+        }
+      }
+      return;
+    }
+
+    // Check if current time is within any mute section
+    const inMutedSection = sections.some(s =>
+      currentTime >= s.startSeconds && currentTime <= s.endSeconds
+    );
+
+    if (inMutedSection && !this.isAutoMuted) {
+      // Enter muted section
+      this.isAutoMuted = true;
+      if (this.videoPlayer) {
+        this.videoPlayer.setMuted(true);
+      }
+    } else if (!inMutedSection && this.isAutoMuted) {
+      // Exit muted section
+      this.isAutoMuted = false;
+      if (this.videoPlayer && this.editorState().volume > 0) {
+        this.videoPlayer.setMuted(false);
+      }
+    }
   }
 
   async onVideoDurationChange(duration: number) {
@@ -2301,10 +2539,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
             if (partial && partial.samples && partial.samples.length > 0) {
               console.log(`✓ Updating with ${partial.samples.length} samples (${progress}%)`);
               // Create a completely new object to trigger change detection
+              // Always use the video element duration for accurate alignment
               this.waveformData.set({
                 samples: [...partial.samples], // Create new array
                 sampleRate: partial.sampleRate || 44100,
-                duration: partial.duration || duration
+                duration: duration // Use video element duration, not FFprobe duration
               });
             }
 
@@ -2328,10 +2567,12 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         console.log(`✅ Final waveform: ${response.data.samples.length} samples`);
 
         // Replace with final high-quality waveform
+        // IMPORTANT: Always use the video player's duration to ensure waveform alignment
+        // FFprobe may report a slightly different duration than the video element
         this.waveformData.set({
           samples: response.data.samples,
           sampleRate: response.data.sampleRate || 44100,
-          duration: response.data.duration || duration
+          duration: duration // Use video element duration for accurate alignment
         });
       } else {
         console.warn('Server waveform not available, keeping current version');

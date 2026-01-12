@@ -62,6 +62,9 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   defaultAIModel = ''; // No fallback - user must have saved a default or select one
   savedAsDefault = signal(false);
 
+  // Track selected AI model directly (fixes ngModel binding issues)
+  selectedAIModel = signal<string>('');
+
   // Custom instructions history
   instructionsHistory = signal<{ id: number; instruction_text: string; used_at: string }[]>([]);
   showInstructionsDropdown = signal(false);
@@ -137,6 +140,14 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     if (value <= 8) return 'Flag content including edge cases and possible matches';
     if (value === 9) return 'Flag all possible matches, including weak associations';
     return 'Flag EVERYTHING remotely related - metaphors, implications, tangential references';
+  }
+
+  getAudioLevelDescription(level: number): string {
+    if (level <= -22) return 'Very quiet - suitable for background music or ambient content';
+    if (level <= -19) return 'Quiet - similar to traditional broadcast standards (EBU R128)';
+    if (level <= -17) return 'Moderate - good for podcasts and general web content';
+    if (level <= -15) return 'Standard - typical for YouTube and streaming platforms';
+    return 'Loud - maximizes perceived volume, may reduce dynamic range';
   }
 
   // Default granularity value (loaded from backend)
@@ -378,7 +389,9 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
             ...task.config,
             aiModel,
           };
-          console.log(`[initializeTasks] ai-analyze: model=${aiModel}`);
+          // Also set the direct signal for proper ngModel binding
+          this.selectedAIModel.set(aiModel);
+          console.log(`[initializeTasks] ai-analyze: model=${aiModel}, set selectedAIModel signal`);
         }
 
         taskMap.set(task.type, taskCopy);
@@ -439,6 +452,10 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
    * Handle AI model change
    */
   onAIModelChange(modelValue: string) {
+    console.log('[onAIModelChange] User selected model:', modelValue);
+    // Update the direct signal (for ngModel binding)
+    this.selectedAIModel.set(modelValue);
+    // Also update the task config
     this.updateTaskConfig('ai-analyze', { aiModel: modelValue });
   }
 
@@ -484,6 +501,19 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
 
   onSave() {
     const currentTasks = new Map(this.tasks());
+
+    // Ensure the ai-analyze task has the currently selected model from the signal
+    // This is critical - we use the signal as the source of truth for the selected model
+    if (currentTasks.has('ai-analyze')) {
+      const aiTask = currentTasks.get('ai-analyze')!;
+      const selectedModel = this.selectedAIModel();
+      console.log('[onSave] Ensuring ai-analyze task uses selected model:', selectedModel);
+      aiTask.config = {
+        ...aiTask.config,
+        aiModel: selectedModel
+      };
+      currentTasks.set('ai-analyze', aiTask);
+    }
 
     // If AI analysis is selected but there's no transcript and transcribe wasn't selected,
     // automatically add transcribe task

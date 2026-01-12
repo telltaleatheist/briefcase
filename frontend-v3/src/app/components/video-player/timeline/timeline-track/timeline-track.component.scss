@@ -50,6 +50,23 @@
   }
 }
 
+// Mute sections header - shows muted audio regions
+.track-mute-header {
+  position: relative;
+  height: 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: none; // Connect with sections/chapters
+  border-bottom: none; // Connect with waveform
+  overflow: hidden;
+
+  app-timeline-mute-layer {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+
 // Waveform container with square corners
 .track-waveform-container {
   position: relative;

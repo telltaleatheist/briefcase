@@ -880,6 +880,156 @@ export class DatabaseController {
     }
   }
 
+  // ==================== MUTE SECTIONS ====================
+
+  /**
+   * GET /api/database/videos/:id/mute-sections
+   * Get all mute sections for a video
+   */
+  @Get('videos/:id/mute-sections')
+  getMuteSections(@Param('id') videoId: string) {
+    const sections = this.databaseService.getMuteSections(videoId);
+    return {
+      sections,
+      count: sections.length
+    };
+  }
+
+  /**
+   * POST /api/database/videos/:id/mute-sections
+   * Add a mute section to a video
+   */
+  @Post('videos/:id/mute-sections')
+  async addMuteSection(
+    @Param('id') videoId: string,
+    @Body() body: {
+      startSeconds: number;
+      endSeconds: number;
+    }
+  ) {
+    try {
+      // Verify video exists
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return {
+          success: false,
+          error: 'Video not found'
+        };
+      }
+
+      // Validate time range
+      if (body.startSeconds === undefined || body.endSeconds === undefined) {
+        return {
+          success: false,
+          error: 'Start and end times are required'
+        };
+      }
+
+      if (body.startSeconds >= body.endSeconds) {
+        return {
+          success: false,
+          error: 'Start time must be before end time'
+        };
+      }
+
+      // Generate unique ID
+      const { v4: uuidv4 } = require('uuid');
+      const sectionId = uuidv4();
+
+      this.databaseService.insertMuteSection({
+        id: sectionId,
+        videoId,
+        startSeconds: body.startSeconds,
+        endSeconds: body.endSeconds
+      });
+
+      this.logger.log(`Added mute section ${sectionId} to video ${videoId}: ${body.startSeconds}s - ${body.endSeconds}s`);
+
+      return {
+        success: true,
+        id: sectionId
+      };
+    } catch (error: any) {
+      this.logger.error(`Error adding mute section: ${error?.message || 'Unknown error'}`);
+      return {
+        success: false,
+        error: error?.message || 'Failed to add mute section'
+      };
+    }
+  }
+
+  /**
+   * DELETE /api/database/mute-sections/:id
+   * Delete a mute section
+   */
+  @Delete('mute-sections/:id')
+  async deleteMuteSection(@Param('id') sectionId: string) {
+    try {
+      this.databaseService.deleteMuteSection(sectionId);
+      this.logger.log(`Deleted mute section ${sectionId}`);
+
+      return {
+        success: true,
+        message: 'Mute section deleted successfully'
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to delete mute section ${sectionId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to delete mute section'
+      };
+    }
+  }
+
+  /**
+   * PATCH /api/database/mute-sections/:id
+   * Update a mute section's start/end times
+   */
+  @Patch('mute-sections/:id')
+  async updateMuteSection(
+    @Param('id') sectionId: string,
+    @Body() body: {
+      startSeconds: number;
+      endSeconds: number;
+    }
+  ) {
+    try {
+      // Validate times
+      if (body.startSeconds < 0 || body.endSeconds < 0) {
+        return {
+          success: false,
+          error: 'Times cannot be negative'
+        };
+      }
+
+      if (body.startSeconds >= body.endSeconds) {
+        return {
+          success: false,
+          error: 'Start time must be before end time'
+        };
+      }
+
+      this.databaseService.updateMuteSection(sectionId, body.startSeconds, body.endSeconds);
+      this.logger.log(`Updated mute section ${sectionId}: ${body.startSeconds}s - ${body.endSeconds}s`);
+
+      return {
+        success: true,
+        message: 'Mute section updated successfully',
+        section: {
+          id: sectionId,
+          startSeconds: body.startSeconds,
+          endSeconds: body.endSeconds
+        }
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to update mute section ${sectionId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update mute section'
+      };
+    }
+  }
+
   /**
    * GET /api/database/videos/:id/tags
    * Get all tags for a video

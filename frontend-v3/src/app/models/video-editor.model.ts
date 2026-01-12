@@ -110,6 +110,14 @@ export interface CustomMarker {
   category?: string;
 }
 
+export interface MuteSection {
+  id: string;
+  videoId: string;
+  startSeconds: number;
+  endSeconds: number;
+  createdAt: string;
+}
+
 export interface VideoMetadata {
   filename: string;
   format: string;
@@ -161,6 +169,7 @@ export interface EditorTab {
   sections: TimelineSection[];
   chapters: TimelineChapter[];
   customMarkers: CustomMarker[];
+  muteSections: MuteSection[];
   waveformData: WaveformData;
   transcript: TranscriptionSegment[];
   analysisData: AnalysisData | null;
@@ -198,6 +207,7 @@ export function createEditorTab(
     sections: [],
     chapters: [],
     customMarkers: [],
+    muteSections: [],
     waveformData: {
       samples: [],
       sampleRate: 44100,

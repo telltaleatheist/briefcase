@@ -93,6 +93,14 @@ export interface CustomMarkerRecord {
   source?: string;
 }
 
+export interface MuteSectionRecord {
+  id: string;
+  video_id: string;
+  start_seconds: number;
+  end_seconds: number;
+  created_at: string;
+}
+
 export interface ChapterRecord {
   id: string;
   video_id: string;
@@ -535,6 +543,16 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
+      -- Mute sections: Ranges of audio to mute for censoring
+      CREATE TABLE IF NOT EXISTS mute_sections (
+        id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        start_seconds REAL NOT NULL,
+        end_seconds REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      );
+
       -- Tags: AI-generated and manual tags
       CREATE TABLE IF NOT EXISTS tags (
         id TEXT PRIMARY KEY,
@@ -674,6 +692,7 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_tags_video ON tags(video_id);
       CREATE INDEX IF NOT EXISTS idx_sections_video ON analysis_sections(video_id);
       CREATE INDEX IF NOT EXISTS idx_custom_markers_video ON custom_markers(video_id);
+      CREATE INDEX IF NOT EXISTS idx_mute_sections_video ON mute_sections(video_id);
       CREATE INDEX IF NOT EXISTS idx_saved_links_status ON saved_links(status);
       CREATE INDEX IF NOT EXISTS idx_saved_links_date_added ON saved_links(date_added);
       CREATE INDEX IF NOT EXISTS idx_saved_links_url ON saved_links(url);
@@ -3409,6 +3428,77 @@ export class DatabaseService {
     db.prepare(sql).run(...values);
     this.saveDatabase();
     this.logger.log(`Updated custom marker ${marker.id}`);
+  }
+
+  // ==================== MUTE SECTIONS ====================
+
+  /**
+   * Insert a mute section
+   */
+  insertMuteSection(section: {
+    id: string;
+    videoId: string;
+    startSeconds: number;
+    endSeconds: number;
+  }) {
+    const db = this.ensureInitialized();
+
+    db.prepare(
+      `INSERT INTO mute_sections (
+        id, video_id, start_seconds, end_seconds, created_at
+      ) VALUES (?, ?, ?, ?, ?)`
+    ).run(
+      section.id,
+      section.videoId,
+      section.startSeconds,
+      section.endSeconds,
+      new Date().toISOString(),
+    );
+
+    this.saveDatabase();
+    this.logger.log(`Inserted mute section ${section.id} for video ${section.videoId}`);
+  }
+
+  /**
+   * Get all mute sections for a video
+   */
+  getMuteSections(videoId: string): MuteSectionRecord[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(
+      'SELECT * FROM mute_sections WHERE video_id = ? ORDER BY start_seconds'
+    );
+    return stmt.all(videoId) as MuteSectionRecord[];
+  }
+
+  /**
+   * Delete a specific mute section by ID
+   */
+  deleteMuteSection(sectionId: string) {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM mute_sections WHERE id = ?').run(sectionId);
+    this.saveDatabase();
+    this.logger.log(`Deleted mute section ${sectionId}`);
+  }
+
+  /**
+   * Update a mute section's start/end times
+   */
+  updateMuteSection(sectionId: string, startSeconds: number, endSeconds: number) {
+    const db = this.ensureInitialized();
+    db.prepare('UPDATE mute_sections SET start_seconds = ?, end_seconds = ? WHERE id = ?')
+      .run(startSeconds, endSeconds, sectionId);
+    this.saveDatabase();
+    this.logger.log(`Updated mute section ${sectionId}: ${startSeconds}s - ${endSeconds}s`);
+  }
+
+  /**
+   * Delete all mute sections for a video
+   */
+  deleteMuteSections(videoId: string) {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM mute_sections WHERE video_id = ?').run(videoId);
+    this.saveDatabase();
+    this.logger.log(`Deleted all mute sections for video ${videoId}`);
   }
 
   // ==================== CHAPTERS ====================

@@ -26,6 +26,21 @@
     </div>
   }
 
+  <!-- Mute sections layer - shows muted audio regions -->
+  @if (muteSections.length > 0) {
+    <div class="track-mute-header">
+      <app-timeline-mute-layer
+        [muteSections]="muteSections"
+        [duration]="duration"
+        [zoomState]="zoomState"
+        [selectedSection]="selectedMuteSection"
+        (sectionClick)="onMuteSectionClick($event)"
+        (sectionDelete)="onMuteSectionDelete($event)"
+        (sectionResizeStart)="onMuteSectionResizeStart($event)">
+      </app-timeline-mute-layer>
+    </div>
+  }
+
   <!-- Waveform container with square corners -->
   <div class="track-waveform-container">
     <app-timeline-waveform

@@ -18,7 +18,7 @@
           *ngFor="let task of getAvailableTasks()"
           class="task-item"
           [class.selected]="isTaskSelected(task.type)"
-          [class.expanded]="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze')"
+          [class.expanded]="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')"
         >
           <!-- Task Header (clickable) -->
           <div class="task-header" (click)="toggleTask(task)">
@@ -30,8 +30,34 @@
             <span class="selection-indicator" *ngIf="isTaskSelected(task.type)">✓</span>
           </div>
 
-          <!-- Task Configuration (auto-expand for transcribe and ai-analyze) -->
-          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze')">
+          <!-- Task Configuration (auto-expand for configurable tasks) -->
+          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')">
+
+            <!-- Normalize Audio Config -->
+            <div *ngIf="task.type === 'normalize-audio'" class="config-form">
+              <div class="form-group granularity-group">
+                <div class="label-row">
+                  <label>Target Loudness</label>
+                  <span class="granularity-value">{{ getTaskConfig(task.type).targetLevel || -16 }} LUFS</span>
+                </div>
+                <div class="slider-container">
+                  <span class="slider-label-left">Quiet</span>
+                  <input
+                    type="range"
+                    min="-24"
+                    max="-14"
+                    step="1"
+                    [value]="getTaskConfig(task.type).targetLevel || -16"
+                    (input)="updateTaskConfig(task.type, { targetLevel: +$any($event.target).value })"
+                    class="granularity-slider"
+                  />
+                  <span class="slider-label-right">Loud</span>
+                </div>
+                <div class="granularity-description">
+                  {{ getAudioLevelDescription(getTaskConfig(task.type).targetLevel || -16) }}
+                </div>
+              </div>
+            </div>
 
             <!-- Transcribe Config -->
             <div *ngIf="task.type === 'transcribe'" class="config-form">
@@ -73,13 +99,13 @@
               <div class="form-group">
                 <label>AI Model</label>
                 <select
-                  [ngModel]="getTaskConfig(task.type).aiModel"
+                  [ngModel]="selectedAIModel()"
                   (ngModelChange)="onAIModelChange($event)"
                   [disabled]="loadingModels()"
                 >
                   <option *ngIf="loadingModels()" value="">Loading models...</option>
                   <option *ngIf="!loadingModels() && aiModels().length === 0" value="">No models available</option>
-                  <option *ngIf="!loadingModels() && aiModels().length > 0 && !getTaskConfig(task.type).aiModel" value="" disabled>-- Select a model --</option>
+                  <option *ngIf="!loadingModels() && aiModels().length > 0 && !selectedAIModel()" value="" disabled>-- Select a model --</option>
 
                   <!-- Local AI (Bundled) -->
                   <optgroup *ngIf="hasModelsForProvider('local')" label="Local AI (Bundled)">
@@ -113,8 +139,8 @@
                   type="button"
                   class="btn-save-default"
                   [class.saved]="savedAsDefault()"
-                  (click)="saveAsDefault(getTaskConfig(task.type).aiModel)"
-                  [disabled]="loadingModels() || !getTaskConfig(task.type).aiModel || savedAsDefault()"
+                  (click)="saveAsDefault(selectedAIModel())"
+                  [disabled]="loadingModels() || !selectedAIModel() || savedAsDefault()"
                   [title]="savedAsDefault() ? 'Saved!' : 'Save this model as your default for future analysis'"
                 >
                   @if (savedAsDefault()) {

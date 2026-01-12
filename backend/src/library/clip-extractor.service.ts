@@ -9,6 +9,11 @@ import {
   type FfmpegProgress,
 } from '../bridges';
 
+export interface MuteSectionInput {
+  startSeconds: number;
+  endSeconds: number;
+}
+
 export interface ClipExtractionRequest {
   videoPath: string;
   startTime: number | null; // seconds (null = start of video)
@@ -16,6 +21,8 @@ export interface ClipExtractionRequest {
   outputPath: string;
   reEncode?: boolean; // Whether to re-encode for frame accuracy (default: false)
   scale?: number; // Video scale factor (1.0 = no scaling, 2.0 = 2x scale, etc.)
+  muteSections?: MuteSectionInput[]; // Audio sections to mute
+  outputSuffix?: string; // Suffix to add to filename (e.g., " (censored)")
   metadata?: {
     title?: string;
     description?: string;
@@ -84,30 +91,48 @@ export class ClipExtractorService {
 
       const duration = endTime - startTime;
 
+      // Handle output suffix (e.g., " (censored)")
+      let outputPath = request.outputPath;
+      if (request.outputSuffix) {
+        const ext = path.extname(outputPath);
+        const basename = path.basename(outputPath, ext);
+        const dirname = path.dirname(outputPath);
+        outputPath = path.join(dirname, `${basename}${request.outputSuffix}${ext}`);
+      }
+
       // Ensure output directory exists
-      const outputDir = path.dirname(request.outputPath);
+      const outputDir = path.dirname(outputPath);
       await fs.mkdir(outputDir, { recursive: true });
+
+      // Log mute sections if present
+      if (request.muteSections && request.muteSections.length > 0) {
+        this.logger.log(`Applying ${request.muteSections.length} mute sections`);
+        request.muteSections.forEach((ms, i) => {
+          this.logger.log(`  Mute ${i + 1}: ${ms.startSeconds}s - ${ms.endSeconds}s`);
+        });
+      }
 
       // Extract clip using FFmpeg
       await this.runFFmpegExtraction(
         request.videoPath,
         startTime,
         duration,
-        request.outputPath,
+        outputPath,
         request.reEncode || false,
         request.scale,
+        request.muteSections,
         request.onProgress
       );
 
       // Get file stats
-      const stats = await fs.stat(request.outputPath);
+      const stats = await fs.stat(outputPath);
 
-      this.logger.log(`Clip extracted successfully: ${request.outputPath}`);
+      this.logger.log(`Clip extracted successfully: ${outputPath}`);
       this.logger.log(`File size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
 
       return {
         success: true,
-        outputPath: request.outputPath,
+        outputPath: outputPath,
         duration,
         fileSize: stats.size,
       };
@@ -122,6 +147,37 @@ export class ClipExtractorService {
   }
 
   /**
+   * Build the audio mute filter expression for FFmpeg
+   * Creates a volume filter with enable expression to mute specified time ranges
+   */
+  private buildMuteFilter(muteSections: MuteSectionInput[], clipStartTime: number = 0): string | null {
+    if (!muteSections || muteSections.length === 0) {
+      return null;
+    }
+
+    // Adjust mute section times relative to clip start time
+    // If clip starts at 30s and mute is at 35-40s, adjusted is 5-10s
+    const adjustedSections = muteSections
+      .map(ms => ({
+        start: ms.startSeconds - clipStartTime,
+        end: ms.endSeconds - clipStartTime
+      }))
+      .filter(ms => ms.end > 0); // Only include sections that are after clip start
+
+    if (adjustedSections.length === 0) {
+      return null;
+    }
+
+    // Build the enable expression: between(t,start1,end1)+between(t,start2,end2)
+    const betweenExpressions = adjustedSections.map(
+      ms => `between(t,${Math.max(0, ms.start).toFixed(3)},${ms.end.toFixed(3)})`
+    );
+
+    const enableExpr = betweenExpressions.join('+');
+    return `volume=enable='${enableExpr}':volume=0`;
+  }
+
+  /**
    * Run FFmpeg extraction using the bridge
    */
   private async runFFmpegExtraction(
@@ -131,18 +187,26 @@ export class ClipExtractorService {
     outputPath: string,
     reEncode: boolean = false,
     scale?: number,
+    muteSections?: MuteSectionInput[],
     onProgress?: (progress: number) => void
   ): Promise<void> {
     const args: string[] = ['-y'];
 
-    // If scale is specified and not 1.0, we must re-encode
-    const needsReEncode = reEncode || (scale && scale !== 1.0);
+    // Build mute filter if mute sections are provided
+    const muteFilter = this.buildMuteFilter(muteSections || [], startTime);
+    const hasMutes = muteFilter !== null;
+
+    // If scale is specified and not 1.0, or if we have mutes, we must re-encode
+    const needsReEncode = reEncode || (scale && scale !== 1.0) || hasMutes;
 
     if (needsReEncode) {
-      // Re-encode mode: Frame-accurate extraction with optional scaling
+      // Re-encode mode: Frame-accurate extraction with optional scaling and muting
       this.logger.log('Using re-encoding mode for frame-accurate extraction');
       if (scale && scale !== 1.0) {
         this.logger.log(`Applying scale: ${scale}x`);
+      }
+      if (hasMutes) {
+        this.logger.log(`Applying audio mute filter: ${muteFilter}`);
       }
 
       const seekBuffer = Math.max(0, startTime - 10);
@@ -155,19 +219,31 @@ export class ClipExtractorService {
       const adjustedStart = startTime - seekBuffer;
       args.push(
         '-ss', adjustedStart.toString(),
-        '-t', duration.toString(),
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-preset', 'medium',
-        '-crf', '18'
+        '-t', duration.toString()
       );
 
-      // Add scale filter if needed
-      if (scale && scale !== 1.0) {
+      // Build filter_complex if we have both scale and mute, or just mute
+      if (hasMutes && scale && scale !== 1.0) {
+        // Both video scaling and audio muting
+        args.push(
+          '-filter_complex',
+          `[0:v]scale=iw*${scale}:ih*${scale}:flags=lanczos[vout];[0:a]${muteFilter}[aout]`,
+          '-map', '[vout]',
+          '-map', '[aout]'
+        );
+      } else if (hasMutes) {
+        // Only audio muting
+        args.push('-af', muteFilter);
+      } else if (scale && scale !== 1.0) {
+        // Only video scaling
         args.push('-vf', `scale=iw*${scale}:ih*${scale}:flags=lanczos`);
       }
 
       args.push(
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-preset', 'medium',
+        '-crf', '18',
         '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
@@ -176,7 +252,7 @@ export class ClipExtractorService {
         outputPath
       );
     } else {
-      // Stream copy mode: Fast extraction (no scaling)
+      // Stream copy mode: Fast extraction (no scaling, no muting)
       this.logger.log('Using stream copy mode for fast extraction');
 
       args.push(

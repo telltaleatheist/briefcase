@@ -172,6 +172,23 @@
 
   .volume-slider {
     width: 80px;
+
+    &.boosted {
+      // Orange tint when amplifying beyond 100%
+      accent-color: #ff6b35;
+    }
+  }
+
+  .volume-percent {
+    font-size: 10px;
+    min-width: 36px;
+    text-align: right;
+    color: var(--text-secondary);
+
+    &.boosted {
+      color: #ff6b35;
+      font-weight: 600;
+    }
   }
 }
 

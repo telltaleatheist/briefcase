@@ -205,7 +205,7 @@
               </select>
             </div>
 
-            <!-- Volume -->
+            <!-- Volume (supports amplification up to 300%) -->
             <div class="volume-control">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
@@ -213,12 +213,17 @@
               <input
                 type="range"
                 class="volume-slider"
+                [class.boosted]="editorState().volume > 1"
                 min="0"
-                max="1"
+                max="3"
                 step="0.01"
                 [value]="editorState().volume"
                 (input)="setVolume(+$any($event.target).value)"
+                [title]="'Volume: ' + Math.round(editorState().volume * 100) + '%'"
               />
+              <span class="volume-percent" [class.boosted]="editorState().volume > 1">
+                {{ Math.round(editorState().volume * 100) }}%
+              </span>
             </div>
           </div>
           <div class="toolbar-right">
@@ -260,11 +265,13 @@
               <app-timeline-track
                 [sections]="filteredSections()"
                 [chapters]="chapters()"
+                [muteSections]="muteSections()"
                 [duration]="editorState().duration"
                 [currentTime]="editorState().currentTime"
                 [zoomState]="editorState().zoomState"
                 [selectedSection]="editorState().selectedSection"
                 [selectedChapterId]="selectedChapterId()"
+                [selectedMuteSection]="selectedMuteSection()"
                 [waveformData]="waveformData()"
                 [waveformColor]="settings().waveformColor"
                 [selection]="highlightSelection()"
@@ -272,6 +279,9 @@
                 (sectionHover)="onSectionHover($event)"
                 (chapterClick)="onChapterClick($event)"
                 (chapterHover)="onChapterHover($event)"
+                (muteSectionClick)="onMuteSectionClick($event)"
+                (muteSectionDelete)="onMuteSectionDelete($event)"
+                (muteSectionResizeStart)="onMuteSectionResizeStart($event)"
                 (selectionHandleStart)="onSelectionHandleStart($event.event, $event.handle)"
                 (selectionDragStart)="onSelectionDragStart($event)">
               </app-timeline-track>

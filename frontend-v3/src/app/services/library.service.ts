@@ -87,6 +87,14 @@ export interface AnalysisSection {
   quotes: AnalysisQuote[];
 }
 
+export interface MuteSection {
+  id: string;
+  videoId: string;
+  startSeconds: number;
+  endSeconds: number;
+  createdAt: string;
+}
+
 export interface ParsedAnalysisMetadata {
   id: string;
   title: string;
@@ -1194,6 +1202,103 @@ export class LibraryService {
         success: true,
         data: response.sections || []
       }))
+    );
+  }
+
+  // =====================================================
+  // MUTE SECTIONS
+  // =====================================================
+
+  /**
+   * Get mute sections for a video
+   * GET /api/database/videos/:id/mute-sections
+   */
+  getMuteSections(videoId: string): Observable<ApiResponse<MuteSection[]>> {
+    return this.http.get<{ sections: any[]; count: number }>(
+      `${this.API_BASE}/database/videos/${videoId}/mute-sections`
+    ).pipe(
+      map(response => ({
+        success: true,
+        data: (response.sections || []).map((s: any) => ({
+          id: s.id,
+          videoId: s.video_id,
+          startSeconds: s.start_seconds,
+          endSeconds: s.end_seconds,
+          createdAt: s.created_at
+        }))
+      })),
+      catchError(error => {
+        console.error('Failed to get mute sections:', error);
+        return of({ success: false, data: [] });
+      })
+    );
+  }
+
+  /**
+   * Add a mute section to a video
+   * POST /api/database/videos/:id/mute-sections
+   */
+  addMuteSection(videoId: string, startSeconds: number, endSeconds: number): Observable<ApiResponse<{ id: string }>> {
+    return this.http.post<{ success: boolean; id?: string; error?: string }>(
+      `${this.API_BASE}/database/videos/${videoId}/mute-sections`,
+      { startSeconds, endSeconds }
+    ).pipe(
+      map(response => ({
+        success: response.success,
+        data: { id: response.id || '' },
+        error: response.error
+      })),
+      catchError(error => {
+        console.error('Failed to add mute section:', error);
+        return of({ success: false, data: { id: '' }, error: error.message });
+      })
+    );
+  }
+
+  /**
+   * Delete a mute section
+   * DELETE /api/database/mute-sections/:id
+   */
+  deleteMuteSection(sectionId: string): Observable<ApiResponse<void>> {
+    return this.http.delete<{ success: boolean; error?: string }>(
+      `${this.API_BASE}/database/mute-sections/${sectionId}`
+    ).pipe(
+      map(response => ({
+        success: response.success,
+        data: undefined,
+        error: response.error
+      })),
+      catchError(error => {
+        console.error('Failed to delete mute section:', error);
+        return of({ success: false, data: undefined, error: error.message });
+      })
+    );
+  }
+
+  /**
+   * Update a mute section's start/end times
+   * PATCH /api/database/mute-sections/:id
+   */
+  updateMuteSection(sectionId: string, startSeconds: number, endSeconds: number): Observable<ApiResponse<MuteSection>> {
+    return this.http.patch<{ success: boolean; section?: any; error?: string }>(
+      `${this.API_BASE}/database/mute-sections/${sectionId}`,
+      { startSeconds, endSeconds }
+    ).pipe(
+      map(response => ({
+        success: response.success,
+        data: response.section ? {
+          id: response.section.id,
+          videoId: '',
+          startSeconds: response.section.startSeconds,
+          endSeconds: response.section.endSeconds,
+          createdAt: ''
+        } : {} as MuteSection,
+        error: response.error
+      })),
+      catchError(error => {
+        console.error('Failed to update mute section:', error);
+        return of({ success: false, data: {} as MuteSection, error: error.message });
+      })
     );
   }
 

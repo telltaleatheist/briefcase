@@ -43,6 +43,12 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
   private isSeeking: boolean = false;
   private updateThrottleTimeout?: any;
 
+  // Web Audio API for volume amplification beyond 100%
+  private audioContext?: AudioContext;
+  private gainNode?: GainNode;
+  private sourceNode?: MediaElementAudioSourceNode;
+  private audioInitialized: boolean = false;
+
   ngAfterViewInit(): void {
     this.setupVideoListeners();
   }
@@ -71,7 +77,7 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
     }
 
     if (changes['volume']) {
-      video.volume = this.volume;
+      this.applyVolume();
     }
 
     if (changes['playbackRate']) {
@@ -82,6 +88,11 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
   ngOnDestroy(): void {
     if (this.updateThrottleTimeout) {
       clearTimeout(this.updateThrottleTimeout);
+    }
+
+    // Clean up Web Audio API
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
     }
   }
 
@@ -146,6 +157,98 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
   seekTo(time: number): void {
     if (this.videoRef?.nativeElement) {
       this.videoRef.nativeElement.currentTime = time;
+    }
+  }
+
+  setMuted(muted: boolean): void {
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.muted = muted;
+    }
+  }
+
+  /**
+   * Initialize Web Audio API for volume amplification beyond 100%
+   * Must be called after user interaction due to browser autoplay policies
+   */
+  private async initAudioContext(): Promise<void> {
+    if (this.audioInitialized || !this.videoRef?.nativeElement) return;
+
+    try {
+      // Create audio context
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      // Resume if suspended (required after user interaction)
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+        console.log('Audio context resumed from suspended state');
+      }
+
+      // Create gain node for volume control
+      this.gainNode = this.audioContext.createGain();
+
+      // Create source from video element
+      this.sourceNode = this.audioContext.createMediaElementSource(this.videoRef.nativeElement);
+
+      // Connect: video -> gain -> output
+      this.sourceNode.connect(this.gainNode);
+      this.gainNode.connect(this.audioContext.destination);
+
+      this.audioInitialized = true;
+      console.log('Audio context initialized for volume amplification, gain ready');
+
+      // Apply current volume
+      this.applyVolume();
+    } catch (err) {
+      console.error('Failed to initialize audio context:', err);
+    }
+  }
+
+  /**
+   * Public method to ensure audio context is ready (call on user interaction)
+   */
+  async ensureAudioContext(): Promise<void> {
+    if (!this.audioInitialized) {
+      await this.initAudioContext();
+    } else if (this.audioContext?.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+  }
+
+  /**
+   * Apply volume using Web Audio API gain for amplification
+   * Falls back to native volume if audio context not initialized
+   */
+  private applyVolume(): void {
+    if (!this.videoRef?.nativeElement) return;
+
+    const video = this.videoRef.nativeElement;
+
+    // If volume > 1 (amplification needed), use Web Audio API
+    if (this.volume > 1) {
+      // Initialize audio context if needed (requires user interaction)
+      if (!this.audioInitialized) {
+        // Trigger async init - will apply volume when ready
+        this.initAudioContext();
+        // For now, just set to max native volume
+        video.volume = 1;
+        return;
+      }
+
+      if (this.gainNode) {
+        // Set video to max native volume, use gain for amplification
+        video.volume = 1;
+        this.gainNode.gain.value = this.volume;
+        console.log(`Volume amplified to ${Math.round(this.volume * 100)}% via gain node`);
+      } else {
+        // Fallback: just set to max
+        video.volume = 1;
+      }
+    } else {
+      // Normal volume (0-100%), use native control
+      video.volume = this.volume;
+      if (this.gainNode) {
+        this.gainNode.gain.value = 1;
+      }
     }
   }
 
