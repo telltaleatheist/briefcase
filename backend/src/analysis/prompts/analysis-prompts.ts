@@ -118,18 +118,20 @@ Transcript excerpt:
 Rules:
 - Lowercase, spaces allowed, max 80 chars
 - Format: "[speaker name] - [key quote or action]" or "[speaker] on [topic] - [notable statement]"
-- Lead with the main speaker's name if identifiable
+- Lead with the main speaker's name if identifiable FROM THE TRANSCRIPT
+- If speaker cannot be identified, use descriptive title without a name (e.g., "pastor claims voting democrat is sinful")
+- NEVER use names from these examples as defaults - only use names actually found in the transcript
 - Include the most notable/quotable phrase in the title
 - Add source/show name at end in parentheses if known (e.g., "howard stern", "fox news")
 - Be specific about what was SAID, not just the topic
 - No dates, extensions, special chars
 - Don't invent content not in transcript
 
-Good examples:
-- "mario murillo - voting democrat is devilish and spitting on apostles graves"
+Good examples (DO NOT copy these names - identify speakers from the actual transcript):
 - "trump on howard stern - i walk into changing rooms because im the owner"
+- "pastor claims democrats are demonic and voting for them is sinful"
 - "lauren witzke - god must destroy civilization over trans healthcare"
-- "nick fuentes on mtg at afpac - from praise to criticism"
+- "fox news host defends border policy with dehumanizing rhetoric"
 
 Output ONLY the filename, nothing else:`;
 
@@ -392,14 +394,16 @@ Chapters:
 Rules:
 - Lowercase, spaces allowed, max 80 chars
 - Format: "[speaker name] - [key quote or action]" or "[speaker] on [topic] - [notable statement]"
-- Lead with the main speaker's name if identifiable
+- Lead with the main speaker's name if identifiable FROM THE CHAPTERS
+- If speaker cannot be identified, use descriptive title without a name (e.g., "pastor claims voting democrat is sinful")
+- NEVER use names from these examples as defaults - only use names actually found in the chapters
 - Include the most notable/quotable phrase in the title
 - Be specific about what was SAID, not just the topic
 - No dates, extensions, special chars, or parentheses
 
-Good examples:
-- "mario murillo - voting democrat is devilish and spitting on apostles graves"
+Good examples (DO NOT copy these names - identify speakers from the actual chapters):
 - "trump on howard stern - i walk into changing rooms because im the owner"
+- "pastor claims democrats are demonic and voting for them is sinful"
 - "lauren witzke - god must destroy civilization over trans healthcare"
 
 Output ONLY the filename, nothing else:`;

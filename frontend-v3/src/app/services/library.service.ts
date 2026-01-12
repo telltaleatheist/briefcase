@@ -452,8 +452,65 @@ export class LibraryService {
       const handledIds = new Set<string>();
       const ghostIds = new Set<string>(); // Track ghost items to avoid duplicates
 
+      // PHASE 1: First identify children whose parents are in other weeks
+      // and add ghost parents + children at the TOP of the section
+      const childrenByParent = new Map<string, VideoItem[]>();
       week.videos.forEach(video => {
-        // Skip if already handled as a child
+        const isChild = video.parentIds && video.parentIds.length > 0;
+        if (isChild && video.parentIds) {
+          video.parentIds.forEach(parentId => {
+            // Only consider parents that aren't in this week
+            if (!week.videos.some(v => v.id === parentId)) {
+              if (!childrenByParent.has(parentId)) {
+                childrenByParent.set(parentId, []);
+              }
+              childrenByParent.get(parentId)!.push(video);
+            }
+          });
+        }
+      });
+
+      // Add ghost parents with their children at TOP of section
+      const childrenWithIndicators = new Set<string>();
+      childrenByParent.forEach((children, parentId) => {
+        const parent = videoMap.get(parentId);
+        if (parent && !ghostIds.has(parentId)) {
+          // Check if any of these children already have an indicator
+          const firstChildWithoutIndicator = children.find(c => !childrenWithIndicators.has(c.id));
+          const shouldShowIndicator = firstChildWithoutIndicator !== undefined;
+
+          // Count how many children this parent has
+          const childCount = children.length;
+
+          // Add ghost parent at TOP (before its children)
+          const ghostParent: VideoItem = {
+            ...parent,
+            isGhost: true,
+            ...(shouldShowIndicator && {
+              ghostType: 'parent' as const,
+              ghostRelatedName: childCount === 1 ? children[0].name : `${childCount} videos`
+            })
+          };
+          processedVideos.push(ghostParent);
+          ghostIds.add(parentId);
+
+          // Add children right after their ghost parent
+          children.forEach(child => {
+            if (!handledIds.has(child.id)) {
+              processedVideos.push(child);
+              handledIds.add(child.id);
+              if (shouldShowIndicator) {
+                childrenWithIndicators.add(child.id);
+              }
+            }
+          });
+        }
+      });
+
+      // PHASE 2: Now process remaining videos (non-children = parents/roots)
+      // These go AFTER the ghost parent groups
+      week.videos.forEach(video => {
+        // Skip if already handled as a child of a ghost parent
         if (handledIds.has(video.id)) return;
 
         // Only show parent videos (videos with no parents)
@@ -465,7 +522,7 @@ export class LibraryService {
           processedVideos.push(video);
           handledIds.add(video.id);
 
-          // Add its children if they're in the same week
+          // Add its children if they're in the same week (right after parent)
           if (video.childIds && video.childIds.length > 0) {
             const ghostChildren: VideoItem[] = [];
 
@@ -481,7 +538,7 @@ export class LibraryService {
               }
             });
 
-            // Add ghost children with relationship indicator only on the first one
+            // Add ghost children right after parent
             // Skip ghosts that have already been added (to avoid duplicates from multi-parent scenarios)
             const newGhostChildren = ghostChildren.filter(c => !ghostIds.has(c.id));
             newGhostChildren.forEach((child, index) => {
@@ -502,67 +559,6 @@ export class LibraryService {
               // Don't add to handledIds - it can still appear in its own week
             });
           }
-        }
-      });
-
-      // Check for children whose parents are in other weeks
-      // Group children by their parent IDs to avoid duplicate ghost parents
-      const childrenByParent = new Map<string, VideoItem[]>();
-
-      week.videos.forEach(video => {
-        if (handledIds.has(video.id)) return;
-
-        // This is a child whose parent is in a different week
-        if (video.parentIds && video.parentIds.length > 0) {
-          video.parentIds.forEach(parentId => {
-            // Only consider parents that aren't in this week
-            if (!week.videos.some(v => v.id === parentId)) {
-              if (!childrenByParent.has(parentId)) {
-                childrenByParent.set(parentId, []);
-              }
-              childrenByParent.get(parentId)!.push(video);
-            }
-          });
-        }
-      });
-
-      // Add ghost parents with their children
-      // We need to track which child videos we've already added indicators for
-      const childrenWithIndicators = new Set<string>();
-
-      childrenByParent.forEach((children, parentId) => {
-        const parent = videoMap.get(parentId);
-        if (parent && !ghostIds.has(parentId)) {
-          // Check if any of these children already have an indicator
-          const firstChildWithoutIndicator = children.find(c => !childrenWithIndicators.has(c.id));
-          const shouldShowIndicator = firstChildWithoutIndicator !== undefined;
-
-          // Count how many children this parent has
-          const childCount = children.length;
-
-          // Add ghost parent once with info about all children
-          const ghostParent: VideoItem = {
-            ...parent,
-            isGhost: true,
-            // Only add indicator if this is the first ghost parent for these children
-            ...(shouldShowIndicator && {
-              ghostType: 'parent' as const,
-              ghostRelatedName: childCount === 1 ? children[0].name : `${childCount} videos`
-            })
-          };
-          processedVideos.push(ghostParent);
-          ghostIds.add(parentId); // Track this ghost parent
-
-          // Add all children of this parent (only once)
-          children.forEach(child => {
-            if (!handledIds.has(child.id)) {
-              processedVideos.push(child);
-              handledIds.add(child.id);
-              if (shouldShowIndicator) {
-                childrenWithIndicators.add(child.id);
-              }
-            }
-          });
         }
       });
 

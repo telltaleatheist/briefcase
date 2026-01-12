@@ -1,4 +1,4 @@
-import { Component, signal, input, output, inject, OnInit, OnDestroy, effect } from '@angular/core';
+import { Component, signal, input, output, inject, OnInit, OnDestroy, effect, HostListener } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -533,6 +533,13 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
       this.bulkSave.emit(tasksArray);
     } else {
       this.save.emit(tasksArray);
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey() {
+    if (this.isOpen()) {
+      this.onClose();
     }
   }
 

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal, inject, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, inject, OnInit, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { LibraryService } from '../../services/library.service';
@@ -103,6 +103,13 @@ export class IgnoreFileModalComponent implements OnInit {
         this.isScanning.set(false);
       }
     });
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey() {
+    if (this.show) {
+      this.close();
+    }
   }
 
   close() {

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal, inject, computed } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, inject, computed, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Library, NewLibrary, OpenLibrary, LibraryManagerMode } from '../../models/library.model';
@@ -229,6 +229,13 @@ export class LibraryManagerModalComponent {
         this.libraryOpened.emit({ path });
         this.close();
       }
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey() {
+    if (this.show) {
+      this.close();
     }
   }
 

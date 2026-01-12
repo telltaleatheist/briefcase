@@ -1,5 +1,5 @@
 <div class="dialog-overlay" (click)="onCancel()">
-  <div class="dialog-content" (click)="$event.stopPropagation()">
+  <div class="dialog-content" (click)="$event.stopPropagation()" (keydown)="onKeyDown($event)">
     <div class="dialog-header">
       <h3>{{ dialogTitle }}</h3>
       <button class="close-btn" (click)="onCancel()">
@@ -58,13 +58,13 @@
         <div class="form-field">
           <label>Title <span class="required">*</span></label>
           <input
+            #titleInput
             type="text"
             class="title-input"
             [ngModel]="title()"
             (ngModelChange)="title.set($event)"
             placeholder="Enter chapter title..."
-            maxlength="100"
-            autofocus>
+            maxlength="100">
         </div>
       }
 
@@ -72,13 +72,13 @@
       <div class="form-field">
         <label>{{ markerType() === 'chapter' ? 'Description (optional)' : 'Description' }}</label>
         <textarea
+          #messageInput
           class="message-input"
           [ngModel]="message()"
           (ngModelChange)="message.set($event)"
           [placeholder]="markerType() === 'chapter' ? 'Optional description for this chapter...' : 'Enter a description for this marker...'"
           rows="3"
-          maxlength="500"
-          [attr.autofocus]="markerType() !== 'chapter' ? true : null">
+          maxlength="500">
         </textarea>
         <span class="char-count">{{ message().length }}/500</span>
       </div>

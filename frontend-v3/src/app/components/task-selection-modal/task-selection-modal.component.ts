@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Input, OnInit, Output, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AVAILABLE_TASKS, JobRequest, Task, TaskType } from '../../models/task.model';
@@ -83,6 +83,13 @@ export class TaskSelectionModalComponent implements OnInit {
 
     this.submit.emit(request);
     this.onClose();
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey() {
+    if (this.visible) {
+      this.onClose();
+    }
   }
 
   onClose() {

@@ -1,11 +1,9 @@
-import { Component, Input, Output, EventEmitter, OnInit, signal, computed, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
-import { BackendUrlService } from '../../services/backend-url.service';
 import { TourService } from '../../services/tour.service';
+import { ExportQueueService, ExportJob } from '../../services/export-queue.service';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
 
@@ -105,12 +103,8 @@ export class ExportDialogComponent implements OnInit {
   private sectionMap = new Map<string, ExportSection>();
 
   private tourService = inject(TourService);
-
-  constructor(
-    private http: HttpClient,
-    private notificationService: NotificationService,
-    private backendUrlService: BackendUrlService
-  ) {}
+  private exportQueue = inject(ExportQueueService);
+  private notificationService = inject(NotificationService);
 
   ngOnInit() {
     // Prepare sections for cascade list
@@ -482,32 +476,84 @@ export class ExportDialogComponent implements OnInit {
       if (!confirmed) {
         return;
       }
-      await this.performOverwrite(selectedSections[0]);
+      this.queueOverwrite(selectedSections[0]);
       return;
     }
 
-    this.isExporting = true;
-    this.totalClips = selectedSections.length;
-    this.currentClip = 0;
-    this.successCount = 0;
-    this.failedCount = 0;
+    // Queue all exports and close dialog immediately
+    this.queueExports(selectedSections);
+  }
 
-    for (const section of selectedSections) {
-      this.currentClip++;
-      this.currentClipName = section.description || 'Unnamed section';
-      this.exportProgress = (this.currentClip / this.totalClips) * 100;
+  /**
+   * Queue multiple export jobs and close the dialog
+   */
+  private queueExports(sections: ExportSection[]) {
+    // Build mute sections array for the request if applying mutes
+    const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
+      ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
+      : undefined;
 
-      try {
-        await this.exportSection(section);
-        this.successCount++;
-      } catch (error) {
-        console.error('Failed to export section:', error);
-        this.failedCount++;
-      }
-    }
+    // Add (censored) suffix if saving as copy with mutes applied
+    const outputSuffix = this.saveCopy && this.applyMutes && this.hasMuteSections()
+      ? ' (censored)'
+      : undefined;
 
-    this.isExporting = false;
-    this.exportComplete = true;
+    const jobs: Omit<ExportJob, 'id' | 'status' | 'progress'>[] = sections.map(section => {
+      const isFullVideo = section.id === '__full_video__';
+      return {
+        videoId: this.data.videoId,
+        videoPath: this.data.videoPath,
+        videoTitle: this.data.videoTitle,
+        sectionDescription: section.description || 'Unnamed section',
+        startTime: isFullVideo ? null : section.startSeconds,
+        endTime: isFullVideo ? null : section.endSeconds,
+        category: section.category,
+        customDirectory: this.outputDirectory || undefined,
+        reEncode: this.reEncode,
+        muteSections: muteSectionsForRequest,
+        outputSuffix: outputSuffix,
+      };
+    });
+
+    this.exportQueue.addJobs(jobs);
+
+    // Show notification and close dialog
+    const count = sections.length;
+    this.notificationService.info(
+      'Export Queued',
+      `${count} clip${count !== 1 ? 's' : ''} added to export queue`
+    );
+    this.close.emit({ exported: true });
+  }
+
+  /**
+   * Queue an overwrite job and close the dialog
+   */
+  private queueOverwrite(section: ExportSection) {
+    const isFullVideo = section.id === '__full_video__';
+
+    // Build mute sections array for the request if applying mutes
+    const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
+      ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
+      : undefined;
+
+    this.exportQueue.addOverwriteJob({
+      videoId: this.data.videoId,
+      videoPath: this.data.videoPath,
+      videoTitle: this.data.videoTitle,
+      sectionDescription: 'Overwriting original file',
+      startTime: isFullVideo ? null : section.startSeconds,
+      endTime: isFullVideo ? null : section.endSeconds,
+      reEncode: this.reEncode,
+      muteSections: muteSectionsForRequest,
+    });
+
+    // Show notification and close dialog
+    this.notificationService.info(
+      'Export Queued',
+      'Overwrite job added to export queue'
+    );
+    this.close.emit({ exported: true });
   }
 
   private async confirmOverwrite(): Promise<boolean> {
@@ -523,81 +569,6 @@ export class ExportDialogComponent implements OnInit {
       );
       resolve(confirmed);
     });
-  }
-
-  private async performOverwrite(section: ExportSection): Promise<void> {
-    this.isExporting = true;
-    this.totalClips = 1;
-    this.currentClip = 1;
-    this.successCount = 0;
-    this.failedCount = 0;
-    this.currentClipName = 'Overwriting original file...';
-    this.exportProgress = 50;
-
-    try {
-      const url = await this.backendUrlService.getApiUrl('/library/overwrite-with-clip');
-
-      // For full video export with only scale changes, send null for times
-      const isFullVideo = section.id === '__full_video__';
-
-      // Build mute sections array for the request if applying mutes
-      const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
-        ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
-        : undefined;
-
-      await firstValueFrom(
-        this.http.post(url, {
-          videoId: this.data.videoId,
-          videoPath: this.data.videoPath,
-          startTime: isFullVideo ? null : section.startSeconds,
-          endTime: isFullVideo ? null : section.endSeconds,
-          reEncode: this.reEncode,
-          muteSections: muteSectionsForRequest,
-        })
-      );
-
-      this.successCount = 1;
-      this.exportProgress = 100;
-      this.notificationService.success('Success', 'Video file has been overwritten with the changes');
-    } catch (error) {
-      console.error('Failed to overwrite video:', error);
-      this.failedCount = 1;
-      this.notificationService.error('Error', 'Failed to overwrite video file');
-    } finally {
-      this.isExporting = false;
-      this.exportComplete = true;
-    }
-  }
-
-  private async exportSection(section: ExportSection): Promise<void> {
-    const url = await this.backendUrlService.getApiUrl('/library/extract-clip');
-
-    // For full video export, send null for times to indicate full video
-    const isFullVideo = section.id === '__full_video__';
-
-    // Build mute sections array for the request if applying mutes
-    const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
-      ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
-      : undefined;
-
-    // Add (censored) suffix if saving as copy with mutes applied
-    const outputSuffix = this.saveCopy && this.applyMutes && this.hasMuteSections()
-      ? ' (censored)'
-      : undefined;
-
-    await firstValueFrom(
-      this.http.post(url, {
-        videoPath: this.data.videoPath,
-        startTime: isFullVideo ? null : section.startSeconds,
-        endTime: isFullVideo ? null : section.endSeconds,
-        category: section.category,
-        title: section.description,
-        customDirectory: this.outputDirectory || undefined,
-        reEncode: this.reEncode,
-        muteSections: muteSectionsForRequest,
-        outputSuffix: outputSuffix,
-      })
-    );
   }
 
   closeDialog() {

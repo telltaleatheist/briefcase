@@ -1,4 +1,4 @@
-import { Component, input, output, signal, OnInit } from '@angular/core';
+import { Component, input, output, signal, OnInit, AfterViewInit, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CustomMarker, TimelineChapter } from '../../../models/video-editor.model';
@@ -21,7 +21,9 @@ export interface MarkerDialogData {
   templateUrl: './marker-dialog.component.html',
   styleUrls: ['./marker-dialog.component.scss']
 })
-export class MarkerDialogComponent implements OnInit {
+export class MarkerDialogComponent implements OnInit, AfterViewInit {
+  @ViewChild('titleInput') titleInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('messageInput') messageInput?: ElementRef<HTMLTextAreaElement>;
   // Inputs
   data = input.required<MarkerDialogData>();
 
@@ -69,6 +71,33 @@ export class MarkerDialogComponent implements OnInit {
     else {
       this.markerType.set(dialogData.initialType || 'marker');
       this.isRange.set(!!dialogData.endTime && dialogData.endTime !== dialogData.startTime);
+    }
+  }
+
+  ngAfterViewInit() {
+    // Focus the appropriate input after a short delay to ensure DOM is ready
+    setTimeout(() => {
+      if (this.markerType() === 'chapter' && this.titleInput?.nativeElement) {
+        this.titleInput.nativeElement.focus();
+      } else if (this.messageInput?.nativeElement) {
+        this.messageInput.nativeElement.focus();
+      }
+    }, 50);
+  }
+
+  /**
+   * Handle Enter key to save (if form is valid)
+   */
+  onKeyDown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      // Allow Shift+Enter for newlines in textarea
+      if (this.canSave) {
+        event.preventDefault();
+        this.onSave();
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.onCancel();
     }
   }
 

@@ -1,0 +1,91 @@
+@if (showIndicator()) {
+  <div class="export-indicator" [class.expanded]="isExpanded()">
+    <!-- Collapsed view - just shows icon and count -->
+    <button class="indicator-button" (click)="toggleExpanded()">
+      @if (hasActiveExports()) {
+        <div class="spinner"></div>
+        <span class="count">{{ activeCount() }}</span>
+      } @else if (failedCount() > 0) {
+        <span class="icon error">!</span>
+        <span class="count error">{{ failedCount() }}</span>
+      } @else {
+        <span class="icon success">&#10003;</span>
+        <span class="count">{{ completedCount() }}</span>
+      }
+    </button>
+
+    <!-- Expanded view - shows details -->
+    @if (isExpanded()) {
+      <div class="indicator-panel">
+        <div class="panel-header">
+          <span class="panel-title">Exports</span>
+          <button class="close-btn" (click)="toggleExpanded()">&#10005;</button>
+        </div>
+
+        <div class="panel-content">
+          <!-- Currently processing -->
+          @if (processingJob(); as job) {
+            <div class="job-item processing">
+              <div class="job-spinner"></div>
+              <div class="job-info">
+                <div class="job-title">{{ truncateTitle(job.sectionDescription || job.videoTitle) }}</div>
+                <div class="job-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill" [style.width.%]="job.progress"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          }
+
+          <!-- Pending jobs -->
+          @for (job of jobs(); track job.id) {
+            @if (job.status === 'pending') {
+              <div class="job-item pending">
+                <span class="job-icon pending">&#8987;</span>
+                <div class="job-info">
+                  <div class="job-title">{{ truncateTitle(job.sectionDescription || job.videoTitle) }}</div>
+                  <div class="job-status">Waiting...</div>
+                </div>
+                <button class="job-cancel" (click)="cancelJob(job.id)" title="Cancel">&#10005;</button>
+              </div>
+            }
+          }
+
+          <!-- Completed jobs -->
+          @for (job of jobs(); track job.id) {
+            @if (job.status === 'completed') {
+              <div class="job-item completed">
+                <span class="job-icon success">&#10003;</span>
+                <div class="job-info">
+                  <div class="job-title">{{ truncateTitle(job.sectionDescription || job.videoTitle) }}</div>
+                  <div class="job-status success">Completed</div>
+                </div>
+              </div>
+            }
+          }
+
+          <!-- Failed jobs -->
+          @for (job of jobs(); track job.id) {
+            @if (job.status === 'failed') {
+              <div class="job-item failed">
+                <span class="job-icon error">!</span>
+                <div class="job-info">
+                  <div class="job-title">{{ truncateTitle(job.sectionDescription || job.videoTitle) }}</div>
+                  <div class="job-status error">{{ job.error || 'Failed' }}</div>
+                </div>
+              </div>
+            }
+          }
+        </div>
+
+        <!-- Footer with clear button -->
+        @if (completedCount() > 0 || failedCount() > 0) {
+          <div class="panel-footer">
+            <button class="clear-btn" (click)="clearCompleted()">Clear finished</button>
+          </div>
+        }
+      </div>
+    }
+  </div>
+}

@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, signal, effect } from '@angular/core';
+import { Component, EventEmitter, Input, Output, signal, effect, ViewChild, ElementRef, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonComponent } from '../button/button.component';
@@ -34,14 +34,12 @@ import { ButtonComponent } from '../button/button.component';
                 [(ngModel)]="editedFilename"
                 [maxlength]="maxLength"
                 [placeholder]="'Enter new title (date and extension will be added automatically)'"
-                (keydown.escape)="close()"
-                (keydown.meta.enter)="save()"
-                (keydown.control.enter)="save()"
+                (keydown)="onKeyDown($event)"
                 rows="6"
                 #filenameInput
               ></textarea>
               <div class="form-meta">
-                <span class="form-hint">Cmd+Enter to save, Esc to cancel</span>
+                <span class="form-hint">Enter to save, Esc to cancel</span>
                 <span class="char-count" [class.near-limit]="editedFilename.length > maxLength - 20">
                   {{ editedFilename.length }}/{{ maxLength }}
                 </span>
@@ -235,9 +233,16 @@ import { ButtonComponent } from '../button/button.component';
     }
   `]
 })
-export class FilenameModalComponent {
+export class FilenameModalComponent implements AfterViewChecked {
+  @ViewChild('filenameInput') filenameInput?: ElementRef<HTMLTextAreaElement>;
+
   @Input() set show(value: boolean) {
+    const wasVisible = this.visible();
     this.visible.set(value);
+    // Mark for focus when becoming visible
+    if (value && !wasVisible) {
+      this.needsFocus = true;
+    }
   }
   @Input() set filename(value: string) {
     this.suggestedFilename.set(value);
@@ -267,6 +272,7 @@ export class FilenameModalComponent {
   fieldLabel = signal('Suggested Filename');
   showDiscardButton = signal(false);
   editedFilename = '';
+  private needsFocus = false;
 
   // Max filename length (255 is typical for most filesystems)
   maxLength = 255;
@@ -277,6 +283,32 @@ export class FilenameModalComponent {
         this.editedFilename = this.suggestedFilename();
       }
     });
+  }
+
+  ngAfterViewChecked() {
+    // Focus the textarea when modal opens
+    if (this.needsFocus && this.filenameInput?.nativeElement) {
+      this.needsFocus = false;
+      setTimeout(() => {
+        this.filenameInput?.nativeElement.focus();
+        // Select all text for easy replacement
+        this.filenameInput?.nativeElement.select();
+      }, 50);
+    }
+  }
+
+  /**
+   * Handle keyboard events - Enter to save, Escape to close
+   */
+  onKeyDown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      // Enter (with or without modifiers) saves
+      event.preventDefault();
+      this.save();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.close();
+    }
   }
 
   save() {

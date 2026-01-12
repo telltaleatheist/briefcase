@@ -310,7 +310,8 @@ export class FilenameDateUtil {
     // 3. Replace other problematic characters
     sanitized = sanitized
       .replace(/[\x00-\x1F\x7F]/g, '')          // Control characters
-      .replace(/[#%&{}$!'@+`=]/g, '-')          // Shell-problematic chars
+      .replace(/'/g, '')                        // Apostrophes - remove entirely
+      .replace(/[#%&{}$!@+`=]/g, '-')           // Shell-problematic chars (apostrophe handled above)
       .replace(/[\[\]]/g, '-')                  // Square brackets (can cause issues)
       .replace(/[;^~]/g, '-');                  // More problematic chars
 

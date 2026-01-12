@@ -34,6 +34,7 @@ import { TourService } from '../../services/tour.service';
 import { QueueService } from '../../services/queue.service';
 import { LibraryFilterService } from '../../services/library-filter.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
+import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -78,7 +79,8 @@ export interface ProcessingTask {
     NewTabDialogComponent,
     QueueTabComponent,
     SaveForLaterTabComponent,
-    SettingsPageComponent
+    SettingsPageComponent,
+    ExportIndicatorComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
@@ -1668,9 +1670,40 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // Extract video ID from itemId format: "weekLabel|videoId"
       const videoId = itemId.split('|')[1];
       if (videoId) {
+        // Rebuild previewItems from current filteredWeeks to ensure fresh data
+        // This handles cases where the library was reloaded (e.g., after rename)
+        this.refreshPreviewItems();
         this.previewSelectedId.set(videoId);
       }
     }
+  }
+
+  /**
+   * Refresh previewItems from current filteredWeeks data
+   * Called when selection changes while preview modal is open to ensure fresh data
+   */
+  private refreshPreviewItems(): void {
+    const allVideos: VideoItem[] = [];
+    this.filteredWeeks().forEach(week => {
+      week.videos.forEach(v => {
+        // Exclude queue items and ghost items
+        if (!v.id.startsWith('queue-') && !v.isGhost) {
+          allVideos.push(v);
+        }
+      });
+    });
+
+    if (allVideos.length === 0) return;
+
+    // Convert to PreviewItem format
+    const previewItems: PreviewItem[] = allVideos.map(v => ({
+      id: v.id,
+      name: v.name,
+      videoId: v.id,
+      mediaType: v.mediaType || 'video/mp4'
+    }));
+
+    this.previewItems.set(previewItems);
   }
 
   onVideoAction(event: { action: string; videos: VideoItem[] }) {
