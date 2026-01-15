@@ -1426,14 +1426,84 @@
     display: none;
   }
 
-  // Compact toolbar in fullscreen - only shows volume
-  .timeline-toolbar.fullscreen-toolbar {
-    justify-content: center;
-    padding: 4px 12px;
-    min-height: auto;
+  // Fullscreen minimal timeline - just waveform and playhead
+  .fullscreen-timeline {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 16px;
+    z-index: 10;
+    transition: transform 0.3s ease, opacity 0.3s ease;
 
-    .toolbar-center {
-      flex: 0 0 auto;
+    .fullscreen-waveform-container {
+      flex: 1;
+      height: 32px;
+      position: relative;
+      cursor: pointer;
+      border-radius: 4px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.05);
+
+      app-timeline-waveform {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      .fullscreen-playhead {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--primary-orange);
+        pointer-events: none;
+        z-index: 5;
+        box-shadow: 0 0 4px rgba(255, 107, 53, 0.5);
+      }
+    }
+
+    .fullscreen-volume {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+
+      svg {
+        color: var(--text-muted);
+      }
+
+      .volume-slider {
+        width: 80px;
+        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--bg-secondary);
+        border-radius: 2px;
+        cursor: pointer;
+
+        &::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 12px;
+          height: 12px;
+          background: var(--text-primary);
+          border-radius: 50%;
+          cursor: pointer;
+        }
+
+        &.boosted {
+          background: linear-gradient(to right, var(--primary-orange), var(--light-orange));
+
+          &::-webkit-slider-thumb {
+            background: var(--primary-orange);
+          }
+        }
+      }
     }
   }
 }
@@ -1453,6 +1523,12 @@
   }
 
   .timeline-area {
+    transform: translateY(100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .fullscreen-timeline {
     transform: translateY(100%);
     opacity: 0;
     pointer-events: none;

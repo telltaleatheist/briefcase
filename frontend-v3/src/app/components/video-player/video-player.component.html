@@ -98,11 +98,11 @@
         (mousedown)="onResizeStart($event)">
       </div>
 
-      <!-- Timeline Area -->
-      <div class="timeline-area" [style.height.px]="timelineHeight()">
-        <!-- Timeline Toolbar -->
-        <div class="timeline-toolbar" [class.fullscreen-toolbar]="isFullscreen()">
-          @if (!isFullscreen()) {
+      <!-- Timeline Area - Normal Mode -->
+      @if (!isFullscreen()) {
+        <div class="timeline-area" [style.height.px]="timelineHeight()">
+          <!-- Timeline Toolbar -->
+          <div class="timeline-toolbar">
             <div class="toolbar-left">
               <!-- Tool buttons -->
               <div class="tool-buttons">
@@ -160,9 +160,7 @@
                 </select>
               </div>
             </div>
-          }
-          <div class="toolbar-center">
-            @if (!isFullscreen()) {
+            <div class="toolbar-center">
               <!-- Play/Pause -->
               <button class="toolbar-btn play-btn" (click)="togglePlayPause()" title="Play/Pause (Space)">
                 @if (editorState().isPlaying) {
@@ -209,113 +207,136 @@
                   <option value="4">4x</option>
                 </select>
               </div>
-            }
 
-            <!-- Volume (supports amplification up to 1000%) -->
-            <div class="volume-control">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
-              </svg>
-              <input
-                type="range"
-                class="volume-slider"
-                [class.boosted]="editorState().volume > 1"
-                min="0"
-                max="10"
-                step="0.01"
-                [value]="editorState().volume"
-                (input)="setVolume(+$any($event.target).value)"
-                [title]="'Volume: ' + Math.round(editorState().volume * 100) + '%'"
-              />
-              <span class="volume-percent" [class.boosted]="editorState().volume > 1">
-                {{ Math.round(editorState().volume * 100) }}%
-              </span>
+              <!-- Volume (supports amplification up to 1000%) -->
+              <div class="volume-control">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                </svg>
+                <input
+                  type="range"
+                  class="volume-slider"
+                  [class.boosted]="editorState().volume > 1"
+                  min="0"
+                  max="10"
+                  step="0.01"
+                  [value]="editorState().volume"
+                  (input)="setVolume(+$any($event.target).value)"
+                  [title]="'Volume: ' + Math.round(editorState().volume * 100) + '%'"
+                />
+                <span class="volume-percent" [class.boosted]="editorState().volume > 1">
+                  {{ Math.round(editorState().volume * 100) }}%
+                </span>
+              </div>
             </div>
-          </div>
-          @if (!isFullscreen()) {
             <div class="toolbar-right">
               <button
                 class="toolbar-btn"
                 [class.active]="isFullscreen()"
                 (click)="toggleFullscreen()"
                 title="Fullscreen (F)">
-                @if (isFullscreen()) {
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
-                  </svg>
-                } @else {
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                  </svg>
-                }
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                </svg>
               </button>
             </div>
-          }
-        </div>
+          </div>
 
-        <!-- Timeline ruler (hidden in fullscreen) -->
-        @if (!isFullscreen()) {
+          <!-- Timeline ruler -->
           <app-timeline-ruler
             [duration]="editorState().duration"
             [zoomState]="editorState().zoomState"
             (seek)="seekTo($event)">
           </app-timeline-ruler>
-        }
 
-        <!-- Timeline tracks -->
-        <div class="timeline-tracks">
-          <!-- Track content -->
-          <div class="track-content"
-               (mousedown)="onTimelineMouseDown($event)"
-               (click)="onTimelineClick($event)"
-               (contextmenu)="onTimelineClick($event)">
-            <!-- Track wrapper for vertical centering -->
-            <div class="track-wrapper">
-              <!-- Unified timeline track component -->
-              <app-timeline-track
-                [sections]="filteredSections()"
-                [chapters]="chapters()"
-                [muteSections]="muteSections()"
-                [duration]="editorState().duration"
-                [currentTime]="editorState().currentTime"
-                [zoomState]="editorState().zoomState"
-                [selectedSection]="editorState().selectedSection"
-                [selectedChapterId]="selectedChapterId()"
-                [selectedMuteSection]="selectedMuteSection()"
-                [waveformData]="waveformData()"
-                [waveformColor]="settings().waveformColor"
-                [selection]="highlightSelection()"
-                (sectionClick)="onSectionClick($event)"
-                (sectionHover)="onSectionHover($event)"
-                (chapterClick)="onChapterClick($event)"
-                (chapterHover)="onChapterHover($event)"
-                (muteSectionClick)="onMuteSectionClick($event)"
-                (muteSectionDelete)="onMuteSectionDelete($event)"
-                (muteSectionResizeStart)="onMuteSectionResizeStart($event)"
-                (selectionHandleStart)="onSelectionHandleStart($event.event, $event.handle)"
-                (selectionDragStart)="onSelectionDragStart($event)">
-              </app-timeline-track>
+          <!-- Timeline tracks -->
+          <div class="timeline-tracks">
+            <!-- Track content -->
+            <div class="track-content"
+                 (mousedown)="onTimelineMouseDown($event)"
+                 (click)="onTimelineClick($event)"
+                 (contextmenu)="onTimelineClick($event)">
+              <!-- Track wrapper for vertical centering -->
+              <div class="track-wrapper">
+                <!-- Unified timeline track component -->
+                <app-timeline-track
+                  [sections]="filteredSections()"
+                  [chapters]="chapters()"
+                  [muteSections]="muteSections()"
+                  [duration]="editorState().duration"
+                  [currentTime]="editorState().currentTime"
+                  [zoomState]="editorState().zoomState"
+                  [selectedSection]="editorState().selectedSection"
+                  [selectedChapterId]="selectedChapterId()"
+                  [selectedMuteSection]="selectedMuteSection()"
+                  [waveformData]="waveformData()"
+                  [waveformColor]="settings().waveformColor"
+                  [selection]="highlightSelection()"
+                  (sectionClick)="onSectionClick($event)"
+                  (sectionHover)="onSectionHover($event)"
+                  (chapterClick)="onChapterClick($event)"
+                  (chapterHover)="onChapterHover($event)"
+                  (muteSectionClick)="onMuteSectionClick($event)"
+                  (muteSectionDelete)="onMuteSectionDelete($event)"
+                  (muteSectionResizeStart)="onMuteSectionResizeStart($event)"
+                  (selectionHandleStart)="onSelectionHandleStart($event.event, $event.handle)"
+                  (selectionDragStart)="onSelectionDragStart($event)">
+                </app-timeline-track>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Playhead wrapper with proper margins -->
-        <div class="playhead-wrapper">
-          <app-timeline-playhead
-            [currentTime]="editorState().currentTime"
+          <!-- Playhead wrapper with proper margins -->
+          <div class="playhead-wrapper">
+            <app-timeline-playhead
+              [currentTime]="editorState().currentTime"
+              [duration]="editorState().duration"
+              [zoomState]="editorState().zoomState"
+              (seek)="seekTo($event)">
+            </app-timeline-playhead>
+          </div>
+
+          <!-- Zoom bar -->
+          <app-timeline-zoom-bar
             [duration]="editorState().duration"
             [zoomState]="editorState().zoomState"
-            (seek)="seekTo($event)">
-          </app-timeline-playhead>
+            (zoomChange)="onZoomChange($event)">
+          </app-timeline-zoom-bar>
         </div>
+      }
 
-        <!-- Zoom bar -->
-        <app-timeline-zoom-bar
-          [duration]="editorState().duration"
-          [zoomState]="editorState().zoomState"
-          (zoomChange)="onZoomChange($event)">
-        </app-timeline-zoom-bar>
-      </div>
+      <!-- Timeline Area - Fullscreen Mode (minimal waveform only) -->
+      @if (isFullscreen()) {
+        <div class="fullscreen-timeline">
+          <div class="fullscreen-waveform-container" (click)="onFullscreenTimelineClick($event)">
+            <app-timeline-waveform
+              [waveformData]="waveformData()"
+              [duration]="editorState().duration"
+              [zoomState]="editorState().zoomState"
+              [color]="settings().waveformColor">
+            </app-timeline-waveform>
+            <!-- Playhead -->
+            <div class="fullscreen-playhead" [style.left.%]="getPlayheadPosition()"></div>
+          </div>
+          <!-- Volume control overlay -->
+          <div class="fullscreen-volume">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+            </svg>
+            <input
+              type="range"
+              class="volume-slider"
+              [class.boosted]="editorState().volume > 1"
+              min="0"
+              max="10"
+              step="0.01"
+              [value]="editorState().volume"
+              (input)="setVolume(+$any($event.target).value)"
+              [title]="'Volume: ' + Math.round(editorState().volume * 100) + '%'"
+            />
+          </div>
+        </div>
+      }
     </div>
 
     <!-- Analysis Sidebar (Right, hidden in fullscreen) -->

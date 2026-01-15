@@ -34,6 +34,7 @@ import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline
 import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track.component';
 import { MuteResizeEvent } from './timeline/timeline-mute-layer/timeline-mute-layer.component';
 import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
+import { TimelineWaveformComponent } from './timeline/timeline-waveform/timeline-waveform.component';
 import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
 import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
 import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
@@ -103,6 +104,7 @@ const CATEGORY_COLORS: Record<string, string> = {
     TimelinePlayheadComponent,
     TimelineTrackComponent,
     TimelineZoomBarComponent,
+    TimelineWaveformComponent,
     ContextMenuComponent,
     MarkerDialogComponent,
     ExportDialogComponent,
@@ -2000,6 +2002,30 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     return (duration / visibleDuration) * 100;
   }
 
+  // Get playhead position as percentage for fullscreen timeline
+  getPlayheadPosition(): number {
+    const state = this.editorState();
+    const visibleStart = state.zoomState.offset;
+    const visibleDuration = state.duration / state.zoomState.level;
+
+    const relativeTime = state.currentTime - visibleStart;
+    return (relativeTime / visibleDuration) * 100;
+  }
+
+  // Handle click on fullscreen timeline to seek
+  onFullscreenTimelineClick(event: MouseEvent) {
+    const container = event.currentTarget as HTMLElement;
+    const rect = container.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const percentage = clickX / rect.width;
+
+    const state = this.editorState();
+    const visibleDuration = state.duration / state.zoomState.level;
+    const time = state.zoomState.offset + (percentage * visibleDuration);
+
+    this.seekTo(Math.max(0, Math.min(state.duration, time)));
+  }
+
   // Zoom controls
   onZoomChange(zoomState: ZoomState) {
     this.editorState.update(state => ({
@@ -2309,8 +2335,42 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }
     this.updateCurrentTime(time);
 
+    // Auto-scroll timeline to follow playhead in fullscreen mode
+    if (this.isFullscreen()) {
+      this.autoScrollToPlayhead(time);
+    }
+
     // Real-time muting: Check if current time is within any mute section
     this.handleAutoMute(time);
+  }
+
+  /**
+   * Auto-scroll the timeline to keep the playhead visible in fullscreen mode
+   */
+  private autoScrollToPlayhead(currentTime: number) {
+    const state = this.editorState();
+    const zoomState = state.zoomState;
+    const visibleDuration = state.duration / zoomState.level;
+    const visibleStart = zoomState.offset;
+    const visibleEnd = visibleStart + visibleDuration;
+
+    // Check if playhead is outside the visible range (with some margin)
+    const margin = visibleDuration * 0.1; // 10% margin
+    if (currentTime < visibleStart + margin || currentTime > visibleEnd - margin) {
+      // Center the view on the playhead
+      const newOffset = Math.max(0, Math.min(
+        state.duration - visibleDuration,
+        currentTime - (visibleDuration / 2)
+      ));
+
+      this.editorState.update(s => ({
+        ...s,
+        zoomState: {
+          ...s.zoomState,
+          offset: newOffset
+        }
+      }));
+    }
   }
 
   /**
