@@ -1388,7 +1388,7 @@
   app-tab-bar,
   .tab-bar {
     position: absolute;
-    top: 52px; // Below header
+    top: 0; // At top since header is hidden in fullscreen
     left: 0;
     right: 0;
     background: rgba(0, 0, 0, 0.9);
@@ -1424,6 +1424,17 @@
   // Hide sidebar in fullscreen
   .analysis-sidebar {
     display: none;
+  }
+
+  // Compact toolbar in fullscreen - only shows volume
+  .timeline-toolbar.fullscreen-toolbar {
+    justify-content: center;
+    padding: 4px 12px;
+    min-height: auto;
+
+    .toolbar-center {
+      flex: 0 0 auto;
+    }
   }
 }
 
