@@ -1517,8 +1517,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   setVolume(volume: number) {
-    // Allow volume up to 3 (300%) for amplification
-    const clampedVolume = Math.max(0, Math.min(3, volume));
+    // Allow volume up to 10 (1000%) for amplification
+    const clampedVolume = Math.max(0, Math.min(10, volume));
 
     this.editorState.update(state => ({
       ...state,
