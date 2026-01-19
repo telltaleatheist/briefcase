@@ -308,7 +308,7 @@
       <!-- Timeline Area - Fullscreen Mode (minimal waveform only) -->
       @if (isFullscreen()) {
         <div class="fullscreen-timeline">
-          <div class="fullscreen-waveform-container" (click)="onFullscreenTimelineClick($event)">
+          <div class="fullscreen-waveform-container" (mousedown)="onFullscreenTimelineMouseDown($event)">
             <app-timeline-waveform
               [waveformData]="waveformData()"
               [duration]="editorState().duration"

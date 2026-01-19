@@ -2012,12 +2012,41 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     return (relativeTime / visibleDuration) * 100;
   }
 
-  // Handle click on fullscreen timeline to seek
-  onFullscreenTimelineClick(event: MouseEvent) {
-    const container = event.currentTarget as HTMLElement;
-    const rect = container.getBoundingClientRect();
+  // Handle mousedown on fullscreen timeline to seek with drag support
+  private isDraggingFullscreenTimeline = false;
+  private fullscreenTimelineContainer: HTMLElement | null = null;
+
+  onFullscreenTimelineMouseDown(event: MouseEvent) {
+    event.preventDefault();
+    this.isDraggingFullscreenTimeline = true;
+    this.fullscreenTimelineContainer = event.currentTarget as HTMLElement;
+
+    // Seek to initial position
+    this.seekToFullscreenTimelinePosition(event);
+
+    // Add document listeners for drag
+    document.addEventListener('mousemove', this.onFullscreenTimelineMouseMove);
+    document.addEventListener('mouseup', this.onFullscreenTimelineMouseUp);
+  }
+
+  private onFullscreenTimelineMouseMove = (event: MouseEvent) => {
+    if (!this.isDraggingFullscreenTimeline || !this.fullscreenTimelineContainer) return;
+    this.seekToFullscreenTimelinePosition(event);
+  };
+
+  private onFullscreenTimelineMouseUp = () => {
+    this.isDraggingFullscreenTimeline = false;
+    this.fullscreenTimelineContainer = null;
+    document.removeEventListener('mousemove', this.onFullscreenTimelineMouseMove);
+    document.removeEventListener('mouseup', this.onFullscreenTimelineMouseUp);
+  };
+
+  private seekToFullscreenTimelinePosition(event: MouseEvent) {
+    if (!this.fullscreenTimelineContainer) return;
+
+    const rect = this.fullscreenTimelineContainer.getBoundingClientRect();
     const clickX = event.clientX - rect.left;
-    const percentage = clickX / rect.width;
+    const percentage = Math.max(0, Math.min(1, clickX / rect.width));
 
     const state = this.editorState();
     const visibleDuration = state.duration / state.zoomState.level;
