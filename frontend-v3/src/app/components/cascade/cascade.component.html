@@ -21,8 +21,13 @@
         @if (item.type === 'header' && item.week.weekLabel) {
           <div
             class="week-header"
+            [class.drag-over]="tabsMode && dragOverTab() === item.week.weekLabel"
             (click)="toggleWeek(item.week, $event)"
             (contextmenu)="onHeaderContextMenu(item.week, $event)"
+            (dragover)="onTabDragOver($event, item.week.weekLabel)"
+            (dragenter)="onTabDragEnter(item.week.weekLabel)"
+            (dragleave)="onTabDragLeave(item.week.weekLabel)"
+            (drop)="onDropToTab($event, item.week.weekLabel)"
           >
             <button class="week-toggle" (click)="toggleWeek(item.week, $event)">
               <span class="toggle-icon" [class.expanded]="item.week.expanded">▶</span>
@@ -34,7 +39,13 @@
 
         <!-- Video Item -->
         @if (item.type === 'video') {
-          <div class="video-item-wrapper">
+          <div
+            class="video-item-wrapper"
+            [class.is-dragging]="tabsMode && draggingVideoIds().includes(item.video.id)"
+            [attr.draggable]="tabsMode ? 'true' : null"
+            (dragstart)="tabsMode && onTabDragStarted($event, item.video, item.weekLabel)"
+            (dragend)="tabsMode && onTabDragEnded()"
+          >
             <div
               class="video-item"
               [attr.data-item-id]="item.itemId"

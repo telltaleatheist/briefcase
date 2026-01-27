@@ -99,11 +99,22 @@ cdk-virtual-scroll-viewport.library-content {
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
-  transition: background $transition-fast;
+  transition: background $transition-fast, border-color $transition-fast, box-shadow $transition-fast;
   box-sizing: border-box;
 
   &:hover {
     background: var(--bg-secondary);
+  }
+
+  // Drag-over state for tabs mode
+  &.drag-over {
+    background: rgba(255, 102, 0, 0.15);
+    border-bottom: 2px solid var(--primary-orange);
+    box-shadow: inset 0 0 0 1px rgba(255, 102, 0, 0.3);
+
+    .week-label {
+      color: var(--primary-orange);
+    }
   }
 }
 
@@ -845,6 +856,25 @@ cdk-virtual-scroll-viewport.library-content {
   flex-direction: column;
   width: 100%; // Fill available width
   min-width: 0; // Allow shrinking below content size
+
+  // Draggable state for tabs mode
+  &[draggable="true"] {
+    cursor: grab;
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
+
+  // Visual feedback when being dragged
+  &.is-dragging {
+    opacity: 0.5;
+
+    .video-item {
+      background: rgba(255, 102, 0, 0.1);
+      border-left: 2px solid var(--primary-orange);
+    }
+  }
 }
 
 // Expand/Collapse Button

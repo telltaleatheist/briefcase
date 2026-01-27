@@ -369,6 +369,50 @@ export class TabsTabComponent {
   }
 
   /**
+   * Handle videos moved between tabs via drag-and-drop
+   */
+  async handleVideoMovedToTab(event: { videoIds: string[]; sourceTabName: string; targetTabName: string }) {
+    const { videoIds, sourceTabName, targetTabName } = event;
+
+    try {
+      // Find the source and target tabs by name
+      const sourceTab = this.allTabs().find(t => t.name === sourceTabName);
+      const targetTab = this.allTabs().find(t => t.name === targetTabName);
+
+      if (!sourceTab || !targetTab) {
+        this.notificationService.error('Error', 'Could not find source or target tab');
+        return;
+      }
+
+      // Remove videos from source tab
+      for (const videoId of videoIds) {
+        await firstValueFrom(this.tabsService.removeVideoFromTab(sourceTab.id, videoId));
+      }
+
+      // Add videos to target tab
+      await firstValueFrom(this.tabsService.addVideosToTab(targetTab.id, videoIds));
+
+      // Reload tabs data
+      await this.loadTabsData();
+
+      // Show success notification
+      const videoText = videoIds.length === 1 ? '1 video' : `${videoIds.length} videos`;
+      this.notificationService.success(
+        'Videos Moved',
+        `Moved ${videoText} from "${sourceTabName}" to "${targetTabName}"`
+      );
+    } catch (error: any) {
+      console.error('Failed to move videos between tabs:', error);
+      this.notificationService.error(
+        'Failed to Move Videos',
+        error?.message || 'An error occurred while moving videos'
+      );
+      // Reload to ensure UI is in sync
+      await this.loadTabsData();
+    }
+  }
+
+  /**
    * Add videos to an existing tab
    */
   async addVideosToTab(tabId: string, videoIds: string[]) {

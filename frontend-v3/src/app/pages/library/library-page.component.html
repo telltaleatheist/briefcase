@@ -121,16 +121,16 @@
       <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
     </div>
   } @else {
-    <!-- Main Container with Drag & Drop (all other tabs) -->
+    <!-- Main Container with Drag & Drop (disabled for tabs tab to allow internal drag/drop) -->
     <div
       class="main-container"
-      [class.dragging-over]="isDraggingOver()"
-      (drop)="onDrop($event)"
-      (dragover)="onDragOver($event)"
-      (dragleave)="onDragLeave($event)">
+      [class.dragging-over]="isDraggingOver() && activeTab() !== 'tabs'"
+      (drop)="activeTab() !== 'tabs' && onDrop($event)"
+      (dragover)="activeTab() !== 'tabs' && onDragOver($event)"
+      (dragleave)="activeTab() !== 'tabs' && onDragLeave($event)">
 
-    <!-- Drop overlay -->
-    <div class="drop-overlay" *ngIf="isDraggingOver()">
+    <!-- Drop overlay (not shown for tabs tab) -->
+    <div class="drop-overlay" *ngIf="isDraggingOver() && activeTab() !== 'tabs'">
       <div class="drop-message">
         <div class="drop-icon">📁</div>
         <div class="drop-text">Drop media files to import</div>

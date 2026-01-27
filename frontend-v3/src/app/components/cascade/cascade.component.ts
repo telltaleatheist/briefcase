@@ -98,11 +98,17 @@ export class CascadeComponent {
   @Output() configureItem = new EventEmitter<VideoItem>();
   @Output() previewRequested = new EventEmitter<VideoItem>();
   @Output() headerAction = new EventEmitter<{ action: string; weekLabel: string }>();
+  @Output() videoMovedToTab = new EventEmitter<{ videoIds: string[]; sourceTabName: string; targetTabName: string }>();
 
   @ViewChild(CdkVirtualScrollViewport) private viewport?: CdkVirtualScrollViewport;
 
   // Track expanded items for children
   expandedItems = signal<Set<string>>(new Set());
+
+  // Drag-drop state for tabs mode
+  draggingFromTab = signal<string | null>(null);
+  draggingVideoIds = signal<string[]>([]);
+  dragOverTab = signal<string | null>(null);
 
   /**
    * Scroll to the top of the list (where processing queue items are)
@@ -1459,6 +1465,9 @@ export class CascadeComponent {
    * Start drag selection on mousedown
    */
   onDragSelectStart(event: MouseEvent): void {
+    // Disable marquee selection in tabs mode (allows native drag/drop)
+    if (this.tabsMode) return;
+
     // Only start drag on left click
     if (event.button !== 0) return;
 
@@ -2116,5 +2125,107 @@ export class CascadeComponent {
 
     // Emit the reorder event
     this.itemsReordered.emit({ weekLabel, videos });
+  }
+
+  /**
+   * Track when drag starts in tabs mode
+   */
+  onTabDragStarted(event: DragEvent, video: VideoItem, weekLabel: string): void {
+    if (!this.tabsMode) return;
+
+    this.draggingFromTab.set(weekLabel);
+
+    // Set drag data for visual feedback
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', video.id);
+    }
+
+    // If the dragged video is selected, move all selected videos from the same tab
+    // Otherwise, just move the single dragged video
+    const selected = this.selectedVideos();
+    const itemId = `${weekLabel}|${video.id}`;
+
+    if (selected.has(itemId) && selected.size > 1) {
+      // Get all selected video IDs that are from the same source tab
+      const videoIds = Array.from(selected)
+        .filter(id => id.startsWith(`${weekLabel}|`))
+        .map(id => id.split('|')[1]);
+      this.draggingVideoIds.set(videoIds);
+    } else {
+      this.draggingVideoIds.set([video.id]);
+    }
+  }
+
+  /**
+   * Handle drag ended (cleanup)
+   */
+  onTabDragEnded(): void {
+    this.draggingFromTab.set(null);
+    this.draggingVideoIds.set([]);
+    this.dragOverTab.set(null);
+  }
+
+  /**
+   * Handle when dragging enters a tab header drop zone
+   */
+  onTabDragEnter(weekLabel: string): void {
+    if (!this.tabsMode) return;
+    const sourceTab = this.draggingFromTab();
+    // Only show drop indicator if different from source
+    if (sourceTab && sourceTab !== weekLabel) {
+      this.dragOverTab.set(weekLabel);
+    }
+  }
+
+  /**
+   * Handle when dragging leaves a tab header drop zone
+   */
+  onTabDragLeave(weekLabel: string): void {
+    if (this.dragOverTab() === weekLabel) {
+      this.dragOverTab.set(null);
+    }
+  }
+
+  /**
+   * Handle drop on a tab header (move videos between tabs)
+   */
+  onDropToTab(event: DragEvent, targetTabName: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!this.tabsMode) return;
+
+    const sourceTabName = this.draggingFromTab();
+    const videoIds = this.draggingVideoIds();
+
+    // Clear drag state
+    this.dragOverTab.set(null);
+
+    if (!sourceTabName || sourceTabName === targetTabName || videoIds.length === 0) {
+      return;
+    }
+
+    // Emit the move event
+    this.videoMovedToTab.emit({
+      videoIds,
+      sourceTabName,
+      targetTabName
+    });
+
+    // Clear selection after move
+    this.selectedVideos.set(new Set());
+    this.selectionChanged.emit({ count: 0, ids: new Set() });
+  }
+
+  /**
+   * Allow drop on tab headers
+   */
+  onTabDragOver(event: DragEvent, weekLabel: string): void {
+    if (!this.tabsMode) return;
+    const sourceTab = this.draggingFromTab();
+    if (sourceTab && sourceTab !== weekLabel) {
+      event.preventDefault(); // Allow drop
+    }
   }
 }
