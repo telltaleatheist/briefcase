@@ -483,13 +483,14 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
-// Thumbnail preview
+// Thumbnail preview (16:9 aspect ratio) - direct child of .video-item
 .item-thumbnail {
   flex-shrink: 0;
-  width: 44px;
-  height: 34px;
+  width: 85px;
+  height: 48px;
   object-fit: cover;
   border-radius: 3px;
+  border: 1px solid #000;
   background: var(--bg-tertiary);
 
   &.thumbnail-error {

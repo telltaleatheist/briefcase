@@ -76,6 +76,13 @@
                 </button>
               }
 
+              <!-- Thumbnail (skip for ghost items) -->
+              @if (showThumbnails && !item.video.isGhost && item.video.thumbnailUrl) {
+                <img class="item-thumbnail"
+                     [src]="item.video.thumbnailUrl"
+                     (error)="$any($event.target).classList.add('thumbnail-error')" />
+              }
+
             <!-- Video Content -->
             <div class="video-content">
               <!-- Ghost relationship indicator for children (ABOVE title) -->
@@ -90,12 +97,6 @@
               <div class="video-title">
                 @if (item.video.titleLoading) {
                   <span class="title-spinner"></span>
-                }
-                <!-- Thumbnail (skip for ghost items) -->
-                @if (showThumbnails && !item.video.isGhost && item.video.thumbnailUrl) {
-                  <img class="item-thumbnail"
-                       [src]="item.video.thumbnailUrl"
-                       (error)="$any($event.target).classList.add('thumbnail-error')" />
                 }
                 <!-- Date badge or placeholder for alignment (skip for child/ghost items) -->
                 @if (!item.video.isGhost) {
