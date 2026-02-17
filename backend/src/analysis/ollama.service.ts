@@ -174,7 +174,7 @@ To install the ${modelName} model:
 
 3. Wait for the download to complete
 
-4. Return to ClipChimp and the model will be available
+4. Return to Briefcase and the model will be available
 
 Current model status: Not installed
     `.trim();

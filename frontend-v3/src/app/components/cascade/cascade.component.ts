@@ -81,6 +81,7 @@ export class CascadeComponent {
   @Input() showDeleteButton = true;
   @Input() showEditButton = false;
   @Input() showQuickActions = true;
+  @Input() showThumbnails = true;
   @Input() showSuggestedTitle = true;
   @Input() suggestedTitleIcon = '';  // Icon to show before suggested title (empty by default)
   @Input() suggestedTitleLabel = 'Title Suggestion:';  // Label to show (empty string to hide)
@@ -354,6 +355,47 @@ export class CascadeComponent {
       actions.push({ label: `Configure${countSuffix}`, icon: '⚙️', action: 'processing' });
       actions.push({ label: '', icon: '', action: '', divider: true });
       actions.push({ label: `Remove from Queue${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
+      return actions;
+    }
+
+    // Completed queue item actions
+    const isCompleted = video ? this.isCompletedItem(video) : false;
+    if (isCompleted) {
+      // View Analysis (if video has analysis or transcript)
+      if (video?.videoId) {
+        actions.push({ label: 'View Analysis', icon: '🧠', action: 'view-analysis' });
+        actions.push({ label: 'View Transcript', icon: '📝', action: 'viewTranscript' });
+        actions.push({ label: '', icon: '', action: '', divider: true });
+
+        // Add to Tab submenu (same as library items)
+        const recentTabs = this.tabsService.recentTabs();
+        const tabSubmenu: VideoContextMenuAction[] = [
+          { label: 'New Tab...', icon: '➕', action: 'addToNewTab' }
+        ];
+
+        if (recentTabs.length > 0) {
+          tabSubmenu.push({ label: '', icon: '', action: '', divider: true });
+          recentTabs.forEach(tab => {
+            tabSubmenu.push({
+              label: tab.name,
+              icon: '📑',
+              action: `addToTab:${tab.id}`
+            });
+          });
+        }
+
+        actions.push({
+          label: `Add to Tab${countSuffix}`,
+          icon: '📑',
+          action: 'addToTab',
+          submenu: tabSubmenu,
+          hasArrow: true
+        });
+
+        actions.push({ label: '', icon: '', action: '', divider: true });
+      }
+
+      actions.push({ label: `Remove${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
       return actions;
     }
 

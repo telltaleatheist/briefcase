@@ -1,10 +1,10 @@
-# ClipChimp Development Guide
+# Briefcase Development Guide
 
-This guide provides comprehensive documentation for developers working on the ClipChimp video downloader application. It covers the architecture, component structure, and implementation details necessary for development and troubleshooting.
+This guide provides comprehensive documentation for developers working on the Briefcase video downloader application. It covers the architecture, component structure, and implementation details necessary for development and troubleshooting.
 
 ## Architecture Overview
 
-ClipChimp is built using a modern web application architecture with Electron as the container:
+Briefcase is built using a modern web application architecture with Electron as the container:
 
 ### Backend (NestJS)
 
@@ -141,7 +141,7 @@ async processMedia(
 
 ### Video Player and Clip Creation System
 
-ClipChimp includes a comprehensive video player and clip creation system that allows users to:
+Briefcase includes a comprehensive video player and clip creation system that allows users to:
 - Play any video file (analyzed or custom)
 - Create clips from specific time ranges
 - View AI analysis sections and transcripts
@@ -719,7 +719,7 @@ try {
 
 #### Python Configuration
 
-ClipChimp supports multiple Python configuration modes:
+Briefcase supports multiple Python configuration modes:
 
 **1. Development Mode (Recommended for Development):**
 ```bash

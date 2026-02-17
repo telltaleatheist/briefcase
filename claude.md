@@ -1,6 +1,6 @@
-# ClipChimp - Project Overview for Claude
+# Briefcase - Project Overview for Claude
 
-ClipChimp is a professional media library manager desktop application with AI-powered video analysis capabilities. It's built as an Electron app with Angular frontend and NestJS backend.
+Briefcase is a professional media library manager desktop application with AI-powered video analysis capabilities. It's built as an Electron app with Angular frontend and NestJS backend.
 
 ## Tech Stack
 

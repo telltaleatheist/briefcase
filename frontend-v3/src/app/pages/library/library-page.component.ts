@@ -1785,6 +1785,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.analyzeVideos(videosToProcess);
         break;
 
+      case 'viewTranscript':
+        if (videosToProcess.length === 1) {
+          const video = videosToProcess[0];
+          if (video.hasTranscript) {
+            // Navigate to video info page on the transcription tab
+            this.router.navigate(['/video', video.id], { queryParams: { tab: 'transcription' } });
+          } else {
+            // No transcript yet - add to queue with transcribe task
+            this.analyzeVideos([video]);
+          }
+        }
+        break;
+
       default:
         // Check for delete:mode pattern
         if (action.startsWith('delete:')) {
@@ -2848,6 +2861,24 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    */
   onClearCompleted() {
     this.queueService.clearCompleted();
+  }
+
+  // ========================================
+  // Queue Tab -> Tab Integration Methods
+  // ========================================
+
+  /**
+   * Handle adding completed queue items to an existing tab
+   */
+  onQueueAddToTab(event: { tabId: string; videoIds: string[] }) {
+    this.addVideosToTab(event.tabId, event.videoIds);
+  }
+
+  /**
+   * Handle adding completed queue items to a new tab
+   */
+  onQueueAddToNewTab(videoIds: string[]) {
+    this.openNewTabDialog(videoIds);
   }
 
   // ========================================

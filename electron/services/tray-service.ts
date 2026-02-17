@@ -38,7 +38,7 @@ export class TrayService {
       }
 
       this.tray = new Tray(icon);
-      this.tray.setToolTip('ClipChimp - Media Library Manager');
+      this.tray.setToolTip('Briefcase - Media Library Manager');
 
       // Build and set the context menu
       this.updateTrayMenu();
@@ -76,7 +76,7 @@ export class TrayService {
 
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Open ClipChimp',
+        label: 'Open Briefcase',
         click: () => this.showWindow()
       },
       {
@@ -90,7 +90,7 @@ export class TrayService {
       },
       { type: 'separator' },
       {
-        label: 'Quit ClipChimp',
+        label: 'Quit Briefcase',
         click: () => this.quitApplication()
       }
     ]);

@@ -1,211 +1,229 @@
 <div class="library-page">
-  <!-- Page Header -->
-  <div class="page-header">
-    <div class="header-content">
-      <h1 class="page-title">
-        @if (activeTab() === 'queue') {
-          Processing Queue
-        } @else if (activeTab() === 'tabs') {
-          Tabs
-        } @else if (activeTab() === 'manager') {
-          Library Manager
-        } @else if (activeTab() === 'saved') {
-          Saved for Later
-        } @else if (activeTab() === 'settings') {
-          Settings
-        } @else {
-          Media Library
-        }
-      </h1>
-      <p class="page-subtitle">
-        <span *ngIf="currentLibrary()">{{ currentLibrary()?.name }}</span>
-        <span *ngIf="!currentLibrary()">No library selected</span>
-      </p>
-    </div>
-    <div class="header-actions">
-      <button
-        class="btn btn-primary"
-        (click)="openDownloadDialog()"
-        title="Download videos from URLs">
-        <span class="btn-icon">⬇️</span>
-        <span>Download</span>
-      </button>
-      <button
-        class="btn btn-primary"
-        (click)="openImportDialog()"
-        title="Import media files from your computer">
-        <span class="btn-icon">📁</span>
-        <span>Import</span>
-      </button>
-      <button
-        class="btn btn-primary"
-        [disabled]="selectedCount() !== 1"
-        (click)="openInEditor()"
-        [title]="selectedCount() === 1 ? 'Open in Video Editor' : 'Select exactly one video'">
-        <span class="btn-icon">🎬</span>
-        <span>Video Editor</span>
-      </button>
-      <button
-        class="btn btn-secondary"
-        [disabled]="selectedCount() !== 1"
-        (click)="viewMore()"
-        [title]="selectedCount() === 1 ? 'View video details' : 'Select exactly one video'">
-        <span class="btn-icon">ℹ️</span>
-        <span>View More</span>
-      </button>
-      <!-- Add to queue button for library items -->
-      <button
-        class="btn btn-secondary"
-        *ngIf="selectedCount() > 0"
-        (click)="onAddSelectedToQueue()">
-        <span class="btn-icon">➕</span>
-        <span>Add to Queue</span>
-        <span class="badge">{{ selectedCount() }}</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- Tabs -->
-  <div class="tabs-section">
+  <!-- Left Nav Rail -->
+  <div class="nav-rail">
     <button
-      class="tab"
+      class="nav-rail-item"
       [class.active]="activeTab() === 'library'"
-      (click)="setActiveTab('library')">
-      📚 Library
+      (click)="setActiveTab('library')"
+      title="Library">
+      <span class="nav-icon">📚</span>
+      <span class="nav-label">Library</span>
     </button>
     <button
-      class="tab"
+      class="nav-rail-item"
       [class.active]="activeTab() === 'queue'"
-      (click)="setActiveTab('queue')">
-      ⚡ Queue
+      (click)="setActiveTab('queue')"
+      title="Queue">
+      <span class="nav-icon">⚡</span>
+      <span class="nav-label">Queue</span>
       @if (queueStats.total > 0) {
-        <span class="tab-badge">{{ queueStats.total }}</span>
+        <span class="nav-badge">{{ queueStats.total }}</span>
       }
     </button>
     <button
-      class="tab"
+      class="nav-rail-item"
       [class.active]="activeTab() === 'tabs'"
-      (click)="setActiveTab('tabs')">
-      📑 Tabs
+      (click)="setActiveTab('tabs')"
+      title="Tabs">
+      <span class="nav-icon">📑</span>
+      <span class="nav-label">Tabs</span>
     </button>
     <button
-      class="tab"
+      class="nav-rail-item"
       [class.active]="activeTab() === 'manager'"
-      (click)="setActiveTab('manager')">
-      🔧 Manager
+      (click)="setActiveTab('manager')"
+      title="Manager">
+      <span class="nav-icon">🔧</span>
+      <span class="nav-label">Manager</span>
     </button>
     <button
-      class="tab"
+      class="nav-rail-item"
       [class.active]="activeTab() === 'saved'"
-      (click)="setActiveTab('saved')">
-      💾 Saved
+      (click)="setActiveTab('saved')"
+      title="Saved">
+      <span class="nav-icon">💾</span>
+      <span class="nav-label">Saved</span>
     </button>
+    <div class="nav-spacer"></div>
     <button
-      class="tab"
+      class="nav-rail-item"
       [class.active]="activeTab() === 'settings'"
-      (click)="setActiveTab('settings')">
-      ⚙️ Settings
+      (click)="setActiveTab('settings')"
+      title="Settings">
+      <span class="nav-icon">⚙️</span>
+      <span class="nav-label">Settings</span>
     </button>
   </div>
 
-  <!-- Search and Filters (Library Tab Only) -->
-  <div class="filters-section" *ngIf="activeTab() === 'library'">
-    <app-library-search-filters
-      (filtersChanged)="onFiltersChanged($event)"
-    />
-  </div>
-
-  <!-- Manager Tab: Full height container -->
-  @if (activeTab() === 'manager') {
-    <div class="manager-tab-container">
-      <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
-    </div>
-  } @else {
-    <!-- Main Container with Drag & Drop (disabled for tabs tab to allow internal drag/drop) -->
-    <div
-      class="main-container"
-      [class.dragging-over]="isDraggingOver() && activeTab() !== 'tabs'"
-      (drop)="activeTab() !== 'tabs' && onDrop($event)"
-      (dragover)="activeTab() !== 'tabs' && onDragOver($event)"
-      (dragleave)="activeTab() !== 'tabs' && onDragLeave($event)">
-
-    <!-- Drop overlay (not shown for tabs tab) -->
-    <div class="drop-overlay" *ngIf="isDraggingOver() && activeTab() !== 'tabs'">
-      <div class="drop-message">
-        <div class="drop-icon">📁</div>
-        <div class="drop-text">Drop media files to import</div>
-      </div>
-    </div>
-
-    <div class="unified-content">
-      <!-- Library Tab: Media Library Cascade -->
-      @if (activeTab() === 'library') {
-        <div class="library-toolbar">
-          <div class="toolbar-section">
-            <h2 class="section-title">Media Library</h2>
-            <p class="section-subtitle">
-              {{ totalVideoCount() }} videos
-            </p>
-          </div>
-        </div>
-        <app-cascade
-          [weeks]="combinedWeeks()"
-          (selectionChanged)="onSelectionChanged($event)"
-          (videoAction)="onVideoAction($event)"
-          (configureItem)="onConfigureItem($event)"
-          (previewRequested)="onPreviewRequested($event)"
-        />
-      }
-
-      <!-- Queue Tab: Staging, Processing, and Completed queues -->
-      <!-- Queue data now comes directly from QueueService -->
-      <app-queue-tab
-        *ngIf="activeTab() === 'queue'"
-        [progressMapper]="queueProgressMapper"
-        [childrenConfig]="processingChildrenConfig"
-        [aiProcessingVideoId]="aiProcessingQueueItemId()"
-        (processAll)="onQueueProcessAll()"
-        (processSelected)="onQueueProcessSelected($event)"
-        (configureSelected)="onQueueConfigureSelected($event)"
-        (removeSelected)="onQueueRemoveSelected($event)"
-        (cancelProcessing)="onCancelProcessing($event)"
-        (viewInLibrary)="onViewInLibrary($event)"
-        (configureItem)="onConfigureItem($event)"
-        (previewRequested)="onPreviewRequested($event)"
-        (viewAnalysis)="onViewAnalysis($event)"
-        (clearCompleted)="onClearCompleted()"
-      />
-
-      <!-- Tabs Tab: User-created tabs with videos -->
-      <app-tabs-tab
-        *ngIf="activeTab() === 'tabs'"
-        [onSelectionChanged]="onSelectionChanged.bind(this)"
-        [onVideoAction]="onVideoAction.bind(this)"
-        [onPreviewRequested]="onPreviewRequested.bind(this)"
-      />
-
-      <!-- Saved Tab: Save for Later links -->
-      <app-save-for-later-tab *ngIf="activeTab() === 'saved'" />
-
-      <!-- Settings Tab: App settings -->
-      <app-settings-page *ngIf="activeTab() === 'settings'" [embedded]="true" />
-
-      <!-- Empty State - Library -->
-      <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0">
-        <div class="empty-icon">📹</div>
-        <h3 class="empty-title">No media found</h3>
-        <p class="empty-description">
-          <span *ngIf="currentFilters?.searchQuery">
-            Try adjusting your search filters
-          </span>
-          <span *ngIf="!currentFilters?.searchQuery">
-            Paste URLs above, click Import Files, or drag and drop files here
-          </span>
+  <!-- Page Content -->
+  <div class="page-content">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="header-content">
+        <h1 class="page-title">
+          @if (activeTab() === 'queue') {
+            Processing Queue
+          } @else if (activeTab() === 'tabs') {
+            Tabs
+          } @else if (activeTab() === 'manager') {
+            Library Manager
+          } @else if (activeTab() === 'saved') {
+            Saved for Later
+          } @else if (activeTab() === 'settings') {
+            Settings
+          } @else {
+            Media Library
+          }
+        </h1>
+        <p class="page-subtitle">
+          <span *ngIf="currentLibrary()">{{ currentLibrary()?.name }}</span>
+          <span *ngIf="!currentLibrary()">No library selected</span>
         </p>
       </div>
+      <div class="header-actions">
+        <button
+          class="btn btn-primary"
+          (click)="openDownloadDialog()"
+          title="Download videos from URLs">
+          <span class="btn-icon">⬇️</span>
+          <span>Download</span>
+        </button>
+        <button
+          class="btn btn-primary"
+          (click)="openImportDialog()"
+          title="Import media files from your computer">
+          <span class="btn-icon">📁</span>
+          <span>Import</span>
+        </button>
+        <button
+          class="btn btn-primary"
+          [disabled]="selectedCount() !== 1"
+          (click)="openInEditor()"
+          [title]="selectedCount() === 1 ? 'Open in Video Editor' : 'Select exactly one video'">
+          <span class="btn-icon">🎬</span>
+          <span>Video Editor</span>
+        </button>
+        <button
+          class="btn btn-secondary"
+          [disabled]="selectedCount() !== 1"
+          (click)="viewMore()"
+          [title]="selectedCount() === 1 ? 'View video details' : 'Select exactly one video'">
+          <span class="btn-icon">ℹ️</span>
+          <span>View More</span>
+        </button>
+        <!-- Add to queue button for library items -->
+        <button
+          class="btn btn-secondary"
+          *ngIf="selectedCount() > 0"
+          (click)="onAddSelectedToQueue()">
+          <span class="btn-icon">➕</span>
+          <span>Add to Queue</span>
+          <span class="badge">{{ selectedCount() }}</span>
+        </button>
+      </div>
     </div>
+
+    <!-- Search and Filters (Library Tab Only) -->
+    <div class="filters-section" *ngIf="activeTab() === 'library'">
+      <app-library-search-filters
+        (filtersChanged)="onFiltersChanged($event)"
+      />
+    </div>
+
+    <!-- Manager Tab: Full height container -->
+    @if (activeTab() === 'manager') {
+      <div class="manager-tab-container">
+        <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
+      </div>
+    } @else {
+      <!-- Main Container with Drag & Drop (disabled for tabs tab to allow internal drag/drop) -->
+      <div
+        class="main-container"
+        [class.dragging-over]="isDraggingOver() && activeTab() !== 'tabs'"
+        (drop)="activeTab() !== 'tabs' && onDrop($event)"
+        (dragover)="activeTab() !== 'tabs' && onDragOver($event)"
+        (dragleave)="activeTab() !== 'tabs' && onDragLeave($event)">
+
+      <!-- Drop overlay (not shown for tabs tab) -->
+      <div class="drop-overlay" *ngIf="isDraggingOver() && activeTab() !== 'tabs'">
+        <div class="drop-message">
+          <div class="drop-icon">📁</div>
+          <div class="drop-text">Drop media files to import</div>
+        </div>
+      </div>
+
+      <div class="unified-content">
+        <!-- Library Tab: Media Library Cascade -->
+        @if (activeTab() === 'library') {
+          <div class="library-toolbar">
+            <div class="toolbar-section">
+              <h2 class="section-title">Media Library</h2>
+              <p class="section-subtitle">
+                {{ totalVideoCount() }} videos
+              </p>
+            </div>
+          </div>
+          <app-cascade
+            [weeks]="combinedWeeks()"
+            (selectionChanged)="onSelectionChanged($event)"
+            (videoAction)="onVideoAction($event)"
+            (configureItem)="onConfigureItem($event)"
+            (previewRequested)="onPreviewRequested($event)"
+          />
+        }
+
+        <!-- Queue Tab: Staging, Processing, and Completed queues -->
+        <!-- Queue data now comes directly from QueueService -->
+        <app-queue-tab
+          *ngIf="activeTab() === 'queue'"
+          [progressMapper]="queueProgressMapper"
+          [childrenConfig]="processingChildrenConfig"
+          [aiProcessingVideoId]="aiProcessingQueueItemId()"
+          (processAll)="onQueueProcessAll()"
+          (processSelected)="onQueueProcessSelected($event)"
+          (configureSelected)="onQueueConfigureSelected($event)"
+          (removeSelected)="onQueueRemoveSelected($event)"
+          (cancelProcessing)="onCancelProcessing($event)"
+          (viewInLibrary)="onViewInLibrary($event)"
+          (configureItem)="onConfigureItem($event)"
+          (previewRequested)="onPreviewRequested($event)"
+          (viewAnalysis)="onViewAnalysis($event)"
+          (addToTab)="onQueueAddToTab($event)"
+          (addToNewTab)="onQueueAddToNewTab($event)"
+          (clearCompleted)="onClearCompleted()"
+        />
+
+        <!-- Tabs Tab: User-created tabs with videos -->
+        <app-tabs-tab
+          *ngIf="activeTab() === 'tabs'"
+          [onSelectionChanged]="onSelectionChanged.bind(this)"
+          [onVideoAction]="onVideoAction.bind(this)"
+          [onPreviewRequested]="onPreviewRequested.bind(this)"
+        />
+
+        <!-- Saved Tab: Save for Later links -->
+        <app-save-for-later-tab *ngIf="activeTab() === 'saved'" />
+
+        <!-- Settings Tab: App settings -->
+        <app-settings-page *ngIf="activeTab() === 'settings'" [embedded]="true" />
+
+        <!-- Empty State - Library -->
+        <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0">
+          <div class="empty-icon">📹</div>
+          <h3 class="empty-title">No media found</h3>
+          <p class="empty-description">
+            <span *ngIf="currentFilters?.searchQuery">
+              Try adjusting your search filters
+            </span>
+            <span *ngIf="!currentFilters?.searchQuery">
+              Paste URLs above, click Import Files, or drag and drop files here
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>
+    }
   </div>
-  }
 </div>
 
 <!-- Config Modal -->

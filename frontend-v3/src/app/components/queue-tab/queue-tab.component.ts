@@ -30,6 +30,8 @@ export class QueueTabComponent {
   @Output() configureItem = new EventEmitter<VideoItem>();
   @Output() previewRequested = new EventEmitter<VideoItem>();
   @Output() viewAnalysis = new EventEmitter<string>();
+  @Output() addToTab = new EventEmitter<{ tabId: string; videoIds: string[] }>();
+  @Output() addToNewTab = new EventEmitter<string[]>();
   @Output() clearCompleted = new EventEmitter<void>();
 
   selectedStagingIds = signal<Set<string>>(new Set());
@@ -195,6 +197,26 @@ export class QueueTabComponent {
           this.viewAnalysis.emit(completedIds[0]);
         }
         break;
+      case 'addToNewTab':
+        // For completed items with a videoId, emit addToNewTab with real video IDs
+        const newTabVideoIds = videos
+          .filter((v: VideoItem) => v.videoId)
+          .map((v: VideoItem) => v.videoId!);
+        if (newTabVideoIds.length > 0) {
+          this.addToNewTab.emit(newTabVideoIds);
+        }
+        break;
+
+      case 'viewTranscript':
+        // For completed items, emit viewAnalysis with real video ID (parent handles navigation)
+        const transcriptVideos = videos
+          .filter((v: VideoItem) => v.videoId);
+        if (transcriptVideos.length === 1) {
+          // Emit as a videoAction to parent so it can navigate
+          this.viewAnalysis.emit(transcriptVideos[0].videoId!);
+        }
+        break;
+
       case 'delete':
       case 'remove':
       case 'removeFromQueue':
@@ -213,6 +235,19 @@ export class QueueTabComponent {
           .map((v: VideoItem) => v.id.replace('completed-', ''));
         for (const id of completedIdsToRemove) {
           this.queueService.removeJob(id);
+        }
+        break;
+
+      default:
+        // Handle addToTab:tabId pattern from completed items
+        if (action.startsWith('addToTab:')) {
+          const tabId = action.replace('addToTab:', '');
+          const tabVideoIds = videos
+            .filter((v: VideoItem) => v.videoId)
+            .map((v: VideoItem) => v.videoId!);
+          if (tabVideoIds.length > 0) {
+            this.addToTab.emit({ tabId, videoIds: tabVideoIds });
+          }
         }
         break;
     }

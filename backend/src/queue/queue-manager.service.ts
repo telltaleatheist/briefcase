@@ -13,6 +13,8 @@ import {
   TaskResult,
 } from '../common/interfaces/task.interface';
 import { v4 as uuidv4 } from 'uuid';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Active task tracking
 export interface ActiveTask {
@@ -701,6 +703,44 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           return { success: false, error: 'No URL provided for download task' };
         }
 
+        // Check for duplicate: does a video with this source URL already exist?
+        const existingVideo = this.databaseService.findVideoByUrl(job.url);
+        if (existingVideo && existingVideo.current_path) {
+          const existingPath = existingVideo.current_path;
+          const fileExists = fs.existsSync(existingPath);
+
+          if (fileExists) {
+            this.logger.log(`[${taskId}] Duplicate detected: video with URL "${job.url}" already exists at "${existingPath}" (id: ${existingVideo.id})`);
+
+            // Use existing file path and video ID - skip actual download
+            job.videoPath = existingPath;
+            job.videoId = existingVideo.id;
+            job.displayName = job.displayName || existingVideo.filename;
+
+            // Update download_date to current so it appears recent
+            this.databaseService.updateVideoMetadata(
+              existingVideo.id,
+              undefined,  // uploadDate
+              new Date().toISOString(),  // downloadDate
+            );
+
+            // Mark remaining tasks that already have results as skippable
+            // by setting videoId so import task can be skipped
+            result = {
+              success: true,
+              data: {
+                videoPath: existingPath,
+                title: existingVideo.filename,
+                duplicate: true,
+                existingVideoId: existingVideo.id,
+              },
+            };
+            break;
+          } else {
+            this.logger.log(`[${taskId}] Found DB entry for URL "${job.url}" but file missing at "${existingPath}" - proceeding with download`);
+          }
+        }
+
         // Determine output directory based on library
         const outputDir = this.getDownloadOutputDir(job.libraryId);
         if (outputDir) {
@@ -723,6 +763,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         break;
 
       case 'import':
+        // If videoId is already set (e.g., from duplicate detection), skip import
+        if (job.videoId) {
+          this.logger.log(`[${taskId}] Skipping import - video already exists in library (id: ${job.videoId})`);
+          result = { success: true, data: { videoId: job.videoId, skipped: true } };
+          break;
+        }
+
         if (!job.videoPath) {
           return { success: false, error: 'No video path available for import task' };
         }
@@ -748,6 +795,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             success: false,
             error: 'No video ID or path available for fix-aspect-ratio task',
           };
+        }
+        // Skip if already fixed (duplicate detection)
+        if (job.videoId) {
+          const videoForAR = this.databaseService.findVideoById(job.videoId);
+          if (videoForAR && videoForAR.aspect_ratio_fixed) {
+            this.logger.log(`[${taskId}] Skipping fix-aspect-ratio - already fixed (id: ${job.videoId})`);
+            result = { success: true, data: { skipped: true } };
+            break;
+          }
         }
         result = await this.mediaOps.fixAspectRatio(
           job.videoId || job.videoPath!,
@@ -775,6 +831,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             success: false,
             error: 'No video ID or path available for normalize-audio task',
           };
+        }
+        // Skip if already normalized (duplicate detection)
+        if (job.videoId) {
+          const videoForAN = this.databaseService.findVideoById(job.videoId);
+          if (videoForAN && videoForAN.audio_normalized) {
+            this.logger.log(`[${taskId}] Skipping normalize-audio - already normalized (id: ${job.videoId})`);
+            result = { success: true, data: { skipped: true } };
+            break;
+          }
         }
         result = await this.mediaOps.normalizeAudio(
           job.videoId || job.videoPath!,
@@ -832,6 +897,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (!job.videoId && !job.videoPath) {
           return { success: false, error: 'No video ID or path available for transcribe task' };
         }
+
+        // Skip if video already has a transcript (duplicate detection)
+        if (job.videoId) {
+          const videoForTranscript = this.databaseService.getVideoById(job.videoId);
+          if (videoForTranscript && (videoForTranscript as any).has_transcript) {
+            this.logger.log(`[${taskId}] Skipping transcribe - video already has transcript (id: ${job.videoId})`);
+            result = { success: true, data: { skipped: true } };
+            break;
+          }
+        }
+
         result = await this.mediaOps.transcribeVideo(
           job.videoId || job.videoPath!,
           task.options,
@@ -850,6 +926,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (!task.options || !task.options.aiModel) {
           return { success: false, error: 'AI model is required for analyze task' };
         }
+
+        // Skip if video already has analysis (duplicate detection)
+        const videoForAnalysis = this.databaseService.getVideoById(job.videoId);
+        if (videoForAnalysis && (videoForAnalysis as any).has_analysis) {
+          this.logger.log(`[${taskId}] Skipping analyze - video already has analysis (id: ${job.videoId})`);
+          result = { success: true, data: { skipped: true } };
+          break;
+        }
+
         result = await this.mediaOps.analyzeVideo(job.videoId, task.options as any, taskId);
         if (result.success && result.data) {
           job.analysisPath = result.data.analysisPath;

@@ -1,7 +1,7 @@
 {
   "name": "clipchimp",
   "version": "1.0.0",
-  "description": "ClipChimp - Professional media library manager with AI analysis",
+  "description": "Briefcase - Professional media library manager with AI analysis",
   "asar": true,
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -115,7 +115,7 @@
   },
   "build": {
     "appId": "com.owenmorgan.clipchimp",
-    "productName": "ClipChimp",
+    "productName": "Briefcase",
     "asar": true,
     "compression": "normal",
     "afterPack": "./scripts/afterPack.js",

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the ClipChimp project will be documented in this file.
+All notable changes to the Briefcase project will be documented in this file.
 
 ---
 
