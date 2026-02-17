@@ -123,6 +123,12 @@ export class VideoInfoPageComponent implements OnInit {
       return;
     }
 
+    // Check for tab query param to auto-select tab
+    const tabParam = this.route.snapshot.queryParamMap.get('tab');
+    if (tabParam === 'transcription' || tabParam === 'ai-analysis' || tabParam === 'metadata' || tabParam === 'overview') {
+      this.activeTab = tabParam;
+    }
+
     this.loadVideoInfo(id);
 
     // Try to start the video info tour after content loads

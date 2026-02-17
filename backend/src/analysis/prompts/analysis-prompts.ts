@@ -1,5 +1,5 @@
 /**
- * AI Analysis Prompts and Categories for ClipChimp Video Analysis
+ * AI Analysis Prompts and Categories for Briefcase Video Analysis
  *
  * This file contains all prompts and default categories used by the AI analysis system.
  * Edit this file to modify prompts or default categories.

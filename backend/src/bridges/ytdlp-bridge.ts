@@ -123,8 +123,9 @@ export class YtDlpBridge extends EventEmitter {
       // Output template
       args.push('-o', outputTemplate);
 
-      // Progress template for parsing
-      args.push('--progress-template', '%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress.speed)s eta %(progress.eta)s [%(progress._percent_str)s]');
+      // Progress template for parsing - includes fragment info for HLS downloads (Rumble, etc.)
+      // Format: bytes/total speed eta eta_value [percent%] frag:current/total
+      args.push('--progress-template', '%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress.speed)s eta %(progress.eta)s [%(progress._percent_str)s] frag:%(progress.fragment_index)s/%(progress.fragment_count)s');
 
       // Impersonate Chrome to bypass anti-bot protection (Rumble, etc.)
       // This uses curl_cffi to fully impersonate Chrome's TLS fingerprint
@@ -487,8 +488,9 @@ export class YtDlpBridge extends EventEmitter {
    * Parse progress from yt-dlp output
    */
   private parseProgress(processId: string, line: string): void {
-    // Try progress template format: bytes/total speed eta time [percent%]
-    const templateMatch = line.match(/(\d+)\/(\d+)\s+([\d.]+)\s+eta\s+(\S+)\s+\[\s*([\d.]+)%\]/);
+    // Try progress template format: bytes/total speed eta time [percent%] frag:current/total
+    // For regular downloads, we have actual bytes and percent
+    const templateMatch = line.match(/(\d+)\/(\d+)\s+([\d.]+)\s+eta\s+(\S+)\s+\[\s*([\d.]+)%\s*\]/);
     if (templateMatch) {
       const [, downloaded, total, speed, eta, percent] = templateMatch;
 
@@ -499,6 +501,68 @@ export class YtDlpBridge extends EventEmitter {
         downloadedBytes: parseInt(downloaded),
         downloadSpeed: parseFloat(speed),
         eta: eta !== 'NA' ? parseFloat(eta) : 0,
+        phase: 'download',
+      } as YtDlpProgress);
+      return;
+    }
+
+    // Handle HLS progress template format where total_bytes is unknown (None/NA)
+    // Format: downloaded_bytes/None speed eta NA [ NA%] frag:current/total
+    // For HLS, we use fragment progress to calculate percent
+    const hlsTemplateMatch = line.match(/(\d+|None|NA)\/(None|NA)\s+([\d.]+|None|NA)\s+eta\s+(\S+)\s+\[\s*([\d.]+|NA)%?\s*\]\s*frag:(\d+|None|NA)\/(\d+|None|NA)/i);
+    if (hlsTemplateMatch) {
+      const [, downloadedStr, , speedStr, , , fragCurrentStr, fragTotalStr] = hlsTemplateMatch;
+      const downloadedBytes = downloadedStr !== 'None' && downloadedStr !== 'NA' ? parseInt(downloadedStr) : 0;
+      const speed = speedStr !== 'None' && speedStr !== 'NA' ? parseFloat(speedStr) : 0;
+      const fragCurrent = fragCurrentStr !== 'None' && fragCurrentStr !== 'NA' ? parseInt(fragCurrentStr) : 0;
+      const fragTotal = fragTotalStr !== 'None' && fragTotalStr !== 'NA' ? parseInt(fragTotalStr) : 0;
+
+      // Calculate percent from fragment progress
+      const percent = fragTotal > 0 ? (fragCurrent / fragTotal) * 100 : 0;
+
+      this.emit('progress', {
+        processId,
+        percent,
+        totalSize: 0,
+        downloadedBytes,
+        downloadSpeed: speed,
+        eta: 0,
+        phase: 'download',
+      } as YtDlpProgress);
+      return;
+    }
+
+    // Fallback for HLS template without fragment info (older format)
+    const hlsTemplateMatchSimple = line.match(/(\d+|None|NA)\/(None|NA)\s+([\d.]+|None|NA)\s+eta\s+(\S+)\s+\[\s*([\d.]+|NA)%?\s*\]/i);
+    if (hlsTemplateMatchSimple && !line.includes('frag:')) {
+      const [, downloadedStr, , speedStr] = hlsTemplateMatchSimple;
+      const downloadedBytes = downloadedStr !== 'None' && downloadedStr !== 'NA' ? parseInt(downloadedStr) : 0;
+      const speed = speedStr !== 'None' && speedStr !== 'NA' ? parseFloat(speedStr) : 0;
+      this.emit('progress', {
+        processId,
+        percent: 0,
+        totalSize: 0,
+        downloadedBytes,
+        downloadSpeed: speed,
+        eta: 0,
+        phase: 'download',
+      } as YtDlpProgress);
+      return;
+    }
+
+    // Handle HLS fragment download messages: [download] Downloading fragment 123 of 456
+    const fragDownloadMatch = line.match(/\[download\]\s+Downloading\s+fragment\s+(\d+)\s+of\s+(\d+)/i);
+    if (fragDownloadMatch) {
+      const [, current, total] = fragDownloadMatch;
+      const fragPercent = (parseInt(current) / parseInt(total)) * 100;
+
+      this.emit('progress', {
+        processId,
+        percent: fragPercent,
+        totalSize: 0,
+        downloadedBytes: 0,
+        downloadSpeed: 0,
+        eta: 0,
         phase: 'download',
       } as YtDlpProgress);
       return;

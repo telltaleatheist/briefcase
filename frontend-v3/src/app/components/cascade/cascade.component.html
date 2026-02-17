@@ -91,6 +91,12 @@
                 @if (item.video.titleLoading) {
                   <span class="title-spinner"></span>
                 }
+                <!-- Thumbnail (skip for ghost items) -->
+                @if (showThumbnails && !item.video.isGhost && item.video.thumbnailUrl) {
+                  <img class="item-thumbnail"
+                       [src]="item.video.thumbnailUrl"
+                       (error)="$any($event.target).classList.add('thumbnail-error')" />
+                }
                 <!-- Date badge or placeholder for alignment (skip for child/ghost items) -->
                 @if (!item.video.isGhost) {
                   @if (getDateBadge(item.video.name); as dateBadge) {
@@ -186,6 +192,12 @@
                     (click)="onQuickAction(item.video, 'openInEditor', $event)"
                     title="View analysis, transcript & more">
                     View Analysis
+                  </button>
+                  <button
+                    class="action-btn transcript-btn"
+                    (click)="onQuickAction(item.video, 'viewTranscript', $event)"
+                    title="View transcript">
+                    Transcript
                   </button>
                   <button
                     class="action-btn process-btn"

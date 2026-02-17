@@ -1,7 +1,7 @@
 {
   "name": "clipchimp-backend",
   "version": "1.0.0",
-  "description": "NestJS backend for ClipChimp media library manager",
+  "description": "NestJS backend for Briefcase media library manager",
   "author": "Your Name",
   "private": true,
   "license": "MIT",

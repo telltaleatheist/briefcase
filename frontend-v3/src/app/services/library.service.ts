@@ -285,7 +285,7 @@ export class LibraryService {
       downloadDate: video.download_date ? this.parseLocalDate(video.download_date) : undefined,
       addedAt: video.added_at ? this.parseLocalDate(video.added_at) : undefined,
       lastProcessedDate: video.last_processed_date ? this.parseLocalDate(video.last_processed_date) : undefined,
-      thumbnailUrl: video.id ? `${this.API_BASE}/database/videos/${video.id}/thumbnail` : undefined,
+      thumbnailUrl: video.id ? `${this.API_BASE}/database/videos/${video.id}/stream?poster=1` : undefined,
       // Additional fields for context menu actions
       filePath: video.file_path || video.filepath || video.current_path,
       suggestedTitle: video.suggested_title,

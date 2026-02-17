@@ -22,7 +22,7 @@ export class AppController {
 
     return {
       status: 'ok',
-      message: 'ClipChimp backend is running',
+      message: 'Briefcase backend is running',
       libraryReady: isReady,
       activeLibrary: activeLibrary?.name || null,
     };

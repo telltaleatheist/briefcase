@@ -458,7 +458,7 @@ export class ModelManagerService implements OnModuleInit {
 
     try {
       const headers: Record<string, string> = {
-        'User-Agent': 'ClipChimp/1.0',
+        'User-Agent': 'Briefcase/1.0',
       };
 
       // Add range header for resume support

@@ -577,6 +577,30 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/videos/by-source-url?url=...
+   * Check if a video with the given source URL already exists in the library
+   */
+  @Get('videos/by-source-url')
+  findBySourceUrl(@Query('url') url: string) {
+    if (!url) {
+      return { exists: false };
+    }
+    const video = this.databaseService.findVideoByUrl(url);
+    if (video) {
+      // Get full record with flags
+      const fullVideo = this.databaseService.getVideoById(video.id);
+      return {
+        exists: true,
+        videoId: video.id,
+        filename: video.filename,
+        hasTranscript: fullVideo ? !!fullVideo.has_transcript : false,
+        hasAnalysis: fullVideo ? !!fullVideo.has_analysis : false,
+      };
+    }
+    return { exists: false };
+  }
+
+  /**
    * GET /api/database/videos/:id/has-analysis
    * Check if a video has an analysis
    */
@@ -1191,6 +1215,7 @@ export class DatabaseController {
   @Get('videos/:id/stream')
   async streamVideoById(
     @Param('id') videoId: string,
+    @Query('poster') poster: string,
     @Req() req: Request,
     @Res() res: Response
   ) {
@@ -1200,6 +1225,24 @@ export class DatabaseController {
       if (!video) {
         this.logger.warn(`Video not found in database: ${videoId}`);
         throw new HttpException(`Video not found in database: ${videoId}`, HttpStatus.NOT_FOUND);
+      }
+
+      // If poster=1, serve thumbnail image instead of streaming video
+      if (poster === '1') {
+        const posterPath = this.thumbnailService.getThumbnailPath(videoId);
+
+        if (!this.thumbnailService.thumbnailExists(videoId)) {
+          const videoFilePath = video.current_path;
+          if (!videoFilePath || !fs.existsSync(videoFilePath)) {
+            throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
+          }
+          const generatedPath = await this.ffmpegService.createThumbnail(videoFilePath, undefined, videoId);
+          if (!generatedPath || !fs.existsSync(generatedPath)) {
+            throw new HttpException('Failed to generate poster', HttpStatus.INTERNAL_SERVER_ERROR);
+          }
+        }
+
+        return res.sendFile(posterPath);
       }
 
       // Normalize path: replace backslashes with forward slashes for cross-platform compatibility
@@ -3258,63 +3301,6 @@ export class DatabaseController {
         success: false,
         error: error.message || 'Failed to transfer videos',
       };
-    }
-  }
-
-  /**
-   * GET /api/database/videos/:id/thumbnail
-   * Get or generate thumbnail for a library video
-   * Thumbnails are stored in centralized .thumbnails directory
-   */
-  @Get('videos/:id/thumbnail')
-  async getVideoThumbnail(
-    @Param('id') id: string,
-    @Res() res: Response
-  ) {
-    try {
-      const video = this.databaseService.getVideoById(id);
-
-      if (!video) {
-        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
-      }
-
-      if (!video.current_path || typeof video.current_path !== 'string') {
-        throw new HttpException('Video path not available', HttpStatus.NOT_FOUND);
-      }
-
-      const videoPath = video.current_path as string;
-
-      if (!fs.existsSync(videoPath)) {
-        throw new HttpException('Video file not found', HttpStatus.NOT_FOUND);
-      }
-
-      // Get thumbnail path from ThumbnailService
-      const thumbnailPath = this.thumbnailService.getThumbnailPath(id);
-
-      // If thumbnail doesn't exist, generate it
-      if (!this.thumbnailService.thumbnailExists(id)) {
-        this.logger.log(`Generating thumbnail for video ${id}: ${video.filename}`);
-        const generatedPath = await this.ffmpegService.createThumbnail(videoPath, undefined, id);
-
-        if (!generatedPath || !fs.existsSync(generatedPath)) {
-          throw new HttpException(
-            'Failed to generate thumbnail',
-            HttpStatus.INTERNAL_SERVER_ERROR
-          );
-        }
-      }
-
-      // Send the thumbnail file
-      res.sendFile(thumbnailPath);
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      this.logger.error(`Error getting thumbnail: ${(error as Error).message}`);
-      throw new HttpException(
-        `Failed to get thumbnail: ${(error as Error).message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
     }
   }
 
