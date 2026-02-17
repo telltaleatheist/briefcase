@@ -1242,7 +1242,7 @@ export class DatabaseController {
           }
         }
 
-        return res.sendFile(posterPath);
+        return res.sendFile(posterPath, { dotfiles: 'allow' });
       }
 
       // Normalize path: replace backslashes with forward slashes for cross-platform compatibility

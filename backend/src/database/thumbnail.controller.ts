@@ -60,8 +60,8 @@ export class ThumbnailController {
         }
       }
 
-      // Send the thumbnail file
-      res.sendFile(thumbnailPath);
+      // Send the thumbnail file (dotfiles: 'allow' needed for .thumbnails directory)
+      res.sendFile(thumbnailPath, { dotfiles: 'allow' });
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;

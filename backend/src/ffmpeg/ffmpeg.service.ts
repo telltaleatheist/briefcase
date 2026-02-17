@@ -597,14 +597,15 @@ export class FfmpegService {
 
       const metadata = await this.getVideoMetadata(videoPath);
       const duration = metadata?.duration || 0;
-      const thumbnailTime = Math.max(1, duration * 0.1);
+      // Seek to 25% of duration to avoid black intro frames
+      const thumbnailTime = Math.max(2, duration * 0.25);
 
       const args = [
         '-y',
         '-ss', thumbnailTime.toString(),
         '-i', videoPath,
         '-vframes', '1',
-        '-vf', 'scale=-1:360',
+        '-vf', 'scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2',
         outputPath
       ];
 
