@@ -10,6 +10,7 @@ import { DatabaseService } from '../database/database.service';
 import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { ApiKeysService } from '../config/api-keys.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
+import { ThumbnailService } from '../database/thumbnail.service';
 import {
   GetInfoResult,
   DownloadResult,
@@ -37,6 +38,7 @@ export class MediaOperationsService {
     private readonly eventService: MediaEventService,
     private readonly apiKeysService: ApiKeysService,
     private readonly ffmpegService: FfmpegService,
+    private readonly thumbnailService: ThumbnailService,
   ) {}
 
   /**
@@ -921,6 +923,22 @@ export class MediaOperationsService {
     }
 
     return seconds;
+  }
+
+  /**
+   * Regenerate thumbnail for a video after file-modifying operations
+   * Deletes the old thumbnail and generates a new one from the updated file
+   * Non-fatal: if it fails, the thumbnail will be lazily regenerated on next request
+   */
+  async regenerateThumbnail(videoId: string, videoPath: string): Promise<void> {
+    try {
+      this.logger.log(`Regenerating thumbnail for video ${videoId}`);
+      this.thumbnailService.deleteThumbnail(videoId);
+      await this.ffmpegService.createThumbnail(videoPath, undefined, videoId);
+      this.logger.log(`Thumbnail regenerated for video ${videoId}`);
+    } catch (error) {
+      this.logger.warn(`Failed to regenerate thumbnail for video ${videoId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**

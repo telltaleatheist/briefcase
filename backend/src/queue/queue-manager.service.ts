@@ -599,6 +599,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         }
       }
 
+      // Regenerate thumbnail after file-modifying tasks
+      const thumbnailRegenTasks = ['fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      if (job.videoId && thumbnailRegenTasks.includes(task.type) && job.videoPath) {
+        await this.mediaOps.regenerateThumbnail(job.videoId, job.videoPath);
+      }
+
       // Emit task completed event
       this.eventService.emit('task.completed', {
         taskId,

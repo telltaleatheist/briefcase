@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Res, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Res, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
 import * as fs from 'fs';
 import { DatabaseService } from './database.service';
@@ -70,6 +70,42 @@ export class ThumbnailController {
       throw new HttpException(
         `Failed to get thumbnail: ${(error as Error).message}`,
         HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Post('videos/:id/regenerate-thumbnail')
+  async regenerateThumbnail(@Param('id') id: string) {
+    try {
+      const video = this.databaseService.getVideoById(id);
+      if (!video) {
+        throw new HttpException('Video not found', HttpStatus.NOT_FOUND);
+      }
+
+      const videoPath = video.current_path as string;
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        throw new HttpException('Video file not found on disk', HttpStatus.NOT_FOUND);
+      }
+
+      // Delete existing thumbnail
+      this.thumbnailService.deleteThumbnail(id);
+
+      // Generate new thumbnail
+      const generatedPath = await this.ffmpegService.createThumbnail(videoPath, undefined, id);
+      if (!generatedPath || !fs.existsSync(generatedPath)) {
+        throw new HttpException('Failed to generate thumbnail', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      this.logger.log(`Thumbnail regenerated for video ${id}`);
+      return { success: true, message: 'Thumbnail regenerated' };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(`Error regenerating thumbnail: ${(error as Error).message}`);
+      throw new HttpException(
+        `Failed to regenerate thumbnail: ${(error as Error).message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
