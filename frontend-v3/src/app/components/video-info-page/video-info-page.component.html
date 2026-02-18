@@ -468,7 +468,16 @@
           </div>
 
           <div class="metadata-group">
-            <h3 class="group-title">File Info</h3>
+            <div class="group-header">
+              <h3 class="group-title">File Info</h3>
+              <button
+                class="edit-button-small"
+                [disabled]="isRefreshingThumbnail"
+                (click)="refreshThumbnail()"
+                title="Regenerate thumbnail from current video file">
+                {{ isRefreshingThumbnail ? '...' : '🖼️' }}
+              </button>
+            </div>
             <div class="metadata-item">
               <span class="metadata-label">Size:</span>
               <span class="metadata-value">{{ formatFileSize(videoInfo.metadata.fileSize) }}</span>

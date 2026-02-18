@@ -52,6 +52,9 @@ export class VideoInfoPageComponent implements OnInit {
   isEditingDescription = false;
   editedDescription = '';
 
+  // Thumbnail
+  isRefreshingThumbnail = false;
+
   // Date Editing
   isEditingDates = false;
   editedUploadDate = '';
@@ -994,6 +997,26 @@ export class VideoInfoPageComponent implements OnInit {
 
   toggleSection(section: keyof typeof this.expandedSections): void {
     this.expandedSections[section] = !this.expandedSections[section];
+  }
+
+  refreshThumbnail(): void {
+    const id = this.videoId || this.route.snapshot.paramMap.get('id');
+    if (!id || this.isRefreshingThumbnail) return;
+
+    this.isRefreshingThumbnail = true;
+    this.http.post<any>(`http://localhost:3000/api/database/videos/${id}/regenerate-thumbnail`, {})
+      .subscribe({
+        next: (response) => {
+          this.isRefreshingThumbnail = false;
+          if (response.success) {
+            console.log('Thumbnail regenerated successfully');
+          }
+        },
+        error: (err) => {
+          this.isRefreshingThumbnail = false;
+          console.error('Failed to regenerate thumbnail:', err);
+        }
+      });
   }
 
   onThumbnailError(event: Event): void {

@@ -26,6 +26,8 @@ import { FileScannerService } from '../database/file-scanner.service';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { DatabaseService } from '../database/database.service';
 import { AIProviderService } from '../analysis/ai-provider.service';
+import { ThumbnailService } from '../database/thumbnail.service';
+import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { buildAnalyticsInsightsPrompt } from './prompts/analytics-insights.prompt';
 import {
   CreateLibraryAnalysisRequest,
@@ -48,7 +50,9 @@ export class LibraryController {
     private fileScannerService: FileScannerService,
     private libraryManagerService: LibraryManagerService,
     private databaseService: DatabaseService,
-    private aiProviderService: AIProviderService
+    private aiProviderService: AIProviderService,
+    private thumbnailService: ThumbnailService,
+    private ffmpegService: FfmpegService,
   ) {}
 
   /**
@@ -1397,6 +1401,7 @@ export class LibraryController {
         const newDuration = extractionResult.duration || (body.endTime !== null && body.startTime !== null ? (body.endTime - body.startTime) : 0);
         const db = this.databaseService['db'];
         if (db) {
+          const nowIso = new Date().toISOString();
           const updateQuery = newFileHash
             ? `UPDATE videos
                SET duration_seconds = ?,
@@ -1406,6 +1411,7 @@ export class LibraryController {
                    has_analysis = 0,
                    transcript_status = NULL,
                    analysis_status = NULL,
+                   last_processed_date = ?,
                    upload_date = ?,
                    download_date = ?,
                    added_at = ?,
@@ -1420,6 +1426,7 @@ export class LibraryController {
                    has_analysis = 0,
                    transcript_status = NULL,
                    analysis_status = NULL,
+                   last_processed_date = ?,
                    upload_date = ?,
                    download_date = ?,
                    added_at = ?,
@@ -1433,6 +1440,7 @@ export class LibraryController {
                 newDuration,
                 extractionResult.fileSize,
                 newFileHash,
+                nowIso,
                 originalMetadata.uploadDate,
                 originalMetadata.downloadDate,
                 originalMetadata.addedAt,
@@ -1444,6 +1452,7 @@ export class LibraryController {
             : [
                 newDuration,
                 extractionResult.fileSize,
+                nowIso,
                 originalMetadata.uploadDate,
                 originalMetadata.downloadDate,
                 originalMetadata.addedAt,
@@ -1456,6 +1465,15 @@ export class LibraryController {
           db.prepare(updateQuery).run(...params);
           this.databaseService['saveDatabase']();
           this.logger.log(`Updated video ${body.videoId} with new duration: ${newDuration}${newFileHash ? ' and file hash' : ''}, preserved original metadata`);
+
+          // Regenerate thumbnail for the overwritten video
+          try {
+            this.thumbnailService.deleteThumbnail(body.videoId);
+            await this.ffmpegService.createThumbnail(body.videoPath, undefined, body.videoId);
+            this.logger.log(`Thumbnail regenerated for overwritten video ${body.videoId}`);
+          } catch (thumbError) {
+            this.logger.warn(`Failed to regenerate thumbnail: ${(thumbError as Error).message}`);
+          }
         }
       } catch (error) {
         this.logger.error(`Failed to clear metadata: ${(error as Error).message}`);
