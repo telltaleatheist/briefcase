@@ -5,9 +5,10 @@ import { RelinkService } from './relink.service';
 import { ClipExtractorService } from './clip-extractor.service';
 import { LibraryController } from './library.controller';
 import { AnalysisModule } from '../analysis/analysis.module';
+import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 
 @Module({
-  imports: [forwardRef(() => AnalysisModule)],
+  imports: [forwardRef(() => AnalysisModule), FfmpegModule],
   providers: [LibraryService, RelinkService, ClipExtractorService],
   controllers: [LibraryController],
   exports: [LibraryService, RelinkService, ClipExtractorService],
