@@ -14,12 +14,15 @@ export interface MuteSectionInput {
   endSeconds: number;
 }
 
+export type ExportQuality = 'high' | 'medium' | 'low';
+
 export interface ClipExtractionRequest {
   videoPath: string;
   startTime: number | null; // seconds (null = start of video)
   endTime: number | null; // seconds (null = end of video)
   outputPath: string;
   reEncode?: boolean; // Whether to re-encode for frame accuracy (default: false)
+  quality?: ExportQuality; // Export quality preset (default: 'medium')
   scale?: number; // Video scale factor (1.0 = no scaling, 2.0 = 2x scale, etc.)
   muteSections?: MuteSectionInput[]; // Audio sections to mute
   outputSuffix?: string; // Suffix to add to filename (e.g., " (censored)")
@@ -121,7 +124,8 @@ export class ClipExtractorService {
         request.reEncode || false,
         request.scale,
         request.muteSections,
-        request.onProgress
+        request.onProgress,
+        request.quality || 'medium',
       );
 
       // Get file stats
@@ -188,7 +192,8 @@ export class ClipExtractorService {
     reEncode: boolean = false,
     scale?: number,
     muteSections?: MuteSectionInput[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    quality: ExportQuality = 'medium',
   ): Promise<void> {
     const args: string[] = ['-y'];
 
@@ -239,16 +244,22 @@ export class ClipExtractorService {
         args.push('-vf', `scale=iw*${scale}:ih*${scale}:flags=lanczos`);
       }
 
+      // Quality presets: CRF values (lower = better quality, bigger file)
+      const crfMap: Record<ExportQuality, string> = {
+        'high': '18',
+        'medium': '23',
+        'low': '28',
+      };
+      const crf = crfMap[quality] || '23';
+      this.logger.log(`Quality preset: ${quality} (CRF ${crf})`);
+
       args.push(
         '-c:v', 'libx264',
         '-c:a', 'aac',
         '-preset', 'medium',
-        '-crf', '18',
+        '-crf', crf,
         '-pix_fmt', 'yuv420p',
-        '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
-        '-async', '1',
-        '-vsync', 'cfr',
         outputPath
       );
     } else {
@@ -261,7 +272,6 @@ export class ClipExtractorService {
         '-t', duration.toString(),
         '-c', 'copy',
         '-avoid_negative_ts', 'make_zero',
-        '-async', '1',
         outputPath
       );
     }

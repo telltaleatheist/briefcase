@@ -8,7 +8,8 @@ export type TaskType =
   | 'normalize-audio'
   | 'process-video'  // Combined: aspect ratio + audio normalization in single pass
   | 'transcribe'
-  | 'analyze';
+  | 'analyze'
+  | 'export-clip';
 
 export interface BaseTask {
   type: TaskType;
@@ -84,6 +85,26 @@ export interface AnalyzeTask extends BaseTask {
   };
 }
 
+export interface ExportClipTask extends BaseTask {
+  type: 'export-clip';
+  options: {
+    videoPath: string;
+    startTime: number | null;
+    endTime: number | null;
+    title?: string;
+    description?: string;
+    category?: string;
+    customDirectory?: string;
+    reEncode?: boolean;
+    quality?: 'high' | 'medium' | 'low';
+    scale?: number;
+    muteSections?: Array<{ startSeconds: number; endSeconds: number }>;
+    outputSuffix?: string;
+    isOverwrite?: boolean;
+    videoId?: string; // needed for overwrite mode
+  };
+}
+
 export type Task =
   | GetInfoTask
   | DownloadTask
@@ -92,7 +113,8 @@ export type Task =
   | NormalizeAudioTask
   | ProcessVideoTask
   | TranscribeTask
-  | AnalyzeTask;
+  | AnalyzeTask
+  | ExportClipTask;
 
 export interface TaskResult {
   success: boolean;

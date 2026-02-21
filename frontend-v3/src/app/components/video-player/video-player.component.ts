@@ -1972,9 +1972,23 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.showExportDialog.set(true);
   }
 
-  onExportDialogClose() {
+  onExportDialogClose(event: { exported: boolean; navigateToQueue?: boolean }) {
     this.showExportDialog.set(false);
     this.exportDialogData.set(null);
+
+    if (event.navigateToQueue) {
+      this.navigateToQueue();
+    }
+  }
+
+  private navigateToQueue() {
+    const electron = (window as any).electron;
+    if (electron?.navigateToQueue) {
+      // Popout window — tell main window to switch to queue tab
+      electron.navigateToQueue();
+    }
+    // Also dispatch for same-window usage
+    window.dispatchEvent(new CustomEvent('navigate-to-queue'));
   }
 
   // Calculate selection overlay left position

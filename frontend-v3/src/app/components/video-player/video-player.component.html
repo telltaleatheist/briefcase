@@ -395,7 +395,7 @@
 @if (showExportDialog() && exportDialogData()) {
   <app-export-dialog
     [data]="exportDialogData()!"
-    (close)="onExportDialogClose()">
+    (close)="onExportDialogClose($event)">
   </app-export-dialog>
 }
 

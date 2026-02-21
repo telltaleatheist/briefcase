@@ -6,6 +6,9 @@ import { MediaEventService } from '../media/media-event.service';
 import { MediaOperationsService } from '../media/media-operations.service';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { DatabaseService } from '../database/database.service';
+import { FileScannerService } from '../database/file-scanner.service';
+import { ClipExtractorService } from '../library/clip-extractor.service';
+import { LibraryService } from '../library/library.service';
 import {
   QueueJob,
   QueueStatus,
@@ -14,6 +17,7 @@ import {
 } from '../common/interfaces/task.interface';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 // Active task tracking
@@ -62,6 +66,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     private readonly libraryManager: LibraryManagerService,
     private readonly databaseService: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly clipExtractor: ClipExtractorService,
+    private readonly fileScannerService: FileScannerService,
+    private readonly libraryService: LibraryService,
   ) {}
 
   /**
@@ -948,10 +955,319 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         // Note: has_analysis flag is automatically set by database trigger
         break;
 
+      case 'export-clip':
+        result = await this.executeExportClip(job, task, taskId);
+        break;
+
       default:
         return { success: false, error: `Unknown task type: \${(task as any).type}` };
     }
 
     return result;
+  }
+
+  /**
+   * Execute export-clip task logic
+   * Replicates the flow from LibraryController.extractClipFromPath() / overwriteVideoWithClip()
+   */
+  private async executeExportClip(
+    job: QueueJob,
+    task: Task,
+    taskId: string,
+  ): Promise<TaskResult> {
+    const opts = task.options as any;
+    this.logger.log(`[EXPORT-CLIP] ========== Starting export-clip task ==========`);
+    this.logger.log(`[EXPORT-CLIP] Job ID: ${job.id}`);
+    this.logger.log(`[EXPORT-CLIP] Video path: ${opts?.videoPath}`);
+    this.logger.log(`[EXPORT-CLIP] Time range: ${opts?.startTime} - ${opts?.endTime}`);
+    this.logger.log(`[EXPORT-CLIP] Re-encode: ${opts?.reEncode}`);
+    this.logger.log(`[EXPORT-CLIP] Quality: ${opts?.quality || 'medium'}`);
+    this.logger.log(`[EXPORT-CLIP] Title: ${opts?.title || opts?.description || '(none)'}`);
+    this.logger.log(`[EXPORT-CLIP] Category: ${opts?.category || '(none)'}`);
+    this.logger.log(`[EXPORT-CLIP] Custom directory: ${opts?.customDirectory || '(default)'}`);
+    this.logger.log(`[EXPORT-CLIP] Mute sections: ${opts?.muteSections?.length || 0}`);
+    this.logger.log(`[EXPORT-CLIP] Output suffix: ${opts?.outputSuffix || '(none)'}`);
+    this.logger.log(`[EXPORT-CLIP] Overwrite mode: ${opts?.isOverwrite || false}`);
+
+    if (!opts || !opts.videoPath) {
+      this.logger.error(`[EXPORT-CLIP] FAILED: No videoPath provided`);
+      return { success: false, error: 'No videoPath provided for export-clip task' };
+    }
+
+    if (!fs.existsSync(opts.videoPath)) {
+      this.logger.error(`[EXPORT-CLIP] FAILED: Video file not found at ${opts.videoPath}`);
+      return { success: false, error: `Video file not found: ${opts.videoPath}` };
+    }
+
+    // Overwrite mode: extract to temp, replace original, clear metadata
+    if (opts.isOverwrite && opts.videoId) {
+      this.logger.log(`[EXPORT-CLIP] Using OVERWRITE mode for video ${opts.videoId}`);
+      return this.executeExportClipOverwrite(opts, taskId);
+    }
+
+    // Regular export mode
+    this.logger.log(`[EXPORT-CLIP] Using regular export mode`);
+    try {
+      // Find parent video for linking
+      let parentVideoId: string | undefined;
+      try {
+        const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
+        const clipsRoot = this.libraryService.getLibraryPaths().clipsDir;
+        const normalizedVideoPath = path.normalize(opts.videoPath);
+
+        const sourceVideo = allVideos.find((v: any) => {
+          if (!v.current_path) return false;
+          const dbAbsolutePath = this.databaseService.toAbsolutePath(String(v.current_path), clipsRoot);
+          return path.normalize(dbAbsolutePath) === normalizedVideoPath;
+        });
+
+        if (sourceVideo && sourceVideo.id) {
+          if (sourceVideo.parent_id) {
+            parentVideoId = String(sourceVideo.parent_id);
+            this.logger.log(`[EXPORT-CLIP] Source video is a child — linking to parent: ${parentVideoId}`);
+          } else {
+            parentVideoId = String(sourceVideo.id);
+            this.logger.log(`[EXPORT-CLIP] Source video found — will link as child of: ${parentVideoId}`);
+          }
+        } else {
+          this.logger.log(`[EXPORT-CLIP] No source video found in library for path`);
+        }
+      } catch (err) {
+        this.logger.warn(`[EXPORT-CLIP] Could not find source video for linking: ${(err as Error).message}`);
+      }
+
+      // Generate clip filename
+      const originalFilename = path.basename(opts.videoPath);
+      const parentVideo = parentVideoId
+        ? this.databaseService.getVideoById(parentVideoId)
+        : null;
+
+      const clipFilename = this.clipExtractor.generateClipFilename(
+        originalFilename,
+        opts.startTime,
+        opts.endTime,
+        opts.category,
+        opts.description || opts.title,
+        parentVideo?.upload_date ?? undefined,
+      );
+      this.logger.log(`[EXPORT-CLIP] Generated filename: ${clipFilename}`);
+
+      // Determine output directory
+      let outputDir: string;
+      if (opts.customDirectory) {
+        outputDir = opts.customDirectory.replace(/[\\/]+$/, '');
+        this.logger.log(`[EXPORT-CLIP] Using custom output directory: ${outputDir}`);
+      } else {
+        const activeLibrary = this.libraryManager.getActiveLibrary();
+        if (!activeLibrary) {
+          this.logger.error(`[EXPORT-CLIP] FAILED: No active library`);
+          return { success: false, error: 'No active library' };
+        }
+        const weekFolder = this.getNearestSunday(new Date());
+        outputDir = path.join(activeLibrary.clipsFolderPath, weekFolder);
+        this.logger.log(`[EXPORT-CLIP] Using weekly folder: ${outputDir}`);
+      }
+
+      // Ensure output directory exists
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+        this.logger.log(`[EXPORT-CLIP] Created output directory`);
+      }
+
+      const outputPath = path.join(outputDir, clipFilename);
+      this.logger.log(`[EXPORT-CLIP] Full output path: ${outputPath}`);
+
+      // Emit initial progress
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 0, 'Starting export...');
+      this.updateTaskProgress(job.id, 0, 'Starting export...');
+      this.logger.log(`[EXPORT-CLIP] Starting FFmpeg extraction (reEncode=${opts.reEncode})...`);
+
+      // Extract the clip with progress
+      const extractionResult = await this.clipExtractor.extractClip({
+        videoPath: opts.videoPath,
+        startTime: opts.startTime,
+        endTime: opts.endTime,
+        outputPath,
+        reEncode: opts.reEncode,
+        quality: opts.quality || 'medium',
+        scale: opts.scale,
+        muteSections: opts.muteSections,
+        outputSuffix: opts.outputSuffix,
+        metadata: {
+          title: opts.title,
+          description: opts.description,
+          category: opts.category,
+        },
+        onProgress: (progress: number) => {
+          const message = `Exporting... ${progress}%`;
+          this.eventService.emitTaskProgress(taskId, 'export-clip', progress, message);
+          this.updateTaskProgress(job.id, progress, message);
+        },
+      });
+
+      if (!extractionResult.success) {
+        this.logger.error(`[EXPORT-CLIP] FFmpeg extraction FAILED: ${extractionResult.error}`);
+        return { success: false, error: extractionResult.error || 'Failed to extract clip' };
+      }
+
+      const finalOutputPath = extractionResult.outputPath || outputPath;
+      const fileSizeMB = extractionResult.fileSize ? (extractionResult.fileSize / 1024 / 1024).toFixed(2) : '?';
+      this.logger.log(`[EXPORT-CLIP] Extraction complete: ${finalOutputPath}`);
+      this.logger.log(`[EXPORT-CLIP] Duration: ${extractionResult.duration}s, Size: ${fileSizeMB} MB`);
+
+      // Auto-import the clip into the library
+      this.logger.log(`[EXPORT-CLIP] Auto-importing clip to library...`);
+      try {
+        const importResult = await this.fileScannerService.importVideos(
+          [finalOutputPath],
+          undefined,
+          parentVideoId,
+        );
+
+        if (importResult.imported.length > 0) {
+          const videoId = importResult.imported[0];
+          this.databaseService.updateLastProcessedDate(videoId);
+          this.logger.log(`[EXPORT-CLIP] Imported to library as video ID: ${videoId}${parentVideoId ? ` (child of ${parentVideoId})` : ''}`);
+        } else {
+          this.logger.warn(`[EXPORT-CLIP] Import returned no video IDs (skipped: ${importResult.skipped.length}, errors: ${importResult.errors.length})`);
+        }
+      } catch (importError) {
+        this.logger.error(`[EXPORT-CLIP] Failed to import exported clip: ${(importError as Error).message}`);
+      }
+
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 100, 'Export complete');
+      this.updateTaskProgress(job.id, 100, 'Export complete');
+      this.logger.log(`[EXPORT-CLIP] ========== Export complete ==========`);
+
+      return {
+        success: true,
+        data: {
+          outputPath: finalOutputPath,
+          duration: extractionResult.duration,
+          fileSize: extractionResult.fileSize,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`[EXPORT-CLIP] Unexpected error: ${(error as Error).message}`);
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Handle overwrite mode for export-clip: extract to temp, replace original, clear metadata
+   */
+  private async executeExportClipOverwrite(
+    opts: any,
+    taskId: string,
+  ): Promise<TaskResult> {
+    try {
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Looking up video ${opts.videoId}...`);
+      const video = this.databaseService.getVideoById(opts.videoId);
+      if (!video) {
+        this.logger.error(`[EXPORT-CLIP] [OVERWRITE] Video not found in database: ${opts.videoId}`);
+        return { success: false, error: 'Video not found in database' };
+      }
+
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Preserving original metadata`);
+      // Store original metadata to preserve after overwrite
+      const originalMetadata = {
+        uploadDate: video.upload_date,
+        downloadDate: video.download_date,
+        addedAt: video.added_at,
+        sourceUrl: video.source_url,
+        aiDescription: video.ai_description,
+        suggestedTitle: video.suggested_title,
+      };
+
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 0, 'Extracting to temp file...');
+      this.updateTaskProgress(taskId, 0, 'Extracting to temp file...');
+
+      // Create temp file
+      const tempDir = os.tmpdir();
+      const originalExt = path.extname(opts.videoPath);
+      const tempFilename = `clipchimp_temp_${Date.now()}${originalExt}`;
+      const tempPath = path.join(tempDir, tempFilename);
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Extracting to temp: ${tempPath}`);
+
+      // Extract clip to temp
+      const extractionResult = await this.clipExtractor.extractClip({
+        videoPath: opts.videoPath,
+        startTime: opts.startTime,
+        endTime: opts.endTime,
+        outputPath: tempPath,
+        reEncode: opts.reEncode || false,
+        quality: opts.quality || 'medium',
+        scale: opts.scale,
+        muteSections: opts.muteSections,
+        onProgress: (progress: number) => {
+          // Scale to 0-80% for extraction phase
+          const scaledProgress = Math.round(progress * 0.8);
+          const message = `Extracting... ${progress}%`;
+          this.eventService.emitTaskProgress(taskId, 'export-clip', scaledProgress, message);
+          this.updateTaskProgress(taskId, scaledProgress, message);
+        },
+      });
+
+      if (!extractionResult.success) {
+        this.logger.error(`[EXPORT-CLIP] [OVERWRITE] Extraction FAILED: ${extractionResult.error}`);
+        try { fs.unlinkSync(tempPath); } catch (_) {}
+        return { success: false, error: extractionResult.error || 'Failed to extract clip' };
+      }
+
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Extraction complete, replacing original...`);
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 85, 'Replacing original file...');
+      this.updateTaskProgress(taskId, 85, 'Replacing original file...');
+
+      // Delete original and copy temp
+      fs.unlinkSync(opts.videoPath);
+      fs.copyFileSync(tempPath, opts.videoPath);
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Original replaced`);
+
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Clearing metadata...`);
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 90, 'Clearing metadata...');
+      this.updateTaskProgress(taskId, 90, 'Clearing metadata...');
+
+      // Clear all metadata
+      this.databaseService.deleteTranscript(opts.videoId);
+      this.databaseService.deleteAnalysisSections(opts.videoId);
+      this.databaseService.deleteCustomMarkers(opts.videoId);
+      this.databaseService.deleteAnalysis(opts.videoId);
+
+      // Recalculate file hash
+      let newFileHash: string | null = null;
+      try {
+        const stats = fs.statSync(opts.videoPath);
+        newFileHash = await this.fileScannerService.quickHashFile(opts.videoPath, stats.size);
+      } catch (_) {}
+
+      // Update video record
+      const newDuration = extractionResult.duration || 0;
+      const db = (this.databaseService as any)['db'];
+      if (db) {
+        const nowIso = new Date().toISOString();
+        const updateFields = newFileHash
+          ? `duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, transcript_status = NULL, analysis_status = NULL, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`
+          : `duration_seconds = ?, file_size_bytes = ?, has_transcript = 0, has_analysis = 0, transcript_status = NULL, analysis_status = NULL, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`;
+
+        const params = newFileHash
+          ? [newDuration, extractionResult.fileSize || 0, newFileHash, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId]
+          : [newDuration, extractionResult.fileSize || 0, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId];
+
+        db.prepare(`UPDATE videos SET ${updateFields} WHERE id = ?`).run(...params);
+      }
+
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 100, 'Overwrite complete');
+      this.updateTaskProgress(taskId, 100, 'Overwrite complete');
+      this.logger.log(`[EXPORT-CLIP] [OVERWRITE] ========== Overwrite complete ==========`);
+
+      return {
+        success: true,
+        data: { outputPath: opts.videoPath, duration: newDuration, overwritten: true },
+      };
+    } catch (error) {
+      this.logger.error(`[EXPORT-CLIP] [OVERWRITE] Unexpected error: ${(error as Error).message}`);
+      return { success: false, error: (error as Error).message };
+    }
   }
 }

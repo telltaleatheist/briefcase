@@ -1,52 +1,42 @@
 <div class="dialog-overlay" (click)="onOverlayClick($event)">
-  <div class="dialog-content" (click)="$event.stopPropagation()">
-    <div class="dialog-header">
-      <h3>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
-        </svg>
-        Export Clips
-      </h3>
-      <button class="close-btn" (click)="cancel()">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 6L6 18M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
+  <div class="dialog-content" [class.queued]="exportQueued" (click)="$event.stopPropagation()">
+    @if (!exportQueued) {
+      <div class="dialog-header">
+        <h3>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Export Clips
+        </h3>
+        <button class="close-btn" (click)="cancel()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    }
 
     <div class="dialog-body">
-      <!-- Export Progress -->
-      @if (isExporting) {
-        <div class="export-progress">
-          <p class="progress-text">Exporting clip {{ currentClip }} of {{ totalClips }}...</p>
-          <div class="progress-bar">
-            <div class="progress-fill" [style.width.%]="exportProgress"></div>
-          </div>
-          @if (currentClipName) {
-            <p class="progress-detail">{{ currentClipName }}</p>
-          }
-        </div>
-      }
-
-      <!-- Export Complete -->
-      @if (exportComplete) {
-        <div class="export-complete">
-          <svg class="success-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <!-- Added to Queue Confirmation -->
+      @if (exportQueued) {
+        <div class="export-queued">
+          <svg class="queue-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
             <polyline points="22 4 12 14.01 9 11.01"/>
           </svg>
-          <h4>Export Complete!</h4>
-          <p>Successfully exported {{ successCount }} clips</p>
-          @if (failedCount > 0) {
-            <p class="error-text">Failed to export {{ failedCount }} clips</p>
-          }
+          <h4>Added to Export Queue</h4>
+          <p>{{ queuedJobCount }} clip{{ queuedJobCount !== 1 ? 's' : '' }} added to the processing queue.</p>
+          <div class="queue-actions">
+            <button class="dismiss-btn" (click)="dismiss()">Dismiss</button>
+            <button class="go-to-queue-btn" (click)="goToQueue()">Take Me There</button>
+          </div>
         </div>
       }
 
       <!-- Export Options and Selection -->
-      @if (!isExporting && !exportComplete) {
+      @if (!exportQueued) {
         <div class="export-options-wrapper">
           <!-- Output Location -->
           <div class="output-location">
@@ -176,12 +166,12 @@
       }
     </div>
 
-    <div class="dialog-footer">
-      <button class="cancel-btn" (click)="exportComplete ? closeDialog() : cancel()" [disabled]="isExporting">
-        {{ exportComplete ? 'Close' : 'Cancel' }}
+    <div class="dialog-footer" [class.hidden]="exportQueued">
+      <button class="cancel-btn" (click)="cancel()" [disabled]="isExporting">
+        Cancel
       </button>
 
-      @if (!exportComplete) {
+      @if (!exportQueued) {
         <div class="export-options">
           <label class="checkbox-option" [class.disabled]="isExporting || !canOverwriteOriginal()">
             <input
@@ -199,6 +189,16 @@
             <span class="checkmark"></span>
             <span class="option-label">Re-encode</span>
           </label>
+          @if (reEncode) {
+            <div class="quality-selector">
+              <label class="quality-label">Quality:</label>
+              <select [(ngModel)]="exportQuality" [disabled]="isExporting">
+                <option value="low">Low (smaller file)</option>
+                <option value="medium">Medium</option>
+                <option value="high">High (larger file)</option>
+              </select>
+            </div>
+          }
         </div>
         <button
           class="export-btn"

@@ -1,9 +1,10 @@
 import { Component, Input, Output, EventEmitter, OnInit, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
 import { TourService } from '../../services/tour.service';
-import { ExportQueueService, ExportJob } from '../../services/export-queue.service';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
 
@@ -59,7 +60,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 })
 export class ExportDialogComponent implements OnInit {
   @Input() data!: ExportDialogData;
-  @Output() close = new EventEmitter<{ exported: boolean }>();
+  @Output() close = new EventEmitter<{ exported: boolean; navigateToQueue?: boolean }>();
 
   // Selection state
   hasSelection = false;
@@ -71,6 +72,7 @@ export class ExportDialogComponent implements OnInit {
   // Export options
   outputDirectory: string | null = null;
   reEncode = true;
+  exportQuality: 'high' | 'medium' | 'low' = 'medium';
   overwriteOriginal = false;
   applyMutes = true;  // Whether to apply mute sections during export
   saveCopy = true;    // Save as copy with (censored) suffix
@@ -78,14 +80,9 @@ export class ExportDialogComponent implements OnInit {
   // Mute sections data
   muteSections: MuteSectionExport[] = [];
 
-  // Export progress
-  exportComplete = false;
-  currentClip = 0;
-  totalClips = 0;
-  exportProgress = 0;
-  currentClipName = '';
-  successCount = 0;
-  failedCount = 0;
+  // Queue confirmation state
+  exportQueued = false;
+  queuedJobCount = 0;
 
   // Sections list configuration
   sections: ExportSection[] = [];
@@ -102,8 +99,10 @@ export class ExportDialogComponent implements OnInit {
   // Map section IDs to ExportSection for lookup
   private sectionMap = new Map<string, ExportSection>();
 
+  private readonly API_BASE = 'http://localhost:3000/api';
+
   private tourService = inject(TourService);
-  private exportQueue = inject(ExportQueueService);
+  private http = inject(HttpClient);
   private notificationService = inject(NotificationService);
 
   ngOnInit() {
@@ -485,9 +484,9 @@ export class ExportDialogComponent implements OnInit {
   }
 
   /**
-   * Queue multiple export jobs and close the dialog
+   * Queue multiple export jobs via backend queue and show confirmation
    */
-  private queueExports(sections: ExportSection[]) {
+  private async queueExports(sections: ExportSection[]) {
     // Build mute sections array for the request if applying mutes
     const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
       ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
@@ -498,38 +497,48 @@ export class ExportDialogComponent implements OnInit {
       ? ' (censored)'
       : undefined;
 
-    const jobs: Omit<ExportJob, 'id' | 'status' | 'progress'>[] = sections.map(section => {
+    const jobs = sections.map(section => {
       const isFullVideo = section.id === '__full_video__';
       return {
-        videoId: this.data.videoId,
         videoPath: this.data.videoPath,
-        videoTitle: this.data.videoTitle,
-        sectionDescription: section.description || 'Unnamed section',
-        startTime: isFullVideo ? null : section.startSeconds,
-        endTime: isFullVideo ? null : section.endSeconds,
-        category: section.category,
-        customDirectory: this.outputDirectory || undefined,
-        reEncode: this.reEncode,
-        muteSections: muteSectionsForRequest,
-        outputSuffix: outputSuffix,
+        videoId: this.data.videoId,
+        displayName: `Export: ${section.description || 'Unnamed'}`,
+        tasks: [{
+          type: 'export-clip',
+          options: {
+            videoPath: this.data.videoPath,
+            startTime: isFullVideo ? null : section.startSeconds,
+            endTime: isFullVideo ? null : section.endSeconds,
+            title: section.description,
+            description: section.description,
+            category: section.category,
+            customDirectory: this.outputDirectory || undefined,
+            reEncode: this.reEncode,
+            quality: this.reEncode ? this.exportQuality : undefined,
+            muteSections: muteSectionsForRequest,
+            outputSuffix: outputSuffix,
+          }
+        }]
       };
     });
 
-    this.exportQueue.addJobs(jobs);
+    try {
+      await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs })
+      );
 
-    // Show notification and close dialog
-    const count = sections.length;
-    this.notificationService.info(
-      'Export Queued',
-      `${count} clip${count !== 1 ? 's' : ''} added to export queue`
-    );
-    this.close.emit({ exported: true });
+      this.queuedJobCount = sections.length;
+      this.exportQueued = true;
+    } catch (error) {
+      console.error('Failed to submit export jobs:', error);
+      this.notificationService.error('Export Failed', 'Failed to submit export jobs to queue');
+    }
   }
 
   /**
-   * Queue an overwrite job and close the dialog
+   * Queue an overwrite job via backend queue and show confirmation
    */
-  private queueOverwrite(section: ExportSection) {
+  private async queueOverwrite(section: ExportSection) {
     const isFullVideo = section.id === '__full_video__';
 
     // Build mute sections array for the request if applying mutes
@@ -537,23 +546,36 @@ export class ExportDialogComponent implements OnInit {
       ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
       : undefined;
 
-    this.exportQueue.addOverwriteJob({
-      videoId: this.data.videoId,
+    const jobs = [{
       videoPath: this.data.videoPath,
-      videoTitle: this.data.videoTitle,
-      sectionDescription: 'Overwriting original file',
-      startTime: isFullVideo ? null : section.startSeconds,
-      endTime: isFullVideo ? null : section.endSeconds,
-      reEncode: this.reEncode,
-      muteSections: muteSectionsForRequest,
-    });
+      videoId: this.data.videoId,
+      displayName: 'Export: Overwriting original',
+      tasks: [{
+        type: 'export-clip',
+        options: {
+          videoPath: this.data.videoPath,
+          startTime: isFullVideo ? null : section.startSeconds,
+          endTime: isFullVideo ? null : section.endSeconds,
+          reEncode: this.reEncode,
+          quality: this.reEncode ? this.exportQuality : undefined,
+          muteSections: muteSectionsForRequest,
+          isOverwrite: true,
+          videoId: this.data.videoId,
+        }
+      }]
+    }];
 
-    // Show notification and close dialog
-    this.notificationService.info(
-      'Export Queued',
-      'Overwrite job added to export queue'
-    );
-    this.close.emit({ exported: true });
+    try {
+      await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs })
+      );
+
+      this.queuedJobCount = 1;
+      this.exportQueued = true;
+    } catch (error) {
+      console.error('Failed to submit overwrite job:', error);
+      this.notificationService.error('Export Failed', 'Failed to submit overwrite job to queue');
+    }
   }
 
   private async confirmOverwrite(): Promise<boolean> {
@@ -571,7 +593,15 @@ export class ExportDialogComponent implements OnInit {
     });
   }
 
+  dismiss() {
+    this.close.emit({ exported: true });
+  }
+
+  goToQueue() {
+    this.close.emit({ exported: true, navigateToQueue: true });
+  }
+
   closeDialog() {
-    this.close.emit({ exported: this.exportComplete });
+    this.close.emit({ exported: this.exportQueued });
   }
 }
