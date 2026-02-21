@@ -64,6 +64,7 @@ interface ElectronAPI {
   moveTabToGroup: (tabData: any, targetGroupNumber: number) => Promise<boolean>;
   createGroupWithTab: (tabData: any) => Promise<number>;
   consolidateGroups: () => Promise<{ success: boolean }>;
+  navigateToQueue: () => Promise<{ success: boolean }>;
 }
 
 // Get resource path information
@@ -144,7 +145,8 @@ contextBridge.exposeInMainWorld('electron', {
   getCurrentGroupNumber: () => ipcRenderer.invoke('get-current-group-number'),
   moveTabToGroup: (tabData: any, targetGroupNumber: number) => ipcRenderer.invoke('move-tab-to-group', tabData, targetGroupNumber),
   createGroupWithTab: (tabData: any) => ipcRenderer.invoke('create-group-with-tab', tabData),
-  consolidateGroups: () => ipcRenderer.invoke('consolidate-groups')
+  consolidateGroups: () => ipcRenderer.invoke('consolidate-groups'),
+  navigateToQueue: () => ipcRenderer.invoke('navigate-to-queue')
 } as ElectronAPI);
 
 // Expose setup progress listener to window.electronAPI
@@ -182,6 +184,11 @@ ipcRenderer.on('request-all-tabs', (_, targetGroupNumber: number) => {
 // Listen for restore-tab-state events (when a new window is created with existing tab data)
 ipcRenderer.on('restore-tab-state', (_, tabData: any) => {
   window.dispatchEvent(new CustomEvent('electron-restore-tab-state', { detail: tabData }));
+});
+
+// Listen for navigate-to-queue events (from popout editor → main window)
+ipcRenderer.on('navigate-to-queue', () => {
+  window.dispatchEvent(new CustomEvent('electron-navigate-to-queue'));
 });
 
 // For TypeScript - declare the API on the window object

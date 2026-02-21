@@ -704,6 +704,14 @@ export class QueueService implements OnDestroy {
     }
   }
 
+  /**
+   * Public method to refresh queue state from backend
+   * Used when navigating to the queue tab to pick up export-clip jobs
+   */
+  refreshFromBackend(): void {
+    this.restoreFromBackend();
+  }
+
   // ==================== WEBSOCKET HANDLERS ====================
 
   private setupWebSocketHandlers(): void {
@@ -877,7 +885,8 @@ export class QueueService implements OnDestroy {
       'normalize': 'normalize-audio',
       'normalize-audio': 'normalize-audio',
       'transcribe': 'transcribe',
-      'analyze': 'ai-analyze'
+      'analyze': 'ai-analyze',
+      'export-clip': 'export-clip'
     };
 
     return mapping[backendType] || 'download-import';
@@ -1044,6 +1053,14 @@ export class QueueService implements OnDestroy {
           model: transcribeTask.options?.['model'] || 'base',
           language: transcribeTask.options?.['language']
         }
+      });
+    }
+
+    const exportClipTask = tasks.find(t => t.type === 'export-clip');
+    if (exportClipTask) {
+      backendTasks.push({
+        type: 'export-clip' as any,
+        options: exportClipTask.options
       });
     }
 

@@ -513,4 +513,15 @@ function setupWindowHandlers(): void {
     windowServiceRef.consolidateGroups();
     return { success: true };
   });
+
+  // Navigate to queue tab (from popout editor → main window)
+  ipcMain.handle('navigate-to-queue', async () => {
+    const mainWindow = windowServiceRef.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      mainWindow.webContents.send('navigate-to-queue');
+    }
+    return { success: true };
+  });
 }

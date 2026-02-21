@@ -16,6 +16,7 @@ export const TASK_LABELS: Record<string, string> = {
   'process-video': 'Processing video...',
   'transcribe': 'Transcribing...',
   'analyze': 'Analyzing...',
+  'export-clip': 'Exporting clip...',
 };
 
 /**

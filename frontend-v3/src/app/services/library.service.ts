@@ -27,7 +27,8 @@ export type BackendTaskType =
   | 'normalize-audio'
   | 'process-video'
   | 'transcribe'
-  | 'analyze';
+  | 'analyze'
+  | 'export-clip';
 
 export interface BackendTask {
   type: BackendTaskType;

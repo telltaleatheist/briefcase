@@ -111,6 +111,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Track videos with pending renames to avoid race conditions
   private pendingRenames = new Set<string>();
 
+  // Navigate-to-queue event handler reference (for cleanup)
+  private navigateToQueueHandler?: () => void;
+
   // Track videos pending analysis (waiting for AI wizard to complete)
   private pendingAnalysisVideos: VideoItem[] = [];
 
@@ -348,6 +351,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Subscribe to websocket events (for library refresh only - queue updates handled by QueueService)
     this.websocketService.connect();
 
+    // Listen for navigate-to-queue events (from popout editor or same-window editor)
+    this.navigateToQueueHandler = () => {
+      this.queueService.refreshFromBackend();
+      this.setActiveTab('queue');
+    };
+    window.addEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
+    window.addEventListener('navigate-to-queue', this.navigateToQueueHandler);
+
     // Check for first-time setup with error handling
     try {
       await this.checkFirstTimeSetup();
@@ -363,7 +374,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
       // Refresh library when a task completes
       // Skip if there's a pending rename for this video to avoid race conditions
-      const refreshTaskTypes = ['analyze', 'transcribe', 'import', 'download', 'fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      const refreshTaskTypes = ['analyze', 'transcribe', 'import', 'download', 'fix-aspect-ratio', 'normalize-audio', 'process-video', 'export-clip'];
       if (refreshTaskTypes.includes(event.type)) {
         if (event.videoId && this.pendingRenames.has(event.videoId)) {
           console.log('Skipping library refresh - pending rename for videoId:', event.videoId);
@@ -1420,6 +1431,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.websocketService.disconnect();
+
+    if (this.navigateToQueueHandler) {
+      window.removeEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
+      window.removeEventListener('navigate-to-queue', this.navigateToQueueHandler);
+    }
   }
 
   loadLibrary() {
@@ -2744,10 +2760,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     if (itemIds.length === 0) return;
 
     try {
-      // Cancel each item
+      // Cancel each item via queue API
       for (const itemId of itemIds) {
         await firstValueFrom(
-          this.http.post(`http://localhost:3000/api/processing/cancel/${itemId}`, {})
+          this.http.post(`http://localhost:3000/api/queue/job/${itemId}/cancel`, {})
         );
       }
 
