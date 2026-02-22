@@ -236,15 +236,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   /**
    * Add a job to the queue
    */
-  addJob(job: Omit<QueueJob, 'id' | 'createdAt' | 'status' | 'progress' | 'currentPhase' | 'currentTaskIndex'>): string {
+  addJob(job: Omit<QueueJob, 'id' | 'createdAt' | 'status' | 'progress' | 'currentPhase' | 'currentTaskIndex'>, options?: { paused?: boolean }): string {
     const jobId = uuidv4();
+    const paused = options?.paused ?? false;
 
     const fullJob: QueueJob = {
       ...job,
       id: jobId,
-      status: 'pending',
+      status: paused ? 'paused' : 'pending',
       progress: 0,
-      currentPhase: 'Waiting in queue...',
+      currentPhase: paused ? 'Paused — waiting to start' : 'Waiting in queue...',
       currentTaskIndex: 0,
       createdAt: new Date(),
     };
@@ -252,12 +253,34 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Add to unified queue
     this.jobQueue.set(jobId, fullJob);
 
-    // Start processing if not already running
-    setImmediate(() => this.processQueue());
+    // Start processing if not already running (skip if paused)
+    if (!paused) {
+      setImmediate(() => this.processQueue());
+    }
 
-    this.logger.log(`Added job ${jobId} with ${job.tasks.length} tasks`);
+    this.logger.log(`Added job ${jobId} with ${job.tasks.length} tasks${paused ? ' (paused)' : ''}`);
 
     return jobId;
+  }
+
+  /**
+   * Start one or more paused jobs — sets status to 'pending' and kicks the queue
+   */
+  startJobs(jobIds: string[]): number {
+    let startedCount = 0;
+    for (const jobId of jobIds) {
+      const job = this.jobQueue.get(jobId);
+      if (job && job.status === 'paused') {
+        job.status = 'pending';
+        job.currentPhase = 'Waiting in queue...';
+        startedCount++;
+        this.logger.log(`Started paused job ${jobId}`);
+      }
+    }
+    if (startedCount > 0) {
+      setImmediate(() => this.processQueue());
+    }
+    return startedCount;
   }
 
   /**
@@ -372,6 +395,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       },
       queue: {
         total: jobs.length,
+        paused: jobs.filter(j => j.status === 'paused').length,
         pending: jobs.filter(j => j.status === 'pending').length,
         processing: jobs.filter(j => j.status === 'processing').length,
         completed: jobs.filter(j => j.status === 'completed').length,
@@ -985,6 +1009,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.logger.log(`[EXPORT-CLIP] Title: ${opts?.title || opts?.description || '(none)'}`);
     this.logger.log(`[EXPORT-CLIP] Category: ${opts?.category || '(none)'}`);
     this.logger.log(`[EXPORT-CLIP] Custom directory: ${opts?.customDirectory || '(default)'}`);
+    this.logger.log(`[EXPORT-CLIP] Scale: ${opts?.scale || '1.0 (none)'}`);
     this.logger.log(`[EXPORT-CLIP] Mute sections: ${opts?.muteSections?.length || 0}`);
     this.logger.log(`[EXPORT-CLIP] Output suffix: ${opts?.outputSuffix || '(none)'}`);
     this.logger.log(`[EXPORT-CLIP] Overwrite mode: ${opts?.isOverwrite || false}`);

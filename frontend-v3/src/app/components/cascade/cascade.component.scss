@@ -342,6 +342,14 @@ cdk-virtual-scroll-viewport.library-content {
       background: var(--bg-hover);
     }
   }
+
+  &.in-tab {
+    border-left: 3px solid #22c55e;
+
+    .selection-indicator {
+      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3), 0 0 8px rgba(34, 197, 94, 0.4);
+    }
+  }
 }
 
 // Selection/Status Indicator

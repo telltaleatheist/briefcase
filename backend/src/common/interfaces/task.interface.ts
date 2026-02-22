@@ -190,7 +190,7 @@ export interface QueueJob {
   libraryId?: string; // Target library for import (uses active library if not specified)
   tasks: Task[];
   currentTaskIndex: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'paused' | 'processing' | 'completed' | 'failed' | 'cancelled';
   progress: number; // 0-100
   currentPhase: string;
   error?: string;

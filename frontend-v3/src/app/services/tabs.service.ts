@@ -33,6 +33,9 @@ export class TabsService {
   // Cached tabs list (signal)
   tabs = signal<VideoTab[]>([]);
 
+  // Set of video IDs that are in at least one tab
+  tabbedVideoIds = signal<Set<string>>(new Set());
+
   // Computed: Most recently created tabs (for context menu)
   recentTabs = computed(() => {
     const allTabs = this.tabs();
@@ -48,12 +51,29 @@ export class TabsService {
    * Load all tabs and update the cache
    */
   loadTabs(): Observable<VideoTab[]> {
+    // Also refresh tabbed video IDs whenever tabs are loaded
+    this.refreshTabbedVideoIds();
+
     return this.http.get<VideoTab[]>(`${this.baseUrl}/tabs`).pipe(
       map(tabs => {
         this.tabs.set(tabs);
         return tabs;
       })
     );
+  }
+
+  /**
+   * Fetch all video IDs that are in at least one tab
+   */
+  refreshTabbedVideoIds(): void {
+    this.http.get<{ success: boolean; videoIds: string[] }>(`${this.baseUrl}/tabs/tabbed-video-ids`).subscribe({
+      next: (result) => {
+        if (result.success) {
+          this.tabbedVideoIds.set(new Set(result.videoIds));
+        }
+      },
+      error: (err) => console.error('Failed to fetch tabbed video IDs:', err)
+    });
   }
 
   /**

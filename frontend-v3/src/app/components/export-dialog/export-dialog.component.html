@@ -26,10 +26,11 @@
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
             <polyline points="22 4 12 14.01 9 11.01"/>
           </svg>
-          <h4>Added to Export Queue</h4>
-          <p>{{ queuedJobCount }} clip{{ queuedJobCount !== 1 ? 's' : '' }} added to the processing queue.</p>
+          <h4>Ready to Export</h4>
+          <p>{{ queuedJobCount }} clip{{ queuedJobCount !== 1 ? 's' : '' }} queued and waiting to start.</p>
           <div class="queue-actions">
-            <button class="dismiss-btn" (click)="dismiss()">Dismiss</button>
+            <button class="cancel-queue-btn" (click)="cancelQueue()">Cancel</button>
+            <button class="start-btn" (click)="startQueue()">Start</button>
             <button class="go-to-queue-btn" (click)="goToQueue()">Take Me There</button>
           </div>
         </div>
@@ -181,15 +182,19 @@
             <span class="checkmark"></span>
             <span class="option-label">Overwrite Original</span>
           </label>
-          <label class="checkbox-option" [class.disabled]="isExporting">
+          <label class="checkbox-option" [class.disabled]="isExporting || reEncodeRequired">
             <input
               type="checkbox"
               [(ngModel)]="reEncode"
-              [disabled]="isExporting">
+              [disabled]="isExporting || reEncodeRequired"
+              [checked]="reEncode || reEncodeRequired">
             <span class="checkmark"></span>
             <span class="option-label">Re-encode</span>
+            @if (reEncodeRequired) {
+              <span class="forced-hint">(required)</span>
+            }
           </label>
-          @if (reEncode) {
+          @if (reEncode || reEncodeRequired) {
             <div class="quality-selector">
               <label class="quality-label">Quality:</label>
               <select [(ngModel)]="exportQuality" [disabled]="isExporting">
