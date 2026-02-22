@@ -739,9 +739,9 @@ export class FileScannerService {
           } else {
             // File is directly in clips root - move to week folder
             this.logger.log(`Video in clips root, moving to week folder: ${fullPath}`);
-            // Use upload date from filename for folder organization, fall back to filesystem date
-            const folderDate = uploadDate ? new Date(uploadDate + 'T12:00:00') : fileCreationDate;
-            const weekFolder = this.getNearestSunday(folderDate);
+            // Always use filesystem date (when user downloaded/created the file) for folder organization
+            // The upload date from the filename is for content dating only, not folder placement
+            const weekFolder = this.getNearestSunday(fileCreationDate);
             const weekFolderPath = path.join(clipsRoot, weekFolder);
 
             if (!fs.existsSync(weekFolderPath)) {
@@ -757,11 +757,11 @@ export class FileScannerService {
           }
         } else {
           // File is outside clips folder - copy to weekly folder
-          // Use upload date from filename for folder organization, fall back to filesystem date
-          const folderDate = uploadDate ? new Date(uploadDate + 'T12:00:00') : fileCreationDate;
-          const weekFolder = this.getNearestSunday(folderDate);
+          // Always use filesystem date (when user downloaded/created the file) for folder organization
+          // The upload date from the filename is for content dating only, not folder placement
+          const weekFolder = this.getNearestSunday(fileCreationDate);
 
-          this.logger.log(`Using week folder based on ${uploadDate ? 'upload date from filename' : 'filesystem date'}: ${weekFolder}`);
+          this.logger.log(`Using week folder based on filesystem date (${fileCreationDate.toISOString()}): ${weekFolder}`);
 
           const weekFolderPath = path.join(clipsRoot, weekFolder);
 

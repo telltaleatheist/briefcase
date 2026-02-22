@@ -57,6 +57,7 @@
               [class.has-children]="hasChildren(item.video) || hasVideoChildren(item.video)"
               [class.is-ghost]="item.video.isGhost"
               [class.is-child]="isVideoChild(item.video)"
+              [class.in-tab]="isInTab(item.video)"
               (click)="handleVideoClick(item.itemId, item.video, $event)"
               (dblclick)="handleVideoDoubleClick(item.video, $event)"
               (contextmenu)="onContextMenu(item.itemId, item.video, $event)"

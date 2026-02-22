@@ -74,6 +74,7 @@ export class QueueController {
         libraryId?: string;
         tasks: Task[];
       }>;
+      paused?: boolean;
     },
   ) {
     if (!body.jobs || body.jobs.length === 0) {
@@ -90,14 +91,14 @@ export class QueueController {
         displayName: job.displayName,
         libraryId: job.libraryId,
         tasks: job.tasks,
-      });
+      }, { paused: body.paused });
       jobIds.push(jobId);
     }
 
     return {
       success: true,
       jobIds,
-      message: `${jobIds.length} jobs added to queue`,
+      message: `${jobIds.length} jobs added to queue${body.paused ? ' (paused)' : ''}`,
     };
   }
 
@@ -183,6 +184,51 @@ export class QueueController {
     return {
       success: true,
       message: 'Job cancelled',
+    };
+  }
+
+  /**
+   * Start paused jobs
+   * POST /queue/jobs/start
+   * Body: { jobIds: string[] }
+   */
+  @Post('jobs/start')
+  async startJobs(@Body() body: { jobIds: string[] }) {
+    if (!body.jobIds || body.jobIds.length === 0) {
+      throw new HttpException('At least one job ID is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const startedCount = this.queueManager.startJobs(body.jobIds);
+
+    return {
+      success: true,
+      startedCount,
+      message: `${startedCount} of ${body.jobIds.length} jobs started`,
+    };
+  }
+
+  /**
+   * Delete multiple jobs at once
+   * POST /queue/jobs/delete
+   * Body: { jobIds: string[] }
+   */
+  @Post('jobs/delete')
+  async deleteBulkJobs(@Body() body: { jobIds: string[] }) {
+    if (!body.jobIds || body.jobIds.length === 0) {
+      throw new HttpException('At least one job ID is required', HttpStatus.BAD_REQUEST);
+    }
+
+    let deletedCount = 0;
+    for (const jobId of body.jobIds) {
+      if (this.queueManager.deleteJob(jobId)) {
+        deletedCount++;
+      }
+    }
+
+    return {
+      success: true,
+      deletedCount,
+      message: `${deletedCount} of ${body.jobIds.length} jobs deleted`,
     };
   }
 

@@ -32,6 +32,7 @@ export interface ExportDialogData {
   videoId: string;
   videoPath?: string | null;  // Optional - backend can look it up by videoId if missing
   videoTitle: string;
+  videoScale?: number;  // Video scale factor (1.0 = no scaling)
 }
 
 // Category colors for consistent styling
@@ -80,9 +81,17 @@ export class ExportDialogComponent implements OnInit {
   // Mute sections data
   muteSections: MuteSectionExport[] = [];
 
+  /** Re-encode is required when scale or mutes are applied (stream copy can't apply filters) */
+  get reEncodeRequired(): boolean {
+    const hasScale = this.data?.videoScale != null && this.data.videoScale !== 1.0;
+    const hasMutesToApply = this.applyMutes && this.hasMuteSections();
+    return hasScale || hasMutesToApply;
+  }
+
   // Queue confirmation state
   exportQueued = false;
   queuedJobCount = 0;
+  queuedJobIds: string[] = [];
 
   // Sections list configuration
   sections: ExportSection[] = [];
@@ -114,7 +123,7 @@ export class ExportDialogComponent implements OnInit {
     cascadeSections.push({
       id: '__full_video__',
       category: 'Export Changes',
-      description: 'Export entire video with changes (scale, etc.)',
+      description: 'Export with changes',
       startSeconds: 0,
       endSeconds: Number.MAX_SAFE_INTEGER, // Will be replaced with actual duration in backend
       timeRange: 'Full Video',
@@ -497,6 +506,11 @@ export class ExportDialogComponent implements OnInit {
       ? ' (censored)'
       : undefined;
 
+    // Scale and mutes require re-encoding
+    const hasScale = this.data.videoScale && this.data.videoScale !== 1.0;
+    const hasMutesToApply = !!muteSectionsForRequest;
+    const needsReEncode = this.reEncode || hasScale || hasMutesToApply;
+
     const jobs = sections.map(section => {
       const isFullVideo = section.id === '__full_video__';
       return {
@@ -513,8 +527,9 @@ export class ExportDialogComponent implements OnInit {
             description: section.description,
             category: section.category,
             customDirectory: this.outputDirectory || undefined,
-            reEncode: this.reEncode,
-            quality: this.reEncode ? this.exportQuality : undefined,
+            reEncode: needsReEncode,
+            quality: needsReEncode ? this.exportQuality : undefined,
+            scale: hasScale ? this.data.videoScale : undefined,
             muteSections: muteSectionsForRequest,
             outputSuffix: outputSuffix,
           }
@@ -523,10 +538,11 @@ export class ExportDialogComponent implements OnInit {
     });
 
     try {
-      await firstValueFrom(
-        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs })
+      const result = await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs, paused: true })
       );
 
+      this.queuedJobIds = result.jobIds || [];
       this.queuedJobCount = sections.length;
       this.exportQueued = true;
     } catch (error) {
@@ -546,6 +562,11 @@ export class ExportDialogComponent implements OnInit {
       ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
       : undefined;
 
+    // Scale and mutes require re-encoding
+    const hasScale = this.data.videoScale && this.data.videoScale !== 1.0;
+    const hasMutesToApply = !!muteSectionsForRequest;
+    const needsReEncode = this.reEncode || hasScale || hasMutesToApply;
+
     const jobs = [{
       videoPath: this.data.videoPath,
       videoId: this.data.videoId,
@@ -556,8 +577,9 @@ export class ExportDialogComponent implements OnInit {
           videoPath: this.data.videoPath,
           startTime: isFullVideo ? null : section.startSeconds,
           endTime: isFullVideo ? null : section.endSeconds,
-          reEncode: this.reEncode,
-          quality: this.reEncode ? this.exportQuality : undefined,
+          reEncode: needsReEncode,
+          quality: needsReEncode ? this.exportQuality : undefined,
+          scale: hasScale ? this.data.videoScale : undefined,
           muteSections: muteSectionsForRequest,
           isOverwrite: true,
           videoId: this.data.videoId,
@@ -566,10 +588,11 @@ export class ExportDialogComponent implements OnInit {
     }];
 
     try {
-      await firstValueFrom(
-        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs })
+      const result = await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs, paused: true })
       );
 
+      this.queuedJobIds = result.jobIds || [];
       this.queuedJobCount = 1;
       this.exportQueued = true;
     } catch (error) {
@@ -593,8 +616,37 @@ export class ExportDialogComponent implements OnInit {
     });
   }
 
-  dismiss() {
+  /**
+   * Start the paused export jobs and close the dialog
+   */
+  async startQueue() {
+    if (this.queuedJobIds.length > 0) {
+      try {
+        await firstValueFrom(
+          this.http.post<any>(`${this.API_BASE}/queue/jobs/start`, { jobIds: this.queuedJobIds })
+        );
+      } catch (error) {
+        console.error('Failed to start export jobs:', error);
+        this.notificationService.error('Error', 'Failed to start export jobs');
+      }
+    }
     this.close.emit({ exported: true });
+  }
+
+  /**
+   * Cancel and remove the paused export jobs from the queue
+   */
+  async cancelQueue() {
+    if (this.queuedJobIds.length > 0) {
+      try {
+        await firstValueFrom(
+          this.http.post<any>(`${this.API_BASE}/queue/jobs/delete`, { jobIds: this.queuedJobIds })
+        );
+      } catch (error) {
+        console.error('Failed to cancel export jobs:', error);
+      }
+    }
+    this.close.emit({ exported: false });
   }
 
   goToQueue() {

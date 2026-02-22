@@ -36,6 +36,24 @@ export class TabsController {
   }
 
   /**
+   * GET /api/tabs/tabbed-video-ids
+   * Get all video IDs that are in at least one tab
+   */
+  @Get('tabbed-video-ids')
+  getTabbedVideoIds() {
+    try {
+      const videoIds = this.databaseService.getAllTabbedVideoIds();
+      return { success: true, videoIds };
+    } catch (error: any) {
+      this.logger.error(`Failed to get tabbed video IDs: ${error?.message}`);
+      throw new HttpException(
+        error?.message || 'Failed to get tabbed video IDs',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /**
    * GET /api/tabs/:id
    * Get a single tab by ID
    */

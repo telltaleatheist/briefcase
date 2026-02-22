@@ -5135,6 +5135,17 @@ export class DatabaseService {
     return stmt.all(videoId) as any[];
   }
 
+  /**
+   * Get all video IDs that are in at least one tab
+   */
+  getAllTabbedVideoIds(): string[] {
+    const db = this.ensureInitialized();
+    const stmt = db.prepare(`
+      SELECT DISTINCT video_id FROM video_tab_items WHERE video_id IS NOT NULL
+    `);
+    return (stmt.all() as any[]).map(row => row.video_id);
+  }
+
   // =====================================================
   // CUSTOM INSTRUCTIONS HISTORY
   // =====================================================

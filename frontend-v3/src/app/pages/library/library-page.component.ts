@@ -117,6 +117,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Track videos pending analysis (waiting for AI wizard to complete)
   private pendingAnalysisVideos: VideoItem[] = [];
 
+  // Tabbed video IDs - local signal synced from TabsService for OnPush cascade @Input
+  tabbedVideoIds = signal<Set<string>>(new Set());
+
   // Drag and drop state
   isDraggingOver = signal(false);
 
@@ -339,6 +342,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     effect(() => {
       const completed = this.queueService.completedJobs();
       this.completedQueue.set(completed.map(job => this.convertQueueJobToProcessingItem(job)));
+    }, { allowSignalWrites: true });
+
+    // Sync tabbed video IDs from TabsService → local signal → cascade @Input
+    effect(() => {
+      const ids = this.tabsService.tabbedVideoIds();
+      this.tabbedVideoIds.set(ids);
     }, { allowSignalWrites: true });
   }
 
@@ -1814,6 +1823,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
         break;
 
+      case 'removeFromParent':
+        this.removeFromParent(videosToProcess[0]);
+        break;
+
+      case 'removeChildren':
+        this.removeChildren(videosToProcess[0]);
+        break;
+
       default:
         // Check for delete:mode pattern
         if (action.startsWith('delete:')) {
@@ -2972,22 +2989,57 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const totalCount = result.totalCount || videoIds.length;
       const alreadyInTab = totalCount - addedCount;
 
-      let message = '';
-      if (addedCount > 0 && alreadyInTab > 0) {
-        message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}". ${alreadyInTab} already in tab.`;
-      } else if (addedCount > 0) {
-        message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}"`;
-      } else {
-        message = `All videos already in "${tab.name}"`;
+      // Only show notification if something was actually added
+      if (addedCount > 0) {
+        const message = alreadyInTab > 0
+          ? `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}". ${alreadyInTab} already in tab.`
+          : `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}"`;
+        this.notificationService.success('Videos Added to Tab', message);
       }
-
-      this.notificationService.success('Videos Added to Tab', message);
     } catch (error: any) {
       console.error('Failed to add videos to tab:', error);
       this.notificationService.error(
         'Failed to Add to Tab',
         error?.message || 'An error occurred while adding videos to the tab'
       );
+    }
+  }
+
+  /**
+   * Remove a child video from its parent(s)
+   */
+  private async removeFromParent(video: VideoItem) {
+    if (!video.parentIds || video.parentIds.length === 0) return;
+
+    try {
+      for (const parentId of video.parentIds) {
+        await firstValueFrom(
+          this.http.post(`http://localhost:3000/api/database/videos/${parentId}/remove-child/${video.id}`, {})
+        );
+      }
+      this.notificationService.success('Removed', `"${video.name}" removed from parent`);
+      this.loadLibrary();
+    } catch (error: any) {
+      console.error('Failed to remove from parent:', error);
+      this.notificationService.error('Error', 'Failed to remove from parent');
+    }
+  }
+
+  /**
+   * Remove all children from a parent video
+   */
+  private async removeChildren(video: VideoItem) {
+    if (!video.childIds || video.childIds.length === 0) return;
+
+    try {
+      await firstValueFrom(
+        this.http.post(`http://localhost:3000/api/database/videos/${video.id}/remove-all-children`, {})
+      );
+      this.notificationService.success('Removed', `All children removed from "${video.name}"`);
+      this.loadLibrary();
+    } catch (error: any) {
+      console.error('Failed to remove children:', error);
+      this.notificationService.error('Error', 'Failed to remove children');
     }
   }
 }

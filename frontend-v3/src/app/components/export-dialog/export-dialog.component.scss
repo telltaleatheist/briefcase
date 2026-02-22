@@ -304,7 +304,7 @@
     display: flex;
     gap: 12px;
 
-    .dismiss-btn {
+    .cancel-queue-btn {
       padding: 8px 20px;
       font-size: 13px;
       background: var(--bg-tertiary, #333);
@@ -315,6 +315,23 @@
 
       &:hover {
         background: var(--bg-card, #3a3a3a);
+        border-color: #dc2626;
+        color: #dc2626;
+      }
+    }
+
+    .start-btn {
+      padding: 8px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      background: #22c55e;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+
+      &:hover {
+        background: #16a34a;
       }
     }
 
@@ -960,6 +977,12 @@
     }
 
     .option-label {
+      white-space: nowrap;
+    }
+
+    .forced-hint {
+      font-size: 10px;
+      color: var(--text-muted, #888);
       white-space: nowrap;
     }
   }

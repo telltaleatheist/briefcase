@@ -283,6 +283,9 @@ export class CascadeComponent {
   private initialized = false;
   private lastLibraryId: string | null = null;
 
+  // Set of video IDs that are in at least one tab (passed from parent for OnPush compatibility)
+  @Input() tabbedVideoIds: Set<string> = new Set();
+
   constructor() {
     // Load tabs for context menu only when library is available
     // Also reload tabs when library changes
@@ -523,6 +526,24 @@ export class CascadeComponent {
     // Processing actions
     actions.push({ label: `Run Analysis${countSuffix}`, icon: '🧠', action: 'analyze' });
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
+
+    // Parent/child relationship actions (single-select only)
+    if (count <= 1 && video) {
+      const isChild = video.parentIds && video.parentIds.length > 0;
+      const isParent = video.childIds && video.childIds.length > 0;
+
+      if (isChild || isParent) {
+        actions.push({ label: '', icon: '', action: '', divider: true });
+      }
+
+      if (isChild) {
+        actions.push({ label: 'Remove from Parent', icon: '🔗', action: 'removeFromParent' });
+      }
+
+      if (isParent) {
+        actions.push({ label: 'Remove Children', icon: '🔗', action: 'removeChildren' });
+      }
+    }
 
     // Final divider and delete/remove
     actions.push({ label: '', icon: '', action: '', divider: true });
@@ -1995,6 +2016,13 @@ export class CascadeComponent {
    */
   isVideoChild(video: VideoItem): boolean {
     return !!(video.parentIds && video.parentIds.length > 0);
+  }
+
+  /**
+   * Check if a video is in any tab
+   */
+  isInTab(video: VideoItem): boolean {
+    return this.tabbedVideoIds.has(video.id);
   }
 
   /**

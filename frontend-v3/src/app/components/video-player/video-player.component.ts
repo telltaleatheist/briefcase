@@ -1967,7 +1967,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       selectionEnd: selection?.endTime,
       videoId,
       videoPath,
-      videoTitle
+      videoTitle,
+      videoScale: this.videoScale()
     });
     this.showExportDialog.set(true);
   }
