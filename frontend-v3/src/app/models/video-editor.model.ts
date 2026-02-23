@@ -179,6 +179,11 @@ export interface EditorTab {
   categoryFilters: CategoryFilter[];
   hasAnalysis: boolean;
   isLoaded: boolean;                    // Whether data has been loaded from backend
+
+  // Video zoom/crop state
+  videoScale: number;
+  showBorder: boolean;
+  borderAspectRatio: '16:9' | '4:3' | '9:16';
 }
 
 /**
@@ -218,6 +223,9 @@ export function createEditorTab(
     highlightSelection: null,
     categoryFilters: [],
     hasAnalysis: false,
-    isLoaded: false
+    isLoaded: false,
+    videoScale: 1.0,
+    showBorder: false,
+    borderAspectRatio: '16:9',
   };
 }
