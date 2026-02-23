@@ -476,21 +476,24 @@ export class ExportDialogComponent implements OnInit {
   async export() {
     const selectedSections = this.getSelectedSections();
 
-    if (selectedSections.length === 0) {
+    if (selectedSections.length === 0 || this.isExporting) {
       return;
     }
+
+    this.isExporting = true;
 
     if (this.overwriteOriginal && this.canOverwriteOriginal()) {
       const confirmed = await this.confirmOverwrite();
       if (!confirmed) {
+        this.isExporting = false;
         return;
       }
-      this.queueOverwrite(selectedSections[0]);
+      await this.queueOverwrite(selectedSections[0]);
       return;
     }
 
     // Queue all exports and close dialog immediately
-    this.queueExports(selectedSections);
+    await this.queueExports(selectedSections);
   }
 
   /**
