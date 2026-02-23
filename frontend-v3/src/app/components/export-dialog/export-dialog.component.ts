@@ -94,6 +94,9 @@ export class ExportDialogComponent implements OnInit {
   queuedJobCount = 0;
   queuedJobIds: string[] = [];
 
+  // Pending jobs (built on "Export" click, submitted on "Start"/"Take Me There")
+  private pendingJobs: any[] = [];
+
   // Sections list configuration
   sections: ExportSection[] = [];
   selectedSectionIds = new Set<string>();
@@ -480,42 +483,38 @@ export class ExportDialogComponent implements OnInit {
       return;
     }
 
-    this.isExporting = true;
-
     if (this.overwriteOriginal && this.canOverwriteOriginal()) {
       const confirmed = await this.confirmOverwrite();
       if (!confirmed) {
-        this.isExporting = false;
         return;
       }
-      await this.queueOverwrite(selectedSections[0]);
-      return;
+      this.buildOverwriteJobs(selectedSections[0]);
+    } else {
+      this.buildExportJobs(selectedSections);
     }
 
-    // Queue all exports and close dialog immediately
-    await this.queueExports(selectedSections);
+    // Show confirmation screen (jobs are NOT submitted yet)
+    this.queuedJobCount = this.pendingJobs.length;
+    this.exportQueued = true;
   }
 
   /**
-   * Queue multiple export jobs via backend queue and show confirmation
+   * Build export job payloads (does NOT submit to backend)
    */
-  private async queueExports(sections: ExportSection[]) {
-    // Build mute sections array for the request if applying mutes
+  private buildExportJobs(sections: ExportSection[]) {
     const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
       ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
       : undefined;
 
-    // Add (censored) suffix if saving as copy with mutes applied
     const outputSuffix = this.saveCopy && this.applyMutes && this.hasMuteSections()
       ? ' (censored)'
       : undefined;
 
-    // Scale and mutes require re-encoding
     const hasScale = this.data.videoScale && this.data.videoScale !== 1.0;
     const hasMutesToApply = !!muteSectionsForRequest;
     const needsReEncode = this.reEncode || hasScale || hasMutesToApply;
 
-    const jobs = sections.map(section => {
+    this.pendingJobs = sections.map(section => {
       const isFullVideo = section.id === '__full_video__';
       return {
         videoPath: this.data.videoPath,
@@ -541,38 +540,23 @@ export class ExportDialogComponent implements OnInit {
         }]
       };
     });
-
-    try {
-      const result = await firstValueFrom(
-        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs, paused: true })
-      );
-
-      this.queuedJobIds = result.jobIds || [];
-      this.queuedJobCount = sections.length;
-      this.exportQueued = true;
-    } catch (error) {
-      console.error('Failed to submit export jobs:', error);
-      this.notificationService.error('Export Failed', 'Failed to submit export jobs to queue');
-    }
   }
 
   /**
-   * Queue an overwrite job via backend queue and show confirmation
+   * Build overwrite job payload (does NOT submit to backend)
    */
-  private async queueOverwrite(section: ExportSection) {
+  private buildOverwriteJobs(section: ExportSection) {
     const isFullVideo = section.id === '__full_video__';
 
-    // Build mute sections array for the request if applying mutes
     const muteSectionsForRequest = this.applyMutes && this.hasMuteSections()
       ? this.muteSections.map(s => ({ startSeconds: s.startSeconds, endSeconds: s.endSeconds }))
       : undefined;
 
-    // Scale and mutes require re-encoding
     const hasScale = this.data.videoScale && this.data.videoScale !== 1.0;
     const hasMutesToApply = !!muteSectionsForRequest;
     const needsReEncode = this.reEncode || hasScale || hasMutesToApply;
 
-    const jobs = [{
+    this.pendingJobs = [{
       videoPath: this.data.videoPath,
       videoId: this.data.videoId,
       displayName: 'Export: Overwriting original',
@@ -592,18 +576,24 @@ export class ExportDialogComponent implements OnInit {
         }
       }]
     }];
+  }
+
+  /**
+   * Submit pending jobs to the backend queue
+   */
+  private async submitJobs(paused: boolean): Promise<boolean> {
+    if (this.pendingJobs.length === 0) return false;
 
     try {
       const result = await firstValueFrom(
-        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs, paused: true })
+        this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs: this.pendingJobs, paused })
       );
-
       this.queuedJobIds = result.jobIds || [];
-      this.queuedJobCount = 1;
-      this.exportQueued = true;
+      return true;
     } catch (error) {
-      console.error('Failed to submit overwrite job:', error);
-      this.notificationService.error('Export Failed', 'Failed to submit overwrite job to queue');
+      console.error('Failed to submit export jobs:', error);
+      this.notificationService.error('Export Failed', 'Failed to submit export jobs to queue');
+      return false;
     }
   }
 
@@ -623,39 +613,36 @@ export class ExportDialogComponent implements OnInit {
   }
 
   /**
-   * Start the paused export jobs and close the dialog
+   * Submit jobs and start them immediately, then close the dialog
    */
   async startQueue() {
-    if (this.queuedJobIds.length > 0) {
-      try {
-        await firstValueFrom(
-          this.http.post<any>(`${this.API_BASE}/queue/jobs/start`, { jobIds: this.queuedJobIds })
-        );
-      } catch (error) {
-        console.error('Failed to start export jobs:', error);
-        this.notificationService.error('Error', 'Failed to start export jobs');
-      }
+    this.isExporting = true;
+    const submitted = await this.submitJobs(false);
+    if (!submitted) {
+      this.isExporting = false;
+      return;
     }
     this.close.emit({ exported: true });
   }
 
   /**
-   * Cancel and remove the paused export jobs from the queue
+   * Cancel — just close without submitting anything
    */
-  async cancelQueue() {
-    if (this.queuedJobIds.length > 0) {
-      try {
-        await firstValueFrom(
-          this.http.post<any>(`${this.API_BASE}/queue/jobs/delete`, { jobIds: this.queuedJobIds })
-        );
-      } catch (error) {
-        console.error('Failed to cancel export jobs:', error);
-      }
-    }
+  cancelQueue() {
+    this.pendingJobs = [];
     this.close.emit({ exported: false });
   }
 
-  goToQueue() {
+  /**
+   * Submit jobs as paused and navigate to queue tab
+   */
+  async goToQueue() {
+    this.isExporting = true;
+    const submitted = await this.submitJobs(true);
+    if (!submitted) {
+      this.isExporting = false;
+      return;
+    }
     this.close.emit({ exported: true, navigateToQueue: true });
   }
 
