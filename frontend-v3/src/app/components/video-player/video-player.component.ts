@@ -457,7 +457,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   borderWidth = signal<number>(0);
   borderHeight = signal<number>(0);
   showBorder = signal<boolean>(false);
-  borderAspectRatio = signal<'16:9' | '4:3'>('16:9');
+  borderAspectRatio = signal<'16:9' | '4:3' | '9:16'>('16:9');
   private resizeObserver?: ResizeObserver;
 
   // Selection state for highlighting
@@ -1329,7 +1329,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Calculate the largest rectangle of the selected aspect ratio that fits within the container
   private updateBorderDimensions(containerWidth: number, containerHeight: number) {
     const aspectRatio = this.borderAspectRatio();
-    const targetAspectRatio = aspectRatio === '16:9' ? 16 / 9 : 4 / 3;
+    const targetAspectRatio = aspectRatio === '16:9' ? 16 / 9 : aspectRatio === '9:16' ? 9 / 16 : 4 / 3;
     const containerAspectRatio = containerWidth / containerHeight;
 
     let width: number;
@@ -1355,7 +1355,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   // Change border aspect ratio
-  onAspectRatioChange(ratio: '16:9' | '4:3') {
+  onAspectRatioChange(ratio: '16:9' | '4:3' | '9:16') {
     this.borderAspectRatio.set(ratio);
     // Recalculate border dimensions
     const element = document.querySelector('.video-player-area') as HTMLElement;
@@ -1550,6 +1550,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   onScaleChange(value: string) {
     const scale = parseFloat(value);
     this.videoScale.set(scale);
+    if (scale > 1.0) {
+      this.showBorder.set(true);
+    }
   }
 
   // Get time from mouse position on timeline
@@ -1968,7 +1971,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       videoId,
       videoPath,
       videoTitle,
-      videoScale: this.videoScale()
+      videoScale: this.videoScale(),
+      cropAspectRatio: (this.showBorder() && this.videoScale() > 1.0) ? this.borderAspectRatio() : undefined,
     });
     this.showExportDialog.set(true);
   }
@@ -2892,7 +2896,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         waveformData: this.waveformData(),
         categoryFilters: this.categoryFilters(),
         highlightSelection: this.highlightSelection(),
-        hasAnalysis: this.hasAnalysis()
+        hasAnalysis: this.hasAnalysis(),
+        videoScale: this.videoScale(),
+        showBorder: this.showBorder(),
+        borderAspectRatio: this.borderAspectRatio(),
       };
     }));
   }
@@ -2923,6 +2930,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.categoryFilters.set(tab.categoryFilters);
     this.highlightSelection.set(tab.highlightSelection);
     this.hasAnalysis.set(tab.hasAnalysis);
+    this.videoScale.set(tab.videoScale ?? 1.0);
+    this.showBorder.set(tab.showBorder ?? false);
+    this.borderAspectRatio.set(tab.borderAspectRatio ?? '16:9');
 
     // Update metadata
     this.metadata.update(m => ({

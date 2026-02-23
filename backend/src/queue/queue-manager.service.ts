@@ -1011,6 +1011,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.logger.log(`[EXPORT-CLIP] Custom directory: ${opts?.customDirectory || '(default)'}`);
     this.logger.log(`[EXPORT-CLIP] Scale: ${opts?.scale || '1.0 (none)'}`);
     this.logger.log(`[EXPORT-CLIP] Mute sections: ${opts?.muteSections?.length || 0}`);
+    this.logger.log(`[EXPORT-CLIP] Crop aspect ratio: ${opts?.cropAspectRatio || '(none)'}`);
     this.logger.log(`[EXPORT-CLIP] Output suffix: ${opts?.outputSuffix || '(none)'}`);
     this.logger.log(`[EXPORT-CLIP] Overwrite mode: ${opts?.isOverwrite || false}`);
 
@@ -1116,6 +1117,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         reEncode: opts.reEncode,
         quality: opts.quality || 'medium',
         scale: opts.scale,
+        cropAspectRatio: opts.cropAspectRatio,
         muteSections: opts.muteSections,
         outputSuffix: opts.outputSuffix,
         metadata: {
@@ -1223,6 +1225,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         reEncode: opts.reEncode || false,
         quality: opts.quality || 'medium',
         scale: opts.scale,
+        cropAspectRatio: opts.cropAspectRatio,
         muteSections: opts.muteSections,
         onProgress: (progress: number) => {
           // Scale to 0-80% for extraction phase

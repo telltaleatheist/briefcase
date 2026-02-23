@@ -33,6 +33,7 @@ export interface ExportDialogData {
   videoPath?: string | null;  // Optional - backend can look it up by videoId if missing
   videoTitle: string;
   videoScale?: number;  // Video scale factor (1.0 = no scaling)
+  cropAspectRatio?: string;  // Target crop aspect ratio (e.g. '16:9', '4:3', '9:16')
 }
 
 // Category colors for consistent styling
@@ -530,6 +531,7 @@ export class ExportDialogComponent implements OnInit {
             reEncode: needsReEncode,
             quality: needsReEncode ? this.exportQuality : undefined,
             scale: hasScale ? this.data.videoScale : undefined,
+            cropAspectRatio: this.data.cropAspectRatio,
             muteSections: muteSectionsForRequest,
             outputSuffix: outputSuffix,
           }
@@ -580,6 +582,7 @@ export class ExportDialogComponent implements OnInit {
           reEncode: needsReEncode,
           quality: needsReEncode ? this.exportQuality : undefined,
           scale: hasScale ? this.data.videoScale : undefined,
+          cropAspectRatio: this.data.cropAspectRatio,
           muteSections: muteSectionsForRequest,
           isOverwrite: true,
           videoId: this.data.videoId,

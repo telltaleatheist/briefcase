@@ -24,6 +24,7 @@ export interface ClipExtractionRequest {
   reEncode?: boolean; // Whether to re-encode for frame accuracy (default: false)
   quality?: ExportQuality; // Export quality preset (default: 'medium')
   scale?: number; // Video scale factor (1.0 = no scaling, 2.0 = 2x scale, etc.)
+  cropAspectRatio?: string; // Target crop aspect ratio (e.g. '16:9', '4:3', '9:16')
   muteSections?: MuteSectionInput[]; // Audio sections to mute
   outputSuffix?: string; // Suffix to add to filename (e.g., " (censored)")
   metadata?: {
@@ -126,6 +127,7 @@ export class ClipExtractorService {
         request.muteSections,
         request.onProgress,
         request.quality || 'medium',
+        request.cropAspectRatio,
       );
 
       // Get file stats
@@ -194,6 +196,7 @@ export class ClipExtractorService {
     muteSections?: MuteSectionInput[],
     onProgress?: (progress: number) => void,
     quality: ExportQuality = 'medium',
+    cropAspectRatio?: string,
   ): Promise<void> {
     const args: string[] = ['-y'];
 
@@ -228,20 +231,45 @@ export class ClipExtractorService {
       );
 
       // Build filter_complex if we have both scale and mute, or just mute
-      if (hasMutes && scale && scale !== 1.0) {
+      // Scale = "zoom into center": scale up the video, then crop to target aspect ratio.
+      // This matches the CSS transform: scale(N) + border overlay behavior in the video player.
+      const parseAspectRatio = (ratio: string): number | null => {
+        const parts = ratio.split(':').map(Number);
+        if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) return parts[0] / parts[1];
+        return null;
+      };
+
+      const targetRatio = cropAspectRatio ? parseAspectRatio(cropAspectRatio) : null;
+
+      let scaleFilter: string | null = null;
+      if (scale && scale !== 1.0) {
+        if (targetRatio) {
+          // Crop to target aspect ratio from the zoomed video
+          // 1. Scale up: iw*scale x ih*scale
+          // 2. Crop to target ratio, centered (FFmpeg default)
+          this.logger.log(`Applying crop to ${cropAspectRatio} aspect ratio (${targetRatio.toFixed(4)})`);
+          // Use \, to escape commas inside min() so FFmpeg doesn't treat them as filter separators
+          scaleFilter = `scale=iw*${scale}:ih*${scale}:flags=lanczos,crop=min(iw\\,ih*${targetRatio}):min(ih\\,iw/${targetRatio})`;
+        } else {
+          // No aspect ratio specified: crop back to original dimensions
+          scaleFilter = `scale=iw*${scale}:ih*${scale}:flags=lanczos,crop=iw/${scale}:ih/${scale}`;
+        }
+      }
+
+      if (hasMutes && scaleFilter) {
         // Both video scaling and audio muting
         args.push(
           '-filter_complex',
-          `[0:v]scale=iw*${scale}:ih*${scale}:flags=lanczos[vout];[0:a]${muteFilter}[aout]`,
+          `[0:v]${scaleFilter}[vout];[0:a]${muteFilter}[aout]`,
           '-map', '[vout]',
           '-map', '[aout]'
         );
       } else if (hasMutes) {
         // Only audio muting
         args.push('-af', muteFilter);
-      } else if (scale && scale !== 1.0) {
+      } else if (scaleFilter) {
         // Only video scaling
-        args.push('-vf', `scale=iw*${scale}:ih*${scale}:flags=lanczos`);
+        args.push('-vf', scaleFilter);
       }
 
       // Quality presets: CRF values (lower = better quality, bigger file)
