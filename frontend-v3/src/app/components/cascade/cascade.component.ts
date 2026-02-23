@@ -398,6 +398,7 @@ export class CascadeComponent {
         actions.push({ label: '', icon: '', action: '', divider: true });
       }
 
+      actions.push({ label: `Retry${countSuffix}`, icon: '🔄', action: 'retry' });
       actions.push({ label: `Remove${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
       return actions;
     }

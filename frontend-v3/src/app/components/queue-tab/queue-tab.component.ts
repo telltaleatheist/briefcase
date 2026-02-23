@@ -217,6 +217,34 @@ export class QueueTabComponent {
         }
         break;
 
+      case 'retry':
+        // Re-add completed/failed jobs back to the staging queue with same config
+        const retryIds = videos
+          .filter((v: VideoItem) => v.id.startsWith('completed-'))
+          .map((v: VideoItem) => v.id.replace('completed-', ''));
+        for (const jobId of retryIds) {
+          const job = this.queueService.allJobs().find(j => j.id === jobId);
+          if (job) {
+            // Create a new pending job with the same tasks (reset state)
+            this.queueService.addJob({
+              title: job.title,
+              url: job.url,
+              videoId: job.videoId,
+              videoPath: job.videoPath,
+              titleResolved: true,
+              tasks: job.tasks.map(t => ({
+                ...t,
+                state: 'pending' as const,
+                progress: 0,
+                errorMessage: undefined,
+              })),
+            });
+            // Remove the old completed job
+            this.queueService.removeJob(jobId);
+          }
+        }
+        break;
+
       case 'delete':
       case 'remove':
       case 'removeFromQueue':
