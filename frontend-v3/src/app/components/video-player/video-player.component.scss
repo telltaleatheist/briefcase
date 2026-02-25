@@ -1426,7 +1426,7 @@
     display: none;
   }
 
-  // Fullscreen minimal timeline - just waveform and playhead
+  // Fullscreen minimal timeline - waveform, timecode, zoom, and volume
   .fullscreen-timeline {
     position: absolute;
     bottom: 0;
@@ -1434,12 +1434,107 @@
     right: 0;
     height: 48px;
     background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     padding: 0 16px;
-    gap: 16px;
+    gap: 12px;
     z-index: 10;
     transition: transform 0.3s ease, opacity 0.3s ease;
+
+    // Timecode display
+    .fullscreen-timecode {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+
+      .fs-time {
+        font-family: 'Monaco', monospace;
+        font-size: 12px;
+        letter-spacing: 0.3px;
+
+        &.current {
+          color: var(--primary-orange);
+        }
+
+        &.total {
+          color: var(--text-muted);
+        }
+      }
+
+      .fs-time-sep {
+        color: var(--text-tertiary);
+        font-size: 11px;
+      }
+    }
+
+    // Zoom controls
+    .fullscreen-zoom {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .fs-zoom-btn {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+
+      &:hover {
+        background: rgba(255, 107, 53, 0.25);
+        border-color: rgba(255, 107, 53, 0.4);
+        color: var(--text-primary);
+      }
+
+      &:active {
+        background: rgba(255, 107, 53, 0.4);
+      }
+    }
+
+    .fs-zoom-bar {
+      width: 60px;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .fs-zoom-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #e55529, #ff8f5a);
+      border-radius: 2px;
+      transition: width 0.15s;
+      min-width: 1px;
+    }
+
+    .fs-zoom-fit {
+      padding: 2px 6px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 3px;
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.15s;
+
+      &:hover {
+        background: rgba(255, 107, 53, 0.2);
+        border-color: rgba(255, 107, 53, 0.4);
+        color: var(--text-primary);
+      }
+    }
 
     .fullscreen-waveform-container {
       flex: 1;

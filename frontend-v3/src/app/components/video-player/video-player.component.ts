@@ -422,6 +422,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     });
   }
 
+  getFullscreenZoomPercent(): number {
+    const level = this.editorState().zoomState.level;
+    const duration = this.editorState().duration;
+    const maxZoom = duration / 5;
+    if (maxZoom <= 1) return 0;
+    return (Math.log(level) / Math.log(maxZoom)) * 100;
+  }
+
   // Video data from route state
   videoId = signal<string | null>(null);
   private videoPath = signal<string | null>(null);
