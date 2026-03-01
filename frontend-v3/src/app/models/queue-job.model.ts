@@ -57,6 +57,9 @@ export interface QueueJob {
 
   // Error info (for failed jobs)
   errorMessage?: string;
+
+  // Trim opener: seconds to trim from the start of the video after download
+  trimStartTime?: number;
 }
 
 /**
@@ -90,6 +93,7 @@ export function createQueueJob(partial: Partial<QueueJob> & { title: string }): 
     startedAt: partial.startedAt,
     completedAt: partial.completedAt,
     errorMessage: partial.errorMessage,
+    trimStartTime: partial.trimStartTime,
   };
 }
 

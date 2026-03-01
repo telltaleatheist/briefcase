@@ -192,6 +192,7 @@
           (addToTab)="onQueueAddToTab($event)"
           (addToNewTab)="onQueueAddToNewTab($event)"
           (clearCompleted)="onClearCompleted()"
+          (trimOpenerRequested)="onTrimOpenerRequested($event)"
         />
 
         <!-- Tabs Tab: User-created tabs with videos -->
@@ -280,6 +281,17 @@
   [isOpen]="downloadDialogOpen()"
   (closeDialog)="onDownloadDialogClosed()"
   (submitConfig)="onDownloadSubmit($event)"
+/>
+
+<!-- Trim Opener Modal -->
+<app-trim-opener-modal
+  [show]="trimModalOpen()"
+  [videoTitle]="trimModalVideoTitle()"
+  [initialTime]="trimModalInitialTime()"
+  [isEditing]="trimModalInitialTime() > 0"
+  (saved)="onTrimSaved($event)"
+  (cleared)="onTrimCleared()"
+  (closed)="onTrimModalClosed()"
 />
 
 <!-- Export Indicator (fixed position in corner) -->

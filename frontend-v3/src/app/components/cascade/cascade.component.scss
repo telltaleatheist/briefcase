@@ -734,6 +734,37 @@ cdk-virtual-scroll-viewport.library-content {
     }
   }
 
+  // Trim button - muted outline, monospace
+  &.trim-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-tertiary);
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: 500;
+    min-width: 38px;
+
+    &:hover {
+      border-color: var(--text-secondary);
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    &.trim-active {
+      background: var(--primary-orange);
+      border-color: var(--primary-orange);
+      color: white;
+      font-weight: 700;
+
+      &:hover {
+        filter: brightness(1.1);
+        color: white;
+        background: var(--primary-orange);
+        border-color: var(--primary-orange);
+      }
+    }
+  }
+
   // Process button - outline style
   &.process-btn {
     background: transparent;

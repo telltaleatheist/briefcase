@@ -290,6 +290,17 @@ export class QueueService implements OnDestroy {
   }
 
   /**
+   * Update a job's trim start time (for trim opener feature)
+   */
+  updateJobTrimStartTime(jobId: string, trimStartTime: number | undefined): void {
+    this.jobs.update(jobs =>
+      jobs.map(job =>
+        job.id === jobId ? { ...job, trimStartTime } : job
+      )
+    );
+  }
+
+  /**
    * Set backend job ID mapping
    */
   setBackendJobId(frontendJobId: string, backendJobId: string): void {
@@ -541,7 +552,7 @@ export class QueueService implements OnDestroy {
 
     // Convert to backend format
     const backendJobs: BackendJobRequest[] = pendingJobs.map(job => {
-      const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url);
+      const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url, job.trimStartTime);
 
       if (job.url) {
         return {
@@ -1003,13 +1014,21 @@ export class QueueService implements OnDestroy {
   /**
    * Convert frontend tasks to backend format
    */
-  private convertTasksToBackendFormat(tasks: QueueTask[], isUrl: boolean): BackendTask[] {
+  private convertTasksToBackendFormat(tasks: QueueTask[], isUrl: boolean, trimStartTime?: number): BackendTask[] {
     const backendTasks: BackendTask[] = [];
 
     if (isUrl) {
       backendTasks.push({ type: 'get-info' });
       backendTasks.push({ type: 'download' });
       backendTasks.push({ type: 'import' });
+    }
+
+    // Inject trim (export-clip overwrite) after download/import but before processing
+    if (trimStartTime != null && trimStartTime > 0) {
+      backendTasks.push({
+        type: 'export-clip' as any,
+        options: { startTime: trimStartTime, endTime: null, isOverwrite: true }
+      });
     }
 
     const hasAspectRatio = tasks.some(t => t.type === 'fix-aspect-ratio');

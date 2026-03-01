@@ -180,6 +180,15 @@
                 <span class="video-duration">{{ item.video.duration }}</span>
               }
 
+              <!-- Trim button for staging items -->
+              @if (isStagingItem(item.video) && !item.video.isGhost) {
+                <button class="action-btn trim-btn" [class.trim-active]="hasTrimTime(item.video)"
+                  (click)="onTrimClick(item.video, $event)"
+                  [title]="hasTrimTime(item.video) ? 'Edit trim point: ' + getTrimLabel(item.video) : 'Set trim point'">
+                  {{ hasTrimTime(item.video) ? getTrimLabel(item.video) : 'Trim' }}
+                </button>
+              }
+
               <!-- Quick Action Buttons (always visible for library items) -->
               @if (showQuickActions && !item.video.isGhost && !isStagingItem(item.video) && !isProcessingItem(item.video) && !isQueueItem(item.video)) {
                 <div class="quick-actions">
