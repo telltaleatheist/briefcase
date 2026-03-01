@@ -1000,6 +1000,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     taskId: string,
   ): Promise<TaskResult> {
     const opts = task.options as any;
+
+    // Fallback: resolve videoPath/videoId from the job context if not in task options
+    // (e.g., trim-opener injects export-clip before videoPath is known at queue time)
+    if (!opts.videoPath && job.videoPath) opts.videoPath = job.videoPath;
+    if (!opts.videoId && job.videoId) opts.videoId = job.videoId;
+
     this.logger.log(`[EXPORT-CLIP] ========== Starting export-clip task ==========`);
     this.logger.log(`[EXPORT-CLIP] Job ID: ${job.id}`);
     this.logger.log(`[EXPORT-CLIP] Video path: ${opts?.videoPath}`);

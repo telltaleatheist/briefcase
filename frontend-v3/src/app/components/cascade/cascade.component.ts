@@ -348,6 +348,10 @@ export class CascadeComponent {
     // Staging queue item specific actions
     if (isStaging) {
       actions.push({ label: `Configure${countSuffix}`, icon: '⚙️', action: 'processing' });
+      if (count <= 1 && video) {
+        const hasTrim = this.hasTrimTime(video);
+        actions.push({ label: hasTrim ? 'Edit Trim Point' : 'Set Trim Point', icon: '✂️', action: 'trimOpener' });
+      }
       actions.push({ label: '', icon: '', action: '', divider: true });
       actions.push({ label: `Remove from Queue${countSuffix}`, icon: '🗑️', action: 'removeFromQueue' });
       return actions;
@@ -1118,6 +1122,35 @@ export class CascadeComponent {
    */
   isStagingItem(video: VideoItem): boolean {
     return video.id.startsWith('staging-') || video.tags?.some(t => t.startsWith('staging:')) || false;
+  }
+
+  /**
+   * Check if a staging item has a trim time set
+   */
+  hasTrimTime(video: VideoItem): boolean {
+    return video.tags?.some(t => t.startsWith('trim:')) || false;
+  }
+
+  /**
+   * Get the trim time label (formatted as HH:MM:SS) for a staging item
+   */
+  getTrimLabel(video: VideoItem): string {
+    const tag = video.tags?.find(t => t.startsWith('trim:'));
+    if (!tag) return '';
+    const seconds = parseFloat(tag.replace('trim:', ''));
+    if (isNaN(seconds) || seconds <= 0) return '';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * Handle trim button click on a staging item
+   */
+  onTrimClick(video: VideoItem, event: Event): void {
+    event.stopPropagation();
+    this.videoAction.emit({ action: 'trimOpener', videos: [video] });
   }
 
   /**

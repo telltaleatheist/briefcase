@@ -33,6 +33,7 @@ export class QueueTabComponent {
   @Output() addToTab = new EventEmitter<{ tabId: string; videoIds: string[] }>();
   @Output() addToNewTab = new EventEmitter<string[]>();
   @Output() clearCompleted = new EventEmitter<void>();
+  @Output() trimOpenerRequested = new EventEmitter<VideoItem>();
 
   selectedStagingIds = signal<Set<string>>(new Set());
   selectedProcessingIds = signal<Set<string>>(new Set());
@@ -60,7 +61,7 @@ export class QueueTabComponent {
         duration: job.duration,
         thumbnailUrl: job.thumbnail,
         sourceUrl: job.url,
-        tags: [`staging:${job.id}`],
+        tags: [`staging:${job.id}`, ...(job.trimStartTime ? [`trim:${job.trimStartTime}`] : [])],
         titleLoading: job.titleResolved === false
       }));
 
@@ -242,6 +243,12 @@ export class QueueTabComponent {
             // Remove the old completed job
             this.queueService.removeJob(jobId);
           }
+        }
+        break;
+
+      case 'trimOpener':
+        if (videos.length === 1) {
+          this.trimOpenerRequested.emit(videos[0]);
         }
         break;
 

@@ -178,6 +178,74 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Fetch a page's HTML content, following redirects (up to 5 hops).
+   */
+  private async fetchPageContent(url: string, maxRedirects = 5): Promise<string> {
+    const httpModule = url.startsWith('https') ? require('https') : require('http');
+
+    return new Promise((resolve, reject) => {
+      httpModule.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (response: any) => {
+        // Follow redirects
+        if ((response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 303) && response.headers.location) {
+          if (maxRedirects <= 0) {
+            reject(new Error('Too many redirects'));
+            return;
+          }
+          this.fetchPageContent(response.headers.location, maxRedirects - 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        let data = '';
+        response.on('data', (chunk: any) => data += chunk);
+        response.on('end', () => resolve(data));
+        response.on('error', reject);
+      }).on('error', reject);
+    });
+  }
+
+  /**
+   * Extract m3u8 (HLS) stream URL from a page's HTML/JSON content.
+   * Used as a fallback when yt-dlp's extractor fails to find video formats.
+   * Works for sites like Subsplash, Resi, and other HLS-based streaming platforms.
+   */
+  private async extractM3u8FromPage(url: string): Promise<string | null> {
+    try {
+      this.logger.log(`Fetching page content to extract m3u8 URL from: ${url}`);
+      const pageContent = await this.fetchPageContent(url);
+
+      // Look for m3u8 URLs in the page content (HTML, inline JSON, script tags, etc.)
+      // Match full URLs containing .m3u8 (with optional query params)
+      const m3u8Regex = /https?:\/\/[^\s"'<>\\]+\.m3u8(?:\?[^\s"'<>\\]*)*/gi;
+      const matches = pageContent.match(m3u8Regex);
+
+      if (matches && matches.length > 0) {
+        // Clean up: unescape any JSON-encoded URLs (backslash-escaped slashes)
+        const cleaned = matches[0].replace(/\\\//g, '/');
+        this.logger.log(`Extracted m3u8 URL from page: ${cleaned}`);
+        return cleaned;
+      }
+
+      // Also check for m3u8 in JSON data attributes or escaped content
+      const escapedM3u8Regex = /https?:\\\/\\\/[^\s"'<>]+\.m3u8(?:\\?[^\s"'<>]*)*/gi;
+      const escapedMatches = pageContent.match(escapedM3u8Regex);
+
+      if (escapedMatches && escapedMatches.length > 0) {
+        const cleaned = escapedMatches[0].replace(/\\\//g, '/');
+        this.logger.log(`Extracted m3u8 URL from escaped content: ${cleaned}`);
+        return cleaned;
+      }
+
+      this.logger.warn('No m3u8 URL found in page content');
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to extract m3u8 from page: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  }
+
+  /**
    * Main method to download a video from a URL with automatic retry on different clients
    */
   async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadResult> {
@@ -509,9 +577,72 @@ export class DownloaderService implements OnModuleInit {
             }
           }
         } else {
-          // Non-YouTube download - use standard method
-          const output = await ytDlpManager.runWithRetry(3, 2000);
-          outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+          // Non-YouTube download - use standard method with m3u8 fallback
+          try {
+            const output = await ytDlpManager.runWithRetry(3, 2000);
+            outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+          } catch (initialError) {
+            const errorMsg = initialError instanceof Error ? initialError.message : String(initialError);
+
+            // If yt-dlp found the page but couldn't extract formats, try scraping for m3u8 streams
+            if (errorMsg.includes('No video formats found') || errorMsg.includes('Unsupported URL')) {
+              this.logger.log('yt-dlp failed to extract formats, attempting m3u8 stream extraction fallback...');
+
+              const m3u8Url = await this.extractM3u8FromPage(options.url);
+
+              if (m3u8Url) {
+                this.logger.log(`Found m3u8 stream URL: ${m3u8Url}`);
+
+                // Create a fresh YtDlpManager for the direct stream URL
+                const fallbackManager = new YtDlpManager();
+                fallbackManager.input(m3u8Url).output(outputTemplate);
+
+                const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+                if (ffmpegPath) {
+                  fallbackManager.addOption('--ffmpeg-location', ffmpegPath);
+                }
+
+                fallbackManager.addOption('--verbose')
+                               .addOption('--no-check-certificates')
+                               .addOption('--force-overwrites');
+
+                if (options.convertToMp4) {
+                  fallbackManager.addOption('--merge-output-format', 'mp4');
+                }
+
+                // Update active downloads reference
+                if (jobId) {
+                  this.activeDownloads.set(jobId, fallbackManager);
+                }
+
+                // Set up progress tracking for the fallback download
+                fallbackManager.on('progress', (progress) => {
+                  const elapsedMs = Date.now() - downloadStartTime;
+                  this.eventService.emitDownloadProgress(
+                    progress.percent,
+                    'Downloading (m3u8 fallback)',
+                    jobId,
+                    {
+                      speed: progress.downloadSpeed,
+                      eta: progress.eta,
+                      elapsedMs,
+                      totalSize: progress.totalSize,
+                      downloadedBytes: progress.downloadedBytes
+                    }
+                  );
+                });
+
+                const output = await fallbackManager.runWithRetry(2, 1000);
+                outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+              } else {
+                // No m3u8 found - re-throw original error
+                throw initialError;
+              }
+            } else {
+              // Different error - re-throw
+              throw initialError;
+            }
+          }
         }
 
         // Check if we have a valid output file

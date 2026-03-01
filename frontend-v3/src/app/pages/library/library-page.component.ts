@@ -35,6 +35,7 @@ import { QueueService } from '../../services/queue.service';
 import { LibraryFilterService } from '../../services/library-filter.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
 import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
+import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -80,7 +81,8 @@ export interface ProcessingTask {
     QueueTabComponent,
     SaveForLaterTabComponent,
     SettingsPageComponent,
-    ExportIndicatorComponent
+    ExportIndicatorComponent,
+    TrimOpenerModalComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
@@ -302,6 +304,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Download Dialog
   downloadDialogOpen = signal(false);
+
+  // Trim Opener Modal state
+  trimModalOpen = signal(false);
+  trimModalVideoTitle = signal('');
+  trimModalInitialTime = signal(0);
+  trimModalJobId = signal<string | null>(null);
 
   // Filters
   currentFilters: LibraryFilters | null = null;
@@ -2894,6 +2902,45 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    */
   onClearCompleted() {
     this.queueService.clearCompleted();
+  }
+
+  // ========================================
+  // Trim Opener Modal Methods
+  // ========================================
+
+  onTrimOpenerRequested(video: VideoItem) {
+    // Extract job ID from staging-{id} format
+    const jobId = video.id.replace('staging-', '');
+    const job = this.queueService.allJobs().find(j => j.id === jobId);
+    if (!job) return;
+
+    this.trimModalJobId.set(jobId);
+    this.trimModalVideoTitle.set(job.title);
+    this.trimModalInitialTime.set(job.trimStartTime || 0);
+    this.trimModalOpen.set(true);
+  }
+
+  onTrimSaved(seconds: number) {
+    const jobId = this.trimModalJobId();
+    if (jobId) {
+      this.queueService.updateJobTrimStartTime(jobId, seconds);
+    }
+    this.trimModalOpen.set(false);
+    this.trimModalJobId.set(null);
+  }
+
+  onTrimCleared() {
+    const jobId = this.trimModalJobId();
+    if (jobId) {
+      this.queueService.updateJobTrimStartTime(jobId, undefined);
+    }
+    this.trimModalOpen.set(false);
+    this.trimModalJobId.set(null);
+  }
+
+  onTrimModalClosed() {
+    this.trimModalOpen.set(false);
+    this.trimModalJobId.set(null);
   }
 
   // ========================================
