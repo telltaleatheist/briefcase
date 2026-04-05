@@ -935,13 +935,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           return { success: false, error: 'No video ID or path available for transcribe task' };
         }
 
-        // Skip if video already has a transcript (duplicate detection)
+        // Clear existing transcript if one exists (user explicitly queued a new transcription)
         if (job.videoId) {
-          const videoForTranscript = this.databaseService.getVideoById(job.videoId);
-          if (videoForTranscript && (videoForTranscript as any).has_transcript) {
-            this.logger.log(`[${taskId}] Skipping transcribe - video already has transcript (id: ${job.videoId})`);
-            result = { success: true, data: { skipped: true } };
-            break;
+          const existingTranscript = this.databaseService.getTranscript(job.videoId);
+          if (existingTranscript) {
+            this.logger.log(`[${taskId}] Clearing existing transcript before re-transcribing (id: ${job.videoId})`);
+            this.databaseService.deleteTranscript(job.videoId);
           }
         }
 
@@ -964,14 +963,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           return { success: false, error: 'AI model is required for analyze task' };
         }
 
-        // Skip if video already has analysis (duplicate detection)
-        const videoForAnalysis = this.databaseService.getVideoById(job.videoId);
-        if (videoForAnalysis && (videoForAnalysis as any).has_analysis) {
-          this.logger.log(`[${taskId}] Skipping analyze - video already has analysis (id: ${job.videoId})`);
-          result = { success: true, data: { skipped: true } };
-          break;
-        }
-
+        // Always run analysis — if the video already has one, mediaOps.analyzeVideo
+        // will clear it before re-running (via processAnalyzePhase cleanup logic)
         result = await this.mediaOps.analyzeVideo(job.videoId, task.options as any, taskId);
         if (result.success && result.data) {
           job.analysisPath = result.data.analysisPath;

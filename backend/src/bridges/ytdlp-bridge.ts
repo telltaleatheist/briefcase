@@ -283,7 +283,7 @@ export class YtDlpBridge extends EventEmitter {
             exitCode: code,
             duration,
             stdout: stdoutBuffer,
-            error: `yt-dlp exited with code ${code}`,
+            error: `yt-dlp exited with code ${code}: ${stderrBuffer.slice(-500)}`,
           });
         }
       });

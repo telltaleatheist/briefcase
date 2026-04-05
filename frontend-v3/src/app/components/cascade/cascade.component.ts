@@ -1554,9 +1554,26 @@ export class CascadeComponent {
   private autoScrollSpeed = 0; // Pixels per frame (negative = up, positive = down)
   private readonly AUTO_SCROLL_ZONE = 50; // Pixels from edge to trigger auto-scroll
   private readonly AUTO_SCROLL_MAX_SPEED = 15; // Max pixels per frame
-  // Track selection bounds in absolute list coordinates for virtual scroll compatibility
-  private dragMinY = 0; // Minimum Y in list-space
-  private dragMaxY = 0; // Maximum Y in list-space
+  // Track selection bounds in absolute scroll coordinates for virtual scroll compatibility
+  private dragMinY = 0; // Minimum Y in scroll-space
+  private dragMaxY = 0; // Maximum Y in scroll-space
+  // Store container reference for consistent coordinate calculation across mousedown/mousemove
+  private dragContainer: HTMLElement | null = null;
+  // Accumulate items selected during drag (needed because items may scroll out of DOM buffer)
+  private dragSelectedItems = new Set<string>();
+
+  /**
+   * Convert mouse screen Y to absolute scroll-space Y using viewport scroll offset.
+   * This is more reliable than using the content wrapper rect, which can drift
+   * when item heights don't perfectly match itemSize.
+   */
+  private mouseToScrollSpaceY(clientY: number): number {
+    if (!this.viewport) return 0;
+    const viewportEl = this.viewport.elementRef.nativeElement;
+    const viewportRect = viewportEl.getBoundingClientRect();
+    const scrollTop = this.viewport.measureScrollOffset('top');
+    return scrollTop + (clientY - viewportRect.top);
+  }
 
   /**
    * Start drag selection on mousedown
@@ -1586,25 +1603,23 @@ export class CascadeComponent {
       this.dragSelectionInitialSelected = new Set();
     }
 
+    // Store container reference for reuse in mousemove/mouseup
     const container = event.currentTarget as HTMLElement;
+    this.dragContainer = container;
+
+    // Ensure container has no unexpected scroll offset (overflow:hidden can still accumulate scrollTop)
+    container.scrollTop = 0;
+    container.scrollLeft = 0;
+
     const rect = container.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    // Initialize scroll-space Y bounds
-    // Use the viewport's rendered content wrapper to get accurate position
-    const contentWrapper = container.querySelector('.cdk-virtual-scroll-content-wrapper');
-    if (contentWrapper && this.viewport) {
-      const contentRect = contentWrapper.getBoundingClientRect();
-      const renderedRange = this.viewport.getRenderedRange();
-      const itemSize = 56;
-      // Calculate absolute Y position in the full list
-      // contentRect.top is where rendered items start visually
-      // renderedRange.start * itemSize is the offset of rendered items from list start
-      const scrollSpaceY = (event.clientY - contentRect.top) + (renderedRange.start * itemSize);
-      this.dragMinY = scrollSpaceY;
-      this.dragMaxY = scrollSpaceY;
-    }
+    // Initialize scroll-space Y bounds using viewport scroll offset
+    const scrollSpaceY = this.mouseToScrollSpaceY(event.clientY);
+    this.dragMinY = scrollSpaceY;
+    this.dragMaxY = scrollSpaceY;
+    this.dragSelectedItems = new Set();
 
     this.dragStartPoint.set({ x, y });
     this.dragCurrentPoint.set({ x, y });
@@ -1642,7 +1657,8 @@ export class CascadeComponent {
 
     if (!this.dragHasMoved) return;
 
-    const container = document.querySelector('.cascade') as HTMLElement;
+    // Use stored container reference instead of querySelector
+    const container = this.dragContainer;
     if (!container) return;
 
     const rect = container.getBoundingClientRect();
@@ -1651,21 +1667,16 @@ export class CascadeComponent {
 
     this.dragCurrentPoint.set({ x, y });
 
-    // Calculate auto-scroll speed and update scroll-space Y bounds
-    const viewportEl = container.querySelector('cdk-virtual-scroll-viewport');
-    const contentWrapper = container.querySelector('.cdk-virtual-scroll-content-wrapper');
-    if (viewportEl && contentWrapper && this.viewport) {
-      const viewportRect = viewportEl.getBoundingClientRect();
-      const contentRect = contentWrapper.getBoundingClientRect();
-      const renderedRange = this.viewport.getRenderedRange();
-      const itemSize = 56;
-      const mouseY = event.clientY;
+    // Update scroll-space Y bounds using viewport scroll offset
+    const scrollSpaceY = this.mouseToScrollSpaceY(event.clientY);
+    this.dragMinY = Math.min(this.dragMinY, scrollSpaceY);
+    this.dragMaxY = Math.max(this.dragMaxY, scrollSpaceY);
 
-      // Update scroll-space Y bounds (expand to include current mouse position)
-      // Calculate absolute Y in full list coordinates
-      const scrollSpaceY = (mouseY - contentRect.top) + (renderedRange.start * itemSize);
-      this.dragMinY = Math.min(this.dragMinY, scrollSpaceY);
-      this.dragMaxY = Math.max(this.dragMaxY, scrollSpaceY);
+    // Calculate auto-scroll speed
+    if (this.viewport) {
+      const viewportEl = this.viewport.elementRef.nativeElement;
+      const viewportRect = viewportEl.getBoundingClientRect();
+      const mouseY = event.clientY;
 
       if (mouseY < viewportRect.top + this.AUTO_SCROLL_ZONE) {
         // Near top - scroll up
@@ -1739,7 +1750,9 @@ export class CascadeComponent {
     this.dragStartPoint.set(null);
     this.dragCurrentPoint.set(null);
     this.dragSelectionInitialSelected = new Set();
+    this.dragSelectedItems = new Set();
     this.dragHasMoved = false;
+    this.dragContainer = null;
 
     // Prevent click handler from firing after drag
     if (wasDragging) {
@@ -1754,36 +1767,47 @@ export class CascadeComponent {
   };
 
   /**
-   * Update selection based on current drag rectangle
-   * Uses scroll-space coordinates to handle virtual scrolling correctly
-   * Toggles items that were already selected before drag started
+   * Update selection based on current drag rectangle.
+   * Uses actual DOM element positions to correctly handle variable-height items
+   * (e.g. items with expanded children). Items that scroll out of the virtual
+   * scroll buffer are retained in dragSelectedItems so they aren't lost.
    */
   private updateDragSelection(): void {
     if (!this.isDragSelecting()) return;
+    if (!this.viewport) return;
 
-    const itemSize = 56; // Must match itemSize in template
-    const allItems = this.virtualItems();
-    const newSelection = new Set(this.dragSelectionInitialSelected);
+    const viewportEl = this.viewport.elementRef.nativeElement;
+    const scrollTop = this.viewport.measureScrollOffset('top');
+    const viewportRect = viewportEl.getBoundingClientRect();
 
-    // Calculate which items fall within the scroll-space Y bounds
-    let currentY = 0;
-    for (const item of allItems) {
-      if (item.type === 'video') {
-        const itemTop = currentY;
-        const itemBottom = currentY + itemSize;
+    // Query rendered video items and use actual DOM positions
+    // This correctly handles expanded children and variable heights
+    const videoElements = Array.from(viewportEl.querySelectorAll('.video-item[data-item-id]'));
 
-        // Check if item intersects with selection bounds
-        if (itemBottom > this.dragMinY && itemTop < this.dragMaxY) {
-          // Toggle: if it was already selected before drag, deselect it; otherwise select it
-          if (this.dragSelectionInitialSelected.has(item.itemId)) {
-            newSelection.delete(item.itemId);
-          } else {
-            newSelection.add(item.itemId);
-          }
-        }
+    for (const el of videoElements) {
+      const itemId = (el as HTMLElement).getAttribute('data-item-id');
+      if (!itemId) continue;
+
+      const rect = el.getBoundingClientRect();
+      // Convert client rect to scroll-space coordinates
+      const itemTop = scrollTop + (rect.top - viewportRect.top);
+      const itemBottom = scrollTop + (rect.bottom - viewportRect.top);
+
+      // dragMinY/dragMaxY only ever expand, so once an item is within bounds
+      // it stays within bounds — accumulate in dragSelectedItems
+      if (itemBottom > this.dragMinY && itemTop < this.dragMaxY) {
+        this.dragSelectedItems.add(itemId);
       }
-      // Both headers and videos take up space
-      currentY += itemSize;
+    }
+
+    // Build final selection from initial state + accumulated drag selections
+    const newSelection = new Set(this.dragSelectionInitialSelected);
+    for (const itemId of this.dragSelectedItems) {
+      if (this.dragSelectionInitialSelected.has(itemId)) {
+        newSelection.delete(itemId); // Toggle off if was already selected
+      } else {
+        newSelection.add(itemId);
+      }
     }
 
     this.selectedVideos.set(newSelection);

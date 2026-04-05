@@ -214,6 +214,9 @@ export class WhisperBridge extends EventEmitter {
       language?: string;
       translate?: boolean;
       audioDurationSeconds?: number;  // For time-based progress estimation
+      offsetMs?: number;    // --offset-t: start processing from this offset in audio
+      durationMs?: number;  // --duration: only process this many ms of audio
+      outputSuffix?: string; // Append to output basename to avoid collisions (e.g. '_chunk0')
     }
   ): Promise<WhisperResult> {
     const processId = options?.processId || crypto.randomBytes(8).toString('hex');
@@ -284,6 +287,9 @@ export class WhisperBridge extends EventEmitter {
       language?: string;
       translate?: boolean;
       audioDurationSeconds?: number;
+      offsetMs?: number;
+      durationMs?: number;
+      outputSuffix?: string;
     }
   ): Promise<WhisperResult> {
     const modelPath = this.getModelPath(options?.model);
@@ -291,7 +297,8 @@ export class WhisperBridge extends EventEmitter {
     return new Promise((resolve, reject) => {
       // Prepare output paths
       const basename = path.basename(audioPath, path.extname(audioPath));
-      const outputBase = path.join(outputDir, basename);
+      const suffix = options?.outputSuffix || '';
+      const outputBase = path.join(outputDir, basename + suffix);
       const srtPath = `${outputBase}.srt`;
 
       const args = [
@@ -305,6 +312,14 @@ export class WhisperBridge extends EventEmitter {
       // Add no-GPU flag if not using GPU
       if (!useGpu) {
         args.push('-ng');
+      }
+
+      // Offset and duration for chunked transcription
+      if (options?.offsetMs != null && options.offsetMs > 0) {
+        args.push('-ot', String(options.offsetMs));
+      }
+      if (options?.durationMs != null && options.durationMs > 0) {
+        args.push('-d', String(options.durationMs));
       }
 
       // Optional language specification
@@ -513,7 +528,7 @@ export class WhisperBridge extends EventEmitter {
     // whisper.cpp with -pp outputs: "progress = XX%"
     const progressMatch = output.match(/progress\s*=\s*(\d+)%/i);
     if (progressMatch) {
-      percent = Math.min(95, parseInt(progressMatch[1], 10));
+      percent = Math.min(99, parseInt(progressMatch[1], 10));
     }
 
     // Simple percentage pattern
@@ -522,7 +537,7 @@ export class WhisperBridge extends EventEmitter {
       if (simpleMatch) {
         const parsed = parseInt(simpleMatch[1], 10);
         if (parsed > processInfo.lastReportedPercent + 5) {
-          percent = Math.min(95, parsed);
+          percent = Math.min(99, parsed);
         }
       }
     }
@@ -619,8 +634,8 @@ export class WhisperBridge extends EventEmitter {
         // 35% = inference start, 95% = inference end (before finalization)
         const percent = Math.round(35 + (progress * 60));
 
-        // Only emit if we've made progress and haven't exceeded 94%
-        if (percent > pi.lastReportedPercent && percent <= 94) {
+        // Only emit if we've made progress and haven't exceeded 98%
+        if (percent > pi.lastReportedPercent && percent <= 98) {
           pi.lastReportedPercent = percent;
 
           this.emit('progress', {

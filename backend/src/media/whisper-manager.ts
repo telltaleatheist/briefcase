@@ -25,6 +25,13 @@ export class WhisperManager extends EventEmitter {
   private readonly logger = new Logger(WhisperManager.name);
   private whisper: WhisperBridge;
   private currentProcessId: string | null = null;
+  private chunkedMode = false;
+  private chunkIndex = 0;
+  private totalChunks = 0;
+  private cancelled = false;
+
+  static readonly CHUNK_THRESHOLD_S = 1800;  // Chunk files longer than 30 minutes
+  static readonly CHUNK_DURATION_S = 1800;   // 30-minute chunks
 
   constructor() {
     super();
@@ -66,11 +73,17 @@ export class WhisperManager extends EventEmitter {
     });
 
     // Forward progress events from bridge to this manager
+    // In chunked mode, remap per-chunk progress to overall progress
     this.whisper.on('progress', (progress: BridgeProgress) => {
-      this.emit('progress', {
-        percent: progress.percent,
-        task: progress.message,
-      } as WhisperProgress);
+      let percent = progress.percent;
+      let task = progress.message;
+
+      if (this.chunkedMode && this.totalChunks > 0) {
+        percent = Math.round((this.chunkIndex * 100 + progress.percent) / this.totalChunks);
+        task = `[${this.chunkIndex + 1}/${this.totalChunks}] ${progress.message}`;
+      }
+
+      this.emit('progress', { percent, task } as WhisperProgress);
     });
 
     // Forward GPU fallback events
@@ -127,6 +140,7 @@ export class WhisperManager extends EventEmitter {
     this.logger.log(`Whisper binary: ${this.whisper.path}`);
     this.logger.log(`Whisper binary exists: ${fs.existsSync(this.whisper.path)}`);
     this.logger.log(`Requested model: ${modelName || 'default'}`);
+    this.logger.log(`Audio duration: ${audioDurationSeconds ? `${audioDurationSeconds}s` : 'unknown'}`);
 
     if (!audioFile || !fs.existsSync(audioFile)) {
       const error = `Audio file not found: ${audioFile}`;
@@ -138,6 +152,12 @@ export class WhisperManager extends EventEmitter {
       const error = `whisper.cpp not found at: ${this.whisper.path}. Please reinstall the application or run: npm run download:binaries`;
       this.logger.error(error);
       throw new Error(error);
+    }
+
+    // Use chunked transcription for long files to avoid whisper hallucination/looping
+    if (audioDurationSeconds && audioDurationSeconds > WhisperManager.CHUNK_THRESHOLD_S) {
+      this.logger.log(`Audio exceeds ${WhisperManager.CHUNK_THRESHOLD_S}s threshold, using chunked transcription`);
+      return this.transcribeChunked(audioFile, outputDir, modelName, audioDurationSeconds);
     }
 
     // Generate a process ID for tracking
@@ -197,9 +217,136 @@ export class WhisperManager extends EventEmitter {
   }
 
   /**
+   * Transcribe a long audio file in 1-hour chunks.
+   * Runs whisper multiple times on the same file using --offset-t and --duration flags,
+   * then combines the SRT outputs into a single transcript.
+   */
+  private async transcribeChunked(
+    audioFile: string,
+    outputDir: string,
+    modelName: string | undefined,
+    audioDurationSeconds: number,
+  ): Promise<string> {
+    const chunkDurationS = WhisperManager.CHUNK_DURATION_S;
+    const totalChunks = Math.ceil(audioDurationSeconds / chunkDurationS);
+
+    this.chunkedMode = true;
+    this.totalChunks = totalChunks;
+    this.cancelled = false;
+
+    this.logger.log(`Chunked transcription: ${totalChunks} chunks of ${chunkDurationS}s each`);
+    this.emit('progress', { percent: 0, task: `Starting chunked transcription (${totalChunks} chunks)` } as WhisperProgress);
+
+    const srtPaths: string[] = [];
+
+    try {
+      for (let i = 0; i < totalChunks; i++) {
+        if (this.cancelled) {
+          throw new Error('Transcription was cancelled');
+        }
+
+        this.chunkIndex = i;
+        const offsetMs = i * chunkDurationS * 1000;
+        const remainingS = audioDurationSeconds - (i * chunkDurationS);
+        const chunkS = Math.min(chunkDurationS, remainingS);
+        const durationMs = chunkS * 1000;
+
+        const processId = `transcribe-chunk${i}-${Date.now()}`;
+        this.currentProcessId = processId;
+
+        this.logger.log(`Chunk ${i + 1}/${totalChunks}: offset=${offsetMs}ms, duration=${durationMs}ms`);
+
+        const result = await this.whisper.transcribe(audioFile, outputDir, {
+          model: modelName,
+          processId,
+          audioDurationSeconds: chunkS,
+          offsetMs,
+          durationMs,
+          outputSuffix: `_chunk${i}`,
+        });
+
+        if (!result.success) {
+          if (result.error?.includes('aborted')) {
+            throw new Error('Transcription was cancelled');
+          }
+          throw new Error(result.error || `Chunk ${i + 1} transcription failed`);
+        }
+
+        if (result.srtPath && fs.existsSync(result.srtPath)) {
+          srtPaths.push(result.srtPath);
+          this.logger.log(`Chunk ${i + 1}/${totalChunks} completed: ${result.srtPath}`);
+        } else {
+          this.logger.warn(`Chunk ${i + 1}/${totalChunks} produced no SRT file, skipping`);
+        }
+      }
+
+      if (srtPaths.length === 0) {
+        throw new Error('Chunked transcription produced no SRT files');
+      }
+
+      // Combine all chunk SRTs into one
+      const basename = path.basename(audioFile, path.extname(audioFile));
+      const combinedSrtPath = path.join(outputDir, `${basename}.srt`);
+      this.combineSrtFiles(srtPaths, combinedSrtPath);
+
+      // Clean up individual chunk SRT files
+      for (const srtPath of srtPaths) {
+        try { fs.unlinkSync(srtPath); } catch { /* ignore */ }
+      }
+
+      this.logger.log(`Chunked transcription completed: ${combinedSrtPath}`);
+      this.emit('progress', { percent: 100, task: 'Transcription completed' } as WhisperProgress);
+      return combinedSrtPath;
+
+    } finally {
+      this.chunkedMode = false;
+      this.chunkIndex = 0;
+      this.totalChunks = 0;
+      this.currentProcessId = null;
+    }
+  }
+
+  /**
+   * Combine multiple SRT files into one with sequential numbering.
+   * Assumes timestamps are absolute (whisper --offset-t produces absolute timestamps).
+   */
+  private combineSrtFiles(srtPaths: string[], outputPath: string): void {
+    const allSegments: string[] = [];
+    let segmentIndex = 1;
+
+    for (const srtPath of srtPaths) {
+      const content = fs.readFileSync(srtPath, 'utf-8').trim();
+      if (!content) continue;
+
+      // SRT blocks are separated by blank lines
+      const blocks = content.split(/\n\n+/);
+
+      for (const block of blocks) {
+        const lines = block.trim().split('\n');
+        if (lines.length < 2) continue;
+
+        // Find the timestamp line (contains "-->")
+        const timestampLine = lines.find(l => l.includes('-->'));
+        if (!timestampLine) continue;
+
+        const textStartIdx = lines.indexOf(timestampLine) + 1;
+        const textLines = lines.slice(textStartIdx);
+        if (textLines.length === 0) continue;
+
+        allSegments.push(`${segmentIndex}\n${timestampLine}\n${textLines.join('\n')}`);
+        segmentIndex++;
+      }
+    }
+
+    fs.writeFileSync(outputPath, allSegments.join('\n\n') + '\n');
+    this.logger.log(`Combined ${segmentIndex - 1} segments from ${srtPaths.length} chunk(s) into ${outputPath}`);
+  }
+
+  /**
    * Cancel the current transcription
    */
   cancel(): void {
+    this.cancelled = true; // Stops chunked transcription between chunks
     if (this.currentProcessId && this.whisper.isRunning(this.currentProcessId)) {
       this.logger.log('='.repeat(60));
       this.logger.log('CANCELLING TRANSCRIPTION');

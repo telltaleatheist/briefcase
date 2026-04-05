@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
 import { TourService } from '../../services/tour.service';
+import { QueueService } from '../../services/queue.service';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
 
@@ -117,6 +118,7 @@ export class ExportDialogComponent implements OnInit {
   private tourService = inject(TourService);
   private http = inject(HttpClient);
   private notificationService = inject(NotificationService);
+  private queueService = inject(QueueService);
 
   ngOnInit() {
     // Prepare sections for cascade list
@@ -589,6 +591,9 @@ export class ExportDialogComponent implements OnInit {
         this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs: this.pendingJobs, paused })
       );
       this.queuedJobIds = result.jobIds || [];
+      // Sync QueueService so it picks up the new backend jobs and can
+      // route WebSocket events (progress, completion, failure) correctly
+      await this.queueService.refreshFromBackend();
       return true;
     } catch (error) {
       console.error('Failed to submit export jobs:', error);
@@ -622,6 +627,10 @@ export class ExportDialogComponent implements OnInit {
       this.isExporting = false;
       return;
     }
+    this.notificationService.success(
+      'Export Started',
+      `${this.queuedJobCount} clip${this.queuedJobCount !== 1 ? 's' : ''} queued and processing.`
+    );
     this.close.emit({ exported: true });
   }
 

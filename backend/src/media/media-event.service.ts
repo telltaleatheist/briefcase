@@ -53,7 +53,7 @@ export class MediaEventService {
    * Helper to ensure progress is within valid range (0-100)
    */
   private normalizeProgress(progress: number): number {
-    return Math.max(0, Math.min(100, progress));
+    return Math.round(Math.max(0, Math.min(100, progress)));
   }
   
   /**

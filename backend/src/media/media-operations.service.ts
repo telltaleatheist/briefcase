@@ -544,6 +544,16 @@ export class MediaOperationsService {
         throw new Error('Transcript not found - transcribe video first');
       }
 
+      // Clear existing analysis data before re-running (preserves user markers)
+      const existingAnalysis = this.databaseService.getAnalysis(videoId);
+      if (existingAnalysis) {
+        this.logger.log(`[${jobId || 'standalone'}] Clearing existing analysis for video ${videoId} before re-analyzing`);
+        this.databaseService.deleteAnalysis(videoId);
+        this.databaseService.deleteAITagsForVideo(videoId);
+        this.databaseService.updateVideoDescription(videoId, null);
+        this.databaseService.updateVideoSuggestedTitle(videoId, null);
+      }
+
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 0, 'Starting AI analysis...');
 
       const transcriptText = transcript.plain_text as string;

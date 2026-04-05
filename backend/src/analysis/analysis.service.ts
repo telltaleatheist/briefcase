@@ -1646,10 +1646,8 @@ export class AnalysisService implements OnModuleInit {
           // If user explicitly selected transcribe, always re-transcribe (don't skip)
           tasks.push({ type: 'transcribe', options: { model: whisperModel } });
         } else {
-          // User requested full analysis
-          if (hasAnalysis && !forceReanalyze) {
-            continue;
-          }
+          // User requested full analysis — always allow re-analysis.
+          // Old analysis will be cleared by processAnalyzePhase before re-running.
 
           // Determine which tasks to add based on existing transcript and user preferences
           if (hasTranscript && !forceRetranscribe) {

@@ -313,39 +313,58 @@
       color: var(--text-primary, #ccc);
       cursor: pointer;
 
-      &:hover {
+      &:hover:not(:disabled) {
         background: var(--bg-card, #3a3a3a);
         border-color: #dc2626;
         color: #dc2626;
       }
+
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
     }
 
-    .start-btn {
+    .start-btn,
+    .go-to-queue-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       padding: 8px 20px;
       font-size: 13px;
       font-weight: 500;
-      background: #22c55e;
       border: none;
       border-radius: 6px;
       color: #fff;
       cursor: pointer;
 
-      &:hover {
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+    }
+
+    .start-btn {
+      background: #22c55e;
+
+      &:hover:not(:disabled) {
         background: #16a34a;
       }
     }
 
     .go-to-queue-btn {
-      padding: 8px 20px;
-      font-size: 13px;
-      font-weight: 500;
       background: var(--primary-orange, #ff6b35);
-      border: none;
-      border-radius: 6px;
-      color: #fff;
-      cursor: pointer;
 
-      &:hover {
+      &:hover:not(:disabled) {
         background: var(--light-orange, #ff8c5a);
       }
     }

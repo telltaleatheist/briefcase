@@ -184,7 +184,11 @@ export class DownloaderService implements OnModuleInit {
     const httpModule = url.startsWith('https') ? require('https') : require('http');
 
     return new Promise((resolve, reject) => {
-      httpModule.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (response: any) => {
+      httpModule.get(url, { headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      } }, (response: any) => {
         // Follow redirects
         if ((response.statusCode === 301 || response.statusCode === 302 || response.statusCode === 303) && response.headers.location) {
           if (maxRedirects <= 0) {
@@ -246,12 +250,110 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Extract Vimeo embed/player URL from a page's HTML content.
+   * Used when yt-dlp fails to access a Vimeo video embedded on another site.
+   * Vimeo embed-only videos require the player URL (with hash token) + referer header.
+   */
+  private async extractVimeoEmbedUrl(pageUrl: string): Promise<{ playerUrl: string; referer: string } | null> {
+    try {
+      this.logger.log(`Fetching page to extract Vimeo embed URL from: ${pageUrl}`);
+      const pageContent = await this.fetchPageContent(pageUrl);
+
+      // Look for Vimeo player iframe embeds: player.vimeo.com/video/ID?h=HASH...
+      const iframeRegex = /(?:src|href)=["']?(https?:\/\/player\.vimeo\.com\/video\/\d+[^"'\s>]*)/gi;
+      const iframeMatches = [...pageContent.matchAll(iframeRegex)];
+
+      if (iframeMatches.length > 0) {
+        const playerUrl = iframeMatches[0][1].replace(/&amp;/g, '&');
+        this.logger.log(`Found Vimeo player embed URL: ${playerUrl}`);
+        return { playerUrl, referer: pageUrl };
+      }
+
+      // Also look for Vimeo video URLs in data attributes, JSON config, or script tags
+      const vimeoUrlRegex = /["'](https?:\/\/(?:player\.)?vimeo\.com\/(?:video\/)?\d+(?:\?[^"'\s]*)?)["']/gi;
+      const urlMatches = [...pageContent.matchAll(vimeoUrlRegex)];
+
+      if (urlMatches.length > 0) {
+        let playerUrl = urlMatches[0][1].replace(/&amp;/g, '&');
+        // Ensure it's a player URL
+        if (!playerUrl.includes('player.vimeo.com')) {
+          const videoIdMatch = playerUrl.match(/vimeo\.com\/(\d+)/);
+          if (videoIdMatch) {
+            // Extract hash parameter if present in any matched URL
+            const hashMatch = pageContent.match(new RegExp(`vimeo\\.com\\/(?:video\\/)?${videoIdMatch[1]}\\?h=([a-f0-9]+)`, 'i'));
+            playerUrl = hashMatch
+              ? `https://player.vimeo.com/video/${videoIdMatch[1]}?h=${hashMatch[1]}`
+              : `https://player.vimeo.com/video/${videoIdMatch[1]}`;
+          }
+        }
+        this.logger.log(`Constructed Vimeo player URL: ${playerUrl}`);
+        return { playerUrl, referer: pageUrl };
+      }
+
+      this.logger.warn('No Vimeo embed URL found in page content');
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to extract Vimeo embed URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  }
+
+  /**
+   * Create a yt-dlp manager configured for Vimeo embed downloads.
+   * Uses the player URL with referer for authentication.
+   */
+  private createVimeoEmbedManager(
+    playerUrl: string,
+    referer: string,
+    outputTemplate: string,
+    quality: string,
+  ): YtDlpManager {
+    const manager = new YtDlpManager();
+    manager.input(playerUrl).output(outputTemplate);
+
+    const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+    if (ffmpegPath) {
+      manager.addOption('--ffmpeg-location', ffmpegPath);
+    }
+
+    manager.addOption('--verbose')
+           .addOption('--no-check-certificates')
+           .addOption('--no-playlist')
+           .addOption('--playlist-items', '1')
+           .addOption('--force-overwrites')
+           .addOption('--referer', referer)
+           .addOption('--cookies-from-browser', 'chrome')
+           .addOption('--merge-output-format', 'mp4');
+
+    // Vimeo serves separate HLS video-only + audio-only streams,
+    // so we must use bestvideo+bestaudio to merge them with ffmpeg.
+    const q = parseInt(quality || '720');
+    manager.addOption('--format', `bestvideo[height<=${q}]+bestaudio/bestvideo+bestaudio/best`);
+
+    return manager;
+  }
+
+  /**
    * Main method to download a video from a URL with automatic retry on different clients
    */
   async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadResult> {
     try {
       // Transform ABC News URLs if needed
       options.url = await this.transformAbcNewsUrl(options.url);
+
+      // Pre-detect Vimeo embeds on non-Vimeo pages so the Vimeo-specific handler is used
+      if (!options.url.includes('vimeo.com')) {
+        try {
+          const embedInfo = await this.extractVimeoEmbedUrl(options.url);
+          if (embedInfo) {
+            this.logger.log(`Detected Vimeo embed on page: ${options.url} → ${embedInfo.playerUrl}`);
+            options.url = embedInfo.playerUrl;
+            options.referer = embedInfo.referer;
+          }
+        } catch (err) {
+          this.logger.warn(`Vimeo embed pre-detection failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+        }
+      }
 
       this.logger.log(`Starting download for URL: ${options.url}`);
 
@@ -452,18 +554,24 @@ export class DownloaderService implements OnModuleInit {
         if (options.useCookies && options.browser) {
           ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
         }
-      } else if (options.url.includes('vimeo.com')) {
-        // Vimeo-specific configuration: Vimeo requires authentication for most videos
-        ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
+      } else if (options.url.includes('vimeo.com') || options.url.includes('player.vimeo.com')) {
+        // Vimeo-specific configuration — Vimeo serves separate HLS video + audio streams
+        const q = parseInt(options.quality || '720');
+        ytDlpManager.addOption('--format', `bestvideo[height<=${q}]+bestaudio/bestvideo+bestaudio/best`);
         ytDlpManager.addOption('--merge-output-format', 'mp4');
 
-        // Vimeo REQUIRES cookies from browser - use Chrome by default
-        const browser = (options.useCookies && options.browser && options.browser !== 'auto')
-          ? options.browser
-          : 'chrome';
-
-        ytDlpManager.addOption('--cookies-from-browser', browser);
-        this.logger.log(`Using cookies from ${browser} for Vimeo authentication`);
+        // Add referer if this is an embed URL (player.vimeo.com)
+        if (options.referer) {
+          ytDlpManager.addOption('--referer', options.referer);
+          this.logger.log(`Using referer for Vimeo embed: ${options.referer}`);
+        } else {
+          // No referer — try cookies from browser as fallback
+          const browser = (options.useCookies && options.browser && options.browser !== 'auto')
+            ? options.browser
+            : 'chrome';
+          ytDlpManager.addOption('--cookies-from-browser', browser);
+          this.logger.log(`Using cookies from ${browser} for Vimeo authentication`);
+        }
       } else {
         // For other sites, use standard format selection
         ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
@@ -583,44 +691,142 @@ export class DownloaderService implements OnModuleInit {
             outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
           } catch (initialError) {
             const errorMsg = initialError instanceof Error ? initialError.message : String(initialError);
+            this.logger.warn(`Initial download failed: ${errorMsg.substring(0, 200)}`);
 
-            // If yt-dlp found the page but couldn't extract formats, try scraping for m3u8 streams
-            if (errorMsg.includes('No video formats found') || errorMsg.includes('Unsupported URL')) {
-              this.logger.log('yt-dlp failed to extract formats, attempting m3u8 stream extraction fallback...');
+            // === Sequential fallback chain ===
+            // Each fallback attempts to set outputFile. If all fail, throw original error.
 
-              const m3u8Url = await this.extractM3u8FromPage(options.url);
+            // Fallback 1: Vimeo embed extraction (for pages embedding Vimeo players)
+            // Triggers on: auth errors, 403 (embed-only videos), format mismatches with vimeo context
+            if (!outputFile) {
+              const isVimeoRelated = errorMsg.includes('web client only works when logged-in')
+                || errorMsg.includes('HTTP Error 403')
+                || (errorMsg.includes('Requested format') && errorMsg.toLowerCase().includes('vimeo'));
 
-              if (m3u8Url) {
-                this.logger.log(`Found m3u8 stream URL: ${m3u8Url}`);
+              if (isVimeoRelated) {
+                try {
+                  const embedInfo = await this.extractVimeoEmbedUrl(options.url);
+                  if (embedInfo) {
+                    this.logger.log(`Vimeo embed fallback: retrying with ${embedInfo.playerUrl}`);
 
-                // Create a fresh YtDlpManager for the direct stream URL
-                const fallbackManager = new YtDlpManager();
-                fallbackManager.input(m3u8Url).output(outputTemplate);
+                    const vimeoManager = this.createVimeoEmbedManager(
+                      embedInfo.playerUrl,
+                      embedInfo.referer,
+                      outputTemplate,
+                      options.quality || '720',
+                    );
+
+                    if (jobId) {
+                      this.activeDownloads.set(jobId, vimeoManager);
+                    }
+
+                    vimeoManager.on('progress', (progress) => {
+                      const elapsedMs = Date.now() - downloadStartTime;
+                      this.eventService.emitDownloadProgress(
+                        progress.percent,
+                        'Downloading (Vimeo embed)',
+                        jobId,
+                        {
+                          speed: progress.downloadSpeed,
+                          eta: progress.eta,
+                          elapsedMs,
+                          totalSize: progress.totalSize,
+                          downloadedBytes: progress.downloadedBytes
+                        }
+                      );
+                    });
+
+                    const output = await vimeoManager.runWithRetry(2, 1000);
+                    outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+                  }
+                } catch (embedErr) {
+                  this.logger.warn(`Vimeo embed fallback failed: ${embedErr instanceof Error ? embedErr.message : String(embedErr)}`);
+                }
+              }
+            }
+
+            // Fallback 2: m3u8 stream extraction (HLS-based sites)
+            if (!outputFile) {
+              try {
+                const m3u8Url = await this.extractM3u8FromPage(options.url);
+                if (m3u8Url) {
+                  this.logger.log(`m3u8 fallback: found stream URL: ${m3u8Url}`);
+
+                  const fallbackManager = new YtDlpManager();
+                  fallbackManager.input(m3u8Url).output(outputTemplate);
+
+                  const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+                  if (ffmpegPath) {
+                    fallbackManager.addOption('--ffmpeg-location', ffmpegPath);
+                  }
+
+                  fallbackManager.addOption('--verbose')
+                                 .addOption('--no-check-certificates')
+                                 .addOption('--force-overwrites');
+
+                  if (options.convertToMp4) {
+                    fallbackManager.addOption('--merge-output-format', 'mp4');
+                  }
+
+                  if (jobId) {
+                    this.activeDownloads.set(jobId, fallbackManager);
+                  }
+
+                  fallbackManager.on('progress', (progress) => {
+                    const elapsedMs = Date.now() - downloadStartTime;
+                    this.eventService.emitDownloadProgress(
+                      progress.percent,
+                      'Downloading (m3u8 fallback)',
+                      jobId,
+                      {
+                        speed: progress.downloadSpeed,
+                        eta: progress.eta,
+                        elapsedMs,
+                        totalSize: progress.totalSize,
+                        downloadedBytes: progress.downloadedBytes
+                      }
+                    );
+                  });
+
+                  const output = await fallbackManager.runWithRetry(2, 1000);
+                  outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+                }
+              } catch (m3u8Err) {
+                this.logger.warn(`m3u8 fallback failed: ${m3u8Err instanceof Error ? m3u8Err.message : String(m3u8Err)}`);
+              }
+            }
+
+            // Fallback 3: Retry original URL with browser cookies (bypasses CloudFlare/403)
+            if (!outputFile && errorMsg.includes('403')) {
+              try {
+                this.logger.log('Got 403 — retrying with browser cookies to bypass site protection...');
+
+                const cookieManager = new YtDlpManager();
+                cookieManager.input(options.url).output(outputTemplate);
 
                 const ffmpegPath = this.sharedConfigService.getFfmpegPath();
                 if (ffmpegPath) {
-                  fallbackManager.addOption('--ffmpeg-location', ffmpegPath);
+                  cookieManager.addOption('--ffmpeg-location', ffmpegPath);
                 }
 
-                fallbackManager.addOption('--verbose')
-                               .addOption('--no-check-certificates')
-                               .addOption('--force-overwrites');
+                cookieManager.addOption('--verbose')
+                             .addOption('--no-check-certificates')
+                             .addOption('--no-playlist')
+                             .addOption('--playlist-items', '1')
+                             .addOption('--force-overwrites')
+                             .addOption('--cookies-from-browser', 'chrome')
+                             .addOption('--format', 'bestvideo+bestaudio/best')
+                             .addOption('--merge-output-format', 'mp4');
 
-                if (options.convertToMp4) {
-                  fallbackManager.addOption('--merge-output-format', 'mp4');
-                }
-
-                // Update active downloads reference
                 if (jobId) {
-                  this.activeDownloads.set(jobId, fallbackManager);
+                  this.activeDownloads.set(jobId, cookieManager);
                 }
 
-                // Set up progress tracking for the fallback download
-                fallbackManager.on('progress', (progress) => {
+                cookieManager.on('progress', (progress) => {
                   const elapsedMs = Date.now() - downloadStartTime;
                   this.eventService.emitDownloadProgress(
                     progress.percent,
-                    'Downloading (m3u8 fallback)',
+                    'Downloading (with cookies)',
                     jobId,
                     {
                       speed: progress.downloadSpeed,
@@ -632,14 +838,64 @@ export class DownloaderService implements OnModuleInit {
                   );
                 });
 
-                const output = await fallbackManager.runWithRetry(2, 1000);
+                const output = await cookieManager.run();
                 outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
-              } else {
-                // No m3u8 found - re-throw original error
-                throw initialError;
+              } catch (cookieErr) {
+                this.logger.warn(`Cookie retry fallback failed: ${cookieErr instanceof Error ? cookieErr.message : String(cookieErr)}`);
               }
-            } else {
-              // Different error - re-throw
+            }
+
+            // Fallback 4: Generic extractor (last resort — scrapes page for any video/audio)
+            if (!outputFile) {
+              try {
+                this.logger.log('All specific fallbacks failed, trying yt-dlp generic extractor...');
+
+                const genericManager = new YtDlpManager();
+                genericManager.input(options.url).output(outputTemplate);
+
+                const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+                if (ffmpegPath) {
+                  genericManager.addOption('--ffmpeg-location', ffmpegPath);
+                }
+
+                genericManager.addOption('--verbose')
+                              .addOption('--no-check-certificates')
+                              .addOption('--no-playlist')
+                              .addOption('--force-overwrites')
+                              .addOption('--force-generic-extractor')
+                              .addOption('--cookies-from-browser', 'chrome')
+                              .addOption('--format', 'bestvideo+bestaudio/best')
+                              .addOption('--merge-output-format', 'mp4');
+
+                if (jobId) {
+                  this.activeDownloads.set(jobId, genericManager);
+                }
+
+                genericManager.on('progress', (progress) => {
+                  const elapsedMs = Date.now() - downloadStartTime;
+                  this.eventService.emitDownloadProgress(
+                    progress.percent,
+                    'Downloading (generic extractor)',
+                    jobId,
+                    {
+                      speed: progress.downloadSpeed,
+                      eta: progress.eta,
+                      elapsedMs,
+                      totalSize: progress.totalSize,
+                      downloadedBytes: progress.downloadedBytes
+                    }
+                  );
+                });
+
+                const output = await genericManager.run();
+                outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+              } catch (genericErr) {
+                this.logger.warn(`Generic extractor fallback failed: ${genericErr instanceof Error ? genericErr.message : String(genericErr)}`);
+              }
+            }
+
+            // If no fallback succeeded, throw the original error
+            if (!outputFile) {
               throw initialError;
             }
           }
@@ -1342,6 +1598,21 @@ export class DownloaderService implements OnModuleInit {
       // Transform ABC News URLs if needed
       url = await this.transformAbcNewsUrl(url);
 
+      // Pre-detect Vimeo embeds on non-Vimeo pages
+      let referer: string | undefined;
+      if (!url.includes('vimeo.com')) {
+        try {
+          const embedInfo = await this.extractVimeoEmbedUrl(url);
+          if (embedInfo) {
+            this.logger.log(`[getVideoInfo] Detected Vimeo embed: ${url} → ${embedInfo.playerUrl}`);
+            referer = embedInfo.referer;
+            url = embedInfo.playerUrl;
+          }
+        } catch (err) {
+          this.logger.warn(`Vimeo embed pre-detection failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+        }
+      }
+
       const startTime = Date.now();
       this.logger.log(`[TIMING] Fetching video info for URL: ${url}`);
 
@@ -1357,6 +1628,12 @@ export class DownloaderService implements OnModuleInit {
         .addOption('--no-check-certificates')
         .addOption('--extractor-retries', '1')
         .addOption('--socket-timeout', '5');
+
+      // Add referer if we detected an embed
+      if (referer) {
+        ytDlpManager.addOption('--referer', referer);
+        ytDlpManager.addOption('--cookies-from-browser', 'chrome');
+      }
 
       // For YouTube URLs, use android client for better reliability
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
@@ -1382,7 +1659,43 @@ export class DownloaderService implements OnModuleInit {
       this.logger.log(`[TIMING] Setup took ${beforeRun - startTime}ms, about to call ytDlpManager.run()`);
 
       // Execute the command and get output
-      const output = await ytDlpManager.run();
+      let output: string;
+      try {
+        output = await ytDlpManager.run();
+      } catch (runError) {
+        const runErrorMsg = runError instanceof Error ? runError.message : String(runError);
+
+        // If Vimeo auth/access error, try extracting the embed URL from the page and retry
+        if (runErrorMsg.includes('web client only works when logged-in') ||
+            runErrorMsg.includes('HTTP Error 403') ||
+            (runErrorMsg.toLowerCase().includes('vimeo') && runErrorMsg.includes('Requested format is not available'))) {
+          this.logger.log('Vimeo auth/format error in getVideoInfo, trying embed URL extraction...');
+
+          const embedInfo = await this.extractVimeoEmbedUrl(url);
+          if (embedInfo) {
+            this.logger.log(`Retrying getVideoInfo with Vimeo player URL: ${embedInfo.playerUrl}`);
+            const retryManager = new YtDlpManager();
+            retryManager
+              .input(embedInfo.playerUrl)
+              .addOption('--dump-json')
+              .addOption('--no-playlist')
+              .addOption('--flat-playlist')
+              .addOption('--skip-download')
+              .addOption('--no-warnings')
+              .addOption('--no-check-certificates')
+              .addOption('--extractor-retries', '1')
+              .addOption('--socket-timeout', '5')
+              .addOption('--referer', embedInfo.referer)
+              .addOption('--cookies-from-browser', 'chrome');
+
+            output = await retryManager.run();
+          } else {
+            throw runError;
+          }
+        } else {
+          throw runError;
+        }
+      }
 
       const afterRun = Date.now();
       this.logger.log(`[TIMING] ytDlpManager.run() took ${afterRun - beforeRun}ms, processing output...`);

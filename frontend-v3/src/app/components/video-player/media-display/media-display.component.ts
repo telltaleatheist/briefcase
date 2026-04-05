@@ -54,6 +54,15 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    // Reset error state whenever the video URL changes
+    if (changes['videoUrl']) {
+      this.hasError = false;
+      this.errorMessage = '';
+      if (changes['videoUrl'].currentValue) {
+        this.isLoading = true;
+      }
+    }
+
     if (!this.videoRef?.nativeElement) return;
 
     const video = this.videoRef.nativeElement;
