@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { ExportDialogComponent, ExportDialogData } from '../export-dialog/export-dialog.component';
 import { NavigationService } from '../../services/navigation.service';
 import { LibraryService, LibraryAnalysis, AnalysisSection as LibAnalysisSection } from '../../services/library.service';
+import { WebsocketService } from '../../services/websocket.service';
 import { TourService } from '../../services/tour.service';
 import {
   VideoEditorState,
@@ -124,6 +125,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
   private tourService = inject(TourService);
+  private websocketService = inject(WebsocketService);
 
   private readonly API_BASE = 'http://localhost:3000/api';
   private readonly MAX_TABS = 15;
@@ -600,6 +602,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private fullscreenTimeout?: any;
 
   private playbackInterval?: any;
+  private unsubVideoPathUpdated?: () => void;
 
   // Track playing state separately to avoid effect re-triggering
   private wasPlaying = false;
@@ -690,6 +693,25 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       this.errorMessage.set('No video data provided. Please select a video from the library.');
       this.hasAnalysis.set(false);
     }
+
+    // Listen for video-path-updated events so replaced videos reload automatically
+    this.unsubVideoPathUpdated = this.websocketService.onVideoPathUpdated((event) => {
+      const tabs = this.tabs();
+      const matchingTab = tabs.find(t => t.videoId === event.videoId);
+      if (!matchingTab) return;
+
+      // Update the tab's videoUrl with a cache-busting param to force reload
+      const freshUrl = `${this.API_BASE}/database/videos/${event.videoId}/stream?t=${Date.now()}`;
+      this.tabs.update(allTabs => allTabs.map(t =>
+        t.videoId === event.videoId ? { ...t, videoUrl: freshUrl, videoPath: event.newPath } : t
+      ));
+
+      // If this is the active tab, update the live signal so the video element reloads
+      if (this.activeTabId() === matchingTab.id) {
+        this.videoUrl.set(freshUrl);
+        this.videoPath.set(event.newPath);
+      }
+    });
 
     // Try to start the video editor tour (basic tour first, then advanced)
     setTimeout(() => {
@@ -1286,6 +1308,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // Show the side navigation when leaving the editor
     this.navService.showNav();
     this.stopPlayback();
+
+    // Clean up websocket subscription
+    this.unsubVideoPathUpdated?.();
 
     // Remove event listeners
     window.removeEventListener('wheel', this.wheelHandler);

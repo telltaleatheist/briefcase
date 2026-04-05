@@ -2610,6 +2610,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   setActiveTab(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'settings') {
     this.activeTab.set(tab);
     if (tab === 'queue') {
+      // Always refresh from backend so newly-submitted jobs (e.g. export-clip)
+      // are visible immediately, even if they were submitted from a popout window
+      this.queueService.refreshFromBackend();
       console.log('[LibraryPage] Switching to Queue tab');
       console.log('[LibraryPage] Staging queue:', this.stagingQueue());
       console.log('[LibraryPage] Processing queue:', this.processingQueue());

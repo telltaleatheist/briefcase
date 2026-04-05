@@ -69,6 +69,7 @@ export interface DownloadOptions {
   useCompression?: boolean;
   compressionLevel?: number;
   transcribeVideo?: boolean;
+  referer?: string; // Referer header for embedded videos (e.g., Vimeo embeds)
   shouldImport?: boolean; // For library downloads
   skipProcessing?: boolean; // Skip processing entirely - just download and mark as completed
   libraryId?: string; // Library ID for database import

@@ -199,7 +199,7 @@ export class ProcessingQueueComponent {
   }
 
   getTaskProgress(task: QueueItemTask): number {
-    return task.progress || 0;
+    return Math.round(task.progress || 0);
   }
 
   getTaskStatus(task: QueueItemTask): string {

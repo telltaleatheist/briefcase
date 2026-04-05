@@ -329,15 +329,8 @@ export class BatchAnalysisService implements OnModuleInit {
           }
           tasks.push({ type: 'transcribe', options: { model: config.whisperModel } });
         } else {
-          // User requested full analysis
-          // Check if analysis already exists and if we should skip
-          if (hasAnalysis && !config.forceReanalyze) {
-            this.logger.log(`Analysis already exists for ${currentFilename}, skipping (use forceReanalyze to override)`);
-            if (this.currentBatchJob) {
-              this.currentBatchJob.skippedVideos++;
-            }
-            continue; // Skip this video entirely
-          }
+          // User requested full analysis — always allow re-analysis.
+          // Old analysis will be cleared by processAnalyzePhase before re-running.
 
           if (!hasTranscript) {
             // Need to transcribe first

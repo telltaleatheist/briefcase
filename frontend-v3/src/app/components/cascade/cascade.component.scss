@@ -88,13 +88,14 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
-// Week Header (Accordion) - Fixed height for virtual scroll
+// Week Header (Accordion) - Fixed height for virtual scroll (must match itemSize="56")
 .week-header {
   display: flex;
   align-items: center;
   gap: $spacing-xs;
   padding: 0 $spacing-lg;
-  height: 36px;
+  height: 56px;
+  box-sizing: border-box;
   width: 100%;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
@@ -198,13 +199,13 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
-// Video Item - Fixed height for virtual scroll
+// Video Item - Fixed height for virtual scroll (must match itemSize="56")
 .video-item {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
   padding: 0 $spacing-md;
-  height: 60px;
+  height: 56px;
   width: 100%; // Fill available width
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);

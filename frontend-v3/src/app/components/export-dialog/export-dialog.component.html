@@ -29,9 +29,23 @@
           <h4>Ready to Export</h4>
           <p>{{ queuedJobCount }} clip{{ queuedJobCount !== 1 ? 's' : '' }} queued and waiting to start.</p>
           <div class="queue-actions">
-            <button class="cancel-queue-btn" (click)="cancelQueue()">Cancel</button>
-            <button class="start-btn" (click)="startQueue()">Start</button>
-            <button class="go-to-queue-btn" (click)="goToQueue()">Take Me There</button>
+            <button class="cancel-queue-btn" (click)="cancelQueue()" [disabled]="isExporting">Cancel</button>
+            <button class="start-btn" (click)="startQueue()" [disabled]="isExporting">
+              @if (isExporting) {
+                <span class="spinner"></span>
+                Submitting...
+              } @else {
+                Start
+              }
+            </button>
+            <button class="go-to-queue-btn" (click)="goToQueue()" [disabled]="isExporting">
+              @if (isExporting) {
+                <span class="spinner"></span>
+                Submitting...
+              } @else {
+                Take Me There
+              }
+            </button>
           </div>
         </div>
       }
