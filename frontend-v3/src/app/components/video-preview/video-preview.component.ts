@@ -1929,6 +1929,19 @@ Tip: Right-click on the timeline for additional options.
 
 
   /**
+   * Detect transient Chromium temp paths that come from
+   * webUtils.getPathForFile() for non-filesystem File objects (clipboard
+   * paste, drag from web content). These files disappear shortly after
+   * the drop, so we must refuse to use them.
+   */
+  private isTransientFilePath(p: string): boolean {
+    if (!p) return false;
+    if (/\.org\.chromium\.Chromium\./.test(p)) return true;
+    if (/[\\/](Caches|Temporary Items)[\\/]/.test(p)) return true;
+    return false;
+  }
+
+  /**
    * Load a video file from disk
    */
   private async loadVideoFile(file: File): Promise<void> {
@@ -1949,8 +1962,24 @@ Tip: Right-click on the timeline for additional options.
 
     if (electron && electron.getFilePathFromFile) {
       try {
-        filePath = electron.getFilePathFromFile(file);
-        console.log('Got file path from Electron:', filePath);
+        const candidate = electron.getFilePathFromFile(file);
+        console.log('Got file path from Electron:', candidate);
+
+        // Reject transient Chromium temp paths (clipboard / web drag
+        // sources) — they disappear shortly after the drop and would
+        // otherwise cause ENOENT errors later when the backend tries
+        // to read the file.
+        if (candidate && this.isTransientFilePath(candidate)) {
+          console.warn('Ignoring transient file path:', candidate);
+          this.notificationService.toastOnly(
+            'warning',
+            'Unsupported source',
+            'This file cannot be imported directly. Please drag it from a Finder window.'
+          );
+          filePath = null;
+        } else {
+          filePath = candidate;
+        }
       } catch (error) {
         console.warn('Failed to get file path from Electron:', error);
       }

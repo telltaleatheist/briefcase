@@ -35,21 +35,54 @@ export class FileImportService {
   }
 
   /**
-   * Get file paths from File objects using Electron's webUtils
+   * Validate a file path resolved by webUtils.getPathForFile().
+   *
+   * For certain File objects (clipboard paste, drag from a webpage, some
+   * Finder operations) webUtils.getPathForFile() returns a transient
+   * Chromium temp path (e.g. .org.chromium.Chromium.XXXXXX) instead of a
+   * real on-disk path. These files disappear shortly after the drop, so
+   * any import that stores them will later surface as an ENOENT error.
+   * Reject them here so we can show the user a friendly warning.
+   */
+  private isValidFilePath(p: string): boolean {
+    if (!p) return false;
+    if (/\.org\.chromium\.Chromium\./.test(p)) return false;
+    if (/[\\/](Caches|Temporary Items)[\\/]/.test(p)) return false;
+    return true;
+  }
+
+  /**
+   * Get file paths from File objects using Electron's webUtils.
+   * Rejects transient Chromium temp paths and warns the user about
+   * unsupported sources.
    */
   async getFilePathsFromFiles(files: File[]): Promise<string[]> {
     const filePaths: string[] = [];
+    let rejected = 0;
 
     try {
       for (const file of files) {
         const path = (window as any).electron?.getFilePathFromFile(file);
-        if (path) {
-          filePaths.push(path);
-          console.log('Got file path:', path);
+        if (!path) continue;
+
+        if (!this.isValidFilePath(path)) {
+          console.warn('Rejecting transient file path:', path);
+          rejected++;
+          continue;
         }
+
+        filePaths.push(path);
+        console.log('Got file path:', path);
       }
 
-      if (filePaths.length === 0) {
+      if (rejected > 0) {
+        this.notificationService.warning(
+          'Unsupported source',
+          'This file cannot be imported directly. Please drag it from a Finder window.'
+        );
+      }
+
+      if (filePaths.length === 0 && rejected === 0) {
         console.error('Could not get file paths from files');
       }
 

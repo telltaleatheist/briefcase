@@ -61,7 +61,14 @@ export class ThumbnailController {
       }
 
       // Send the thumbnail file (dotfiles: 'allow' needed for .thumbnails directory)
-      res.sendFile(thumbnailPath, { dotfiles: 'allow' });
+      res.sendFile(thumbnailPath, { dotfiles: 'allow' }, (err: Error | null) => {
+        if (err) {
+          this.logger.warn(`Failed to send thumbnail for video ${id}: ${err.message}`);
+          if (!res.headersSent) {
+            res.status(404).json({ statusCode: 404, message: 'Thumbnail not found' });
+          }
+        }
+      });
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;

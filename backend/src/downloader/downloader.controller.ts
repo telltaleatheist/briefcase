@@ -1,11 +1,13 @@
 // ClipChimp/backend/src/downloader/downloader.controller.ts
-import { Controller, Get, Param, Delete, Res, Query } from '@nestjs/common';
+import { Controller, Get, Param, Delete, Res, Query, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { DownloaderService } from './downloader.service';
 import * as fs from 'fs';
 
 @Controller('downloader')
 export class DownloaderController {
+  private readonly logger = new Logger(DownloaderController.name);
+
   constructor(
     private readonly downloaderService: DownloaderService
   ) {}
@@ -46,36 +48,44 @@ export class DownloaderController {
   @Get('file/:id')
   async getFile(@Param('id') id: string, @Res() res: Response) {
     const file = await this.downloaderService.getFileById(id);
-    
+
     if (!file || !fs.existsSync(file.filePath)) {
       return res.status(404).json({ message: 'File not found' });
     }
-    
-    return res.download(file.filePath);
+
+    return res.download(file.filePath, (err: Error | null) => {
+      if (err) {
+        this.logger.warn(`Failed to download file ${id}: ${err.message}`);
+        if (!res.headersSent) {
+          res.status(404).json({ statusCode: 404, message: 'File not found' });
+        }
+      }
+    });
   }
 
   @Get('stream/:id')
   async streamFile(@Param('id') id: string, @Res() res: Response) {
     const file = await this.downloaderService.getFileById(id);
-    
+
     if (!file || !fs.existsSync(file.filePath)) {
       return res.status(404).json({ message: 'File not found' });
     }
-    
+
     // Get file stats
     const stat = fs.statSync(file.filePath);
     const fileSize = stat.size;
     const range = res.req.headers.range;
-    
+
     if (range) {
       // Parse range
       const parts = range.replace(/bytes=/, '').split('-');
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunkSize = (end - start) + 1;
-      
+
       const fileStream = fs.createReadStream(file.filePath, { start, end });
-      
+      this.attachStreamErrorHandler(fileStream, res, `download ${id}`);
+
       // Set headers
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -92,9 +102,34 @@ export class DownloaderController {
         'Content-Length': fileSize,
         'Content-Type': 'video/mp4',
       });
-      
-      fs.createReadStream(file.filePath).pipe(res);
+
+      const fileStream = fs.createReadStream(file.filePath);
+      this.attachStreamErrorHandler(fileStream, res, `download ${id}`);
+      fileStream.pipe(res);
     }
+  }
+
+  /**
+   * Attach an error handler to a read stream so filesystem errors never
+   * leak to the response body. Must be called BEFORE piping.
+   */
+  private attachStreamErrorHandler(
+    stream: NodeJS.ReadableStream,
+    res: Response,
+    context: string,
+  ): void {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+      this.logger.warn(`Stream error for ${context}: ${err.code || ''} ${err.message}`);
+      if (!res.headersSent) {
+        res.status(404).json({ statusCode: 404, message: 'File not found' });
+      } else {
+        try {
+          res.end();
+        } catch {
+          // ignore
+        }
+      }
+    });
   }
 
   @Get('check')

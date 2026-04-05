@@ -56,6 +56,29 @@ export class LibraryController {
   ) {}
 
   /**
+   * Attach an error handler to a read stream so filesystem errors never
+   * leak to the response body. Must be called BEFORE piping.
+   */
+  private attachStreamErrorHandler(
+    stream: NodeJS.ReadableStream,
+    res: Response,
+    context: string,
+  ): void {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+      this.logger.warn(`Stream error for ${context}: ${err.code || ''} ${err.message}`);
+      if (!res.headersSent) {
+        res.status(404).json({ statusCode: 404, message: 'File not found' });
+      } else {
+        try {
+          res.end();
+        } catch {
+          // ignore
+        }
+      }
+    });
+  }
+
+  /**
    * Import a single file to the library
    * Simple endpoint for processing queue - just imports, doesn't download
    */
@@ -566,7 +589,14 @@ export class LibraryController {
       // Set headers and send file
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=3600');
-      res.sendFile(imagePath);
+      res.sendFile(imagePath, (err: Error | null) => {
+        if (err) {
+          this.logger.warn(`Failed to send image: ${err.message}`);
+          if (!res.headersSent) {
+            res.status(404).json({ statusCode: 404, message: 'Image not found' });
+          }
+        }
+      });
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -653,6 +683,7 @@ export class LibraryController {
           const chunkSize = end - start + 1;
 
           const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 }); // 256KB buffer for faster streaming
+          this.attachStreamErrorHandler(stream, res, 'custom-video');
 
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -666,6 +697,7 @@ export class LibraryController {
         } else {
           // No range request, stream entire file with optimized buffer
           const stream = createReadStream(videoPath, { highWaterMark: 256 * 1024 }); // 256KB buffer
+          this.attachStreamErrorHandler(stream, res, 'custom-video');
 
           res.writeHead(200, {
             'Content-Length': fileSize,
@@ -756,6 +788,7 @@ export class LibraryController {
           const chunkSize = end - start + 1;
 
           const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 }); // 256KB buffer for faster streaming
+          this.attachStreamErrorHandler(stream, res, `video ${id}`);
 
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -769,6 +802,7 @@ export class LibraryController {
         } else {
           // No range request, stream entire file with optimized buffer
           const stream = createReadStream(videoPath, { highWaterMark: 256 * 1024 }); // 256KB buffer
+          this.attachStreamErrorHandler(stream, res, `video ${id}`);
 
           res.writeHead(200, {
             'Content-Length': fileSize,
