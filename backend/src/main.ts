@@ -7,6 +7,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { log } from './common/logger';
 import { ServerOptions } from 'socket.io';
 import * as express from 'express';  // Explicitly import express
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 class ExtendedIoAdapter extends IoAdapter {
   createIOServer(port: number, options?: ServerOptions): any {
@@ -77,6 +78,10 @@ async function bootstrap() {
         forbidNonWhitelisted: false,
       })
     );
+
+    // Global exception filter: sanitizes all error responses so no raw
+    // filesystem paths or Node fs error codes leak to clients.
+    app.useGlobalFilters(new AllExceptionsFilter());
 
     // Port was already declared above for CORS configuration
     await app.listen(port);

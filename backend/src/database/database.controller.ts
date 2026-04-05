@@ -58,6 +58,30 @@ export class DatabaseController {
   ) {}
 
   /**
+   * Attach an error handler to a read stream so filesystem errors (ENOENT,
+   * EACCES, abrupt file removal mid-stream) never leak to the response body.
+   * Must be called BEFORE the stream is piped to the response.
+   */
+  private attachStreamErrorHandler(
+    stream: NodeJS.ReadableStream,
+    res: Response,
+    context: string,
+  ): void {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+      this.logger.warn(`Stream error for ${context}: ${err.code || ''} ${err.message}`);
+      if (!res.headersSent) {
+        res.status(404).json({ statusCode: 404, message: 'File not found' });
+      } else {
+        try {
+          res.end();
+        } catch {
+          // ignore
+        }
+      }
+    });
+  }
+
+  /**
    * GET /api/database/stats
    * Get database statistics (video counts, etc.)
    * Returns empty stats if no library/database exists yet (first run)
@@ -1242,7 +1266,14 @@ export class DatabaseController {
           }
         }
 
-        return res.sendFile(posterPath, { dotfiles: 'allow' });
+        return res.sendFile(posterPath, { dotfiles: 'allow' }, (err: Error | null) => {
+          if (err) {
+            this.logger.warn(`Failed to send poster for video ${videoId}: ${err.message}`);
+            if (!res.headersSent) {
+              res.status(404).json({ statusCode: 404, message: 'Poster not found' });
+            }
+          }
+        });
       }
 
       // Normalize path: replace backslashes with forward slashes for cross-platform compatibility
@@ -1300,6 +1331,7 @@ export class DatabaseController {
         const chunkSize = end - start + 1;
 
         const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 });
+        this.attachStreamErrorHandler(stream, res, videoId);
 
         res.writeHead(206, {
           'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -1313,6 +1345,7 @@ export class DatabaseController {
       } else {
         // No range request, stream entire file
         const stream = createReadStream(videoPath, { highWaterMark: 256 * 1024 });
+        this.attachStreamErrorHandler(stream, res, videoId);
 
         res.writeHead(200, {
           'Content-Length': fileSize,

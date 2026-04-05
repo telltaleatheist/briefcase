@@ -217,7 +217,11 @@ export class FfmpegController {
       }
 
       // Send the image file
-      res.sendFile(thumbnailPath);
+      res.sendFile(thumbnailPath, (err: Error | null) => {
+        if (err && !res.headersSent) {
+          res.status(404).json({ success: false, message: 'Thumbnail not found' });
+        }
+      });
     } catch (error) {
       return res.status(500).json({
         success: false,

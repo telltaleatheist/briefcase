@@ -143,6 +143,16 @@ export class WindowService {
    * If an editor window already exists, adds the video as a new tab instead
    */
   createEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string }): BrowserWindow {
+    // Defense in depth: refuse to pass transient Chromium temp paths to the
+    // editor. These come from webUtils.getPathForFile() for non-filesystem
+    // File objects (clipboard, webpage drags) and disappear by the time the
+    // backend tries to read them. The editor can fetch the real path from
+    // the database by videoId.
+    if (videoData.videoPath && WindowService.isTransientFilePath(videoData.videoPath)) {
+      log.warn(`Refusing to pass Chromium temp path to editor: ${videoData.videoPath}`);
+      videoData = { ...videoData, videoPath: undefined };
+    }
+
     // Check if an editor window already exists - add as tab instead
     const existingEditor = this.getFirstEditorWindow();
     if (existingEditor && !existingEditor.isDestroyed()) {
@@ -183,6 +193,7 @@ export class WindowService {
     const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
 
     log.info(`Opening editor window: ${editorUrl}`);
+    this.attachEditorFailureHandlers(editorWindow);
     editorWindow.loadURL(editorUrl);
 
     // Store reference and assign group number
@@ -211,6 +222,162 @@ export class WindowService {
     });
 
     return editorWindow;
+  }
+
+  /**
+   * Detect transient Chromium temp paths that come from
+   * webUtils.getPathForFile() for non-filesystem File objects (clipboard
+   * paste, drag from web content, etc). These files vanish the moment
+   * Chromium decides to clean them up, so we must never persist them.
+   */
+  private static isTransientFilePath(p: string): boolean {
+    if (!p) return false;
+    if (/\.org\.chromium\.Chromium\./.test(p)) return true;
+    if (/[\\/](Caches|Temporary Items)[\\/]/.test(p)) return true;
+    return false;
+  }
+
+  /**
+   * Attach failure-handling listeners to an editor window so that if
+   * navigation fails (HTTP 4xx/5xx, network error, wrong content-type)
+   * the user sees a branded fallback page instead of raw JSON / a blank
+   * white window.
+   */
+  private attachEditorFailureHandlers(editorWindow: BrowserWindow): void {
+    let fallbackShown = false;
+
+    const showFallback = (message: string) => {
+      if (fallbackShown || editorWindow.isDestroyed()) return;
+      fallbackShown = true;
+      this.loadEditorErrorPage(editorWindow, message);
+    };
+
+    // Fires when navigation receives HTTP response headers. If the status
+    // code indicates an error, show fallback — the body is almost
+    // certainly not our Angular app.
+    editorWindow.webContents.on(
+      'did-navigate',
+      (_event, url, httpResponseCode) => {
+        if (httpResponseCode && httpResponseCode >= 400) {
+          log.warn(`Editor window got HTTP ${httpResponseCode} for ${url}`);
+          showFallback('The editor could not be loaded. Please try again.');
+        }
+      },
+    );
+
+    // Fires on network errors, aborted loads, bad DNS, etc.
+    editorWindow.webContents.on(
+      'did-fail-load',
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrame) return;
+        // -3 = ABORTED (e.g. we navigated away intentionally). Ignore.
+        if (errorCode === -3) return;
+        log.warn(
+          `Editor window failed to load ${validatedURL}: ${errorCode} ${errorDescription}`,
+        );
+        showFallback('The editor could not be loaded. Please try again.');
+      },
+    );
+
+    // Final safety net: after a successful load, verify the page actually
+    // contains our Angular app. If the server returned e.g. JSON or plain
+    // text with a 200 (shouldn't happen, but belt-and-braces), fall back.
+    editorWindow.webContents.on('did-finish-load', async () => {
+      if (fallbackShown || editorWindow.isDestroyed()) return;
+      try {
+        const isAngular = await editorWindow.webContents.executeJavaScript(
+          `(() => {
+            try {
+              if (document.contentType && document.contentType !== 'text/html') return false;
+              return !!document.querySelector('app-root, app-editor, app-video-player');
+            } catch (e) { return false; }
+          })()`,
+          true,
+        );
+        if (!isAngular) {
+          log.warn('Editor window finished loading but is not the Angular app');
+          showFallback('The editor could not be loaded. Please try again.');
+        }
+      } catch (err) {
+        log.warn(`Editor content verification failed: ${(err as Error).message}`);
+      }
+    });
+  }
+
+  /**
+   * Load a branded fallback error page into an editor window. Reuses the
+   * same visual style as showBackendErrorWindow().
+   */
+  private loadEditorErrorPage(window: BrowserWindow, message: string): void {
+    if (window.isDestroyed()) return;
+
+    const safeMessage = message
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const html = `
+      <html>
+        <head>
+          <title>Couldn't open video</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              margin: 0;
+              padding: 20px;
+              color: #333;
+              background-color: #f5f5f5;
+              text-align: center;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+            }
+            .container {
+              background-color: white;
+              padding: 40px;
+              border-radius: 8px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              width: 100%;
+              max-width: 480px;
+            }
+            h2 {
+              color: #e74c3c;
+              margin-top: 0;
+            }
+            p {
+              line-height: 1.5;
+              margin-bottom: 24px;
+              color: #555;
+            }
+            button {
+              background-color: #3498db;
+              color: white;
+              border: none;
+              padding: 10px 22px;
+              border-radius: 4px;
+              cursor: pointer;
+              font-size: 14px;
+            }
+            button:hover {
+              background-color: #2980b9;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h2>Couldn't open video</h2>
+            <p>${safeMessage}</p>
+            <button onclick="window.close()">Close Window</button>
+          </div>
+        </body>
+      </html>
+    `;
+
+    window
+      .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+      .catch((err) => log.warn(`Failed to load editor error page: ${err.message}`));
   }
 
   /**
@@ -400,6 +567,13 @@ export class WindowService {
    * Create a new group (window) with a tab
    */
   createGroupWithTab(tabData: TabMoveData): number {
+    // Defense in depth: strip any transient Chromium temp path before it
+    // gets passed to the editor.
+    if (tabData.videoPath && WindowService.isTransientFilePath(tabData.videoPath)) {
+      log.warn(`Refusing to pass Chromium temp path to editor: ${tabData.videoPath}`);
+      tabData = { ...tabData, videoPath: null };
+    }
+
     const windowId = `editor-${tabData.videoId}-${Date.now()}`;
     const iconPath = path.join(AppConfig.appPath, 'assets', 'icon.png');
 
@@ -430,6 +604,7 @@ export class WindowService {
     });
     const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
 
+    this.attachEditorFailureHandlers(editorWindow);
     editorWindow.loadURL(editorUrl);
 
     // Store reference and assign group number

@@ -46,6 +46,13 @@ export class WebController {
     }
 
     this.logger.log(`Serving HTML from: ${htmlPath}`);
-    return res.sendFile(htmlPath);
+    return res.sendFile(htmlPath, (err: Error | null) => {
+      if (err) {
+        this.logger.warn(`Failed to send saved-links HTML: ${err.message}`);
+        if (!res.headersSent) {
+          res.status(404).send('Web interface not found.');
+        }
+      }
+    });
   }
 }
