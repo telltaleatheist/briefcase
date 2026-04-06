@@ -655,22 +655,77 @@ export class QueueService implements OnDestroy {
         }
 
         // Second: Sync with backend jobs
+        // We match backend jobs to frontend jobs in three passes:
+        //   1. By backendJobId (the normal case — job is already tracked)
+        //   2. By identity (url or videoId) for jobs that are mid-submission.
+        //      submitPendingJobs() marks jobs as 'processing' locally BEFORE the
+        //      POST response assigns backendJobId. If refreshFromBackend() runs
+        //      during that window (e.g. user adds another URL and we switch to
+        //      the queue tab), we MUST NOT create a duplicate — we must attach
+        //      the backend ID to the in-flight frontend job instead.
+        //   3. Create a brand new frontend job (e.g. export-clip from a popout)
+        //
+        // We also track already-matched frontend IDs so two backend jobs can't
+        // collide onto the same frontend job, and we reap any legacy duplicates
+        // that share a backendJobId from earlier buggy sessions.
+        const matchedFrontendIds = new Set<string>();
+        const duplicateIdsToRemove: string[] = [];
+
         backendJobs.forEach((backendJob: any) => {
-          // Check if we already have this job (by backend ID)
-          const existingJob = this.jobs().find(j => j.backendJobId === backendJob.id);
-          if (existingJob) {
-            // Update existing job state
-            const newState = this.mapBackendStatus(backendJob.status);
-            if (existingJob.state !== newState) {
-              this.updateJobState(existingJob.id, newState);
+          // Pass 1: Match by backendJobId (and collect legacy duplicates)
+          const matchesById = this.jobs().filter(j => j.backendJobId === backendJob.id);
+          if (matchesById.length > 0) {
+            const primary = matchesById[0];
+            matchedFrontendIds.add(primary.id);
+
+            // Any other jobs sharing this backendJobId are leftover duplicates
+            // from the pre-fix race condition — reap them.
+            for (let i = 1; i < matchesById.length; i++) {
+              console.warn(`[QueueService] Removing legacy duplicate of backend job ${backendJob.id}: ${matchesById[i].id}`);
+              duplicateIdsToRemove.push(matchesById[i].id);
             }
-          } else {
-            // Create new job from backend data
-            const frontendJob = this.mapBackendToFrontendJob(backendJob);
-            this.setBackendJobId(frontendJob.id, backendJob.id);
-            this.jobs.update(jobs => [...jobs, frontendJob]);
+
+            const newState = this.mapBackendStatus(backendJob.status);
+            if (primary.state !== newState) {
+              this.updateJobState(primary.id, newState);
+            }
+            return;
           }
+
+          // Pass 2: Match by identity (url or videoId) for in-flight submissions
+          const byIdentity = this.jobs().find(j => {
+            if (matchedFrontendIds.has(j.id)) return false;
+            if (j.backendJobId) return false;
+            if (j.state !== 'processing' && j.state !== 'pending') return false;
+            if (backendJob.url && j.url && j.url === backendJob.url) return true;
+            if (backendJob.videoId && j.videoId && j.videoId === backendJob.videoId) return true;
+            return false;
+          });
+
+          if (byIdentity) {
+            console.log(`[QueueService] Matched in-flight job ${byIdentity.id} to backend job ${backendJob.id} by identity (submit race guard)`);
+            matchedFrontendIds.add(byIdentity.id);
+            this.setBackendJobId(byIdentity.id, backendJob.id);
+            const newState = this.mapBackendStatus(backendJob.status);
+            if (byIdentity.state !== newState) {
+              this.updateJobState(byIdentity.id, newState);
+            }
+            return;
+          }
+
+          // Pass 3: Create new job from backend data (genuinely new, e.g. from
+          // a popout editor export-clip submission)
+          const frontendJob = this.mapBackendToFrontendJob(backendJob);
+          matchedFrontendIds.add(frontendJob.id);
+          this.setBackendJobId(frontendJob.id, backendJob.id);
+          this.jobs.update(jobs => [...jobs, frontendJob]);
         });
+
+        // Reap any legacy duplicates we found during matching
+        if (duplicateIdsToRemove.length > 0) {
+          console.log(`[QueueService] Cleaning up ${duplicateIdsToRemove.length} legacy duplicate job(s)`);
+          duplicateIdsToRemove.forEach(id => this.removeJob(id));
+        }
 
         console.log(`[QueueService] Queue restored with ${this.jobs().length} total jobs`);
       } else {
