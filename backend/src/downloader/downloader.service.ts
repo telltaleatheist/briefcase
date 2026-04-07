@@ -408,20 +408,33 @@ export class DownloaderService implements OnModuleInit {
         throw new Error(error);
       }
       
-      // Check if this is a Reddit URL - handle differently
+      // Check if this is a Reddit URL - try direct download first (avoids rate-limited API)
       if (options.url.includes('reddit.com')) {
         try {
-          const info = await this.getRedditInfo(options.url);
-          if (info && info.imageUrl) {
-            // It's an image post, handle differently
-            const result = await this.downloadRedditImage(info.imageUrl, info.title, downloadFolder, jobId);
-
-            // Add a flag to indicate this is an image
-            return { ...result, isImage: true };
+          const videoInfo = await this.getRedditVideoUrlFromJson(options.url);
+          if (videoInfo) {
+            // It's a video post — download directly via HTTPS + ffmpeg mux
+            this.logger.log(`Reddit: found video via JSON API, downloading directly: "${videoInfo.title}"`);
+            const directResult = await this.downloadRedditVideoDirect(options.url, downloadFolder, jobId);
+            if (directResult && fs.existsSync(directResult)) {
+              this.logger.log(`Reddit direct download succeeded: ${directResult}`);
+              const processedFile = await this.processOutputFilename(directResult, uploadDate);
+              this.addToHistory(processedFile, options.url);
+              this.eventService.emitDownloadCompleted(processedFile, options.url, jobId, false);
+              if (jobId) this.activeDownloads.delete(jobId);
+              return { success: true, outputFile: processedFile };
+            }
+          } else {
+            // Not a video — check for image
+            const info = await this.getRedditInfo(options.url);
+            if (info && info.imageUrl) {
+              const result = await this.downloadRedditImage(info.imageUrl, info.title, downloadFolder, jobId);
+              return { ...result, isImage: true };
+            }
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
-          this.logger.warn(`Failed to get Reddit info, trying regular download: ${errorMessage}`);
+          this.logger.warn(`Reddit direct download failed, falling back to yt-dlp: ${errorMessage}`);
         }
       }
 
@@ -523,6 +536,12 @@ export class DownloaderService implements OnModuleInit {
       // Configure format options based on source
       if (options.url.includes('reddit.com')) {
         // For Reddit, don't specify any format - let yt-dlp choose the best available format
+        // Always use browser cookies to avoid "account authentication required" errors
+        const browser = (options.useCookies && options.browser && options.browser !== 'auto')
+          ? options.browser
+          : 'chrome';
+        ytDlpManager.addOption('--cookies-from-browser', browser);
+        this.logger.log(`Using cookies from ${browser} for Reddit authentication`);
       } else if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
         // YouTube-specific configuration with fallback methods
         this.configureYouTubeDownload(ytDlpManager, options);
@@ -695,6 +714,20 @@ export class DownloaderService implements OnModuleInit {
 
             // === Sequential fallback chain ===
             // Each fallback attempts to set outputFile. If all fail, throw original error.
+
+            // Fallback 0: Reddit direct download (bypasses yt-dlp entirely)
+            if (!outputFile && options.url.includes('reddit.com')) {
+              try {
+                this.logger.warn('Reddit yt-dlp failed, trying direct download via JSON API...');
+                const result = await this.downloadRedditVideoDirect(options.url, downloadFolder, jobId);
+                if (result) {
+                  outputFile = result;
+                  this.logger.log(`Reddit direct download succeeded: ${outputFile}`);
+                }
+              } catch (redditErr) {
+                this.logger.warn(`Reddit direct download fallback failed: ${redditErr instanceof Error ? redditErr.message : String(redditErr)}`);
+              }
+            }
 
             // Fallback 1: Vimeo embed extraction (for pages embedding Vimeo players)
             // Triggers on: auth errors, 403 (embed-only videos), format mismatches with vimeo context
@@ -1098,7 +1131,8 @@ export class DownloaderService implements OnModuleInit {
         .addOption('--dump-json')
         .addOption('--simulate')
         .addOption('--no-playlist')
-        .addOption('--flat-playlist');
+        .addOption('--flat-playlist')
+        .addOption('--cookies-from-browser', 'chrome');
         
       // Initialize with default title
       let title = 'Reddit Post';
@@ -1168,6 +1202,300 @@ export class DownloaderService implements OnModuleInit {
     }
   }
   
+  /**
+   * Download a Reddit video directly using Node.js HTTPS + ffmpeg muxing.
+   * Bypasses yt-dlp entirely — fetches video+audio from v.redd.it CDN and muxes.
+   */
+  private async downloadRedditVideoDirect(
+    url: string,
+    downloadFolder: string,
+    jobId?: string,
+  ): Promise<string | null> {
+    const https = require('https');
+    const { execSync } = require('child_process');
+
+    // Step 1: Get video info from JSON API
+    const videoInfo = await this.getRedditVideoUrlFromJson(url);
+    if (!videoInfo) {
+      this.logger.warn('Reddit direct download: no video info from JSON API');
+      return null;
+    }
+
+    // Step 2: Parse the v.redd.it base URL to build video + audio URLs
+    // videoInfo.url could be HLS, DASH, or fallback MP4
+    const videoUrl = videoInfo.url;
+    const baseMatch = videoUrl.match(/(https?:\/\/v\.redd\.it\/[a-zA-Z0-9]+)\//);
+    if (!baseMatch) {
+      this.logger.warn(`Reddit direct download: cannot parse base URL from ${videoUrl}`);
+      return null;
+    }
+    const baseUrl = baseMatch[1];
+
+    // Build direct download URLs for video and audio
+    const quality = '720';
+    const videoMp4Url = `${baseUrl}/CMAF_${quality}.mp4`;
+    const audioMp4Url = `${baseUrl}/CMAF_AUDIO_128.mp4`;
+
+    // Build filename with date prefix (YYYY-MM-DD Title.mp4)
+    const sanitizedTitle = FilenameDateUtil.sanitizeFilename(videoInfo.title || 'Reddit Video');
+    const filename = FilenameDateUtil.ensureDatePrefix(sanitizedTitle + '.mp4', videoInfo.uploadDate);
+    const outputFile = path.join(downloadFolder, filename);
+    const tempVideo = path.join(downloadFolder, `.reddit_video_${Date.now()}.mp4`);
+    const tempAudio = path.join(downloadFolder, `.reddit_audio_${Date.now()}.m4a`);
+
+    this.logger.log(`Reddit direct download: video=${videoMp4Url}`);
+    this.logger.log(`Reddit direct download: audio=${audioMp4Url}`);
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': 'https://www.reddit.com/',
+    };
+
+    // Helper to download a file via HTTPS
+    const downloadFile = (fileUrl: string, dest: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const file = fs.createWriteStream(dest);
+        https.get(fileUrl, { headers }, (res: any) => {
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            file.close();
+            fs.unlinkSync(dest);
+            const redirectUrl = res.headers.location;
+            if (redirectUrl) {
+              downloadFile(redirectUrl, dest).then(resolve);
+            } else {
+              resolve(false);
+            }
+            return;
+          }
+          if (res.statusCode !== 200) {
+            file.close();
+            try { fs.unlinkSync(dest); } catch {}
+            this.logger.warn(`Reddit direct download: ${fileUrl} returned ${res.statusCode}`);
+            resolve(false);
+            return;
+          }
+          res.pipe(file);
+          file.on('finish', () => { file.close(); resolve(true); });
+          file.on('error', () => { file.close(); resolve(false); });
+        }).on('error', () => { file.close(); resolve(false); });
+      });
+    };
+
+    try {
+      if (jobId) {
+        this.eventService.emitDownloadProgress(10, 'Downloading Reddit video...', jobId, {});
+      }
+
+      // Download video and audio in parallel
+      const [videoOk, audioOk] = await Promise.all([
+        downloadFile(videoMp4Url, tempVideo),
+        downloadFile(audioMp4Url, tempAudio),
+      ]);
+
+      if (!videoOk) {
+        this.logger.warn('Reddit direct download: video download failed');
+        return null;
+      }
+
+      if (jobId) {
+        this.eventService.emitDownloadProgress(70, 'Muxing Reddit video...', jobId, {});
+      }
+
+      // Step 3: Mux with ffmpeg
+      const ffmpegPath = this.sharedConfigService.getFfmpegPath() || 'ffmpeg';
+
+      if (audioOk) {
+        // Mux video + audio
+        execSync(
+          `"${ffmpegPath}" -y -i "${tempVideo}" -i "${tempAudio}" -c copy -movflags +faststart "${outputFile}"`,
+          { timeout: 60000, stdio: 'pipe' },
+        );
+      } else {
+        // No audio track — just rename video
+        this.logger.warn('Reddit direct download: no audio track, using video only');
+        fs.renameSync(tempVideo, outputFile);
+      }
+
+      // Cleanup temp files
+      try { if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo); } catch {}
+      try { if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio); } catch {}
+
+      if (fs.existsSync(outputFile)) {
+        if (jobId) {
+          this.eventService.emitDownloadProgress(100, 'Reddit download complete', jobId, {});
+        }
+        return outputFile;
+      }
+
+      return null;
+    } catch (err) {
+      // Cleanup on error
+      try { if (fs.existsSync(tempVideo)) fs.unlinkSync(tempVideo); } catch {}
+      try { if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio); } catch {}
+      throw err;
+    }
+  }
+
+  /**
+   * Fetch video URL directly from Reddit's public JSON API.
+   * Appends .json to the post URL to get structured data without auth.
+   */
+  private async getRedditVideoUrlFromJson(url: string): Promise<{ url: string; title: string; uploadDate?: string } | null> {
+    const https = require('https');
+
+    // Clean URL and build JSON endpoint, use old.reddit.com to avoid aggressive rate-limiting
+    let cleanUrl = url.split('?')[0].replace(/\/$/, '');
+    cleanUrl = cleanUrl.replace('www.reddit.com', 'old.reddit.com')
+                       .replace('://reddit.com', '://old.reddit.com');
+    const jsonUrl = cleanUrl + '.json';
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+
+    return new Promise((resolve, reject) => {
+      https.get(jsonUrl, { headers }, (res: any) => {
+        // Follow redirects
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          const redirectUrl = res.headers.location;
+          if (redirectUrl) {
+            https.get(redirectUrl, { headers }, (redirectRes: any) => {
+              this.handleRedditJsonResponse(redirectRes, resolve, reject);
+            }).on('error', reject);
+            return;
+          }
+        }
+        this.handleRedditJsonResponse(res, resolve, reject);
+      }).on('error', reject);
+    });
+  }
+
+  private handleRedditJsonResponse(
+    res: any,
+    resolve: (value: { url: string; title: string; uploadDate?: string } | null) => void,
+    reject: (reason?: any) => void,
+  ): void {
+    let body = '';
+    res.on('data', (chunk: string) => { body += chunk; });
+    res.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        // Reddit JSON returns an array: [post_listing, comments_listing]
+        const listing = Array.isArray(data) ? data[0] : data;
+        const post = listing?.data?.children?.[0]?.data;
+        if (!post) {
+          resolve(null);
+          return;
+        }
+
+        const title = post.title || 'Reddit Video';
+
+        // Extract upload date from created_utc (Unix timestamp)
+        let uploadDate: string | undefined;
+        const createdUtc = post.created_utc || post.created;
+        if (createdUtc) {
+          const date = new Date(createdUtc * 1000);
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          uploadDate = `${year}-${month}-${day}`;
+        }
+
+        // Check for Reddit-hosted video
+        if (post.is_video && post.media?.reddit_video) {
+          const rv = post.media.reddit_video;
+          // Prefer HLS for best quality with audio muxing
+          const videoUrl = rv.hls_url || rv.dash_url || rv.fallback_url;
+          if (videoUrl) {
+            // Decode HTML entities (&amp; -> &)
+            const decoded = videoUrl.replace(/&amp;/g, '&');
+            this.logger.log(`Reddit JSON: found ${rv.hls_url ? 'HLS' : 'fallback'} video for "${title}" (${uploadDate || 'no date'})`);
+            resolve({ url: decoded, title, uploadDate });
+            return;
+          }
+        }
+
+        // Check for crossposted video
+        if (post.crosspost_parent_list?.length > 0) {
+          const xpost = post.crosspost_parent_list[0];
+          if (xpost.is_video && xpost.media?.reddit_video) {
+            const rv = xpost.media.reddit_video;
+            const videoUrl = rv.hls_url || rv.dash_url || rv.fallback_url;
+            if (videoUrl) {
+              const decoded = videoUrl.replace(/&amp;/g, '&');
+              this.logger.log(`Reddit JSON: found crossposted video for "${title}" (${uploadDate || 'no date'})`);
+              resolve({ url: decoded, title, uploadDate });
+              return;
+            }
+          }
+        }
+
+        this.logger.log('Reddit JSON: no Reddit-hosted video found in post data');
+        resolve(null);
+      } catch (parseErr) {
+        this.logger.warn(`Reddit JSON: failed to parse JSON, trying HTML scrape: ${parseErr}`);
+        // Reddit returned HTML instead of JSON — scrape video URL from page source
+        const videoInfo = this.extractRedditVideoFromHtml(body);
+        if (videoInfo) {
+          this.logger.log(`Reddit HTML scrape: found video URL for "${videoInfo.title}"`);
+          resolve(videoInfo);
+        } else {
+          resolve(null);
+        }
+      }
+    });
+  }
+
+  /**
+   * Extract Reddit video URL from HTML page source.
+   * Reddit embeds video data in JSON within script tags.
+   */
+  private extractRedditVideoFromHtml(html: string): { url: string; title: string } | null {
+    try {
+      // Look for v.redd.it HLS playlist URL in the page
+      const hlsMatch = html.match(/https?:\/\/v\.redd\.it\/[a-zA-Z0-9]+\/HLSPlaylist\.m3u8[^"'\s\\]*/);
+      if (hlsMatch) {
+        const url = hlsMatch[0].replace(/&amp;/g, '&').replace(/\\u0026/g, '&');
+        const title = this.extractTitleFromHtml(html);
+        return { url, title };
+      }
+
+      // Look for v.redd.it DASH playlist
+      const dashMatch = html.match(/https?:\/\/v\.redd\.it\/[a-zA-Z0-9]+\/DASHPlaylist\.mpd[^"'\s\\]*/);
+      if (dashMatch) {
+        const url = dashMatch[0].replace(/&amp;/g, '&').replace(/\\u0026/g, '&');
+        const title = this.extractTitleFromHtml(html);
+        return { url, title };
+      }
+
+      // Look for v.redd.it fallback MP4 URL
+      const fallbackMatch = html.match(/https?:\/\/v\.redd\.it\/[a-zA-Z0-9]+\/CMAF_\d+\.mp4[^"'\s\\]*/);
+      if (fallbackMatch) {
+        const url = fallbackMatch[0].replace(/&amp;/g, '&').replace(/\\u0026/g, '&');
+        const title = this.extractTitleFromHtml(html);
+        return { url, title };
+      }
+
+      return null;
+    } catch (err) {
+      this.logger.warn(`Reddit HTML scrape failed: ${err}`);
+      return null;
+    }
+  }
+
+  private extractTitleFromHtml(html: string): string {
+    const titleMatch = html.match(/<title>([^<]*)<\/title>/i);
+    if (titleMatch) {
+      // Reddit titles are usually "Post Title : subreddit"
+      return titleMatch[1].replace(/\s*:\s*\w+$/, '').trim() || 'Reddit Video';
+    }
+    return 'Reddit Video';
+  }
+
   private extractTitleFromRedditUrl(url: string): string | null {
     try {
       // Reddit URLs often contain the title after the post ID
@@ -1595,6 +1923,37 @@ export class DownloaderService implements OnModuleInit {
    */
   async getVideoInfo(url: string): Promise<any> {
     try {
+      // For Reddit URLs, use JSON API directly to avoid rate-limited API calls
+      if (url.includes('reddit.com')) {
+        const redditVideo = await this.getRedditVideoUrlFromJson(url);
+        if (redditVideo) {
+          return {
+            title: redditVideo.title,
+            uploader: 'Reddit',
+            duration: 0,
+            thumbnail: '',
+            uploadDate: redditVideo.uploadDate,
+            description: '',
+            formats: [],
+            width: 0,
+            height: 0,
+          };
+        }
+        // Not a video — might be an image post, return basic info from URL
+        const titleFromUrl = this.extractTitleFromRedditUrl(url);
+        return {
+          title: titleFromUrl || 'Reddit Post',
+          uploader: 'Reddit',
+          duration: 0,
+          thumbnail: '',
+          uploadDate: undefined,
+          description: '',
+          formats: [],
+          width: 0,
+          height: 0,
+        };
+      }
+
       // Transform ABC News URLs if needed
       url = await this.transformAbcNewsUrl(url);
 
@@ -1644,6 +2003,12 @@ export class DownloaderService implements OnModuleInit {
       if (url.includes('vimeo.com')) {
         ytDlpManager.addOption('--cookies-from-browser', 'chrome');
         this.logger.log('Using cookies from Chrome for Vimeo metadata retrieval');
+      }
+
+      // For Reddit, use cookies from Chrome to avoid auth errors
+      if (url.includes('reddit.com')) {
+        ytDlpManager.addOption('--cookies-from-browser', 'chrome');
+        this.logger.log('Using cookies from Chrome for Reddit metadata retrieval');
       }
 
       // For Twitter/X, let yt-dlp use its default API (syndication API is slow now)
