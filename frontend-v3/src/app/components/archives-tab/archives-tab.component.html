@@ -1,0 +1,59 @@
+<div class="archives-container">
+  <!-- Header with URL input -->
+  <div class="header-section">
+    <div class="url-input-container">
+      <input
+        type="text"
+        class="url-input"
+        placeholder="Enter URL to archive..."
+        [ngModel]="urlInput()"
+        (ngModelChange)="urlInput.set($event)"
+        (keyup.enter)="onUrlSubmit()"
+        [disabled]="captureInProgress()"
+      />
+      <button
+        class="btn-add"
+        (click)="onUrlSubmit()"
+        [disabled]="!urlInput() || captureInProgress()"
+      >
+        @if (captureInProgress()) {
+          Capturing...
+        } @else {
+          Archive
+        }
+      </button>
+    </div>
+  </div>
+
+  <!-- Archives list grouped by domain -->
+  <div class="archives-content">
+    @if (isLoading()) {
+      <div class="loading-state">
+        <span class="loading-spinner">⏳</span>
+        <p>Loading archives...</p>
+      </div>
+    } @else if (archiveWeeks().length === 0) {
+      <div class="empty-state">
+        <span class="empty-icon">🌐</span>
+        <p>No web archives yet</p>
+        <span class="empty-hint">Enter a URL above to archive a web page, or import existing .mhtml files</span>
+        <button class="btn-backfill" (click)="onBackfill()">
+          Scan for existing MHTML files
+        </button>
+      </div>
+    } @else {
+      <app-cascade
+        [weeks]="archiveWeeks()"
+        [showStatusIndicator]="false"
+        [showDeleteButton]="false"
+        [showDuration]="false"
+        [showEditButton]="false"
+        [showThumbnails]="true"
+        [showSuggestedTitle]="true"
+        [draggable]="false"
+        (selectionChanged)="onSelectionChanged($event)"
+        (videoAction)="onVideoAction($event)"
+      />
+    }
+  </div>
+</div>

@@ -1,4 +1,5 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DatabaseService } from './database.service';
 import { LibraryManagerService } from './library-manager.service';
 import { IgnoreService } from './ignore.service';
@@ -63,6 +64,7 @@ export class FileScannerService {
     private readonly ignoreService: IgnoreService,
     private readonly ffmpegService: FfmpegService,
     private readonly mediaEventService: MediaEventService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -242,6 +244,16 @@ export class FileScannerService {
             result.newVideos++;
             result.newVideoIds.push(videoId);
             this.logger.log(`New video added: ${file.filename}`);
+
+            // Emit event for webpage files so WebArchiveService can backfill
+            const ext = path.extname(file.filename).toLowerCase();
+            if (this.WEBPAGE_EXTENSIONS.includes(ext)) {
+              this.eventEmitter.emit('webpage.imported', {
+                videoId,
+                filePath: file.fullPath,
+                filename: file.filename,
+              });
+            }
           } catch (error) {
             const err = error as Error;
             this.logger.error(`Failed to add video ${file.filename}: ${err.message}`);
@@ -839,6 +851,16 @@ export class FileScannerService {
 
         // Emit WebSocket event so frontend refreshes immediately
         this.mediaEventService.emitVideoImported(videoId, filename, destinationPath);
+
+        // Emit event for webpage files so WebArchiveService can backfill
+        const ext = path.extname(filename).toLowerCase();
+        if (this.WEBPAGE_EXTENSIONS.includes(ext)) {
+          this.eventEmitter.emit('webpage.imported', {
+            videoId,
+            filePath: destinationPath,
+            filename,
+          });
+        }
 
         imported.push(videoId);
         this.logger.log(`Imported: ${filename} (${videoId})${uploadDate ? ` with upload date ${uploadDate}` : ''}`);

@@ -6,6 +6,7 @@ interface ElectronAPI {
   openDirectoryPicker: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   showOpenDialog: (options: any) => Promise<{ canceled: boolean; filePaths: string[] }>;
   openFile: (filePath: string) => Promise<string>;
+  openInBrowser: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openMultipleFiles: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
@@ -13,6 +14,14 @@ interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   saveConsoleLogs: (filename: string, content: string) => Promise<string>;
   openEditorWindow: (videoData: { videoId: string; videoPath?: string; videoTitle: string }) => Promise<{ success: boolean; error?: string }>;
+  captureWebPage: (options: { url: string; savePath: string; timeout?: number }) => Promise<{
+    success: boolean;
+    filePath?: string;
+    method?: string;
+    error?: string;
+    pageTitle?: string;
+  }>;
+  fetchFavicon: (domain: string, saveDir: string) => Promise<{ success: boolean; faviconPath?: string; error?: string }>;
 }
 
 declare global {
@@ -85,6 +94,25 @@ export class ElectronService {
       await window.electron!.openFile(filePath);
     } catch (error) {
       console.error('Error opening file:', error);
+    }
+  }
+
+  /**
+   * Open a local file in the default web browser.
+   * More reliable than openFile for MHTML/HTML files that may not have
+   * a default application associated with them.
+   */
+  async openInBrowser(filePath: string): Promise<{ success: boolean; error?: string }> {
+    if (!this.isElectron) {
+      console.warn('openInBrowser: Not running in Electron');
+      return { success: false, error: 'Not running in Electron' };
+    }
+
+    try {
+      return await window.electron!.openInBrowser(filePath);
+    } catch (error: any) {
+      console.error('Error opening file in browser:', error);
+      return { success: false, error: error.message };
     }
   }
 
@@ -188,6 +216,46 @@ export class ElectronService {
       console.error('Error opening external URL:', error);
       // Fallback to window.open
       window.open(url, '_blank');
+    }
+  }
+
+  /**
+   * Capture a web page as MHTML
+   */
+  async captureWebPage(options: { url: string; savePath: string; timeout?: number }): Promise<{
+    success: boolean;
+    filePath?: string;
+    method?: string;
+    error?: string;
+    pageTitle?: string;
+  }> {
+    if (!this.isElectron) {
+      console.warn('captureWebPage: Not running in Electron');
+      return { success: false, error: 'Not running in Electron' };
+    }
+
+    try {
+      return await window.electron!.captureWebPage(options);
+    } catch (error) {
+      console.error('Error capturing web page:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Fetch and cache a favicon for a domain
+   */
+  async fetchFavicon(domain: string, saveDir: string): Promise<{ success: boolean; faviconPath?: string; error?: string }> {
+    if (!this.isElectron) {
+      console.warn('fetchFavicon: Not running in Electron');
+      return { success: false, error: 'Not running in Electron' };
+    }
+
+    try {
+      return await window.electron!.fetchFavicon(domain, saveDir);
+    } catch (error) {
+      console.error('Error fetching favicon:', error);
+      return { success: false, error: (error as Error).message };
     }
   }
 

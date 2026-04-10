@@ -106,7 +106,9 @@ export class QueueTabComponent {
 
         // Derive hasTranscript/hasAnalysis from completed tasks
         const hasTranscript = job.tasks?.some(t => t.type === 'transcribe' && t.state === 'completed');
-        const hasAnalysis = job.tasks?.some(t => t.type === 'ai-analyze' && t.state === 'completed');
+        const hasAnalysis = job.tasks?.some(
+          t => (t.type === 'ai-analyze' || t.type === 'analyze-webpage') && t.state === 'completed'
+        );
 
         return {
           id: `completed-${job.id}`,

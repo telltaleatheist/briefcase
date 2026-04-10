@@ -408,6 +408,28 @@ Good examples (DO NOT copy these names - identify speakers from the actual chapt
 
 Output ONLY the filename, nothing else:`;
 
+export const TITLE_FROM_WEBPAGE_PROMPT = `Generate a concise, descriptive filename for this saved webpage based on its content.
+
+Current filename: {currentTitle}
+Page content (truncated):
+{pageText}
+
+Rules:
+- Lowercase, spaces allowed, max 80 chars
+- Format: "[speaker/author] - [key quote or action]" or "[source] on [topic] - [notable statement]"
+- Lead with the main person or source if clearly identifiable FROM THE CONTENT
+- If no clear person, use a descriptive topical title (e.g., "senate passes surveillance bill extending section 702")
+- Include the most notable/quotable phrase if present
+- Be specific about what the page is ABOUT, not just generic keywords
+- No dates, extensions, special chars, or parentheses
+
+Good examples (DO NOT copy these — identify the subject from the actual content):
+- "reuters - pentagon confirms ukraine aid shipment delayed"
+- "forgiato blow on trump rally crowd size controversy"
+- "cnn opinion - why nato expansion failed diplomacy"
+
+Output ONLY the filename, nothing else:`;
+
 // =============================================================================
 // DEFAULT PROMPTS EXPORT
 // =============================================================================

@@ -9,6 +9,7 @@ export type TaskType =
   | 'process-video'  // Combined: aspect ratio + audio normalization in single pass
   | 'transcribe'
   | 'analyze'
+  | 'analyze-webpage'
   | 'export-clip';
 
 export interface BaseTask {
@@ -85,6 +86,16 @@ export interface AnalyzeTask extends BaseTask {
   };
 }
 
+export interface AnalyzeWebpageTask extends BaseTask {
+  type: 'analyze-webpage';
+  options?: {
+    aiModel: string;
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+    apiKey?: string;
+    ollamaEndpoint?: string;
+  };
+}
+
 export interface ExportClipTask extends BaseTask {
   type: 'export-clip';
   options: {
@@ -114,6 +125,7 @@ export type Task =
   | ProcessVideoTask
   | TranscribeTask
   | AnalyzeTask
+  | AnalyzeWebpageTask
   | ExportClipTask;
 
 export interface TaskResult {

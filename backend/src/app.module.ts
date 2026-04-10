@@ -11,6 +11,7 @@ import { AnalysisModule } from './analysis/analysis.module';
 import { LibraryModule } from './library/library.module';
 import { DatabaseModule } from './database/database.module';
 import { SavedLinksModule } from './saved-links/saved-links.module';
+import { WebArchiveModule } from './web-archive/web-archive.module';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { SharedConfigModule } from './config/shared-config.module';
@@ -52,6 +53,7 @@ import { join } from 'path';
     AnalysisModule,
     LibraryModule,
     SavedLinksModule,
+    WebArchiveModule,
     JobStateManagerModule,
   ],
   controllers: [AppController],

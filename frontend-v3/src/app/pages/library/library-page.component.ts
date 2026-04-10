@@ -16,6 +16,7 @@ import { TabsTabComponent } from '../../components/tabs-tab/tabs-tab.component';
 import { NewTabDialogComponent } from '../../components/new-tab-dialog/new-tab-dialog.component';
 import { QueueTabComponent } from '../../components/queue-tab/queue-tab.component';
 import { SaveForLaterTabComponent } from '../../components/save-for-later-tab/save-for-later-tab.component';
+import { ArchivesTabComponent } from '../../components/archives-tab/archives-tab.component';
 import { SettingsPageComponent } from '../settings/settings-page.component';
 import { LibraryShortcutsDialogComponent } from '../../components/library-shortcuts-dialog/library-shortcuts-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
@@ -33,6 +34,7 @@ import { ElectronService } from '../../services/electron.service';
 import { TourService } from '../../services/tour.service';
 import { QueueService } from '../../services/queue.service';
 import { LibraryFilterService } from '../../services/library-filter.service';
+import { WebArchiveService } from '../../services/web-archive.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
 import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
@@ -80,6 +82,7 @@ export interface ProcessingTask {
     NewTabDialogComponent,
     QueueTabComponent,
     SaveForLaterTabComponent,
+    ArchivesTabComponent,
     SettingsPageComponent,
     ExportIndicatorComponent,
     TrimOpenerModalComponent
@@ -101,6 +104,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private tourService = inject(TourService);
   private queueService = inject(QueueService);
   private filterService = inject(LibraryFilterService);
+  private webArchiveService = inject(WebArchiveService);
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
@@ -315,7 +319,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   currentFilters: LibraryFilters | null = null;
 
   // Tab State
-  activeTab = signal<'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'settings'>('library');
+  activeTab = signal<'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings'>('library');
 
   // Default task settings (loaded from localStorage)
   private defaultTaskSettings: QueueItemTask[] = [];
@@ -889,6 +893,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           updated = true;
           return {
             ...video,
+            suggestedTitle: suggestedTitle,
             suggestedFilename: suggestedTitle,
             aiDescription: aiDescription,
             hasAnalysis: true
@@ -911,6 +916,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             if (video.id === videoId) {
               return {
                 ...video,
+                suggestedTitle: suggestedTitle,
                 suggestedFilename: suggestedTitle,
                 aiDescription: aiDescription,
                 hasAnalysis: true
@@ -1776,6 +1782,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.analyzeVideos(videosToProcess);
         break;
 
+      case 'analyzeWebpage':
+        this.analyzeWebpages(videosToProcess);
+        break;
+
       case 'moveToLibrary':
         // TODO: Open library selector dialog
         console.log('Move to library:', videosToProcess.map(v => v.name));
@@ -1786,9 +1796,20 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         this.deleteVideos(videosToProcess, 'everything');
         break;
 
-      case 'openInEditor':
-        this.openInEditor(videosToProcess);
+      case 'openInEditor': {
+        // Webpage archives should open in the default browser, not the editor
+        const webpages = videosToProcess.filter(v => v.mediaType === 'webpage');
+        const nonWebpages = videosToProcess.filter(v => v.mediaType !== 'webpage');
+        for (const wp of webpages) {
+          if (wp.filePath) {
+            this.electronService.openInBrowser(wp.filePath);
+          }
+        }
+        if (nonWebpages.length > 0) {
+          this.openInEditor(nonWebpages);
+        }
         break;
+      }
 
       case 'openInRipplecut':
         this.openInRipplecut(videosToProcess[0]);
@@ -1801,12 +1822,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
         break;
 
-      case 'open':
-        // Open video file in default video player
-        if (videosToProcess[0]?.filePath) {
-          this.electronService.openFile(videosToProcess[0].filePath);
+      case 'open': {
+        // Webpage archives open in default browser; everything else in default app
+        const first = videosToProcess[0];
+        if (first?.filePath) {
+          if (first.mediaType === 'webpage') {
+            this.electronService.openInBrowser(first.filePath);
+          } else {
+            this.electronService.openFile(first.filePath);
+          }
         }
         break;
+      }
 
       case 'configure':
         // Open the processing configuration modal for this video
@@ -2081,6 +2108,79 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.configExistingTasks.set(defaultTasks);
     this.configHasTranscript.set(allHaveTranscripts);
     this.configModalOpen.set(true);
+  }
+
+  /**
+   * Queue webpage items for AI title generation.
+   * Reuses the user's configured default AI model (library-specific or global).
+   */
+  private async analyzeWebpages(videos: VideoItem[]) {
+    const webpages = videos.filter(v => v.mediaType === 'webpage');
+    if (webpages.length === 0) return;
+
+    // Check if AI is configured before proceeding
+    const setupStatus = this.aiSetupService.getSetupStatus();
+    if (setupStatus.needsSetup) {
+      this.pendingAnalysisVideos = webpages;
+      this.aiWizardOpen.set(true);
+      return;
+    }
+
+    // Resolve default AI model (library-specific first, then global)
+    let defaultModel: string | null = null;
+    try {
+      const libResponse = await firstValueFrom(
+        this.http.get<{ success: boolean; aiModel: string | null }>(
+          `http://localhost:3000/api/database/libraries/default-ai-model`
+        )
+      );
+      defaultModel = libResponse?.aiModel || null;
+    } catch (error) {
+      console.error('Failed to fetch library default AI model:', error);
+    }
+
+    if (!defaultModel) {
+      try {
+        const configResponse = await firstValueFrom(
+          this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
+            `http://localhost:3000/api/config/default-ai`
+          )
+        );
+        if (configResponse?.defaultAI) {
+          defaultModel = `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
+        }
+      } catch (error) {
+        console.error('Failed to fetch global default AI model:', error);
+      }
+    }
+
+    if (!defaultModel) {
+      this.notificationService.error(
+        'No AI Model Configured',
+        'Please select a default AI model in Settings or via the video config dialog first.'
+      );
+      return;
+    }
+
+    // Clear selection
+    if (this.cascadeComponent) {
+      this.cascadeComponent.clearSelection();
+    }
+
+    // Create one queue job per webpage
+    for (const webpage of webpages) {
+      const task = createQueueTask('analyze-webpage', { aiModel: defaultModel });
+      this.queueService.addJob({
+        videoId: webpage.id,
+        title: webpage.name,
+        thumbnail: webpage.thumbnailUrl,
+        tasks: [task],
+        titleResolved: true
+      });
+    }
+
+    // Switch to Queue tab to show staging items
+    this.setActiveTab('queue');
   }
 
   private deleteVideos(videos: VideoItem[], mode: 'database-only' | 'file-only' | 'everything' = 'everything') {
@@ -2552,6 +2652,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Handle webpage capture from download dialog
+   */
+  async onCaptureWebpage(urls: string[]) {
+    this.downloadDialogOpen.set(false);
+    this.setActiveTab('archives');
+
+    for (const url of urls) {
+      const result = await this.webArchiveService.captureUrl(url);
+      if (result.success) {
+        this.notificationService.success('Archived', url);
+      } else {
+        this.notificationService.error('Archive Failed', result.error || 'Unknown error');
+      }
+    }
+
+    // Refresh library to show new files
+    this.loadLibrary();
+  }
+
+  /**
    * Open file picker dialog for importing media files using Electron IPC
    */
   async openImportDialog() {
@@ -2607,7 +2727,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   /**
    * Switch between Library, Queue, Tabs, Manager, Saved, and Settings tabs
    */
-  setActiveTab(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'settings') {
+  setActiveTab(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings') {
     this.activeTab.set(tab);
     if (tab === 'queue') {
       // Always refresh from backend so newly-submitted jobs (e.g. export-clip)

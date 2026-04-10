@@ -28,6 +28,7 @@ export type BackendTaskType =
   | 'process-video'
   | 'transcribe'
   | 'analyze'
+  | 'analyze-webpage'
   | 'export-clip';
 
 export interface BackendTask {
@@ -276,25 +277,36 @@ export class LibraryService {
    * Transform backend video to frontend VideoItem format
    */
   private transformVideo(video: any): VideoItem {
+    // Use poster for actual videos. For webpages, leave thumbnailUrl undefined
+    // so the cascade renders the uniform 🌐 placeholder - all web archives
+    // should look identical at a glance. Audio/document/image also have no
+    // thumbnail because ffmpeg can't produce one.
+    let thumbnailUrl: string | undefined;
+    if (video.id && (!video.media_type || video.media_type === 'video')) {
+      thumbnailUrl = `${this.API_BASE}/database/videos/${video.id}/stream?poster=1&t=${video.last_processed_date || video.added_at || '0'}`;
+    }
+
     return {
       id: video.id,
       name: video.filename || video.name || 'Untitled',
-      suggestedFilename: video.suggested_title || undefined,
+      suggestedFilename: video.wa_page_title || video.suggested_title || undefined,
       duration: this.formatDuration(video.duration || video.duration_seconds || 0),
       size: video.file_size || video.file_size_bytes,
       uploadDate: video.upload_date ? this.parseLocalDate(video.upload_date) : undefined,
       downloadDate: video.download_date ? this.parseLocalDate(video.download_date) : undefined,
       addedAt: video.added_at ? this.parseLocalDate(video.added_at) : undefined,
       lastProcessedDate: video.last_processed_date ? this.parseLocalDate(video.last_processed_date) : undefined,
-      thumbnailUrl: video.id ? `${this.API_BASE}/database/videos/${video.id}/stream?poster=1&t=${video.last_processed_date || video.added_at || '0'}` : undefined,
+      thumbnailUrl,
       // Additional fields for context menu actions
       filePath: video.file_path || video.filepath || video.current_path,
-      suggestedTitle: video.suggested_title,
+      // For webpage items, fall back to the page title captured from MHTML so
+      // the library cascade shows "Title Suggestion" underneath the filename.
+      suggestedTitle: video.suggested_title || video.wa_page_title || undefined,
       hasTranscript: video.has_transcript === 1 || video.has_transcript === true,
       hasAnalysis: video.has_analysis === 1 || video.has_analysis === true,
       // Searchable fields
       aiDescription: video.ai_description,
-      sourceUrl: video.source_url,
+      sourceUrl: video.wa_original_url || video.source_url,
       tags: video.tags || [],
       // Media type info
       mediaType: video.media_type,
@@ -728,6 +740,26 @@ export class LibraryService {
             customInstructions: config?.customInstructions || '',
             analysisGranularity: config?.analysisGranularity ?? 5,
             analysisQuality: config?.analysisQuality || 'fast'
+          }
+        }];
+
+      case 'analyze-webpage':
+        if (!config?.aiModel) {
+          throw new Error('Webpage analysis requires an AI model to be selected. Please select a model in the configuration.');
+        }
+        const webModelValue = config.aiModel;
+        let webProvider = 'ollama';
+        let webModel = webModelValue;
+        if (webModelValue.includes(':')) {
+          const colonIndex = webModelValue.indexOf(':');
+          webProvider = webModelValue.substring(0, colonIndex);
+          webModel = webModelValue.substring(colonIndex + 1);
+        }
+        return [{
+          type: 'analyze-webpage',
+          options: {
+            aiModel: webModel,
+            aiProvider: webProvider,
           }
         }];
 

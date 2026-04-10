@@ -8,10 +8,12 @@ import { WindowService } from '../services/window-service';
 import { BackendService } from '../services/backend-service';
 import { DownloadService } from '../services/download-service';
 import { UpdateService } from '../services/update-service';
+import { WebCaptureService } from '../services/web-capture-service';
 
 // Create service instances
 let downloadService: DownloadService;
 let updateService: UpdateService;
+let webCaptureService: WebCaptureService;
 
 // Define settings schema
 interface Settings {
@@ -51,6 +53,7 @@ export function setupIpcHandlers(
   // Create services
   downloadService = new DownloadService(windowService);
   updateService = new UpdateService(windowService);
+  webCaptureService = new WebCaptureService();
 
   // Register handlers
   setupConfigHandlers();
@@ -59,6 +62,7 @@ export function setupIpcHandlers(
   setupUpdateHandlers();
   setupSettingsHandlers();
   setupWindowHandlers();
+  setupWebCaptureHandlers();
 }
 
 /**
@@ -106,6 +110,23 @@ function setupFileSystemHandlers(): void {
   // Open file in native application
   ipcMain.handle('open-file', (_, filePath) => {
     return shell.openPath(filePath);
+  });
+
+  // Open a local file in the default web browser (reliable for MHTML/HTML)
+  ipcMain.handle('open-in-browser', async (_, filePath: string) => {
+    try {
+      // Encode path segments but keep slashes to produce a valid file:// URL
+      const encodedPath = filePath
+        .split('/')
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+      const url = `file://${encodedPath}`;
+      await shell.openExternal(url);
+      return { success: true };
+    } catch (error) {
+      log.error('Error opening file in browser:', error);
+      return { success: false, error: (error as Error).message };
+    }
   });
 
   // Show file in folder
@@ -523,5 +544,33 @@ function setupWindowHandlers(): void {
       mainWindow.webContents.send('navigate-to-queue');
     }
     return { success: true };
+  });
+}
+
+/**
+ * Set up web capture IPC handlers
+ */
+function setupWebCaptureHandlers(): void {
+  // Capture a web page as MHTML
+  ipcMain.handle('capture-web-page', async (_, options: { url: string; savePath: string; timeout?: number }) => {
+    try {
+      log.info(`[WebCapture] Capturing page: ${options.url}`);
+      const result = await webCaptureService.captureWebPage(options);
+      return result;
+    } catch (error: any) {
+      log.error('[WebCapture] Capture failed:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Fetch favicon for a domain
+  ipcMain.handle('fetch-favicon', async (_, domain: string, saveDir: string) => {
+    try {
+      const faviconPath = await webCaptureService.fetchFavicon(domain, saveDir);
+      return { success: true, faviconPath };
+    } catch (error: any) {
+      log.error('[WebCapture] Favicon fetch failed:', error);
+      return { success: false, error: error.message };
+    }
   });
 }

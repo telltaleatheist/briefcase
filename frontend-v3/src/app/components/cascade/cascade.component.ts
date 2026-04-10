@@ -468,6 +468,68 @@ export class CascadeComponent {
       return actions;
     }
 
+    // Webpage item actions (MHTML archives)
+    const isWebpage = video?.mediaType === 'webpage';
+    const allSelectedAreWebpages = selectedVideos.length > 0 && selectedVideos.every(v => v.mediaType === 'webpage');
+    if (isWebpage && (count <= 1 || allSelectedAreWebpages)) {
+      actions.push({ label: `Open in Browser${countSuffix}`, icon: '🌐', action: 'open' });
+
+      if (count <= 1) {
+        actions.push({ label: '', icon: '', action: '', divider: true });
+        // For web archives the filename IS the meaningful title the user
+        // cares about ("2025-11-14 Some article title.mhtml"), so Rename
+        // edits the filename directly rather than the website's page title.
+        actions.push({ label: 'Rename', icon: '✏️', action: 'rename' });
+        actions.push({ label: 'Copy Filename', icon: '📋', action: 'copyFilename' });
+        actions.push({ label: 'Open File Location', icon: '📁', action: 'openLocation' });
+      }
+
+      actions.push({ label: '', icon: '', action: '', divider: true });
+
+      // Add to Tab submenu (same as library items)
+      const webpageRecentTabs = this.tabsService.recentTabs();
+      const webpageTabSubmenu: VideoContextMenuAction[] = [
+        { label: 'New Tab...', icon: '➕', action: 'addToNewTab' }
+      ];
+      if (webpageRecentTabs.length > 0) {
+        webpageTabSubmenu.push({ label: '', icon: '', action: '', divider: true });
+        webpageRecentTabs.forEach(tab => {
+          webpageTabSubmenu.push({
+            label: tab.name,
+            icon: '📑',
+            action: `addToTab:${tab.id}`
+          });
+        });
+      }
+      actions.push({
+        label: `Add to Tab${countSuffix}`,
+        icon: '📑',
+        action: 'addToTab',
+        submenu: webpageTabSubmenu,
+        hasArrow: true
+      });
+
+      actions.push({ label: '', icon: '', action: '', divider: true });
+
+      if (hasAnySuggestions) {
+        const suggestionCount = selectedWithSuggestions.length;
+        const suggestionSuffix = suggestionCount > 1 ? ` (${suggestionCount})` : '';
+        actions.push({ label: `Discard Suggestions${suggestionSuffix}`, icon: '✨', action: 'discardSuggestions' });
+      }
+
+      // Generate Title with AI - reads extracted text, calls LLM for title suggestion
+      actions.push({ label: `Generate Title with AI${countSuffix}`, icon: '🧠', action: 'analyzeWebpage' });
+
+      actions.push({ label: '', icon: '', action: '', divider: true });
+      if (this.tabsMode) {
+        actions.push({ label: `Remove from Tab${countSuffix}`, icon: '✖️', action: 'removeFromTab' });
+      } else {
+        actions.push({ label: `Delete${countSuffix}`, icon: '🗑️', action: 'delete' });
+      }
+
+      return actions;
+    }
+
     // Library item actions
     // "Open" action - opens in video editor
     actions.push({ label: `Open${countSuffix}`, icon: '🎬', action: 'openInEditor' });
@@ -699,16 +761,28 @@ export class CascadeComponent {
 
     switch (action) {
       case 'open':
-      case 'openInEditor':
-        // Open in video editor - emit all selected videos at once
-        // Filter out queue/staging/processing items that can't be opened in editor
-        const editableVideos = videos.filter(v =>
-          !this.isQueueItem(v) && !this.isStagingItem(v) && !this.isProcessingItem(v)
-        );
-        if (editableVideos.length > 0) {
-          this.videoAction.emit({ action: 'openInEditor', videos: editableVideos });
+      case 'openInEditor': {
+        // For webpage items, open in default browser instead of video editor
+        const webpageVideos = videos.filter(v => v.mediaType === 'webpage');
+        const nonWebpageVideos = videos.filter(v => v.mediaType !== 'webpage');
+
+        if (webpageVideos.length > 0) {
+          // Emit 'open' to parent so the library page can route through openInBrowser
+          this.videoAction.emit({ action: 'open', videos: webpageVideos });
+        }
+
+        if (nonWebpageVideos.length > 0) {
+          // Open in video editor - emit all selected non-webpage videos at once
+          // Filter out queue/staging/processing items that can't be opened in editor
+          const editableVideos = nonWebpageVideos.filter(v =>
+            !this.isQueueItem(v) && !this.isStagingItem(v) && !this.isProcessingItem(v)
+          );
+          if (editableVideos.length > 0) {
+            this.videoAction.emit({ action: 'openInEditor', videos: editableVideos });
+          }
         }
         break;
+      }
 
       case 'openInMediaPlayer':
         // Open in system default media player
@@ -766,6 +840,14 @@ export class CascadeComponent {
 
       case 'analyze':
         this.videoAction.emit({ action: 'analyze', videos });
+        break;
+
+      case 'analyzeWebpage':
+        // Only emit webpage items - filter defensively
+        const webpageItems = videos.filter(v => v.mediaType === 'webpage');
+        if (webpageItems.length > 0) {
+          this.videoAction.emit({ action: 'analyzeWebpage', videos: webpageItems });
+        }
         break;
 
       case 'processing':
@@ -869,8 +951,14 @@ export class CascadeComponent {
     // This allows the user to edit only the title while date and extension are preserved
     const titleOnly = extractTitleFromFilename(video.name);
 
-    // Use suggested filename if available, otherwise use extracted title
-    this.editingFilename.set(video.suggestedFilename || titleOnly);
+    // For webpages, always pre-populate with the current filename title — the
+    // suggestedFilename field holds the website's page title (from the MHTML),
+    // which is NOT what the user wants to edit when renaming a web archive.
+    // For videos, prefer suggestedFilename (AI-generated) when available.
+    const initial = video.mediaType === 'webpage'
+      ? titleOnly
+      : (video.suggestedFilename || titleOnly);
+    this.editingFilename.set(initial);
 
     this.filenameModalVisible.set(true);
   }
@@ -878,21 +966,27 @@ export class CascadeComponent {
   onFilenameSaved(newFilename: string) {
     const video = this.editingVideo();
     if (video) {
+      const isWebpage = video.mediaType === 'webpage';
       // Call API to rename the file
       this.libraryService.renameVideoFile(video.id, newFilename).subscribe({
         next: (response: any) => {
           if (response.success) {
             console.log('File renamed successfully:', video.id, newFilename);
-            // Update local state - change name and clear AI suggestion
+            // Update local state - change name
             video.name = response.newFilename || newFilename;
             video.suggestedFilename = undefined;
-            video.suggestedTitle = undefined;
 
-            // Clear suggested title from database
-            this.libraryService.clearSuggestedTitle(video.id).subscribe({
-              next: () => console.log('Suggested title cleared from database'),
-              error: (err) => console.warn('Failed to clear suggested title:', err)
-            });
+            // For videos, a manual rename means the user has decided what the
+            // filename should be, so we clear the AI-suggested title. For
+            // webpages, the displayed suggestedTitle comes from wa_page_title
+            // (the website's own page title) and should persist through renames.
+            if (!isWebpage) {
+              video.suggestedTitle = undefined;
+              this.libraryService.clearSuggestedTitle(video.id).subscribe({
+                next: () => console.log('Suggested title cleared from database'),
+                error: (err) => console.warn('Failed to clear suggested title:', err)
+              });
+            }
 
             // Update display
             this.videoWeeks.set([...this.videoWeeks()]);
@@ -1265,7 +1359,15 @@ export class CascadeComponent {
       }
 
       if (videosToOpen.length > 0) {
-        this.videoAction.emit({ action: 'openInEditor', videos: videosToOpen });
+        // Webpage archives should open in the default browser, not the editor
+        const webpageVideos = videosToOpen.filter(v => v.mediaType === 'webpage');
+        const otherVideos = videosToOpen.filter(v => v.mediaType !== 'webpage');
+        if (webpageVideos.length > 0) {
+          this.videoAction.emit({ action: 'open', videos: webpageVideos });
+        }
+        if (otherVideos.length > 0) {
+          this.videoAction.emit({ action: 'openInEditor', videos: otherVideos });
+        }
       }
       return;
     }

@@ -480,7 +480,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
 
       // Only return non-AI tasks
-      if (currentTask.type !== 'analyze') {
+      if (currentTask.type !== 'analyze' && currentTask.type !== 'analyze-webpage') {
         return { task: currentTask, job };
       }
     }
@@ -502,8 +502,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
 
       // Only return AI tasks
-      if (currentTask.type === 'analyze') {
-        this.logger.log(`getNextAITask: Found analyze task for job ${job.id}`);
+      if (currentTask.type === 'analyze' || currentTask.type === 'analyze-webpage') {
+        this.logger.log(`getNextAITask: Found ${currentTask.type} task for job ${job.id}`);
         // Check if any previous task in this job is still running
         // Tasks must be sequential within a job
         let previousTaskRunning = false;
@@ -621,7 +621,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
       // Update last_processed_date for tasks that process the video
       // (not for get-info or download which don't have a video ID yet)
-      const processingTasks = ['import', 'transcribe', 'analyze', 'fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      const processingTasks = ['import', 'transcribe', 'analyze', 'analyze-webpage', 'fix-aspect-ratio', 'normalize-audio', 'process-video'];
       if (job.videoId && processingTasks.includes(task.type)) {
         try {
           this.databaseService.updateLastProcessedDate(job.videoId);
@@ -970,6 +970,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           job.analysisPath = result.data.analysisPath;
         }
         // Note: has_analysis flag is automatically set by database trigger
+        break;
+
+      case 'analyze-webpage':
+        if (!job.videoId) {
+          return { success: false, error: 'No video ID available for analyze-webpage task' };
+        }
+        if (!task.options || !task.options.aiModel) {
+          return { success: false, error: 'AI model is required for analyze-webpage task' };
+        }
+        result = await this.mediaOps.analyzeWebpage(job.videoId, task.options as any, taskId);
         break;
 
       case 'export-clip':

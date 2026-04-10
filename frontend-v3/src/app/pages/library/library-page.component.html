@@ -44,6 +44,14 @@
       <span class="nav-icon">💾</span>
       <span class="nav-label">Saved</span>
     </button>
+    <button
+      class="nav-rail-item"
+      [class.active]="activeTab() === 'archives'"
+      (click)="setActiveTab('archives')"
+      title="Archives">
+      <span class="nav-icon">🌐</span>
+      <span class="nav-label">Archives</span>
+    </button>
     <div class="nav-spacer"></div>
     <button
       class="nav-rail-item"
@@ -69,6 +77,8 @@
             Library Manager
           } @else if (activeTab() === 'saved') {
             Saved for Later
+          } @else if (activeTab() === 'archives') {
+            Web Archives
           } @else if (activeTab() === 'settings') {
             Settings
           } @else {
@@ -206,6 +216,9 @@
         <!-- Saved Tab: Save for Later links -->
         <app-save-for-later-tab *ngIf="activeTab() === 'saved'" />
 
+        <!-- Archives Tab: Web page archives -->
+        <app-archives-tab *ngIf="activeTab() === 'archives'" />
+
         <!-- Settings Tab: App settings -->
         <app-settings-page *ngIf="activeTab() === 'settings'" [embedded]="true" />
 
@@ -281,6 +294,7 @@
   [isOpen]="downloadDialogOpen()"
   (closeDialog)="onDownloadDialogClosed()"
   (submitConfig)="onDownloadSubmit($event)"
+  (captureWebpage)="onCaptureWebpage($event)"
 />
 
 <!-- Trim Opener Modal -->

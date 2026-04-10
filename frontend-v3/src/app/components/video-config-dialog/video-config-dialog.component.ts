@@ -40,6 +40,9 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   @Input() isOpen = false;
   @Output() closeDialog = new EventEmitter<void>();
   @Output() submitConfig = new EventEmitter<{ url: string; name: string; settings: VideoJobSettings }[]>();
+  @Output() captureWebpage = new EventEmitter<string[]>();
+
+  captureMode: 'video' | 'webpage' = 'video';
 
   urlText = '';
   loadingModels = false;
@@ -422,6 +425,11 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   }
 
   onSubmit(): void {
+    if (this.captureMode === 'webpage') {
+      this.onSubmitWebpage();
+      return;
+    }
+
     const urls = this.getUrls();
     if (urls.length === 0) return;
 
@@ -442,6 +450,13 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     this.close();
   }
 
+  onSubmitWebpage(): void {
+    const urls = this.getUrls();
+    if (urls.length === 0) return;
+    this.captureWebpage.emit(urls);
+    this.close();
+  }
+
   close(): void {
     this.closeDialog.emit();
     this.resetForm();
@@ -449,6 +464,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
 
   private resetForm(): void {
     this.urlText = '';
+    this.captureMode = 'video';
     // Reset settings but keep the saved default AI model - it will be loaded fresh when dialog reopens
     this.settings = {
       fixAspectRatio: false,
