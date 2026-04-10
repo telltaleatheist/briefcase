@@ -31,6 +31,7 @@ interface ElectronAPI {
     getBinaryPath: (binaryName: string) => string;
   };
   openFile: (filePath: string) => Promise<string>;
+  openInBrowser: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openMultipleFiles: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
   copyFilesToClipboard: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
@@ -65,6 +66,15 @@ interface ElectronAPI {
   createGroupWithTab: (tabData: any) => Promise<number>;
   consolidateGroups: () => Promise<{ success: boolean }>;
   navigateToQueue: () => Promise<{ success: boolean }>;
+  // Web capture
+  captureWebPage: (options: { url: string; savePath: string; timeout?: number }) => Promise<{
+    success: boolean;
+    filePath?: string;
+    method?: string;
+    error?: string;
+    pageTitle?: string;
+  }>;
+  fetchFavicon: (domain: string, saveDir: string) => Promise<{ success: boolean; faviconPath?: string; error?: string }>;
 }
 
 // Get resource path information
@@ -119,6 +129,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   // Add all your other IPC handlers here
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
+  openInBrowser: (filePath: string) => ipcRenderer.invoke('open-in-browser', filePath),
   openMultipleFiles: (filePaths: string[]) => ipcRenderer.invoke('open-files', filePaths),
   showInFolder: (filePath: string) => ipcRenderer.invoke('show-in-folder', filePath),
   copyFilesToClipboard: (filePaths: string[]) => ipcRenderer.invoke('copy-files-to-clipboard', filePaths),
@@ -146,7 +157,10 @@ contextBridge.exposeInMainWorld('electron', {
   moveTabToGroup: (tabData: any, targetGroupNumber: number) => ipcRenderer.invoke('move-tab-to-group', tabData, targetGroupNumber),
   createGroupWithTab: (tabData: any) => ipcRenderer.invoke('create-group-with-tab', tabData),
   consolidateGroups: () => ipcRenderer.invoke('consolidate-groups'),
-  navigateToQueue: () => ipcRenderer.invoke('navigate-to-queue')
+  navigateToQueue: () => ipcRenderer.invoke('navigate-to-queue'),
+  // Web capture
+  captureWebPage: (options: { url: string; savePath: string; timeout?: number }) => ipcRenderer.invoke('capture-web-page', options),
+  fetchFavicon: (domain: string, saveDir: string) => ipcRenderer.invoke('fetch-favicon', domain, saveDir)
 } as ElectronAPI);
 
 // Expose setup progress listener to window.electronAPI

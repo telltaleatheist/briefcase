@@ -1,4 +1,4 @@
-export type TaskType = 'download-import' | 'fix-aspect-ratio' | 'normalize-audio' | 'transcribe' | 'ai-analyze' | 'export-clip';
+export type TaskType = 'download-import' | 'fix-aspect-ratio' | 'normalize-audio' | 'transcribe' | 'ai-analyze' | 'analyze-webpage' | 'export-clip';
 
 export interface Task {
   type: TaskType;

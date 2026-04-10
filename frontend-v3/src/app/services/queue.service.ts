@@ -955,6 +955,7 @@ export class QueueService implements OnDestroy {
       'normalize-audio': 'normalize-audio',
       'transcribe': 'transcribe',
       'analyze': 'ai-analyze',
+      'analyze-webpage': 'analyze-webpage',
       'export-clip': 'export-clip'
     };
 
@@ -1169,6 +1170,35 @@ export class QueueService implements OnDestroy {
           customInstructions: analyzeTask.options?.['customInstructions'],
           analysisGranularity: analyzeTask.options?.['analysisGranularity'] ?? 5,
           analysisQuality: analyzeTask.options?.['analysisQuality'] || 'fast'
+        }
+      });
+    }
+
+    const analyzeWebpageTask = tasks.find(t => t.type === 'analyze-webpage');
+    if (analyzeWebpageTask) {
+      if (!analyzeWebpageTask.options?.['aiModel']) {
+        throw new Error('Webpage analysis requires an AI model to be selected.');
+      }
+
+      // Parse provider:model string
+      const modelValue = analyzeWebpageTask.options['aiModel'];
+      let aiProvider = 'ollama';
+      let aiModel = modelValue;
+
+      if (modelValue.includes(':')) {
+        const firstColon = modelValue.indexOf(':');
+        const possibleProvider = modelValue.substring(0, firstColon);
+        if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
+          aiProvider = possibleProvider;
+          aiModel = modelValue.substring(firstColon + 1);
+        }
+      }
+
+      backendTasks.push({
+        type: 'analyze-webpage' as any,
+        options: {
+          aiModel,
+          aiProvider,
         }
       });
     }

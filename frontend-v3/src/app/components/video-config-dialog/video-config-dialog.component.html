@@ -1,18 +1,38 @@
 <div class="modal-backdrop" *ngIf="isOpen" (click)="close()">
   <div class="modal-container" (click)="$event.stopPropagation()">
     <div class="modal-header">
-      <h2 class="modal-title">Download from URL</h2>
+      <h2 class="modal-title">{{ captureMode === 'webpage' ? 'Save Webpage' : 'Download from URL' }}</h2>
       <button class="close-btn" (click)="close()" aria-label="Close">✕</button>
     </div>
 
     <div class="modal-body">
+      <!-- Mode Toggle -->
+      <div class="mode-toggle">
+        <button
+          class="mode-btn"
+          [class.active]="captureMode === 'video'"
+          (click)="captureMode = 'video'"
+        >
+          <span class="mode-icon">🎬</span> Download Video
+        </button>
+        <button
+          class="mode-btn"
+          [class.active]="captureMode === 'webpage'"
+          (click)="captureMode = 'webpage'"
+        >
+          <span class="mode-icon">🌐</span> Save Webpage
+        </button>
+      </div>
+
       <!-- URL Input -->
       <div class="url-section">
-        <label class="section-label">Video URLs</label>
+        <label class="section-label">{{ captureMode === 'webpage' ? 'Page URLs' : 'Video URLs' }}</label>
         <textarea
           class="url-input"
           [(ngModel)]="urlText"
-          placeholder="Enter one or more URLs (one per line)&#10;https://youtube.com/watch?v=...&#10;https://vimeo.com/..."
+          [placeholder]="captureMode === 'webpage'
+            ? 'Enter one or more URLs to archive (one per line)\nhttps://example.com/article...\nhttps://reddit.com/r/...'
+            : 'Enter one or more URLs (one per line)\nhttps://youtube.com/watch?v=...\nhttps://vimeo.com/...'"
           rows="4"
         ></textarea>
         <span class="url-count" *ngIf="getUrlCount() > 0">
@@ -20,8 +40,8 @@
         </span>
       </div>
 
-      <!-- Tasks -->
-      <div class="tasks-section">
+      <!-- Tasks (hidden in webpage mode) -->
+      <div class="tasks-section" *ngIf="captureMode === 'video'">
         <label class="section-label">Tasks to Run</label>
         <div class="tasks-list">
           <!-- Download & Import (always selected for URL downloads) -->
@@ -269,9 +289,9 @@
         (click)="onSubmit()"
         [disabled]="getUrlCount() === 0"
       >
-        <span>Add to Queue</span>
+        <span>{{ captureMode === 'webpage' ? 'Save' : 'Add to Queue' }}</span>
         <span class="task-count" *ngIf="getUrlCount() > 0">
-          ({{ getUrlCount() }} video{{ getUrlCount() !== 1 ? 's' : '' }})
+          ({{ getUrlCount() }} {{ captureMode === 'webpage' ? 'page' : 'video' }}{{ getUrlCount() !== 1 ? 's' : '' }})
         </span>
       </button>
     </div>

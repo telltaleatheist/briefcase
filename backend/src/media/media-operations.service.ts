@@ -784,6 +784,114 @@ export class MediaOperationsService {
   }
 
   /**
+   * AI analysis of a captured webpage (MHTML). Uses the extracted text from
+   * the text_content table to generate a suggested filename via LLM.
+   */
+  async analyzeWebpage(
+    videoId: string,
+    options: {
+      aiModel: string;
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+      apiKey?: string;
+      ollamaEndpoint?: string;
+    },
+    jobId?: string,
+  ): Promise<AnalyzeResult> {
+    try {
+      this.logger.log(`[${jobId || 'standalone'}] Analyzing webpage: ${videoId}`);
+
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        throw new Error('Webpage not found');
+      }
+      if (video.media_type !== 'webpage') {
+        throw new Error(`Cannot analyze as webpage: media_type is '${video.media_type}'`);
+      }
+
+      const textContent = this.databaseService.getTextContent(videoId);
+      if (!textContent || !textContent.extracted_text || textContent.extracted_text.trim().length === 0) {
+        throw new Error('No extracted text found for this webpage. Re-import or re-backfill the archive.');
+      }
+
+      this.eventService.emitTaskProgress(jobId || '', 'analyze', 10, 'Loading page text...');
+
+      // Resolve provider from model name prefix when possible
+      let cleanModelName = options.aiModel;
+      let provider: 'ollama' | 'openai' | 'claude' | 'local' | undefined =
+        options.aiProvider as 'ollama' | 'openai' | 'claude' | 'local' | undefined;
+
+      const knownProviders = ['ollama', 'openai', 'claude', 'local'];
+      const colonIndex = cleanModelName.indexOf(':');
+      if (colonIndex > 0) {
+        const possibleProvider = cleanModelName.substring(0, colonIndex);
+        if (knownProviders.includes(possibleProvider)) {
+          if (!options.aiProvider || possibleProvider === options.aiProvider) {
+            provider = possibleProvider as 'ollama' | 'openai' | 'claude' | 'local';
+            cleanModelName = cleanModelName.substring(colonIndex + 1);
+          }
+        }
+      }
+
+      if (!provider) {
+        throw new Error('AI provider is required for analysis.');
+      }
+
+      let apiKey = options.apiKey;
+      if (!apiKey && provider !== 'ollama' && provider !== 'local') {
+        if (provider === 'openai') {
+          apiKey = this.apiKeysService.getOpenAiApiKey();
+        } else if (provider === 'claude') {
+          apiKey = this.apiKeysService.getClaudeApiKey();
+        }
+        if (!apiKey) {
+          throw new Error(`No API key found for ${provider}. Please configure it in settings.`);
+        }
+      }
+
+      // Clear previous suggested title so the UI shows the new one
+      this.databaseService.updateVideoSuggestedTitle(videoId, null);
+
+      this.eventService.emitTaskProgress(jobId || '', 'analyze', 30, 'Generating title with AI...');
+
+      const currentTitle = video.filename.replace(/\.[^/.]+$/, '');
+
+      const suggestedTitle = await this.aiAnalysisService.generateTitleFromWebpageText(
+        {
+          provider,
+          model: cleanModelName,
+          apiKey,
+          ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
+        },
+        textContent.extracted_text,
+        currentTitle,
+      );
+
+      if (suggestedTitle) {
+        this.databaseService.updateVideoSuggestedTitle(videoId, suggestedTitle);
+        this.logger.log(`[${jobId || 'standalone'}] Saved suggested title for webpage: ${suggestedTitle}`);
+      } else {
+        this.logger.warn(`[${jobId || 'standalone'}] AI did not return a valid title for webpage ${videoId}`);
+      }
+
+      this.eventService.emitTaskProgress(jobId || '', 'analyze', 100, 'Analysis complete');
+      this.eventService.emitAnalysisCompleted(videoId, suggestedTitle || '', '');
+
+      return {
+        success: true,
+        data: {
+          sectionsCount: 0,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Webpage analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Webpage analysis failed',
+      };
+    }
+  }
+
+  /**
    * Verify and update video metadata using ffprobe
    * Called during analysis to ensure metadata is accurate
    */

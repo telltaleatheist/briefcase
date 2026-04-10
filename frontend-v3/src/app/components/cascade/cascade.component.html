@@ -79,9 +79,13 @@
 
               <!-- Thumbnail (skip for ghost items) -->
               @if (showThumbnails && !item.video.isGhost && item.video.thumbnailUrl) {
-                <img class="item-thumbnail"
-                     [src]="item.video.thumbnailUrl"
-                     (error)="$any($event.target).classList.add('thumbnail-error')" />
+                <img
+                  [class]="item.video.mediaType === 'webpage' ? 'item-thumbnail favicon-thumbnail' : 'item-thumbnail'"
+                  [src]="item.video.thumbnailUrl"
+                  (error)="item.video.mediaType === 'webpage' ? $any($event.target).classList.add('favicon-error') : $any($event.target).classList.add('thumbnail-error')" />
+              }
+              @if (showThumbnails && !item.video.isGhost && !item.video.thumbnailUrl && item.video.mediaType === 'webpage') {
+                <span class="favicon-placeholder">🌐</span>
               }
 
             <!-- Video Content -->
@@ -150,6 +154,14 @@
                     <!-- Duplicate warning display (no AI label or edit button) -->
                     <span class="meta-icon">⚠️</span>
                     <span class="meta-filename duplicate-warning">{{ item.video.suggestedTitle.substring(2).trim() }}</span>
+                  } @else if (item.video.mediaType === 'webpage') {
+                    <!-- Web archive display: fixed link icon, no "Title Suggestion:" label, no Edit button -->
+                    <span class="meta-icon">🔗</span>
+                    <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
+                    @if (item.video.downloadDate) {
+                      <span class="meta-separator">•</span>
+                      <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
+                    }
                   } @else {
                     <!-- AI suggested title display -->
                     @if (suggestedTitleIcon) {
@@ -192,30 +204,40 @@
               <!-- Quick Action Buttons (always visible for library items) -->
               @if (showQuickActions && !item.video.isGhost && !isStagingItem(item.video) && !isProcessingItem(item.video) && !isQueueItem(item.video)) {
                 <div class="quick-actions">
-                  <button
-                    class="action-btn open-btn"
-                    (click)="onQuickAction(item.video, 'open', $event)"
-                    title="Open video file">
-                    Open
-                  </button>
-                  <button
-                    class="action-btn ripplecut-btn"
-                    (click)="onQuickAction(item.video, 'openInEditor', $event)"
-                    title="View analysis, transcript & more">
-                    View Analysis
-                  </button>
-                  <button
-                    class="action-btn transcript-btn"
-                    (click)="onQuickAction(item.video, 'viewTranscript', $event)"
-                    title="View transcript">
-                    Transcript
-                  </button>
-                  <button
-                    class="action-btn process-btn"
-                    (click)="onQuickAction(item.video, 'process', $event)"
-                    title="Run AI analysis">
-                    Process
-                  </button>
+                  @if (item.video.mediaType === 'webpage') {
+                    <!-- Webpage items only show a single Open button -->
+                    <button
+                      class="action-btn open-btn"
+                      (click)="onQuickAction(item.video, 'open', $event)"
+                      title="Open in default browser">
+                      Open
+                    </button>
+                  } @else {
+                    <button
+                      class="action-btn open-btn"
+                      (click)="onQuickAction(item.video, 'open', $event)"
+                      title="Open video file">
+                      Open
+                    </button>
+                    <button
+                      class="action-btn ripplecut-btn"
+                      (click)="onQuickAction(item.video, 'openInEditor', $event)"
+                      title="View analysis, transcript & more">
+                      View Analysis
+                    </button>
+                    <button
+                      class="action-btn transcript-btn"
+                      (click)="onQuickAction(item.video, 'viewTranscript', $event)"
+                      title="View transcript">
+                      Transcript
+                    </button>
+                    <button
+                      class="action-btn process-btn"
+                      (click)="onQuickAction(item.video, 'process', $event)"
+                      title="Run AI analysis">
+                      Process
+                    </button>
+                  }
                 </div>
               }
 

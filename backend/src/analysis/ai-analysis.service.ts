@@ -19,6 +19,7 @@ import {
   DESCRIPTION_FROM_CHAPTERS_PROMPT,
   TAGS_FROM_CHAPTERS_PROMPT,
   TITLE_FROM_CHAPTERS_PROMPT,
+  TITLE_FROM_WEBPAGE_PROMPT,
   DEFAULT_PROMPTS,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
@@ -1684,6 +1685,89 @@ export class AIAnalysisService {
       return null;
     } catch (error) {
       this.logger.warn(`Title generation failed: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Generate a suggested filename for a webpage from its extracted text.
+   * Public entry point used by webpage analysis (no chapters/transcript needed).
+   */
+  async generateTitleFromWebpageText(
+    config: AIProviderConfig,
+    pageText: string,
+    currentTitle: string,
+  ): Promise<string | null> {
+    try {
+      if (!pageText || pageText.trim().length === 0) {
+        return null;
+      }
+
+      // Truncate to stay within reasonable context; ~8000 chars ≈ 2k tokens
+      const truncated = pageText.substring(0, 8000);
+
+      const prompt = interpolatePrompt(TITLE_FROM_WEBPAGE_PROMPT, {
+        currentTitle: currentTitle || 'untitled',
+        pageText: truncated,
+      });
+
+      const response = await this.aiProviderService.generateText(prompt, config);
+
+      if (!response || !response.text) {
+        return null;
+      }
+
+      let suggestedTitle = response.text.trim();
+
+      // Remove quotes
+      if (suggestedTitle.startsWith('"') && suggestedTitle.endsWith('"')) {
+        suggestedTitle = suggestedTitle.slice(1, -1);
+      }
+
+      // Strip file extension
+      if (suggestedTitle.includes('.')) {
+        suggestedTitle = suggestedTitle.split('.')[0];
+      }
+
+      // Remove leading date prefix
+      suggestedTitle = suggestedTitle.replace(/^\d{4}-\d{2}-\d{2}[-\s]*/, '');
+
+      suggestedTitle = suggestedTitle.toLowerCase().trim();
+      suggestedTitle = suggestedTitle.replace(/[/\\:*?"<>|]/g, '');
+      suggestedTitle = suggestedTitle.replace(/\s*\([^)]*\)\s*$/, '');
+      suggestedTitle = suggestedTitle.replace(/\.(?!\s|$)/g, '');
+      suggestedTitle = suggestedTitle.replace(/\.$/, '');
+      suggestedTitle = suggestedTitle.replace(/\s+/g, ' ').trim();
+
+      const invalidPatterns = [
+        /^based on/i,
+        /^the page/i,
+        /^this page/i,
+        /^this article/i,
+        /^i would/i,
+        /^i suggest/i,
+        /^here is/i,
+        /^the suggested/i,
+      ];
+      for (const pattern of invalidPatterns) {
+        if (pattern.test(suggestedTitle)) {
+          this.logger.warn(`Rejected invalid webpage AI title: "${suggestedTitle}"`);
+          return null;
+        }
+      }
+
+      if (suggestedTitle.length > 200) {
+        suggestedTitle = suggestedTitle.substring(0, 200).split(',').slice(0, -1).join(',');
+      }
+
+      if (suggestedTitle.length < 10) {
+        this.logger.warn(`Rejected too-short webpage AI title: "${suggestedTitle}"`);
+        return null;
+      }
+
+      return suggestedTitle || null;
+    } catch (error) {
+      this.logger.warn(`Webpage title generation failed: ${(error as Error).message}`);
       return null;
     }
   }

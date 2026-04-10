@@ -1253,6 +1253,16 @@ export class DatabaseController {
 
       // If poster=1, serve thumbnail image instead of streaming video
       if (poster === '1') {
+        // Only actual video files can produce a ffmpeg-generated poster.
+        // Audio, webpage, document, and image types should just return 404
+        // so the frontend falls back to its placeholder/icon rendering.
+        if (video.media_type && video.media_type !== 'video') {
+          return res.status(404).json({
+            statusCode: 404,
+            message: `Posters not available for media type: ${video.media_type}`
+          });
+        }
+
         const posterPath = this.thumbnailService.getThumbnailPath(videoId);
 
         if (!this.thumbnailService.thumbnailExists(videoId)) {

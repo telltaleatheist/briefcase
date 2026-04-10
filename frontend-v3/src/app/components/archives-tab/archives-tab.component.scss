@@ -1,0 +1,161 @@
+@use '../../../styles/variables' as *;
+
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.archives-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+// Header with URL input
+.header-section {
+  flex-shrink: 0;
+  padding: $spacing-lg $spacing-xl;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.url-input-container {
+  display: flex;
+  gap: $spacing-md;
+  align-items: center;
+}
+
+.url-input {
+  flex: 1;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: $font-size-base;
+
+  &:focus {
+    outline: none;
+    border-color: $primary-orange;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-add {
+  padding: $spacing-sm $spacing-lg;
+  background: $primary-orange;
+  color: white;
+  border: none;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    background: darken($primary-orange, 8%);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// Archives content area
+.archives-content {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+
+  app-cascade {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+  }
+}
+
+// Loading state
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-4xl;
+  text-align: center;
+  color: var(--text-secondary);
+
+  .loading-spinner {
+    font-size: 3rem;
+    margin-bottom: $spacing-md;
+    animation: spin 2s linear infinite;
+  }
+}
+
+// Empty state
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-4xl;
+  text-align: center;
+  color: var(--text-secondary);
+
+  .empty-icon {
+    font-size: 3rem;
+    margin-bottom: $spacing-md;
+    opacity: 0.5;
+  }
+
+  p {
+    margin: 0 0 $spacing-xs;
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+  }
+
+  .empty-hint {
+    font-size: $font-size-sm;
+    color: var(--text-tertiary);
+    margin-bottom: $spacing-lg;
+  }
+}
+
+.btn-backfill {
+  padding: $spacing-sm $spacing-lg;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    border-color: $primary-orange;
+    background: rgba($primary-orange, 0.1);
+    color: $primary-orange;
+  }
+}
+
+// Animations
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

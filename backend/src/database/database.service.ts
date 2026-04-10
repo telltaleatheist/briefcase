@@ -156,6 +156,20 @@ export interface TextContentRecord {
   extracted_at: string;
 }
 
+export interface WebArchiveRecord {
+  video_id: string;
+  original_url: string | null;
+  domain: string | null;
+  favicon_path: string | null;
+  page_title: string | null;
+  capture_date: string | null;
+  publish_date: string | null;
+  capture_method: string | null;
+  capture_status: string;
+  error_message: string | null;
+  text_extracted: number;
+}
+
 export interface LibraryAnalyticsRecord {
   id: string;
   library_id: string;
@@ -628,6 +642,24 @@ export class DatabaseService {
         UNIQUE(primary_media_id, related_media_id)
       );
 
+      -- Web archives: Metadata for archived web pages (MHTML files)
+      CREATE TABLE IF NOT EXISTS web_archives (
+        video_id TEXT PRIMARY KEY,
+        original_url TEXT,
+        domain TEXT,
+        favicon_path TEXT,
+        page_title TEXT,
+        capture_date TEXT,
+        publish_date TEXT,
+        capture_method TEXT,
+        capture_status TEXT NOT NULL DEFAULT 'completed',
+        error_message TEXT,
+        text_extracted INTEGER DEFAULT 0,
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+        CHECK (capture_status IN ('pending', 'capturing', 'completed', 'failed')),
+        CHECK (text_extracted IN (0, 1))
+      );
+
       -- Text content: Extracted text from documents (PDFs, EPUBs, etc.) for searching
       CREATE TABLE IF NOT EXISTS text_content (
         media_id TEXT PRIMARY KEY,
@@ -699,6 +731,9 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_media_relationships_primary ON media_relationships(primary_media_id);
       CREATE INDEX IF NOT EXISTS idx_media_relationships_related ON media_relationships(related_media_id);
       CREATE INDEX IF NOT EXISTS idx_text_content_media ON text_content(media_id);
+      CREATE INDEX IF NOT EXISTS idx_web_archives_domain ON web_archives(domain);
+      CREATE INDEX IF NOT EXISTS idx_web_archives_capture_date ON web_archives(capture_date);
+      CREATE INDEX IF NOT EXISTS idx_web_archives_original_url ON web_archives(original_url);
       CREATE INDEX IF NOT EXISTS idx_library_analytics_library ON library_analytics(library_id);
       CREATE INDEX IF NOT EXISTS idx_library_analytics_generated ON library_analytics(generated_at);
       CREATE INDEX IF NOT EXISTS idx_video_tabs_display_order ON video_tabs(display_order);
@@ -1359,6 +1394,47 @@ export class DatabaseService {
           this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
         }
       }
+    }
+
+    // Migration 23: Create web_archives table for archived web pages
+    try {
+      const waCheck = db.prepare(`
+        SELECT COUNT(*) as count FROM sqlite_master
+        WHERE type='table' AND name='web_archives'
+      `).get() as { count: number };
+
+      if (waCheck.count === 0) {
+        this.logger.log('Running migration: Creating web_archives table');
+        try {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS web_archives (
+              video_id TEXT PRIMARY KEY,
+              original_url TEXT,
+              domain TEXT,
+              favicon_path TEXT,
+              page_title TEXT,
+              capture_date TEXT,
+              publish_date TEXT,
+              capture_method TEXT,
+              capture_status TEXT NOT NULL DEFAULT 'completed',
+              error_message TEXT,
+              text_extracted INTEGER DEFAULT 0,
+              FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+              CHECK (capture_status IN ('pending', 'capturing', 'completed', 'failed')),
+              CHECK (text_extracted IN (0, 1))
+            );
+            CREATE INDEX IF NOT EXISTS idx_web_archives_domain ON web_archives(domain);
+            CREATE INDEX IF NOT EXISTS idx_web_archives_capture_date ON web_archives(capture_date);
+            CREATE INDEX IF NOT EXISTS idx_web_archives_original_url ON web_archives(original_url);
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: web_archives table created');
+        } catch (migrationError: any) {
+          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Error checking web_archives table: ${error?.message || 'Unknown error'}`);
     }
 
     // Migration: Create transcripts_soundex_fts FTS5 table for phonetic search
@@ -2964,8 +3040,13 @@ export class DatabaseService {
     let query = `
       SELECT
         v.*,
-        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
+        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children,
+        wa.domain as wa_domain,
+        wa.favicon_path as wa_favicon_path,
+        wa.original_url as wa_original_url,
+        wa.page_title as wa_page_title
       FROM videos v
+      LEFT JOIN web_archives wa ON wa.video_id = v.id
     `;
     const params: any[] = [];
 
@@ -4826,6 +4907,120 @@ export class DatabaseService {
     `);
     const results = stmt.all(`%${searchTerm}%`, limit) as TextContentSearchRecord[];
     return results;
+  }
+
+  // ========================================
+  // Web Archives CRUD
+  // ========================================
+
+  insertWebArchive(archive: {
+    videoId: string;
+    originalUrl?: string;
+    domain?: string;
+    faviconPath?: string;
+    pageTitle?: string;
+    captureDate?: string;
+    publishDate?: string;
+    captureMethod?: string;
+    captureStatus?: string;
+    errorMessage?: string;
+    textExtracted?: boolean;
+  }) {
+    const db = this.ensureInitialized();
+    db.prepare(
+      `INSERT OR REPLACE INTO web_archives (
+        video_id, original_url, domain, favicon_path, page_title,
+        capture_date, publish_date, capture_method, capture_status,
+        error_message, text_extracted
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      archive.videoId,
+      archive.originalUrl || null,
+      archive.domain || null,
+      archive.faviconPath || null,
+      archive.pageTitle || null,
+      archive.captureDate || new Date().toISOString(),
+      archive.publishDate || null,
+      archive.captureMethod || null,
+      archive.captureStatus || 'completed',
+      archive.errorMessage || null,
+      archive.textExtracted ? 1 : 0,
+    );
+    this.saveDatabase();
+  }
+
+  getWebArchive(videoId: string): WebArchiveRecord | null {
+    const db = this.ensureInitialized();
+    const result = db.prepare('SELECT * FROM web_archives WHERE video_id = ?').get(videoId) as WebArchiveRecord | undefined;
+    return result || null;
+  }
+
+  getWebArchiveByUrl(url: string): (WebArchiveRecord & { filename: string; current_path: string }) | null {
+    const db = this.ensureInitialized();
+    const result = db.prepare(`
+      SELECT wa.*, v.filename, v.current_path
+      FROM web_archives wa
+      JOIN videos v ON wa.video_id = v.id
+      WHERE wa.original_url = ?
+      LIMIT 1
+    `).get(url) as (WebArchiveRecord & { filename: string; current_path: string }) | undefined;
+    return result || null;
+  }
+
+  getAllWebArchives(domain?: string): (WebArchiveRecord & { filename: string; current_path: string; file_size_bytes: number; upload_date: string | null; download_date: string; suggested_title: string | null })[] {
+    const db = this.ensureInitialized();
+    let query = `
+      SELECT wa.*, v.filename, v.current_path, v.file_size_bytes, v.upload_date, v.download_date, v.suggested_title
+      FROM web_archives wa
+      JOIN videos v ON wa.video_id = v.id
+      WHERE v.is_linked = 1
+    `;
+    const params: any[] = [];
+    if (domain) {
+      query += ' AND wa.domain = ?';
+      params.push(domain);
+    }
+    query += ' ORDER BY wa.capture_date DESC';
+    const rows = db.prepare(query).all(...params) as any[];
+
+    // Resolve current_path from relative (as stored) to absolute, so the
+    // frontend can pass it to electronService.showInFolder / openInBrowser etc.
+    const clipsFolder = this.getClipsFolderPath();
+    if (clipsFolder) {
+      for (const row of rows) {
+        if (row.current_path) {
+          row.current_path = this.toAbsolutePath(row.current_path, clipsFolder).replace(/\\/g, '/');
+        }
+      }
+    }
+
+    return rows;
+  }
+
+  getWebArchiveDomains(): { domain: string; count: number; favicon_path: string | null }[] {
+    const db = this.ensureInitialized();
+    return db.prepare(`
+      SELECT wa.domain, COUNT(*) as count, MAX(wa.favicon_path) as favicon_path
+      FROM web_archives wa
+      JOIN videos v ON wa.video_id = v.id
+      WHERE v.is_linked = 1 AND wa.domain IS NOT NULL
+      GROUP BY wa.domain
+      ORDER BY wa.domain ASC
+    `).all() as any[];
+  }
+
+  updateWebArchiveStatus(videoId: string, status: string, errorMessage?: string) {
+    const db = this.ensureInitialized();
+    db.prepare(`
+      UPDATE web_archives SET capture_status = ?, error_message = ? WHERE video_id = ?
+    `).run(status, errorMessage || null, videoId);
+    this.saveDatabase();
+  }
+
+  deleteWebArchive(videoId: string) {
+    const db = this.ensureInitialized();
+    db.prepare('DELETE FROM web_archives WHERE video_id = ?').run(videoId);
+    this.saveDatabase();
   }
 
   /**

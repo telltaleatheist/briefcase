@@ -505,6 +505,33 @@ cdk-virtual-scroll-viewport.library-content {
   &.thumbnail-error {
     display: none;
   }
+
+  &.favicon-thumbnail {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    padding: 2px;
+  }
+
+  &.favicon-error {
+    display: none;
+  }
+}
+
+.favicon-placeholder {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 
 // Date badge for filename dates
