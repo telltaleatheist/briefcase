@@ -289,7 +289,7 @@ export class LibraryService {
     return {
       id: video.id,
       name: video.filename || video.name || 'Untitled',
-      suggestedFilename: video.wa_page_title || video.suggested_title || undefined,
+      suggestedFilename: video.suggested_title || undefined,
       duration: this.formatDuration(video.duration || video.duration_seconds || 0),
       size: video.file_size || video.file_size_bytes,
       uploadDate: video.upload_date ? this.parseLocalDate(video.upload_date) : undefined,
@@ -299,9 +299,12 @@ export class LibraryService {
       thumbnailUrl,
       // Additional fields for context menu actions
       filePath: video.file_path || video.filepath || video.current_path,
-      // For webpage items, fall back to the page title captured from MHTML so
-      // the library cascade shows "Title Suggestion" underneath the filename.
-      suggestedTitle: video.suggested_title || video.wa_page_title || undefined,
+      // suggestedTitle is ONLY the AI-generated title suggestion. The MHTML
+      // page title is exposed separately as webPageTitle so the cascade can
+      // differentiate between "AI suggestion (editable)" and "page title
+      // fallback (display only)" for web archive items.
+      suggestedTitle: video.suggested_title || undefined,
+      webPageTitle: video.wa_page_title || undefined,
       hasTranscript: video.has_transcript === 1 || video.has_transcript === true,
       hasAnalysis: video.has_analysis === 1 || video.has_analysis === true,
       // Searchable fields
@@ -886,7 +889,7 @@ export class LibraryService {
   }
 
   /**
-   * Get the .clipchimpignore file content
+   * Get the .briefcaseignore file content
    * GET /api/database/ignore
    */
   getIgnoreFile(): Observable<ApiResponse<{ content: string; filePath: string; patterns: string[] }>> {
@@ -896,7 +899,7 @@ export class LibraryService {
   }
 
   /**
-   * Update the .clipchimpignore file content
+   * Update the .briefcaseignore file content
    * POST /api/database/ignore
    */
   updateIgnoreFile(content: string): Observable<ApiResponse<any>> {
@@ -907,7 +910,7 @@ export class LibraryService {
   }
 
   /**
-   * Add a pattern to the .clipchimpignore file
+   * Add a pattern to the .briefcaseignore file
    * POST /api/database/ignore/add
    */
   addIgnorePattern(pattern: string): Observable<ApiResponse<any>> {

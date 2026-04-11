@@ -951,13 +951,10 @@ export class CascadeComponent {
     // This allows the user to edit only the title while date and extension are preserved
     const titleOnly = extractTitleFromFilename(video.name);
 
-    // For webpages, always pre-populate with the current filename title — the
-    // suggestedFilename field holds the website's page title (from the MHTML),
-    // which is NOT what the user wants to edit when renaming a web archive.
-    // For videos, prefer suggestedFilename (AI-generated) when available.
-    const initial = video.mediaType === 'webpage'
-      ? titleOnly
-      : (video.suggestedFilename || titleOnly);
+    // Pre-populate with AI-suggested filename when available (applies to both
+    // videos and webpages). webPageTitle is NOT used here — it's a
+    // display-only fallback, not a rename target.
+    const initial = video.suggestedFilename || titleOnly;
     this.editingFilename.set(initial);
 
     this.filenameModalVisible.set(true);
@@ -966,27 +963,22 @@ export class CascadeComponent {
   onFilenameSaved(newFilename: string) {
     const video = this.editingVideo();
     if (video) {
-      const isWebpage = video.mediaType === 'webpage';
       // Call API to rename the file
       this.libraryService.renameVideoFile(video.id, newFilename).subscribe({
         next: (response: any) => {
           if (response.success) {
             console.log('File renamed successfully:', video.id, newFilename);
-            // Update local state - change name
+            // Update local state - change name and clear AI-generated
+            // suggestions. A manual rename means the user has made their
+            // decision. webPageTitle (MHTML page title) is untouched because
+            // it's not an AI suggestion.
             video.name = response.newFilename || newFilename;
             video.suggestedFilename = undefined;
-
-            // For videos, a manual rename means the user has decided what the
-            // filename should be, so we clear the AI-suggested title. For
-            // webpages, the displayed suggestedTitle comes from wa_page_title
-            // (the website's own page title) and should persist through renames.
-            if (!isWebpage) {
-              video.suggestedTitle = undefined;
-              this.libraryService.clearSuggestedTitle(video.id).subscribe({
-                next: () => console.log('Suggested title cleared from database'),
-                error: (err) => console.warn('Failed to clear suggested title:', err)
-              });
-            }
+            video.suggestedTitle = undefined;
+            this.libraryService.clearSuggestedTitle(video.id).subscribe({
+              next: () => console.log('Suggested title cleared from database'),
+              error: (err) => console.warn('Failed to clear suggested title:', err)
+            });
 
             // Update display
             this.videoWeeks.set([...this.videoWeeks()]);

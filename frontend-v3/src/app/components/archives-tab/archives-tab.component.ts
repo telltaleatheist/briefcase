@@ -258,9 +258,13 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
     return {
       id: item.video_id,
       name: item.filename,
-      suggestedTitle: item.suggested_title || item.page_title || undefined,
+      // suggestedTitle is ONLY the AI-generated title. webPageTitle holds the
+      // MHTML page title as a display-only fallback so the cascade can show
+      // an Edit button exclusively when an AI suggestion exists.
+      suggestedTitle: item.suggested_title || undefined,
+      webPageTitle: item.page_title || undefined,
       // uploadDate = when the content was published/created online (parsed from
-      // filename). downloadDate = when ClipChimp saved it locally.
+      // filename). downloadDate = when Briefcase saved it locally.
       uploadDate: item.upload_date ? new Date(item.upload_date) : undefined,
       downloadDate: item.download_date ? new Date(item.download_date) : undefined,
       // Leave thumbnailUrl undefined so the cascade renders the uniform 🌐
