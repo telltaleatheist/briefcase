@@ -13,7 +13,7 @@ Briefcase is a professional media library manager desktop application with AI-po
 ## Project Structure
 
 ```
-ClipChimp/
+Briefcase/
 ├── backend/             # NestJS API server
 │   └── src/
 │       ├── database/    # SQLite database service
@@ -91,7 +91,7 @@ npm run package:win-x64    # Windows installer
 ## Database Schema
 
 Videos are stored per-library in SQLite databases at:
-`~/Library/Application Support/clippy/libraries/{library_id}/library.db`
+`~/Library/Application Support/briefcase/libraries/{library_id}/library.db`
 
 Key tables:
 - `videos` - Video metadata (filePath, duration, title, etc.)

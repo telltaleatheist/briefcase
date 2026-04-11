@@ -1,4 +1,4 @@
-// ClipChimp/electron/services/download-service.ts
+// Briefcase/electron/services/download-service.ts
 import { app } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';

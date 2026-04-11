@@ -1,5 +1,5 @@
 {
-  "name": "clipchimp",
+  "name": "briefcase",
   "version": "1.0.0",
   "description": "Briefcase - Professional media library manager with AI analysis",
   "asar": true,
@@ -114,7 +114,7 @@
     "yt-dlp-wrap-extended": "^2.3.15"
   },
   "build": {
-    "appId": "com.owenmorgan.clipchimp",
+    "appId": "com.owenmorgan.briefcase",
     "productName": "Briefcase",
     "asar": true,
     "compression": "normal",

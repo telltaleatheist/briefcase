@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/common/dto/download.dto.ts
+// Briefcase/backend/src/common/dto/download.dto.ts
 import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, Max, Min, ValidateNested, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 

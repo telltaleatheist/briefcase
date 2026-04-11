@@ -1,4 +1,4 @@
-// ClipChimp/electron/services/web-capture-service.ts
+// Briefcase/electron/services/web-capture-service.ts
 import { BrowserWindow, session } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';

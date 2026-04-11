@@ -1,4 +1,4 @@
-# ClipChimp - Video Analysis & Clip Management System
+# Briefcase - Video Analysis & Clip Management System
 
 **Project Status:** ✅ Production Ready
 **Latest Version:** Phase 5 Complete (Nov 2025)
@@ -8,7 +8,7 @@
 
 ## Project Vision
 
-ClipChimp is a comprehensive desktop application for downloading, analyzing, and managing video content. It combines video downloading (via yt-dlp), AI-powered transcription and analysis (via Whisper + LLM), and a sophisticated library system for organizing and creating clips from 5,000+ videos.
+Briefcase is a comprehensive desktop application for downloading, analyzing, and managing video content. It combines video downloading (via yt-dlp), AI-powered transcription and analysis (via Whisper + LLM), and a sophisticated library system for organizing and creating clips from 5,000+ videos.
 
 ---
 

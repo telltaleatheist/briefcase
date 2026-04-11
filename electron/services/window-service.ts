@@ -1,4 +1,4 @@
-// ClipChimp/electron/services/window-service.ts
+// Briefcase/electron/services/window-service.ts
 import { BrowserWindow, shell } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';

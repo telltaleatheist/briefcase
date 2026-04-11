@@ -49,7 +49,7 @@ export class SimpleAnalyzeController {
                         path.join(process.env.HOME || '', 'Library', 'Application Support') :
                         path.join(process.env.HOME || '', '.config'));
 
-      const categoriesPath = path.join(userDataPath, 'ClipChimp', 'analysis-categories.json');
+      const categoriesPath = path.join(userDataPath, 'briefcase', 'analysis-categories.json');
 
       const fsSync = require('fs');
       if (!fsSync.existsSync(categoriesPath)) {

@@ -1,6 +1,6 @@
-# Clippy Refactoring Change Summary
+# Briefcase Refactoring Change Summary
 
-This document summarizes the key changes made to improve the architecture of the Clippy application during our refactoring session.
+This document summarizes the key changes made to improve the architecture of the Briefcase application during our refactoring session.
 
 ---
 

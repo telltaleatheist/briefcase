@@ -1,4 +1,4 @@
-# ClipChimp Backend Architecture - Pragmatic Implementation Plan
+# Briefcase Backend Architecture - Pragmatic Implementation Plan
 
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
@@ -16,7 +16,7 @@
 ## Executive Summary
 
 ### Project Overview
-ClipChimp is a refactored version of ClipChimp with a new Angular frontend and streamlined NestJS backend. The system uses an **outcome-based architecture** where the database tracks "what has been done to videos" rather than "what work is in progress."
+Briefcase is a refactored version of Briefcase with a new Angular frontend and streamlined NestJS backend. The system uses an **outcome-based architecture** where the database tracks "what has been done to videos" rather than "what work is in progress."
 
 ### Key Design Principles
 - **Outcome-Based Storage**: Database tracks video states (has_transcript, has_analysis, etc.), not processing tasks
@@ -710,7 +710,7 @@ class DownloadWorker {
 ```json
 {
   "manifest_version": 3,
-  "name": "ClipChimp Downloader",
+  "name": "Briefcase Downloader",
   "version": "1.0.0",
   "permissions": ["activeTab", "storage"],
   "host_permissions": ["http://localhost:3001/*"],
@@ -727,7 +727,7 @@ class DownloadWorker {
 
 ```javascript
 // background.js
-class ClipChimpExtension {
+class BriefcaseExtension {
   constructor() {
     this.backendUrl = 'http://localhost:3001';
     this.setupContextMenu();
@@ -735,8 +735,8 @@ class ClipChimpExtension {
 
   setupContextMenu() {
     chrome.contextMenus.create({
-      id: 'save-to-clipchimp',
-      title: 'Save to ClipChimp',
+      id: 'save-to-briefcase',
+      title: 'Save to Briefcase',
       contexts: ['video', 'link', 'page']
     });
 
@@ -758,7 +758,7 @@ class ClipChimpExtension {
       chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icon.png',
-        title: 'Added to ClipChimp',
+        title: 'Added to Briefcase',
         message: `"${pageTitle}" added to queue`
       });
 
@@ -773,7 +773,7 @@ class ClipChimpExtension {
   }
 }
 
-new ClipChimpExtension();
+new BriefcaseExtension();
 ```
 
 ---
@@ -809,13 +809,13 @@ new ClipChimpExtension();
   - ✅ `onModuleDestroy()` - updated for new structure
 
 **Files Modified:**
-- `/Volumes/Callisto/Projects/ClipChimp/backend/src/database/database.service.ts` (lines 9-31, 373-396, 980-1016)
-- `/Volumes/Callisto/Projects/ClipChimp/backend/src/queue/queue-manager.service.ts` (lines 14-165)
-- `/Volumes/Callisto/Projects/ClipChimp/backend/src/common/interfaces/task.interface.ts` (lines 160-188)
+- `/Volumes/Callisto/Projects/Briefcase/backend/src/database/database.service.ts` (lines 9-31, 373-396, 980-1016)
+- `/Volumes/Callisto/Projects/Briefcase/backend/src/queue/queue-manager.service.ts` (lines 14-165)
+- `/Volumes/Callisto/Projects/Briefcase/backend/src/common/interfaces/task.interface.ts` (lines 160-188)
 
 ### 🔄 IN PROGRESS
 
-**Current location:** `/Volumes/Callisto/Projects/ClipChimp/backend/src/queue/queue-manager.service.ts` line ~170
+**Current location:** `/Volumes/Callisto/Projects/Briefcase/backend/src/queue/queue-manager.service.ts` line ~170
 
 Need to replace/rewrite these methods starting at line 167:
 

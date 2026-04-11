@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/saved-links/saved-links.controller.ts
+// Briefcase/backend/src/saved-links/saved-links.controller.ts
 import {
   Controller,
   Get,

@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/ffmpeg/ffmpeg.controller.ts
+// Briefcase/backend/src/ffmpeg/ffmpeg.controller.ts
 import {
   Body,
   Controller,

@@ -8,7 +8,7 @@ ASAR (Atom Shell Archive Resource) is a read-only archive format used by Electro
 **ASAR = READ-ONLY** ❌ No writes, no modifications
 **extraResources = READ/WRITE/EXECUTE** ✅ Full filesystem access
 
-## What Goes Where in ClipChimp
+## What Goes Where in Briefcase
 
 ### ✅ INSIDE ASAR (Read-Only Code)
 
@@ -16,7 +16,7 @@ The following are packaged **inside** `app.asar` (read-only):
 
 ```
 app.asar/
-├── frontend/dist/clipchimp-frontend/     # Angular frontend
+├── frontend/dist/briefcase-frontend/     # Angular frontend
 ├── dist-electron/electron/             # Electron main process
 ├── dist-electron/config/               # Config utilities
 ├── dist-electron/utilities/            # Utility functions
@@ -56,7 +56,7 @@ YourApp.app/Contents/Resources/
 The following are in **user data directories** (fully writable):
 
 ```
-~/Library/Application Support/clipchimp/
+~/Library/Application Support/briefcase/
 ├── app-config.json                     # User binary paths config
 ├── libraries-config.json               # Library configuration
 ├── libraries/                          # Clip libraries
@@ -200,7 +200,7 @@ YourApp.app/
 │   │   └── node_modules/               # extraResources (R/X)
 │   └── Info.plist
 
-~/Library/Application Support/clipchimp/   # User data (R/W)
+~/Library/Application Support/briefcase/   # User data (R/W)
 ├── app-config.json
 ├── libraries-config.json
 ├── cache/
@@ -218,7 +218,7 @@ YourApp/
     ├── utilities/                      # extraResources (R/X)
     └── node_modules/                   # extraResources (R/X)
 
-%APPDATA%/clipchimp/                       # User data (R/W)
+%APPDATA%/briefcase/                       # User data (R/W)
 ├── app-config.json
 ├── libraries-config.json
 ├── cache/
@@ -236,7 +236,7 @@ YourApp/
     ├── utilities/                      # extraResources (R/X)
     └── node_modules/                   # extraResources (R/X)
 
-~/.config/clipchimp/                       # User data (R/W)
+~/.config/briefcase/                       # User data (R/W)
 ├── app-config.json
 ├── libraries-config.json
 ├── cache/
@@ -289,7 +289,7 @@ fs.writeFileSync(configPath, data);  // Works!
 ### ❌ Pitfall 3: Hardcoded Paths
 ```typescript
 // ❌ WRONG: Hardcoded development path
-const dbPath = '/Users/you/projects/ClipChimp/data/library.db';
+const dbPath = '/Users/you/projects/Briefcase/data/library.db';
 ```
 
 **Solution:**
@@ -333,7 +333,7 @@ npm run electron:test-packaged
 npm run package:mac-arm64
 
 # Run the packaged app
-open "dist-electron/mac-arm64/ClipChimp.app"
+open "dist-electron/mac-arm64/Briefcase.app"
 ```
 
 ### Verification Checklist
@@ -341,27 +341,27 @@ open "dist-electron/mac-arm64/ClipChimp.app"
 1. **Binaries are executable**:
    ```bash
    # Check inside packaged app
-   ls -la "ClipChimp.app/Contents/Resources/utilities/bin/yt-dlp_macos"
+   ls -la "Briefcase.app/Contents/Resources/utilities/bin/yt-dlp_macos"
    # Should show: -rwxr-xr-x (executable)
    ```
 
 2. **User data is writable**:
    ```bash
    # Check user data directory after running app
-   ls -la ~/Library/Application\ Support/ClipChimp/
+   ls -la ~/Library/Application\ Support/Briefcase/
    # Should see: config files, databases, cache
    ```
 
 3. **Native modules load**:
    ```bash
    # Check logs for any "Cannot load native module" errors
-   tail -f ~/Library/Logs/ClipChimp/main.log
+   tail -f ~/Library/Logs/Briefcase/main.log
    ```
 
 4. **Whisper cache works**:
    ```bash
    # After running transcription, verify models downloaded
-   ls -la ~/Library/Application\ Support/ClipChimp/cache/
+   ls -la ~/Library/Application\ Support/Briefcase/cache/
    # Should see Whisper model files
    ```
 

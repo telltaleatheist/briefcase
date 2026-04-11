@@ -73,4 +73,4 @@ If a download operation fails due to missing executables, the system:
 
 # Conclusion
 
-This configuration system ensures that Clippy can locate the required executables before attempting to use them, providing a better user experience and preventing cryptic error messages.
+This configuration system ensures that Briefcase can locate the required executables before attempting to use them, providing a better user experience and preventing cryptic error messages.

@@ -1,4 +1,4 @@
-// ClipChimp/electron/environment.util.ts
+// Briefcase/electron/environment.util.ts
 // SIMPLIFIED: Removed config persistence code - using bundled binaries via runtime-paths
 import * as path from 'path';
 import * as fs from 'fs';

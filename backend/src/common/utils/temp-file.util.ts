@@ -11,17 +11,17 @@ import { Logger } from '@nestjs/common';
 const logger = new Logger('TempFileUtil');
 
 /**
- * Get the temp directory for ClipChimp processing
+ * Get the temp directory for Briefcase processing
  */
 export function getTempDir(): string {
   const tempBase = os.tmpdir();
-  const clipchimpTemp = path.join(tempBase, 'clipchimp-processing');
+  const briefcaseTemp = path.join(tempBase, 'briefcase-processing');
 
-  if (!fs.existsSync(clipchimpTemp)) {
-    fs.mkdirSync(clipchimpTemp, { recursive: true });
+  if (!fs.existsSync(briefcaseTemp)) {
+    fs.mkdirSync(briefcaseTemp, { recursive: true });
   }
 
-  return clipchimpTemp;
+  return briefcaseTemp;
 }
 
 /**

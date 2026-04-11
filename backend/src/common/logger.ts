@@ -15,15 +15,15 @@ const getLogDirectory = (): string => {
     const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
 
     if (platform === 'darwin') {
-      // macOS: ~/Library/Logs/ClipChimp
-      return path.join(homeDir, 'Library', 'Logs', 'ClipChimp');
+      // macOS: ~/Library/Logs/briefcase
+      return path.join(homeDir, 'Library', 'Logs', 'briefcase');
     } else if (platform === 'win32') {
-      // Windows: %APPDATA%/clipchimp/logs
+      // Windows: %APPDATA%/briefcase/logs
       const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
-      return path.join(appData, 'clipchimp', 'logs');
+      return path.join(appData, 'briefcase', 'logs');
     } else {
-      // Linux: ~/.config/clipchimp/logs
-      return path.join(homeDir, '.config', 'clipchimp', 'logs');
+      // Linux: ~/.config/briefcase/logs
+      return path.join(homeDir, '.config', 'briefcase', 'logs');
     }
   }
 };

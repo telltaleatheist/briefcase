@@ -1,4 +1,4 @@
-// ClipChimp/electron/main.ts
+// Briefcase/electron/main.ts
 // SIMPLIFIED: No more executable checking - binaries are bundled!
 import { app } from 'electron';
 import * as log from 'electron-log';
@@ -7,6 +7,7 @@ import { AppConfig } from './config/app-config';
 import { WindowService } from './services/window-service';
 import { BackendService } from './services/backend-service';
 import { TrayService } from './services/tray-service';
+import { UserDataMigration } from './services/user-data-migration';
 import { setupIpcHandlers } from './ipc/ipc-handlers';
 import { UpdateService } from './services/update-service';
 import { LogUtil } from './utilities/log-util';
@@ -108,6 +109,12 @@ try {
 app.whenReady().then(async () => {
 
   try {
+    // One-time migration from the legacy "clipchimp" userData folder to
+    // the new "briefcase" folder. Must run BEFORE AppConfig.initialize()
+    // or any service reads from userData, so the backend, database, and
+    // settings all see the same files.
+    UserDataMigration.run();
+
     // Initialize AppConfig first
     AppConfig.initialize();
 

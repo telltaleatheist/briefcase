@@ -112,8 +112,8 @@ export class ModelManagerService implements OnModuleInit {
         ? path.join(process.env.HOME || '', 'Library', 'Application Support')
         : path.join(process.env.HOME || '', '.config'));
 
-    this.modelsDir = path.join(userDataPath, 'ClipChimp', 'models');
-    this.configPath = path.join(userDataPath, 'ClipChimp', 'app-config.json');
+    this.modelsDir = path.join(userDataPath, 'briefcase', 'models');
+    this.configPath = path.join(userDataPath, 'briefcase', 'app-config.json');
   }
 
   onModuleInit() {

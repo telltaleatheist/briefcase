@@ -1,4 +1,4 @@
-// ClipChimp/electron/config/environment.ts
+// Briefcase/electron/config/environment.ts
 import { app } from 'electron';
 
 /**

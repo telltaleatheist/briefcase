@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/downloader/downloader.controller.ts
+// Briefcase/backend/src/downloader/downloader.controller.ts
 import { Controller, Get, Param, Delete, Res, Query, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { DownloaderService } from './downloader.service';

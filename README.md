@@ -766,8 +766,8 @@ npm run package:mac-arm64  # or other platform
 
 ```bash
 # Clone Repository
-git clone https://github.com/your-username/clipchimp.git
-cd clipchimp
+git clone https://github.com/your-username/briefcase.git
+cd briefcase
 ```
 
 ### Install Dependencies
@@ -909,7 +909,7 @@ This documentation should provide a comprehensive understanding of the project a
 - Check logs first:
   - Backend logs for API and process issues
   - Frontend console for UI and event issues
-  - Log location for Mac: `~/Library/Logs/clipchimp/main.log`
+  - Log location for Mac: `~/Library/Logs/briefcase/main.log`
 
 **Key log patterns:**
 - "Emitting event" logs for WebSocket communication

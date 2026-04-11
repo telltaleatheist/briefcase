@@ -1,5 +1,5 @@
 ```
-/Users/telltale/Projects/clippy/scripts/..
+/Users/telltale/Projects/briefcase/scripts/..
 ├── backend
 │   ├── package-lock.json
 │   ├── package.json
@@ -57,7 +57,7 @@
 │   └── index.ts
 ├── docs
 │   ├── backend-refactoring.md
-│   ├── clippy_structure.md
+│   ├── briefcase_structure.md
 │   ├── config-integration-guide.md
 │   ├── full_structure.md
 │   └── packaged_structure.md

@@ -42,7 +42,7 @@ export class NotificationService {
   }
 
   private loadNotifications(): void {
-    const stored = localStorage.getItem('clipchimp_notifications');
+    const stored = localStorage.getItem('briefcase_notifications');
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -59,7 +59,7 @@ export class NotificationService {
 
   private saveNotifications(): void {
     try {
-      localStorage.setItem('clipchimp_notifications', JSON.stringify(this.notifications));
+      localStorage.setItem('briefcase_notifications', JSON.stringify(this.notifications));
     } catch (e) {
       console.error('Failed to save notifications:', e);
     }

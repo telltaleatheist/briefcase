@@ -3799,7 +3799,7 @@ export class DatabaseController {
 
   /**
    * GET /api/database/ignore
-   * Get the .clipchimpignore file content
+   * Get the .briefcaseignore file content
    */
   @Get('ignore')
   getIgnoreFile() {
@@ -3823,7 +3823,7 @@ export class DatabaseController {
 
   /**
    * POST /api/database/ignore
-   * Update the .clipchimpignore file content
+   * Update the .briefcaseignore file content
    */
   @Post('ignore')
   updateIgnoreFile(@Body() body: { content: string }) {
@@ -3844,7 +3844,7 @@ export class DatabaseController {
 
   /**
    * POST /api/database/ignore/add
-   * Add a pattern to the .clipchimpignore file
+   * Add a pattern to the .briefcaseignore file
    */
   @Post('ignore/add')
   addIgnorePattern(@Body() body: { pattern: string }) {

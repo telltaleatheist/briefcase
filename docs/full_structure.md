@@ -1,5 +1,5 @@
 ```
-/Users/telltale/Projects/clippy/scripts/..
+/Users/telltale/Projects/briefcase/scripts/..
 ├── backend
 │   ├── dist
 │   │   ├── app.controller.d.ts
@@ -135,36 +135,36 @@
 ├── dist-electron
 │   ├── builder-debug.yml
 │   ├── builder-effective-config.yaml
-│   ├── Clippy-1.0.0-arm64.dmg
-│   ├── Clippy-1.0.0-arm64.dmg.blockmap
+│   ├── Briefcase-1.0.0-arm64.dmg
+│   ├── Briefcase-1.0.0-arm64.dmg.blockmap
 │   ├── latest-mac.yml
 │   ├── mac-arm64
-│   │   └── Clippy.app
+│   │   └── Briefcase.app
 │   │       └── Contents
 │   │           ├── Frameworks
-│   │           │   ├── Clippy Helper (GPU).app
+│   │           │   ├── Briefcase Helper (GPU).app
 │   │           │   │   └── Contents
 │   │           │   │       ├── Info.plist
 │   │           │   │       ├── MacOS
-│   │           │   │       │   └── Clippy Helper (GPU)
+│   │           │   │       │   └── Briefcase Helper (GPU)
 │   │           │   │       └── PkgInfo
-│   │           │   ├── Clippy Helper (Plugin).app
+│   │           │   ├── Briefcase Helper (Plugin).app
 │   │           │   │   └── Contents
 │   │           │   │       ├── Info.plist
 │   │           │   │       ├── MacOS
-│   │           │   │       │   └── Clippy Helper (Plugin)
+│   │           │   │       │   └── Briefcase Helper (Plugin)
 │   │           │   │       └── PkgInfo
-│   │           │   ├── Clippy Helper (Renderer).app
+│   │           │   ├── Briefcase Helper (Renderer).app
 │   │           │   │   └── Contents
 │   │           │   │       ├── Info.plist
 │   │           │   │       ├── MacOS
-│   │           │   │       │   └── Clippy Helper (Renderer)
+│   │           │   │       │   └── Briefcase Helper (Renderer)
 │   │           │   │       └── PkgInfo
-│   │           │   ├── Clippy Helper.app
+│   │           │   ├── Briefcase Helper.app
 │   │           │   │   └── Contents
 │   │           │   │       ├── Info.plist
 │   │           │   │       ├── MacOS
-│   │           │   │       │   └── Clippy Helper
+│   │           │   │       │   └── Briefcase Helper
 │   │           │   │       └── PkgInfo
 │   │           │   ├── Electron Framework.framework
 │   │           │   │   ├── Electron Framework -> Versions/Current/Electron Framework
@@ -331,7 +331,7 @@
 │   │           │           └── Current -> A
 │   │           ├── Info.plist
 │   │           ├── MacOS
-│   │           │   └── Clippy
+│   │           │   └── Briefcase
 │   │           ├── PkgInfo
 │   │           └── Resources
 │   │               ├── af.lproj
@@ -492,7 +492,7 @@
 │           └── PathValidator.js.map
 ├── docs
 │   ├── backend-refactoring.md
-│   ├── clippy_structure.md
+│   ├── briefcase_structure.md
 │   ├── config-integration-guide.md
 │   ├── development.md
 │   ├── full_structure.md
@@ -525,7 +525,7 @@
 ├── frontend
 │   ├── angular.json
 │   ├── dist
-│   │   ├── clippy-frontend
+│   │   ├── briefcase-frontend
 │   │   │   ├── 3rdpartylicenses.txt
 │   │   │   ├── browser
 │   │   │   │   ├── chunk-7SDZ26YN.js

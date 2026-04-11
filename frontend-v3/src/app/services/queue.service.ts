@@ -19,7 +19,7 @@ import { TaskType } from '../models/task.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
 import { LibraryService, BackendJobRequest, BackendTask } from './library.service';
 
-const STORAGE_KEY = 'clipchimp-queue-jobs';
+const STORAGE_KEY = 'briefcase-queue-jobs';
 const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 @Injectable({

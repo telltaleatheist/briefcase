@@ -28,8 +28,8 @@ export class ConfigController implements OnModuleInit {
                       path.join(process.env.HOME || '', 'Library', 'Application Support') :
                       path.join(process.env.HOME || '', '.config'));
 
-    this.configPath = path.join(userDataPath, 'ClipChimp', 'app-config.json');
-    this.logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'ClipChimp');
+    this.configPath = path.join(userDataPath, 'briefcase', 'app-config.json');
+    this.logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'briefcase');
   }
 
   onModuleInit() {
@@ -58,7 +58,7 @@ export class ConfigController implements OnModuleInit {
       let deletedCount = 0;
       for (const file of files) {
         // Only clean up frontend console log files (not Winston's backend.log files)
-        if (!file.startsWith('clipchimp-console-')) {
+        if (!file.startsWith('briefcase-console-')) {
           continue;
         }
 
@@ -147,7 +147,7 @@ export class ConfigController implements OnModuleInit {
   async saveLogs(@Body() body: { content: string }) {
     try {
       // Get logs directory
-      const logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'ClipChimp');
+      const logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'briefcase');
 
       // Ensure logs directory exists
       if (!fs.existsSync(logsDir)) {
@@ -156,7 +156,7 @@ export class ConfigController implements OnModuleInit {
 
       // Create filename with timestamp
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `clipchimp-console-${timestamp}.txt`;
+      const filename = `briefcase-console-${timestamp}.txt`;
       const filePath = path.join(logsDir, filename);
 
       // Save logs

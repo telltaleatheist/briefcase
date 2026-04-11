@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/media/media-event.service.ts
+// Briefcase/backend/src/media/media-event.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { WebSocketService } from '../common/websocket.service';
 

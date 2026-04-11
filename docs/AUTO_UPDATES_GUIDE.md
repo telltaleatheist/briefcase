@@ -2,7 +2,7 @@
 
 ## Overview
 
-Clippy uses **electron-updater** with **delta updates** via blockmap files. This allows users to download only the changed parts of your app instead of the entire new version.
+Briefcase uses **electron-updater** with **delta updates** via blockmap files. This allows users to download only the changed parts of your app instead of the entire new version.
 
 ## How Blockmap Works
 
@@ -66,24 +66,24 @@ When you build, electron-builder creates:
 **Windows:**
 ```
 dist-electron/
-├── Clippy Setup 1.0.0.exe          # NSIS installer (~150 MB)
-├── Clippy Setup 1.0.0.exe.blockmap # Binary diff map (~100 KB)
+├── Briefcase Setup 1.0.0.exe          # NSIS installer (~150 MB)
+├── Briefcase Setup 1.0.0.exe.blockmap # Binary diff map (~100 KB)
 └── latest.yml                       # Update metadata (~1 KB)
 ```
 
 **macOS:**
 ```
 dist-electron/
-├── Clippy-1.0.0.dmg          # DMG installer
-├── Clippy-1.0.0.dmg.blockmap # Blockmap
+├── Briefcase-1.0.0.dmg          # DMG installer
+├── Briefcase-1.0.0.dmg.blockmap # Blockmap
 └── latest-mac.yml            # Update metadata
 ```
 
 **Linux:**
 ```
 dist-electron/
-├── Clippy-1.0.0.AppImage          # AppImage
-├── Clippy-1.0.0.AppImage.blockmap # Blockmap
+├── Briefcase-1.0.0.AppImage          # AppImage
+├── Briefcase-1.0.0.AppImage.blockmap # Blockmap
 └── latest-linux.yml               # Update metadata
 ```
 
@@ -134,18 +134,18 @@ npm run package:linux
 For **each platform**, upload:
 
 **Windows:**
-- ✅ `Clippy Setup 1.0.1.exe`
-- ✅ `Clippy Setup 1.0.1.exe.blockmap`
+- ✅ `Briefcase Setup 1.0.1.exe`
+- ✅ `Briefcase Setup 1.0.1.exe.blockmap`
 - ✅ `latest.yml`
 
 **macOS:**
-- ✅ `Clippy-1.0.1.dmg`
-- ✅ `Clippy-1.0.1.dmg.blockmap`
+- ✅ `Briefcase-1.0.1.dmg`
+- ✅ `Briefcase-1.0.1.dmg.blockmap`
 - ✅ `latest-mac.yml`
 
 **Linux:**
-- ✅ `Clippy-1.0.1.AppImage`
-- ✅ `Clippy-1.0.1.AppImage.blockmap`
+- ✅ `Briefcase-1.0.1.AppImage`
+- ✅ `Briefcase-1.0.1.AppImage.blockmap`
 - ✅ `latest-linux.yml`
 
 ### Step 3: GitHub Release Configuration
@@ -155,7 +155,7 @@ Your release should look like this:
 ```
 Release: v1.0.1
 Tag: v1.0.1
-Title: Clippy v1.0.1
+Title: Briefcase v1.0.1
 
 Description:
 ### What's New
@@ -167,11 +167,11 @@ Description:
 Choose your platform below.
 
 Assets:
-📦 Clippy Setup 1.0.1.exe (150 MB)
-📄 Clippy Setup 1.0.1.exe.blockmap (100 KB)
+📦 Briefcase Setup 1.0.1.exe (150 MB)
+📄 Briefcase Setup 1.0.1.exe.blockmap (100 KB)
 📄 latest.yml (1 KB)
-📦 Clippy-1.0.1.dmg (145 MB)
-📄 Clippy-1.0.1.dmg.blockmap (95 KB)
+📦 Briefcase-1.0.1.dmg (145 MB)
+📄 Briefcase-1.0.1.dmg.blockmap (95 KB)
 📄 latest-mac.yml (1 KB)
 ...
 ```
@@ -180,7 +180,7 @@ Assets:
 
 ### First Install
 ```
-1. User downloads Clippy Setup 1.0.0.exe from GitHub
+1. User downloads Briefcase Setup 1.0.0.exe from GitHub
 2. Installs app
 3. App stores blockmap locally
 ```
@@ -202,7 +202,7 @@ Assets:
 ┌─────────────────────────────────────┐
 │  Update Available                   │
 ├─────────────────────────────────────┤
-│  Clippy v1.0.1 is available         │
+│  Briefcase v1.0.1 is available         │
 │                                     │
 │  What's new:                        │
 │  • Feature improvements             │

@@ -1,5 +1,5 @@
 {
-  "name": "clipchimp-backend",
+  "name": "briefcase-backend",
   "version": "1.0.0",
   "description": "NestJS backend for Briefcase media library manager",
   "author": "Your Name",

@@ -2,7 +2,7 @@
 
 # Resolve the path to the target file (relative to the script's location)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_FILE="$SCRIPT_DIR/../docs/clippy_structure.md"
+TARGET_FILE="$SCRIPT_DIR/../docs/briefcase_structure.md"
 
 echo "Refreshing tree in: $TARGET_FILE"
 

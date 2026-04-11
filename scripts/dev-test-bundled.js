@@ -16,7 +16,7 @@ const path = require('path');
 const PROJECT_ROOT = path.join(__dirname, '..');
 
 console.log('╔═══════════════════════════════════════════════════════════╗');
-console.log('║   ClipChimp Dev Test (Using Bundled Binaries)            ║');
+console.log('║   Briefcase Dev Test (Using Bundled Binaries)            ║');
 console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
 // Step 1: Check binaries
@@ -80,7 +80,7 @@ const mainScript = path.join(PROJECT_ROOT, 'dist-electron', 'electron', 'main.js
 // When ELECTRON_RUN_AS_NODE=1, Electron runs as plain Node.js and require('electron') returns a path string instead of the module
 const env = {
   ...process.env,
-  CLIPCHIMP_PROJECT_ROOT: PROJECT_ROOT,
+  BRIEFCASE_PROJECT_ROOT: PROJECT_ROOT,
   FFMPEG_PATH: binaries['ffmpeg'],
   FFPROBE_PATH: binaries['ffprobe'],
   YT_DLP_PATH: binaries['yt-dlp'],

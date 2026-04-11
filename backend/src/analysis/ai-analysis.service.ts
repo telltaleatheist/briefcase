@@ -530,7 +530,7 @@ export class AIAnalysisService {
         homeDir,
         'Library',
         'Application Support',
-        'clippy',
+        'briefcase',
         'prompts.json',
       );
 

@@ -1,5 +1,5 @@
 /**
- * Download and cache all required binaries for ClipChimp
+ * Download and cache all required binaries for Briefcase
  *
  * This script orchestrates downloading all binaries needed for the app:
  * - yt-dlp (video downloader)
@@ -23,7 +23,7 @@ const MODELS_DIR = path.join(__dirname, '..', 'utilities', 'models');
 
 async function downloadAllBinaries() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║      ClipChimp Binary Download Manager                    ║');
+  console.log('║      Briefcase Binary Download Manager                    ║');
   console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
   // Ensure directories exist

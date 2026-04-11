@@ -1,4 +1,4 @@
-// ClipChimp/electron/services/backend-service.ts
+// Briefcase/electron/services/backend-service.ts
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -309,11 +309,11 @@ export class BackendService {
       const backendEnv = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
-        CLIPCHIMP_BACKEND: 'true',
+        BRIEFCASE_BACKEND: 'true',
         FRONTEND_PATH: frontendPath,
         NODE_PATH: backendNodeModules,
         RESOURCES_PATH: resourcesPath,
-        CLIPCHIMP_PROJECT_ROOT: projectRoot, // Critical for development mode
+        BRIEFCASE_PROJECT_ROOT: projectRoot, // Critical for development mode
         PORT: this.actualBackendPort.toString(),
         NODE_ENV: process.env.NODE_ENV || 'production',
         APP_ROOT: resourcesPath,

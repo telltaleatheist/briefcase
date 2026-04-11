@@ -1,4 +1,4 @@
-// ClipChimp/electron/utilities/port-util.ts
+// Briefcase/electron/utilities/port-util.ts
 import * as net from 'net';
 import * as log from 'electron-log';
 
