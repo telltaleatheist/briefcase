@@ -243,9 +243,9 @@ export class DatabaseService {
 
   constructor(private readonly thumbnailService: ThumbnailService) {
     // Base directory - cross-platform app data location
-    // Mac: ~/Library/Application Support/ClipChimp
-    // Windows: %APPDATA%/ClipChimp
-    // Linux: ~/.config/ClipChimp
+    // Mac: ~/Library/Application Support/briefcase
+    // Windows: %APPDATA%/briefcase
+    // Linux: ~/.config/briefcase
     this.appDataPath = this.getAppDataPath();
 
     // Ensure directories exist
@@ -258,13 +258,16 @@ export class DatabaseService {
 
   /**
    * Get cross-platform app data directory
-   * Mac: ~/Library/Application Support/ClipChimp
-   * Windows: %APPDATA%/ClipChimp
-   * Linux: ~/.config/ClipChimp
+   * Mac: ~/Library/Application Support/briefcase
+   * Windows: %APPDATA%/briefcase
+   * Linux: ~/.config/briefcase
+   *
+   * Must match Electron's app.getPath('userData') which comes from
+   * package.json name = "briefcase" (lowercase).
    */
   private getAppDataPath(): string {
     const platform = process.platform;
-    const appName = 'ClipChimp';
+    const appName = 'briefcase';
 
     if (platform === 'darwin') {
       // macOS
@@ -285,8 +288,8 @@ export class DatabaseService {
    * @param dbPath - Path to the database file (optional, uses default if not provided)
    */
   initializeDatabase(dbPath?: string) {
-    // Use provided path or default to .clipchimp.db in app data directory
-    this.dbPath = dbPath || path.join(this.appDataPath, '.clipchimp.db');
+    // Use provided path or default to .briefcase.db in app data directory
+    this.dbPath = dbPath || path.join(this.appDataPath, '.briefcase.db');
 
     this.logger.log(`Initializing database at: ${this.dbPath}`);
 

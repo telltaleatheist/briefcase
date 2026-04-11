@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/common/interfaces/download.interface.ts
+// Briefcase/backend/src/common/interfaces/download.interface.ts
 
 export type JobStatus = 'queued' | 'downloading' | 'downloaded' | 'importing' | 'processing' | 'transcribing' | 'completed' | 'failed';
 

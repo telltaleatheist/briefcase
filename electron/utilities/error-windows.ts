@@ -1,4 +1,4 @@
-// ClipChimp/electron/utils/error-windows.ts
+// Briefcase/electron/utilities/error-windows.ts
 import { BrowserWindow, app } from 'electron';
 import * as log from 'electron-log';
 

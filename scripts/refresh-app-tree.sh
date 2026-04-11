@@ -1,6 +1,6 @@
 #!/bin/bash
-SEARCH_DIR="/Users/telltale/Documents/software/ClipChimp/dist-electron/mac-arm64/ClipChimp.app"
-TARGET_FILE="/Users/telltale/Documents/software/ClipChimp/docs/completed_app_structure.md"
+SEARCH_DIR="/Users/telltale/Documents/software/Briefcase/dist-electron/mac-arm64/Briefcase.app"
+TARGET_FILE="/Users/telltale/Documents/software/Briefcase/docs/completed_app_structure.md"
 
 echo "Refreshing tree in: $TARGET_FILE"
 

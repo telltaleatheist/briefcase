@@ -33,9 +33,9 @@ interface LibraryManagerConfig {
  * - Clips folder (where imported videos are stored)
  *
  * Configuration stored in platform-specific app data directory:
- * - Mac: ~/Library/Application Support/ClipChimp/libraries-config.json
- * - Windows: %APPDATA%/ClipChimp/libraries-config.json
- * - Linux: ~/.config/ClipChimp/libraries-config.json
+ * - Mac: ~/Library/Application Support/briefcase/libraries-config.json
+ * - Windows: %APPDATA%/briefcase/libraries-config.json
+ * - Linux: ~/.config/briefcase/libraries-config.json
  */
 @Injectable()
 export class LibraryManagerService implements OnModuleInit {
@@ -50,9 +50,9 @@ export class LibraryManagerService implements OnModuleInit {
     private readonly migrationService: LibraryMigrationService,
   ) {
     // Base directory - cross-platform app data location
-    // Mac: ~/Library/Application Support/ClipChimp
-    // Windows: %APPDATA%/ClipChimp
-    // Linux: ~/.config/ClipChimp
+    // Mac: ~/Library/Application Support/briefcase
+    // Windows: %APPDATA%/briefcase
+    // Linux: ~/.config/briefcase
     this.appDataPath = this.getAppDataPath();
 
     // Libraries directory (metadata only - actual libraries are in user-selected folders)
@@ -76,13 +76,16 @@ export class LibraryManagerService implements OnModuleInit {
 
   /**
    * Get cross-platform app data directory
-   * Mac: ~/Library/Application Support/ClipChimp
-   * Windows: %APPDATA%/ClipChimp
-   * Linux: ~/.config/ClipChimp
+   * Mac: ~/Library/Application Support/briefcase
+   * Windows: %APPDATA%/briefcase
+   * Linux: ~/.config/briefcase
+   *
+   * Must match Electron's app.getPath('userData') which comes from
+   * package.json name = "briefcase" (lowercase).
    */
   private getAppDataPath(): string {
     const platform = process.platform;
-    const appName = 'ClipChimp';
+    const appName = 'briefcase';
 
     if (platform === 'darwin') {
       // macOS

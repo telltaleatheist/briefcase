@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/saved-links/saved-links.service.ts
+// Briefcase/backend/src/saved-links/saved-links.service.ts
 import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DatabaseService } from '../database/database.service';

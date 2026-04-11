@@ -34,7 +34,7 @@ export class TourService {
   private pendingTourId: string | null = null;
 
   // LocalStorage key for tracking completed tours
-  private readonly STORAGE_KEY = 'clipchimp_completed_tours';
+  private readonly STORAGE_KEY = 'briefcase_completed_tours';
 
   constructor() {
     this.initializeTours();
@@ -623,7 +623,7 @@ export class TourService {
       allowClose: true,
       stagePadding: 10,
       stageRadius: 8,
-      popoverClass: 'clipchimp-tour-popover',
+      popoverClass: 'briefcase-tour-popover',
       onDestroyed: () => {
         const completedTourId = this.currentTourId;
         this.isRunning.set(false);

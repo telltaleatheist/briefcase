@@ -12,7 +12,11 @@ export class IgnoreService {
   constructor(private libraryManager: LibraryManagerService) {}
 
   /**
-   * Get the ignore file path for the active library
+   * Get the ignore file path for the active library.
+   *
+   * Also performs a one-time rename of the legacy `.clipchimpignore`
+   * file if it exists and the new `.briefcaseignore` file does not,
+   * so existing user ignore patterns carry over transparently.
    */
   private getIgnoreFilePath(): string | null {
     const activeLibrary = this.libraryManager.getActiveLibrary();
@@ -21,11 +25,23 @@ export class IgnoreService {
       return null;
     }
 
-    return path.join(activeLibrary.clipsFolderPath, '.clipchimpignore');
+    const newPath = path.join(activeLibrary.clipsFolderPath, '.briefcaseignore');
+    const legacyPath = path.join(activeLibrary.clipsFolderPath, '.clipchimpignore');
+
+    if (!fs.existsSync(newPath) && fs.existsSync(legacyPath)) {
+      try {
+        fs.renameSync(legacyPath, newPath);
+        this.logger.log(`Renamed legacy ignore file: ${legacyPath} → ${newPath}`);
+      } catch (error: any) {
+        this.logger.warn(`Failed to rename legacy ignore file: ${error.message}`);
+      }
+    }
+
+    return newPath;
   }
 
   /**
-   * Load ignore patterns from .clipchimpignore file
+   * Load ignore patterns from .briefcaseignore file
    */
   loadIgnorePatterns(): string[] {
     this.ignoreFilePath = this.getIgnoreFilePath();
@@ -38,7 +54,7 @@ export class IgnoreService {
       if (!fs.existsSync(this.ignoreFilePath)) {
         // Create default ignore file with common patterns
         const defaultPatterns = [
-          '# ClipChimp Ignore File',
+          '# Briefcase Ignore File',
           '# Add patterns to ignore files (supports wildcards like .gitignore)',
           '',
           '# macOS metadata files',
@@ -69,7 +85,7 @@ export class IgnoreService {
         ].join('\n');
 
         fs.writeFileSync(this.ignoreFilePath, defaultPatterns, 'utf-8');
-        this.logger.log(`Created default .clipchimpignore file at: ${this.ignoreFilePath}`);
+        this.logger.log(`Created default .briefcaseignore file at: ${this.ignoreFilePath}`);
       }
 
       const content = fs.readFileSync(this.ignoreFilePath, 'utf-8');
@@ -176,7 +192,7 @@ export class IgnoreService {
   }
 
   /**
-   * Get the raw content of .clipchimpignore file
+   * Get the raw content of .briefcaseignore file
    */
   getIgnoreFileContent(): string | null {
     this.ignoreFilePath = this.getIgnoreFilePath();
@@ -197,7 +213,7 @@ export class IgnoreService {
   }
 
   /**
-   * Update the .clipchimpignore file content
+   * Update the .briefcaseignore file content
    */
   updateIgnoreFileContent(content: string): boolean {
     this.ignoreFilePath = this.getIgnoreFilePath();
@@ -209,7 +225,7 @@ export class IgnoreService {
 
     try {
       fs.writeFileSync(this.ignoreFilePath, content, 'utf-8');
-      this.logger.log('Updated .clipchimpignore file');
+      this.logger.log('Updated .briefcaseignore file');
 
       // Reload patterns
       this.loadIgnorePatterns();
@@ -247,7 +263,7 @@ export class IgnoreService {
       const newContent = content.trim() + '\n' + pattern + '\n';
 
       fs.writeFileSync(this.ignoreFilePath, newContent, 'utf-8');
-      this.logger.log(`Added pattern to .clipchimpignore: ${pattern}`);
+      this.logger.log(`Added pattern to .briefcaseignore: ${pattern}`);
 
       // Reload patterns
       this.loadIgnorePatterns();

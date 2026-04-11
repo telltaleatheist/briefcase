@@ -1,4 +1,4 @@
-// ClipChimp/electron/utils/log-util.ts
+// Briefcase/electron/utilities/log-util.ts
 import { exec } from 'child_process';
 import * as log from 'electron-log';
 import * as fs from 'fs';

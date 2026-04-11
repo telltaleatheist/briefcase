@@ -1221,7 +1221,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // Create temp file
       const tempDir = os.tmpdir();
       const originalExt = path.extname(opts.videoPath);
-      const tempFilename = `clipchimp_temp_${Date.now()}${originalExt}`;
+      const tempFilename = `briefcase_temp_${Date.now()}${originalExt}`;
       const tempPath = path.join(tempDir, tempFilename);
       this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Extracting to temp: ${tempPath}`);
 

@@ -137,7 +137,7 @@ export class CreateClipDialogComponent {
       } else {
         // Fallback to Downloads if API fails
         const homedir = await (window as any).electron?.getPath('downloads') || 'Downloads';
-        this.saveDirectory = `${homedir}/clipchimp/clips`;
+        this.saveDirectory = `${homedir}/briefcase/clips`;
         this.savePath = `${this.saveDirectory}/${clipFilename}`;
         console.warn('Failed to fetch library paths, using fallback directory');
       }

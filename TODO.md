@@ -1,4 +1,4 @@
-# ClipChimp - TODO & Future Enhancements
+# Briefcase - TODO & Future Enhancements
 
 **Last Updated:** November 6, 2025
 **Current Status:** Phase 5 Complete ✅

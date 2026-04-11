@@ -1,4 +1,4 @@
-// ClipChimp/electron/ipc/ipc-handlers.ts
+// Briefcase/electron/ipc/ipc-handlers.ts
 // SIMPLIFIED: Removed ConfigManager and PathValidator - using bundled binaries
 import { ipcMain, dialog, shell, app } from 'electron';
 import * as log from 'electron-log';
@@ -26,7 +26,7 @@ interface Settings {
 // Initialize electron-store for user settings
 // Stored in user's app data directory - won't transfer with app
 const store = new Store<Settings>({
-  name: 'clipchimp-settings',
+  name: 'briefcase-settings',
   defaults: {
     lastUsedProvider: 'ollama',
     lastUsedModel: 'qwen2.5:7b',

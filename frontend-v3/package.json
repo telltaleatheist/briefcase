@@ -1,7 +1,7 @@
 {
-  "name": "clipchimp",
+  "name": "briefcase",
   "version": "1.0.0",
-  "description": "ClipChimp - Professional media library manager with AI analysis",
+  "description": "Briefcase - Professional media library manager with AI analysis",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -25,7 +25,7 @@
     "@atom-platform/ngx-plyr": "^17.3.2",
     "@ngneat/hotkeys": "^4.1.0",
     "angular-split": "^17.2.0",
-    "clipchimp": "file:..",
+    "briefcase": "file:..",
     "driver.js": "^1.4.0",
     "plyr": "^3.8.3",
     "rxjs": "^7.8.0",

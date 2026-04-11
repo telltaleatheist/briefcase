@@ -45,7 +45,7 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
       (process.platform === 'darwin'
         ? path.join(process.env.HOME || '', 'Library', 'Application Support')
         : path.join(process.env.HOME || '', '.config'));
-    this.modelsDir = path.join(userDataPath, 'ClipChimp', 'models');
+    this.modelsDir = path.join(userDataPath, 'briefcase', 'models');
 
     this.logger.log('-'.repeat(60));
     this.logger.log('RESOLVED PATHS:');

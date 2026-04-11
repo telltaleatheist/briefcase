@@ -86,7 +86,7 @@ export class OnboardingComponent implements OnInit {
 
   completeOnboarding() {
     // Mark onboarding as complete in localStorage
-    localStorage.setItem('clipchimp-onboarding-complete', 'true');
+    localStorage.setItem('briefcase-onboarding-complete', 'true');
     this.completed.emit();
   }
 

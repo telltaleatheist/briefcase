@@ -2,7 +2,7 @@
 
 ## Overview
 
-ClipChimp uses a monorepo structure with separate `node_modules` directories:
+Briefcase uses a monorepo structure with separate `node_modules` directories:
 - **Root**: Electron, build tools, and development dependencies
 - **Backend**: NestJS backend with its own dependencies including @types packages
 - **Frontend**: Angular frontend dependencies

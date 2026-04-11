@@ -102,7 +102,7 @@ frontend-v3/.angular/cache/*
 Modelfile
 # Backend dependencies (managed separately)
 !backend/node_modules/.gitkeep
-clipchimp-console*
+briefcase-console*
 utilities/bin/*.dll
 utilities/bin/*.dylib
 utilities/bin/whisper-cli

@@ -59,9 +59,9 @@ function getResourcesPath(): string {
   }
 
   // Development: project root (where package.json is)
-  // Check for CLIPCHIMP_PROJECT_ROOT env var first (set by dev scripts)
-  if (process.env.CLIPCHIMP_PROJECT_ROOT) {
-    return process.env.CLIPCHIMP_PROJECT_ROOT;
+  // Check for BRIEFCASE_PROJECT_ROOT env var first (set by dev scripts)
+  if (process.env.BRIEFCASE_PROJECT_ROOT) {
+    return process.env.BRIEFCASE_PROJECT_ROOT;
   }
 
   return process.cwd();

@@ -8,7 +8,7 @@
 ```
 Error: Cannot find module '../dist-electron/shared/binary-paths'
 Require stack:
-- /Applications/ClipChimp.app/Contents/Resources/app.asar/dist-electron/electron/utilities/executables.js
+- /Applications/Briefcase.app/Contents/Resources/app.asar/dist-electron/electron/utilities/executables.js
 ```
 
 **Cause:**
@@ -70,11 +70,11 @@ Binaries are not in the expected locations after packaging.
 **Debug:**
 ```bash
 # Check packaged app structure
-ls -la "ClipChimp.app/Contents/Resources/utilities/bin/"
-ls -la "ClipChimp.app/Contents/Resources/node_modules/@ffmpeg-installer/"
+ls -la "Briefcase.app/Contents/Resources/utilities/bin/"
+ls -la "Briefcase.app/Contents/Resources/node_modules/@ffmpeg-installer/"
 
 # Check logs for path resolution
-tail -f ~/Library/Logs/ClipChimp/main.log
+tail -f ~/Library/Logs/Briefcase/main.log
 ```
 
 ---
@@ -95,14 +95,14 @@ Cache directory has been fixed to use writable user data location:
 
 ```typescript
 // ✅ CORRECT (now fixed)
-const userDataPath = getUserDataPath(); // ~/Library/Application Support/clipchimp
+const userDataPath = getUserDataPath(); // ~/Library/Application Support/briefcase
 const cacheDir = path.join(userDataPath, 'cache');
 process.env.XDG_CACHE_HOME = cacheDir;
 ```
 
 Whisper models will now download to:
 ```
-~/Library/Application Support/clipchimp/cache/
+~/Library/Application Support/briefcase/cache/
 ```
 
 ---
@@ -136,7 +136,7 @@ const dbPath = path.join(
 - ASAR archive ❌
 
 **Should be in:**
-- `~/Library/Application Support/clipchimp/` ✓
+- `~/Library/Application Support/briefcase/` ✓
 
 ---
 
@@ -186,11 +186,11 @@ Check `environment.util.ts` getFrontEndPath():
 ```typescript
 const possiblePaths = [
   // Packaged paths (inside app bundle)
-  path.join(process.resourcesPath, 'frontend', 'dist', 'clipchimp-frontend', 'browser'),
-  path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'clipchimp-frontend', 'browser'),
+  path.join(process.resourcesPath, 'frontend', 'dist', 'briefcase-frontend', 'browser'),
+  path.join(process.resourcesPath, 'app.asar', 'frontend', 'dist', 'briefcase-frontend', 'browser'),
 
   // Development paths
-  path.join(process.cwd(), 'frontend', 'dist', 'clipchimp-frontend', 'browser'),
+  path.join(process.cwd(), 'frontend', 'dist', 'briefcase-frontend', 'browser'),
 ];
 ```
 
@@ -213,7 +213,7 @@ Environment variables are not persisted or binary paths not detected.
 
 ```bash
 # Check config file
-cat ~/Library/Application\ Support/clipchimp/app-config.json
+cat ~/Library/Application\ Support/briefcase/app-config.json
 
 # Should contain:
 {
@@ -251,10 +251,10 @@ npm run clean:mac
 npm run package:mac-arm64
 
 # Run packaged app
-open "dist-electron/mac-arm64/ClipChimp.app"
+open "dist-electron/mac-arm64/Briefcase.app"
 
 # Check logs
-tail -f ~/Library/Logs/ClipChimp/main.log
+tail -f ~/Library/Logs/Briefcase/main.log
 ```
 
 ### Verification Steps
@@ -266,7 +266,7 @@ tail -f ~/Library/Logs/ClipChimp/main.log
 2. **Database Works:**
    - Create a new library
    - Import a video
-   - Verify database file created in `~/Library/Application Support/clipchimp/libraries/`
+   - Verify database file created in `~/Library/Application Support/briefcase/libraries/`
 
 3. **Downloads Work:**
    - Paste a video URL
@@ -275,7 +275,7 @@ tail -f ~/Library/Logs/ClipChimp/main.log
 
 4. **Transcription Works:**
    - Run transcription on a video
-   - Whisper models download to `~/Library/Application Support/clipchimp/cache/`
+   - Whisper models download to `~/Library/Application Support/briefcase/cache/`
    - Transcript appears in database
 
 5. **Config Persists:**
@@ -295,19 +295,19 @@ export ELECTRON_ENABLE_LOGGING=1
 npm run electron:dev
 
 # Or in packaged app
-ELECTRON_ENABLE_LOGGING=1 /Applications/ClipChimp.app/Contents/MacOS/ClipChimp
+ELECTRON_ENABLE_LOGGING=1 /Applications/Briefcase.app/Contents/MacOS/Briefcase
 ```
 
 Check logs:
 ```bash
 # macOS
-tail -f ~/Library/Logs/ClipChimp/main.log
+tail -f ~/Library/Logs/Briefcase/main.log
 
 # Windows
-type %USERPROFILE%\AppData\Roaming\ClipChimp\logs\main.log
+type %USERPROFILE%\AppData\Roaming\Briefcase\logs\main.log
 
 # Linux
-tail -f ~/.config/ClipChimp/logs/main.log
+tail -f ~/.config/Briefcase/logs/main.log
 ```
 
 ---

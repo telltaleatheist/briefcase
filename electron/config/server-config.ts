@@ -1,4 +1,4 @@
-// ClipChimp/electron/config/server-config.ts
+// Briefcase/electron/config/server-config.ts
 import * as log from 'electron-log';
 import { EnvironmentUtil, ServerConfig as EnvServerConfig } from '../environment.util';
 

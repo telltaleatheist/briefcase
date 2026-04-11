@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/common/utils/filename-date.util.ts
+// Briefcase/backend/src/common/utils/filename-date.util.ts
 
 /**
  * Utility for managing dates in video filenames

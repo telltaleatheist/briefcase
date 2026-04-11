@@ -90,21 +90,21 @@ npm version patch  # or minor, or major
 
 # Step 2: Build Windows
 npm run package:win
-# ✓ Creates: Clippy Setup 1.0.1.exe + blockmap
+# ✓ Creates: Briefcase Setup 1.0.1.exe + blockmap
 
 # Step 3: Build macOS (ARM)
 npm run package:mac
-# ✓ Creates: Clippy-1.0.1-arm64.dmg + blockmap
+# ✓ Creates: Briefcase-1.0.1-arm64.dmg + blockmap
 # ✓ Windows files still there!
 
 # Step 4: Build macOS (Intel)
 npm run package:mac-intel
-# ✓ Creates: Clippy-1.0.1.dmg + blockmap
+# ✓ Creates: Briefcase-1.0.1.dmg + blockmap
 # ✓ Windows and ARM files still there!
 
 # Step 5: Build Linux
 npm run package:linux
-# ✓ Creates: Clippy-1.0.1.AppImage + blockmap
+# ✓ Creates: Briefcase-1.0.1.AppImage + blockmap
 # ✓ All other platform files still there!
 
 # Step 6: Check what you have
@@ -118,20 +118,20 @@ After building all platforms, your `dist-electron/` should contain:
 ```
 dist-electron/
 ├── win-unpacked/                    # Windows build files
-├── Clippy Setup 1.0.1.exe           # Windows installer (150 MB)
-├── Clippy Setup 1.0.1.exe.blockmap  # Windows blockmap (100 KB)
+├── Briefcase Setup 1.0.1.exe           # Windows installer (150 MB)
+├── Briefcase Setup 1.0.1.exe.blockmap  # Windows blockmap (100 KB)
 ├── latest.yml                       # Windows update metadata
 ├── mac/                             # macOS Intel build files
 ├── mac-arm64/                       # macOS ARM build files
-├── Clippy-1.0.1.dmg                 # macOS Intel installer (145 MB)
-├── Clippy-1.0.1.dmg.blockmap        # macOS Intel blockmap
-├── Clippy-1.0.1-arm64.dmg           # macOS ARM installer (140 MB)
-├── Clippy-1.0.1-arm64.dmg.blockmap  # macOS ARM blockmap
+├── Briefcase-1.0.1.dmg                 # macOS Intel installer (145 MB)
+├── Briefcase-1.0.1.dmg.blockmap        # macOS Intel blockmap
+├── Briefcase-1.0.1-arm64.dmg           # macOS ARM installer (140 MB)
+├── Briefcase-1.0.1-arm64.dmg.blockmap  # macOS ARM blockmap
 ├── latest-mac.yml                   # macOS update metadata
 ├── linux-unpacked/                  # Linux build files
-├── Clippy-1.0.1.AppImage            # Linux AppImage (155 MB)
-├── Clippy-1.0.1.AppImage.blockmap   # Linux blockmap
-├── Clippy-1.0.1.deb                 # Debian package (optional)
+├── Briefcase-1.0.1.AppImage            # Linux AppImage (155 MB)
+├── Briefcase-1.0.1.AppImage.blockmap   # Linux blockmap
+├── Briefcase-1.0.1.deb                 # Debian package (optional)
 └── latest-linux.yml                 # Linux update metadata
 ```
 

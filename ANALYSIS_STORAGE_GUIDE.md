@@ -4,7 +4,7 @@
 
 ### Core Tables (SQLite via sql.js)
 
-All tables are stored in `~/Library/Application Support/clipchimp/clipchimp.db`
+All tables are stored in `~/Library/Application Support/briefcase/briefcase.db`
 
 #### `videos` table
 - **Purpose**: Core metadata for each video file
@@ -114,7 +114,7 @@ All tables are stored in `~/Library/Application Support/clipchimp/clipchimp.db`
 
 **Output Files Created**:
 ```
-~/Downloads/clipchimp/
+~/Downloads/briefcase/
 ├── videos/
 │   └── [downloaded_video]
 └── analysis/
@@ -427,7 +427,7 @@ AnalysisService.startAnalysis()
     ├─ Extract audio
     ├─ Transcribe audio
     ├─ Analyze transcript with AI
-    └─ Save files to ~/Downloads/clipchimp/
+    └─ Save files to ~/Downloads/briefcase/
     ↓
 [Result files created, NOT in database]
 ```
@@ -463,7 +463,7 @@ Batch complete
 
 **File System** (for single analysis UI):
 ```
-~/Downloads/clipchimp/
+~/Downloads/briefcase/
 ├── videos/[video_file]
 └── analysis/
     ├── transcripts/
@@ -475,7 +475,7 @@ Batch complete
 
 **Database** (for batch library):
 ```
-~/Library/Application Support/clipchimp/clipchimp.db
+~/Library/Application Support/briefcase/briefcase.db
 ├── videos
 ├── transcripts
 ├── analyses

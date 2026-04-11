@@ -7,8 +7,8 @@
 npm run package:win
 
 # 2. Files created in dist-electron/
-# - Clippy Setup X.X.X.exe
-# - Clippy Setup X.X.X.exe.blockmap
+# - Briefcase Setup X.X.X.exe
+# - Briefcase Setup X.X.X.exe.blockmap
 # - latest.yml
 
 # 3. Create GitHub Release
@@ -20,14 +20,14 @@ npm run package:win
 ## What Happens When User Installs
 
 ```
-User downloads → Installs → Launches Clippy
+User downloads → Installs → Launches Briefcase
                     ↓
          First run checks dependencies
                     ↓
          Missing deps? → Setup wizard appears
                     ↓
          Downloads portable versions to:
-         %APPDATA%/Clippy/dependencies/
+         %APPDATA%/Briefcase/dependencies/
                     ↓
          [Optional] AI features wizard
                     ↓
@@ -50,7 +50,7 @@ User downloads → Installs → Launches Clippy
 
 ### Where Dependencies Install
 ```
-%APPDATA%/Clippy/
+%APPDATA%/Briefcase/
 ├── dependencies/
 │   ├── bin/
 │   │   ├── ffmpeg.exe    (70 MB)
@@ -118,8 +118,8 @@ When creating a release:
 - [ ] Git tag created (`v1.0.1`)
 - [ ] Built for Windows: `npm run package:win`
 - [ ] Created GitHub Release
-- [ ] Uploaded `Clippy Setup X.X.X.exe`
-- [ ] Uploaded `Clippy Setup X.X.X.exe.blockmap`
+- [ ] Uploaded `Briefcase Setup X.X.X.exe`
+- [ ] Uploaded `Briefcase Setup X.X.X.exe.blockmap`
 - [ ] Uploaded `latest.yml`
 - [ ] Release published (not draft)
 - [ ] Tested download link works
@@ -198,8 +198,8 @@ When creating a release:
 ### App says "Setup incomplete"
 
 **Check:**
-1. Look in `%APPDATA%/Clippy/logs/main.log`
-2. Check `%APPDATA%/Clippy/dependencies/bin/`
+1. Look in `%APPDATA%/Briefcase/logs/main.log`
+2. Check `%APPDATA%/Briefcase/dependencies/bin/`
 3. Verify files exist:
    - ffmpeg.exe
    - ffprobe.exe
@@ -270,10 +270,10 @@ npm run package:win
 After setup completes, these are available to your app:
 
 ```typescript
-process.env.FFMPEG_PATH    // C:/Users/.../Clippy/dependencies/bin/ffmpeg.exe
-process.env.FFPROBE_PATH   // C:/Users/.../Clippy/dependencies/bin/ffprobe.exe
-process.env.YT_DLP_PATH    // C:/Users/.../Clippy/dependencies/bin/yt-dlp.exe
-process.env.PYTHON_PATH    // C:/Users/.../Clippy/dependencies/python/python.exe
+process.env.FFMPEG_PATH    // C:/Users/.../Briefcase/dependencies/bin/ffmpeg.exe
+process.env.FFPROBE_PATH   // C:/Users/.../Briefcase/dependencies/bin/ffprobe.exe
+process.env.YT_DLP_PATH    // C:/Users/.../Briefcase/dependencies/bin/yt-dlp.exe
+process.env.PYTHON_PATH    // C:/Users/.../Briefcase/dependencies/python/python.exe
 process.env.PATH           // Updated with bin directory
 ```
 
@@ -289,7 +289,7 @@ Your backend automatically uses these via the existing code.
 
 ## Support Resources
 
-- **User Logs**: `%APPDATA%/Clippy/logs/main.log`
+- **User Logs**: `%APPDATA%/Briefcase/logs/main.log`
 - **Setup Guide**: [WINDOWS_SETUP_GUIDE.md](WINDOWS_SETUP_GUIDE.md)
 - **Integration**: [SETUP_SYSTEM_INTEGRATION.md](SETUP_SYSTEM_INTEGRATION.md)
 - **Updates**: [AUTO_UPDATES_GUIDE.md](AUTO_UPDATES_GUIDE.md)

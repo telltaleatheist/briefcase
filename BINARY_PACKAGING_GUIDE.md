@@ -1,10 +1,10 @@
-# Binary Packaging Guide for ClipChimp
+# Binary Packaging Guide for Briefcase
 
-This guide explains how ClipChimp packages and manages binary dependencies (ffmpeg, ffprobe, yt-dlp, and Python) for distribution.
+This guide explains how Briefcase packages and manages binary dependencies (ffmpeg, ffprobe, yt-dlp, and Python) for distribution.
 
 ## Overview
 
-ClipChimp requires several binary dependencies to function:
+Briefcase requires several binary dependencies to function:
 - **FFmpeg**: Video/audio processing
 - **FFprobe**: Media file analysis
 - **yt-dlp**: Video downloading from various platforms

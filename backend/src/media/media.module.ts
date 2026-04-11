@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/media/media.module.ts
+// Briefcase/backend/src/media/media.module.ts
 import { Module, forwardRef } from '@nestjs/common';
 import { MediaEventService } from './media-event.service';
 import { MediaProcessingService } from './media-processing.service';

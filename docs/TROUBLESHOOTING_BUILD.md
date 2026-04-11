@@ -2,7 +2,7 @@
 
 ## Common Build Issues
 
-### "Cannot find Clippy.exe" Error
+### "Cannot find Briefcase.exe" Error
 
 #### Scenario 1: Building on Mac for Windows
 
@@ -68,7 +68,7 @@ ls -la dist-electron/*.exe
 
 #### Scenario 3: Installer runs but app won't start
 
-**Problem:** Windows installer completes, but app shows "Cannot find Clippy.exe" when launching.
+**Problem:** Windows installer completes, but app shows "Cannot find Briefcase.exe" when launching.
 
 **Common Causes:**
 
@@ -77,8 +77,8 @@ ls -la dist-electron/*.exe
    - Check: Windows Security → Virus & threat protection → Protection history
 
 2. **Installation path has special characters**
-   - Some paths cause issues: `C:\Program Files\Clippy` (space in path)
-   - Try installing to: `C:\Clippy` instead
+   - Some paths cause issues: `C:\Program Files\Briefcase` (space in path)
+   - Try installing to: `C:\Briefcase` instead
 
 3. **Missing runtime dependencies**
    - Windows needs Visual C++ Redistributable
@@ -88,9 +88,9 @@ ls -la dist-electron/*.exe
 **Solution:**
 ```bash
 # On Windows, check if exe exists after install
-dir "C:\Program Files\Clippy\Clippy.exe"
+dir "C:\Program Files\Briefcase\Briefcase.exe"
 # Or
-dir "%LOCALAPPDATA%\Programs\Clippy\Clippy.exe"
+dir "%LOCALAPPDATA%\Programs\Briefcase\Briefcase.exe"
 
 # Check Windows Event Viewer for errors
 # Windows Key + X → Event Viewer → Application logs
@@ -122,7 +122,7 @@ ls -lh dist-electron/*.exe
 3. **ASAR packaging failed**
    ```bash
    # Check if asar file was created
-   ls -la dist-electron/mac*/Clippy.app/Contents/Resources/app.asar
+   ls -la dist-electron/mac*/Briefcase.app/Contents/Resources/app.asar
    ```
 
 **Solution:**
@@ -144,7 +144,7 @@ npm run build:all
 ls -la dist-electron/main/electron/main.js     # Should exist
 ls -la dist-electron/preload/preload.js        # Should exist
 ls -la backend/dist/main.js                    # Should exist
-ls -la frontend/dist/clippy-frontend/index.html # Should exist
+ls -la frontend/dist/briefcase-frontend/index.html # Should exist
 ```
 
 If any of these don't exist, fix that build first.
@@ -395,7 +395,7 @@ project-root/
 │       └── main.js
 └── frontend/
     └── dist/
-        └── clippy-frontend/     # Compiled Angular frontend
+        └── briefcase-frontend/     # Compiled Angular frontend
             └── index.html
 ```
 
@@ -473,12 +473,12 @@ time npm run package:win
 du -sh dist-electron/*
 
 # Check what's in the ASAR
-npx asar list dist-electron/mac/Clippy.app/Contents/Resources/app.asar | head -50
+npx asar list dist-electron/mac/Briefcase.app/Contents/Resources/app.asar | head -50
 ```
 
 ---
 
-## Still Getting "Cannot find Clippy.exe"?
+## Still Getting "Cannot find Briefcase.exe"?
 
 Please provide:
 1. Exact error message (screenshot or copy/paste)

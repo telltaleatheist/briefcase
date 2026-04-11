@@ -50,7 +50,7 @@ export class LoggerService {
     }
 
     const content = this.exportLogs();
-    const filename = `clipchimp-console-${new Date().toISOString().split('T')[0]}.txt`;
+    const filename = `briefcase-console-${new Date().toISOString().split('T')[0]}.txt`;
 
     try {
       await this.electronService.saveConsoleLogs(filename, content);
@@ -128,7 +128,7 @@ export class LoggerService {
   downloadLogs() {
     const content = this.exportLogs();
 
-    // Save to backend (which saves to ~/Library/Logs/clipchimp/)
+    // Save to backend (which saves to ~/Library/Logs/briefcase/)
     this.http.post<any>(`${this.API_BASE}/config/save-logs`, { content }).subscribe({
       next: (response) => {
         if (response.success) {

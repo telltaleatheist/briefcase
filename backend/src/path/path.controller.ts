@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/path/path.controller.ts
+// Briefcase/backend/src/path/path.controller.ts
 import { Controller, Get, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
 import { PathService } from './path.service';
 

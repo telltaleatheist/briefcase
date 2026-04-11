@@ -1083,7 +1083,7 @@ export class MediaOperationsService {
                       path.join(process.env.HOME || '', 'Library', 'Application Support') :
                       path.join(process.env.HOME || '', '.config'));
 
-    const categoriesPath = path.join(userDataPath, 'ClipChimp', 'analysis-categories.json');
+    const categoriesPath = path.join(userDataPath, 'briefcase', 'analysis-categories.json');
 
     if (!fs.existsSync(categoriesPath)) {
       // Categories file doesn't exist - return empty array, analysis will still run but skip flagging

@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/downloader/downloader.module.ts
+// Briefcase/backend/src/downloader/downloader.module.ts
 import { Module, forwardRef } from '@nestjs/common';
 import { DownloaderService } from './downloader.service';
 import { DownloaderController } from './downloader.controller';

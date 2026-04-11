@@ -8,10 +8,10 @@ import * as path from 'path';
 const getRuntimePaths = () => {
   // Try to load runtime-paths module - this is the ONLY source of binary paths
   try {
-    // In development, use CLIPCHIMP_PROJECT_ROOT (set by Electron)
+    // In development, use BRIEFCASE_PROJECT_ROOT (set by Electron)
     // Check this FIRST because RESOURCES_PATH points to electron's resources in dev mode
-    if (process.env.CLIPCHIMP_PROJECT_ROOT) {
-      const runtimePathsFile = path.join(process.env.CLIPCHIMP_PROJECT_ROOT, 'dist-electron', 'shared', 'runtime-paths.js');
+    if (process.env.BRIEFCASE_PROJECT_ROOT) {
+      const runtimePathsFile = path.join(process.env.BRIEFCASE_PROJECT_ROOT, 'dist-electron', 'shared', 'runtime-paths.js');
       return require(runtimePathsFile).getRuntimePaths();
     }
     // In packaged app, use RESOURCES_PATH env var to locate the module
@@ -92,11 +92,11 @@ export class SharedConfigService {
     const homeDir = os.homedir();
 
     if (process.platform === 'darwin') {
-      return path.join(homeDir, 'Library', 'Application Support', 'ClipChimp');
+      return path.join(homeDir, 'Library', 'Application Support', 'briefcase');
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'ClipChimp');
+      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'briefcase');
     } else {
-      return path.join(homeDir, '.config', 'ClipChimp');
+      return path.join(homeDir, '.config', 'briefcase');
     }
   }
 

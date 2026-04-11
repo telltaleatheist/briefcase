@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
       log.error('Setup incomplete, cannot start application');
       dialog.showErrorBox(
         'Setup Required',
-        'Clippy requires certain dependencies to function. Please complete the setup process.'
+        'Briefcase requires certain dependencies to function. Please complete the setup process.'
       );
       app.quit();
       return;
@@ -121,8 +121,8 @@ await portableManager.cleanupAll();
 
 ### First Run
 ```
-1. User installs Clippy
-2. User launches Clippy
+1. User installs Briefcase
+2. User launches Briefcase
 3. Dependency check runs
 4. Setup dialog appears (if dependencies missing)
 5. User clicks "Install"
@@ -134,7 +134,7 @@ await portableManager.cleanupAll();
 
 ### Subsequent Runs
 ```
-1. User launches Clippy
+1. User launches Briefcase
 2. Quick dependency check (all present)
 3. Environment variables set
 4. Main app launches immediately
@@ -179,7 +179,7 @@ if (!setupComplete) {
     type: 'warning',
     buttons: ['Retry', 'Quit'],
     title: 'Setup Incomplete',
-    message: 'Clippy needs dependencies to function',
+    message: 'Briefcase needs dependencies to function',
     detail: 'Would you like to try the setup again?'
   });
 
@@ -306,8 +306,8 @@ console.log('Installation info:', info);
 ### View Logs
 
 Logs are stored at:
-- Windows: `%APPDATA%/Clippy/logs/main.log`
-- Mac: `~/Library/Logs/Clippy/main.log`
+- Windows: `%APPDATA%/Briefcase/logs/main.log`
+- Mac: `~/Library/Logs/Briefcase/main.log`
 
 ## 15. Documentation for Users
 

@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/ffmpeg/ffmpeg.module.ts
+// Briefcase/backend/src/ffmpeg/ffmpeg.module.ts
 import { Module, forwardRef } from '@nestjs/common';
 import { FfmpegService } from './ffmpeg.service';
 import { FfmpegController } from './ffmpeg.controller';

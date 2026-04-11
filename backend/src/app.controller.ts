@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/app.controller.ts
+// Briefcase/backend/src/app.controller.ts
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
 import { LibraryManagerService } from './database/library-manager.service';

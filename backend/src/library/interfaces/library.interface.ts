@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/library/interfaces/library.interface.ts
+// Briefcase/backend/src/library/interfaces/library.interface.ts
 
 /**
  * Video metadata and location tracking

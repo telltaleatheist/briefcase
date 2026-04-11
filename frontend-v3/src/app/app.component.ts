@@ -75,7 +75,7 @@ export class AppComponent implements OnInit {
     this.onboardingChecked = true;
 
     // Check if onboarding was completed
-    const onboardingComplete = localStorage.getItem('clipchimp-onboarding-complete') === 'true';
+    const onboardingComplete = localStorage.getItem('briefcase-onboarding-complete') === 'true';
 
     if (onboardingComplete) {
       // Even if onboarding is complete, check if there's a library

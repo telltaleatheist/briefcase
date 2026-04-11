@@ -1,7 +1,7 @@
 # Frontend-v3 Implementation Notes
 
 ## Overview
-This document outlines the new video library page implementation for ClipChimp frontend-v3.
+This document outlines the new video library page implementation for Briefcase frontend-v3.
 
 ## What Was Built
 

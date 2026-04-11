@@ -81,7 +81,7 @@ function downloadFile(url, destPath, headers = {}) {
 
       const options = {
         headers: {
-          'User-Agent': 'ClipChimp/1.0',
+          'User-Agent': 'Briefcase/1.0',
           ...headers
         }
       };

@@ -1,10 +1,10 @@
 # Build Scripts
 
-This directory contains scripts for packaging and building ClipChimp.
+This directory contains scripts for packaging and building Briefcase.
 
 ## Binary Management
 
-ClipChimp bundles native binaries - no Python required!
+Briefcase bundles native binaries - no Python required!
 
 ### Bundled Binaries
 
@@ -44,7 +44,7 @@ npm run package:linux       # Downloads binaries, then packages
 
 ### Architecture
 
-ClipChimp uses native binaries exclusively:
+Briefcase uses native binaries exclusively:
 - **Transcription**: whisper.cpp (C++ with Metal GPU acceleration on Mac)
 - **AI Analysis**: HTTP calls to Ollama/OpenAI/Claude (no local ML)
 - **Video Processing**: ffmpeg/ffprobe

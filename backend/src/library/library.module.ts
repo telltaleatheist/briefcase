@@ -1,4 +1,4 @@
-// ClipChimp/backend/src/library/library.module.ts
+// Briefcase/backend/src/library/library.module.ts
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { LibraryService } from './library.service';
 import { RelinkService } from './relink.service';

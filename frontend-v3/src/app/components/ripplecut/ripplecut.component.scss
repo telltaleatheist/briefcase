@@ -1526,7 +1526,7 @@ $base-audio-track-height: 32px;
   }
 }
 
-// Selection Range (with drag handles like ClipChimp)
+// Selection Range (with drag handles like Briefcase)
 // Now rendered inside track-content, so it only spans the lane height
 .selection-range {
   position: absolute;
@@ -2120,7 +2120,7 @@ $base-audio-track-height: 32px;
   }
 }
 
-// Marker highlights - ClipChimp-style transparent highlight sections
+// Marker highlights - Briefcase-style transparent highlight sections
 .marker-highlight {
   position: absolute;
   top: 4px; // Positioned at top of lane (after padding)

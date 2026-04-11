@@ -1,10 +1,10 @@
 # Windows Setup & Dependency Installation Guide
 
-This document explains how Clippy handles dependency installation on Windows, including the new automated setup system with portable dependencies and optional AI features.
+This document explains how Briefcase handles dependency installation on Windows, including the new automated setup system with portable dependencies and optional AI features.
 
 ## Overview
 
-Clippy now features an intelligent dependency management system that:
+Briefcase now features an intelligent dependency management system that:
 
 1. **Checks for missing dependencies** on first run
 2. **Offers portable installation** for most tools (no system PATH pollution)
@@ -17,7 +17,7 @@ Clippy now features an intelligent dependency management system that:
 ### Dependency Categories
 
 #### Required Dependencies (Portable)
-These are installed in `%APPDATA%/Clippy/dependencies/bin/` and don't affect your system PATH:
+These are installed in `%APPDATA%/Briefcase/dependencies/bin/` and don't affect your system PATH:
 
 - **FFmpeg** - Video processing and conversion
 - **FFprobe** - Video metadata analysis (comes with FFmpeg)
@@ -60,7 +60,7 @@ These are installed system-wide as they benefit from being available globally:
 ### File Structure
 
 ```
-%APPDATA%/Clippy/
+%APPDATA%/Briefcase/
 ├── dependencies/
 │   ├── bin/
 │   │   ├── ffmpeg.exe
@@ -187,7 +187,7 @@ Responsibilities:
 npm run package:win
 
 # This will create:
-# - dist-electron/Clippy Setup X.X.X.exe (NSIS installer)
+# - dist-electron/Briefcase Setup X.X.X.exe (NSIS installer)
 ```
 
 ### What the Installer Includes
@@ -291,10 +291,10 @@ The system automatically detects and uses available package managers in this ord
 **Problem**: App says dependencies are missing after installation completed.
 
 **Solution**:
-1. Check `%APPDATA%/Clippy/dependencies/bin/`
+1. Check `%APPDATA%/Briefcase/dependencies/bin/`
 2. Verify files exist
 3. Restart the app
-4. Check logs in `%APPDATA%/Clippy/logs/`
+4. Check logs in `%APPDATA%/Briefcase/logs/`
 
 ### Ollama Installation Fails
 
@@ -327,7 +327,7 @@ The system automatically detects and uses available package managers in this ord
 **Problem**: Installation requires admin rights but fails.
 
 **Solutions**:
-1. Right-click Clippy and "Run as Administrator"
+1. Right-click Briefcase and "Run as Administrator"
 2. Or install dependencies manually without package manager
 3. Or use portable versions (no admin needed)
 
@@ -337,17 +337,17 @@ If automated installation fails, users can install manually:
 
 ### FFmpeg & FFprobe
 1. Download from: https://www.gyan.dev/ffmpeg/builds/
-2. Extract to: `%APPDATA%/Clippy/dependencies/bin/`
+2. Extract to: `%APPDATA%/Briefcase/dependencies/bin/`
 3. Or add to system PATH
 
 ### yt-dlp
 1. Download from: https://github.com/yt-dlp/yt-dlp/releases
-2. Place in: `%APPDATA%/Clippy/dependencies/bin/`
+2. Place in: `%APPDATA%/Briefcase/dependencies/bin/`
 3. Rename to `yt-dlp.exe` if needed
 
 ### Python
 1. Download Python 3.11 Embedded: https://www.python.org/downloads/
-2. Extract to: `%APPDATA%/Clippy/dependencies/python/`
+2. Extract to: `%APPDATA%/Briefcase/dependencies/python/`
 
 ### Ollama
 1. Download from: https://ollama.ai/download
@@ -431,4 +431,4 @@ const result = await wizard.runWizard('chocolatey', (progress) => {
 
 ---
 
-For questions or issues, check the logs at `%APPDATA%/Clippy/logs/main.log`
+For questions or issues, check the logs at `%APPDATA%/Briefcase/logs/main.log`
