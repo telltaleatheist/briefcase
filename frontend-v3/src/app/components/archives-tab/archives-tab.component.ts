@@ -37,41 +37,92 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
   isLoading = signal(false);
   selectedItems = signal<Set<string>>(new Set());
 
-  // Map archives into VideoWeek format grouped by domain
+  // Map archives into VideoWeek format grouped by download date (Sunday-based
+  // week key), matching the library page's grouping pattern. Items captured
+  // within the past 24 hours bubble up into a "New" section at the top.
   archiveWeeks = computed(() => {
     const archives = this.webArchiveService.archives();
     if (archives.length === 0) return [];
 
-    // Group by domain
-    const grouped = new Map<string, WebArchiveItem[]>();
-    for (const archive of archives) {
-      const domain = archive.domain || 'Unknown';
-      if (!grouped.has(domain)) {
-        grouped.set(domain, []);
+    const now = Date.now();
+    const dateMap = new Map<string, WebArchiveItem[]>();
+    const past24Hours: WebArchiveItem[] = [];
+
+    // Sort archives by download_date descending (newest first)
+    const sorted = [...archives].sort((a, b) => {
+      const dateA = a.download_date ? new Date(a.download_date).getTime() : 0;
+      const dateB = b.download_date ? new Date(b.download_date).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    for (const archive of sorted) {
+      if (!archive.download_date) {
+        const key = 'Unknown';
+        if (!dateMap.has(key)) dateMap.set(key, []);
+        dateMap.get(key)!.push(archive);
+        continue;
       }
-      grouped.get(domain)!.push(archive);
+
+      const downloadDate = new Date(archive.download_date);
+      const hoursDiff = (now - downloadDate.getTime()) / (1000 * 60 * 60);
+
+      if (hoursDiff <= 24) {
+        past24Hours.push(archive);
+        continue;
+      }
+
+      const dateKey = this.getWeekDateKey(downloadDate);
+      if (!dateMap.has(dateKey)) dateMap.set(dateKey, []);
+      dateMap.get(dateKey)!.push(archive);
     }
 
-    // Convert to VideoWeek format, sorted alphabetically by domain
     const weeks: VideoWeek[] = [];
-    const sortedDomains = Array.from(grouped.keys()).sort();
 
-    for (const domain of sortedDomains) {
-      const items = grouped.get(domain)!;
-      // Sort items within domain by date descending
-      items.sort((a, b) => (b.capture_date || '').localeCompare(a.capture_date || ''));
-
-      const videos: VideoItem[] = items.map(item => this.archiveToVideoItem(item));
-      const count = items.length;
-
+    if (past24Hours.length > 0) {
       weeks.push({
-        weekLabel: `${domain} (${count})`,
-        videos,
+        weekLabel: 'New',
+        videos: past24Hours.map(item => this.archiveToVideoItem(item)),
       });
     }
 
+    const dateGroups = Array.from(dateMap.entries())
+      .map(([dateKey, items]) => ({
+        weekLabel: dateKey,
+        videos: items.map(item => this.archiveToVideoItem(item)),
+      }))
+      .sort((a, b) => {
+        if (a.weekLabel === 'Unknown') return 1;
+        if (b.weekLabel === 'Unknown') return -1;
+        return b.weekLabel.localeCompare(a.weekLabel);
+      });
+
+    weeks.push(...dateGroups);
+
     return weeks;
   });
+
+  /**
+   * Compute a Sunday-based YYYY-MM-DD week key to match the library page's
+   * groupings. Mon-Wed snap back to the previous Sunday; Thu-Sat snap forward
+   * to the next Sunday.
+   */
+  private getWeekDateKey(date: Date): string {
+    const d = new Date(date);
+    const dayOfWeek = d.getDay();
+
+    if (dayOfWeek === 0) {
+      // Already Sunday
+    } else if (dayOfWeek <= 3) {
+      d.setDate(d.getDate() - dayOfWeek);
+    } else {
+      d.setDate(d.getDate() + (7 - dayOfWeek));
+    }
+
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 
   captureInProgress = this.webArchiveService.captureInProgress;
 
