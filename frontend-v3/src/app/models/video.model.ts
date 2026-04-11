@@ -12,7 +12,8 @@ export interface VideoItem {
   selected?: boolean;
   // Additional fields for context menu actions
   filePath?: string;
-  suggestedTitle?: string;
+  suggestedTitle?: string;          // AI-generated title suggestion (only set after AI analysis)
+  webPageTitle?: string;            // For webpage items: the original page title from MHTML (display only, not editable)
   hasTranscript?: boolean;
   hasAnalysis?: boolean;
   // Searchable fields

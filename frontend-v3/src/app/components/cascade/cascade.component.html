@@ -138,7 +138,7 @@
               }
 
               <!-- Suggested Title Row (not for ghosts) -->
-              @if (showSuggestedTitle && item.video.suggestedTitle && !item.video.isGhost) {
+              @if (showSuggestedTitle && (item.video.suggestedTitle || item.video.webPageTitle) && !item.video.isGhost) {
                 <div class="video-meta">
                   <!-- Placeholder to align with title above -->
                   <span class="date-placeholder"></span>
@@ -150,14 +150,24 @@
                       class="meta-action"
                       (click)="onConfigureClick(item.video, $event)"
                     >Configure</span>
-                  } @else if (item.video.suggestedTitle.startsWith('⚠️')) {
+                  } @else if (item.video.suggestedTitle && item.video.suggestedTitle.startsWith('⚠️')) {
                     <!-- Duplicate warning display (no AI label or edit button) -->
                     <span class="meta-icon">⚠️</span>
                     <span class="meta-filename duplicate-warning">{{ item.video.suggestedTitle.substring(2).trim() }}</span>
                   } @else if (item.video.mediaType === 'webpage') {
-                    <!-- Web archive display: fixed link icon, no "Title Suggestion:" label, no Edit button -->
+                    <!-- Web archive display: link icon, page title OR AI suggestion -->
                     <span class="meta-icon">🔗</span>
-                    <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
+                    @if (item.video.suggestedTitle) {
+                      <!-- AI-generated title: show Edit button so user can accept/refine -->
+                      <span class="meta-filename">{{ item.video.suggestedTitle }}</span>
+                      <span
+                        class="meta-action"
+                        (click)="openSuggestedTitleModal(item.video); $event.stopPropagation()"
+                      >Edit</span>
+                    } @else {
+                      <!-- MHTML page title fallback: display only, not editable -->
+                      <span class="meta-filename">{{ item.video.webPageTitle }}</span>
+                    }
                     @if (item.video.downloadDate) {
                       <span class="meta-separator">•</span>
                       <span class="meta-downloaded">Downloaded: {{ formatDownloadDate(item.video.downloadDate) }}</span>
