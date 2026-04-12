@@ -260,19 +260,19 @@ export class ClipExtractorService {
       }
 
       // Build strip-bars filter: crop center 9:16 portrait, blur-fill to 16:9
-      // Same approach as ffmpeg.service fixAspectRatio filter (hardcoded 1920x1080)
+      // Dynamic resolution — after crop, ih = source height, so target 16:9 = ih*16/9 × ih
       let stripBarsFilter: string | null = null;
       if (stripBlackBars) {
         this.logger.log('Applying strip-black-bars filter (blur fill)');
-        // 1. Crop center 9:16 content from source (removes black bars)
-        // 2. Scale cropped to fill 1920x1920, blur, crop to 1920x1080 → background
-        // 3. Scale cropped to fit within 1920x1080 → sharp foreground
+        // 1. Crop center 9:16 from source (removes black bars)
+        // 2. Scale cropped to fill 16:9 width, blur, crop height → background
+        // 3. Keep cropped at native size → sharp foreground
         // 4. Overlay fg centered on bg
         stripBarsFilter = [
           '[0:v]crop=ih*9/16:ih[cropped]',
           '[cropped]split=2[cr1][cr2]',
-          '[cr1]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg]',
-          "[cr2]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg]",
+          '[cr1]scale=ih*16/9:-2:flags=lanczos,crop=iw:iw*9/16,gblur=sigma=50[bg]',
+          '[cr2]scale=-2:ih[fg]',
           '[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]',
         ].join(';');
       }
