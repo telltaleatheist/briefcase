@@ -13,6 +13,7 @@ import { DatabaseModule } from '../database/database.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { ApiKeysModule } from '../config/config.module';
+import { WebArchiveModule } from '../web-archive/web-archive.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ApiKeysModule } from '../config/config.module';
     forwardRef(() => DownloaderModule),
     forwardRef(() => AnalysisModule),
     ApiKeysModule,
+    WebArchiveModule,
   ],
   controllers: [MediaController],
   providers: [

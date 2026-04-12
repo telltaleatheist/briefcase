@@ -584,7 +584,7 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   duration = signal(0);
   progress = signal(0);
   position = signal({ x: 100, y: 100 });
-  windowSize = signal({ width: 640, height: 480 });
+  windowSize = signal({ width: 760, height: 600 });
   volume = signal(1.0); // 0.0 to 1.0
   isMuted = signal(false);
   playbackRate = signal(1.0); // Playback speed

@@ -11,6 +11,7 @@ import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { ApiKeysService } from '../config/api-keys.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { ThumbnailService } from '../database/thumbnail.service';
+import { WebArchiveService } from '../web-archive/web-archive.service';
 import {
   GetInfoResult,
   DownloadResult,
@@ -39,6 +40,7 @@ export class MediaOperationsService {
     private readonly apiKeysService: ApiKeysService,
     private readonly ffmpegService: FfmpegService,
     private readonly thumbnailService: ThumbnailService,
+    private readonly webArchiveService: WebArchiveService,
   ) {}
 
   /**
@@ -808,9 +810,48 @@ export class MediaOperationsService {
         throw new Error(`Cannot analyze as webpage: media_type is '${video.media_type}'`);
       }
 
-      const textContent = this.databaseService.getTextContent(videoId);
+      let textContent = this.databaseService.getTextContent(videoId);
       if (!textContent || !textContent.extracted_text || textContent.extracted_text.trim().length === 0) {
-        throw new Error('No extracted text found for this webpage. Re-import or re-backfill the archive.');
+        // Backfill text_content on demand. This covers MHTMLs imported before
+        // the webpage.imported event handler existed, or cases where the
+        // initial backfill silently failed.
+        this.logger.log(
+          `[${jobId || 'standalone'}] text_content missing for ${videoId}, extracting from MHTML...`,
+        );
+        this.eventService.emitTaskProgress(jobId || '', 'analyze', 5, 'Extracting page text...');
+
+        const absolutePath = video.current_path as string;
+        if (!absolutePath || !fs.existsSync(absolutePath)) {
+          throw new Error(`Webpage file not found on disk: ${absolutePath}`);
+        }
+
+        let extractedText = '';
+        try {
+          extractedText = this.webArchiveService.extractTextFromMhtml(absolutePath);
+        } catch (err: any) {
+          throw new Error(
+            `Failed to extract text from MHTML: ${err?.message || 'unknown error'}`,
+          );
+        }
+
+        if (!extractedText || extractedText.trim().length === 0) {
+          throw new Error(
+            'No readable text could be extracted from this MHTML file. The archive may be empty or corrupted.',
+          );
+        }
+
+        this.databaseService.insertTextContent({
+          mediaId: videoId,
+          extractedText,
+          extractionMethod: 'mhtml-parse',
+        });
+        textContent = this.databaseService.getTextContent(videoId);
+        if (!textContent || !textContent.extracted_text) {
+          throw new Error('Failed to persist extracted text to database.');
+        }
+        this.logger.log(
+          `[${jobId || 'standalone'}] Backfilled text_content for ${videoId} (${extractedText.length} chars)`,
+        );
       }
 
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 10, 'Loading page text...');
