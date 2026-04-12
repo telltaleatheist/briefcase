@@ -5,7 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { NotificationService } from '../../services/notification.service';
 import { TourService } from '../../services/tour.service';
-import { QueueService } from '../../services/queue.service';
+
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
 
@@ -118,7 +118,7 @@ export class ExportDialogComponent implements OnInit {
   private tourService = inject(TourService);
   private http = inject(HttpClient);
   private notificationService = inject(NotificationService);
-  private queueService = inject(QueueService);
+
 
   ngOnInit() {
     // Prepare sections for cascade list
@@ -518,10 +518,11 @@ export class ExportDialogComponent implements OnInit {
 
     this.pendingJobs = sections.map(section => {
       const isFullVideo = section.id === '__full_video__';
+      const sectionLabel = section.description || 'Unnamed';
       return {
         videoPath: this.data.videoPath,
         videoId: this.data.videoId,
-        displayName: `Export: ${section.description || 'Unnamed'}`,
+        displayName: `Export: ${this.data.videoTitle} — ${sectionLabel}`,
         tasks: [{
           type: 'export-clip',
           options: {
@@ -561,7 +562,7 @@ export class ExportDialogComponent implements OnInit {
     this.pendingJobs = [{
       videoPath: this.data.videoPath,
       videoId: this.data.videoId,
-      displayName: 'Export: Overwriting original',
+      displayName: `Export: ${this.data.videoTitle} — overwriting original`,
       tasks: [{
         type: 'export-clip',
         options: {
@@ -581,7 +582,14 @@ export class ExportDialogComponent implements OnInit {
   }
 
   /**
-   * Submit pending jobs to the backend queue
+   * Submit pending jobs to the backend queue.
+   *
+   * Does NOT call refreshFromBackend — the main window's QueueService picks
+   * up new jobs when the user navigates to the queue tab (via setActiveTab →
+   * refreshFromBackend). Calling it here caused zombie pending jobs when the
+   * export dialog runs in a popout editor: the popout's QueueService created
+   * a frontend job and persisted it to the same localStorage the main window
+   * uses, stomping on the main window's copy.
    */
   private async submitJobs(paused: boolean): Promise<boolean> {
     if (this.pendingJobs.length === 0) return false;
@@ -591,9 +599,6 @@ export class ExportDialogComponent implements OnInit {
         this.http.post<any>(`${this.API_BASE}/queue/jobs/bulk`, { jobs: this.pendingJobs, paused })
       );
       this.queuedJobIds = result.jobIds || [];
-      // Sync QueueService so it picks up the new backend jobs and can
-      // route WebSocket events (progress, completion, failure) correctly
-      await this.queueService.refreshFromBackend();
       return true;
     } catch (error) {
       console.error('Failed to submit export jobs:', error);

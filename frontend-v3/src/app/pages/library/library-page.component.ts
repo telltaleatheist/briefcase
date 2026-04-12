@@ -372,9 +372,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Subscribe to websocket events (for library refresh only - queue updates handled by QueueService)
     this.websocketService.connect();
 
-    // Listen for navigate-to-queue events (from popout editor or same-window editor)
+    // Listen for navigate-to-queue events (from popout editor or same-window editor).
+    // setActiveTab('queue') already calls refreshFromBackend, so don't call it
+    // twice — two parallel refreshes could both hit Pass 3 in restoreFromBackend
+    // and create duplicate frontend jobs for a single backend export-clip job.
     this.navigateToQueueHandler = () => {
-      this.queueService.refreshFromBackend();
       this.setActiveTab('queue');
     };
     window.addEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
@@ -430,10 +432,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       );
     });
 
-    // Video renamed - update video list (including upload date)
+    // Video renamed - update video list (including upload date and path)
     this.websocketService.onVideoRenamed((event) => {
       console.log('Video renamed event received:', event);
-      this.updateVideoName(event.videoId, event.newFilename, event.uploadDate);
+      this.updateVideoName(event.videoId, event.newFilename, event.uploadDate, event.newPath);
       this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
     });
 
@@ -844,7 +846,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   // Update video name and upload date in the library when renamed via WebSocket
-  private updateVideoName(videoId: string, newFilename: string, uploadDate?: string | null) {
+  private updateVideoName(videoId: string, newFilename: string, uploadDate?: string | null, newPath?: string) {
     const weeks = this.videoWeeks();
     let updated = false;
 
@@ -863,6 +865,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           // Update uploadDate if provided
           if (uploadDate !== undefined) {
             updates.uploadDate = uploadDate ? new Date(uploadDate) : undefined;
+          }
+          // Update filePath to the new on-disk location. Without this, opening
+          // the editor (or any other action that reads filePath) after a
+          // rename passes a stale path that no longer exists, causing downstream
+          // tasks like export-clip to fail with "Video file not found".
+          if (newPath) {
+            updates.filePath = newPath;
           }
           return updates;
         }

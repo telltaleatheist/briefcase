@@ -10,14 +10,16 @@ import { LibraryService } from '../../services/library.service';
 import { QueueService } from '../../services/queue.service';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { WebsocketService } from '../../services/websocket.service';
+import { TabsService } from '../../services/tabs.service';
 import { createQueueTask } from '../../models/queue-job.model';
 import { CascadeComponent } from '../cascade/cascade.component';
+import { NewTabDialogComponent } from '../new-tab-dialog/new-tab-dialog.component';
 import { VideoItem, VideoWeek } from '../../models/video.model';
 
 @Component({
   selector: 'app-archives-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, CascadeComponent],
+  imports: [CommonModule, FormsModule, CascadeComponent, NewTabDialogComponent],
   templateUrl: './archives-tab.component.html',
   styleUrls: ['./archives-tab.component.scss']
 })
@@ -29,13 +31,19 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
   private queueService = inject(QueueService);
   private aiSetupService = inject(AiSetupService);
   private webSocketService = inject(WebsocketService);
+  private tabsService = inject(TabsService);
   private http = inject(HttpClient);
 
   private unsubscribeAnalysisCompleted?: () => void;
+  private unsubscribeVideoRenamed?: () => void;
 
   urlInput = signal('');
   isLoading = signal(false);
   selectedItems = signal<Set<string>>(new Set());
+
+  // New tab dialog state
+  newTabDialogOpen = signal(false);
+  private newTabPendingVideoIds: string[] = [];
 
   // Map archives into VideoWeek format grouped by download date (Sunday-based
   // week key), matching the library page's grouping pattern. Items captured
@@ -138,11 +146,26 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
         this.webArchiveService.loadArchives();
       }
     });
+
+    // Refresh after a rename so the webArchiveService cache reflects the new
+    // filename. Cascade mutates VideoItem in place for instant UI feedback,
+    // but the source-of-truth signal needs to be resynced to survive any
+    // future recomputation of archiveWeeks.
+    this.unsubscribeVideoRenamed = this.webSocketService.onVideoRenamed((event) => {
+      const archives = this.webArchiveService.archives();
+      const isWebpageArchive = archives.some(a => a.video_id === event.videoId);
+      if (isWebpageArchive) {
+        this.webArchiveService.loadArchives();
+      }
+    });
   }
 
   ngOnDestroy() {
     if (this.unsubscribeAnalysisCompleted) {
       this.unsubscribeAnalysisCompleted();
+    }
+    if (this.unsubscribeVideoRenamed) {
+      this.unsubscribeVideoRenamed();
     }
   }
 
@@ -215,6 +238,83 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
       case 'analyzeWebpage':
         await this.analyzeWebpages(videos);
         break;
+
+      case 'addToNewTab':
+        this.openNewTabDialog(videos.map(v => v.id));
+        break;
+
+      case 'addToTab':
+        // Parent "Add to Tab" item - submenu children handle the real actions,
+        // so this is a no-op safety catch.
+        break;
+
+      default:
+        // addToTab:<tabId> - add archives to an existing tab.
+        if (action.startsWith('addToTab:')) {
+          const tabId = action.replace('addToTab:', '');
+          await this.addArchivesToTab(tabId, videos.map(v => v.id));
+        }
+        break;
+    }
+  }
+
+  /**
+   * Open the new-tab dialog with the given video IDs pending.
+   */
+  private openNewTabDialog(videoIds: string[]) {
+    this.newTabPendingVideoIds = videoIds;
+    this.newTabDialogOpen.set(true);
+  }
+
+  async onNewTabCreated(tabName: string) {
+    try {
+      const videoIds = this.newTabPendingVideoIds;
+      const result = await firstValueFrom(this.tabsService.createTab(tabName));
+
+      if (videoIds.length > 0) {
+        await firstValueFrom(this.tabsService.addVideosToTab(result.id, videoIds));
+        const videoText = videoIds.length === 1 ? '1 item' : `${videoIds.length} items`;
+        this.notificationService.success('Tab Created', `Created "${tabName}" with ${videoText}`);
+      } else {
+        this.notificationService.success('Tab Created', `Created empty tab "${tabName}"`);
+      }
+
+      this.newTabPendingVideoIds = [];
+    } catch (error: any) {
+      console.error('Failed to create tab:', error);
+      this.notificationService.error(
+        'Failed to Create Tab',
+        error?.message || 'An error occurred while creating the tab'
+      );
+    }
+  }
+
+  onNewTabDialogClosed() {
+    this.newTabDialogOpen.set(false);
+    this.newTabPendingVideoIds = [];
+  }
+
+  private async addArchivesToTab(tabId: string, videoIds: string[]) {
+    try {
+      const result = await firstValueFrom(this.tabsService.addVideosToTab(tabId, videoIds));
+      const tab = await firstValueFrom(this.tabsService.getTabById(tabId));
+
+      const addedCount = result.addedCount || 0;
+      const totalCount = result.totalCount || videoIds.length;
+      const alreadyInTab = totalCount - addedCount;
+
+      if (addedCount > 0) {
+        const message = alreadyInTab > 0
+          ? `Added ${addedCount} item${addedCount !== 1 ? 's' : ''} to "${tab.name}". ${alreadyInTab} already in tab.`
+          : `Added ${addedCount} item${addedCount !== 1 ? 's' : ''} to "${tab.name}"`;
+        this.notificationService.success('Added to Tab', message);
+      }
+    } catch (error: any) {
+      console.error('Failed to add archives to tab:', error);
+      this.notificationService.error(
+        'Failed to Add to Tab',
+        error?.message || 'An error occurred while adding items to the tab'
+      );
     }
   }
 

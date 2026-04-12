@@ -150,8 +150,24 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Keyboard shortcuts
   @HostListener('document:keydown', ['$event'])
   handleKeyboardEvent(event: KeyboardEvent) {
-    // Don't trigger if user is typing in an input
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+    // Don't trigger if user is typing in a text-entry field.
+    // We deliberately allow range sliders, checkboxes, radios, selects, etc.
+    // to pass through — those elements retain focus after interaction (e.g.
+    // scale slider, border checkbox) but shouldn't block shortcuts like Cmd+E.
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement) {
+      return;
+    }
+    if (target instanceof HTMLInputElement) {
+      const textEntryTypes = new Set([
+        'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date',
+        'datetime-local', 'month', 'week', 'time'
+      ]);
+      if (textEntryTypes.has(target.type)) {
+        return;
+      }
+    }
+    if (target instanceof HTMLElement && target.isContentEditable) {
       return;
     }
 
@@ -603,6 +619,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   private playbackInterval?: any;
   private unsubVideoPathUpdated?: () => void;
+  private unsubVideoRenamed?: () => void;
 
   // Track playing state separately to avoid effect re-triggering
   private wasPlaying = false;
@@ -694,7 +711,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       this.hasAnalysis.set(false);
     }
 
-    // Listen for video-path-updated events so replaced videos reload automatically
+    // Listen for video-path-updated events so replaced videos reload automatically.
+    // This fires after an overwrite export, where the new file already has scale
+    // and border baked in — so we reset those per-tab settings to defaults to
+    // avoid double-applying the zoom on top of the already-zoomed content.
     this.unsubVideoPathUpdated = this.websocketService.onVideoPathUpdated((event) => {
       const tabs = this.tabs();
       const matchingTab = tabs.find(t => t.videoId === event.videoId);
@@ -703,12 +723,45 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       // Update the tab's videoUrl with a cache-busting param to force reload
       const freshUrl = `${this.API_BASE}/database/videos/${event.videoId}/stream?t=${Date.now()}`;
       this.tabs.update(allTabs => allTabs.map(t =>
-        t.videoId === event.videoId ? { ...t, videoUrl: freshUrl, videoPath: event.newPath } : t
+        t.videoId === event.videoId
+          ? {
+              ...t,
+              videoUrl: freshUrl,
+              videoPath: event.newPath,
+              videoScale: 1.0,
+              showBorder: false,
+              borderAspectRatio: '16:9',
+            }
+          : t
       ));
 
-      // If this is the active tab, update the live signal so the video element reloads
+      // If this is the active tab, update the live signals so the video element
+      // reloads and the scale/border controls reflect the defaults.
       if (this.activeTabId() === matchingTab.id) {
         this.videoUrl.set(freshUrl);
+        this.videoPath.set(event.newPath);
+        this.videoScale.set(1.0);
+        this.showBorder.set(false);
+        this.borderAspectRatio.set('16:9');
+      }
+    });
+
+    // Listen for video-renamed events so the editor's cached videoPath stays
+    // in sync when a file is renamed (manually or via AI suggestion). Without
+    // this, exporting after a rename would send a stale path to the backend
+    // and fail with "Video file not found".
+    this.unsubVideoRenamed = this.websocketService.onVideoRenamed((event) => {
+      const tabs = this.tabs();
+      const matchingTab = tabs.find(t => t.videoId === event.videoId);
+      if (!matchingTab) return;
+
+      this.tabs.update(allTabs => allTabs.map(t =>
+        t.videoId === event.videoId
+          ? { ...t, videoPath: event.newPath, videoTitle: event.newFilename }
+          : t
+      ));
+
+      if (this.activeTabId() === matchingTab.id) {
         this.videoPath.set(event.newPath);
       }
     });
@@ -1309,8 +1362,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.navService.showNav();
     this.stopPlayback();
 
-    // Clean up websocket subscription
+    // Clean up websocket subscriptions
     this.unsubVideoPathUpdated?.();
+    this.unsubVideoRenamed?.();
 
     // Remove event listeners
     window.removeEventListener('wheel', this.wheelHandler);

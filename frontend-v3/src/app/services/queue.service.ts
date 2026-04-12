@@ -39,6 +39,13 @@ export class QueueService implements OnDestroy {
   private backendToFrontendIdMap = new Map<string, string>();
   private frontendToBackendIdMap = new Map<string, string>();
 
+  // Concurrency guard for restoreFromBackend. When a refresh is already in
+  // flight and a second one is requested, we defer it until the current one
+  // finishes so two parallel GETs can't each hit Pass 3 and create duplicate
+  // frontend jobs for the same backend job.
+  private restoreInFlight: Promise<void> | null = null;
+  private restoreQueued = false;
+
   // WebSocket unsubscribe functions
   private wsUnsubscribes: (() => void)[] = [];
 
@@ -68,8 +75,22 @@ export class QueueService implements OnDestroy {
     };
   });
 
+  // True when running in a popout editor window. Popout windows must NOT
+  // read/write localStorage or handle WebSocket queue events — only the main
+  // window owns the persisted queue state. Without this, two QueueService
+  // instances stomping on the same storage key create zombie pending jobs.
+  private readonly isPopout =
+    window.location.pathname.includes('/editor') &&
+    window.location.search.includes('popout=true');
+
   constructor() {
-    console.log('[QueueService] Constructor called');
+    console.log('[QueueService] Constructor called (popout:', this.isPopout, ')');
+
+    if (this.isPopout) {
+      // Popout editors don't manage queue state — they just POST export jobs
+      // to the backend and let the main window handle tracking/persistence.
+      return;
+    }
 
     // Load persisted jobs (with expiry filter)
     this.loadFromStorage();
@@ -611,9 +632,33 @@ export class QueueService implements OnDestroy {
   }
 
   /**
-   * Restore processing jobs from backend on initialization
+   * Restore processing jobs from backend on initialization.
+   * Serialized via restoreInFlight to prevent parallel refreshes from each
+   * running Pass 3 and creating duplicate frontend jobs for the same backend job.
    */
-  private async restoreFromBackend(): Promise<void> {
+  private restoreFromBackend(): Promise<void> {
+    if (this.restoreInFlight) {
+      // A refresh is already running. Mark that we want another one to run
+      // right after it finishes (coalesce multiple pending requests into one).
+      this.restoreQueued = true;
+      return this.restoreInFlight;
+    }
+
+    this.restoreInFlight = this.doRestoreFromBackend().finally(() => {
+      this.restoreInFlight = null;
+      if (this.restoreQueued) {
+        this.restoreQueued = false;
+        // Kick off the queued refresh — returns a new promise we don't await
+        // from this finally (fire-and-forget is fine; callers who awaited the
+        // original already got their result).
+        this.restoreFromBackend();
+      }
+    });
+
+    return this.restoreInFlight;
+  }
+
+  private async doRestoreFromBackend(): Promise<void> {
     console.log('[QueueService] Restoring jobs from backend...');
     try {
       const response = await firstValueFrom(
@@ -627,15 +672,20 @@ export class QueueService implements OnDestroy {
         // Create a set of backend job IDs for quick lookup
         const backendJobIds = new Set(backendJobs.map((j: any) => j.id));
 
-        // First: Mark orphaned processing jobs as completed
+        // First: Mark orphaned pending/processing jobs as completed.
         // These are jobs whose backend ID no longer exists — the backend already
-        // finished processing and cleaned them up. Marking as completed (rather
-        // than resetting to pending) prevents zombie items that reappear on every visit.
+        // finished processing and cleaned them up. This catches two scenarios:
+        //   a) Processing jobs whose backend task completed while the frontend
+        //      was away (the normal orphan case).
+        //   b) Pending jobs left behind by a popout editor window. The popout
+        //      and main window share localStorage but have independent signal
+        //      state, so a stale "pending" copy from the popout can persist
+        //      even after the main window completed and cleaned up its own copy.
         const currentJobs = this.jobs();
         let orphanedCount = 0;
         currentJobs.forEach(job => {
-          if (job.state === 'processing' && job.backendJobId && !backendJobIds.has(job.backendJobId)) {
-            console.log(`[QueueService] Marking orphaned processing job as completed: ${job.id} (backend: ${job.backendJobId})`);
+          if ((job.state === 'processing' || job.state === 'pending') && job.backendJobId && !backendJobIds.has(job.backendJobId)) {
+            console.log(`[QueueService] Marking orphaned ${job.state} job as completed: ${job.id} (backend: ${job.backendJobId})`);
             this.updateJobState(job.id, 'completed');
             // Clear the backend job ID since it no longer exists
             this.frontendToBackendIdMap.delete(job.id);
@@ -651,7 +701,7 @@ export class QueueService implements OnDestroy {
           }
         });
         if (orphanedCount > 0) {
-          console.log(`[QueueService] Marked ${orphanedCount} orphaned processing jobs as completed`);
+          console.log(`[QueueService] Marked ${orphanedCount} orphaned jobs as completed`);
         }
 
         // Second: Sync with backend jobs
@@ -729,19 +779,19 @@ export class QueueService implements OnDestroy {
 
         console.log(`[QueueService] Queue restored with ${this.jobs().length} total jobs`);
       } else {
-        // Backend returned no jobs - mark any processing jobs as completed
-        // (backend already finished and cleaned up these jobs)
+        // Backend returned no jobs — mark any pending/processing jobs that
+        // have a backendJobId as completed (the backend already finished and
+        // cleaned them up). Jobs without a backendJobId are locally-queued
+        // items that haven't been submitted yet, so leave them alone.
         const currentJobs = this.jobs();
         let completedCount = 0;
         currentJobs.forEach(job => {
-          if (job.state === 'processing') {
-            console.log(`[QueueService] No backend jobs - marking processing job as completed: ${job.id}`);
+          if ((job.state === 'processing' || job.state === 'pending') && job.backendJobId) {
+            console.log(`[QueueService] No backend jobs - marking ${job.state} job as completed: ${job.id}`);
             this.updateJobState(job.id, 'completed');
-            if (job.backendJobId) {
-              this.frontendToBackendIdMap.delete(job.id);
-              this.backendToFrontendIdMap.delete(job.backendJobId);
-              job.backendJobId = undefined;
-            }
+            this.frontendToBackendIdMap.delete(job.id);
+            this.backendToFrontendIdMap.delete(job.backendJobId);
+            job.backendJobId = undefined;
             job.tasks.forEach(task => {
               if (task.state === 'running') {
                 this.updateTaskState(job.id, task.type, 'completed');
@@ -751,17 +801,18 @@ export class QueueService implements OnDestroy {
           }
         });
         if (completedCount > 0) {
-          console.log(`[QueueService] Marked ${completedCount} processing jobs as completed (no backend jobs found)`);
+          console.log(`[QueueService] Marked ${completedCount} orphaned jobs as completed (no backend jobs found)`);
         }
       }
     } catch (error) {
       console.error('[QueueService] Failed to restore from backend:', error);
       // On error, mark processing jobs as completed to avoid zombie items.
       // If the backend is unreachable, these jobs can't be tracked anyway.
+      // Don't touch pending jobs without backendJobId — those are local-only.
       const currentJobs = this.jobs();
       currentJobs.forEach(job => {
-        if (job.state === 'processing') {
-          console.log(`[QueueService] Backend error - marking processing job as completed: ${job.id}`);
+        if (job.state === 'processing' || (job.state === 'pending' && job.backendJobId)) {
+          console.log(`[QueueService] Backend error - marking ${job.state} job as completed: ${job.id}`);
           this.updateJobState(job.id, 'completed');
           job.tasks.forEach(task => {
             if (task.state === 'running') {

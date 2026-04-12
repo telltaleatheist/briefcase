@@ -51,9 +51,17 @@
         [showThumbnails]="true"
         [showSuggestedTitle]="true"
         [draggable]="false"
+        [deleteMode]="'simple'"
         (selectionChanged)="onSelectionChanged($event)"
         (videoAction)="onVideoAction($event)"
       />
     }
   </div>
 </div>
+
+<!-- New Tab Dialog (for "Add to Tab > New Tab..." action) -->
+<app-new-tab-dialog
+  [show]="newTabDialogOpen()"
+  (created)="onNewTabCreated($event)"
+  (closed)="onNewTabDialogClosed()"
+/>

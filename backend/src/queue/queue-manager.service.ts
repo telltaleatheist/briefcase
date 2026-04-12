@@ -1284,8 +1284,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (db) {
         const nowIso = new Date().toISOString();
         const updateFields = newFileHash
-          ? `duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, transcript_status = NULL, analysis_status = NULL, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`
-          : `duration_seconds = ?, file_size_bytes = ?, has_transcript = 0, has_analysis = 0, transcript_status = NULL, analysis_status = NULL, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`;
+          ? `duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`
+          : `duration_seconds = ?, file_size_bytes = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`;
 
         const params = newFileHash
           ? [newDuration, extractionResult.fileSize || 0, newFileHash, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId]
@@ -1293,6 +1293,23 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
         db.prepare(`UPDATE videos SET ${updateFields} WHERE id = ?`).run(...params);
       }
+
+      // Regenerate the thumbnail from the new file contents. Without this,
+      // the library keeps showing the pre-overwrite thumbnail forever.
+      this.eventService.emitTaskProgress(taskId, 'export-clip', 95, 'Regenerating thumbnail...');
+      this.updateTaskProgress(taskId, 95, 'Regenerating thumbnail...');
+      try {
+        await this.mediaOps.regenerateThumbnail(opts.videoId, opts.videoPath);
+      } catch (thumbErr) {
+        this.logger.warn(`[EXPORT-CLIP] [OVERWRITE] Thumbnail regeneration failed (non-fatal): ${(thumbErr as Error).message}`);
+      }
+
+      // Notify all frontends (library view + any open Scout editor) that the
+      // file at this path has changed so they can cache-bust their video URL
+      // and refetch thumbnails. The path itself is unchanged, but reusing the
+      // existing video-path-updated event gives us the refresh behavior Scout
+      // already implements for replaced videos.
+      this.eventService.emitVideoPathUpdated(opts.videoId, opts.videoPath, opts.videoPath);
 
       this.eventService.emitTaskProgress(taskId, 'export-clip', 100, 'Overwrite complete');
       this.updateTaskProgress(taskId, 100, 'Overwrite complete');
