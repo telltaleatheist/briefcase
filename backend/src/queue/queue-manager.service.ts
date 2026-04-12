@@ -621,7 +621,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
       // Update last_processed_date for tasks that process the video
       // (not for get-info or download which don't have a video ID yet)
-      const processingTasks = ['import', 'transcribe', 'analyze', 'analyze-webpage', 'fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      const processingTasks = ['import', 'transcribe', 'analyze', 'analyze-webpage', 'fix-aspect-ratio', 'strip-black-bars', 'normalize-audio', 'process-video'];
       if (job.videoId && processingTasks.includes(task.type)) {
         try {
           this.databaseService.updateLastProcessedDate(job.videoId);
@@ -631,7 +631,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
 
       // Regenerate thumbnail after file-modifying tasks
-      const thumbnailRegenTasks = ['fix-aspect-ratio', 'normalize-audio', 'process-video'];
+      const thumbnailRegenTasks = ['fix-aspect-ratio', 'strip-black-bars', 'normalize-audio', 'process-video'];
       if (job.videoId && thumbnailRegenTasks.includes(task.type) && job.videoPath) {
         await this.mediaOps.regenerateThumbnail(job.videoId, job.videoPath);
       }
@@ -862,6 +862,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         }
         break;
 
+      case 'strip-black-bars':
+        if (!job.videoId && !job.videoPath) {
+          return {
+            success: false,
+            error: 'No video ID or path available for strip-black-bars task',
+          };
+        }
+        result = await this.executeStripBlackBars(job, taskId);
+        break;
+
       case 'normalize-audio':
         if (!job.videoId && !job.videoPath) {
           return {
@@ -991,6 +1001,105 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     }
 
     return result;
+  }
+
+  /**
+   * Execute strip-black-bars: crop center 9:16 portrait, blur-fill to 16:9, overwrite original
+   */
+  private async executeStripBlackBars(
+    job: QueueJob,
+    taskId: string,
+  ): Promise<TaskResult> {
+    try {
+      const videoId = job.videoId;
+      if (!videoId) {
+        return { success: false, error: 'No video ID for strip-black-bars' };
+      }
+
+      const video = this.databaseService.getVideoById(videoId);
+      if (!video) {
+        return { success: false, error: `Video not found: ${videoId}` };
+      }
+
+      const videoPath = video.current_path as string;
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return { success: false, error: `Video file not found: ${videoPath}` };
+      }
+
+      this.logger.log(`[STRIP-BARS] Processing: ${videoPath}`);
+      this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 0, 'Starting strip bars...');
+      this.updateTaskProgress(taskId, 0, 'Starting strip bars...');
+
+      // Extract to temp file with strip-black-bars filter
+      const tempDir = os.tmpdir();
+      const originalExt = path.extname(videoPath);
+      const tempPath = path.join(tempDir, `briefcase_strip_${Date.now()}${originalExt}`);
+
+      const extractionResult = await this.clipExtractor.extractClip({
+        videoPath,
+        startTime: null,
+        endTime: null,
+        outputPath: tempPath,
+        reEncode: true,
+        quality: 'high',
+        stripBlackBars: true,
+        onProgress: (progress: number) => {
+          const scaled = Math.round(progress * 0.8);
+          this.eventService.emitTaskProgress(taskId, 'strip-black-bars', scaled, `Processing... ${progress}%`);
+          this.updateTaskProgress(taskId, scaled, `Processing... ${progress}%`);
+        },
+      });
+
+      if (!extractionResult.success) {
+        try { fs.unlinkSync(tempPath); } catch (_) {}
+        return { success: false, error: extractionResult.error || 'Strip bars failed' };
+      }
+
+      // Replace original file
+      this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 85, 'Replacing original...');
+      this.updateTaskProgress(taskId, 85, 'Replacing original...');
+      fs.unlinkSync(videoPath);
+      fs.copyFileSync(tempPath, videoPath);
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+
+      // Update file size and hash in database
+      this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 90, 'Updating metadata...');
+      this.updateTaskProgress(taskId, 90, 'Updating metadata...');
+      try {
+        const stats = fs.statSync(videoPath);
+        const newHash = await this.fileScannerService.quickHashFile(videoPath, stats.size);
+        const newDuration = extractionResult.duration || 0;
+        const db = (this.databaseService as any)['db'];
+        if (db) {
+          db.prepare(
+            `UPDATE videos SET duration_seconds = ?, file_size_bytes = ?, file_hash = ?, last_processed_date = ? WHERE id = ?`
+          ).run(newDuration, stats.size, newHash, new Date().toISOString(), videoId);
+        }
+      } catch (err) {
+        this.logger.warn(`[STRIP-BARS] Failed to update metadata: ${(err as Error).message}`);
+      }
+
+      // Regenerate thumbnail
+      this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 95, 'Regenerating thumbnail...');
+      this.updateTaskProgress(taskId, 95, 'Regenerating thumbnail...');
+      try {
+        await this.mediaOps.regenerateThumbnail(videoId, videoPath);
+      } catch (err) {
+        this.logger.warn(`[STRIP-BARS] Thumbnail regen failed (non-fatal): ${(err as Error).message}`);
+      }
+
+      // Notify frontends
+      this.eventService.emitVideoPathUpdated(videoId, videoPath, videoPath);
+
+      this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 100, 'Strip bars complete');
+      this.updateTaskProgress(taskId, 100, 'Strip bars complete');
+      this.logger.log(`[STRIP-BARS] Complete: ${videoPath}`);
+
+      return { success: true, data: { outputPath: videoPath } };
+    } catch (error) {
+      this.logger.error(`[STRIP-BARS] Error: ${(error as Error).message}`);
+      return { success: false, error: (error as Error).message };
+    }
   }
 
   /**

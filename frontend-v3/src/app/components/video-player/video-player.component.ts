@@ -3181,7 +3181,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       analysisData: tab.analysisData,
       highlightSelection: tab.highlightSelection,
       categoryFilters: tab.categoryFilters,
-      hasAnalysis: tab.hasAnalysis
+      hasAnalysis: tab.hasAnalysis,
+      videoScale: tab.videoScale,
+      showBorder: tab.showBorder,
+      borderAspectRatio: tab.borderAspectRatio,
     };
   }
 
@@ -3223,7 +3226,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       highlightSelection: tabData.highlightSelection,
       categoryFilters: tabData.categoryFilters || [],
       hasAnalysis: tabData.hasAnalysis || false,
-      isLoaded: true // Mark as loaded since we already have the data
+      isLoaded: true, // Mark as loaded since we already have the data
+      videoScale: tabData.videoScale ?? 1.0,
+      showBorder: tabData.showBorder ?? false,
+      borderAspectRatio: tabData.borderAspectRatio ?? '16:9',
     };
 
     this.tabs.update(tabs => [...tabs, restoredTab]);

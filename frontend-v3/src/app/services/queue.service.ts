@@ -1002,6 +1002,7 @@ export class QueueService implements OnDestroy {
       'fix-aspect': 'fix-aspect-ratio',
       'fix-aspect-ratio': 'fix-aspect-ratio',
       'process-video': 'fix-aspect-ratio',
+      'strip-black-bars': 'fix-aspect-ratio',
       'normalize': 'normalize-audio',
       'normalize-audio': 'normalize-audio',
       'transcribe': 'transcribe',
@@ -1172,6 +1173,12 @@ export class QueueService implements OnDestroy {
           level: task?.options?.['targetLevel'] || -16
         }
       });
+    }
+
+    // Strip black bars is a sub-option of fix-aspect-ratio
+    const aspectTask = tasks.find(t => t.type === 'fix-aspect-ratio');
+    if (aspectTask?.options?.['stripBlackBars']) {
+      backendTasks.push({ type: 'strip-black-bars' });
     }
 
     const transcribeTask = tasks.find(t => t.type === 'transcribe');
