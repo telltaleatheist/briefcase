@@ -24,6 +24,7 @@ export type BackendTaskType =
   | 'download'
   | 'import'
   | 'fix-aspect-ratio'
+  | 'strip-black-bars'
   | 'normalize-audio'
   | 'process-video'
   | 'transcribe'

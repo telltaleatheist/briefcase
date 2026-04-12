@@ -18,7 +18,7 @@
           *ngFor="let task of getAvailableTasks()"
           class="task-item"
           [class.selected]="isTaskSelected(task.type)"
-          [class.expanded]="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')"
+          [class.expanded]="isTaskSelected(task.type) && (task.type === 'fix-aspect-ratio' || task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')"
         >
           <!-- Task Header (clickable) -->
           <div class="task-header" (click)="toggleTask(task)">
@@ -31,7 +31,22 @@
           </div>
 
           <!-- Task Configuration (auto-expand for configurable tasks) -->
-          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')">
+          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'fix-aspect-ratio' || task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')">
+
+            <!-- Fix Aspect Ratio Config -->
+            <div *ngIf="task.type === 'fix-aspect-ratio'" class="config-form">
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input
+                    type="checkbox"
+                    [checked]="getTaskConfig(task.type).stripBlackBars"
+                    (change)="updateTaskConfig(task.type, { stripBlackBars: $any($event.target).checked })"
+                  />
+                  <span>Strip black bars (blur fill)</span>
+                </label>
+                <span class="form-hint">Crops center 9:16 portrait content and replaces black bars with a blurred background.</span>
+              </div>
+            </div>
 
             <!-- Normalize Audio Config -->
             <div *ngIf="task.type === 'normalize-audio'" class="config-form">

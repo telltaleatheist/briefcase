@@ -5,6 +5,7 @@ export type TaskType =
   | 'download'
   | 'import'
   | 'fix-aspect-ratio'
+  | 'strip-black-bars'
   | 'normalize-audio'
   | 'process-video'  // Combined: aspect ratio + audio normalization in single pass
   | 'transcribe'
@@ -46,6 +47,11 @@ export interface FixAspectRatioTask extends BaseTask {
   options?: {
     // Options for aspect ratio processing
   };
+}
+
+export interface StripBlackBarsTask extends BaseTask {
+  type: 'strip-black-bars';
+  options?: {};
 }
 
 export interface NormalizeAudioTask extends BaseTask {
@@ -121,6 +127,7 @@ export type Task =
   | DownloadTask
   | ImportTask
   | FixAspectRatioTask
+  | StripBlackBarsTask
   | NormalizeAudioTask
   | ProcessVideoTask
   | TranscribeTask

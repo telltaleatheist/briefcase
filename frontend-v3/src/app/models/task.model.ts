@@ -45,6 +45,7 @@ export interface AIAnalyzeConfig {
 export interface FixAspectRatioConfig {
   targetRatio?: '16:9' | '4:3' | '1:1' | '9:16' | 'auto';
   cropMode?: 'center' | 'smart' | 'letterbox';
+  stripBlackBars?: boolean;
 }
 
 export interface NormalizeAudioConfig {

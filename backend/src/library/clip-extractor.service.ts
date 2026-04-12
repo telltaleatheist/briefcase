@@ -25,6 +25,7 @@ export interface ClipExtractionRequest {
   quality?: ExportQuality; // Export quality preset (default: 'medium')
   scale?: number; // Video scale factor (1.0 = no scaling, 2.0 = 2x scale, etc.)
   cropAspectRatio?: string; // Target crop aspect ratio (e.g. '16:9', '4:3', '9:16')
+  stripBlackBars?: boolean; // Crop center 9:16 portrait, blur-fill to 16:9
   muteSections?: MuteSectionInput[]; // Audio sections to mute
   outputSuffix?: string; // Suffix to add to filename (e.g., " (censored)")
   metadata?: {
@@ -128,6 +129,7 @@ export class ClipExtractorService {
         request.onProgress,
         request.quality || 'medium',
         request.cropAspectRatio,
+        request.stripBlackBars,
       );
 
       // Get file stats
@@ -197,6 +199,7 @@ export class ClipExtractorService {
     onProgress?: (progress: number) => void,
     quality: ExportQuality = 'medium',
     cropAspectRatio?: string,
+    stripBlackBars?: boolean,
   ): Promise<void> {
     const args: string[] = ['-y'];
 
@@ -204,8 +207,8 @@ export class ClipExtractorService {
     const muteFilter = this.buildMuteFilter(muteSections || [], startTime);
     const hasMutes = muteFilter !== null;
 
-    // If scale is specified and not 1.0, or if we have mutes, we must re-encode
-    const needsReEncode = reEncode || (scale && scale !== 1.0) || hasMutes;
+    // If scale is specified and not 1.0, strip bars, or mutes, we must re-encode
+    const needsReEncode = reEncode || (scale && scale !== 1.0) || hasMutes || stripBlackBars;
 
     if (needsReEncode) {
       // Re-encode mode: Frame-accurate extraction with optional scaling and muting
@@ -256,7 +259,41 @@ export class ClipExtractorService {
         }
       }
 
-      if (hasMutes && scaleFilter) {
+      // Build strip-bars filter: crop center 9:16 portrait, blur-fill to 16:9
+      // Same approach as ffmpeg.service fixAspectRatio filter (hardcoded 1920x1080)
+      let stripBarsFilter: string | null = null;
+      if (stripBlackBars) {
+        this.logger.log('Applying strip-black-bars filter (blur fill)');
+        // 1. Crop center 9:16 content from source (removes black bars)
+        // 2. Scale cropped to fill 1920x1920, blur, crop to 1920x1080 → background
+        // 3. Scale cropped to fit within 1920x1080 → sharp foreground
+        // 4. Overlay fg centered on bg
+        stripBarsFilter = [
+          '[0:v]crop=ih*9/16:ih[cropped]',
+          '[cropped]split=2[cr1][cr2]',
+          '[cr1]scale=1920:1920:force_original_aspect_ratio=increase,gblur=sigma=50,crop=1920:1080[bg]',
+          "[cr2]scale='if(gte(a,16/9),1920,-1)':'if(gte(a,16/9),-1,1080)'[fg]",
+          '[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]',
+        ].join(';');
+      }
+
+      if (stripBarsFilter && hasMutes) {
+        // Strip bars + audio muting
+        args.push(
+          '-filter_complex',
+          `${stripBarsFilter};[0:a]${muteFilter}[aout]`,
+          '-map', '[vout]',
+          '-map', '[aout]'
+        );
+      } else if (stripBarsFilter) {
+        // Strip bars only
+        args.push(
+          '-filter_complex',
+          stripBarsFilter,
+          '-map', '[vout]',
+          '-map', '0:a'
+        );
+      } else if (hasMutes && scaleFilter) {
         // Both video scaling and audio muting
         args.push(
           '-filter_complex',
