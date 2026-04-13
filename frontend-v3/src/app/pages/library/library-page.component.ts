@@ -3189,19 +3189,30 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   private async refreshThumbnails(videos: VideoItem[]) {
+    const refreshedIds = new Set<string>();
     for (const video of videos) {
       try {
         await firstValueFrom(
           this.http.post(`http://localhost:3000/api/database/videos/${video.id}/regenerate-thumbnail`, {})
         );
+        refreshedIds.add(video.id);
       } catch (error: any) {
         console.error(`Failed to refresh thumbnail for ${video.name}:`, error);
         this.notificationService.error('Error', `Failed to refresh thumbnail for "${video.name}"`);
         return;
       }
     }
+    // Bust thumbnail cache in-place without reloading the library (avoids re-sorting)
+    const cacheBust = Date.now().toString();
+    this.videoWeeks.update(weeks => weeks.map(week => ({
+      ...week,
+      videos: week.videos.map(v =>
+        refreshedIds.has(v.id) && v.thumbnailUrl
+          ? { ...v, thumbnailUrl: v.thumbnailUrl.replace(/&t=.*$/, `&t=${cacheBust}`) }
+          : v
+      )
+    })));
     this.notificationService.success('Done', videos.length > 1 ? `Refreshed ${videos.length} thumbnails` : 'Thumbnail refreshed');
-    this.loadLibrary();
   }
 
   /**
