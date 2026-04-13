@@ -3192,7 +3192,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     for (const video of videos) {
       try {
         await firstValueFrom(
-          this.http.post(`http://localhost:3000/api/thumbnails/videos/${video.id}/regenerate-thumbnail`, {})
+          this.http.post(`http://localhost:3000/api/database/videos/${video.id}/regenerate-thumbnail`, {})
         );
       } catch (error: any) {
         console.error(`Failed to refresh thumbnail for ${video.name}:`, error);
