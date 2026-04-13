@@ -103,9 +103,6 @@ export class ThumbnailController {
         throw new HttpException('Failed to generate thumbnail', HttpStatus.INTERNAL_SERVER_ERROR);
       }
 
-      // Update last_processed_date so frontend cache-busting picks up the new thumbnail
-      this.databaseService.updateLastProcessedDate(id);
-
       this.logger.log(`Thumbnail regenerated for video ${id}`);
       return { success: true, message: 'Thumbnail regenerated' };
     } catch (error) {
