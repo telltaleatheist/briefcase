@@ -1867,6 +1867,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
         break;
 
+      case 'refreshThumbnail':
+        this.refreshThumbnails(videosToProcess);
+        break;
+
       case 'removeFromParent':
         this.removeFromParent(videosToProcess[0]);
         break;
@@ -3182,6 +3186,22 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         error?.message || 'An error occurred while adding videos to the tab'
       );
     }
+  }
+
+  private async refreshThumbnails(videos: VideoItem[]) {
+    for (const video of videos) {
+      try {
+        await firstValueFrom(
+          this.http.post(`http://localhost:3000/api/thumbnails/videos/${video.id}/regenerate-thumbnail`, {})
+        );
+      } catch (error: any) {
+        console.error(`Failed to refresh thumbnail for ${video.name}:`, error);
+        this.notificationService.error('Error', `Failed to refresh thumbnail for "${video.name}"`);
+        return;
+      }
+    }
+    this.notificationService.success('Done', videos.length > 1 ? `Refreshed ${videos.length} thumbnails` : 'Thumbnail refreshed');
+    this.loadLibrary();
   }
 
   /**

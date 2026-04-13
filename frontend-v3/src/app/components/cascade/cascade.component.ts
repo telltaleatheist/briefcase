@@ -591,6 +591,7 @@ export class CascadeComponent {
     }
 
     // Processing actions
+    actions.push({ label: `Refresh Thumbnail${countSuffix}`, icon: '🖼️', action: 'refreshThumbnail' });
     actions.push({ label: `Run Analysis${countSuffix}`, icon: '🧠', action: 'analyze' });
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
 
