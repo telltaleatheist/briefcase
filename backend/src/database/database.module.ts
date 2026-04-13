@@ -11,6 +11,7 @@ import { DatabaseConflictService } from './database-conflict.service';
 import { RelinkingService } from './relinking.service';
 import { RelinkingController } from './relinking.controller';
 import { TabsController } from './tabs.controller';
+import { ThumbnailController } from './thumbnail.controller';
 import { IgnoreService } from './ignore.service';
 import { ThumbnailService } from './thumbnail.service';
 import { WaveformService } from './waveform.service';
@@ -40,6 +41,7 @@ import { MediaModule } from '../media/media.module';
     DatabaseController,
     RelinkingController,
     TabsController,
+    ThumbnailController,
   ],
   providers: [
     DatabaseService,
