@@ -565,14 +565,80 @@ export class QueueService implements OnDestroy {
     }
     const libraryId = currentLibrary.id;
 
-    // IMMEDIATELY move jobs to 'processing' state
+    // Split jobs into two groups:
+    // 1. Jobs that already have a backendJobId (e.g. paused export-clip jobs
+    //    submitted by the export dialog) — these just need to be unpaused.
+    // 2. Jobs without a backendJobId — these need new backend jobs created.
+    const jobsToUnpause = pendingJobs.filter(job => !!job.backendJobId);
+    const jobsToCreate = pendingJobs.filter(job => !job.backendJobId);
+
+    // IMMEDIATELY move ALL jobs to 'processing' state
     // This prevents editing and shows them in the processing section right away
-    const jobIds = pendingJobs.map(job => job.id);
-    jobIds.forEach(id => this.updateJobState(id, 'processing'));
-    console.log(`[QueueService] Moved ${jobIds.length} jobs to processing state`);
+    const allJobIds = pendingJobs.map(job => job.id);
+    allJobIds.forEach(id => this.updateJobState(id, 'processing'));
+    console.log(`[QueueService] Moved ${allJobIds.length} jobs to processing state (${jobsToUnpause.length} to unpause, ${jobsToCreate.length} to create)`);
+
+    // Handle unpausing existing backend jobs
+    const unpausePromise: Promise<Map<string, string>> = jobsToUnpause.length > 0
+      ? this.unpausePendingJobs(jobsToUnpause)
+      : Promise.resolve(new Map<string, string>());
+
+    // Handle creating new backend jobs
+    const createPromise: Promise<Map<string, string>> = jobsToCreate.length > 0
+      ? this.createNewBackendJobs(jobsToCreate, libraryId)
+      : Promise.resolve(new Map<string, string>());
+
+    return new Observable<Map<string, string>>(subscriber => {
+      Promise.all([unpausePromise, createPromise]).then(([unpausedMap, createdMap]) => {
+        // Merge both maps
+        const combined = new Map<string, string>();
+        unpausedMap.forEach((v, k) => combined.set(k, v));
+        createdMap.forEach((v, k) => combined.set(k, v));
+        subscriber.next(combined);
+        subscriber.complete();
+      }).catch(error => {
+        subscriber.error(error);
+      });
+    });
+  }
+
+  /**
+   * Unpause backend jobs that were submitted as paused (e.g. from export dialog's "Take Me There")
+   */
+  private async unpausePendingJobs(jobs: QueueJob[]): Promise<Map<string, string>> {
+    const backendJobIds = jobs.map(job => job.backendJobId!);
+    const frontendToBackend = new Map<string, string>();
+
+    try {
+      await firstValueFrom(
+        this.http.post<any>(`${this.API_BASE}/queue/jobs/start`, { jobIds: backendJobIds })
+      );
+
+      jobs.forEach(job => {
+        frontendToBackend.set(job.id, job.backendJobId!);
+      });
+
+      console.log(`[QueueService] Unpaused ${backendJobIds.length} existing backend jobs`);
+    } catch (error: any) {
+      console.error('[QueueService] Failed to unpause jobs:', error);
+      // Revert jobs back to pending so user can try again
+      jobs.forEach(job => {
+        this.updateJobState(job.id, 'pending');
+        this.updateJobError(job.id, error.message || 'Failed to start paused jobs');
+      });
+    }
+
+    return frontendToBackend;
+  }
+
+  /**
+   * Create new backend jobs for pending frontend jobs that don't have a backendJobId yet
+   */
+  private async createNewBackendJobs(jobs: QueueJob[], libraryId: string): Promise<Map<string, string>> {
+    const frontendToBackend = new Map<string, string>();
 
     // Convert to backend format
-    const backendJobs: BackendJobRequest[] = pendingJobs.map(job => {
+    const backendJobs: BackendJobRequest[] = jobs.map(job => {
       const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url, job.trimStartTime);
 
       if (job.url) {
@@ -592,43 +658,41 @@ export class QueueService implements OnDestroy {
       }
     });
 
-    return this.libraryService.createBulkJobs(backendJobs).pipe(
-      map(response => {
-        const frontendToBackend = new Map<string, string>();
+    try {
+      const response = await firstValueFrom(
+        this.libraryService.createBulkJobs(backendJobs)
+      );
 
-        if (response.success) {
-          const jobIds = response.data.jobIds;
+      if (response.success) {
+        const jobIds = response.data.jobIds;
 
-          pendingJobs.forEach((job, index) => {
-            if (index < jobIds.length) {
-              const backendJobId = jobIds[index];
-              this.setBackendJobId(job.id, backendJobId);
-              frontendToBackend.set(job.id, backendJobId);
-            }
-          });
-
-          console.log(`[QueueService] ${jobIds.length} jobs submitted to backend`);
-        } else {
-          console.error('[QueueService] Failed to create jobs');
-          // Revert jobs back to pending so user can try again
-          pendingJobs.forEach(job => {
-            this.updateJobState(job.id, 'pending');
-            this.updateJobError(job.id, 'Failed to submit job to backend');
-          });
-        }
-
-        return frontendToBackend;
-      }),
-      catchError(error => {
-        console.error('[QueueService] Failed to submit jobs:', error);
-        // Revert jobs back to pending so user can try again
-        pendingJobs.forEach(job => {
-          this.updateJobState(job.id, 'pending');
-          this.updateJobError(job.id, error.message || 'Unknown error');
+        jobs.forEach((job, index) => {
+          if (index < jobIds.length) {
+            const backendJobId = jobIds[index];
+            this.setBackendJobId(job.id, backendJobId);
+            frontendToBackend.set(job.id, backendJobId);
+          }
         });
-        return of(new Map<string, string>());
-      })
-    );
+
+        console.log(`[QueueService] ${jobIds.length} new jobs submitted to backend`);
+      } else {
+        console.error('[QueueService] Failed to create jobs');
+        // Revert jobs back to pending so user can try again
+        jobs.forEach(job => {
+          this.updateJobState(job.id, 'pending');
+          this.updateJobError(job.id, 'Failed to submit job to backend');
+        });
+      }
+    } catch (error: any) {
+      console.error('[QueueService] Failed to submit jobs:', error);
+      // Revert jobs back to pending so user can try again
+      jobs.forEach(job => {
+        this.updateJobState(job.id, 'pending');
+        this.updateJobError(job.id, error.message || 'Unknown error');
+      });
+    }
+
+    return frontendToBackend;
   }
 
   /**
