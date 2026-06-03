@@ -105,7 +105,6 @@ export class QueueService implements OnDestroy {
     // Persist on any change
     effect(() => {
       const currentJobs = this.jobs();
-      console.log('[QueueService] Effect triggered, saving', currentJobs.length, 'jobs');
       this.saveToStorage(currentJobs);
     });
   }
@@ -362,6 +361,32 @@ export class QueueService implements OnDestroy {
   }
 
   /**
+   * Cancel and remove jobs from the queue.
+   * Notifies backend to cancel running tasks, then removes from frontend state.
+   * Always removes from frontend even if backend cancel fails (job may have already finished).
+   */
+  cancelJobs(frontendJobIds: string[]): void {
+    // Collect backend IDs for jobs that have been submitted
+    const backendJobIds = frontendJobIds
+      .map(id => this.frontendToBackendIdMap.get(id))
+      .filter((id): id is string => !!id);
+
+    // Immediately remove from frontend state (user clicked cancel, honor it)
+    frontendJobIds.forEach(id => this.removeJob(id));
+
+    // Notify backend to cancel (fire and forget - job may already be gone)
+    if (backendJobIds.length > 0) {
+      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
+        tap(() => console.log(`[QueueService] Cancelled ${backendJobIds.length} backend jobs`)),
+        catchError(error => {
+          console.warn('[QueueService] Backend cancel failed (job may have already completed):', error);
+          return of(undefined);
+        })
+      ).subscribe();
+    }
+  }
+
+  /**
    * Clear all completed/failed jobs
    */
   clearCompleted(): void {
@@ -544,11 +569,11 @@ export class QueueService implements OnDestroy {
 
   /**
    * Submit pending jobs to the backend for processing
-   * Returns a map of frontend job ID -> backend job ID
+   * Returns a map of frontend job ID -> backend job ID, plus any warnings about skipped tasks
    */
-  submitPendingJobs(): Observable<Map<string, string>> {
+  submitPendingJobs(): Observable<{ jobIdMap: Map<string, string>; warnings: string[] }> {
     const pendingJobs = this.pendingJobs();
-    if (pendingJobs.length === 0) return of(new Map());
+    if (pendingJobs.length === 0) return of({ jobIdMap: new Map(), warnings: [] });
 
     // Get current library ID - REQUIRED for processing
     const currentLibrary = this.libraryService.currentLibrary();
@@ -561,7 +586,7 @@ export class QueueService implements OnDestroy {
         this.updateJobError(job.id, 'No library configured. Please create a library first.');
       });
 
-      return of(new Map());
+      return of({ jobIdMap: new Map(), warnings: [] });
     }
     const libraryId = currentLibrary.id;
 
@@ -584,17 +609,17 @@ export class QueueService implements OnDestroy {
       : Promise.resolve(new Map<string, string>());
 
     // Handle creating new backend jobs
-    const createPromise: Promise<Map<string, string>> = jobsToCreate.length > 0
+    const createPromise = jobsToCreate.length > 0
       ? this.createNewBackendJobs(jobsToCreate, libraryId)
-      : Promise.resolve(new Map<string, string>());
+      : Promise.resolve({ map: new Map<string, string>(), warnings: [] as string[] });
 
-    return new Observable<Map<string, string>>(subscriber => {
-      Promise.all([unpausePromise, createPromise]).then(([unpausedMap, createdMap]) => {
+    return new Observable<{ jobIdMap: Map<string, string>; warnings: string[] }>(subscriber => {
+      Promise.all([unpausePromise, createPromise]).then(([unpausedMap, createResult]) => {
         // Merge both maps
         const combined = new Map<string, string>();
         unpausedMap.forEach((v, k) => combined.set(k, v));
-        createdMap.forEach((v, k) => combined.set(k, v));
-        subscriber.next(combined);
+        createResult.map.forEach((v, k) => combined.set(k, v));
+        subscriber.next({ jobIdMap: combined, warnings: createResult.warnings });
         subscriber.complete();
       }).catch(error => {
         subscriber.error(error);
@@ -634,12 +659,13 @@ export class QueueService implements OnDestroy {
   /**
    * Create new backend jobs for pending frontend jobs that don't have a backendJobId yet
    */
-  private async createNewBackendJobs(jobs: QueueJob[], libraryId: string): Promise<Map<string, string>> {
+  private async createNewBackendJobs(jobs: QueueJob[], libraryId: string): Promise<{ map: Map<string, string>; warnings: string[] }> {
     const frontendToBackend = new Map<string, string>();
+    const warnings: string[] = [];
 
     // Convert to backend format
     const backendJobs: BackendJobRequest[] = jobs.map(job => {
-      const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url, job.trimStartTime);
+      const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url, job.trimStartTime, warnings);
 
       if (job.url) {
         return {
@@ -675,6 +701,12 @@ export class QueueService implements OnDestroy {
         });
 
         console.log(`[QueueService] ${jobIds.length} new jobs submitted to backend`);
+
+        // Sync state from backend after a short delay to catch any WebSocket events
+        // that may have been emitted before the ID mapping was established.
+        // This handles the race condition where local-file tasks (transcribe, analyze)
+        // start processing immediately and emit events before the HTTP response arrives.
+        setTimeout(() => this.restoreFromBackend(), 500);
       } else {
         console.error('[QueueService] Failed to create jobs');
         // Revert jobs back to pending so user can try again
@@ -692,7 +724,7 @@ export class QueueService implements OnDestroy {
       });
     }
 
-    return frontendToBackend;
+    return { map: frontendToBackend, warnings };
   }
 
   /**
@@ -1189,7 +1221,7 @@ export class QueueService implements OnDestroy {
   /**
    * Convert frontend tasks to backend format
    */
-  private convertTasksToBackendFormat(tasks: QueueTask[], isUrl: boolean, trimStartTime?: number): BackendTask[] {
+  private convertTasksToBackendFormat(tasks: QueueTask[], isUrl: boolean, trimStartTime?: number, warnings?: string[]): BackendTask[] {
     const backendTasks: BackendTask[] = [];
 
     if (isUrl) {
@@ -1267,62 +1299,62 @@ export class QueueService implements OnDestroy {
     const analyzeTask = tasks.find(t => t.type === 'ai-analyze');
     if (analyzeTask) {
       if (!analyzeTask.options?.['aiModel']) {
-        throw new Error('AI analysis requires an AI model to be selected.');
-      }
+        warnings?.push('AI analysis was skipped because no AI model is selected. Configure a model in the queue item settings.');
+      } else {
+        // Parse provider:model string
+        const modelValue = analyzeTask.options['aiModel'];
+        let aiProvider = 'ollama';
+        let aiModel = modelValue;
 
-      // Parse provider:model string
-      const modelValue = analyzeTask.options['aiModel'];
-      let aiProvider = 'ollama';
-      let aiModel = modelValue;
-
-      if (modelValue.includes(':')) {
-        const firstColon = modelValue.indexOf(':');
-        const possibleProvider = modelValue.substring(0, firstColon);
-        if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
-          aiProvider = possibleProvider;
-          aiModel = modelValue.substring(firstColon + 1);
+        if (modelValue.includes(':')) {
+          const firstColon = modelValue.indexOf(':');
+          const possibleProvider = modelValue.substring(0, firstColon);
+          if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
+            aiProvider = possibleProvider;
+            aiModel = modelValue.substring(firstColon + 1);
+          }
         }
-      }
 
-      backendTasks.push({
-        type: 'analyze',
-        options: {
-          aiModel,
-          aiProvider,
-          customInstructions: analyzeTask.options?.['customInstructions'],
-          analysisGranularity: analyzeTask.options?.['analysisGranularity'] ?? 5,
-          analysisQuality: analyzeTask.options?.['analysisQuality'] || 'fast'
-        }
-      });
+        backendTasks.push({
+          type: 'analyze',
+          options: {
+            aiModel,
+            aiProvider,
+            customInstructions: analyzeTask.options?.['customInstructions'],
+            analysisGranularity: analyzeTask.options?.['analysisGranularity'] ?? 5,
+            analysisQuality: analyzeTask.options?.['analysisQuality'] || 'fast'
+          }
+        });
+      }
     }
 
     const analyzeWebpageTask = tasks.find(t => t.type === 'analyze-webpage');
     if (analyzeWebpageTask) {
       if (!analyzeWebpageTask.options?.['aiModel']) {
-        throw new Error('Webpage analysis requires an AI model to be selected.');
-      }
+        warnings?.push('Webpage analysis was skipped because no AI model is selected. Configure a model in the queue item settings.');
+      } else {
+        // Parse provider:model string
+        const modelValue = analyzeWebpageTask.options['aiModel'];
+        let aiProvider = 'ollama';
+        let aiModel = modelValue;
 
-      // Parse provider:model string
-      const modelValue = analyzeWebpageTask.options['aiModel'];
-      let aiProvider = 'ollama';
-      let aiModel = modelValue;
-
-      if (modelValue.includes(':')) {
-        const firstColon = modelValue.indexOf(':');
-        const possibleProvider = modelValue.substring(0, firstColon);
-        if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
-          aiProvider = possibleProvider;
-          aiModel = modelValue.substring(firstColon + 1);
+        if (modelValue.includes(':')) {
+          const firstColon = modelValue.indexOf(':');
+          const possibleProvider = modelValue.substring(0, firstColon);
+          if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
+            aiProvider = possibleProvider;
+            aiModel = modelValue.substring(firstColon + 1);
+          }
         }
-      }
 
-      backendTasks.push({
-        type: 'analyze-webpage' as any,
-        options: {
-          aiModel,
-          aiProvider,
-        }
-      });
+        backendTasks.push({
+          type: 'analyze-webpage' as any,
+          options: {
+            aiModel,
+            aiProvider,
+          }
+        });
+      }
     }
 
     return backendTasks;

@@ -145,11 +145,18 @@ export class ExportDialogComponent implements OnInit {
         this.selectionEnd = this.data.selectionEnd;
         this.selectionDuration = this.formatTime(duration);
 
+        // Check if selection matches an existing marker/section (within 1s tolerance)
+        const matchingSection = this.data.sections.find(s =>
+          Math.abs(s.startSeconds - this.selectionStart) < 1 &&
+          Math.abs(s.endSeconds - this.selectionEnd) < 1
+        );
+        const selectionDescription = matchingSection?.description || 'Current timeline selection';
+
         // Add selection as a cascade list item at the top
         cascadeSections.push({
           id: '__selection__',
           category: 'Current Selection',
-          description: 'Current timeline selection',
+          description: selectionDescription,
           startSeconds: this.selectionStart,
           endSeconds: this.selectionEnd,
           timeRange: `${this.formatTime(this.selectionStart)} - ${this.formatTime(this.selectionEnd)} (${this.selectionDuration})`,
@@ -519,10 +526,17 @@ export class ExportDialogComponent implements OnInit {
     this.pendingJobs = sections.map(section => {
       const isFullVideo = section.id === '__full_video__';
       const sectionLabel = section.description || 'Unnamed';
+      // Use marker/section text as the primary name when available
+      const isGenericLabel = !section.description || section.description === 'Current timeline selection';
+      const displayName = isFullVideo
+        ? `Export: ${this.data.videoTitle}`
+        : isGenericLabel
+          ? `Export: ${this.data.videoTitle} — ${sectionLabel}`
+          : sectionLabel;
       return {
         videoPath: this.data.videoPath,
         videoId: this.data.videoId,
-        displayName: `Export: ${this.data.videoTitle} — ${sectionLabel}`,
+        displayName,
         tasks: [{
           type: 'export-clip',
           options: {

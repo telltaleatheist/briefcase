@@ -51,9 +51,6 @@ export class QueueTabComponent {
     // Add staging section (pending jobs)
     const allJobs = this.queueService.allJobs();
     const pendingJobs = this.queueService.pendingJobs();
-    console.log('[QueueTab] allQueueWeeks computed:');
-    console.log('  - All jobs:', allJobs.length, allJobs.map(j => ({ id: j.id, state: j.state, title: j.title })));
-    console.log('  - Pending jobs:', pendingJobs.length);
     if (pendingJobs.length > 0) {
       const stagingVideos: VideoItem[] = pendingJobs.map(job => ({
         id: `staging-${job.id}`,
@@ -264,6 +261,14 @@ export class QueueTabComponent {
         if (stagingIds.length > 0) {
           // Can remove directly via QueueService, or emit for parent to handle
           this.removeSelected.emit(stagingIds);
+        }
+
+        // For processing items, cancel and remove via QueueService
+        const processingIdsToRemove = videos
+          .filter((v: VideoItem) => v.id.startsWith('processing-'))
+          .map((v: VideoItem) => v.id.replace('processing-', ''));
+        if (processingIdsToRemove.length > 0) {
+          this.cancelProcessing.emit(processingIdsToRemove);
         }
 
         // For completed items, remove them from the queue

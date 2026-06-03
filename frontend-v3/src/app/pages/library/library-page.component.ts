@@ -407,19 +407,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Task started - logged for debugging (queue updates handled by QueueService)
-    this.websocketService.onTaskStarted((event: TaskStarted) => {
-      console.log('Task started:', event);
-    });
-
-    // Task progress - logged for debugging (queue updates handled by QueueService)
-    this.websocketService.onTaskProgress((event: TaskProgress) => {
-      console.log('Task progress:', event);
-    });
-
     // Task failed - show notification (queue updates handled by QueueService)
     this.websocketService.onTaskFailed((event: TaskFailed) => {
-      console.log('Task failed:', event);
 
       // Get error message
       const errorMessage = event.error?.message || 'Unknown error';
@@ -2837,14 +2826,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Submit pending jobs to backend via QueueService
     // QueueService handles state transitions and WebSocket updates
     this.queueService.submitPendingJobs().subscribe({
-      next: (jobIdMap) => {
+      next: ({ jobIdMap, warnings }) => {
         const count = jobIdMap.size;
-        console.log('[ProcessStagingItems] Processing started for', count, 'items');
         if (count > 0) {
           this.notificationService.success(
             'Processing Started',
             `Started processing ${count} ${count === 1 ? 'item' : 'items'}`
           );
+        }
+        // Show explicit warnings for skipped tasks (e.g. AI analysis with no model)
+        for (const warning of warnings) {
+          this.notificationService.warning('Task Skipped', warning);
         }
       },
       error: (error) => {
@@ -2917,34 +2909,16 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   /**
    * Cancel processing items
    */
-  async onCancelProcessing(itemIds: string[]) {
+  onCancelProcessing(itemIds: string[]) {
     if (itemIds.length === 0) return;
 
-    try {
-      // Cancel each item via queue API
-      for (const itemId of itemIds) {
-        await firstValueFrom(
-          this.http.post(`http://localhost:3000/api/queue/job/${itemId}/cancel`, {})
-        );
-      }
+    // Use QueueService to properly cancel jobs (handles ID translation and cleanup)
+    this.queueService.cancelJobs(itemIds);
 
-      this.notificationService.success(
-        'Processing Cancelled',
-        `Cancelled ${itemIds.length} ${itemIds.length === 1 ? 'item' : 'items'}`
-      );
-
-      // The processing queue will update automatically via EventSource
-      // But we can optimistically remove the cancelled items for immediate feedback
-      const queue = this.processingQueue();
-      const remaining = queue.filter(item => !itemIds.includes(item.id));
-      this.processingQueue.set(remaining);
-    } catch (error) {
-      console.error('Failed to cancel processing:', error);
-      this.notificationService.error(
-        'Cancellation Failed',
-        'Failed to cancel processing items'
-      );
-    }
+    this.notificationService.success(
+      'Processing Cancelled',
+      `Cancelled ${itemIds.length} ${itemIds.length === 1 ? 'item' : 'items'}`
+    );
   }
 
   /**

@@ -12,7 +12,7 @@ export class PlaybackControlService {
     duration: 0,
     isPlaying: false,
     playbackRate: 1,
-    volume: 1,
+    volume: 3.5,
     muted: false
   });
 
@@ -219,7 +219,7 @@ export class PlaybackControlService {
       duration: 0,
       isPlaying: false,
       playbackRate: 1,
-      volume: 1,
+      volume: 3.5,
       muted: false
     });
     this.lastKeyPressed = null;

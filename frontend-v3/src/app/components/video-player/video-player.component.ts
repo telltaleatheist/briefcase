@@ -468,7 +468,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     currentTime: 0,
     duration: 120,
     isPlaying: false,
-    volume: 1,
+    volume: 3.5,
     playbackRate: 1,
     zoomState: { level: 1, offset: 0 }
   });

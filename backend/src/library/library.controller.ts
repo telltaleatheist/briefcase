@@ -973,11 +973,9 @@ export class LibraryController {
             });
 
             if (sourceVideo && sourceVideo.id) {
-              // If source video has a parent, make the clip a co-child (sibling)
-              // Otherwise, make the source video the parent
               if (sourceVideo.parent_id) {
-                parentVideoId = String(sourceVideo.parent_id);
-                this.logger.log(`Source video is a child - linking clip as co-child to parent: ${parentVideoId}`);
+                // Source is already a child clip — don't create nested children
+                this.logger.log(`Source video is a child clip — skipping parent linking`);
               } else {
                 parentVideoId = String(sourceVideo.id);
                 this.logger.log(`Source video is a parent - linking clip as child: ${parentVideoId}`);
@@ -1662,11 +1660,9 @@ export class LibraryController {
             const sourceVideo = allVideos.find((v: any) => v.current_path === analysis.video.currentPath);
 
             if (sourceVideo && sourceVideo.id) {
-              // If source video has a parent, make the clip a co-child (sibling)
-              // Otherwise, make the source video the parent
               if (sourceVideo.parent_id) {
-                parentVideoId = String(sourceVideo.parent_id);
-                this.logger.log(`Source video is a child - linking clip as co-child to parent: ${parentVideoId}`);
+                // Source is already a child clip — don't create nested children
+                this.logger.log(`Source video is a child clip — skipping parent linking`);
               } else {
                 parentVideoId = String(sourceVideo.id);
                 this.logger.log(`Source video is a parent - linking clip as child: ${parentVideoId}`);

@@ -29,26 +29,35 @@ export class AIProviderService {
 
   constructor(private readonly llamaManager: LlamaManager) {}
 
-  // Pricing per 1M tokens (as of January 2025)
+  // Pricing per 1M tokens (as of May 2025)
   private readonly PRICING: Record<'claude' | 'openai', Record<string, { input: number; output: number }>> = {
     claude: {
-      'claude-3-5-sonnet-20241022': { input: 3.00, output: 15.00 },
-      'claude-3-5-sonnet-latest': { input: 3.00, output: 15.00 },
-      'claude-3-opus-20240229': { input: 15.00, output: 75.00 },
-      'claude-3-sonnet-20240229': { input: 3.00, output: 15.00 },
-      'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
+      'claude-sonnet-4': { input: 3.00, output: 15.00 },
+      'claude-haiku-4': { input: 0.80, output: 4.00 },
+      'claude-opus-4': { input: 15.00, output: 75.00 },
+      'claude-3-7-sonnet': { input: 3.00, output: 15.00 },
+      'claude-3-5-sonnet': { input: 3.00, output: 15.00 },
+      'claude-3-5-haiku': { input: 0.80, output: 4.00 },
+      'claude-3-opus': { input: 15.00, output: 75.00 },
+      'claude-3-sonnet': { input: 3.00, output: 15.00 },
+      'claude-3-haiku': { input: 0.25, output: 1.25 },
     },
     openai: {
       'gpt-4o': { input: 2.50, output: 10.00 },
       'gpt-4o-mini': { input: 0.15, output: 0.60 },
+      'gpt-4.1': { input: 2.00, output: 8.00 },
+      'gpt-4.1-mini': { input: 0.40, output: 1.60 },
+      'gpt-4.1-nano': { input: 0.10, output: 0.40 },
       'gpt-4-turbo': { input: 10.00, output: 30.00 },
       'gpt-4': { input: 30.00, output: 60.00 },
       'gpt-3.5-turbo': { input: 0.50, output: 1.50 },
+      'o3-mini': { input: 1.10, output: 4.40 },
     },
   };
 
   /**
    * Calculate estimated cost based on token usage
+   * Uses prefix matching so date-suffixed models (e.g. claude-sonnet-4-20250514) still match
    */
   private calculateCost(
     provider: 'claude' | 'openai',
@@ -56,7 +65,32 @@ export class AIProviderService {
     inputTokens: number,
     outputTokens: number,
   ): number {
-    const pricing = this.PRICING[provider]?.[model];
+    const providerPricing = this.PRICING[provider];
+    if (!providerPricing) return 0;
+
+    // Try exact match first
+    let pricing = providerPricing[model];
+
+    // Fallback: find a key that the model starts with (handles date suffixes like -20250514)
+    if (!pricing) {
+      const matchingKey = Object.keys(providerPricing)
+        .sort((a, b) => b.length - a.length) // Longest match first
+        .find(key => model.startsWith(key));
+      if (matchingKey) {
+        pricing = providerPricing[matchingKey];
+      }
+    }
+
+    // Fallback: find a key that starts with the same base (handles -latest suffix)
+    if (!pricing) {
+      const modelBase = model.replace(/-latest$/, '').replace(/-\d{8}$/, '');
+      const matchingKey = Object.keys(providerPricing)
+        .find(key => key === modelBase || modelBase.startsWith(key));
+      if (matchingKey) {
+        pricing = providerPricing[matchingKey];
+      }
+    }
+
     if (!pricing) {
       this.logger.warn(`No pricing data for ${provider}:${model}`);
       return 0;
