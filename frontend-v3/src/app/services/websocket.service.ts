@@ -175,11 +175,6 @@ export class WebsocketService implements OnDestroy {
       console.log('✅ Server confirmed connection:', data);
     });
 
-    // Listen for all events for debugging
-    this.socket.onAny((event, ...args) => {
-      console.log(`📨 WS Event: ${event}`, args);
-    });
-
     // Task events
     this.socket.on('task.started', (event: TaskStarted) => {
       console.log('WS task.started received:', event);

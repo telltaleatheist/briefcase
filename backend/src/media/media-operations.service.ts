@@ -64,6 +64,7 @@ export class MediaOperationsService {
           duration: info.duration,
           uploadDate: info.uploadDate,
           thumbnail: info.thumbnail,
+          isLive: info.isLive || false,
         },
       };
     } catch (error) {

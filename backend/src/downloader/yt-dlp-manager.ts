@@ -213,6 +213,66 @@ export class YtDlpManager extends EventEmitter {
   }
 
   /**
+   * Execute a livestream download with automatic stop at live edge
+   * Uses --live-from-start and monitors fragment timing to detect catch-up
+   */
+  async runLivestream(): Promise<string> {
+    if (!this.inputUrl) {
+      throw new Error('No input URL specified.');
+    }
+
+    // Reset abort flag
+    this.aborted = false;
+
+    // Build additional args from options
+    const additionalArgs: string[] = [];
+
+    for (let i = 0; i < this.options.length; i++) {
+      const option = this.options[i];
+
+      // Skip progress-template handling - bridge handles this
+      if (option === '--progress-template') {
+        i++; // Skip value too
+        continue;
+      }
+
+      additionalArgs.push(option);
+    }
+
+    // Generate a unique process ID
+    const processId = `livestream-${Date.now()}`;
+    this.currentProcessId = processId;
+
+    this.logger.log(`Starting livestream download: ${this.inputUrl}`);
+
+    try {
+      const result = await this.ytdlp.downloadLivestream(
+        this.inputUrl,
+        this.outputTemplate || '%(title)s.%(ext)s',
+        {
+          processId,
+          additionalArgs,
+        }
+      );
+
+      this.currentProcessId = null;
+
+      if (this.aborted) {
+        throw new Error('Download was cancelled');
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || `yt-dlp exited with code ${result.exitCode}`);
+      }
+
+      return result.stdout;
+    } catch (error) {
+      this.currentProcessId = null;
+      throw error;
+    }
+  }
+
+  /**
    * Execute the yt-dlp command with automatic retries
    */
   async runWithRetry(maxRetries = 3, delayMs = 1000): Promise<string> {

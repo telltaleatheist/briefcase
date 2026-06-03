@@ -148,6 +148,7 @@ export interface GetInfoResult extends TaskResult {
     duration: number;
     uploadDate: string;
     thumbnail: string;
+    isLive?: boolean;
   };
 }
 
@@ -221,6 +222,7 @@ export interface QueueJob {
     duration: number;
     uploadDate: string;
     thumbnail: string;
+    isLive?: boolean;
   };
   transcriptPath?: string; // Set by transcribe task
   analysisPath?: string; // Set by analyze task

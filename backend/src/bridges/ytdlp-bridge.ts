@@ -26,6 +26,7 @@ export interface YtDlpProcessInfo {
   args: string[];
   startTime: number;
   aborted: boolean;
+  gracefullyStopped: boolean;
 }
 
 export interface YtDlpResult {
@@ -203,6 +204,7 @@ export class YtDlpBridge extends EventEmitter {
         args,
         startTime,
         aborted: false,
+        gracefullyStopped: false,
       };
 
       this.activeProcesses.set(processId, processInfo);
@@ -239,6 +241,18 @@ export class YtDlpBridge extends EventEmitter {
       proc.on('close', (code) => {
         const duration = Date.now() - startTime;
         this.activeProcesses.delete(processId);
+
+        if (processInfo.gracefullyStopped) {
+          this.logger.log(`[${processId}] Gracefully stopped after ${duration}ms`);
+          resolve({
+            processId,
+            success: true,
+            exitCode: code,
+            duration,
+            stdout: stdoutBuffer,
+          });
+          return;
+        }
 
         if (processInfo.aborted) {
           this.logger.log(`[${processId}] Aborted after ${duration}ms`);
@@ -461,6 +475,122 @@ export class YtDlpBridge extends EventEmitter {
   }
 
   /**
+   * Gracefully stop a running download by sending SIGINT
+   * This allows yt-dlp to finish muxing and produce a valid file
+   */
+  gracefulStop(processId: string): boolean {
+    const processInfo = this.activeProcesses.get(processId);
+    if (!processInfo) {
+      this.logger.warn(`Cannot graceful stop ${processId}: not found`);
+      return false;
+    }
+
+    this.logger.log(`[${processId}] Gracefully stopping download (SIGINT)`);
+    processInfo.gracefullyStopped = true;
+
+    if (process.platform === 'win32') {
+      // On Windows, send CTRL_C_EVENT via taskkill with /T (tree)
+      try {
+        const { execSync } = require('child_process');
+        execSync(`taskkill /pid ${processInfo.process.pid} /T`, { stdio: 'ignore' });
+      } catch {
+        processInfo.process.kill('SIGINT');
+      }
+    } else {
+      processInfo.process.kill('SIGINT');
+    }
+
+    return true;
+  }
+
+  /**
+   * Download a livestream with automatic stop at live edge
+   * Adds --live-from-start and monitors fragment timing to detect when
+   * the download has caught up to the live edge, then gracefully stops.
+   */
+  downloadLivestream(
+    url: string,
+    outputTemplate: string,
+    options?: {
+      format?: string;
+      processId?: string;
+      mergeOutputFormat?: string;
+      cookies?: string;
+      cookiesFromBrowser?: string;
+      additionalArgs?: string[];
+    }
+  ): Promise<YtDlpResult> {
+    const processId = options?.processId || crypto.randomBytes(8).toString('hex');
+
+    // Track fragment timing for live-edge detection
+    // With --concurrent-fragments, events come in bursts so we need higher thresholds
+    const fragmentTimestamps: number[] = [];
+    const CONSECUTIVE_SLOW_THRESHOLD = 8; // Number of consecutive slow intervals to confirm live edge
+    const SLOW_FRAGMENT_MS = 5000; // Fragment taking >5s indicates real-time pace
+    const STALL_TIMEOUT_MS = 45000; // If no progress for 45s, graceful stop
+
+    let stallTimer: NodeJS.Timeout | null = null;
+    let liveEdgeDetected = false;
+
+    const resetStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (!liveEdgeDetected) {
+          this.logger.log(`[${processId}] No progress for ${STALL_TIMEOUT_MS / 1000}s, stopping livestream download`);
+          liveEdgeDetected = true;
+          this.gracefulStop(processId);
+        }
+      }, STALL_TIMEOUT_MS);
+    };
+
+    // Listen for progress events to track fragment timing
+    const progressListener = (progress: YtDlpProgress) => {
+      if (progress.processId !== processId || liveEdgeDetected) return;
+
+      const now = Date.now();
+      fragmentTimestamps.push(now);
+      resetStallTimer();
+
+      // Need at least CONSECUTIVE_SLOW_THRESHOLD + 1 timestamps to compute intervals
+      if (fragmentTimestamps.length < CONSECUTIVE_SLOW_THRESHOLD + 1) return;
+
+      // Check last N intervals
+      const recentTimestamps = fragmentTimestamps.slice(-(CONSECUTIVE_SLOW_THRESHOLD + 1));
+      const intervals: number[] = [];
+      for (let i = 1; i < recentTimestamps.length; i++) {
+        intervals.push(recentTimestamps[i] - recentTimestamps[i - 1]);
+      }
+
+      // If all recent intervals exceed threshold, we've caught up to live edge
+      const allSlow = intervals.every(interval => interval > SLOW_FRAGMENT_MS);
+      if (allSlow) {
+        this.logger.log(
+          `[${processId}] Live edge detected: last ${CONSECUTIVE_SLOW_THRESHOLD} fragment intervals ` +
+          `all exceed ${SLOW_FRAGMENT_MS}ms (${intervals.map(i => `${i}ms`).join(', ')})`
+        );
+        liveEdgeDetected = true;
+        if (stallTimer) clearTimeout(stallTimer);
+        this.gracefulStop(processId);
+      }
+    };
+
+    this.on('progress', progressListener);
+    resetStallTimer();
+
+    // Add --live-from-start to additional args
+    const additionalArgs = [...(options?.additionalArgs || []), '--live-from-start'];
+
+    return this.download(url, outputTemplate, {
+      ...options,
+      processId,
+      additionalArgs,
+    }).finally(() => {
+      this.removeListener('progress', progressListener);
+      if (stallTimer) clearTimeout(stallTimer);
+    });
+  }
+
+  /**
    * Abort all running downloads
    */
   abortAll(): void {
@@ -508,8 +638,9 @@ export class YtDlpBridge extends EventEmitter {
 
     // Handle HLS progress template format where total_bytes is unknown (None/NA)
     // Format: downloaded_bytes/None speed eta NA [ NA%] frag:current/total
-    // For HLS, we use fragment progress to calculate percent
-    const hlsTemplateMatch = line.match(/(\d+|None|NA)\/(None|NA)\s+([\d.]+|None|NA)\s+eta\s+(\S+)\s+\[\s*([\d.]+|NA)%?\s*\]\s*frag:(\d+|None|NA)\/(\d+|None|NA)/i);
+    // For HLS/livestream, we use fragment progress to calculate percent
+    // yt-dlp outputs N/A (with slash) for unknown values in _percent_str
+    const hlsTemplateMatch = line.match(/(\d+|None|NA)\/(None|NA)\s+([\d.]+|None|NA)\s+eta\s+(\S+)\s+\[\s*([\d.]+|N\/A|NA)%?\s*\]\s*frag:(\d+|None|NA)\/(\d+|None|NA)/i);
     if (hlsTemplateMatch) {
       const [, downloadedStr, , speedStr, , , fragCurrentStr, fragTotalStr] = hlsTemplateMatch;
       const downloadedBytes = downloadedStr !== 'None' && downloadedStr !== 'NA' ? parseInt(downloadedStr) : 0;
@@ -533,7 +664,7 @@ export class YtDlpBridge extends EventEmitter {
     }
 
     // Fallback for HLS template without fragment info (older format)
-    const hlsTemplateMatchSimple = line.match(/(\d+|None|NA)\/(None|NA)\s+([\d.]+|None|NA)\s+eta\s+(\S+)\s+\[\s*([\d.]+|NA)%?\s*\]/i);
+    const hlsTemplateMatchSimple = line.match(/(\d+|None|NA)\/(None|NA)\s+([\d.]+|None|NA)\s+eta\s+(\S+)\s+\[\s*([\d.]+|N\/A|NA)%?\s*\]/i);
     if (hlsTemplateMatchSimple && !line.includes('frag:')) {
       const [, downloadedStr, , speedStr] = hlsTemplateMatchSimple;
       const downloadedBytes = downloadedStr !== 'None' && downloadedStr !== 'NA' ? parseInt(downloadedStr) : 0;
@@ -610,17 +741,29 @@ export class YtDlpBridge extends EventEmitter {
     }
 
     // Try HLS fragment progress: (frag 123/1371) - extract percent from fragment ratio
+    // Also handles concurrent-fragment stderr format: "N: [download] XMiB at Y (time) (frag X/Y)"
     const fragMatch = line.match(/\(frag\s+(\d+)\/(\d+)\)/);
     if (fragMatch) {
       const [, current, total] = fragMatch;
       const fragPercent = (parseInt(current) / parseInt(total)) * 100;
+
+      // Try to extract speed from the same line (e.g., "at  569.45KiB/s" or "at    2.00MiB/s")
+      let speed = 0;
+      const speedInLineMatch = line.match(/at\s+([\d.]+)\s*([KMG]i?B)\/s/i);
+      if (speedInLineMatch) {
+        speed = parseFloat(speedInLineMatch[1]);
+        const unit = speedInLineMatch[2];
+        if (unit.startsWith('K')) speed *= 1024;
+        else if (unit.startsWith('M')) speed *= 1024 * 1024;
+        else if (unit.startsWith('G')) speed *= 1024 * 1024 * 1024;
+      }
 
       this.emit('progress', {
         processId,
         percent: fragPercent,
         totalSize: 0,
         downloadedBytes: 0,
-        downloadSpeed: 0,
+        downloadSpeed: speed,
         eta: 0,
         phase: 'download',
       } as YtDlpProgress);

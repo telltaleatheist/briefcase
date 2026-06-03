@@ -377,8 +377,9 @@ export class DownloaderService implements OnModuleInit {
       // Capture start time BEFORE starting download
       const downloadStartTime = Date.now();
 
-      // Extract upload date for filename formatting (used later in processOutputFilename)
+      // Extract upload date and live status for filename formatting and download path
       let uploadDate: string | undefined;
+      let isLive = false;
       try {
         const videoInfo = await this.getVideoInfo(options.url);
         if (videoInfo && videoInfo.uploadDate) {
@@ -386,8 +387,15 @@ export class DownloaderService implements OnModuleInit {
           uploadDate = videoInfo.uploadDate;
           this.logger.log(`Extracted upload date for filename: ${uploadDate}`);
         }
+        if (videoInfo && videoInfo.isLive) {
+          isLive = true;
+          this.logger.log(`Detected live stream for URL: ${options.url}`);
+        }
+        if (videoInfo) {
+          this.logger.log(`Video info: isLive=${videoInfo.isLive}, title="${videoInfo.title}"`);
+        }
       } catch (error) {
-        this.logger.warn(`Could not fetch upload date, will use current date: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        this.logger.warn(`Could not fetch video info (upload date/live status unavailable): ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
       // Emit download-started event
@@ -409,33 +417,44 @@ export class DownloaderService implements OnModuleInit {
       }
       
       // Check if this is a Reddit URL - try direct download first (avoids rate-limited API)
+      // Includes retry with delay to handle Reddit's aggressive rate-limiting
       if (options.url.includes('reddit.com')) {
-        try {
-          const videoInfo = await this.getRedditVideoUrlFromJson(options.url);
-          if (videoInfo) {
-            // It's a video post — download directly via HTTPS + ffmpeg mux
-            this.logger.log(`Reddit: found video via JSON API, downloading directly: "${videoInfo.title}"`);
-            const directResult = await this.downloadRedditVideoDirect(options.url, downloadFolder, jobId);
-            if (directResult && fs.existsSync(directResult)) {
-              this.logger.log(`Reddit direct download succeeded: ${directResult}`);
-              const processedFile = await this.processOutputFilename(directResult, uploadDate);
-              this.addToHistory(processedFile, options.url);
-              this.eventService.emitDownloadCompleted(processedFile, options.url, jobId, false);
-              if (jobId) this.activeDownloads.delete(jobId);
-              return { success: true, outputFile: processedFile };
+        const maxDirectAttempts = 2;
+        for (let attempt = 1; attempt <= maxDirectAttempts; attempt++) {
+          try {
+            const videoInfo = await this.getRedditVideoUrlFromJson(options.url);
+            if (videoInfo) {
+              // It's a video post — download directly via HTTPS + ffmpeg mux
+              this.logger.log(`Reddit: found video via JSON API, downloading directly: "${videoInfo.title}" (attempt ${attempt})`);
+              const directResult = await this.downloadRedditVideoDirect(options.url, downloadFolder, jobId);
+              if (directResult && fs.existsSync(directResult)) {
+                this.logger.log(`Reddit direct download succeeded: ${directResult}`);
+                const processedFile = await this.processOutputFilename(directResult, uploadDate);
+                this.addToHistory(processedFile, options.url);
+                this.eventService.emitDownloadCompleted(processedFile, options.url, jobId, false);
+                if (jobId) this.activeDownloads.delete(jobId);
+                return { success: true, outputFile: processedFile };
+              }
+            } else {
+              // Not a video — check for image
+              const info = await this.getRedditInfo(options.url);
+              if (info && info.imageUrl) {
+                const result = await this.downloadRedditImage(info.imageUrl, info.title, downloadFolder, jobId);
+                return { ...result, isImage: true };
+              }
             }
-          } else {
-            // Not a video — check for image
-            const info = await this.getRedditInfo(options.url);
-            if (info && info.imageUrl) {
-              const result = await this.downloadRedditImage(info.imageUrl, info.title, downloadFolder, jobId);
-              return { ...result, isImage: true };
-            }
+          } catch (error) {
+            const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
+            this.logger.warn(`Reddit direct download attempt ${attempt} failed: ${errorMessage}`);
           }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
-          this.logger.warn(`Reddit direct download failed, falling back to yt-dlp: ${errorMessage}`);
+
+          // If first attempt failed, wait before retrying (rate-limit cooldown)
+          if (attempt < maxDirectAttempts) {
+            this.logger.log(`Reddit: waiting 3s before retry attempt ${attempt + 1}...`);
+            await new Promise(r => setTimeout(r, 3000));
+          }
         }
+        this.logger.warn('Reddit direct download: all attempts failed, falling back to yt-dlp');
       }
 
       // Check if this is a direct Twitter image URL (pbs.twimg.com)
@@ -623,8 +642,66 @@ export class DownloaderService implements OnModuleInit {
       });
       
       try {
-        // For YouTube, try multiple client methods if the first one fails
-        if (options.url.includes('youtube.com') || options.url.includes('youtu.be')) {
+        // For live YouTube streams, try livestream download path first (auto-stop at live edge)
+        // If it fails (e.g., stream ended), fall through to regular YouTube download
+        if (isLive && (options.url.includes('youtube.com') || options.url.includes('youtu.be'))) {
+          try {
+            this.logger.log('Using livestream download path (--live-from-start with auto-stop)');
+
+            const livestreamManager = new YtDlpManager();
+            livestreamManager.input(options.url).output(outputTemplate);
+
+            const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+            if (ffmpegPath) {
+              livestreamManager.addOption('--ffmpeg-location', ffmpegPath);
+            }
+
+            livestreamManager.addOption('--verbose')
+                             .addOption('--no-check-certificates')
+                             .addOption('--no-playlist')
+                             .addOption('--force-overwrites')
+                             .addOption('--concurrent-fragments', '10');
+
+            if (options.convertToMp4) {
+              livestreamManager.addOption('--merge-output-format', 'mp4');
+            }
+
+            // Use best available format for livestreams
+            livestreamManager.addOption('--format', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best');
+
+            // Update active downloads reference
+            if (jobId) {
+              this.activeDownloads.set(jobId, livestreamManager);
+            }
+
+            // Set up progress tracking
+            livestreamManager.on('progress', (progress) => {
+              const elapsedMs = Date.now() - downloadStartTime;
+              this.eventService.emitDownloadProgress(
+                progress.percent,
+                'Downloading livestream',
+                jobId,
+                {
+                  speed: progress.downloadSpeed,
+                  eta: progress.eta,
+                  elapsedMs,
+                  totalSize: progress.totalSize,
+                  downloadedBytes: progress.downloadedBytes
+                }
+              );
+            });
+
+            const output = await livestreamManager.runLivestream();
+            outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+          } catch (livestreamError) {
+            const errMsg = livestreamError instanceof Error ? livestreamError.message : String(livestreamError);
+            this.logger.warn(`Livestream download failed, falling back to regular download: ${errMsg}`);
+            // Reset isLive so we fall through to the regular YouTube path below
+            isLive = false;
+          }
+        }
+        // For YouTube (non-live, or livestream fallback), try multiple client methods if the first one fails
+        if (!outputFile && (options.url.includes('youtube.com') || options.url.includes('youtu.be'))) {
           const clientMethods = ['android', 'ios', 'mweb', 'web', 'default'];
           let lastError: Error | null = null;
 
@@ -703,7 +780,7 @@ export class DownloaderService implements OnModuleInit {
               }
             }
           }
-        } else {
+        } else if (!outputFile) {
           // Non-YouTube download - use standard method with m3u8 fallback
           try {
             const output = await ytDlpManager.runWithRetry(3, 2000);
@@ -718,7 +795,8 @@ export class DownloaderService implements OnModuleInit {
             // Fallback 0: Reddit direct download (bypasses yt-dlp entirely)
             if (!outputFile && options.url.includes('reddit.com')) {
               try {
-                this.logger.warn('Reddit yt-dlp failed, trying direct download via JSON API...');
+                this.logger.warn('Reddit yt-dlp failed, waiting 3s then trying direct download via JSON API...');
+                await new Promise(r => setTimeout(r, 3000)); // Let rate-limits cool down
                 const result = await this.downloadRedditVideoDirect(options.url, downloadFolder, jobId);
                 if (result) {
                   outputFile = result;
@@ -1231,20 +1309,19 @@ export class DownloaderService implements OnModuleInit {
     }
     const baseUrl = baseMatch[1];
 
-    // Build direct download URLs for video and audio
-    const quality = '720';
-    const videoMp4Url = `${baseUrl}/CMAF_${quality}.mp4`;
+    // Build direct download URLs — try multiple qualities as fallback
+    const qualities = ['720', '480', '360', '240'];
     const audioMp4Url = `${baseUrl}/CMAF_AUDIO_128.mp4`;
 
     // Build filename with date prefix (YYYY-MM-DD Title.mp4)
     const sanitizedTitle = FilenameDateUtil.sanitizeFilename(videoInfo.title || 'Reddit Video');
     const filename = FilenameDateUtil.ensureDatePrefix(sanitizedTitle + '.mp4', videoInfo.uploadDate);
     const outputFile = path.join(downloadFolder, filename);
-    const tempVideo = path.join(downloadFolder, `.reddit_video_${Date.now()}.mp4`);
-    const tempAudio = path.join(downloadFolder, `.reddit_audio_${Date.now()}.m4a`);
+    const ts = Date.now();
+    const tempVideo = path.join(downloadFolder, `.reddit_video_${ts}.mp4`);
+    const tempAudio = path.join(downloadFolder, `.reddit_audio_${ts}.m4a`);
 
-    this.logger.log(`Reddit direct download: video=${videoMp4Url}`);
-    this.logger.log(`Reddit direct download: audio=${audioMp4Url}`);
+    this.logger.log(`Reddit direct download: base=${baseUrl}, audio=${audioMp4Url}`);
 
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1253,8 +1330,8 @@ export class DownloaderService implements OnModuleInit {
       'Referer': 'https://www.reddit.com/',
     };
 
-    // Helper to download a file via HTTPS
-    const downloadFile = (fileUrl: string, dest: string): Promise<boolean> => {
+    // Helper to download a file via HTTPS with retry on 429
+    const downloadFile = (fileUrl: string, dest: string, retryCount = 0): Promise<boolean> => {
       return new Promise((resolve) => {
         const file = fs.createWriteStream(dest);
         https.get(fileUrl, { headers }, (res: any) => {
@@ -1263,10 +1340,22 @@ export class DownloaderService implements OnModuleInit {
             fs.unlinkSync(dest);
             const redirectUrl = res.headers.location;
             if (redirectUrl) {
-              downloadFile(redirectUrl, dest).then(resolve);
+              downloadFile(redirectUrl, dest, retryCount).then(resolve);
             } else {
               resolve(false);
             }
+            return;
+          }
+          // Retry on rate-limit (429) or server error (5xx) with backoff
+          if ((res.statusCode === 429 || res.statusCode >= 500) && retryCount < 2) {
+            file.close();
+            try { fs.unlinkSync(dest); } catch {}
+            res.resume();
+            const delay = (retryCount + 1) * 2000;
+            this.logger.warn(`Reddit CDN: ${fileUrl} returned ${res.statusCode}, retrying in ${delay}ms`);
+            setTimeout(() => {
+              downloadFile(fileUrl, dest, retryCount + 1).then(resolve);
+            }, delay);
             return;
           }
           if (res.statusCode !== 200) {
@@ -1288,19 +1377,50 @@ export class DownloaderService implements OnModuleInit {
         this.eventService.emitDownloadProgress(10, 'Downloading Reddit video...', jobId, {});
       }
 
-      // Download video and audio in parallel
-      const [videoOk, audioOk] = await Promise.all([
-        downloadFile(videoMp4Url, tempVideo),
-        downloadFile(audioMp4Url, tempAudio),
-      ]);
+      // Try each quality level until one works (720 → 480 → 360 → 240)
+      let videoOk = false;
+      let usedQuality = '';
+      for (const q of qualities) {
+        const videoMp4Url = `${baseUrl}/CMAF_${q}.mp4`;
+        this.logger.log(`Reddit direct download: trying quality ${q}p — ${videoMp4Url}`);
+        videoOk = await downloadFile(videoMp4Url, tempVideo);
+        if (videoOk) {
+          usedQuality = q;
+          this.logger.log(`Reddit direct download: quality ${q}p succeeded`);
+          break;
+        }
+        this.logger.warn(`Reddit direct download: quality ${q}p failed, trying next`);
+      }
+
+      // Also try the HLS fallback URL from the JSON API if all CMAF qualities failed
+      if (!videoOk && videoUrl.includes('.m3u8')) {
+        this.logger.log('Reddit direct download: all CMAF qualities failed, trying HLS via ffmpeg');
+        try {
+          const ffmpegPath = this.sharedConfigService.getFfmpegPath() || 'ffmpeg';
+          execSync(
+            `"${ffmpegPath}" -y -i "${videoUrl}" -c copy "${tempVideo}"`,
+            { timeout: 120000, stdio: 'pipe' },
+          );
+          if (fs.existsSync(tempVideo) && fs.statSync(tempVideo).size > 0) {
+            videoOk = true;
+            usedQuality = 'HLS';
+            this.logger.log('Reddit direct download: HLS fallback succeeded');
+          }
+        } catch (hlsErr) {
+          this.logger.warn(`Reddit direct download: HLS fallback failed: ${hlsErr instanceof Error ? hlsErr.message : hlsErr}`);
+        }
+      }
 
       if (!videoOk) {
-        this.logger.warn('Reddit direct download: video download failed');
+        this.logger.warn('Reddit direct download: all video quality attempts failed');
         return null;
       }
 
+      // Download audio (non-blocking — video without audio is still usable)
+      const audioOk = await downloadFile(audioMp4Url, tempAudio);
+
       if (jobId) {
-        this.eventService.emitDownloadProgress(70, 'Muxing Reddit video...', jobId, {});
+        this.eventService.emitDownloadProgress(70, `Muxing Reddit video (${usedQuality}p)...`, jobId, {});
       }
 
       // Step 3: Mux with ffmpeg
@@ -1343,32 +1463,103 @@ export class DownloaderService implements OnModuleInit {
    * Appends .json to the post URL to get structured data without auth.
    */
   private async getRedditVideoUrlFromJson(url: string): Promise<{ url: string; title: string; uploadDate?: string } | null> {
+    // Try with retry and domain fallback for rate-limiting resilience
+    const domains = ['old.reddit.com', 'www.reddit.com'];
+    const maxRetries = 3;
+
+    for (const domain of domains) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const result = await this.fetchRedditJson(url, domain);
+          if (result) return result;
+          // null means valid JSON but no video found — don't retry
+          if (attempt === 1) return null;
+        } catch (err: any) {
+          const isRateLimited = err?.rateLimited === true;
+          const isLastAttempt = attempt === maxRetries;
+
+          if (isRateLimited && !isLastAttempt) {
+            const delayMs = attempt * 2000; // 2s, 4s backoff
+            this.logger.warn(`Reddit JSON: rate-limited by ${domain}, retrying in ${delayMs}ms (attempt ${attempt}/${maxRetries})`);
+            await new Promise(r => setTimeout(r, delayMs));
+            continue;
+          }
+
+          if (isLastAttempt) {
+            this.logger.warn(`Reddit JSON: all ${maxRetries} attempts failed on ${domain}: ${err.message || err}`);
+            break; // Try next domain
+          }
+        }
+      }
+    }
+
+    this.logger.warn('Reddit JSON: exhausted all domain/retry attempts');
+    return null;
+  }
+
+  /**
+   * Fetch Reddit JSON from a specific domain. Throws with { rateLimited: true } on 429/throttle.
+   */
+  private fetchRedditJson(url: string, domain: string): Promise<{ url: string; title: string; uploadDate?: string } | null> {
     const https = require('https');
 
-    // Clean URL and build JSON endpoint, use old.reddit.com to avoid aggressive rate-limiting
     let cleanUrl = url.split('?')[0].replace(/\/$/, '');
-    cleanUrl = cleanUrl.replace('www.reddit.com', 'old.reddit.com')
-                       .replace('://reddit.com', '://old.reddit.com');
+    cleanUrl = cleanUrl.replace('www.reddit.com', domain)
+                       .replace('old.reddit.com', domain)
+                       .replace('://reddit.com', `://${domain}`);
     const jsonUrl = cleanUrl + '.json';
 
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept': 'application/json, text/html;q=0.9, */*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
     };
 
+    this.logger.log(`Reddit JSON: fetching ${jsonUrl}`);
+
     return new Promise((resolve, reject) => {
       https.get(jsonUrl, { headers }, (res: any) => {
+        // Rate-limited
+        if (res.statusCode === 429) {
+          res.resume(); // Drain response
+          reject({ rateLimited: true, message: `HTTP 429 from ${domain}` });
+          return;
+        }
+
         // Follow redirects
         if (res.statusCode === 301 || res.statusCode === 302) {
           const redirectUrl = res.headers.location;
           if (redirectUrl) {
             https.get(redirectUrl, { headers }, (redirectRes: any) => {
+              if (redirectRes.statusCode === 429) {
+                redirectRes.resume();
+                reject({ rateLimited: true, message: `HTTP 429 after redirect from ${domain}` });
+                return;
+              }
               this.handleRedditJsonResponse(redirectRes, resolve, reject);
             }).on('error', reject);
             return;
           }
         }
+
+        // Non-OK status (403 etc) — check if it's a soft rate-limit
+        if (res.statusCode !== 200) {
+          let body = '';
+          res.on('data', (chunk: string) => { body += chunk; });
+          res.on('end', () => {
+            const isThrottled = body.includes('rate limit') || body.includes('too many requests') || body.includes('try again later');
+            if (isThrottled) {
+              reject({ rateLimited: true, message: `HTTP ${res.statusCode} with throttle message from ${domain}` });
+            } else {
+              this.logger.warn(`Reddit JSON: HTTP ${res.statusCode} from ${domain}`);
+              // Try HTML scrape on the body we got
+              const videoInfo = this.extractRedditVideoFromHtml(body);
+              resolve(videoInfo);
+            }
+          });
+          return;
+        }
+
         this.handleRedditJsonResponse(res, resolve, reject);
       }).on('error', reject);
     });
@@ -1437,7 +1628,16 @@ export class DownloaderService implements OnModuleInit {
         this.logger.log('Reddit JSON: no Reddit-hosted video found in post data');
         resolve(null);
       } catch (parseErr) {
-        this.logger.warn(`Reddit JSON: failed to parse JSON, trying HTML scrape: ${parseErr}`);
+        this.logger.warn(`Reddit JSON: failed to parse JSON (${body.length} bytes), trying HTML scrape`);
+
+        // Check if the HTML indicates rate-limiting / CAPTCHA
+        const isRateLimited = body.includes('rate limit') || body.includes('too many requests')
+          || body.includes('try again later') || body.includes('whoa there, pardner');
+        if (isRateLimited) {
+          reject({ rateLimited: true, message: 'Reddit returned rate-limit page instead of JSON' });
+          return;
+        }
+
         // Reddit returned HTML instead of JSON — scrape video URL from page source
         const videoInfo = this.extractRedditVideoFromHtml(body);
         if (videoInfo) {
@@ -1985,8 +2185,8 @@ export class DownloaderService implements OnModuleInit {
         .addOption('--skip-download')
         .addOption('--no-warnings')
         .addOption('--no-check-certificates')
-        .addOption('--extractor-retries', '1')
-        .addOption('--socket-timeout', '5');
+        .addOption('--extractor-retries', '2')
+        .addOption('--socket-timeout', '10');
 
       // Add referer if we detected an embed
       if (referer) {
@@ -2119,7 +2319,8 @@ export class DownloaderService implements OnModuleInit {
           description: videoInfo.description || '',
           formats: videoInfo.formats || [],
           width: videoInfo.width || 0,
-          height: videoInfo.height || 0
+          height: videoInfo.height || 0,
+          isLive: videoInfo.is_live === true || videoInfo.live_status === 'is_live'
         };
         
         this.logger.log(`Successfully fetched info for video: ${result.title}`);

@@ -2061,14 +2061,6 @@ export class CascadeComponent {
   getVideoRelationships(video: VideoItem): Array<{id: string; type: 'parent' | 'child'; video: VideoItem}> {
     const relationships: Array<{id: string; type: 'parent' | 'child'; video: VideoItem}> = [];
 
-    // Debug logging
-    console.log('Getting relationships for video:', video.name, {
-      parentIds: video.parentIds,
-      childIds: video.childIds,
-      parents: video.parents,
-      children: video.children
-    });
-
     // Add parents
     if (video.parents && video.parents.length > 0) {
       video.parents.forEach(parent => {
@@ -2090,8 +2082,6 @@ export class CascadeComponent {
         });
       });
     }
-
-    console.log('Total relationships found:', relationships.length);
 
     return relationships;
   }

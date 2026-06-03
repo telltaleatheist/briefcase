@@ -47,7 +47,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private mainPool = new Map<string, ActiveTask>();  // Max 5 concurrent
   private aiPool: ActiveTask | null = null;           // Max 1 concurrent
 
-  // Queue processing state
+  // Queue processing state (kept for API compatibility, no longer used as a lock)
   private processing = false;
 
   // Watchdog timer for detecting stuck tasks
@@ -76,6 +76,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * Starts the watchdog timer to detect stuck tasks
    */
   onModuleInit() {
+
     this.startWatchdog();
   }
 
@@ -253,12 +254,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Add to unified queue
     this.jobQueue.set(jobId, fullJob);
 
-    // Start processing if not already running (skip if paused)
+    this.logger.log(`Added job ${jobId} with ${job.tasks.length} tasks${paused ? ' (paused)' : ''}`);
+
+    // Kick the queue (skip if paused)
     if (!paused) {
       setImmediate(() => this.processQueue());
     }
-
-    this.logger.log(`Added job ${jobId} with ${job.tasks.length} tasks${paused ? ' (paused)' : ''}`);
 
     return jobId;
   }
@@ -406,51 +407,35 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
 
   /**
-   * Unified queue processing with 5+1 pool model
-   * Main loop that fills both pools with tasks
+   * Unified queue processing with 5+1 pool model.
+   * Event-driven: called when jobs are added or tasks complete.
+   * Each call fills available pool slots with the next eligible tasks.
+   * No polling loop — executeTask's finally block re-triggers this.
    */
-  private async processQueue(): Promise<void> {
-    if (this.processing) {
-      return; // Already processing
+  private processQueue(): void {
+    // Fill main pool (up to 5 concurrent tasks)
+    let dispatched = 0;
+    while (this.mainPool.size < this.MAX_MAIN_CONCURRENT) {
+      const nextTask = this.getNextMainTask();
+      if (!nextTask) break;
+
+      this.executeTask(nextTask, 'main').catch(err => {
+        this.logger.error(`Main pool task failed: ${err?.message || err}`);
+      });
+      dispatched++;
     }
 
-    this.processing = true;
-
-    try {
-      while (true) {
-        // Fill main pool (up to 5 concurrent tasks)
-        while (this.mainPool.size < this.MAX_MAIN_CONCURRENT) {
-          const nextTask = this.getNextMainTask();
-          if (!nextTask) break;
-
-          // Execute task without awaiting (parallel execution)
-          this.executeTask(nextTask, 'main').catch(err => {
-            this.logger.error(`Main pool task failed: \${err.message}`);
-          });
-        }
-
-        // Fill AI pool (up to 1 concurrent task)
-        if (!this.aiPool) {
-          const nextTask = this.getNextAITask();
-          if (nextTask) {
-            // Execute task without awaiting (parallel execution)
-            this.executeTask(nextTask, 'ai').catch(err => {
-              this.logger.error(`AI pool task failed: \${err.message}`);
-            });
-          }
-        }
-
-        // Check if queue is empty and all pools are empty
-        if (this.jobQueue.size === 0 && this.mainPool.size === 0 && !this.aiPool) {
-          break; // Nothing left to do
-        }
-
-        // Wait before checking again
-        await new Promise(resolve => setTimeout(resolve, 100));
+    // Fill AI pool (up to 1 concurrent task)
+    if (!this.aiPool) {
+      const nextTask = this.getNextAITask();
+      if (nextTask) {
+        this.executeTask(nextTask, 'ai').catch(err => {
+          this.logger.error(`AI pool task failed: ${err?.message || err}`);
+        });
+        dispatched++;
       }
-    } finally {
-      this.processing = false;
     }
+
   }
 
   /**
@@ -461,7 +446,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
 
       const currentTask = job.tasks[job.currentTaskIndex];
-      if (!currentTask) continue;
+      if (!currentTask) {
+        this.logger.warn(`getNextMainTask: job ${job.id} has no task at index ${job.currentTaskIndex} (tasks length: ${job.tasks.length})`);
+        continue;
+      }
 
       // Skip if this task is already running
       if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
@@ -555,7 +543,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       this.logger.log(`Job ${job.id} was cancelled, skipping task ${task.type}`);
       // Clean up cancelled job from set after acknowledging
       this.cancelledJobs.delete(job.id);
-      setImmediate(() => this.processQueue());
+      this.processQueue();
       return;
     }
 
@@ -574,7 +562,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       lastProgressAt: now,
     };
 
-    // Add to appropriate pool
+    // IMPORTANT: Register in pool SYNCHRONOUSLY before any async work.
+    // This prevents processQueue's inner while loop from dispatching the
+    // same task again while we await the library switch below.
     if (pool === 'main') {
       this.mainPool.set(taskId, activeTask);
     } else {
@@ -587,23 +577,32 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       job.startedAt = new Date();
     }
 
-    job.currentPhase = `\${task.type} (\${job.currentTaskIndex + 1}/\${job.tasks.length})`;
-
-    this.logger.log(
-      `[\${pool.toUpperCase()} POOL] Starting task \${taskId}: \${task.type} for job \${job.id}`,
-    );
-
-    // Emit task started event (will be added in Step 5)
-    this.eventService.emit('task.started', {
-      taskId,
-      jobId: job.id,
-      videoId: job.videoId,
-      type: task.type,
-      pool,
-      timestamp: new Date().toISOString(),
-    });
-
     try {
+      // Ensure correct library is active for this job (all tasks need the right DB context)
+      if (job.libraryId) {
+        const currentLibrary = this.libraryManager.getActiveLibrary();
+        if (!currentLibrary || currentLibrary.id !== job.libraryId) {
+          this.logger.log(`[${job.id}] Switching to target library: ${job.libraryId} for task ${task.type}`);
+          await this.libraryManager.switchLibrary(job.libraryId);
+        }
+      }
+
+      job.currentPhase = `${task.type} (${job.currentTaskIndex + 1}/${job.tasks.length})`;
+
+      this.logger.log(
+        `[${pool.toUpperCase()} POOL] Starting task ${taskId}: ${task.type} for job ${job.id}`,
+      );
+
+      // Emit task started event
+      this.eventService.emit('task.started', {
+        taskId,
+        jobId: job.id,
+        videoId: job.videoId,
+        type: task.type,
+        pool,
+        timestamp: new Date().toISOString(),
+      });
+
       // Execute the task
       const result = await this.executeTaskLogic(job, task, taskId);
 
@@ -678,7 +677,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       job.error = error instanceof Error ? error.message : 'Unknown error';
       job.completedAt = new Date();
 
-      this.logger.error(`Task \${taskId} failed: \${job.error}`);
+      this.logger.error(`Task ${taskId} failed: ${job.error}`);
 
       // Emit task failed event
       this.eventService.emit('task.failed', {
@@ -698,7 +697,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // This ensures the UI can show the failure state before removal
       setTimeout(() => {
         this.jobQueue.delete(job.id);
-        this.logger.log(`Removed failed job \${job.id} from queue`);
+        this.logger.log(`Removed failed job ${job.id} from queue`);
       }, 5000);
     } finally {
       // Remove from pool
@@ -708,8 +707,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         this.aiPool = null;
       }
 
-      // Continue processing
-      setImmediate(() => this.processQueue());
+      // Dispatch next tasks
+      this.processQueue();
     }
   }
 
@@ -809,15 +808,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
         if (!job.videoPath) {
           return { success: false, error: 'No video path available for import task' };
-        }
-
-        // Switch to target library if specified (import uses active library)
-        if (job.libraryId) {
-          const currentLibrary = this.libraryManager.getActiveLibrary();
-          if (!currentLibrary || currentLibrary.id !== job.libraryId) {
-            this.logger.log(`[${taskId}] Switching to target library: ${job.libraryId}`);
-            await this.libraryManager.switchLibrary(job.libraryId);
-          }
         }
 
         result = await this.mediaOps.importToLibrary(job.videoPath, task.options, taskId);
@@ -1167,8 +1157,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
         if (sourceVideo && sourceVideo.id) {
           if (sourceVideo.parent_id) {
-            parentVideoId = String(sourceVideo.parent_id);
-            this.logger.log(`[EXPORT-CLIP] Source video is a child — linking to parent: ${parentVideoId}`);
+            // Source is already a child clip — don't create nested children
+            this.logger.log(`[EXPORT-CLIP] Source video is a child clip — skipping parent linking`);
           } else {
             parentVideoId = String(sourceVideo.id);
             this.logger.log(`[EXPORT-CLIP] Source video found — will link as child of: ${parentVideoId}`);

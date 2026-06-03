@@ -40,9 +40,9 @@ async function bootstrap() {
       AppModule,
       new ExpressAdapter(expressApp),
       {
-        // Minimal logging - only show errors and warnings
-        // This removes verbose RouterExplorer and RoutesResolver logs
-        logger: ['error', 'warn'],
+        // Show errors, warnings, and log-level messages (skips verbose debug/verbose levels)
+        // This includes important service messages like download status and livestream detection
+        logger: ['error', 'warn', 'log'],
         abortOnError: false
       }
     );
