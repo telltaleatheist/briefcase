@@ -1,17 +1,5 @@
 <div class="timeline-track-container">
-  <!-- Sections header with rounded top corners -->
-  <div class="track-sections-header">
-    <app-timeline-sections-layer
-      [sections]="sections"
-      [duration]="duration"
-      [zoomState]="zoomState"
-      [selectedSection]="selectedSection"
-      (sectionClick)="onSectionClick($event)"
-      (sectionHover)="onSectionHover($event)">
-    </app-timeline-sections-layer>
-  </div>
-
-  <!-- Chapters layer - below sections, above waveform -->
+  <!-- Chapters layer - above waveform -->
   @if (chapters.length > 0) {
     <div class="track-chapters-header">
       <app-timeline-chapters-layer
@@ -41,7 +29,7 @@
     </div>
   }
 
-  <!-- Waveform container with square corners -->
+  <!-- Waveform container - colored section blocks are overlaid on top -->
   <div class="track-waveform-container">
     <app-timeline-waveform
       [waveformData]="waveformData"
@@ -49,6 +37,17 @@
       [zoomState]="zoomState"
       [color]="waveformColor">
     </app-timeline-waveform>
+
+    <!-- Sections overlaid over the waveform (semi-transparent so the wave shows through) -->
+    <app-timeline-sections-layer
+      class="sections-overlay"
+      [sections]="sections"
+      [duration]="duration"
+      [zoomState]="zoomState"
+      [selectedSection]="selectedSection"
+      (sectionClick)="onSectionClick($event)"
+      (sectionHover)="onSectionHover($event)">
+    </app-timeline-sections-layer>
 
     <!-- Selection overlay - positioned within waveform container -->
     @if (selection) {

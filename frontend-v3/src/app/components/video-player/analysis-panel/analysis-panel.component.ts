@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal, computed, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed, inject, OnChanges, SimpleChanges, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TimelineSection, TimelineChapter, CategoryFilter, AnalysisData } from '../../../models/video-editor.model';
@@ -12,8 +12,9 @@ import { TranscriptSearchService, TranscriptSearchOptions } from '../../../servi
   templateUrl: './analysis-panel.component.html',
   styleUrls: ['./analysis-panel.component.scss']
 })
-export class AnalysisPanelComponent {
+export class AnalysisPanelComponent implements OnChanges {
   private transcriptSearchService = inject(TranscriptSearchService);
+  private host = inject(ElementRef) as ElementRef<HTMLElement>;
   @Input() sections: TimelineSection[] = [];
   @Input() chapters: TimelineChapter[] = [];
   @Input() categoryFilters: CategoryFilter[] = [];
@@ -35,17 +36,30 @@ export class AnalysisPanelComponent {
   @Output() generateAnalysis = new EventEmitter<string>();
   @Output() transcriptSeek = new EventEmitter<number>();
 
-  // Tab state - only 2 tabs now
-  activeTab = signal<'analysis' | 'transcript'>('analysis');
+  // "Follow cursor": when enabled, the list scrolls to (and highlights) the
+  // item containing the current playback position — chapter, category section,
+  // or transcript segment, depending on the open view. Persisted across runs.
+  followCursor = signal<boolean>(
+    !(typeof localStorage !== 'undefined' && localStorage.getItem('briefcase-follow-cursor') === 'false')
+  );
 
-  // Analysis sub-view: categories (sections) or chapters
-  analysisView = signal<'categories' | 'chapters'>('categories');
+  // Id of the item containing currentTime, per view (recomputed on input changes)
+  currentChapterId: string | null = null;
+  currentSectionId: string | null = null;
+  currentSegmentId: string | null = null;
+  private lastFollowId: string | null = null;
+
+  // Primary tabs
+  activeTab = signal<'analysis' | 'chapters' | 'transcript'>('analysis');
 
   // Filter accordion state
   filtersExpanded = signal(true);
 
   // Transcript sub-view: segments (timestamped) or plain (continuous text)
   transcriptView = signal<'segments' | 'plain'>('segments');
+
+  // Brief "Copied" feedback for the transcript copy button
+  transcriptCopied = signal(false);
 
   // Transcript search
   transcriptSearch = signal('');
@@ -103,12 +117,62 @@ export class AnalysisPanelComponent {
     return this.filteredTranscript.length;
   }
 
-  setActiveTab(tab: 'analysis' | 'transcript'): void {
-    this.activeTab.set(tab);
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['currentTime'] || changes['chapters'] || changes['sections'] ||
+        changes['transcript'] || changes['categoryFilters']) {
+      this.updateCurrentIds();
+      if (changes['currentTime'] && this.followCursor()) {
+        this.scrollToCurrent();
+      }
+    }
   }
 
-  setAnalysisView(view: 'categories' | 'chapters'): void {
-    this.analysisView.set(view);
+  toggleFollowCursor(): void {
+    const enabled = !this.followCursor();
+    this.followCursor.set(enabled);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('briefcase-follow-cursor', String(enabled));
+    }
+    if (enabled) {
+      this.scrollToCurrent(true); // jump to the current item right away
+    }
+  }
+
+  // Recompute which item (per view) contains the current playback position.
+  private updateCurrentIds(): void {
+    const t = this.currentTime;
+    const within = (start: number, end: number) => t >= start && t < end;
+    this.currentChapterId = this.chapters.find(c => within(c.startTime, c.endTime))?.id ?? null;
+    this.currentSectionId = this.filteredSections.find(s => within(s.startTime, s.endTime))?.id ?? null;
+    this.currentSegmentId = this.transcript.find(s => within(s.startTime, s.endTime))?.id ?? null;
+  }
+
+  // The id to follow for whichever tab is currently open.
+  private get currentFollowId(): string | null {
+    switch (this.activeTab()) {
+      case 'transcript': return this.currentSegmentId;
+      case 'chapters': return this.currentChapterId;
+      default: return this.currentSectionId; // analysis (categories)
+    }
+  }
+
+  // Scroll the highlighted (.follow-current) item into view. Skips work when
+  // the target hasn't changed, unless `force` is set (e.g. on toggle/view switch).
+  private scrollToCurrent(force = false): void {
+    if (!this.followCursor()) return;
+    const id = this.currentFollowId;
+    if (!id || (!force && id === this.lastFollowId)) return;
+    this.lastFollowId = id;
+    // Wait for the view to render the .follow-current class before scrolling.
+    requestAnimationFrame(() => {
+      const el = this.host.nativeElement.querySelector('.follow-current') as HTMLElement | null;
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }
+
+  setActiveTab(tab: 'analysis' | 'chapters' | 'transcript'): void {
+    this.activeTab.set(tab);
+    this.scrollToCurrent(true);
   }
 
   toggleFilters(): void {
@@ -117,6 +181,7 @@ export class AnalysisPanelComponent {
 
   setTranscriptView(view: 'segments' | 'plain'): void {
     this.transcriptView.set(view);
+    this.scrollToCurrent(true);
   }
 
   // Check if a chapter is currently playing
@@ -149,6 +214,19 @@ export class AnalysisPanelComponent {
 
   onTranscriptSegmentClick(segment: TranscriptionSegment): void {
     this.transcriptSeek.emit(segment.startTime);
+  }
+
+  // Copy the full transcript to the clipboard as plain text (no timestamps/segments)
+  async copyTranscript(): Promise<void> {
+    const text = this.plainTranscript();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.transcriptCopied.set(true);
+      setTimeout(() => this.transcriptCopied.set(false), 1500);
+    } catch (err) {
+      console.error('Failed to copy transcript:', err);
+    }
   }
 
   onGenerateAnalysis(): void {

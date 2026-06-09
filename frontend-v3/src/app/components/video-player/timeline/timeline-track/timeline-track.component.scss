@@ -11,29 +11,22 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  width: calc(100% - 48px); // Account for margins (24px on each side)
-  margin: 0 24px; // Horizontal margins to align with ruler
+  width: calc(100% - 24px); // Left inset only; reach the right edge
+  margin: 0 0 0 24px; // Left margin to align with ruler, no right margin
   // Component is vertically centered by parent container
 }
 
-// Sections header with rounded top corners
-.track-sections-header {
-  position: relative;
-  height: 36px;
-  background: var(--bg-secondary);
-  border-radius: 8px 8px 0 0; // Only top corners rounded
-  border: 1px solid var(--border-color);
-  border-bottom: none; // Remove bottom border to connect with chapters or waveform
-  overflow: visible; // Allow lines to extend below
-
-  app-timeline-sections-layer {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
+// Round the outer corners of the stacked track: top corners on the first
+// visible row, bottom corners on the waveform (always the last row). Using
+// per-corner properties so the two rules compose when the waveform is the
+// only row (rather than the shorthand clobbering one set of corners).
+.timeline-track-container > div:first-child {
+  border-top: 1px solid var(--border-color);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
 }
 
-// Chapters header - below sections, above waveform
+// Chapters header - above waveform
 .track-chapters-header {
   position: relative;
   height: 24px;
@@ -67,13 +60,17 @@
   }
 }
 
-// Waveform container with square corners
+// Waveform container - the colored section blocks are overlaid on top of it.
+// Always the last row, so it carries the rounded bottom corners.
 .track-waveform-container {
   position: relative;
-  height: 60px;
+  height: 30px; // Compact: about half the previous 60px
+  box-sizing: border-box; // Keep 30px as the true outer height so it fits the track region exactly
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-top: none; // Connect seamlessly with sections header
+  border-top: none; // Connect seamlessly with the row above (if any)
+  border-bottom-left-radius: 8px; // Always the last row → rounded bottom
+  border-bottom-right-radius: 8px;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -81,7 +78,15 @@
 
   app-timeline-waveform {
     flex: 1;
-    height: 40px; // Waveform height within container
+    height: 20px; // Waveform height within container (about half the previous 40px)
+  }
+
+  // Section blocks overlaid across the full height of the waveform
+  .sections-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none; // Individual blocks re-enable their own pointer events
   }
 
   // Selection overlay - positioned within waveform container

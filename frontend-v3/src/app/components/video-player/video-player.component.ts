@@ -612,9 +612,12 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Sidebar visibility
   showAnalysisSidebar = signal(true);
+  // Tracks a manual sidebar toggle so the "collapse when empty" default
+  // doesn't override the user's explicit choice.
+  private sidebarUserOverride = false;
 
   // Timeline resizing
-  timelineHeight = signal(280); // Increased default height
+  timelineHeight = signal(150); // Compact default to match the slimmer waveform track
   isResizing = signal(false);
 
   // Fullscreen mode
@@ -850,6 +853,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     try {
       this.isLoading.set(true);
       this.errorMessage.set(null);
+      this.sidebarUserOverride = false; // new video → re-evaluate sidebar default
 
       // Load video details with timeout protection
       const timeoutId = setTimeout(() => {
@@ -873,14 +877,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
             // Load transcript separately (non-blocking)
             this.loadTranscriptForVideo(videoId).catch(err => {
               console.warn('Transcript loading failed, continuing without it:', err);
-            });
+            }).finally(() => this.applySidebarDefault());
 
             // Always load sections (includes both AI sections and custom markers)
             // loadAnalysisForVideo now handles both cases properly
             this.loadAnalysisForVideo(videoId).catch(err => {
               console.warn('Section/analysis loading failed, continuing without it:', err);
               this.hasAnalysis.set(false);
-            });
+            }).finally(() => this.applySidebarDefault());
 
             // Load mute sections for audio censoring
             this.loadMuteSections(videoId).catch(err => {
@@ -2263,7 +2267,19 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Sidebar toggle
   toggleAnalysisSidebar() {
+    this.sidebarUserOverride = true;
     this.showAnalysisSidebar.update(v => !v);
+  }
+
+  // Collapse the sidebar by default when the video has no analysis or
+  // transcript. Skipped once the user manually toggles it for this video.
+  private applySidebarDefault() {
+    if (this.sidebarUserOverride) return;
+    const hasContent = this.sections().length > 0
+      || this.chapters().length > 0
+      || this.transcript().length > 0
+      || this.hasAnalysis();
+    this.showAnalysisSidebar.set(hasContent);
   }
 
   // Fullscreen toggle
@@ -3031,6 +3047,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.showBorder.set(tab.showBorder ?? false);
     this.borderAspectRatio.set(tab.borderAspectRatio ?? '16:9');
     this.videoCompleted.set(false);
+    this.sidebarUserOverride = false;
+    this.applySidebarDefault();
 
     // Update metadata
     this.metadata.update(m => ({
