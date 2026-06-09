@@ -669,7 +669,7 @@
   position: absolute;
   top: 64px; // After toolbar (40px) + ruler (24px)
   left: 24px; // Match track-lane margin
-  right: 24px; // Match track-lane margin
+  right: 0; // Track lane reaches the right edge
   bottom: 56px; // Before zoom bar
   z-index: 10000; // Above everything
   pointer-events: none;

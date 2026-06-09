@@ -56,6 +56,99 @@
   }
 }
 
+// "Follow cursor" bar above the tabs (a standalone pill toggle, not a tab)
+.follow-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color, #dee2e6);
+}
+
+.follow-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #6c757d);
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  svg {
+    opacity: 0.8;
+  }
+
+  &:hover {
+    color: var(--text-primary, #212529);
+    border-color: var(--text-tertiary, #adb5bd);
+  }
+
+  &.active {
+    color: #fff;
+    background: var(--primary-orange, #ff6b35);
+    border-color: var(--primary-orange, #ff6b35);
+
+    svg {
+      opacity: 1;
+    }
+  }
+}
+
+// Copy-transcript button (sits beside the Segments/Plain toggle)
+.copy-transcript-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #6c757d);
+  background: var(--bg-secondary, #f8f9fa);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  svg {
+    opacity: 0.7;
+  }
+
+  &:hover {
+    color: var(--text-primary, #212529);
+    border-color: var(--primary-orange, #ff6b35);
+
+    svg {
+      opacity: 1;
+    }
+  }
+
+  &.copied {
+    color: #16a34a;
+    border-color: #16a34a;
+
+    svg {
+      opacity: 1;
+    }
+  }
+}
+
+// Highlight for the item at the current playback position when "Follow" is on
+.section-item.follow-current,
+.chapter-item.follow-current,
+.transcript-segment.follow-current {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 107, 53, 0.14);
+  box-shadow: 0 0 0 2px var(--primary-orange, #ff6b35);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -442,6 +535,13 @@
 
   &.transcript-view-toggle {
     padding-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .view-toggle {
+      flex: 1;
+    }
   }
 }
 

@@ -1,4 +1,19 @@
 <div class="analysis-panel">
+  <!-- Follow-cursor toggle (above the tabs, not a tab) -->
+  <div class="follow-bar">
+    <button
+      class="follow-toggle"
+      [class.active]="followCursor()"
+      (click)="toggleFollowCursor()"
+      title="Follow cursor: scroll this panel to the chapter, category, or transcript line at the playback position">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+      </svg>
+      Follow cursor
+    </button>
+  </div>
+
   <!-- Tabs -->
   <div class="panel-tabs">
     <button
@@ -6,8 +21,17 @@
       [class.active]="activeTab() === 'analysis'"
       (click)="setActiveTab('analysis')">
       Analysis
-      @if (sections.length > 0 || chapters.length > 0) {
-        <span class="tab-count">{{ analysisView() === 'chapters' ? chapters.length : sections.length }}</span>
+      @if (sections.length > 0) {
+        <span class="tab-count">{{ sections.length }}</span>
+      }
+    </button>
+    <button
+      class="tab-btn"
+      [class.active]="activeTab() === 'chapters'"
+      (click)="setActiveTab('chapters')">
+      Chapters
+      @if (chapters.length > 0) {
+        <span class="tab-count">{{ chapters.length }}</span>
       }
     </button>
     <button
@@ -15,9 +39,6 @@
       [class.active]="activeTab() === 'transcript'"
       (click)="setActiveTab('transcript')">
       Transcript
-      @if (transcript.length > 0) {
-        <span class="tab-count">{{ transcript.length }}</span>
-      }
     </button>
   </div>
 
@@ -43,41 +64,6 @@
       </button>
     </div>
   } @else {
-    <!-- View Toggle: Categories / Chapters -->
-    <div class="view-toggle-section">
-      <div class="view-toggle">
-        <button
-          class="toggle-btn"
-          [class.active]="analysisView() === 'categories'"
-          (click)="setAnalysisView('categories')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 6h16M4 12h16M4 18h16"/>
-          </svg>
-          Categories
-          @if (sections.length > 0) {
-            <span class="toggle-count">{{ sections.length }}</span>
-          }
-        </button>
-        <button
-          class="toggle-btn"
-          [class.active]="analysisView() === 'chapters'"
-          (click)="setAnalysisView('chapters')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <path d="M9 9h6"/>
-            <path d="M9 13h6"/>
-            <path d="M9 17h4"/>
-          </svg>
-          Chapters
-          @if (chapters.length > 0) {
-            <span class="toggle-count">{{ chapters.length }}</span>
-          }
-        </button>
-      </div>
-    </div>
-
-    <!-- Categories View -->
-    @if (analysisView() === 'categories') {
       <!-- Summary -->
       @if (analysisData?.summary) {
         <div class="summary-section">
@@ -122,6 +108,7 @@
           <div
             class="section-item"
             [class.selected]="selectedSection?.id === section.id"
+            [class.follow-current]="followCursor() && section.id === currentSectionId"
             [style.--section-color]="section.color"
             [title]="section.description">
             <button class="section-content" (click)="onSectionClick(section)">
@@ -164,11 +151,12 @@
           </div>
         </div>
       }
-    }
+  }
+  }
 
-    <!-- Chapters View -->
-    @if (analysisView() === 'chapters') {
-      <div class="chapters-list">
+  <!-- Chapters Tab Content -->
+  @if (activeTab() === 'chapters') {
+    <div class="chapters-list">
         @if (chapters.length === 0) {
           <div class="empty-state">
             <div class="no-analysis-icon">
@@ -187,6 +175,7 @@
             <div
               class="chapter-item"
               [class.current]="isCurrentChapter(chapter)"
+              [class.follow-current]="followCursor() && chapter.id === currentChapterId"
               [class.selected]="selectedChapterId === chapter.id"
               [title]="chapter.title">
               <button class="chapter-content" (click)="onChapterClick(chapter)">
@@ -206,9 +195,7 @@
             </div>
           }
         }
-      </div>
-    }
-  }
+    </div>
   }
 
   <!-- Transcript Tab Content -->
@@ -277,6 +264,27 @@
           Plain Text
         </button>
       </div>
+
+      @if (transcript.length > 0) {
+        <button
+          class="copy-transcript-btn"
+          [class.copied]="transcriptCopied()"
+          (click)="copyTranscript()"
+          title="Copy the full transcript as plain text">
+          @if (transcriptCopied()) {
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 6L9 17l-5-5"/>
+            </svg>
+            Copied
+          } @else {
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            Copy
+          }
+        </button>
+      }
     </div>
 
     <!-- Transcript Content -->
@@ -300,6 +308,7 @@
           @for (segment of filteredTranscript; track segment.id) {
             <button
               class="transcript-segment"
+              [class.follow-current]="followCursor() && segment.id === currentSegmentId"
               (click)="onTranscriptSegmentClick(segment)">
               <span class="segment-time">{{ formatTime(segment.startTime) }}</span>
               <span class="segment-text">{{ segment.text }}</span>
