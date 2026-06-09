@@ -486,6 +486,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   borderAspectRatio = signal<'16:9' | '4:3' | '9:16'>('16:9');
   private resizeObserver?: ResizeObserver;
 
+  // True once the video has played through to its final frame. Drives the
+  // glowing/pulsing "finished" border. Cleared as soon as playback resumes,
+  // the user seeks, or a different video is loaded.
+  videoCompleted = signal<boolean>(false);
+
   // Selection state for highlighting
   highlightSelection = signal<TimelineSelection | null>(null);
   isSelecting = signal(false);
@@ -642,6 +647,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         if (isPlaying !== this.wasPlaying) {
           this.wasPlaying = isPlaying;
           if (isPlaying) {
+            // Starting playback clears the "finished" glow.
+            this.videoCompleted.set(false);
             this.startPlayback();
             // Hide timeline immediately in fullscreen when playing starts
             if (this.isFullscreen()) {
@@ -1503,6 +1510,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       if (newTime >= state.duration) {
         newTime = state.duration;
         this.togglePlayPause();
+        // Reached the final frame — light up the "finished" glowing border.
+        this.videoCompleted.set(true);
       }
 
       this.updateCurrentTime(newTime);
@@ -1532,6 +1541,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   seekTo(time: number) {
+    this.videoCompleted.set(false);
     this.updateCurrentTime(time);
     if (this.videoPlayer) {
       this.videoPlayer.seekTo(time);
@@ -3020,6 +3030,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.videoScale.set(tab.videoScale ?? 1.0);
     this.showBorder.set(tab.showBorder ?? false);
     this.borderAspectRatio.set(tab.borderAspectRatio ?? '16:9');
+    this.videoCompleted.set(false);
 
     // Update metadata
     this.metadata.update(m => ({
