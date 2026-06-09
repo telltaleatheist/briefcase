@@ -74,6 +74,11 @@
                [style.height.px]="borderHeight()"></div>
         }
 
+        <!-- Glowing/pulsing border shown when the video plays to its final frame -->
+        @if (videoCompleted()) {
+          <div class="video-completed-glow"></div>
+        }
+
         <!-- Video player with scale transform -->
         <div class="video-scale-wrapper" [style.transform]="'scale(' + videoScale() + ')'">
           <app-media-display

@@ -1778,3 +1778,31 @@
   z-index: 10;
   // Width and height are set via [style.width.px] and [style.height.px] bindings
 }
+
+// Glowing, pulsing border shown when the video plays through to its final frame.
+// Lives in .video-player-area (above the scaled video) so it always frames the
+// player and is never hidden behind the GPU-composited <video> element.
+.video-completed-glow {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 20;
+  border: 3px solid #ff6b35;
+  animation: video-completed-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes video-completed-pulse {
+  0%, 100% {
+    border-color: rgba(255, 107, 53, 0.55);
+    box-shadow:
+      inset 0 0 14px rgba(255, 107, 53, 0.45),
+      0 0 14px rgba(255, 107, 53, 0.45);
+  }
+  50% {
+    border-color: rgba(255, 138, 92, 1);
+    box-shadow:
+      inset 0 0 30px rgba(255, 107, 53, 0.95),
+      0 0 34px rgba(255, 107, 53, 0.95);
+  }
+}
