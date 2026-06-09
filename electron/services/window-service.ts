@@ -1,5 +1,5 @@
 // Briefcase/electron/services/window-service.ts
-import { BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';
 import { AppConfig } from '../config/app-config';
@@ -44,6 +44,7 @@ export class WindowService {
   private nextGroupNumber: number = 1;
   private frontendPort: number = 8080;
   private isQuitting: boolean = false;
+  private forceQuit: boolean = false;
 
   /**
    * Set the frontend port to use
@@ -218,6 +219,10 @@ export class WindowService {
       if ((input.meta || input.control) && input.shift && input.key.toLowerCase() === 'r') {
         event.preventDefault();
         editorWindow.webContents.reloadIgnoringCache();
+      }
+      if (process.platform !== 'darwin' && input.control && input.key.toLowerCase() === 'q') {
+        event.preventDefault();
+        app.quit();
       }
     });
 
@@ -637,6 +642,10 @@ export class WindowService {
         event.preventDefault();
         editorWindow.webContents.reloadIgnoringCache();
       }
+      if (process.platform !== 'darwin' && input.control && input.key.toLowerCase() === 'q') {
+        event.preventDefault();
+        app.quit();
+      }
     });
 
     log.info(`Created new Group ${groupNumber} with tab ${tabData.videoId}`);
@@ -671,6 +680,21 @@ export class WindowService {
   setQuitting(quitting: boolean): void {
     this.isQuitting = quitting;
   }
+
+  /**
+   * Request that the app quit immediately, bypassing the "press again to
+   * quit" confirmation. Used by the tray menu's Quit action.
+   */
+  requestForceQuit(): void {
+    this.forceQuit = true;
+  }
+
+  /**
+   * Whether a force-quit (bypass confirmation) has been requested.
+   */
+  shouldForceQuit(): boolean {
+    return this.forceQuit;
+  }
   
   /**
    * Setup keyboard shortcuts for reload
@@ -691,6 +715,13 @@ export class WindowService {
         event.preventDefault();
         log.info('Hard reloading window (Cmd/Ctrl+Shift+R)');
         this.mainWindow?.webContents.reloadIgnoringCache();
+      }
+
+      // Ctrl+Q (Windows/Linux) - request quit. On macOS, Cmd+Q is handled by
+      // the app menu and routed through the main process 'before-quit' handler.
+      if (process.platform !== 'darwin' && input.control && input.key.toLowerCase() === 'q') {
+        event.preventDefault();
+        app.quit();
       }
     });
   }

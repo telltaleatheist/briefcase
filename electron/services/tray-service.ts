@@ -177,8 +177,10 @@ export class TrayService {
    */
   private quitApplication(): void {
     log.info('Quitting application from tray');
-    // Set the quitting flag so the window can actually close
+    // Set the quitting flag so the window can actually close, and bypass the
+    // "press again to quit" confirmation — an explicit tray Quit is intentional.
     this.windowService.setQuitting(true);
+    this.windowService.requestForceQuit();
     app.quit();
   }
 

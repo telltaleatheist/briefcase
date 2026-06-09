@@ -7,11 +7,12 @@ import { NavigationService } from './services/navigation.service';
 import { QueueService } from './services/queue.service';
 import { LibraryService } from './services/library.service';
 import { OnboardingComponent } from './components/onboarding/onboarding.component';
+import { QuitConfirmComponent } from './components/quit-confirm/quit-confirm.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, NavigationComponent, OnboardingComponent],
+  imports: [RouterOutlet, NavigationComponent, OnboardingComponent, QuitConfirmComponent],
   template: `
     <!-- Show onboarding if needed -->
     @if (showOnboarding()) {
@@ -26,6 +27,9 @@ import { OnboardingComponent } from './components/onboarding/onboarding.componen
         </main>
       </div>
     }
+
+    <!-- Chrome-style "press again to quit" toast (driven by the Electron main process) -->
+    <app-quit-confirm />
   `,
   styles: [`
     .app-container {

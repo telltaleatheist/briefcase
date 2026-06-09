@@ -205,6 +205,15 @@ ipcRenderer.on('navigate-to-queue', () => {
   window.dispatchEvent(new CustomEvent('electron-navigate-to-queue'));
 });
 
+// Listen for quit-confirmation events (Chrome-style "press again to quit")
+ipcRenderer.on('quit-confirm-show', (_, label: string) => {
+  window.dispatchEvent(new CustomEvent('electron-quit-confirm-show', { detail: { label } }));
+});
+
+ipcRenderer.on('quit-confirm-hide', () => {
+  window.dispatchEvent(new CustomEvent('electron-quit-confirm-hide'));
+});
+
 // For TypeScript - declare the API on the window object
 declare global {
   interface Window {

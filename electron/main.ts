@@ -1,6 +1,6 @@
 // Briefcase/electron/main.ts
 // SIMPLIFIED: No more executable checking - binaries are bundled!
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';
 import { AppConfig } from './config/app-config';
@@ -47,6 +47,48 @@ let backendService: BackendService;
 let updateService: UpdateService;
 let trayService: TrayService;
 
+// "Press again to quit" confirmation state (Chrome-style double-press to quit)
+let quitConfirmActive = false;
+let quitConfirmTimer: NodeJS.Timeout | undefined;
+let isQuittingForReal = false;
+const QUIT_CONFIRM_MS = 5000;
+
+/**
+ * Show or hide the "press again to quit" toast in every open window.
+ */
+function setQuitConfirmVisible(visible: boolean): void {
+  const label = process.platform === 'darwin'
+    ? 'Press ⌘Q again to quit'
+    : 'Press Ctrl+Q again to quit';
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(visible ? 'quit-confirm-show' : 'quit-confirm-hide', label);
+    }
+  }
+}
+
+/**
+ * Cleanup performed right before the app actually exits.
+ */
+function performQuitCleanup(): void {
+  log.info('Application is quitting...');
+
+  // Set the quitting flag to allow windows to close
+  if (windowService) {
+    windowService.setQuitting(true);
+  }
+
+  // Shutdown backend service
+  if (backendService) {
+    backendService.shutdown();
+  }
+
+  // Destroy tray icon
+  if (trayService) {
+    trayService.destroy();
+  }
+}
+
 // Configure logging - always log to file
 log.transports.console.level = 'info';
 log.transports.file.level = 'debug';
@@ -57,6 +99,7 @@ LogUtil.cleanupOldLogs(7);
 // Handle process signals for graceful shutdown
 process.on('SIGTERM', () => {
   log.info('Received SIGTERM signal, initiating graceful shutdown...');
+  isQuittingForReal = true;
   if (backendService) {
     backendService.shutdown();
   }
@@ -65,6 +108,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   log.info('Received SIGINT signal, initiating graceful shutdown...');
+  isQuittingForReal = true;
   if (backendService) {
     backendService.shutdown();
   }
@@ -74,6 +118,7 @@ process.on('SIGINT', () => {
 // Handle uncaught exceptions to prevent zombie processes
 process.on('uncaughtException', (error) => {
   log.error('Uncaught exception:', error);
+  isQuittingForReal = true;
   if (backendService) {
     backendService.shutdown();
   }
@@ -180,22 +225,31 @@ app.on('window-all-closed', () => {
   log.info('All windows closed, app continues running in tray');
 });
 
-// Cleanup before quitting
-app.on('before-quit', () => {
-  log.info('Application is quitting...');
-
-  // Set the quitting flag to allow windows to close
-  if (windowService) {
-    windowService.setQuitting(true);
+// Intercept quit to require a second confirmation press (Chrome-style).
+// Real shutdowns (tray "Quit", OS signals) bypass this and exit immediately.
+app.on('before-quit', (event) => {
+  // Already confirmed by a signal, the tray menu, or a prior second press → exit.
+  if (isQuittingForReal || windowService?.shouldForceQuit()) {
+    performQuitCleanup();
+    return;
   }
 
-  // Shutdown backend service
-  if (backendService) {
-    backendService.shutdown();
+  // The toast is already on screen → this is the second press → exit.
+  if (quitConfirmActive) {
+    if (quitConfirmTimer) clearTimeout(quitConfirmTimer);
+    quitConfirmActive = false;
+    isQuittingForReal = true;
+    setQuitConfirmVisible(false);
+    performQuitCleanup();
+    return;
   }
 
-  // Destroy tray icon
-  if (trayService) {
-    trayService.destroy();
-  }
+  // First press → cancel the quit and show the confirmation toast for 5s.
+  event.preventDefault();
+  quitConfirmActive = true;
+  setQuitConfirmVisible(true);
+  quitConfirmTimer = setTimeout(() => {
+    quitConfirmActive = false;
+    setQuitConfirmVisible(false);
+  }, QUIT_CONFIRM_MS);
 });
