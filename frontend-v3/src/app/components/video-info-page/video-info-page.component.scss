@@ -1619,6 +1619,33 @@
       }
     }
 
+    .copy-transcript-button {
+      padding: $spacing-sm $spacing-md;
+      background: var(--bg-secondary);
+      border: 2px solid var(--border-color);
+      border-radius: $radius-md;
+      font-size: $font-size-sm;
+      font-weight: $font-weight-medium;
+      color: var(--text-primary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: $spacing-xs;
+      transition: all $transition-fast;
+      white-space: nowrap;
+
+      &:hover {
+        border-color: $primary-orange;
+        background: rgba(255, 107, 53, 0.05);
+      }
+
+      &.copied {
+        border-color: $success;
+        background: rgba(34, 197, 94, 0.1);
+        color: $success;
+      }
+    }
+
     .export-menu {
       position: relative;
 
@@ -1745,8 +1772,9 @@
   border-radius: $radius-lg;
   padding: $spacing-lg;
   min-height: 400px;
-  max-height: 600px;
-  overflow-y: auto;
+  // No fixed height / inner scroll — the transcript flows down the page and the
+  // whole page scrolls (like the other tabs), so the video can scroll up out of
+  // the way and the full window height is usable.
 
   .continuous-view {
     .continuous-text {

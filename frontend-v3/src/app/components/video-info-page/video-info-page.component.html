@@ -42,6 +42,13 @@
   <div class="tab-navigation">
     <button
       class="tab-button"
+      [class.active]="activeTab === 'transcription'"
+      (click)="activeTab = 'transcription'">
+      <span class="tab-icon">💬</span>
+      Transcription
+    </button>
+    <button
+      class="tab-button"
       [class.active]="activeTab === 'overview'"
       (click)="activeTab = 'overview'">
       <span class="tab-icon">📊</span>
@@ -61,13 +68,6 @@
       <span class="tab-icon">🤖</span>
       AI Analysis
       <span class="tab-badge">{{ videoInfo.aiAnalyses.length }}</span>
-    </button>
-    <button
-      class="tab-button"
-      [class.active]="activeTab === 'transcription'"
-      (click)="activeTab = 'transcription'">
-      <span class="tab-icon">💬</span>
-      Transcription
     </button>
   </div>
 
@@ -765,6 +765,15 @@
               [(ngModel)]="showTimestamps">
             <span>Show Timestamps</span>
           </label>
+
+          <button
+            class="copy-transcript-button"
+            [class.copied]="transcriptCopied"
+            (click)="copyTranscript()"
+            title="Copy the full transcript as plain text (no timestamps)">
+            <span class="button-icon">{{ transcriptCopied ? '✓' : '📋' }}</span>
+            {{ transcriptCopied ? 'Copied' : 'Copy' }}
+          </button>
 
           <div class="export-menu">
             <button class="export-button">

@@ -105,7 +105,8 @@ export class VideoInfoPageComponent implements OnInit {
   contextMenuTarget: { video: any; type: 'parent' | 'child' } | null = null;
 
   // UI State
-  activeTab: 'overview' | 'metadata' | 'ai-analysis' | 'transcription' = 'overview';
+  activeTab: 'overview' | 'metadata' | 'ai-analysis' | 'transcription' = 'transcription';
+  transcriptCopied = false;
   expandedSections = {
     tags: true,
     description: true,
@@ -691,6 +692,28 @@ export class VideoInfoPageComponent implements OnInit {
     return this.videoInfo.transcription
       .map(seg => seg.text)
       .join(' ');
+  }
+
+  /**
+   * Copy the full transcript to the clipboard as plain paragraph text,
+   * with no timestamps or speaker labels — ready to paste into an AI tool.
+   */
+  copyTranscript(): void {
+    const text = this.getContinuousTranscription()
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) return;
+
+    navigator.clipboard.writeText(text).then(() => {
+      this.transcriptCopied = true;
+      setTimeout(() => {
+        this.transcriptCopied = false;
+        this.cdr.detectChanges();
+      }, 2000);
+      this.cdr.detectChanges();
+    }).catch(err => {
+      console.error('Failed to copy transcript:', err);
+    });
   }
 
   // Utility Methods
