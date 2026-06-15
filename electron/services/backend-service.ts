@@ -174,6 +174,14 @@ export class BackendService {
 
     log.info('Waiting for backend to be ready...');
 
+    // Track whether the HTTP server ever responded, even if the active library
+    // wasn't loaded. The library can live on an external volume that mounts
+    // late; in that case the backend comes up healthy with no active library
+    // and loads it in the background. We must still open the window rather than
+    // show the fatal "Backend Server Error" dialog. Only a backend whose HTTP
+    // server never responds at all is a genuine startup failure.
+    let httpEverResponded = false;
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       // Check immediately on first attempt, then wait
       if (attempt > 0) {
@@ -182,9 +190,12 @@ export class BackendService {
       }
 
       // HTTP health check - standard approach
-      const isReady = await this.checkBackendRunning();
+      const { ready, httpUp } = await this.checkBackendRunning();
+      if (httpUp) {
+        httpEverResponded = true;
+      }
 
-      if (isReady) {
+      if (ready) {
         log.info(`✓ Backend ready after ${attempt + 1} attempt(s)`);
         return true;
       }
@@ -195,6 +206,13 @@ export class BackendService {
       }
     }
 
+    if (httpEverResponded) {
+      log.warn('Backend HTTP is up but the active library is not loaded yet ' +
+        '(likely on a volume that is still mounting). Opening the app anyway; ' +
+        'the library will load in the background once its volume is available.');
+      return true;
+    }
+
     log.error('Backend failed to respond after maximum attempts');
     return false;
   }
@@ -203,7 +221,7 @@ export class BackendService {
    * Check if backend is running and library is ready
    * Waits for both the HTTP server AND the library database to be initialized
    */
-  private async checkBackendRunning(): Promise<boolean> {
+  private async checkBackendRunning(): Promise<{ ready: boolean; httpUp: boolean }> {
     return new Promise((resolve) => {
       const req = http.request({
         hostname: ServerConfig.config.nestBackend.host,
@@ -213,7 +231,7 @@ export class BackendService {
         timeout: 5000
       }, (res) => {
         if (res.statusCode !== 200) {
-          resolve(false);
+          resolve({ ready: false, httpUp: false });
           return;
         }
 
@@ -223,25 +241,28 @@ export class BackendService {
         res.on('end', () => {
           try {
             const health = JSON.parse(data);
-            // Backend is ready when HTTP responds AND library is ready (or no library exists)
-            // If no active library, libraryReady will be false but that's okay for first run
-            const isReady = health.status === 'ok' && (health.libraryReady || health.activeLibrary === null);
-            resolve(isReady);
+            const httpUp = health.status === 'ok';
+            // Fully ready when HTTP responds AND the library is loaded (or none
+            // is configured). When a library IS configured but not loaded yet,
+            // httpUp is still true so the caller can fall back to opening the
+            // window after the wait window instead of failing.
+            const ready = httpUp && (health.libraryReady || health.activeLibrary === null);
+            resolve({ ready, httpUp });
           } catch {
-            // If we can't parse, just check HTTP status
-            resolve(true);
+            // Couldn't parse the body but HTTP responded 200 - treat as up.
+            resolve({ ready: true, httpUp: true });
           }
         });
       });
 
       req.on('error', () => {
         // Expected during startup - silently fail
-        resolve(false);
+        resolve({ ready: false, httpUp: false });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        resolve(false);
+        resolve({ ready: false, httpUp: false });
       });
 
       req.end();
