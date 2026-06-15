@@ -44,6 +44,7 @@ export class LibraryManagerService implements OnModuleInit {
   private readonly librariesBasePath: string;
   private readonly configFilePath: string;
   private config: LibraryManagerConfig;
+  private libraryLoadRetryTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -114,13 +115,27 @@ export class LibraryManagerService implements OnModuleInit {
 
     const activeLibrary = this.getActiveLibrary();
     if (activeLibrary) {
-      // Create backup of library database before loading
-      this.backupLibraryDatabase(activeLibrary);
-
       this.logger.log(`[onModuleInit] Auto-loading active library: ${activeLibrary.name} (${activeLibrary.id})`);
       const initStart = Date.now();
-      await this.initializeActiveLibrary();
-      this.logger.log(`[onModuleInit] ✓ Library initialized in ${Date.now() - initStart}ms`);
+
+      // Loading the active library MUST NOT crash backend startup. The library
+      // database can live on an external/secondary volume (e.g. /Volumes/...)
+      // that macOS mounts a beat AFTER a login-item app launches. Opening it
+      // before the volume is mounted previously threw EACCES out of this
+      // lifecycle hook, which aborted bootstrap before the HTTP server ever
+      // listened — surfacing as the "Backend Server Error" dialog at every
+      // boot. Wait briefly for the volume, and if it still isn't ready, start
+      // the backend without it and keep retrying in the background.
+      try {
+        await this.loadActiveLibraryWithVolumeWait();
+        this.logger.log(`[onModuleInit] ✓ Library initialized in ${Date.now() - initStart}ms`);
+      } catch (error: any) {
+        this.logger.warn(
+          `[onModuleInit] Active library not available at startup (${error?.message || error}). ` +
+          `Starting backend without it; will keep retrying in the background.`,
+        );
+        this.scheduleLibraryLoadRetry();
+      }
     } else {
       this.logger.log('[onModuleInit] No active library to load on startup');
     }
@@ -546,6 +561,100 @@ export class LibraryManagerService implements OnModuleInit {
     this.saveConfig();
 
     return true;
+  }
+
+  /**
+   * Whether the active library's database path is currently reachable.
+   *
+   * On macOS, external/secondary volumes live under /Volumes/<name> and are
+   * mounted by the OS shortly after login. If the library lives on such a
+   * volume and it isn't mounted yet, the parent directory won't exist and we
+   * must NOT try to create it: mkdir into the read-only /Volumes root fails
+   * with EACCES, and on other setups it could create a phantom folder on the
+   * boot disk that the real volume later hides. In that case we wait instead.
+   */
+  private isLibraryPathAvailable(dbPath: string): boolean {
+    // Parent already exists → volume mounted and ready.
+    const parentDir = path.dirname(dbPath);
+    if (fs.existsSync(parentDir)) {
+      return true;
+    }
+
+    // Parent missing and the library is on an external volume → require the
+    // volume root (/Volumes/<name>) to be mounted before we touch it.
+    if (process.platform === 'darwin' && dbPath.startsWith('/Volumes/')) {
+      const volumeRoot = '/' + dbPath.split('/').slice(1, 3).join('/'); // /Volumes/<name>
+      return fs.existsSync(volumeRoot);
+    }
+
+    // Boot disk / app-data path: parent simply hasn't been created yet (e.g. a
+    // brand-new library). Safe to create it during initializeDatabase().
+    return true;
+  }
+
+  /**
+   * Wait (briefly) for the active library's volume to mount, then load it.
+   * Throws if the volume doesn't appear within the wait window so the caller
+   * can fall back to a longer background retry without blocking startup.
+   */
+  private async loadActiveLibraryWithVolumeWait(maxWaitMs = 15000): Promise<void> {
+    const activeLibrary = this.getActiveLibrary();
+    if (!activeLibrary) {
+      return;
+    }
+
+    const parentDir = path.dirname(activeLibrary.databasePath);
+    const start = Date.now();
+    while (!this.isLibraryPathAvailable(activeLibrary.databasePath)) {
+      if (Date.now() - start >= maxWaitMs) {
+        throw new Error(`Library volume not mounted: ${parentDir}`);
+      }
+      this.logger.warn(`[onModuleInit] Waiting for library volume to mount: ${parentDir}`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    this.backupLibraryDatabase(activeLibrary);
+    await this.initializeActiveLibrary();
+  }
+
+  /**
+   * Keep trying to load the active library in the background after startup gave
+   * up waiting for its volume. Handles the case where an external drive mounts
+   * slowly (e.g. a network share) without holding up the backend or the UI.
+   */
+  private scheduleLibraryLoadRetry(attempt = 1): void {
+    if (this.libraryLoadRetryTimer) {
+      return; // already scheduled
+    }
+
+    const MAX_ATTEMPTS = 60; // ~5 minutes at 5s intervals
+    const INTERVAL_MS = 5000;
+
+    this.libraryLoadRetryTimer = setTimeout(async () => {
+      this.libraryLoadRetryTimer = null;
+
+      const activeLibrary = this.getActiveLibrary();
+      if (!activeLibrary || this.isDatabaseReady()) {
+        return; // nothing to do, or loaded another way (e.g. user switched)
+      }
+
+      if (this.isLibraryPathAvailable(activeLibrary.databasePath)) {
+        try {
+          this.backupLibraryDatabase(activeLibrary);
+          await this.initializeActiveLibrary();
+          this.logger.log(`[retry] ✓ Active library loaded after background retry (attempt ${attempt})`);
+          return;
+        } catch (error: any) {
+          this.logger.warn(`[retry] Library load attempt ${attempt} failed: ${error?.message || error}`);
+        }
+      }
+
+      if (attempt < MAX_ATTEMPTS) {
+        this.scheduleLibraryLoadRetry(attempt + 1);
+      } else {
+        this.logger.error('[retry] Gave up loading active library after background retries.');
+      }
+    }, INTERVAL_MS);
   }
 
   /**
