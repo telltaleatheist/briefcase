@@ -29,7 +29,27 @@ export class ConfigController implements OnModuleInit {
                       path.join(process.env.HOME || '', '.config'));
 
     this.configPath = path.join(userDataPath, 'briefcase', 'app-config.json');
-    this.logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'briefcase');
+    this.logsDir = ConfigController.getLogsDirectory();
+  }
+
+  /**
+   * Resolve the platform-appropriate logs directory.
+   * Must match the location used by the Winston logger (common/logger.ts).
+   */
+  private static getLogsDirectory(): string {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
+
+    if (process.platform === 'darwin') {
+      // macOS: ~/Library/Logs/briefcase
+      return path.join(homeDir, 'Library', 'Logs', 'briefcase');
+    } else if (process.platform === 'win32') {
+      // Windows: %APPDATA%/briefcase/logs
+      const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+      return path.join(appData, 'briefcase', 'logs');
+    } else {
+      // Linux: ~/.config/briefcase/logs
+      return path.join(homeDir, '.config', 'briefcase', 'logs');
+    }
   }
 
   onModuleInit() {
@@ -146,8 +166,8 @@ export class ConfigController implements OnModuleInit {
   @Post('save-logs')
   async saveLogs(@Body() body: { content: string }) {
     try {
-      // Get logs directory
-      const logsDir = path.join(process.env.HOME || '', 'Library', 'Logs', 'briefcase');
+      // Get logs directory (platform-aware; matches common/logger.ts)
+      const logsDir = ConfigController.getLogsDirectory();
 
       // Ensure logs directory exists
       if (!fs.existsSync(logsDir)) {
