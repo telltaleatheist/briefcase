@@ -795,6 +795,25 @@ export class FileScannerService {
           this.logger.log(`Copied ${filename} to ${weekFolder}/ (preserved timestamps)`);
         }
 
+        // Ensure the imported file has a date prefix. Use the upload date already parsed from
+        // the filename when present; otherwise fall back to the download date (the file's
+        // creation date — when it was downloaded into Briefcase). Mirrors the downloader so
+        // drag/dropped files are dated consistently instead of being left undated.
+        let finalFilename = path.basename(destinationPath);
+        const downloadDateYMD = fileCreationDate.toISOString().split('T')[0];
+        const datedFilename = FilenameDateUtil.ensureDatePrefix(
+          finalFilename,
+          uploadDate || undefined,
+          downloadDateYMD,
+        );
+        if (datedFilename !== finalFilename) {
+          const newDestinationPath = path.join(path.dirname(destinationPath), datedFilename);
+          fs.renameSync(destinationPath, newDestinationPath);
+          this.logger.log(`Added date prefix to imported file: ${finalFilename} -> ${datedFilename}`);
+          destinationPath = newDestinationPath;
+          finalFilename = datedFilename;
+        }
+
         // Create new video entry
         const videoId = uuidv4();
 
@@ -826,10 +845,10 @@ export class FileScannerService {
 
         this.databaseService.insertVideo({
           id: videoId,
-          filename,
+          filename: finalFilename,
           fileHash,
           currentPath: relativePath,
-          uploadDate: uploadDate || undefined, // Content creation date from filename
+          uploadDate: uploadDate || undefined, // Content creation date from filename (null if unknown)
           downloadDate, // File creation timestamp (when you downloaded it)
           durationSeconds,
           fileSizeBytes: stats.size,
@@ -850,20 +869,20 @@ export class FileScannerService {
         }
 
         // Emit WebSocket event so frontend refreshes immediately
-        this.mediaEventService.emitVideoImported(videoId, filename, destinationPath);
+        this.mediaEventService.emitVideoImported(videoId, finalFilename, destinationPath);
 
         // Emit event for webpage files so WebArchiveService can backfill
-        const ext = path.extname(filename).toLowerCase();
+        const ext = path.extname(finalFilename).toLowerCase();
         if (this.WEBPAGE_EXTENSIONS.includes(ext)) {
           this.eventEmitter.emit('webpage.imported', {
             videoId,
             filePath: destinationPath,
-            filename,
+            filename: finalFilename,
           });
         }
 
         imported.push(videoId);
-        this.logger.log(`Imported: ${filename} (${videoId})${uploadDate ? ` with upload date ${uploadDate}` : ''}`);
+        this.logger.log(`Imported: ${finalFilename} (${videoId})${uploadDate ? ` with upload date ${uploadDate}` : ` with download-date fallback ${downloadDateYMD}`}`);
       } catch (error: any) {
         this.logger.error(`Failed to import ${fullPath}: ${error.message}`);
         errors.push(`${path.basename(fullPath)}: ${error.message}`);
