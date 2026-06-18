@@ -108,6 +108,7 @@ export interface ExportClipTask extends BaseTask {
     videoPath: string;
     startTime: number | null;
     endTime: number | null;
+    trimEndSeconds?: number; // seconds to remove from the end, resolved against the file's real duration (download trim-opener)
     title?: string;
     description?: string;
     category?: string;

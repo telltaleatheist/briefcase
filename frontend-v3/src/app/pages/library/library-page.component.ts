@@ -313,6 +313,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   trimModalOpen = signal(false);
   trimModalVideoTitle = signal('');
   trimModalInitialTime = signal(0);
+  trimModalInitialEndTime = signal(0);
   trimModalJobId = signal<string | null>(null);
 
   // Filters
@@ -3027,13 +3028,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.trimModalJobId.set(jobId);
     this.trimModalVideoTitle.set(job.title);
     this.trimModalInitialTime.set(job.trimStartTime || 0);
+    this.trimModalInitialEndTime.set(job.trimEndTime || 0);
     this.trimModalOpen.set(true);
   }
 
-  onTrimSaved(seconds: number) {
+  onTrimSaved(value: { start: number; end: number }) {
     const jobId = this.trimModalJobId();
     if (jobId) {
-      this.queueService.updateJobTrimStartTime(jobId, seconds);
+      this.queueService.updateJobTrim(
+        jobId,
+        value.start > 0 ? value.start : undefined,
+        value.end > 0 ? value.end : undefined
+      );
     }
     this.trimModalOpen.set(false);
     this.trimModalJobId.set(null);
@@ -3042,7 +3048,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onTrimCleared() {
     const jobId = this.trimModalJobId();
     if (jobId) {
-      this.queueService.updateJobTrimStartTime(jobId, undefined);
+      this.queueService.updateJobTrim(jobId, undefined, undefined);
     }
     this.trimModalOpen.set(false);
     this.trimModalJobId.set(null);

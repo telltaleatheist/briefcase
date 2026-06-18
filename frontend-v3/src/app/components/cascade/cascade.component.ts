@@ -1215,17 +1215,31 @@ export class CascadeComponent {
    * Check if a staging item has a trim time set
    */
   hasTrimTime(video: VideoItem): boolean {
-    return video.tags?.some(t => t.startsWith('trim:')) || false;
+    return video.tags?.some(t => t.startsWith('trim:') || t.startsWith('trimend:')) || false;
   }
 
   /**
-   * Get the trim time label (formatted as HH:MM:SS) for a staging item
+   * Get the trim label for a staging item. Shows the start trim point and/or
+   * the amount trimmed from the end (e.g. "▸00:05:00" / "◂00:10:00").
    */
   getTrimLabel(video: VideoItem): string {
-    const tag = video.tags?.find(t => t.startsWith('trim:'));
-    if (!tag) return '';
-    const seconds = parseFloat(tag.replace('trim:', ''));
-    if (isNaN(seconds) || seconds <= 0) return '';
+    const parts: string[] = [];
+    const start = this.parseTrimTag(video, 'trim:');
+    const end = this.parseTrimTag(video, 'trimend:');
+    if (start > 0) parts.push(`▸${this.formatTrim(start)}`);
+    if (end > 0) parts.push(`◂${this.formatTrim(end)}`);
+    return parts.join(' ');
+  }
+
+  private parseTrimTag(video: VideoItem, prefix: string): number {
+    // Match the exact prefix so "trim:" doesn't also catch "trimend:"
+    const tag = video.tags?.find(t => t.startsWith(prefix));
+    if (!tag) return 0;
+    const seconds = parseFloat(tag.slice(prefix.length));
+    return isNaN(seconds) || seconds <= 0 ? 0 : seconds;
+  }
+
+  private formatTrim(seconds: number): string {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);

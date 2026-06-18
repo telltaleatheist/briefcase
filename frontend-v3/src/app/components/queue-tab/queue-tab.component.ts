@@ -58,7 +58,11 @@ export class QueueTabComponent {
         duration: job.duration,
         thumbnailUrl: job.thumbnail,
         sourceUrl: job.url,
-        tags: [`staging:${job.id}`, ...(job.trimStartTime ? [`trim:${job.trimStartTime}`] : [])],
+        tags: [
+          `staging:${job.id}`,
+          ...(job.trimStartTime ? [`trim:${job.trimStartTime}`] : []),
+          ...(job.trimEndTime ? [`trimend:${job.trimEndTime}`] : []),
+        ],
         titleLoading: job.titleResolved === false
       }));
 

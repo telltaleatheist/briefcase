@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
       <div class="modal-overlay" (click)="close()" (mousedown)="$event.stopPropagation()">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h3 class="modal-title">Set Trim Point</h3>
+            <h3 class="modal-title">Set Trim Points</h3>
             <button class="modal-close" (click)="close()">&times;</button>
           </div>
 
@@ -19,41 +19,81 @@ import { FormsModule } from '@angular/forms';
             @if (videoTitle) {
               <div class="video-name">{{ videoTitle }}</div>
             }
-            <p class="modal-description">Everything before this timecode will be trimmed after download.</p>
 
-            <div class="timecode-group">
-              <div class="timecode-field">
-                <label>HH</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="99"
-                  [(ngModel)]="hours"
-                  (keydown)="onKeyDown($event)"
-                  #hoursInput
-                />
+            <div class="trim-section">
+              <p class="modal-description">Trim from start — everything <strong>before</strong> this timecode is removed after download.</p>
+              <div class="timecode-group">
+                <div class="timecode-field">
+                  <label>HH</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="99"
+                    [(ngModel)]="hours"
+                    (keydown)="onKeyDown($event)"
+                    #hoursInput
+                  />
+                </div>
+                <span class="timecode-sep">:</span>
+                <div class="timecode-field">
+                  <label>MM</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    [(ngModel)]="minutes"
+                    (keydown)="onKeyDown($event)"
+                  />
+                </div>
+                <span class="timecode-sep">:</span>
+                <div class="timecode-field">
+                  <label>SS</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    [(ngModel)]="seconds"
+                    (keydown)="onKeyDown($event)"
+                  />
+                </div>
               </div>
-              <span class="timecode-sep">:</span>
-              <div class="timecode-field">
-                <label>MM</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  [(ngModel)]="minutes"
-                  (keydown)="onKeyDown($event)"
-                />
-              </div>
-              <span class="timecode-sep">:</span>
-              <div class="timecode-field">
-                <label>SS</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  [(ngModel)]="seconds"
-                  (keydown)="onKeyDown($event)"
-                />
+            </div>
+
+            <div class="trim-section">
+              <p class="modal-description">Trim from end — this <strong>duration</strong> is removed from the end after download.</p>
+              <div class="timecode-group">
+                <div class="timecode-field">
+                  <label>HH</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="99"
+                    [(ngModel)]="endHours"
+                    (keydown)="onKeyDown($event)"
+                  />
+                </div>
+                <span class="timecode-sep">:</span>
+                <div class="timecode-field">
+                  <label>MM</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    [(ngModel)]="endMinutes"
+                    (keydown)="onKeyDown($event)"
+                  />
+                </div>
+                <span class="timecode-sep">:</span>
+                <div class="timecode-field">
+                  <label>SS</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    [(ngModel)]="endSeconds"
+                    (keydown)="onKeyDown($event)"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -63,7 +103,7 @@ import { FormsModule } from '@angular/forms';
             @if (isEditing) {
               <button class="btn btn-outline" (click)="clearTrim()">Clear Trim</button>
             }
-            <button class="btn btn-primary" (click)="save()" [disabled]="totalSeconds() === 0">Set Trim Point</button>
+            <button class="btn btn-primary" (click)="save()" [disabled]="startTotalSeconds() === 0 && endTotalSeconds() === 0">Set Trim</button>
           </div>
         </div>
       </div>
@@ -139,6 +179,12 @@ import { FormsModule } from '@angular/forms';
 
     .modal-body {
       margin-bottom: 20px;
+    }
+
+    .trim-section + .trim-section {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
     }
 
     .video-name {
@@ -284,7 +330,19 @@ export class TrimOpenerModalComponent {
     }
   }
 
-  @Output() saved = new EventEmitter<number>();
+  @Input() set initialEndTime(seconds: number | undefined) {
+    if (seconds != null && seconds > 0) {
+      this.endHours = Math.floor(seconds / 3600);
+      this.endMinutes = Math.floor((seconds % 3600) / 60);
+      this.endSeconds = Math.floor(seconds % 60);
+    } else {
+      this.endHours = 0;
+      this.endMinutes = 0;
+      this.endSeconds = 0;
+    }
+  }
+
+  @Output() saved = new EventEmitter<{ start: number; end: number }>();
   @Output() cleared = new EventEmitter<void>();
   @Output() closed = new EventEmitter<void>();
 
@@ -294,6 +352,9 @@ export class TrimOpenerModalComponent {
   hours = 0;
   minutes = 0;
   seconds = 0;
+  endHours = 0;
+  endMinutes = 0;
+  endSeconds = 0;
 
   constructor() {
     effect(() => {
@@ -303,14 +364,19 @@ export class TrimOpenerModalComponent {
     });
   }
 
-  totalSeconds(): number {
+  startTotalSeconds(): number {
     return (this.hours || 0) * 3600 + (this.minutes || 0) * 60 + (this.seconds || 0);
   }
 
+  endTotalSeconds(): number {
+    return (this.endHours || 0) * 3600 + (this.endMinutes || 0) * 60 + (this.endSeconds || 0);
+  }
+
   save(): void {
-    const total = this.totalSeconds();
-    if (total > 0) {
-      this.saved.emit(total);
+    const start = this.startTotalSeconds();
+    const end = this.endTotalSeconds();
+    if (start > 0 || end > 0) {
+      this.saved.emit({ start, end });
       this.visible.set(false);
     }
   }

@@ -20,6 +20,7 @@ export interface ClipExtractionRequest {
   videoPath: string;
   startTime: number | null; // seconds (null = start of video)
   endTime: number | null; // seconds (null = end of video)
+  trimEndSeconds?: number; // seconds to remove from the END (resolved against the file's real duration). Used by the download trim-opener, where the absolute end timecode isn't known until the file exists. Overrides endTime when > 0.
   outputPath: string;
   reEncode?: boolean; // Whether to re-encode for frame accuracy (default: false)
   quality?: ExportQuality; // Export quality preset (default: 'medium')
@@ -74,14 +75,24 @@ export class ClipExtractorService {
     try {
       this.logger.log(`Extracting clip from ${request.videoPath}`);
 
-      // Get video duration if processing full video (null times)
+      // Get video duration if processing full video (null times) or trimming
+      // a fixed amount off the end (we need the real duration to resolve it).
+      const trimEndSeconds = request.trimEndSeconds ?? 0;
       let videoDuration: number | null = null;
-      if (request.startTime === null || request.endTime === null) {
+      if (request.startTime === null || request.endTime === null || trimEndSeconds > 0) {
         videoDuration = await this.getVideoDuration(request.videoPath);
       }
 
       const startTime = request.startTime ?? 0;
-      const endTime = request.endTime ?? videoDuration ?? 0;
+      let endTime = request.endTime ?? videoDuration ?? 0;
+
+      // trimEndSeconds removes a fixed amount from the end of the video,
+      // resolved against the probed duration. Used by the download trim-opener
+      // ("trim the last X minutes"), where the absolute end isn't known until
+      // the file exists. Takes precedence over any endTime that was passed.
+      if (trimEndSeconds > 0 && videoDuration != null) {
+        endTime = videoDuration - trimEndSeconds;
+      }
 
       this.logger.log(`Time range: ${startTime}s - ${endTime}s`);
 

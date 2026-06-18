@@ -60,6 +60,9 @@ export interface QueueJob {
 
   // Trim opener: seconds to trim from the start of the video after download
   trimStartTime?: number;
+
+  // Trim ending: seconds to trim from the end of the video after download
+  trimEndTime?: number;
 }
 
 /**
@@ -94,6 +97,7 @@ export function createQueueJob(partial: Partial<QueueJob> & { title: string }): 
     completedAt: partial.completedAt,
     errorMessage: partial.errorMessage,
     trimStartTime: partial.trimStartTime,
+    trimEndTime: partial.trimEndTime,
   };
 }
 

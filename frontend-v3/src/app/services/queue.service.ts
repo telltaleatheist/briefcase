@@ -321,6 +321,19 @@ export class QueueService implements OnDestroy {
   }
 
   /**
+   * Update a job's trim start AND end times (for trim opener feature).
+   * trimStartTime = seconds to remove from the start, trimEndTime = seconds
+   * to remove from the end. Pass undefined/0 to clear either side.
+   */
+  updateJobTrim(jobId: string, trimStartTime: number | undefined, trimEndTime: number | undefined): void {
+    this.jobs.update(jobs =>
+      jobs.map(job =>
+        job.id === jobId ? { ...job, trimStartTime, trimEndTime } : job
+      )
+    );
+  }
+
+  /**
    * Set backend job ID mapping
    */
   setBackendJobId(frontendJobId: string, backendJobId: string): void {
@@ -665,7 +678,7 @@ export class QueueService implements OnDestroy {
 
     // Convert to backend format
     const backendJobs: BackendJobRequest[] = jobs.map(job => {
-      const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url, job.trimStartTime, warnings);
+      const tasks = this.convertTasksToBackendFormat(job.tasks, !!job.url, job.trimStartTime, warnings, job.trimEndTime);
 
       if (job.url) {
         return {
@@ -1221,7 +1234,7 @@ export class QueueService implements OnDestroy {
   /**
    * Convert frontend tasks to backend format
    */
-  private convertTasksToBackendFormat(tasks: QueueTask[], isUrl: boolean, trimStartTime?: number, warnings?: string[]): BackendTask[] {
+  private convertTasksToBackendFormat(tasks: QueueTask[], isUrl: boolean, trimStartTime?: number, warnings?: string[], trimEndTime?: number): BackendTask[] {
     const backendTasks: BackendTask[] = [];
 
     if (isUrl) {
@@ -1230,11 +1243,21 @@ export class QueueService implements OnDestroy {
       backendTasks.push({ type: 'import' });
     }
 
-    // Inject trim (export-clip overwrite) after download/import but before processing
-    if (trimStartTime != null && trimStartTime > 0) {
+    // Inject trim (export-clip overwrite) after download/import but before
+    // processing/transcribe/analyze. A single export-clip task handles both
+    // ends: startTime removes the opener, trimEndSeconds removes the tail
+    // (resolved against the file's real duration on the backend).
+    const hasStartTrim = trimStartTime != null && trimStartTime > 0;
+    const hasEndTrim = trimEndTime != null && trimEndTime > 0;
+    if (hasStartTrim || hasEndTrim) {
       backendTasks.push({
         type: 'export-clip' as any,
-        options: { startTime: trimStartTime, endTime: null, isOverwrite: true }
+        options: {
+          startTime: hasStartTrim ? trimStartTime : 0,
+          endTime: null,
+          trimEndSeconds: hasEndTrim ? trimEndTime : 0,
+          isOverwrite: true
+        }
       });
     }
 
