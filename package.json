@@ -18,7 +18,7 @@
     "clean:all": "npm run clean:mac && npm run clean:win && npm run clean:linux && rimraf dist-electron backup",
     "prebuild:all": "npm run verify:deps || npm run install:backend",
     "build:all": "npm run build:shared && npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
-    "build:backend": "cd backend && npm install --prefer-offline && tsc -p tsconfig.json && npm run build",
+    "build:backend": "cd backend && npm install --prefer-offline && npm run build",
     "build:backend:fast": "cd backend && npm run build",
     "build:frontend": "cd frontend-v3 && npm run build",
     "build:frontend:dev": "cd frontend-v3 && npx ng build --configuration=development",
