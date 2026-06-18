@@ -14,6 +14,8 @@ import {
   type LlamaGenerateResult,
 } from './llama-bridge';
 import { getRuntimePaths, getLlamaLibraryPath } from './runtime-paths';
+import { detectGpuVram, type DetectedGpu } from './gpu-info';
+import { COGITO_MODELS } from '../config/model-catalog';
 
 export interface LocalAIProgress {
   percent: number;
@@ -26,6 +28,7 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
   private readonly logger = new Logger(LlamaManager.name);
   private llama: LlamaBridge;
   private modelsDir: string;
+  private cachedGpu: DetectedGpu | null | undefined = undefined; // undefined = not detected yet
 
   constructor() {
     super();
@@ -82,54 +85,99 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
   }
 
   /**
-   * Initialize by finding a default model to use
+   * Initialize by finding a default model to use (logs the outcome at startup).
    */
   private initializeDefaultModel(): void {
-    // Check for default model in config
-    const configPath = path.join(path.dirname(this.modelsDir), 'app-config.json');
-    let defaultModelId: string | null = null;
+    if (!this.resolveModel()) {
+      this.logger.log(
+        fs.existsSync(this.modelsDir)
+          ? '  No models found in models directory'
+          : '  Models directory does not exist',
+      );
+    }
+  }
 
+  /**
+   * Find the best model on disk (config default, else first available .gguf) and
+   * point the bridge at it. Safe to call repeatedly — used to pick up models
+   * downloaded after startup without an app restart. Returns true if a model is set.
+   */
+  private resolveModel(): boolean {
+    if (!fs.existsSync(this.modelsDir)) return false;
+
+    const models = fs.readdirSync(this.modelsDir).filter((f) => f.endsWith('.gguf'));
+    if (models.length === 0) return false;
+
+    let defaultModelId: string | null = null;
+    const configPath = path.join(path.dirname(this.modelsDir), 'app-config.json');
     try {
       if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        defaultModelId = config.defaultLocalModel || null;
+        defaultModelId = JSON.parse(fs.readFileSync(configPath, 'utf8')).defaultLocalModel || null;
       }
     } catch {
       // Ignore config read errors
     }
 
-    // Try to find the default model or any available model
-    if (fs.existsSync(this.modelsDir)) {
-      const models = fs.readdirSync(this.modelsDir).filter((f) => f.endsWith('.gguf'));
-      if (models.length > 0) {
-        // If we have a default model ID, try to find its file
-        let modelToUse = models[0]; // Fallback to first model
-
-        if (defaultModelId) {
-          // Map model ID to filename patterns
-          const modelPatterns: Record<string, string> = {
-            'cogito-3b': 'cogito-v1-preview-llama-3B',
-            'cogito-8b': 'cogito-v1-preview-llama-8B',
-            'cogito-70b': 'cogito-v1-preview-llama-70B',
-          };
-          const pattern = modelPatterns[defaultModelId];
-          if (pattern) {
-            const foundModel = models.find((m) => m.includes(pattern));
-            if (foundModel) {
-              modelToUse = foundModel;
-            }
-          }
-        }
-
-        const modelPath = path.join(this.modelsDir, modelToUse);
-        this.llama.setModelPath(modelPath);
-        this.logger.log(`  Default model set: ${modelToUse}`);
-      } else {
-        this.logger.log('  No models found in models directory');
+    let modelToUse = models[0]; // Fallback to first model
+    if (defaultModelId) {
+      // Map model ID to a filename pattern (matches model-catalog filenames).
+      const modelPatterns: Record<string, string> = {
+        'cogito-3b': 'cogito-v1-preview-llama-3B',
+        'cogito-8b': 'cogito-v1-preview-llama-8B',
+        'cogito-14b': 'cogito-v1-preview-qwen-14B',
+        'cogito-32b': 'cogito-v1-preview-qwen-32B',
+      };
+      const pattern = modelPatterns[defaultModelId];
+      if (pattern) {
+        const found = models.find((m) => m.includes(pattern));
+        if (found) modelToUse = found;
       }
-    } else {
-      this.logger.log('  Models directory does not exist');
     }
+
+    const modelPath = path.join(this.modelsDir, modelToUse);
+    this.llama.setModelPath(modelPath);
+    this.llama.setGpuLayers(this.computeGpuLayers(modelToUse));
+    this.logger.log(`  Default model set: ${modelToUse}`);
+    return true;
+  }
+
+  /**
+   * Compute how many transformer layers to offload to the GPU (-ngl), mirroring
+   * BookForge: full offload on Apple Silicon (Metal/unified memory); on CUDA,
+   * full offload if the model fits in VRAM (minus headroom), otherwise a partial
+   * offload proportional to the VRAM budget; CPU-only when there's no usable GPU.
+   * Prevents VRAM overflow → empty output on the larger Cogito models.
+   */
+  private computeGpuLayers(filename: string): number {
+    const FULL = 99;
+    if (process.platform === 'darwin') {
+      return FULL; // unified memory — offload everything
+    }
+
+    if (this.cachedGpu === undefined) {
+      this.cachedGpu = detectGpuVram();
+    }
+    const vram = this.cachedGpu?.vramGB ?? 0;
+    if (vram < 4) {
+      this.logger.log('No usable GPU (>=4GB) — running on CPU (-ngl 0)');
+      return 0;
+    }
+
+    const model = COGITO_MODELS.find((m) => m.filename === filename);
+    const sizeGB = model?.sizeGB ?? 0;
+    const layers = model?.layers ?? 0;
+    const HEADROOM_GB = 1.5; // KV cache + compute buffers + display
+    const budget = vram - HEADROOM_GB;
+
+    if (sizeGB > 0 && sizeGB <= budget) {
+      return FULL; // fits entirely in VRAM
+    }
+    if (layers > 0 && budget > 0 && sizeGB > 0) {
+      const n = Math.max(0, Math.min(layers, Math.floor(layers * (budget / sizeGB))));
+      this.logger.log(`Partial GPU offload: ${n}/${layers} layers (${sizeGB}GB model, ${vram}GB VRAM)`);
+      return n;
+    }
+    return 0;
   }
 
   /**
@@ -140,9 +188,12 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
   }
 
   /**
-   * Check if local AI is available (model exists)
+   * Check if local AI is available (model exists). Re-resolves on demand so a
+   * model downloaded after startup is picked up without restarting.
    */
   isAvailable(): boolean {
+    if (this.llama.isModelAvailable()) return true;
+    this.resolveModel();
     return this.llama.isModelAvailable();
   }
 

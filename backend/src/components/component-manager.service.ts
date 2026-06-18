@@ -27,6 +27,7 @@ import {
   InstalledManifest,
   InstalledRecord,
 } from './component.types';
+import { whisperModelComponents, llamaModelComponents } from '../config/model-catalog';
 
 const MANIFEST_URL =
   'https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/manifest.json';
@@ -38,6 +39,7 @@ export class ComponentManagerService implements OnModuleInit {
   private readonly configDir: string;
   private readonly componentsDir: string;
   private readonly whisperModelsDir: string;
+  private readonly llamaModelsDir: string;
   private readonly installedPath: string;
   private readonly manifestCachePath: string;
   private readonly tmpDir: string;
@@ -54,13 +56,16 @@ export class ComponentManagerService implements OnModuleInit {
     this.configDir = path.join(userDataPath, 'briefcase');
     this.componentsDir = path.join(this.configDir, 'components');
     this.whisperModelsDir = path.join(this.configDir, 'models', 'whisper');
+    // Local AI (GGUF) models live flat in <configDir>/models — the same dir
+    // ModelManagerService and LlamaManager read from, so all three agree.
+    this.llamaModelsDir = path.join(this.configDir, 'models');
     this.installedPath = path.join(this.componentsDir, 'installed.json');
     this.manifestCachePath = path.join(this.componentsDir, 'manifest-cache.json');
     this.tmpDir = path.join(this.componentsDir, '.tmp');
   }
 
   onModuleInit() {
-    for (const dir of [this.componentsDir, this.whisperModelsDir, this.tmpDir]) {
+    for (const dir of [this.componentsDir, this.whisperModelsDir, this.llamaModelsDir, this.tmpDir]) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     }
     this.logger.log(`Components directory: ${this.componentsDir}`);
@@ -72,6 +77,18 @@ export class ComponentManagerService implements OnModuleInit {
 
   getWhisperModelsDir(): string {
     return this.whisperModelsDir;
+  }
+
+  /**
+   * Full component catalog: binaries from the published manifest, plus the
+   * self-contained whisper + local-AI model catalogs (downloaded directly from
+   * Hugging Face). Models are intentionally NOT sourced from the manifest so new
+   * sizes can be added without republishing a release asset.
+   */
+  private async getAllComponents(): Promise<ManifestComponent[]> {
+    const manifest = await this.getManifest();
+    const binaries = manifest.components.filter((c) => c.kind === 'binary');
+    return [...binaries, ...whisperModelComponents(), ...llamaModelComponents()];
   }
 
   // ---------- manifest ----------
@@ -186,8 +203,8 @@ export class ComponentManagerService implements OnModuleInit {
   // ---------- public API ----------
 
   async listComponents(): Promise<ComponentStatus[]> {
-    const manifest = await this.getManifest();
-    return manifest.components.map((c) => {
+    const components = await this.getAllComponents();
+    return components.map((c) => {
       const art = this.pickArtifact(c);
       return {
         id: c.id,
@@ -204,8 +221,8 @@ export class ComponentManagerService implements OnModuleInit {
   }
 
   async install(id: string): Promise<void> {
-    const manifest = await this.getManifest();
-    const component = manifest.components.find((c) => c.id === id);
+    const components = await this.getAllComponents();
+    const component = components.find((c) => c.id === id);
     if (!component) throw new Error(`Unknown component: ${id}`);
 
     const artifact = this.pickArtifact(component);
@@ -222,6 +239,8 @@ export class ComponentManagerService implements OnModuleInit {
     try {
       if (component.kind === 'whisper-model') {
         await this.installModel(id, artifact, controller.signal);
+      } else if (component.kind === 'llama-model') {
+        await this.installLlamaModel(id, artifact, controller.signal);
       } else {
         await this.installBinary(id, artifact, controller.signal);
       }
@@ -265,11 +284,12 @@ export class ComponentManagerService implements OnModuleInit {
     const rec = installed.components[id];
     if (!rec) return;
 
-    if (rec.kind === 'whisper-model') {
+    if (rec.kind === 'binary') {
+      if (fs.existsSync(rec.dir)) fs.rmSync(rec.dir, { recursive: true, force: true });
+    } else {
+      // Model kinds (whisper-model, llama-model) are single files in a shared dir.
       const file = path.join(rec.dir, rec.entry);
       if (fs.existsSync(file)) fs.rmSync(file, { force: true });
-    } else {
-      if (fs.existsSync(rec.dir)) fs.rmSync(rec.dir, { recursive: true, force: true });
     }
     delete installed.components[id];
     this.saveInstalled(installed);
@@ -346,6 +366,57 @@ export class ComponentManagerService implements OnModuleInit {
       bytes: artifact.bytes,
       installedAt: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Download a local AI (GGUF) model into <configDir>/models — the same flat dir
+   * ModelManagerService and LlamaManager read from. After a successful install we
+   * adopt it as the default local model if none is set yet, so it's usable
+   * without an app restart.
+   */
+  private async installLlamaModel(id: string, artifact: ComponentArtifact, signal: AbortSignal): Promise<void> {
+    if (!fs.existsSync(this.llamaModelsDir)) fs.mkdirSync(this.llamaModelsDir, { recursive: true });
+    const fileName = artifact.entry || artifact.file || `${id}.gguf`;
+    const destPath = path.join(this.llamaModelsDir, fileName);
+    const tempPath = `${destPath}.download`;
+
+    await this.downloadToFile(artifact.url, tempPath, id, signal);
+
+    if (artifact.sha256) {
+      this.emitProgress(id, 'verify', artifact.bytes, artifact.bytes);
+      await this.verifySha256(tempPath, artifact.sha256);
+    }
+
+    fs.renameSync(tempPath, destPath);
+    this.recordInstalled({
+      id,
+      kind: 'llama-model',
+      dir: this.llamaModelsDir,
+      entry: fileName,
+      sha256: artifact.sha256,
+      bytes: artifact.bytes,
+      installedAt: new Date().toISOString(),
+    });
+    this.setDefaultLocalModelIfUnset(id);
+  }
+
+  /** Write defaultLocalModel to app-config.json when one isn't already chosen. */
+  private setDefaultLocalModelIfUnset(modelId: string): void {
+    try {
+      const configPath = path.join(this.configDir, 'app-config.json');
+      let config: any = {};
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      }
+      if (!config.defaultLocalModel) {
+        config.defaultLocalModel = modelId;
+        config.lastUpdated = new Date().toISOString();
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+        this.logger.log(`Set default local model to ${modelId}`);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not set default local model: ${err.message}`);
+    }
   }
 
   private chmodRecursive(dir: string): void {

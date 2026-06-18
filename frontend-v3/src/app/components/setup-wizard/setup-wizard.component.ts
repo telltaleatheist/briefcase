@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnInit, Output, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ComponentService, ComponentStatus } from '../../services/component.service';
 import { SetupDownloadService } from '../../services/setup-download.service';
 import { AiSetupService, SystemInfo } from '../../services/ai-setup.service';
+import { ElectronService } from '../../services/electron.service';
 
-type Step = 'welcome' | 'tools' | 'models' | 'review' | 'finishing';
+type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
 
 /**
  * Minutes-style paginated setup wizard for download-on-demand components
@@ -15,7 +17,7 @@ type Step = 'welcome' | 'tools' | 'models' | 'review' | 'finishing';
 @Component({
   selector: 'app-setup-wizard',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="setup-overlay">
@@ -85,6 +87,74 @@ type Step = 'welcome' | 'tools' | 'models' | 'review' | 'finishing';
               } @else {
                 <p class="sub">No downloadable models are listed in the manifest yet.</p>
               }
+            }
+
+            @case ('ai') {
+              <div class="step-head">
+                <h3>AI for video analysis</h3>
+                <p class="sub">Briefcase runs AI locally on your machine by default — private, offline, and free. Pick a Cogito model to download (it runs through llama.cpp). Prefer a cloud provider? Add a key below.</p>
+              </div>
+
+              <div class="group-label">Local models — recommended</div>
+              @if (llamaModels().length) {
+                <div class="select-list">
+                  @for (c of llamaModels(); track c.id) {
+                    <label class="select-card"
+                           [class.checked]="isChecked(c)"
+                           [class.installed]="c.installed">
+                      <input type="checkbox" [checked]="isChecked(c)" [disabled]="c.installed" (change)="toggleModel(c)">
+                      <div class="select-info">
+                        <div class="select-name">{{ c.name }}
+                          @if (isRecommended(c)) { <span class="badge badge-accent">Recommended</span> }
+                        </div>
+                        @if (c.description) { <div class="select-desc">{{ c.description }}</div> }
+                      </div>
+                      <div class="select-meta">
+                        @if (c.installed) { <span class="badge badge-ok">Installed</span> }
+                        @else { <span class="select-size">{{ fmtSize(c.sizeBytes) }}</span> }
+                      </div>
+                    </label>
+                  }
+                </div>
+                <p class="hint">Not sure? {{ recommendedName() }} is the best fit for this computer. The local AI engine (≈5 MB) installs automatically with your first model.</p>
+              } @else {
+                <p class="sub">No local models are available for this platform.</p>
+              }
+
+              <div class="group-label">Or use a cloud provider</div>
+              <div class="provider-list">
+                <div class="provider-row">
+                  <div class="provider-head">
+                    <span class="provider-name">Claude (Anthropic)</span>
+                    @if (claudeSaved()) { <span class="badge badge-ok">Key saved</span> }
+                    <button type="button" class="linklike" (click)="open('https://console.anthropic.com/settings/keys')">Get a key ↗</button>
+                  </div>
+                  <div class="provider-input">
+                    <input type="password" placeholder="sk-ant-…" [(ngModel)]="claudeKey" />
+                    <button class="btn btn-secondary btn-sm" [disabled]="!claudeKey || savingKey()" (click)="saveClaude()">Save</button>
+                  </div>
+                </div>
+
+                <div class="provider-row">
+                  <div class="provider-head">
+                    <span class="provider-name">ChatGPT (OpenAI)</span>
+                    @if (openaiSaved()) { <span class="badge badge-ok">Key saved</span> }
+                    <button type="button" class="linklike" (click)="open('https://platform.openai.com/api-keys')">Get a key ↗</button>
+                  </div>
+                  <div class="provider-input">
+                    <input type="password" placeholder="sk-…" [(ngModel)]="openaiKey" />
+                    <button class="btn btn-secondary btn-sm" [disabled]="!openaiKey || savingKey()" (click)="saveOpenAI()">Save</button>
+                  </div>
+                </div>
+
+                <div class="provider-row">
+                  <div class="provider-head">
+                    <span class="provider-name">Ollama</span>
+                    <span class="select-desc">Run other open models via a separate Ollama install.</span>
+                    <button type="button" class="linklike" (click)="open('https://ollama.com/download')">Install Ollama ↗</button>
+                  </div>
+                </div>
+              </div>
             }
 
             @case ('review') {
@@ -174,23 +244,39 @@ export class SetupWizardComponent implements OnInit {
 
   private componentService = inject(ComponentService);
   private aiSetup = inject(AiSetupService);
+  private electron = inject(ElectronService);
   dl = inject(SetupDownloadService);
 
-  readonly NUMBERED = 4; // welcome, tools, models, review
-  readonly dotIndexes = [0, 1, 2, 3];
+  readonly NUMBERED = 5; // welcome, tools, models, ai, review
+  readonly dotIndexes = [0, 1, 2, 3, 4];
 
   readonly step = signal<Step>('welcome');
   readonly all = signal<ComponentStatus[]>([]);
   readonly system = signal<SystemInfo | null>(null);
 
-  private order: Step[] = ['welcome', 'tools', 'models', 'review', 'finishing'];
+  // AI step state (cloud providers)
+  claudeKey = '';
+  openaiKey = '';
+  readonly claudeSaved = signal(false);
+  readonly openaiSaved = signal(false);
+  readonly savingKey = signal(false);
+
+  private order: Step[] = ['welcome', 'tools', 'models', 'ai', 'review', 'finishing'];
 
   readonly stepIndex = computed(() => Math.min(this.order.indexOf(this.step()), this.NUMBERED - 1));
   readonly requiredTools = computed(() => this.all().filter((c) => c.kind === 'binary' && c.required && c.supported));
-  readonly optionalTools = computed(() => this.all().filter((c) => c.kind === 'binary' && !c.required && c.supported));
+  readonly optionalTools = computed(() =>
+    this.all().filter((c) => c.kind === 'binary' && !c.required && c.supported && c.id !== 'llama'),
+  );
   readonly models = computed(() => this.all().filter((c) => c.kind === 'whisper-model' && c.supported));
+  readonly llamaModels = computed(() => this.all().filter((c) => c.kind === 'llama-model' && c.supported));
   readonly reviewItems = computed(() => this.all().filter((c) => this.dl.isSelected(c.id) && !c.installed));
   readonly totalBytes = computed(() => this.reviewItems().reduce((s, c) => s + (c.sizeBytes || 0), 0));
+
+  readonly recommendedName = computed(() => {
+    const id = this.system()?.recommendedModel;
+    return this.llamaModels().find((m) => m.id === id)?.name || 'Cogito 8B';
+  });
 
   async ngOnInit() {
     this.componentService.listComponents().subscribe((components) => {
@@ -206,6 +292,11 @@ export class SetupWizardComponent implements OnInit {
       this.dl.select(presel);
     });
     this.aiSetup.getSystemInfo().subscribe((s) => this.system.set(s));
+    // Reflect any already-configured cloud keys.
+    this.aiSetup.checkAIAvailability().then((a) => {
+      this.claudeSaved.set(a.hasClaudeKey);
+      this.openaiSaved.set(a.hasOpenAIKey);
+    });
   }
 
   isChecked(c: ComponentStatus): boolean {
@@ -215,6 +306,60 @@ export class SetupWizardComponent implements OnInit {
   toggle(c: ComponentStatus): void {
     if (c.installed || (c.required && c.kind === 'binary')) return;
     this.dl.toggle(c.id);
+  }
+
+  isRecommended(c: ComponentStatus): boolean {
+    return c.id === this.system()?.recommendedModel;
+  }
+
+  /** Toggle a local AI model; selecting one also queues the llama engine binary. */
+  toggleModel(c: ComponentStatus): void {
+    if (c.installed) return;
+    const willSelect = !this.dl.isSelected(c.id);
+    this.dl.toggle(c.id);
+    if (willSelect) {
+      // Ensure the llama-server binary is installed too (skipped automatically if already present).
+      const llama = this.all().find((x) => x.id === 'llama' && !x.installed);
+      if (llama) this.dl.select(['llama']);
+    }
+  }
+
+  async saveClaude(): Promise<void> {
+    if (!this.claudeKey || this.savingKey()) return;
+    this.savingKey.set(true);
+    try {
+      await this.aiSetup.saveClaudeKey(this.claudeKey).toPromise();
+      this.claudeSaved.set(true);
+      this.claudeKey = '';
+      this.aiSetup.notifyModelsChanged();
+    } catch {
+      // error surfaced to console by the service
+    } finally {
+      this.savingKey.set(false);
+    }
+  }
+
+  async saveOpenAI(): Promise<void> {
+    if (!this.openaiKey || this.savingKey()) return;
+    this.savingKey.set(true);
+    try {
+      await this.aiSetup.saveOpenAIKey(this.openaiKey).toPromise();
+      this.openaiSaved.set(true);
+      this.openaiKey = '';
+      this.aiSetup.notifyModelsChanged();
+    } catch {
+      // error surfaced to console by the service
+    } finally {
+      this.savingKey.set(false);
+    }
+  }
+
+  open(url: string): void {
+    if (this.electron.isElectron) {
+      this.electron.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
   }
 
   next(): void {

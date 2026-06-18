@@ -45,6 +45,8 @@ export class LlamaBridge extends EventEmitter {
   private startTime: number | null = null;
   private readonly logger = new Logger(LlamaBridge.name);
   private currentModelPath: string | null = null;
+  /** GPU layers to offload (-ngl). null → default (full offload, 99). */
+  private currentNgl: number | null = null;
 
   // Configuration
   private readonly DEFAULT_PORT = 8081;
@@ -86,6 +88,14 @@ export class LlamaBridge extends EventEmitter {
    */
   getModelPath(): string | null {
     return this.currentModelPath;
+  }
+
+  /**
+   * Set the number of GPU layers to offload (-ngl). Takes effect on next start.
+   * 99 = full offload (default), 0 = CPU only, partial = N layers on GPU.
+   */
+  setGpuLayers(ngl: number): void {
+    this.currentNgl = ngl;
   }
 
   /**
@@ -168,6 +178,7 @@ export class LlamaBridge extends EventEmitter {
 
     this.emitProgress('starting', 0, 'Starting local AI server...');
 
+    const ngl = this.currentNgl ?? 99; // default: full offload (e.g. Metal)
     const args = [
       '-m',
       modelPath,
@@ -176,12 +187,13 @@ export class LlamaBridge extends EventEmitter {
       '-c',
       '8192', // Context size
       '-ngl',
-      '99', // GPU layers (use all for Metal)
+      String(ngl), // GPU layers to offload (VRAM-aware; 99 = all)
       '--threads',
       '4', // CPU threads
       '-fa',
       'on', // Flash attention for better memory usage (newer llama.cpp requires value)
     ];
+    this.logger.log(`GPU layer offload (-ngl): ${ngl}`);
 
     const env = { ...process.env };
     if (this.config.libraryPath) {

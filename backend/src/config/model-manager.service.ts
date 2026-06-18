@@ -8,8 +8,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
 import axios from 'axios';
+import { COGITO_MODELS } from './model-catalog';
+import { detectGpuVram } from '../bridges/gpu-info';
 
 export interface ModelInfo {
   id: string;
@@ -51,47 +52,7 @@ export interface DownloadProgress {
   eta?: string;
 }
 
-// Cogito models available for download
-// Using bartowski's quantizations from Hugging Face
-// minRAM represents the minimum VRAM (GPU) or RAM (CPU) needed to run the model
-const COGITO_MODELS: Omit<ModelInfo, 'downloaded' | 'isDefault'>[] = [
-  {
-    id: 'cogito-3b',
-    name: 'Cogito 3B',
-    filename: 'deepcogito_cogito-v1-preview-llama-3B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-llama-3B-GGUF/resolve/main/deepcogito_cogito-v1-preview-llama-3B-Q4_K_M.gguf',
-    sizeGB: 2.24,
-    minRAM: 4, // ~3GB VRAM/RAM needed
-    description: 'Lightweight and fast. Works on most GPUs (4GB+ VRAM) or CPU.',
-  },
-  {
-    id: 'cogito-8b',
-    name: 'Cogito 8B',
-    filename: 'deepcogito_cogito-v1-preview-llama-8B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-llama-8B-GGUF/resolve/main/deepcogito_cogito-v1-preview-llama-8B-Q4_K_M.gguf',
-    sizeGB: 4.92,
-    minRAM: 6, // ~5.5GB VRAM/RAM needed
-    description: 'Good balance of quality and speed. Runs great on 6GB+ GPU.',
-  },
-  {
-    id: 'cogito-14b',
-    name: 'Cogito 14B',
-    filename: 'deepcogito_cogito-v1-preview-qwen-14B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-qwen-14B-GGUF/resolve/main/deepcogito_cogito-v1-preview-qwen-14B-Q4_K_M.gguf',
-    sizeGB: 8.99,
-    minRAM: 10, // ~10GB VRAM/RAM needed
-    description: 'Higher quality results. Runs on 10GB+ GPU or 16GB+ RAM.',
-  },
-  {
-    id: 'cogito-32b',
-    name: 'Cogito 32B',
-    filename: 'deepcogito_cogito-v1-preview-qwen-32B-Q4_K_M.gguf',
-    url: 'https://huggingface.co/bartowski/deepcogito_cogito-v1-preview-qwen-32B-GGUF/resolve/main/deepcogito_cogito-v1-preview-qwen-32B-Q4_K_M.gguf',
-    sizeGB: 19.85,
-    minRAM: 24, // ~24GB VRAM/RAM needed
-    description: 'Best quality for most systems. Needs 24GB+ GPU or Mac with 32GB+ unified memory.',
-  },
-];
+// Cogito model catalog lives in ./model-catalog (shared with ComponentManagerService).
 
 @Injectable()
 export class ModelManagerService implements OnModuleInit {
@@ -136,129 +97,14 @@ export class ModelManagerService implements OnModuleInit {
       return this.cachedGpuInfo;
     }
 
-    try {
-      if (process.platform === 'win32') {
-        // Try NVIDIA first
-        try {
-          const nvidiaSmiOutput = execSync('nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits', {
-            encoding: 'utf8',
-            timeout: 5000,
-            windowsHide: true,
-          }).trim();
-
-          if (nvidiaSmiOutput) {
-            const parts = nvidiaSmiOutput.split(',').map(s => s.trim());
-            if (parts.length >= 2) {
-              const vramMB = parseInt(parts[1], 10);
-              this.cachedGpuInfo = {
-                name: parts[0],
-                vramGB: Math.round((vramMB / 1024) * 10) / 10,
-                driver: parts[2] || undefined,
-              };
-              this.logger.log(`Detected NVIDIA GPU: ${this.cachedGpuInfo.name} with ${this.cachedGpuInfo.vramGB}GB VRAM`);
-              return this.cachedGpuInfo;
-            }
-          }
-        } catch {
-          // NVIDIA not available, try other methods
-        }
-
-        // Try WMI for AMD/Intel/other GPUs
-        try {
-          const wmicOutput = execSync('wmic path win32_VideoController get Name,AdapterRAM /format:csv', {
-            encoding: 'utf8',
-            timeout: 5000,
-            windowsHide: true,
-          }).trim();
-
-          const lines = wmicOutput.split('\n').filter(l => l.trim() && !l.includes('Node,'));
-          for (const line of lines) {
-            const parts = line.split(',');
-            if (parts.length >= 3) {
-              const adapterRAM = parseInt(parts[1], 10);
-              const name = parts[2]?.trim();
-
-              // Skip integrated graphics with very low VRAM
-              if (adapterRAM > 0 && name && !name.toLowerCase().includes('microsoft basic')) {
-                const vramGB = Math.round((adapterRAM / (1024 ** 3)) * 10) / 10;
-                // Only consider GPUs with at least 2GB VRAM
-                if (vramGB >= 2) {
-                  this.cachedGpuInfo = { name, vramGB };
-                  this.logger.log(`Detected GPU: ${name} with ${vramGB}GB VRAM`);
-                  return this.cachedGpuInfo;
-                }
-              }
-            }
-          }
-        } catch {
-          // WMI failed
-        }
-      } else if (process.platform === 'darwin') {
-        // macOS - use system_profiler for Metal GPUs
-        try {
-          const output = execSync('system_profiler SPDisplaysDataType -json', {
-            encoding: 'utf8',
-            timeout: 5000,
-          });
-          const data = JSON.parse(output);
-          const displays = data.SPDisplaysDataType || [];
-
-          for (const display of displays) {
-            const name = display.sppci_model || display._name || 'Unknown GPU';
-            // On Apple Silicon, GPU uses unified memory - report as system RAM available
-            // On discrete GPUs, look for VRAM
-            const vramString = display.spdisplays_vram || display.spdisplays_vram_shared || '';
-            let vramGB = 0;
-
-            if (vramString.includes('GB')) {
-              vramGB = parseFloat(vramString);
-            } else if (vramString.includes('MB')) {
-              vramGB = parseFloat(vramString) / 1024;
-            } else if (name.includes('Apple')) {
-              // Apple Silicon uses unified memory - use total system RAM
-              vramGB = Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10;
-            }
-
-            if (vramGB >= 2) {
-              this.cachedGpuInfo = { name, vramGB: Math.round(vramGB * 10) / 10 };
-              this.logger.log(`Detected GPU: ${name} with ${this.cachedGpuInfo.vramGB}GB VRAM`);
-              return this.cachedGpuInfo;
-            }
-          }
-        } catch (err) {
-          this.logger.warn(`Failed to detect macOS GPU: ${err}`);
-        }
-      } else {
-        // Linux - try nvidia-smi or lspci
-        try {
-          const nvidiaSmiOutput = execSync('nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits', {
-            encoding: 'utf8',
-            timeout: 5000,
-          }).trim();
-
-          if (nvidiaSmiOutput) {
-            const parts = nvidiaSmiOutput.split(',').map(s => s.trim());
-            if (parts.length >= 2) {
-              const vramMB = parseInt(parts[1], 10);
-              this.cachedGpuInfo = {
-                name: parts[0],
-                vramGB: Math.round((vramMB / 1024) * 10) / 10,
-              };
-              this.logger.log(`Detected NVIDIA GPU: ${this.cachedGpuInfo.name} with ${this.cachedGpuInfo.vramGB}GB VRAM`);
-              return this.cachedGpuInfo;
-            }
-          }
-        } catch {
-          // NVIDIA not available on Linux
-        }
-      }
-    } catch (err) {
-      this.logger.warn(`GPU detection error: ${err}`);
+    const gpu = detectGpuVram();
+    this.cachedGpuInfo = gpu;
+    if (gpu) {
+      this.logger.log(`Detected GPU: ${gpu.name} with ${gpu.vramGB}GB VRAM`);
+    } else {
+      this.logger.log('No suitable GPU detected, will use CPU for inference');
     }
-
-    this.cachedGpuInfo = null;
-    this.logger.log('No suitable GPU detected, will use CPU for inference');
-    return null;
+    return this.cachedGpuInfo;
   }
 
   /**

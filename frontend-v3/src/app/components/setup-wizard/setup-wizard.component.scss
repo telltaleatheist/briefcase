@@ -81,6 +81,29 @@
 }
 .badge-rec { background: var(--bg-input); color: var(--accent-orange); }
 .badge-ok { background: rgba(34, 197, 94, 0.12); color: var(--success); }
+.badge-accent { background: var(--accent-orange); color: #fff; }
+
+.hint { font-size: 0.8125rem; color: var(--text-tertiary); line-height: 1.45; margin: 0.625rem 0 0; }
+
+.provider-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.provider-row {
+  border: 1px solid var(--border-color); border-radius: 10px; padding: 0.75rem 0.875rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.provider-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.provider-name { font-weight: 600; font-size: 0.9rem; }
+.provider-input { display: flex; gap: 0.5rem; }
+.provider-input input {
+  flex: 1; min-width: 0; padding: 0.5rem 0.625rem; border-radius: 8px;
+  border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary);
+  font-size: 0.8125rem;
+}
+.btn-sm { padding: 0.45rem 0.85rem; font-size: 0.8125rem; }
+.linklike {
+  margin-left: auto; background: none; border: none; cursor: pointer; padding: 0;
+  color: var(--accent-orange); font-size: 0.8125rem; font-weight: 600;
+}
+.linklike:hover { text-decoration: underline; }
 
 .review-list { display: flex; flex-direction: column; }
 .review-row, .review-total {

@@ -71,6 +71,26 @@ function getDownloadedWhisperModelsDir(): string | null {
 }
 
 /**
+ * All directories that may contain whisper models, in priority order:
+ * downloaded (<configDir>/models/whisper) first, then the bundled dir.
+ *
+ * Resolved live (not cached) so models downloaded after startup are picked up,
+ * and so bundled + downloaded models are MERGED rather than one shadowing the
+ * other. This is what makes every downloaded size show up for transcription.
+ */
+export function getWhisperModelDirs(): string[] {
+  const dirs: string[] = [];
+  const downloaded = path.join(getBriefcaseConfigDir(), 'models', 'whisper');
+  const bundled = path.join(getResourcesPath(), 'utilities', 'models');
+  for (const dir of [downloaded, bundled]) {
+    if (!dirs.includes(dir) && fs.existsSync(dir)) {
+      dirs.push(dir);
+    }
+  }
+  return dirs;
+}
+
+/**
  * Check if running in a packaged Electron app
  */
 export function isPackaged(): boolean {
@@ -258,7 +278,9 @@ export function getRuntimePaths(): RuntimePaths {
     whisper: whisperPath,
     whisperModelsDir,
     llama: llamaPath,
-    llamaModelsDir: path.join(resourcesPath, 'utilities', 'models', 'llama'),
+    // GGUF models are downloaded to <configDir>/models (flat), matching
+    // ModelManagerService / LlamaManager / ComponentManagerService.
+    llamaModelsDir: path.join(getBriefcaseConfigDir(), 'models'),
   };
 }
 

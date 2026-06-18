@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 
-export type ComponentKind = 'binary' | 'whisper-model';
+export type ComponentKind = 'binary' | 'whisper-model' | 'llama-model';
 
 export interface ComponentStatus {
   id: string;

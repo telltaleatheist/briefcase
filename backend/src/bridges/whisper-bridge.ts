@@ -45,6 +45,13 @@ export interface WhisperConfig {
   modelsDir: string;
   libraryPath?: string;  // DYLD_LIBRARY_PATH for macOS
   gpuMode?: WhisperGpuMode;  // GPU preference: auto (try GPU, fallback to CPU), gpu (force), cpu (force)
+  /**
+   * Optional live resolver returning every directory that may hold models, in
+   * priority order. When provided, model discovery scans (and merges) all of
+   * them on each call — so models downloaded after startup, and bundled +
+   * downloaded models, are all visible. Falls back to [modelsDir] when absent.
+   */
+  resolveModelDirs?: () => string[];
 }
 
 export class WhisperBridge extends EventEmitter {
@@ -54,11 +61,14 @@ export class WhisperBridge extends EventEmitter {
   private gpuFailedOnce = false;  // Track if GPU failed, for auto mode fallback
 
   // All known whisper models (for display names)
-  // tiny, base, and small are bundled with the app
   static readonly MODEL_INFO: Record<string, { name: string; description: string }> = {
     'base': { name: 'Base', description: 'Fast, good for clean audio' },
     'small': { name: 'Small', description: 'Better accuracy, handles music/complex audio' },
     'tiny': { name: 'Tiny', description: 'Fastest, lower accuracy' },
+    'medium': { name: 'Medium', description: 'High accuracy for tougher audio' },
+    'large-v3-turbo': { name: 'Large v3 Turbo', description: 'Near-large accuracy, much faster' },
+    'large-v3': { name: 'Large v3', description: 'Best accuracy, slowest' },
+    'large': { name: 'Large', description: 'Best accuracy, slowest' },
   };
   static readonly DEFAULT_MODEL = 'base';
 
@@ -111,7 +121,17 @@ export class WhisperBridge extends EventEmitter {
   }
 
   /**
-   * Get path to a specific model file
+   * Directories to scan for models, resolved live. Falls back to the static
+   * modelsDir when no resolver was supplied.
+   */
+  private modelDirs(): string[] {
+    const dirs = this.config.resolveModelDirs ? this.config.resolveModelDirs() : [this.config.modelsDir];
+    return dirs.filter((d) => !!d);
+  }
+
+  /**
+   * Get path to a specific model file. Searches every model directory (downloaded
+   * first, then bundled) and falls back to the default/first available model.
    */
   getModelPath(modelName: string = WhisperBridge.DEFAULT_MODEL): string {
     let normalizedName = modelName.toLowerCase();
@@ -124,68 +144,62 @@ export class WhisperBridge extends EventEmitter {
       normalizedName = normalizedName.slice(0, -4);
     }
 
-    const modelFile = `ggml-${normalizedName}.bin`;
-    const modelPath = path.join(this.config.modelsDir, modelFile);
+    const dirs = this.modelDirs();
+    const fileFor = (name: string) => `ggml-${name}.bin`;
 
-    // Check if this model exists on disk
-    if (!fs.existsSync(modelPath)) {
-      // Fall back to default if requested model doesn't exist
-      const availableModels = this.getAvailableModels();
-      if (availableModels.length === 0) {
-        throw new Error(`No whisper models found in ${this.config.modelsDir}`);
-      }
-
-      if (!availableModels.includes(normalizedName)) {
-        // Try default, otherwise use first available
-        const fallback = availableModels.includes(WhisperBridge.DEFAULT_MODEL)
-          ? WhisperBridge.DEFAULT_MODEL
-          : availableModels[0];
-        this.logger.warn(`Model ${modelName} not found, using ${fallback}`);
-        normalizedName = fallback;
-        return path.join(this.config.modelsDir, `ggml-${normalizedName}.bin`);
-      }
+    // Direct hit in any dir (priority order).
+    for (const dir of dirs) {
+      const candidate = path.join(dir, fileFor(normalizedName));
+      if (fs.existsSync(candidate)) return candidate;
     }
 
-    return modelPath;
+    // Requested model missing — fall back to default, then first available.
+    const availableModels = this.getAvailableModels();
+    if (availableModels.length === 0) {
+      throw new Error(`No whisper models found in: ${dirs.join(', ') || '(no directories)'}`);
+    }
+    const fallback = availableModels.includes(WhisperBridge.DEFAULT_MODEL)
+      ? WhisperBridge.DEFAULT_MODEL
+      : availableModels[0];
+    this.logger.warn(`Model ${modelName} not found, using ${fallback}`);
+    for (const dir of dirs) {
+      const candidate = path.join(dir, fileFor(fallback));
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    // Shouldn't happen (fallback came from the scan), but keep a sane return.
+    return path.join(dirs[0], fileFor(fallback));
   }
 
   /**
-   * Get list of available models on disk (scans directory for ggml-*.bin files)
+   * Get list of available models on disk. Scans and MERGES every model directory
+   * (downloaded + bundled) live, deduping by model name.
    */
   getAvailableModels(): string[] {
-    try {
-      if (!fs.existsSync(this.config.modelsDir)) {
-        this.logger.warn(`Models directory not found: ${this.config.modelsDir}`);
-        return [];
-      }
-
-      const files = fs.readdirSync(this.config.modelsDir);
-      const models: string[] = [];
-
-      for (const file of files) {
-        // Match ggml-{modelname}.bin pattern
-        const match = file.match(/^ggml-([a-z0-9-]+)\.bin$/i);
-        if (match) {
-          models.push(match[1].toLowerCase());
+    const seen = new Set<string>();
+    for (const dir of this.modelDirs()) {
+      try {
+        if (!fs.existsSync(dir)) continue;
+        for (const file of fs.readdirSync(dir)) {
+          const match = file.match(/^ggml-([a-z0-9-]+)\.bin$/i);
+          if (match) seen.add(match[1].toLowerCase());
         }
+      } catch (error) {
+        this.logger.error(`Error scanning models directory ${dir}: ${(error as Error).message}`);
       }
-
-      // Sort with 'base' first (default), then 'small' (for complex audio), then others
-      const sizeOrder = ['base', 'small', 'tiny', 'medium', 'large'];
-      models.sort((a, b) => {
-        const aIndex = sizeOrder.indexOf(a);
-        const bIndex = sizeOrder.indexOf(b);
-        if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
-        if (aIndex === -1) return 1;
-        if (bIndex === -1) return -1;
-        return aIndex - bIndex;
-      });
-
-      return models;
-    } catch (error) {
-      this.logger.error(`Error scanning models directory: ${(error as Error).message}`);
-      return [];
     }
+
+    const models = Array.from(seen);
+    // Sort smallest/fastest first, then by accuracy.
+    const sizeOrder = ['base', 'small', 'tiny', 'medium', 'large-v3-turbo', 'large-v3', 'large'];
+    models.sort((a, b) => {
+      const aIndex = sizeOrder.indexOf(a);
+      const bIndex = sizeOrder.indexOf(b);
+      if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
+    return models;
   }
 
   /**

@@ -7,7 +7,7 @@
  * mirror). Each component has per-(platform, arch) artifacts.
  */
 
-export type ComponentKind = 'binary' | 'whisper-model';
+export type ComponentKind = 'binary' | 'whisper-model' | 'llama-model';
 
 export interface ComponentArtifact {
   platform: 'darwin' | 'win32' | 'linux';

@@ -28,6 +28,7 @@ export {
   verifyBinary,
   getWhisperLibraryPath,
   getLlamaLibraryPath,
+  getWhisperModelDirs,
   type RuntimePaths,
 } from './runtime-paths';
 

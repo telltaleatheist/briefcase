@@ -10,6 +10,7 @@ import {
   WhisperBridge,
   getRuntimePaths,
   getWhisperLibraryPath,
+  getWhisperModelDirs,
   verifyBinary,
   type WhisperProgress as BridgeProgress,
   type WhisperGpuMode,
@@ -65,11 +66,18 @@ export class WhisperManager extends EventEmitter {
       this.logger.log(`  Whisper binary permissions: ${stats.mode.toString(8)}`);
     }
 
-    // Initialize the WhisperBridge
+    // Initialize the WhisperBridge.
+    // resolveModelDirs is evaluated live on every model scan, so models
+    // downloaded after startup (and bundled + downloaded models together) are
+    // all discovered without restarting the backend.
     this.whisper = new WhisperBridge({
       binaryPath: whisperPath,
       modelsDir: modelsDir,
       libraryPath: getWhisperLibraryPath(),
+      resolveModelDirs: () => {
+        const dirs = getWhisperModelDirs();
+        return dirs.length > 0 ? dirs : [modelsDir];
+      },
     });
 
     // Forward progress events from bridge to this manager
